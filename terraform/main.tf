@@ -119,7 +119,7 @@ resource "kubernetes_config_map" "econgraph_config" {
 
     # Server configuration
     "SERVER_HOST"       = "0.0.0.0"
-    "SERVER_PORT"       = "8080"
+    "SERVER_PORT"       = "9876"
 
     # CORS configuration
     "CORS_ALLOWED_ORIGINS" = "https://${var.domain}"

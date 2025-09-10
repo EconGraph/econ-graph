@@ -28,10 +28,16 @@ terraform apply -auto-approve
 
 cd "$PROJECT_ROOT"
 
-# Step 2: Initialize database
+# Step 2: Wait for PostgreSQL to be ready in Kubernetes
 echo ""
-echo "📋 Step 2: Initializing database..."
-./scripts/deploy/init-database.sh
+echo "📋 Step 2: Waiting for PostgreSQL to be ready in Kubernetes..."
+echo "⏳ Waiting for PostgreSQL pod to be ready..."
+kubectl wait --for=condition=ready pod -l app=postgresql -n econ-graph --timeout=300s
+
+echo "⏳ Waiting for PostgreSQL service to be available..."
+kubectl wait --for=condition=ready pod -l app=postgresql -n econ-graph --timeout=60s
+
+echo "✅ PostgreSQL is ready in Kubernetes cluster"
 
 # Step 3: Build Docker images
 echo ""
@@ -49,8 +55,8 @@ echo "=================================================="
 echo ""
 echo "🌐 Your EconGraph application is now running at:"
 echo "  Frontend: http://localhost:3000"
-echo "  Backend:  http://localhost:8080"
-echo "  GraphQL:  http://localhost:8080/graphql"
+echo "  Backend:  http://localhost:9876"
+echo "  GraphQL:  http://localhost:9876/graphql"
 echo ""
 echo "📊 Monitor your deployment:"
 echo "  kubectl get pods -n econ-graph"
