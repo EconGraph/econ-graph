@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: backend
-        image: econ-graph-backend:v4.1.0
+        image: econ-graph-backend:v3.6.0
         imagePullPolicy: Never  # Use local image
         ports:
         - containerPort: 8080

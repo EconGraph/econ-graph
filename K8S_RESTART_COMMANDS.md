@@ -1,4 +1,4 @@
-# 🚀 IMMEDIATE K8S RESTART COMMANDS - v4.1.0
+# 🚀 IMMEDIATE K8S RESTART COMMANDS - v3.6.0
 
 ## ⚡ **ONE-COMMAND RESTART** (Recommended)
 
@@ -20,11 +20,11 @@ kind get clusters
 kubectl config current-context
 ```
 
-### Step 2: Build New Images with v4.1.0 Tag
+### Step 2: Build New Images with v3.6.0 Tag
 ```bash
 # Build backend
 cd backend
-docker build -t econ-graph-backend:v4.1.0 .
+docker build -t econ-graph-backend:v3.6.0 .
 docker build -t econ-graph-backend:latest .
 
 # Build frontend  
@@ -34,7 +34,7 @@ docker build \
   --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
   --build-arg REACT_APP_WS_URL="ws://localhost/graphql" \
   --build-arg NODE_ENV="production" \
-  -t econ-graph-frontend:v4.1.0 .
+  -t econ-graph-frontend:v3.6.0 .
 docker build \
   --build-arg REACT_APP_API_URL="" \
   --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
@@ -47,8 +47,8 @@ cd ..
 
 ### Step 3: Load Images into Kind Cluster  
 ```bash
-kind load docker-image econ-graph-backend:v4.1.0 --name econ-graph
-kind load docker-image econ-graph-frontend:v4.1.0 --name econ-graph
+kind load docker-image econ-graph-backend:v3.6.0 --name econ-graph
+kind load docker-image econ-graph-frontend:v3.6.0 --name econ-graph
 kind load docker-image econ-graph-backend:latest --name econ-graph  
 kind load docker-image econ-graph-frontend:latest --name econ-graph
 ```
@@ -94,7 +94,7 @@ kubectl get ingress -n econ-graph
 
 ---
 
-## 📊 **WHAT'S BEING DEPLOYED - v4.1.0**
+## 📊 **WHAT'S BEING DEPLOYED - v3.6.0**
 
 ### ✅ **Test Quality Improvements:**
 - **173/173 frontend tests passing** (100% success rate)
@@ -210,7 +210,7 @@ After restart, verify these key improvements:
 **Docker Status**: Installation complete, daemon setup in progress  
 **kubectl**: ✅ Installed and ready  
 **kind**: ✅ Installed and ready  
-**Manifests**: ✅ Updated with v4.1.0 image tags  
+**Manifests**: ✅ Updated with v3.6.0 image tags  
 **Scripts**: ✅ All restart automation ready
 
 **Ready to execute**: All commands prepared for immediate k8s restart when Docker daemon is fully operational.

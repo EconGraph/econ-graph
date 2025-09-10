@@ -1,8 +1,8 @@
-# 🚀 Kubernetes Deployment Restart - v4.1.0
+# 🚀 Kubernetes Deployment Restart - v3.6.0
 
 ## ✅ **Ready to Deploy: Complete Test Quality Restoration**
 
-**Version**: v4.1.0  
+**Version**: v3.6.0  
 **Status**: All tests passing, Professional Analysis page fixed, CI/CD optimized  
 **Changes**: 173/173 frontend tests ✅, type errors eliminated, accessibility compliance achieved
 
@@ -18,7 +18,7 @@
 
 This script will:
 - ✅ Check/create kind cluster
-- ✅ Build Docker images with v4.1.0 tag
+- ✅ Build Docker images with v3.6.0 tag
 - ✅ Load images into cluster
 - ✅ Apply updated manifests
 - ✅ Restart backend and frontend deployments
@@ -47,13 +47,13 @@ cd ../..
 # Build images with new version
 ./scripts/deploy/build-images.sh
 
-# Tag with v4.1.0
-docker tag econ-graph-backend:latest econ-graph-backend:v4.1.0
-docker tag econ-graph-frontend:latest econ-graph-frontend:v4.1.0
+# Tag with v3.6.0
+docker tag econ-graph-backend:latest econ-graph-backend:v3.6.0
+docker tag econ-graph-frontend:latest econ-graph-frontend:v3.6.0
 
 # Load into kind cluster
-kind load docker-image econ-graph-backend:v4.1.0 --name econ-graph
-kind load docker-image econ-graph-frontend:v4.1.0 --name econ-graph
+kind load docker-image econ-graph-backend:v3.6.0 --name econ-graph
+kind load docker-image econ-graph-frontend:v3.6.0 --name econ-graph
 ```
 
 ### 3. **Apply Updated Manifests**
@@ -91,7 +91,7 @@ kubectl logs -f deployment/econ-graph-frontend -n econ-graph
 
 ---
 
-## 📋 **What's New in v4.1.0**
+## 📋 **What's New in v3.6.0**
 
 ### ✅ **Critical Fixes Applied:**
 
@@ -110,7 +110,7 @@ kubectl logs -f deployment/econ-graph-frontend -n econ-graph
 
 ### ✅ **Deployment Changes:**
 
-- **Image Tags**: Updated to `v4.1.0` (from `latest`)
+- **Image Tags**: Updated to `v3.6.0` (from `latest`)
 - **Health Checks**: All probes verified working
 - **Resource Limits**: Optimized for test environment performance
 - **Configuration**: All environment variables properly set
