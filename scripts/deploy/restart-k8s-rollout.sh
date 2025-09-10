@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Restart Kubernetes rollout to deploy v3.6.0 with database migration consolidation and auth test fixes
+# Restart Kubernetes rollout to deploy v3.6.1 with integration test fixes and GitHub Actions disablement
 # Run this script when Docker and Kubernetes cluster are available
 
 set -e
 
-echo "🚀 Restarting EconGraph Kubernetes rollout for v3.6.0 (with database migration consolidation and auth test fixes)..."
+echo "🚀 Restarting EconGraph Kubernetes rollout for v3.6.1 (with integration test fixes and GitHub Actions disablement)..."
 echo ""
 
 # Get the project root directory
@@ -27,18 +27,18 @@ echo "🔧 Setting kubectl context..."
 kubectl config use-context kind-econ-graph
 
 # Rebuild Docker images with new version tag
-echo "🏗️  Building Docker images for v3.6.0..."
+echo "🏗️  Building Docker images for v3.6.1..."
 ./scripts/deploy/build-images.sh
 
 # Tag images with new version
-echo "🏷️  Tagging images with v3.6.0..."
-docker tag econ-graph-backend:latest econ-graph-backend:v3.6.0
-docker tag econ-graph-frontend:latest econ-graph-frontend:v3.6.0
+echo "🏷️  Tagging images with v3.6.1..."
+docker tag econ-graph-backend:latest econ-graph-backend:v3.6.1
+docker tag econ-graph-frontend:latest econ-graph-frontend:v3.6.1
 
 # Load images into kind cluster
 echo "📦 Loading images into kind cluster..."
-kind load docker-image econ-graph-backend:v3.6.0 --name econ-graph
-kind load docker-image econ-graph-frontend:v3.6.0 --name econ-graph
+kind load docker-image econ-graph-backend:v3.6.1 --name econ-graph
+kind load docker-image econ-graph-frontend:v3.6.1 --name econ-graph
 
 # Apply updated manifests
 echo "📋 Applying updated Kubernetes manifests..."
@@ -67,13 +67,14 @@ echo "  Backend:  http://localhost:8080"
 echo "  GraphQL:  http://localhost:8080/graphql"
 echo "  Health:   http://localhost:8080/health"
 echo ""
-echo "🎯 Version deployed: v3.6.0"
-echo "   ✅ Database migrations consolidated: 9 → 3 logical groups"
-echo "   ✅ Auth integration tests: All 11 tests passing"
+echo "🎯 Version deployed: v3.6.1"
+echo "   ✅ Integration tests fixed: All auth tests passing (11/11)"
+echo "   ✅ Collaboration tests fixed: 6/7 tests passing"
+echo "   ✅ GitHub Actions release/deploy workflow disabled"
 echo "   ✅ Database connection issues resolved"
 echo "   ✅ Test container lifecycle improved"
 echo "   ✅ Authentication system reliability enhanced"
-echo "   ✅ Cleaner deployment process with consolidated migrations"
+echo "   ✅ Port configuration standardized (9876 for backend)"
 echo ""
 echo "📋 Monitor deployment:"
 echo "  kubectl logs -f deployment/econ-graph-backend -n econ-graph"

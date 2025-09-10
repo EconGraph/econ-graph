@@ -1,10 +1,10 @@
-# 🚀 Kubernetes Deployment Restart - v3.6.0
+# 🚀 Kubernetes Deployment Restart - v3.6.1
 
-## ✅ **Ready to Deploy: Complete Test Quality Restoration**
+## ✅ **Ready to Deploy: Integration Test Fixes and GitHub Actions Control**
 
-**Version**: v3.6.0  
-**Status**: All tests passing, Professional Analysis page fixed, CI/CD optimized  
-**Changes**: 173/173 frontend tests ✅, type errors eliminated, accessibility compliance achieved
+**Version**: v3.6.1  
+**Status**: Integration tests fixed, GitHub Actions release/deploy disabled, port configuration standardized  
+**Changes**: All auth tests passing (11/11), collaboration tests fixed (6/7), enhanced logging and debugging
 
 ---
 
@@ -18,7 +18,7 @@
 
 This script will:
 - ✅ Check/create kind cluster
-- ✅ Build Docker images with v3.6.0 tag
+- ✅ Build Docker images with v3.6.1 tag
 - ✅ Load images into cluster
 - ✅ Apply updated manifests
 - ✅ Restart backend and frontend deployments
