@@ -136,8 +136,7 @@ pub struct GoogleAuthRequest {
 /// Facebook OAuth request
 #[derive(Debug, Deserialize)]
 pub struct FacebookAuthRequest {
-    pub facebook_id: String,
-    pub user_info: FacebookUserInfo,
+    pub token: String,
 }
 
 /// Authentication response

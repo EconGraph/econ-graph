@@ -171,21 +171,49 @@ impl AuthService {
     }
 
     /// Verify Facebook OAuth token
-    pub async fn verify_facebook_token(&self, facebook_id: &str) -> AppResult<FacebookUserInfo> {
-        // In a real implementation, you would verify the Facebook token
-        // For now, we'll create a mock response based on the facebook_id
-        // This should be replaced with actual Facebook Graph API calls
+    pub async fn verify_facebook_token(&self, access_token: &str) -> AppResult<FacebookUserInfo> {
+        // Verify the Facebook access token and get user info from Facebook Graph API
+        let user_info_url = format!(
+            "https://graph.facebook.com/me?access_token={}&fields=id,name,email,picture",
+            access_token
+        );
 
-        let user_info = FacebookUserInfo {
-            id: facebook_id.to_string(),
-            email: Some(format!("user{}@facebook.com", facebook_id)),
-            name: format!("Facebook User {}", facebook_id),
-            picture: Some(FacebookPicture {
-                data: FacebookPictureData {
-                    url: "https://graph.facebook.com/default/picture".to_string(),
-                },
-            }),
-        };
+        let user_response = self
+            .http_client
+            .get(&user_info_url)
+            .send()
+            .await
+            .map_err(|e| {
+                let error = AppError::AuthenticationError(format!(
+                    "Facebook token verification failed - HTTP client error: {}",
+                    e
+                ));
+                error.log_with_context("Facebook OAuth HTTP client error");
+                error
+            })?;
+
+        if !user_response.status().is_success() {
+            let status = user_response.status();
+            let error_text = user_response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            let error = AppError::AuthenticationError(format!(
+                "Facebook token verification failed - HTTP status: {} - {}",
+                status, error_text
+            ));
+            error.log_with_context("Facebook OAuth HTTP status error");
+            return Err(error);
+        }
+
+        let user_info: FacebookUserInfo = user_response.json().await.map_err(|e| {
+            let error = AppError::AuthenticationError(format!(
+                "Facebook token verification failed - JSON parsing error: {}",
+                e
+            ));
+            error.log_with_context("Facebook OAuth JSON parsing error");
+            error
+        })?;
 
         Ok(user_info)
     }

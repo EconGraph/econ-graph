@@ -599,28 +599,13 @@ mod tests {
 
         // Test FacebookAuthRequest
         let facebook_json = json!({
-            "facebook_id": "facebook-456",
-            "user_info": {
-                "id": "facebook-456",
-                "email": "user@facebook.com",
-                "name": "Facebook User",
-                "picture": {
-                    "data": {
-                        "url": "https://graph.facebook.com/picture.jpg"
-                    }
-                }
-            }
+            "token": "facebook-access-token"
         });
 
         let facebook_request: FacebookAuthRequest =
             serde_json::from_value(facebook_json).expect("Should deserialize FacebookAuthRequest");
 
-        assert_eq!(facebook_request.facebook_id, "facebook-456");
-        assert_eq!(facebook_request.user_info.id, "facebook-456");
-        assert_eq!(
-            facebook_request.user_info.email.unwrap(),
-            "user@facebook.com"
-        );
+        assert_eq!(facebook_request.token, "facebook-access-token");
 
         // Test UserResponse serialization
         let user = User {

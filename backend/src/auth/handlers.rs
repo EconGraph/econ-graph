@@ -90,7 +90,7 @@ pub async fn handle_facebook_auth(
 ) -> Result<impl Reply, Rejection> {
     // Verify Facebook token
     let facebook_user_info = match auth_service
-        .verify_facebook_token(&auth_request.facebook_id)
+        .verify_facebook_token(&auth_request.token)
         .await
     {
         Ok(info) => info,
