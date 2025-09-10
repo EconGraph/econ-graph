@@ -177,8 +177,10 @@ async fn main() -> AppResult<()> {
     // Load configuration
     info!("📋 Loading configuration from environment...");
     let config = Config::from_env().map_err(|e| {
+        let error = AppError::ConfigError(format!("Failed to load configuration: {}", e));
+        error.log_with_context("Application startup configuration loading");
         eprintln!("❌ Failed to load configuration: {}", e);
-        AppError::ConfigError(format!("Failed to load configuration: {}", e))
+        error
     })?;
 
     info!("📊 Configuration loaded successfully:");
@@ -192,8 +194,10 @@ async fn main() -> AppResult<()> {
     info!("  - Database URL: {}", config.database_url);
 
     let pool = create_pool(&config.database_url).await.map_err(|e| {
+        let error = AppError::DatabaseError(format!("Failed to create database pool: {}", e));
+        error.log_with_context("Application startup database pool creation");
         eprintln!("❌ Failed to create database pool: {}", e);
-        AppError::DatabaseError(format!("Failed to create database pool: {}", e))
+        error
     })?;
 
     info!("✅ Database connection pool created successfully");

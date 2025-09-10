@@ -83,6 +83,8 @@ pub async fn run_migrations(database_url: &str) -> AppResult<()> {
             }
             Err(e) => {
                 // If the first attempt fails, try with explicit connection parameters
+                let error = AppError::DatabaseError(format!("Database connection failed: {}", e));
+                error.log_with_context("Database migration connection attempt");
                 info!("First connection attempt failed: {}, trying alternative approach", e);
 
                 // Parse the URL to extract components

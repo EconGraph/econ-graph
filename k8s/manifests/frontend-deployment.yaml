@@ -25,6 +25,18 @@ spec:
         - containerPort: 3000
           name: http
         env:
+        # Port Configuration
+        - name: REACT_APP_BACKEND_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: REACT_APP_BACKEND_PORT
+        - name: REACT_APP_FRONTEND_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: REACT_APP_FRONTEND_PORT
+        # Frontend Configuration
         - name: REACT_APP_API_URL
           valueFrom:
             configMapKeyRef:
@@ -40,6 +52,16 @@ spec:
             configMapKeyRef:
               name: econ-graph-config
               key: REACT_APP_WS_URL
+        - name: REACT_APP_GOOGLE_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: REACT_APP_GOOGLE_CLIENT_ID
+        - name: REACT_APP_FACEBOOK_APP_ID
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: REACT_APP_FACEBOOK_APP_ID
         - name: NODE_ENV
           valueFrom:
             configMapKeyRef:

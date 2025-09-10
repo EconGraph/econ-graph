@@ -120,9 +120,9 @@ kubectl logs -f deployment/econ-graph-frontend -n econ-graph
 ## 🌐 **Expected Application URLs After Restart**
 
 - **Frontend**: http://localhost:3000 (React app with all 173 tests passing)
-- **Backend**: http://localhost:8080 (Rust API with improved performance)  
-- **GraphQL**: http://localhost:8080/graphql (Enhanced schema)
-- **Health Check**: http://localhost:8080/health (System status)
+- **Backend**: http://localhost:9876 (Rust API with improved performance)  
+- **GraphQL**: http://localhost:9876/graphql (Enhanced schema)
+- **Health Check**: http://localhost:9876/health (System status)
 
 ---
 

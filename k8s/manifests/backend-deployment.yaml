@@ -22,9 +22,23 @@ spec:
         image: econ-graph-backend:v3.6.1
         imagePullPolicy: Never  # Use local image
         ports:
-        - containerPort: 8080
+        # Note: containerPort must be static in Kubernetes, but the application
+        # reads the actual port from the BACKEND_PORT environment variable
+        - containerPort: 9876
           name: http
         env:
+        # Port Configuration
+        - name: BACKEND_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: BACKEND_PORT
+        - name: FRONTEND_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: FRONTEND_PORT
+        # Backend Configuration
         - name: DATABASE_URL
           valueFrom:
             configMapKeyRef:
@@ -75,13 +89,13 @@ spec:
         livenessProbe:
           httpGet:
             path: /health
-            port: 8080
+            port: 9876
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /health
-            port: 8080
+            port: 9876
           initialDelaySeconds: 5
           periodSeconds: 5
       restartPolicy: Always

@@ -4,19 +4,26 @@ metadata:
   name: econ-graph-config
   namespace: econ-graph
 data:
+  # Port Configuration
+  BACKEND_PORT: "9876"
+  FRONTEND_PORT: "3000"
+  ADMIN_FRONTEND_PORT: "3001"
+  DATABASE_PORT: "5432"
+
   # Backend configuration
   DATABASE_URL: "postgresql://postgres:password@postgres-service:5432/econ_graph"
   RUST_LOG: "info"
-  JWT_SECRET: "your-jwt-secret-key-change-in-production"
   CORS_ORIGIN: "http://localhost:3000"
   GOOGLE_CLIENT_ID: "80227441551-3dv05tkflnfrjpqv5fgii7b8br0brt7m.apps.googleusercontent.com"
   GOOGLE_CLIENT_SECRET: "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"
   FACEBOOK_ACCESS_TOKEN: "EAAPjY3gQKzABPVnOZA7Alyz4yGZANbHYvIqYtf87P4ET2LLbMzgs3fE0sjzmOhbZAfRaT4sAPgLPwSKgJnC3sI6pZAFhOeUto1bt7iwEd5iVu6ecZAlI35ianxY7uwCHNUjsBHM2hMS01lNdPCjc0s9LGXESKWnOALMAFEZA9ynw4enIjVWAOl56K3ECkZC249CTmq9w5fwvssv0JIj0tenZBeWUd1tnY4eFbd7Yy6LpnDQvEh8wugCb9o02mhesnDHcQ4utxLRsdx2n"
 
   # Frontend configuration
-  REACT_APP_API_URL: ""
+  REACT_APP_API_URL: "http://localhost:9876"
+  REACT_APP_BACKEND_PORT: "9876"
+  REACT_APP_FRONTEND_PORT: "3000"
   REACT_APP_GRAPHQL_URL: "/graphql"
-  REACT_APP_WS_URL: "ws://localhost/graphql"
+  REACT_APP_WS_URL: "ws://localhost:9876/graphql"
   REACT_APP_FACEBOOK_APP_ID: "demo-facebook-app-id"
   REACT_APP_GOOGLE_CLIENT_ID: "80227441551-3dv05tkflnfrjpqv5fgii7b8br0brt7m.apps.googleusercontent.com"
 

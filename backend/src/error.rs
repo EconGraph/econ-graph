@@ -2,6 +2,26 @@ use serde_json::json;
 use thiserror::Error;
 use warp::{http::StatusCode, reject::Reject, Reply};
 
+/// Macro to log an error with context before returning it
+/// Usage: `log_and_return!(error, "context message")`
+#[macro_export]
+macro_rules! log_and_return {
+    ($error:expr, $context:expr) => {{
+        $error.log_with_context($context);
+        return Err($error);
+    }};
+}
+
+/// Macro to log an error with context and return it as a Result
+/// Usage: `log_error!(error, "context message")`
+#[macro_export]
+macro_rules! log_error {
+    ($error:expr, $context:expr) => {{
+        $error.log_with_context($context);
+        Err($error)
+    }};
+}
+
 /// Application-specific error types
 #[derive(Error, Debug)]
 pub enum AppError {
@@ -104,81 +124,174 @@ impl Reject for AppError {}
 /// Convert AppError to HTTP response
 pub fn handle_rejection(err: warp::Rejection) -> Result<impl Reply, std::convert::Infallible> {
     let (code, message) = if err.is_not_found() {
+        tracing::warn!("404 Not Found: {:?}", err);
         (StatusCode::NOT_FOUND, "Not Found".to_string())
     } else if let Some(app_error) = err.find::<AppError>() {
+        // Log detailed error information for all AppError variants
         match app_error {
-            AppError::Database(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
-            ),
-            AppError::DatabasePool(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database connection error".to_string(),
-            ),
-            AppError::HttpClient(_) => (
-                StatusCode::BAD_GATEWAY,
-                "External service error".to_string(),
-            ),
-            AppError::JsonSerialization(_) => (StatusCode::BAD_REQUEST, "Invalid JSON".to_string()),
-            AppError::Validation(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            AppError::ValidationErrors(_) => {
+            AppError::Database(e) => {
+                tracing::error!("Database error: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            }
+            AppError::DatabasePool(msg) => {
+                tracing::error!("Database pool error: {}", msg);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database connection error".to_string(),
+                )
+            }
+            AppError::HttpClient(e) => {
+                tracing::error!("HTTP client error: {}", e);
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "External service error".to_string(),
+                )
+            }
+            AppError::JsonSerialization(e) => {
+                tracing::error!("JSON serialization error: {}", e);
+                (StatusCode::BAD_REQUEST, "Invalid JSON".to_string())
+            }
+            AppError::Validation(msg) => {
+                tracing::warn!("Validation error: {}", msg);
+                (StatusCode::BAD_REQUEST, msg.clone())
+            }
+            AppError::ValidationErrors(e) => {
+                tracing::warn!("Validation errors: {}", e);
                 (StatusCode::BAD_REQUEST, "Validation failed".to_string())
             }
-            AppError::ConnectionPool(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Connection pool error".to_string(),
-            ),
-            AppError::ConfigError(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Configuration error".to_string(),
-            ),
-            AppError::Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, "I/O error".to_string()),
-            AppError::AuthenticationError(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
-            AppError::InternalError(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal server error".to_string(),
-            ),
-            AppError::DatabaseError(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
-            ),
-            AppError::ValidationError(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            AppError::SeriesNotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
-            AppError::DataSourceNotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
-            AppError::InvalidDateFormat(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            AppError::InvalidTransformation(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            AppError::RateLimitExceeded => (
-                StatusCode::TOO_MANY_REQUESTS,
-                "Rate limit exceeded".to_string(),
-            ),
-            AppError::ExternalApiError(_) => {
+            AppError::ConnectionPool(msg) => {
+                tracing::error!("Connection pool error: {}", msg);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Connection pool error".to_string(),
+                )
+            }
+            AppError::ConfigError(msg) => {
+                tracing::error!("Configuration error: {}", msg);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Configuration error".to_string(),
+                )
+            }
+            AppError::Io(e) => {
+                tracing::error!("I/O error: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "I/O error".to_string())
+            }
+            AppError::AuthenticationError(msg) => {
+                tracing::warn!("Authentication error: {}", msg);
+                (StatusCode::UNAUTHORIZED, msg.clone())
+            }
+            AppError::InternalError(msg) => {
+                tracing::error!("Internal server error: {}", msg);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error".to_string(),
+                )
+            }
+            AppError::DatabaseError(msg) => {
+                tracing::error!("Database error: {}", msg);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            }
+            AppError::ValidationError(msg) => {
+                tracing::warn!("Validation error: {}", msg);
+                (StatusCode::BAD_REQUEST, msg.clone())
+            }
+            AppError::SeriesNotFound(msg) => {
+                tracing::info!("Series not found: {}", msg);
+                (StatusCode::NOT_FOUND, msg.clone())
+            }
+            AppError::DataSourceNotFound(msg) => {
+                tracing::info!("Data source not found: {}", msg);
+                (StatusCode::NOT_FOUND, msg.clone())
+            }
+            AppError::InvalidDateFormat(msg) => {
+                tracing::warn!("Invalid date format: {}", msg);
+                (StatusCode::BAD_REQUEST, msg.clone())
+            }
+            AppError::InvalidTransformation(msg) => {
+                tracing::warn!("Invalid transformation: {}", msg);
+                (StatusCode::BAD_REQUEST, msg.clone())
+            }
+            AppError::RateLimitExceeded => {
+                tracing::warn!("Rate limit exceeded");
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "Rate limit exceeded".to_string(),
+                )
+            }
+            AppError::ExternalApiError(msg) => {
+                tracing::error!("External API error: {}", msg);
                 (StatusCode::BAD_GATEWAY, "External API error".to_string())
             }
-            AppError::ParserError(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            AppError::MigrationError(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Migration error".to_string(),
-            ),
-            AppError::CrawlerError(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Crawler error".to_string(),
-            ),
-            AppError::SearchError(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            AppError::PermissionDenied(msg) => (StatusCode::FORBIDDEN, msg.clone()),
-            AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
-            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
-            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
-            AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
-            AppError::UnprocessableEntity(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg.clone()),
-            AppError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg.clone()),
+            AppError::ParserError(msg) => {
+                tracing::error!("Parser error: {}", msg);
+                (StatusCode::BAD_REQUEST, msg.clone())
+            }
+            AppError::MigrationError(msg) => {
+                tracing::error!("Migration error: {}", msg);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Migration error".to_string(),
+                )
+            }
+            AppError::CrawlerError(msg) => {
+                tracing::error!("Crawler error: {}", msg);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Crawler error".to_string(),
+                )
+            }
+            AppError::SearchError(msg) => {
+                tracing::error!("Search error: {}", msg);
+                (StatusCode::BAD_REQUEST, msg.clone())
+            }
+            AppError::PermissionDenied(msg) => {
+                tracing::warn!("Permission denied: {}", msg);
+                (StatusCode::FORBIDDEN, msg.clone())
+            }
+            AppError::NotFound(msg) => {
+                tracing::info!("Not found: {}", msg);
+                (StatusCode::NOT_FOUND, msg.clone())
+            }
+            AppError::BadRequest(msg) => {
+                tracing::warn!("Bad request: {}", msg);
+                (StatusCode::BAD_REQUEST, msg.clone())
+            }
+            AppError::Unauthorized(msg) => {
+                tracing::warn!("Unauthorized: {}", msg);
+                (StatusCode::UNAUTHORIZED, msg.clone())
+            }
+            AppError::Forbidden(msg) => {
+                tracing::warn!("Forbidden: {}", msg);
+                (StatusCode::FORBIDDEN, msg.clone())
+            }
+            AppError::Conflict(msg) => {
+                tracing::warn!("Conflict: {}", msg);
+                (StatusCode::CONFLICT, msg.clone())
+            }
+            AppError::UnprocessableEntity(msg) => {
+                tracing::warn!("Unprocessable entity: {}", msg);
+                (StatusCode::UNPROCESSABLE_ENTITY, msg.clone())
+            }
+            AppError::ServiceUnavailable(msg) => {
+                tracing::error!("Service unavailable: {}", msg);
+                (StatusCode::SERVICE_UNAVAILABLE, msg.clone())
+            }
         }
     } else if err
         .find::<warp::filters::body::BodyDeserializeError>()
         .is_some()
     {
+        tracing::warn!("Invalid request body: {:?}", err);
         (StatusCode::BAD_REQUEST, "Invalid request body".to_string())
     } else if err.find::<warp::reject::MethodNotAllowed>().is_some() {
+        tracing::warn!("Method not allowed: {:?}", err);
         (
             StatusCode::METHOD_NOT_ALLOWED,
             "Method not allowed".to_string(),
@@ -297,5 +410,91 @@ impl AppError {
 
     pub fn authentication_error<T: std::fmt::Display>(message: T) -> Self {
         AppError::AuthenticationError(message.to_string())
+    }
+
+    /// Log the error with appropriate level and context
+    /// This should be called before returning the error to ensure it's logged
+    pub fn log_with_context(&self, context: &str) {
+        match self {
+            // Critical errors that need immediate attention
+            AppError::Database(_)
+            | AppError::DatabasePool(_)
+            | AppError::DatabaseError(_)
+            | AppError::ConnectionPool(_)
+            | AppError::MigrationError(_)
+            | AppError::InternalError(_)
+            | AppError::ServiceUnavailable(_) => {
+                tracing::error!("{} - {}: {}", context, self.error_type(), self);
+            }
+            // External service errors
+            AppError::HttpClient(_) | AppError::ExternalApiError(_) | AppError::CrawlerError(_) => {
+                tracing::error!("{} - {}: {}", context, self.error_type(), self);
+            }
+            // Client errors (warnings)
+            AppError::Validation(_)
+            | AppError::ValidationErrors(_)
+            | AppError::ValidationError(_)
+            | AppError::BadRequest(_)
+            | AppError::InvalidDateFormat(_)
+            | AppError::InvalidTransformation(_)
+            | AppError::ParserError(_)
+            | AppError::SearchError(_) => {
+                tracing::warn!("{} - {}: {}", context, self.error_type(), self);
+            }
+            // Authentication/authorization errors
+            AppError::AuthenticationError(_)
+            | AppError::Unauthorized(_)
+            | AppError::Forbidden(_)
+            | AppError::PermissionDenied(_) => {
+                tracing::warn!("{} - {}: {}", context, self.error_type(), self);
+            }
+            // Not found errors (info level)
+            AppError::NotFound(_)
+            | AppError::SeriesNotFound(_)
+            | AppError::DataSourceNotFound(_) => {
+                tracing::info!("{} - {}: {}", context, self.error_type(), self);
+            }
+            // Other errors
+            _ => {
+                tracing::error!("{} - {}: {}", context, self.error_type(), self);
+            }
+        }
+    }
+
+    /// Get a human-readable error type for logging
+    fn error_type(&self) -> &'static str {
+        match self {
+            AppError::Database(_) => "DatabaseError",
+            AppError::DatabasePool(_) => "DatabasePoolError",
+            AppError::HttpClient(_) => "HttpClientError",
+            AppError::JsonSerialization(_) => "JsonSerializationError",
+            AppError::Validation(_) => "ValidationError",
+            AppError::ValidationErrors(_) => "ValidationErrors",
+            AppError::ConnectionPool(_) => "ConnectionPoolError",
+            AppError::ConfigError(_) => "ConfigError",
+            AppError::Io(_) => "IoError",
+            AppError::AuthenticationError(_) => "AuthenticationError",
+            AppError::InternalError(_) => "InternalError",
+            AppError::DatabaseError(_) => "DatabaseError",
+            AppError::ValidationError(_) => "ValidationError",
+            AppError::SeriesNotFound(_) => "SeriesNotFound",
+            AppError::DataSourceNotFound(_) => "DataSourceNotFound",
+            AppError::InvalidDateFormat(_) => "InvalidDateFormat",
+            AppError::InvalidTransformation(_) => "InvalidTransformation",
+            AppError::RateLimitExceeded => "RateLimitExceeded",
+            AppError::ExternalApiError(_) => "ExternalApiError",
+            AppError::ParserError(_) => "ParserError",
+            AppError::MigrationError(_) => "MigrationError",
+            AppError::CrawlerError(_) => "CrawlerError",
+            AppError::SearchError(_) => "SearchError",
+            AppError::PermissionDenied(_) => "PermissionDenied",
+            AppError::NotFound(_) => "NotFound",
+            AppError::BadRequest(_) => "BadRequest",
+            AppError::Unauthorized(_) => "Unauthorized",
+            AppError::Forbidden(_) => "Forbidden",
+            AppError::Conflict(_) => "Conflict",
+            AppError::UnprocessableEntity(_) => "UnprocessableEntity",
+            AppError::ServiceUnavailable(_) => "ServiceUnavailable",
+        }
     }
 }
