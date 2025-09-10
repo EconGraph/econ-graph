@@ -28,7 +28,18 @@ echo "📋 Applying Kubernetes manifests..."
 kubectl apply -f k8s/manifests/namespace.yaml
 kubectl apply -f k8s/manifests/configmap.yaml
 kubectl apply -f k8s/manifests/secret.yaml
+
+# Deploy PostgreSQL
+echo "🗄️  Deploying PostgreSQL..."
+kubectl apply -f k8s/manifests/postgres-init.yaml
+kubectl apply -f k8s/manifests/postgres-deployment.yaml
 kubectl apply -f k8s/manifests/postgres.yaml
+
+# Wait for PostgreSQL to be ready
+echo "⏳ Waiting for PostgreSQL to be ready..."
+kubectl wait --for=condition=ready pod -l app=postgresql -n econ-graph --timeout=300s
+
+# Deploy application
 kubectl apply -f k8s/manifests/backend-deployment.yaml
 kubectl apply -f k8s/manifests/backend-service.yaml
 kubectl apply -f k8s/manifests/frontend-deployment.yaml
@@ -48,9 +59,10 @@ kubectl wait --for=condition=available --timeout=300s deployment/econ-graph-fron
 echo "✅ Deployment completed successfully!"
 echo ""
 echo "🌐 Application URLs:"
-echo "  Frontend: http://localhost:3000"
-echo "  Backend:  http://localhost:8080"
-echo "  GraphQL:  http://localhost:8080/graphql"
+echo "  Frontend: http://localhost/"
+echo "  Backend:  http://localhost:9876"
+echo "  GraphQL:  http://localhost/graphql"
+echo "  Playground: http://localhost/playground"
 echo ""
 echo "📊 Useful commands:"
 echo "  kubectl get pods -n econ-graph"

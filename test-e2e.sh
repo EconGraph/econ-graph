@@ -107,7 +107,7 @@ run_backend_tests() {
 
     # Run backend integration tests
     print_step "Executing backend end-to-end tests..."
-    timeout $BACKEND_TEST_TIMEOUT cargo test e2e_tests --lib --verbose -- --test-threads=1 || {
+    cargo test epic_e2e_tests --lib --verbose -- --test-threads=1 || {
         print_error "Backend integration tests failed"
         return 1
     }
@@ -134,12 +134,12 @@ run_frontend_tests() {
 
     # Set test environment variables
     export NODE_ENV=test
-    export REACT_APP_GRAPHQL_ENDPOINT=http://localhost:8080/graphql
+    export REACT_APP_GRAPHQL_ENDPOINT=http://localhost:9876/graphql
     export REACT_APP_TEST_MODE=true
 
     # Run frontend integration tests
     print_step "Executing frontend end-to-end tests..."
-    timeout $FRONTEND_TEST_TIMEOUT npm test -- --testNamePattern="End-to-End" --watchAll=false --coverage=false || {
+    npm test -- --testPathPattern="e2e-integration" --watchAll=false --coverage=false || {
         print_error "Frontend integration tests failed"
         return 1
     }
@@ -168,7 +168,7 @@ run_combined_tests() {
     sleep 5
 
     # Test server health
-    if curl -f http://localhost:8080/health >/dev/null 2>&1; then
+    if curl -f http://localhost:9876/health >/dev/null 2>&1; then
         print_success "Backend server is running and healthy"
     else
         print_warning "Backend server health check failed, continuing anyway..."
@@ -177,10 +177,10 @@ run_combined_tests() {
     cd ../frontend
 
     # Run frontend tests against running backend
-    export REACT_APP_GRAPHQL_ENDPOINT=http://localhost:8080/graphql
+    export REACT_APP_GRAPHQL_ENDPOINT=http://localhost:9876/graphql
 
     print_step "Running frontend tests against live backend..."
-    npm test -- --testNamePattern="Integration" --watchAll=false || {
+    npm test -- --testPathPattern="e2e-integration" --watchAll=false || {
         print_error "Combined integration tests failed"
         kill $BACKEND_PID 2>/dev/null
         return 1

@@ -73,7 +73,7 @@ impl TestContainer {
         // Create connection pool
         let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(&database_url);
         let pool = Pool::builder()
-            .max_size(5)
+            .max_size(20)
             .build(manager)
             .await
             .expect("Failed to create test pool");

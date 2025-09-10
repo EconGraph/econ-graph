@@ -19,35 +19,35 @@ spec:
           service:
             name: econ-graph-backend-service
             port:
-              number: 8080
+              number: 9876
       - path: /graphql
         pathType: Prefix
         backend:
           service:
             name: econ-graph-backend-service
             port:
-              number: 8080
+              number: 9876
       - path: /auth
         pathType: Prefix
         backend:
           service:
             name: econ-graph-backend-service
             port:
-              number: 8080
+              number: 9876
       - path: /playground
         pathType: Prefix
         backend:
           service:
             name: econ-graph-backend-service
             port:
-              number: 8080
+              number: 9876
       - path: /health
         pathType: Prefix
         backend:
           service:
             name: econ-graph-backend-service
             port:
-              number: 8080
+              number: 9876
       - path: /
         pathType: Prefix
         backend:

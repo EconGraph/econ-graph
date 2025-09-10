@@ -1,17 +1,15 @@
-# PostgreSQL deployment for local development
-# Note: This assumes you have PostgreSQL running on the host
-# For production, use a managed database service
-
+# PostgreSQL service for Kubernetes cluster
 apiVersion: v1
 kind: Service
 metadata:
   name: postgres-service
   namespace: econ-graph
   labels:
-    app: postgres
+    app: postgresql
 spec:
-  type: ExternalName
-  externalName: host.docker.internal
+  type: ClusterIP
+  selector:
+    app: postgresql
   ports:
   - port: 5432
     targetPort: 5432

@@ -69,52 +69,26 @@ pub async fn run_migrations(database_url: &str) -> AppResult<()> {
         // Ensure the database URL is properly formatted
         let formatted_url = if database_url.starts_with("postgresql://") {
             database_url
+        } else if database_url.starts_with("postgres://") {
+            database_url.replace("postgres://", "postgresql://")
         } else {
             format!("postgresql://{}", database_url)
         };
 
-        info!("Attempting to connect to database for migrations: {}", formatted_url);
+        info!(
+            "Attempting to connect to database for migrations: {}",
+            formatted_url
+        );
 
-        // Try to establish connection with retry logic
-        let mut conn = match diesel::PgConnection::establish(&formatted_url) {
-            Ok(conn) => {
-                info!("Database connection established successfully");
-                conn
-            }
-            Err(e) => {
-                // If the first attempt fails, try with explicit connection parameters
-                let error = AppError::DatabaseError(format!("Database connection failed: {}", e));
-                error.log_with_context("Database migration connection attempt");
-                info!("First connection attempt failed: {}, trying alternative approach", e);
-
-                // Parse the URL to extract components
-                if let Ok(url) = url::Url::parse(&formatted_url) {
-                    let host = url.host_str().unwrap_or("localhost");
-                    let port = url.port().unwrap_or(5432);
-                    let username = url.username();
-                    let password = url.password().unwrap_or("");
-                    let database = url.path().trim_start_matches('/');
-
-                    let connection_string = format!(
-                        "postgresql://{}:{}@{}:{}/{}",
-                        username, password, host, port, database
-                    );
-
-                    info!("Trying connection with parsed URL: {}", connection_string);
-                    diesel::PgConnection::establish(&connection_string).map_err(|e| {
-                        AppError::InternalError(format!(
-                            "Failed to establish sync connection for migrations (both attempts): {}",
-                            e
-                        ))
-                    })?
-                } else {
-                    return Err(AppError::InternalError(format!(
-                        "Failed to parse database URL: {}",
-                        formatted_url
-                    )));
-                }
-            }
-        };
+        // Try to establish connection
+        let mut conn = diesel::PgConnection::establish(&formatted_url).map_err(|e| {
+            let error = AppError::InternalError(format!(
+                "Failed to establish sync connection for migrations: {}",
+                e
+            ));
+            error.log_with_context("Database migration connection attempt");
+            error
+        })?;
 
         info!("Database connection established, running migrations...");
 

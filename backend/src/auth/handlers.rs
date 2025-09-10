@@ -20,18 +20,19 @@ pub async fn handle_google_auth(
     let google_user_info = match auth_service.verify_google_token(&auth_request.token).await {
         Ok(info) => info,
         Err(e) => {
-            tracing::error!("Google token verification failed: {}", e);
+            tracing::error!("Google token verification failed for user: {}", e);
             return Ok(reply::with_status(
                 reply::json(&json!({
-                    "error": "Google authentication failed",
-                    "message": e.to_string()
+                    "error": "Authentication failed",
+                    "message": "Unable to verify Google account. Please try signing in again."
                 })),
-                StatusCode::UNAUTHORIZED,
+                StatusCode::FORBIDDEN,
             ));
         }
     };
 
     // Create or update user
+    let user_email = google_user_info.email.clone();
     let user = match auth_service
         .create_or_update_oauth_user(
             AuthProvider::Google,
@@ -44,11 +45,11 @@ pub async fn handle_google_auth(
     {
         Ok(user) => user,
         Err(e) => {
-            tracing::error!("Failed to create/update Google user: {}", e);
+            tracing::error!("Failed to create/update Google user {}: {}", user_email, e);
             return Ok(reply::with_status(
                 reply::json(&json!({
-                    "error": "Failed to create user account",
-                    "message": e.to_string()
+                    "error": "Account creation failed",
+                    "message": "Unable to create your account. Please try again or contact support."
                 })),
                 StatusCode::INTERNAL_SERVER_ERROR,
             ));
@@ -59,11 +60,15 @@ pub async fn handle_google_auth(
     let token = match auth_service.generate_token(&user) {
         Ok(token) => token,
         Err(e) => {
-            tracing::error!("Failed to generate JWT token: {}", e);
+            tracing::error!(
+                "Failed to generate JWT token for user {}: {}",
+                user.email,
+                e
+            );
             return Ok(reply::with_status(
                 reply::json(&json!({
-                    "error": "Failed to generate authentication token",
-                    "message": e.to_string()
+                    "error": "Authentication failed",
+                    "message": "Unable to complete sign-in. Please try again."
                 })),
                 StatusCode::INTERNAL_SERVER_ERROR,
             ));
@@ -90,19 +95,23 @@ pub async fn handle_facebook_auth(
     {
         Ok(info) => info,
         Err(e) => {
-            tracing::error!("Facebook token verification failed: {}", e);
+            tracing::error!("Facebook token verification failed for user: {}", e);
             return Ok(reply::with_status(
                 reply::json(&json!({
-                    "error": "Facebook authentication failed",
-                    "message": e.to_string()
+                    "error": "Authentication failed",
+                    "message": "Unable to verify Facebook account. Please try signing in again."
                 })),
-                StatusCode::UNAUTHORIZED,
+                StatusCode::FORBIDDEN,
             ));
         }
     };
 
     // Create or update user
     let facebook_id = facebook_user_info.id.clone();
+    let user_email = facebook_user_info
+        .email
+        .clone()
+        .unwrap_or_else(|| format!("fb_user_{}@econgraph.com", facebook_id));
     let user = match auth_service
         .create_or_update_oauth_user(
             AuthProvider::Facebook,
@@ -117,11 +126,15 @@ pub async fn handle_facebook_auth(
     {
         Ok(user) => user,
         Err(e) => {
-            tracing::error!("Failed to create/update Facebook user: {}", e);
+            tracing::error!(
+                "Failed to create/update Facebook user {}: {}",
+                user_email,
+                e
+            );
             return Ok(reply::with_status(
                 reply::json(&json!({
-                    "error": "Failed to create user account",
-                    "message": e.to_string()
+                    "error": "Account creation failed",
+                    "message": "Unable to create your account. Please try again or contact support."
                 })),
                 StatusCode::INTERNAL_SERVER_ERROR,
             ));
@@ -132,11 +145,15 @@ pub async fn handle_facebook_auth(
     let token = match auth_service.generate_token(&user) {
         Ok(token) => token,
         Err(e) => {
-            tracing::error!("Failed to generate JWT token: {}", e);
+            tracing::error!(
+                "Failed to generate JWT token for user {}: {}",
+                user.email,
+                e
+            );
             return Ok(reply::with_status(
                 reply::json(&json!({
-                    "error": "Failed to generate authentication token",
-                    "message": e.to_string()
+                    "error": "Authentication failed",
+                    "message": "Unable to complete sign-in. Please try again."
                 })),
                 StatusCode::INTERNAL_SERVER_ERROR,
             ));
@@ -180,7 +197,7 @@ pub async fn handle_login(
                     "error": "Invalid credentials",
                     "message": "Email or password is incorrect"
                 })),
-                StatusCode::UNAUTHORIZED,
+                StatusCode::FORBIDDEN,
             ));
         }
     };
@@ -189,11 +206,15 @@ pub async fn handle_login(
     let token = match auth_service.generate_token(&user) {
         Ok(token) => token,
         Err(e) => {
-            tracing::error!("Failed to generate JWT token: {}", e);
+            tracing::error!(
+                "Failed to generate JWT token for user {}: {}",
+                user.email,
+                e
+            );
             return Ok(reply::with_status(
                 reply::json(&json!({
-                    "error": "Failed to generate authentication token",
-                    "message": e.to_string()
+                    "error": "Authentication failed",
+                    "message": "Unable to complete sign-in. Please try again."
                 })),
                 StatusCode::INTERNAL_SERVER_ERROR,
             ));
@@ -250,11 +271,15 @@ pub async fn handle_register(
     let token = match auth_service.generate_token(&user) {
         Ok(token) => token,
         Err(e) => {
-            tracing::error!("Failed to generate JWT token: {}", e);
+            tracing::error!(
+                "Failed to generate JWT token for user {}: {}",
+                user.email,
+                e
+            );
             return Ok(reply::with_status(
                 reply::json(&json!({
-                    "error": "Failed to generate authentication token",
-                    "message": e.to_string()
+                    "error": "Authentication failed",
+                    "message": "Unable to complete sign-in. Please try again."
                 })),
                 StatusCode::INTERNAL_SERVER_ERROR,
             ));

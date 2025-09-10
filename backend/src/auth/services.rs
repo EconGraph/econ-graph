@@ -97,21 +97,29 @@ impl AuthService {
         );
 
         let response = self.http_client.get(&url).send().await.map_err(|e| {
-            let error =
-                AppError::AuthenticationError(format!("Google token verification failed: {}", e));
+            let error = AppError::AuthenticationError(format!(
+                "Google token verification failed - HTTP client error: {}",
+                e
+            ));
             error.log_with_context("Google OAuth token verification");
             error
         })?;
 
         if !response.status().is_success() {
-            let error = AppError::AuthenticationError("Invalid Google token".to_string());
+            let status = response.status();
+            let error = AppError::AuthenticationError(format!(
+                "Google token verification failed - HTTP status: {}",
+                status
+            ));
             error.log_with_context("Google OAuth token verification");
             return Err(error);
         }
 
         let token_info: serde_json::Value = response.json().await.map_err(|e| {
-            let error =
-                AppError::AuthenticationError(format!("Failed to parse Google response: {}", e));
+            let error = AppError::AuthenticationError(format!(
+                "Google token verification failed - JSON parsing error: {}",
+                e
+            ));
             error.log_with_context("Google OAuth response parsing");
             error
         })?;
@@ -120,8 +128,10 @@ impl AuthService {
         if !self.google_client_id.starts_with("your-") {
             if let Some(audience) = token_info.get("audience") {
                 if audience.as_str() != Some(&self.google_client_id) {
-                    let error =
-                        AppError::AuthenticationError("Google token audience mismatch".to_string());
+                    let error = AppError::AuthenticationError(
+                        "Google token audience mismatch - token not intended for this application"
+                            .to_string(),
+                    );
                     error.log_with_context("Google OAuth audience verification");
                     return Err(error);
                 }
@@ -140,15 +150,19 @@ impl AuthService {
             .send()
             .await
             .map_err(|e| {
-                let error =
-                    AppError::AuthenticationError(format!("Failed to get Google user info: {}", e));
+                let error = AppError::AuthenticationError(format!(
+                    "Google token verification failed - user info retrieval error: {}",
+                    e
+                ));
                 error.log_with_context("Google OAuth user info retrieval");
                 error
             })?;
 
         let user_info: GoogleUserInfo = user_response.json().await.map_err(|e| {
-            let error =
-                AppError::AuthenticationError(format!("Failed to parse Google user info: {}", e));
+            let error = AppError::AuthenticationError(format!(
+                "Google token verification failed - user info parsing error: {}",
+                e
+            ));
             error.log_with_context("Google OAuth user info parsing");
             error
         })?;

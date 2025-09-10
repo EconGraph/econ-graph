@@ -202,12 +202,18 @@ async fn main() -> AppResult<()> {
 
     info!("✅ Database connection pool created successfully");
 
-    // Run migrations (temporarily disabled - already run manually)
-    // database::run_migrations(&config.database_url)
-    //     .await
-    //     .map_err(|e| AppError::DatabaseError(format!("Failed to run migrations: {}", e)))?;
+    // Run migrations
+    info!("🔄 Running database migrations...");
+    database::run_migrations(&config.database_url)
+        .await
+        .map_err(|e| {
+            let error = AppError::DatabaseError(format!("Failed to run migrations: {}", e));
+            error.log_with_context("Application startup database migrations");
+            eprintln!("❌ Failed to run migrations: {}", e);
+            error
+        })?;
 
-    info!("🔄 Database migrations skipped (already run manually)");
+    info!("✅ Database migrations completed successfully");
 
     // Create GraphQL schema
     let schema = create_schema_with_data(pool.clone());
