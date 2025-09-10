@@ -1,3 +1,7 @@
+-- Authentication and Collaboration Schema
+-- Creates user authentication, session management, and collaboration features
+-- This consolidates the auth and collaboration migrations into a cohesive schema
+
 -- Create users table for OAuth and email authentication
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -33,7 +37,7 @@ CREATE TABLE user_sessions (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     last_used_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     user_agent TEXT,
-    ip_address INET
+    ip_address TEXT -- Using TEXT instead of INET for better compatibility
 );
 
 -- Create chart annotations table for collaboration
@@ -101,16 +105,7 @@ CREATE INDEX idx_annotation_comments_user_id ON annotation_comments(user_id);
 CREATE INDEX idx_chart_collaborators_chart_id ON chart_collaborators(chart_id);
 CREATE INDEX idx_chart_collaborators_user_id ON chart_collaborators(user_id);
 
--- Create updated_at trigger function
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
--- Create triggers for updated_at columns
+-- Create triggers for updated_at columns (reusing the function from initial schema)
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 

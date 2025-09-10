@@ -1,5 +1,6 @@
 -- Global Economic Network Analysis Schema
--- This creates the foundation for cross-country economic analysis
+-- Creates comprehensive tables for cross-country economic analysis
+-- This consolidates the global analysis migration into a cohesive schema
 
 -- Countries table with geographic and economic metadata
 CREATE TABLE countries (
