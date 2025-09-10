@@ -285,7 +285,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               id: result.id,
               email: result.email,
               name: result.name,
-              avatar: result.imageUrl,
+              picture: result.imageUrl,
+              verified_email: result.emailVerified || true, // Default to true if not available
             },
           }),
         });
