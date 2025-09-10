@@ -47,6 +47,9 @@ config = "0.14"
 # Environment
 dotenvy = "0.15"
 
+# URL parsing
+url = "2.5"
+
 # Error handling
 anyhow = "1.0"
 thiserror = "1.0"

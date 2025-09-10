@@ -130,33 +130,80 @@ async fn root_handler() -> Result<impl warp::Reply, Infallible> {
 
 #[tokio::main]
 async fn main() -> AppResult<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt::init();
+    // Initialize tracing with more detailed output
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_target(false)
+        .with_thread_ids(true)
+        .with_thread_names(true)
+        .init();
 
     info!(
         "🚀 Starting EconGraph Backend Server v{}",
         env!("CARGO_PKG_VERSION")
     );
 
-    // Load configuration
-    let config = Config::from_env()
-        .map_err(|e| AppError::ConfigError(format!("Failed to load configuration: {}", e)))?;
+    // Log environment variables (non-sensitive ones)
+    info!("🔧 Environment Configuration:");
+    info!(
+        "  - RUST_LOG: {:?}",
+        std::env::var("RUST_LOG").unwrap_or_else(|_| "not set".to_string())
+    );
+    info!(
+        "  - BACKEND_PORT: {:?}",
+        std::env::var("BACKEND_PORT").unwrap_or_else(|_| "not set".to_string())
+    );
+    info!(
+        "  - FRONTEND_PORT: {:?}",
+        std::env::var("FRONTEND_PORT").unwrap_or_else(|_| "not set".to_string())
+    );
+    info!(
+        "  - DATABASE_URL: {:?}",
+        if std::env::var("DATABASE_URL").is_ok() {
+            "set"
+        } else {
+            "not set"
+        }
+    );
+    info!(
+        "  - JWT_SECRET: {:?}",
+        if std::env::var("JWT_SECRET").is_ok() {
+            "set"
+        } else {
+            "not set"
+        }
+    );
 
-    info!("📊 Configuration loaded successfully");
+    // Load configuration
+    info!("📋 Loading configuration from environment...");
+    let config = Config::from_env().map_err(|e| {
+        eprintln!("❌ Failed to load configuration: {}", e);
+        AppError::ConfigError(format!("Failed to load configuration: {}", e))
+    })?;
+
+    info!("📊 Configuration loaded successfully:");
+    info!("  - Server host: {}", config.server.host);
+    info!("  - Server port: {}", config.server.port);
+    info!("  - CORS origins: {:?}", config.cors.allowed_origins);
+    info!("  - Database URL: {}", config.database_url);
 
     // Create database connection pool
-    let pool = create_pool(&config.database_url)
-        .await
-        .map_err(|e| AppError::DatabaseError(format!("Failed to create database pool: {}", e)))?;
+    info!("🗄️  Creating database connection pool...");
+    info!("  - Database URL: {}", config.database_url);
 
-    info!("🗄️  Database connection pool created");
+    let pool = create_pool(&config.database_url).await.map_err(|e| {
+        eprintln!("❌ Failed to create database pool: {}", e);
+        AppError::DatabaseError(format!("Failed to create database pool: {}", e))
+    })?;
 
-    // Run migrations
-    database::run_migrations(&config.database_url)
-        .await
-        .map_err(|e| AppError::DatabaseError(format!("Failed to run migrations: {}", e)))?;
+    info!("✅ Database connection pool created successfully");
 
-    info!("🔄 Database migrations completed");
+    // Run migrations (temporarily disabled - already run manually)
+    // database::run_migrations(&config.database_url)
+    //     .await
+    //     .map_err(|e| AppError::DatabaseError(format!("Failed to run migrations: {}", e)))?;
+
+    info!("🔄 Database migrations skipped (already run manually)");
 
     // Create GraphQL schema
     let schema = create_schema_with_data(pool.clone());
@@ -169,8 +216,13 @@ async fn main() -> AppResult<()> {
     // Start background crawler (if enabled in config)
     // For now, crawler is always enabled - in production this could be configurable
     info!("🕷️  Starting background crawler...");
-    let _ = start_crawler().await;
-    info!("✅ Background crawler started");
+    match start_crawler().await {
+        Ok(_) => info!("✅ Background crawler started successfully"),
+        Err(e) => {
+            eprintln!("⚠️  Warning: Failed to start background crawler: {}", e);
+            info!("⚠️  Background crawler failed to start, continuing without crawler");
+        }
+    }
 
     // Create Warp filters
     let cors = warp::cors()
@@ -227,14 +279,21 @@ async fn main() -> AppResult<()> {
         "❤️  Health check available at http://localhost:{}/health",
         port
     );
+    info!("🔗 API endpoints:");
+    info!("  - POST/GET /graphql - GraphQL API");
+    info!("  - GET /playground - GraphQL Playground");
+    info!("  - GET /health - Health check");
+    info!("  - GET / - API documentation");
 
     // Start the server
+    info!("🚀 Starting HTTP server...");
     let (_, server) =
         warp::serve(routes).bind_with_graceful_shutdown(([0, 0, 0, 0], port), async {
             signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
             info!("🛑 Received shutdown signal, gracefully shutting down...");
         });
 
+    info!("✅ Server is now running and accepting connections!");
     server.await;
 
     info!("✅ Server shutdown complete");

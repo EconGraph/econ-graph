@@ -48,7 +48,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // OAuth Configuration
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
 const FACEBOOK_APP_ID = process.env.REACT_APP_FACEBOOK_APP_ID || '';
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL ||
+  `http://localhost:${process.env.REACT_APP_BACKEND_PORT || '9876'}`;
 
 // Facebook SDK initialization
 declare global {

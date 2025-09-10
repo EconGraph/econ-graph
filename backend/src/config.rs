@@ -59,15 +59,20 @@ impl Config {
 
             server: ServerConfig {
                 host: env::var("SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
-                port: env::var("SERVER_PORT")
-                    .unwrap_or_else(|_| "8080".to_string())
+                port: env::var("BACKEND_PORT")
+                    .unwrap_or_else(|_| "9876".to_string())
                     .parse()
-                    .unwrap_or(8080),
+                    .unwrap_or(9876),
             },
 
             cors: CorsConfig {
                 allowed_origins: env::var("CORS_ALLOWED_ORIGINS")
-                    .unwrap_or_else(|_| "http://localhost:3000".to_string())
+                    .unwrap_or_else(|_| {
+                        format!(
+                            "http://localhost:{}",
+                            env::var("FRONTEND_PORT").unwrap_or_else(|_| "3000".to_string())
+                        )
+                    })
                     .split(',')
                     .map(|s| s.trim().to_string())
                     .collect(),
@@ -116,10 +121,16 @@ impl Default for Config {
             database_url: "postgresql://localhost:5432/econ_graph_test".to_string(),
             server: ServerConfig {
                 host: "127.0.0.1".to_string(),
-                port: 8080,
+                port: env::var("BACKEND_PORT")
+                    .unwrap_or_else(|_| "9876".to_string())
+                    .parse()
+                    .unwrap_or(9876),
             },
             cors: CorsConfig {
-                allowed_origins: vec!["http://localhost:3000".to_string()],
+                allowed_origins: vec![format!(
+                    "http://localhost:{}",
+                    env::var("FRONTEND_PORT").unwrap_or_else(|_| "3000".to_string())
+                )],
             },
             crawler: CrawlerConfig {
                 fred_api_key: None,
@@ -153,14 +164,24 @@ mod tests {
         // PURPOSE: Verify that default configuration values are set correctly for local development
         // This ensures developers can run the app without extensive configuration setup
 
+        // Clear environment variables to test true defaults
+        env::remove_var("BACKEND_PORT");
+        env::remove_var("FRONTEND_PORT");
+        env::remove_var("CORS_ALLOWED_ORIGINS");
+
         let config = Config::default();
 
         // Verify default server binds to localhost - safe for development
         assert_eq!(config.server.host, "127.0.0.1");
-        // Verify default port 8080 - common development port that's usually available
-        assert_eq!(config.server.port, 8080);
+        // Verify default port 9876 - non-traditional port to avoid conflicts
+        assert_eq!(config.server.port, 9876);
         // Verify CORS allows React dev server - required for frontend development
         assert_eq!(config.cors.allowed_origins, vec!["http://localhost:3000"]);
+
+        // Clean up environment to avoid affecting other tests
+        env::remove_var("BACKEND_PORT");
+        env::remove_var("FRONTEND_PORT");
+        env::remove_var("CORS_ALLOWED_ORIGINS");
     }
 
     #[test]
@@ -174,7 +195,8 @@ mod tests {
             "DATABASE_URL",
             "postgresql://test:test@localhost:5432/test_db",
         );
-        env::set_var("SERVER_PORT", "9000");
+        env::set_var("BACKEND_PORT", "9000");
+        env::set_var("FRONTEND_PORT", "4000");
 
         let config = Config::from_env().unwrap();
 
@@ -184,9 +206,11 @@ mod tests {
             "postgresql://test:test@localhost:5432/test_db"
         );
         assert_eq!(config.server.port, 9000);
+        assert_eq!(config.cors.allowed_origins, vec!["http://localhost:4000"]);
 
         // Clean up environment to avoid affecting other tests
         env::remove_var("DATABASE_URL");
-        env::remove_var("SERVER_PORT");
+        env::remove_var("BACKEND_PORT");
+        env::remove_var("FRONTEND_PORT");
     }
 }
