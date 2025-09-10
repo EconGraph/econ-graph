@@ -7,46 +7,27 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        database::{create_pool, DatabasePool},
         error::AppResult,
         models::{NewUser, User},
         services::{collaboration_service::PermissionLevel, CollaborationService},
+        test_utils::TestContainer,
     };
     use bigdecimal::BigDecimal;
     use chrono::{NaiveDate, Utc};
     use diesel::prelude::*;
     use diesel_async::RunQueryDsl;
     use std::str::FromStr;
-    use testcontainers::runners::AsyncRunner;
-    use testcontainers_modules::postgres::Postgres;
     use uuid::Uuid;
 
-    /// Create a test database pool with proper container lifecycle management
-    /// Returns (container, pool) - the container must be kept alive for the test duration
-    async fn create_test_pool() -> (testcontainers::ContainerAsync<Postgres>, DatabasePool) {
-        let postgres_container = Postgres::default().start().await.unwrap();
-        let connection_string = format!(
-            "postgres://postgres:postgres@127.0.0.1:{}/postgres",
-            postgres_container.get_host_port_ipv4(5432).await.unwrap()
-        );
-
-        let pool = create_pool(&connection_string)
-            .await
-            .expect("Failed to create connection pool");
-
-        // Run migrations
-        crate::database::run_migrations(&connection_string)
-            .await
-            .expect("Failed to run migrations");
-
-        (postgres_container, pool)
-    }
-
     /// Create a test user for collaboration tests
-    async fn create_test_user(pool: &DatabasePool, email: &str, name: &str) -> AppResult<User> {
+    async fn create_test_user(
+        container: &TestContainer,
+        email: &str,
+        name: &str,
+    ) -> AppResult<User> {
         use crate::schema::users;
 
-        let mut conn = pool.get().await?;
+        let mut conn = container.pool.get().await?;
 
         let new_user = NewUser {
             email: email.to_string(),
@@ -75,11 +56,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_retrieve_annotation() -> AppResult<()> {
-        let (_container, pool) = create_test_pool().await;
-        let collaboration_service = CollaborationService::new(pool.clone());
+        let container = TestContainer::new().await;
+        let collaboration_service = CollaborationService::new(container.pool.clone());
 
         // Create test user
-        let user = create_test_user(&pool, "annotator@test.com", "Test Annotator").await?;
+        let user = create_test_user(&container, "annotator@test.com", "Test Annotator").await?;
 
         // Create annotation
         let series_id = Uuid::new_v4();
@@ -120,12 +101,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_annotation_visibility_permissions() -> AppResult<()> {
-        let (_container, pool) = create_test_pool().await;
-        let collaboration_service = CollaborationService::new(pool.clone());
+        let container = TestContainer::new().await;
+        let collaboration_service = CollaborationService::new(container.pool.clone());
 
         // Create test users
-        let user1 = create_test_user(&pool, "user1@test.com", "User One").await?;
-        let user2 = create_test_user(&pool, "user2@test.com", "User Two").await?;
+        let user1 = create_test_user(&container, "user1@test.com", "User One").await?;
+        let user2 = create_test_user(&container, "user2@test.com", "User Two").await?;
 
         let series_id = Uuid::new_v4();
         let annotation_date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
@@ -185,12 +166,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_annotation_comments_workflow() -> AppResult<()> {
-        let (_container, pool) = create_test_pool().await;
-        let collaboration_service = CollaborationService::new(pool.clone());
+        let container = TestContainer::new().await;
+        let collaboration_service = CollaborationService::new(container.pool.clone());
 
         // Create test users
-        let user1 = create_test_user(&pool, "commenter1@test.com", "Commenter One").await?;
-        let user2 = create_test_user(&pool, "commenter2@test.com", "Commenter Two").await?;
+        let user1 = create_test_user(&container, "commenter1@test.com", "Commenter One").await?;
+        let user2 = create_test_user(&container, "commenter2@test.com", "Commenter Two").await?;
 
         let series_id = Uuid::new_v4();
         let annotation_date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
@@ -251,13 +232,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_chart_sharing_and_permissions() -> AppResult<()> {
-        let (_container, pool) = create_test_pool().await;
-        let collaboration_service = CollaborationService::new(pool.clone());
+        let container = TestContainer::new().await;
+        let collaboration_service = CollaborationService::new(container.pool.clone());
 
         // Create test users
-        let owner = create_test_user(&pool, "owner@test.com", "Chart Owner").await?;
-        let viewer = create_test_user(&pool, "viewer@test.com", "Chart Viewer").await?;
-        let editor = create_test_user(&pool, "editor@test.com", "Chart Editor").await?;
+        let owner = create_test_user(&container, "owner@test.com", "Chart Owner").await?;
+        let viewer = create_test_user(&container, "viewer@test.com", "Chart Viewer").await?;
+        let editor = create_test_user(&container, "editor@test.com", "Chart Editor").await?;
 
         let chart_id = Uuid::new_v4();
 
@@ -293,12 +274,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_annotation_deletion_permissions() -> AppResult<()> {
-        let (_container, pool) = create_test_pool().await;
-        let collaboration_service = CollaborationService::new(pool.clone());
+        let container = TestContainer::new().await;
+        let collaboration_service = CollaborationService::new(container.pool.clone());
 
         // Create test users
-        let owner = create_test_user(&pool, "owner@test.com", "Annotation Owner").await?;
-        let other_user = create_test_user(&pool, "other@test.com", "Other User").await?;
+        let owner = create_test_user(&container, "owner@test.com", "Annotation Owner").await?;
+        let other_user = create_test_user(&container, "other@test.com", "Other User").await?;
 
         let series_id = Uuid::new_v4();
         let annotation_date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
@@ -341,14 +322,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_collaboration_workflow_end_to_end() -> AppResult<()> {
-        let (_container, pool) = create_test_pool().await;
-        let collaboration_service = CollaborationService::new(pool.clone());
+        let container = TestContainer::new().await;
+        let collaboration_service = CollaborationService::new(container.pool.clone());
 
         // Create test users representing different roles
-        let analyst = create_test_user(&pool, "analyst@bank.com", "Senior Analyst").await?;
-        let manager = create_test_user(&pool, "manager@bank.com", "Portfolio Manager").await?;
+        let analyst = create_test_user(&container, "analyst@bank.com", "Senior Analyst").await?;
+        let manager = create_test_user(&container, "manager@bank.com", "Portfolio Manager").await?;
         let researcher =
-            create_test_user(&pool, "researcher@bank.com", "Research Associate").await?;
+            create_test_user(&container, "researcher@bank.com", "Research Associate").await?;
 
         let series_id = Uuid::new_v4(); // GDP series
         let chart_id = Uuid::new_v4();
@@ -457,15 +438,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_collaboration_performance_and_scale() -> AppResult<()> {
-        let (_container, pool) = create_test_pool().await;
-        let collaboration_service = CollaborationService::new(pool.clone());
+        let container = TestContainer::new().await;
+        let collaboration_service = CollaborationService::new(container.pool.clone());
 
         // Create multiple users
         let mut users = Vec::new();
         for i in 0..10 {
             let email = format!("user{}@test.com", i);
             let name = format!("User {}", i);
-            let user = create_test_user(&pool, &email, &name).await?;
+            let user = create_test_user(&container, &email, &name).await?;
             users.push(user);
         }
 
