@@ -209,6 +209,8 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onClose }) => {
           background: theme.palette.background.default,
         },
       }}
+      role="navigation"
+      aria-label="Main navigation"
     >
       {drawerContent}
     </Drawer>
