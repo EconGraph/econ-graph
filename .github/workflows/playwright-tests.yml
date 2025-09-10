@@ -1,0 +1,68 @@
+name: Playwright Tests
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v3.7.2, v3.8.0, etc.
+
+jobs:
+  playwright-tests:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install dependencies
+      working-directory: ./frontend
+      run: npm ci
+
+    - name: Install Playwright Browsers
+      working-directory: ./frontend
+      run: npx playwright install --with-deps
+
+    - name: Setup test environment
+      run: |
+        # Create a simple test server to serve the built frontend
+        cd frontend
+        npm install -g serve
+        serve -s build -l 3000 &
+        sleep 10
+        curl -f http://localhost:3000 || exit 1
+
+    - name: Run Playwright tests
+      working-directory: ./frontend
+      run: npx playwright test --reporter=github
+      env:
+        PLAYWRIGHT_BASE_URL: http://localhost:3000
+
+    - name: Upload Playwright Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-report-${{ github.ref_name }}
+        path: frontend/playwright-report/
+        retention-days: 30
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-test-results-${{ github.ref_name }}
+        path: frontend/test-results/
+        retention-days: 30
+
+    - name: Upload screenshots on failure
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: playwright-screenshots-${{ github.ref_name }}
+        path: frontend/test-results/
+        retention-days: 7

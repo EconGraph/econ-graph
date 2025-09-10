@@ -1,0 +1,135 @@
+name: Comprehensive Playwright Tests
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v3.7.2, v3.8.0, etc.
+
+jobs:
+  playwright-tests:
+    timeout-minutes: 90
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Install frontend dependencies
+      working-directory: ./frontend
+      run: npm ci
+
+    - name: Install Playwright Browsers
+      working-directory: ./frontend
+      run: npx playwright install --with-deps
+
+    - name: Build backend
+      working-directory: ./backend
+      run: cargo build --release
+      env:
+        DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
+
+    - name: Run database migrations
+      working-directory: ./backend
+      run: cargo run --bin migrate
+      env:
+        DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
+
+    - name: Start backend server
+      working-directory: ./backend
+      run: |
+        cargo run --release &
+        sleep 10
+      env:
+        DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
+        BACKEND_PORT: 9876
+        FRONTEND_PORT: 3000
+
+    - name: Build frontend
+      working-directory: ./frontend
+      run: npm run build
+      env:
+        REACT_APP_API_URL: http://localhost:9876
+
+    - name: Start frontend server
+      working-directory: ./frontend
+      run: |
+        npm start &
+        sleep 30
+      env:
+        PORT: 3000
+        REACT_APP_API_URL: http://localhost:9876
+
+    - name: Wait for services to be ready
+      run: |
+        timeout 60 bash -c 'until curl -f http://localhost:9876/health; do sleep 2; done'
+        timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
+
+    - name: Run Playwright tests
+      working-directory: ./frontend
+      run: npx playwright test --reporter=github
+      env:
+        PLAYWRIGHT_BASE_URL: http://localhost:3000
+
+    - name: Upload Playwright Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-report-${{ github.ref_name }}
+        path: frontend/playwright-report/
+        retention-days: 30
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-test-results-${{ github.ref_name }}
+        path: frontend/test-results/
+        retention-days: 30
+
+    - name: Upload screenshots
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: playwright-screenshots-${{ github.ref_name }}
+        path: frontend/test-results/
+        retention-days: 7

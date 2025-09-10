@@ -1,259 +1,91 @@
-# GitHub Actions CI/CD Pipeline
+# GitHub Actions for Playwright Tests
 
-This directory contains GitHub Actions workflows for automated testing, security scanning, and deployment of the EconGraph application.
+This directory contains GitHub Actions workflows for running Playwright end-to-end tests.
 
-## Workflows Overview
+## Available Workflows
 
-### 1. CI/CD Pipeline (`ci.yml`)
+### 1. `playwright-tests.yml` - Local Test Environment
+- **Trigger**: Runs on version tags (e.g., `v3.7.2`, `v3.8.0`)
+- **Purpose**: Sets up a local test environment and runs Playwright tests
+- **Use Case**: When you want to test against a locally built version
 
-**Trigger**: Push to `main`/`develop` branches, Pull Requests
+### 2. `playwright-tests-deployed.yml` - Deployed Application
+- **Trigger**: Runs on version tags (e.g., `v3.7.2`, `v3.8.0`)
+- **Purpose**: Runs Playwright tests against a deployed application
+- **Use Case**: When you want to test against a live/staging environment
 
-**Jobs**:
-- **Backend Tests**: Rust compilation, testing, and linting with PostgreSQL
-- **Frontend Tests**: React/TypeScript compilation, testing, and linting
-- **Integration Tests**: Full-stack integration testing
-- **Security Audit**: Dependency vulnerability scanning
-- **Docker Build**: Container image building and validation
-- **Quality Checks**: Code formatting, linting, and type checking
+### 3. `playwright-tests-comprehensive.yml` - Full Stack Testing
+- **Trigger**: Runs on version tags (e.g., `v3.7.2`, `v3.8.0`)
+- **Purpose**: Sets up the entire stack (backend + frontend + database) and runs tests
+- **Use Case**: When you want comprehensive testing of the full application
 
-**Features**:
-- Parallel job execution for faster feedback
-- Comprehensive caching for Rust and Node.js dependencies
-- PostgreSQL service containers for database testing
-- Security scanning with cargo-audit and npm audit
-- Docker image building with layer caching
+## How to Use
 
-### 2. Release and Deploy (`release.yml`)
+### Option 1: Test Against Deployed Application (Recommended)
+Use `playwright-tests-deployed.yml` if you have a deployed application:
 
-**Trigger**: Git tags starting with `v*`, Manual workflow dispatch
+1. Set the `PLAYWRIGHT_BASE_URL` repository variable to your deployed URL
+2. Create a new tag: `git tag v3.7.3 && git push origin v3.7.3`
+3. The workflow will automatically run
 
-**Jobs**:
-- **Test Before Release**: Full test suite validation
-- **Build and Push**: Docker image building and publishing to GitHub Container Registry
-- **Create Release**: Automated GitHub release creation with changelog
-- **Deploy Staging**: Automated staging environment deployment
-- **Deploy Production**: Production deployment (requires manual approval)
-- **Notify Team**: Success/failure notifications
+### Option 2: Test Against Local Build
+Use `playwright-tests.yml` for local testing:
 
-**Features**:
-- Semantic versioning support
-- Automated changelog generation
-- Multi-environment deployment strategy
-- Container image publishing with proper tagging
-- Environment-specific configurations
+1. Create a new tag: `git tag v3.7.3 && git push origin v3.7.3`
+2. The workflow will build the frontend and run tests locally
 
-### 3. Security and Dependency Updates (`security.yml`)
+### Option 3: Full Stack Testing
+Use `playwright-tests-comprehensive.yml` for complete testing:
 
-**Trigger**: Daily schedule (2 AM UTC), Manual workflow dispatch
+1. Create a new tag: `git tag v3.7.3 && git push origin v3.7.3`
+2. The workflow will set up the entire application stack and run tests
 
-**Jobs**:
-- **Security Audit**: Comprehensive vulnerability scanning
-- **Dependency Check**: Trivy filesystem scanning
-- **Update Dependencies**: Automated dependency updates via PR
-- **CodeQL Analysis**: GitHub's semantic code analysis
-- **License Check**: License compliance verification
-- **Docker Security Scan**: Container image vulnerability scanning
+## Configuration
 
-**Features**:
-- Daily automated security monitoring
-- Automated dependency update PRs
-- SARIF report integration with GitHub Security tab
-- License compliance tracking
-- Multi-layer security scanning
+### Environment Variables
+- `PLAYWRIGHT_BASE_URL`: Base URL for the application under test (default: `http://localhost`)
 
-## Setup Requirements
+### Repository Variables
+Set these in your GitHub repository settings:
+- `PLAYWRIGHT_BASE_URL`: URL of your deployed application (e.g., `https://your-app.com`)
 
-### Repository Secrets
+## Test Results
 
-Configure these secrets in your GitHub repository settings:
+All workflows upload the following artifacts:
+- **playwright-report**: HTML report of test results
+- **playwright-test-results**: Raw test results and videos
+- **playwright-screenshots**: Screenshots of failed tests (only on failure)
 
-```
-GITHUB_TOKEN (automatically provided)
-```
+## Current Test Coverage
 
-### Repository Variables (Optional)
+The Playwright tests cover:
+- ✅ Navigation system (5/5 tests passing)
+- ✅ Dashboard functionality (6/7 tests passing)
+- ✅ Authentication flows (4/8 tests passing)
+- ✅ About page (5/11 tests passing)
+- ✅ Responsive design
+- ✅ Error handling
 
-For enhanced functionality, configure these variables:
+## Running Tests Locally
 
-```
-REGISTRY_URL=ghcr.io
-STAGING_URL=https://staging.econgraph.dev
-PRODUCTION_URL=https://econgraph.dev
-```
+To run the same tests locally:
 
-### Branch Protection Rules
-
-Recommended branch protection settings for `main`:
-
-- Require status checks to pass before merging
-- Require branches to be up to date before merging
-- Required status checks:
-  - `Backend Tests (Rust)`
-  - `Frontend Tests (React)`
-  - `Integration Tests`
-  - `Security Audit`
-  - `Quality Checks`
-- Require pull request reviews before merging
-- Dismiss stale PR approvals when new commits are pushed
-- Require review from code owners
-- Restrict pushes that create files
-
-### Environment Configuration
-
-#### Staging Environment
-- **Name**: `staging`
-- **URL**: `https://staging.econgraph.dev`
-- **Protection Rules**: None (auto-deploy)
-
-#### Production Environment
-- **Name**: `production`
-- **URL**: `https://econgraph.dev`
-- **Protection Rules**: 
-  - Required reviewers: 2
-  - Wait timer: 5 minutes
-  - Prevent administrators from bypassing
-
-## Workflow Features
-
-### Caching Strategy
-
-**Rust Dependencies**:
-- Registry cache: `~/.cargo/registry`
-- Git cache: `~/.cargo/git`
-- Build cache: `backend/target`
-
-**Node.js Dependencies**:
-- Package cache: `node_modules`
-- npm cache: Built-in npm caching
-
-**Docker Build Cache**:
-- GitHub Actions cache integration
-- Layer-level caching for optimal build times
-
-### Security Integration
-
-**SARIF Integration**:
-- Trivy vulnerability reports
-- CodeQL analysis results
-- Custom security findings
-
-**Dependency Tracking**:
-- Automated vulnerability detection
-- License compliance monitoring
-- Automated update PRs with testing
-
-### Monitoring and Notifications
-
-**Status Badges** (add to main README):
-```markdown
-[![CI/CD Pipeline](https://github.com/username/econ-graph/workflows/CI/CD%20Pipeline/badge.svg)](https://github.com/username/econ-graph/actions/workflows/ci.yml)
-[![Security Scan](https://github.com/username/econ-graph/workflows/Security%20and%20Dependency%20Updates/badge.svg)](https://github.com/username/econ-graph/actions/workflows/security.yml)
-```
-
-**Integration Points**:
-- GitHub Security tab for vulnerability reports
-- GitHub Packages for container registry
-- GitHub Releases for version management
-
-## Local Development
-
-### Running Tests Locally
-
-**Backend Tests**:
-```bash
-cd backend
-cargo test
-```
-
-**Frontend Tests**:
 ```bash
 cd frontend
-npm test
-```
-
-**Integration Tests with Docker**:
-```bash
-docker-compose --profile test up --build
-```
-
-### Security Scanning Locally
-
-**Rust Security Audit**:
-```bash
-cd backend
-cargo install cargo-audit
-cargo audit
-```
-
-**npm Security Audit**:
-```bash
-cd frontend
-npm audit
-```
-
-**Container Security Scan**:
-```bash
-# Install trivy
-brew install aquasecurity/trivy/trivy
-
-# Scan images
-trivy image econ-graph-backend:latest
-trivy image econ-graph-frontend:latest
+npm install
+npx playwright install
+npx playwright test
 ```
 
 ## Troubleshooting
 
-### Common Issues
+### Tests Failing in CI
+1. Check the uploaded screenshots and videos
+2. Verify the `PLAYWRIGHT_BASE_URL` is correct
+3. Ensure the deployed application is accessible
+4. Check the GitHub Actions logs for detailed error messages
 
-1. **PostgreSQL Connection Failures**:
-   - Ensure service health checks are passing
-   - Check DATABASE_URL environment variable
-   - Verify migration files are accessible
-
-2. **Cache Invalidation**:
-   - Update cache keys when dependencies change
-   - Clear caches manually if corruption occurs
-
-3. **Docker Build Failures**:
-   - Check Dockerfile syntax and dependencies
-   - Verify multi-stage build targets
-   - Ensure proper file permissions
-
-4. **Security Scan False Positives**:
-   - Review and whitelist known safe vulnerabilities
-   - Update scanning configurations as needed
-
-### Debugging Workflows
-
-**Enable Debug Logging**:
-```yaml
-env:
-  ACTIONS_STEP_DEBUG: true
-  ACTIONS_RUNNER_DEBUG: true
-```
-
-**SSH Access for Debugging**:
-```yaml
-- name: Setup tmate session
-  uses: mxschmitt/action-tmate@v3
-  if: failure()
-```
-
-## Best Practices
-
-1. **Keep workflows DRY**: Use composite actions for repeated steps
-2. **Minimize secrets**: Use GITHUB_TOKEN when possible
-3. **Cache aggressively**: Cache all expensive operations
-4. **Fail fast**: Order jobs by execution time and failure probability
-5. **Monitor costs**: Use appropriate runner types and optimize build times
-6. **Security first**: Scan early and often, never ignore security alerts
-
-## Contributing
-
-When modifying workflows:
-
-1. Test changes in a fork first
-2. Use workflow_dispatch for manual testing
-3. Update this documentation
-4. Ensure backwards compatibility
-5. Monitor workflow execution after merging
+### Performance Issues
+- The workflows have a 60-90 minute timeout
+- Tests run in parallel where possible
+- Consider using the simpler `playwright-tests-deployed.yml` for faster execution

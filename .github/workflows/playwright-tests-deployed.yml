@@ -1,0 +1,61 @@
+name: Playwright Tests (Deployed)
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v3.7.2, v3.8.0, etc.
+
+jobs:
+  playwright-tests:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install dependencies
+      working-directory: ./frontend
+      run: npm ci
+
+    - name: Install Playwright Browsers
+      working-directory: ./frontend
+      run: npx playwright install --with-deps
+
+    - name: Run Playwright tests against deployed application
+      working-directory: ./frontend
+      run: npx playwright test --reporter=github
+      env:
+        # This assumes the application is deployed and accessible
+        # You can override this with a specific URL if needed
+        PLAYWRIGHT_BASE_URL: ${{ vars.PLAYWRIGHT_BASE_URL || 'http://localhost' }}
+
+    - name: Upload Playwright Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-report-${{ github.ref_name }}
+        path: frontend/playwright-report/
+        retention-days: 30
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-test-results-${{ github.ref_name }}
+        path: frontend/test-results/
+        retention-days: 30
+
+    - name: Upload screenshots on failure
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: playwright-screenshots-${{ github.ref_name }}
+        path: frontend/test-results/
+        retention-days: 7
