@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Restart Kubernetes rollout to deploy v3.7.1 with test reliability and deployment robustness improvements
+# Restart Kubernetes rollout to deploy v3.7.2 with Google OAuth fixes and frontend API URL configuration
 # Run this script when Docker and Kubernetes cluster are available
 
 set -e
 
-echo "🚀 Restarting EconGraph Kubernetes rollout for v3.7.1 (with test reliability and deployment robustness improvements)..."
+echo "🚀 Restarting EconGraph Kubernetes rollout for v3.7.2 (with Google OAuth fixes and frontend API URL configuration)..."
 echo ""
 
 # Get the project root directory
@@ -27,18 +27,18 @@ echo "🔧 Setting kubectl context..."
 kubectl config use-context kind-econ-graph
 
 # Rebuild Docker images with new version tag
-echo "🏗️  Building Docker images for v3.7.1..."
+echo "🏗️  Building Docker images for v3.7.2..."
 ./scripts/deploy/build-images.sh
 
 # Tag images with new version
-echo "🏷️  Tagging images with v3.7.1..."
-docker tag econ-graph-backend:latest econ-graph-backend:v3.7.1
-docker tag econ-graph-frontend:latest econ-graph-frontend:v3.7.1
+echo "🏷️  Tagging images with v3.7.2..."
+docker tag econ-graph-backend:latest econ-graph-backend:v3.7.2
+docker tag econ-graph-frontend:latest econ-graph-frontend:v3.7.2
 
 # Load images into kind cluster
 echo "📦 Loading images into kind cluster..."
-kind load docker-image econ-graph-backend:v3.7.1 --name econ-graph
-kind load docker-image econ-graph-frontend:v3.7.1 --name econ-graph
+kind load docker-image econ-graph-backend:v3.7.2 --name econ-graph
+kind load docker-image econ-graph-frontend:v3.7.2 --name econ-graph
 
 # Check if PostgreSQL is running
 echo "🗄️  Checking PostgreSQL..."
@@ -76,7 +76,7 @@ echo "  GraphQL:  http://localhost/graphql"
 echo "  Playground: http://localhost/playground"
 echo "  Health:   http://localhost/health"
 echo ""
-echo "🎯 Version deployed: v3.7.1"
+echo "🎯 Version deployed: v3.7.2"
 echo "   ✅ Integration tests fixed: All auth tests passing (11/11)"
 echo "   ✅ Collaboration tests fixed: 6/7 tests passing"
 echo "   ✅ GitHub Actions release/deploy workflow disabled"

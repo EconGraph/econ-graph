@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: backend
-        image: econ-graph-backend:v3.7.1
+        image: econ-graph-backend:v3.7.2
         imagePullPolicy: Never  # Use local image
         ports:
         # Note: containerPort must be static in Kubernetes, but the application

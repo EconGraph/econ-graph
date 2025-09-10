@@ -14,29 +14,29 @@ cd "$PROJECT_ROOT"
 # Build backend image
 echo "📦 Building backend image..."
 cd backend
-docker build -t econ-graph-backend:latest .
+docker build -t econ-graph-backend:v3.7.2 .
 echo "✅ Backend image built successfully"
 
 # Build frontend image
 echo "📦 Building frontend image..."
 cd ../frontend
 docker build \
-  --build-arg REACT_APP_API_URL="" \
+  --build-arg REACT_APP_API_URL="http://localhost" \
   --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
   --build-arg REACT_APP_WS_URL="ws://localhost/graphql" \
   --build-arg REACT_APP_FACEBOOK_APP_ID="demo-facebook-app-id" \
   --build-arg REACT_APP_GOOGLE_CLIENT_ID="80227441551-3dv05tkflnfrjpqv5fgii7b8br0brt7m.apps.googleusercontent.com" \
   --build-arg NODE_ENV="production" \
-  -t econ-graph-frontend:latest .
+  -t econ-graph-frontend:v3.7.2 .
 echo "✅ Frontend image built successfully"
 
 # Load images into kind cluster
 echo "🚀 Loading images into kind cluster..."
-kind load docker-image econ-graph-backend:latest --name econ-graph
-kind load docker-image econ-graph-frontend:latest --name econ-graph
+kind load docker-image econ-graph-backend:v3.7.2 --name econ-graph
+kind load docker-image econ-graph-frontend:v3.7.2 --name econ-graph
 
 echo "🎉 All images built and loaded successfully!"
 echo ""
 echo "Images available in kind cluster:"
-echo "  - econ-graph-backend:latest"
-echo "  - econ-graph-frontend:latest"
+echo "  - econ-graph-backend:v3.7.2"
+echo "  - econ-graph-frontend:v3.7.2"
