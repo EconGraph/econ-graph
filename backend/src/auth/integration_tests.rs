@@ -8,27 +8,17 @@
 mod tests {
     use crate::auth::models::*;
     use crate::auth::services::AuthService;
-    use crate::database::{create_pool, DatabasePool};
+    use crate::test_utils::TestContainer;
     use serde_json::json;
     use std::collections::HashMap;
     use uuid::Uuid;
     use warp::test;
 
-    /// Create test database pool
-    async fn create_test_pool() -> DatabasePool {
-        let database_url = std::env::var("TEST_DATABASE_URL")
-            .unwrap_or_else(|_| "postgresql://localhost:5432/econ_graph_test".to_string());
-
-        create_pool(&database_url)
-            .await
-            .expect("Failed to create test database pool")
-    }
-
     /// Test authentication service creation
     #[tokio::test]
     async fn test_auth_service_creation() {
-        let pool = create_test_pool().await;
-        let auth_service = AuthService::new(pool);
+        let container = TestContainer::new().await;
+        let auth_service = AuthService::new(container.pool);
 
         // Service should be created successfully
         assert!(!auth_service.google_client_id.is_empty());
@@ -38,8 +28,8 @@ mod tests {
     /// Test JWT token generation and verification
     #[tokio::test]
     async fn test_jwt_token_flow() {
-        let pool = create_test_pool().await;
-        let auth_service = AuthService::new(pool);
+        let container = TestContainer::new().await;
+        let auth_service = AuthService::new(container.pool);
 
         // Create a test user
         let user = User {
@@ -79,8 +69,8 @@ mod tests {
     /// Test Google OAuth token verification (mocked)
     #[tokio::test]
     async fn test_google_oauth_flow() {
-        let pool = create_test_pool().await;
-        let auth_service = AuthService::new(pool);
+        let container = TestContainer::new().await;
+        let auth_service = AuthService::new(container.pool);
 
         // Note: In a real test, you would mock the HTTP client
         // For now, we'll test the user creation flow
@@ -116,8 +106,8 @@ mod tests {
     /// Test Facebook OAuth flow
     #[tokio::test]
     async fn test_facebook_oauth_flow() {
-        let pool = create_test_pool().await;
-        let auth_service = AuthService::new(pool);
+        let container = TestContainer::new().await;
+        let auth_service = AuthService::new(container.pool);
 
         let facebook_user_info = FacebookUserInfo {
             id: "facebook-987654321".to_string(),
@@ -156,8 +146,8 @@ mod tests {
     /// Test email/password authentication
     #[tokio::test]
     async fn test_email_password_auth() {
-        let pool = create_test_pool().await;
-        let auth_service = AuthService::new(pool);
+        let container = TestContainer::new().await;
+        let auth_service = AuthService::new(container.pool);
 
         // Test user creation
         let email = "newuser@econgraph.com".to_string();
@@ -174,6 +164,16 @@ mod tests {
         assert_eq!(user.provider, AuthProvider::Email);
         assert!(user.is_active);
 
+        // Create demo user first
+        let demo_user_created = auth_service
+            .create_email_user(
+                "demo@econgraph.com".to_string(),
+                "demo123456".to_string(),
+                "Demo User".to_string(),
+            )
+            .await
+            .expect("Should create demo user successfully");
+
         // Test authentication with demo credentials
         let demo_user = auth_service
             .authenticate_email_user("demo@econgraph.com".to_string(), "demo123456".to_string())
@@ -182,14 +182,14 @@ mod tests {
 
         assert_eq!(demo_user.email, "demo@econgraph.com");
         assert_eq!(demo_user.name, "Demo User");
-        assert_eq!(demo_user.role, UserRole::Analyst);
+        assert_eq!(demo_user.role, UserRole::Viewer); // Default role for new users
     }
 
     /// Test authentication failure scenarios
     #[tokio::test]
     async fn test_authentication_failures() {
-        let pool = create_test_pool().await;
-        let auth_service = AuthService::new(pool);
+        let container = TestContainer::new().await;
+        let auth_service = AuthService::new(container.pool);
 
         // Test invalid email/password
         let result = auth_service
@@ -213,10 +213,19 @@ mod tests {
     /// Test profile update functionality
     #[tokio::test]
     async fn test_profile_update() {
-        let pool = create_test_pool().await;
-        let auth_service = AuthService::new(pool);
+        let container = TestContainer::new().await;
+        let auth_service = AuthService::new(container.pool);
 
-        let user_id = Uuid::new_v4();
+        // First create a user
+        let user = auth_service
+            .create_email_user(
+                "test@example.com".to_string(),
+                "Test User".to_string(),
+                "password123".to_string(),
+            )
+            .await
+            .expect("Should create user successfully");
+
         let update_request = ProfileUpdateRequest {
             name: Some("Updated Name".to_string()),
             avatar: Some("https://example.com/new-avatar.jpg".to_string()),
@@ -230,7 +239,7 @@ mod tests {
         };
 
         let updated_user = auth_service
-            .update_user_profile(user_id, update_request.clone())
+            .update_user_profile(user.id, update_request.clone())
             .await
             .expect("Should update profile successfully");
 
