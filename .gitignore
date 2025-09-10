@@ -4,7 +4,8 @@
 **/*.rs.bk
 *.pdb
 
-# Node.js
+# Node.js - ignore all node_modules directories
+node_modules/
 /frontend/node_modules/
 /frontend/build/
 /frontend/dist/

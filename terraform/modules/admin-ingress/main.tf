@@ -20,7 +20,7 @@ resource "kubernetes_ingress_class_v1" "admin" {
       "description" = "Ingress class for administrative interfaces"
     }
   }
-  
+
   spec {
     controller = "k8s.io/ingress-nginx-admin"
   }
@@ -37,11 +37,11 @@ resource "kubernetes_config_map" "admin_nginx_config" {
     # Strict security configuration for admin access
     "nginx.conf" = <<-EOF
       # Admin-specific NGINX configuration with enhanced security
-      
+
       # Rate limiting for admin access
       limit_req_zone $binary_remote_addr zone=admin_login:10m rate=5r/m;
       limit_req_zone $binary_remote_addr zone=admin_api:10m rate=30r/m;
-      
+
       # Security headers
       add_header X-Frame-Options "DENY" always;
       add_header X-Content-Type-Options "nosniff" always;
@@ -49,15 +49,15 @@ resource "kubernetes_config_map" "admin_nginx_config" {
       add_header Referrer-Policy "no-referrer" always;
       add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none';" always;
       add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
-      
+
       # Hide server information
       server_tokens off;
-      
+
       # Admin access logging
       access_log /var/log/nginx/admin_access.log combined;
       error_log /var/log/nginx/admin_error.log warn;
     EOF
-    
+
     # IP whitelist configuration
     "admin-whitelist.conf" = join("\n", [
       for ip in var.allowed_admin_ips : "allow ${ip};"
@@ -85,19 +85,19 @@ resource "kubernetes_ingress_v1" "admin" {
   metadata {
     name      = "admin-ingress"
     namespace = var.admin_namespace
-    
+
     annotations = {
       "kubernetes.io/ingress.class"                    = "nginx-admin"
       "nginx.ingress.kubernetes.io/ssl-redirect"       = "true"
       "nginx.ingress.kubernetes.io/force-ssl-redirect" = "true"
-      
+
       # IP whitelisting
       "nginx.ingress.kubernetes.io/whitelist-source-range" = join(",", var.allowed_admin_ips)
-      
+
       # Rate limiting
       "nginx.ingress.kubernetes.io/limit-rps"        = "10"
       "nginx.ingress.kubernetes.io/limit-connections" = "5"
-      
+
       # Security headers
       "nginx.ingress.kubernetes.io/configuration-snippet" = <<-EOF
         more_set_headers "X-Frame-Options: DENY";
@@ -105,40 +105,40 @@ resource "kubernetes_ingress_v1" "admin" {
         more_set_headers "X-XSS-Protection: 1; mode=block";
         more_set_headers "Referrer-Policy: no-referrer";
         more_set_headers "Permissions-Policy: geolocation=(), microphone=(), camera=()";
-        
+
         # Admin access logging with additional details
         access_log /var/log/nginx/admin_detailed.log '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" "$http_x_forwarded_for" "$request_time" "$upstream_response_time"';
       EOF
-      
+
       # Authentication (if using external auth)
       "nginx.ingress.kubernetes.io/auth-url"    = "http://auth-service.${var.admin_namespace}.svc.cluster.local/auth"
       "nginx.ingress.kubernetes.io/auth-signin" = "https://${var.admin_domain}/login"
-      
+
       # Custom error pages
       "nginx.ingress.kubernetes.io/custom-http-errors" = "403,404,500,502,503"
       "nginx.ingress.kubernetes.io/default-backend"    = "admin-error-pages"
-      
+
       # Additional security
       "nginx.ingress.kubernetes.io/server-snippet" = <<-EOF
         # Disable server signature
         server_tokens off;
-        
+
         # Security timeouts
         client_body_timeout 10s;
         client_header_timeout 10s;
-        
+
         # Limit request size
         client_max_body_size 1m;
-        
+
         # Block common attack patterns
         location ~* \.(php|asp|aspx|jsp)$ {
           return 403;
         }
-        
+
         location ~* /\. {
           return 403;
         }
-        
+
         location ~* /(wp-|wordpress|admin|phpmyadmin) {
           return 403;
         }
@@ -148,7 +148,7 @@ resource "kubernetes_ingress_v1" "admin" {
 
   spec {
     ingress_class_name = kubernetes_ingress_class_v1.admin.metadata[0].name
-    
+
     tls {
       hosts       = [var.admin_domain]
       secret_name = kubernetes_secret.admin_tls.metadata[0].name
@@ -156,12 +156,12 @@ resource "kubernetes_ingress_v1" "admin" {
 
     rule {
       host = var.admin_domain
-      
+
       http {
         path {
           path      = "/"
           path_type = "Prefix"
-          
+
           backend {
             service {
               name = var.admin_service_name
@@ -171,12 +171,12 @@ resource "kubernetes_ingress_v1" "admin" {
             }
           }
         }
-        
+
         # Health check endpoint (less restrictive)
         path {
           path      = "/health"
           path_type = "Exact"
-          
+
           backend {
             service {
               name = var.admin_service_name
@@ -204,9 +204,9 @@ resource "kubernetes_network_policy" "admin_ingress" {
         app = "admin-frontend"
       }
     }
-    
+
     policy_types = ["Ingress"]
-    
+
     ingress {
       from {
         # Only allow from ingress controller
@@ -216,7 +216,7 @@ resource "kubernetes_network_policy" "admin_ingress" {
           }
         }
       }
-      
+
       from {
         # Allow from monitoring namespace
         namespace_selector {
@@ -225,7 +225,7 @@ resource "kubernetes_network_policy" "admin_ingress" {
           }
         }
       }
-      
+
       ports {
         protocol = "TCP"
         port     = var.admin_service_port
@@ -237,11 +237,11 @@ resource "kubernetes_network_policy" "admin_ingress" {
 # Service monitor for admin ingress (Prometheus)
 resource "kubernetes_manifest" "admin_ingress_monitor" {
   count = var.enable_monitoring ? 1 : 0
-  
+
   manifest = {
     apiVersion = "monitoring.coreos.com/v1"
     kind       = "ServiceMonitor"
-    
+
     metadata = {
       name      = "admin-ingress-monitor"
       namespace = var.admin_namespace
@@ -250,14 +250,14 @@ resource "kubernetes_manifest" "admin_ingress_monitor" {
         monitoring = "enabled"
       }
     }
-    
+
     spec = {
       selector = {
         matchLabels = {
           app = "admin-frontend"
         }
       }
-      
+
       endpoints = [
         {
           port     = "http"
@@ -272,11 +272,11 @@ resource "kubernetes_manifest" "admin_ingress_monitor" {
 # Alert rules for admin access monitoring
 resource "kubernetes_manifest" "admin_security_alerts" {
   count = var.enable_monitoring ? 1 : 0
-  
+
   manifest = {
     apiVersion = "monitoring.coreos.com/v1"
     kind       = "PrometheusRule"
-    
+
     metadata = {
       name      = "admin-security-alerts"
       namespace = var.admin_namespace
@@ -285,7 +285,7 @@ resource "kubernetes_manifest" "admin_security_alerts" {
         monitoring = "enabled"
       }
     }
-    
+
     spec = {
       groups = [
         {
@@ -342,7 +342,7 @@ resource "kubernetes_deployment" "admin_error_pages" {
   metadata {
     name      = "admin-error-pages"
     namespace = var.admin_namespace
-    
+
     labels = {
       app = "admin-error-pages"
     }
@@ -368,17 +368,17 @@ resource "kubernetes_deployment" "admin_error_pages" {
         container {
           name  = "error-pages"
           image = "nginx:alpine"
-          
+
           port {
             container_port = 80
           }
-          
+
           volume_mount {
             name       = "error-pages"
             mount_path = "/usr/share/nginx/html"
           }
         }
-        
+
         volume {
           name = "error-pages"
           config_map {
@@ -427,7 +427,7 @@ resource "kubernetes_config_map" "admin_error_pages" {
       </body>
       </html>
     EOF
-    
+
     "404.html" = <<-EOF
       <!DOCTYPE html>
       <html>
@@ -449,7 +449,7 @@ resource "kubernetes_config_map" "admin_error_pages" {
       </body>
       </html>
     EOF
-    
+
     "50x.html" = <<-EOF
       <!DOCTYPE html>
       <html>

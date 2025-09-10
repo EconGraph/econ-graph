@@ -56,15 +56,15 @@ echo "✅ Complete collaboration narration track created"
 # Check if base video exists, if not create a simple one
 if [ ! -f "$BASE_VIDEO" ]; then
     echo "📹 Creating base collaboration demo video..."
-    
+
     # Create a simple collaboration-focused demo video
     # This would ideally be a screen recording of the collaboration features
     # For now, we'll use the existing demo HTML and enhance it
-    
+
     # Copy and enhance the demo HTML for collaboration
     COLLAB_DEMO_HTML="demo-videos/collaboration-demo.html"
     cp "demo-videos/demo.html" "$COLLAB_DEMO_HTML"
-    
+
     # Add collaboration-specific enhancements to the HTML
     cat >> "$COLLAB_DEMO_HTML" << 'EOF'
 
@@ -72,7 +72,7 @@ if [ ! -f "$BASE_VIDEO" ]; then
 // Enhanced collaboration demo features
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🤝 Starting collaboration demo enhancements...');
-    
+
     // Add collaboration panel
     const collaborationPanel = document.createElement('div');
     collaborationPanel.style.cssText = `
@@ -87,7 +87,7 @@ document.addEventListener('DOMContentLoaded', function() {
         z-index: 1000;
         font-family: 'Segoe UI', sans-serif;
     `;
-    
+
     collaborationPanel.innerHTML = `
         <h3 style="margin: 0 0 15px 0; color: #2c3e50;">🤝 Live Collaboration</h3>
         <div style="margin-bottom: 15px;">
@@ -123,9 +123,9 @@ document.addEventListener('DOMContentLoaded', function() {
             </button>
         </div>
     `;
-    
+
     document.body.appendChild(collaborationPanel);
-    
+
     // Add annotation markers to the chart
     setTimeout(() => {
         const chartContainer = document.getElementById('chartContainer');
@@ -142,7 +142,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 z-index: 10;
             `;
             chartContainer.appendChild(annotation1);
-            
+
             const annotation2 = document.createElement('div');
             annotation2.style.cssText = `
                 position: absolute;
@@ -154,7 +154,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 z-index: 10;
             `;
             chartContainer.appendChild(annotation2);
-            
+
             // Add annotation labels
             const label1 = document.createElement('div');
             label1.style.cssText = `
@@ -170,7 +170,7 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             label1.textContent = 'COVID-19 Impact';
             chartContainer.appendChild(label1);
-            
+
             const label2 = document.createElement('div');
             label2.style.cssText = `
                 position: absolute;
@@ -187,7 +187,7 @@ document.addEventListener('DOMContentLoaded', function() {
             chartContainer.appendChild(label2);
         }
     }, 3000);
-    
+
     // Simulate real-time collaboration activity
     let activityCounter = 0;
     setInterval(() => {
@@ -206,9 +206,9 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 EOF
-    
+
     echo "✅ Enhanced collaboration demo HTML created"
-    
+
     # For now, we'll use the existing video and add collaboration audio
     BASE_VIDEO="demo-videos/epic-system-demo.webm"
 fi
@@ -231,7 +231,7 @@ if [ -f "$BASE_VIDEO" ]; then
         "$OUTPUT_VIDEO" -y >/dev/null 2>&1
 else
     echo "⚠️  Base video not found, creating audio-only version..."
-    
+
     # Create a simple video with collaboration audio
     ffmpeg -f lavfi -i color=c=black:s=1920x1080:r=25 \
         -i "$COMPLETE_COLLAB_AUDIO" \

@@ -116,21 +116,21 @@ resource "kubernetes_config_map" "econgraph_config" {
     "DATABASE_PORT"     = "5432"
     "DATABASE_NAME"     = "econ_graph"
     "DATABASE_USER"     = "econgraph"
-    
+
     # Server configuration
     "SERVER_HOST"       = "0.0.0.0"
     "SERVER_PORT"       = "8080"
-    
+
     # CORS configuration
     "CORS_ALLOWED_ORIGINS" = "https://${var.domain}"
-    
+
     # Logging
     "RUST_LOG"          = "info"
-    
+
     # Queue processing
     "MAX_CONCURRENT_JOBS"        = "10"
     "QUEUE_POLL_INTERVAL_SECONDS" = "5"
-    
+
     # Rate limiting
     "FRED_RATE_LIMIT_PER_MINUTE" = "120"
     "BLS_RATE_LIMIT_PER_MINUTE"  = "500"
@@ -154,66 +154,66 @@ resource "kubernetes_secret" "econgraph_secrets" {
 # PostgreSQL StatefulSet
 module "postgresql" {
   source = "./modules/postgresql"
-  
+
   namespace = kubernetes_namespace.econgraph.metadata[0].name
   password  = var.database_password != "" ? var.database_password : random_password.database_password.result
-  
+
   depends_on = [kubernetes_namespace.econgraph]
 }
 
 # EconGraph Backend Deployment
 module "backend" {
   source = "./modules/backend"
-  
+
   namespace     = kubernetes_namespace.econgraph.metadata[0].name
   environment   = var.environment
   config_map    = kubernetes_config_map.econgraph_config.metadata[0].name
   secret        = kubernetes_secret.econgraph_secrets.metadata[0].name
-  
+
   depends_on = [module.postgresql]
 }
 
 # EconGraph Crawler Deployment
 module "crawler" {
   source = "./modules/crawler"
-  
+
   namespace     = kubernetes_namespace.econgraph.metadata[0].name
   environment   = var.environment
   config_map    = kubernetes_config_map.econgraph_config.metadata[0].name
   secret        = kubernetes_secret.econgraph_secrets.metadata[0].name
-  
+
   depends_on = [module.postgresql]
 }
 
 # Frontend Deployment
 module "frontend" {
   source = "./modules/frontend"
-  
+
   namespace   = kubernetes_namespace.econgraph.metadata[0].name
   environment = var.environment
   domain      = var.domain
-  
+
   depends_on = [module.backend]
 }
 
 # Monitoring Stack (Prometheus + Grafana)
 module "monitoring" {
   source = "./modules/monitoring"
-  
+
   namespace              = kubernetes_namespace.econgraph.metadata[0].name
   grafana_admin_password = random_password.grafana_admin_password.result
   domain                 = var.domain
-  
+
   depends_on = [kubernetes_namespace.econgraph]
 }
 
 # Ingress Controller (if not already installed)
 module "ingress" {
   source = "./modules/ingress"
-  
+
   namespace = kubernetes_namespace.econgraph.metadata[0].name
   domain    = var.domain
-  
+
   depends_on = [module.frontend, module.backend, module.monitoring]
 }
 
@@ -247,28 +247,28 @@ output "application_urls" {
 # Admin Frontend (Secure, Isolated)
 module "admin_frontend" {
   source = "./modules/admin-frontend"
-  
+
   image_repository = var.image_repository
   image_tag        = var.image_tag
   cluster_name     = var.cluster_name
-  
+
   # Security configuration
   admin_jwt_secret     = var.admin_jwt_secret
   admin_session_key    = var.admin_session_key
   admin_encryption_key = var.admin_encryption_key
-  
+
   # Resource limits
   replica_count    = var.admin_replica_count
   cpu_request     = var.admin_cpu_request
   cpu_limit       = var.admin_cpu_limit
   memory_request  = var.admin_memory_request
   memory_limit    = var.admin_memory_limit
-  
+
   # Network security
   allowed_admin_ips = var.allowed_admin_ips
   session_timeout   = var.admin_session_timeout
   mfa_required      = var.admin_mfa_required
-  
+
   depends_on = [
     module.postgresql,
     module.backend
@@ -278,25 +278,25 @@ module "admin_frontend" {
 # Admin Ingress (Restricted Access)
 module "admin_ingress" {
   source = "./modules/admin-ingress"
-  
+
   admin_domain       = var.admin_domain
   admin_namespace    = module.admin_frontend.namespace_name
   admin_service_name = module.admin_frontend.service_name
   admin_service_port = module.admin_frontend.service_port
-  
+
   # Access control
   allowed_admin_ips = var.allowed_admin_ips
   admin_tls_cert    = var.admin_tls_cert
   admin_tls_key     = var.admin_tls_key
-  
+
   # Security settings
   rate_limit_rps         = var.admin_rate_limit_rps
   rate_limit_connections = var.admin_rate_limit_connections
   enable_monitoring      = var.enable_monitoring
-  
+
   # Alerting
   alert_email = var.admin_alert_email
-  
+
   depends_on = [
     module.admin_frontend
   ]

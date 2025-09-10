@@ -16,7 +16,7 @@ nonfarm payrolls : employment,jobs,payroll employment
 jobless rate : unemployment rate
 labor participation : workforce participation
 
-# Inflation and Prices  
+# Inflation and Prices
 inflation : price increases,rising prices,price growth
 deflation : falling prices,price decreases
 cpi : consumer price index,consumer prices

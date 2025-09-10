@@ -32,7 +32,7 @@ const path = require('path');
 
 async function generateScreenshots() {
     console.log('🚀 Launching browser for screenshot generation...');
-    
+
     const browser = await puppeteer.launch({
         headless: true,
         defaultViewport: null,
@@ -44,21 +44,21 @@ async function generateScreenshots() {
             '--allow-file-access-from-files'
         ]
     });
-    
+
     const page = await browser.newPage();
-    
+
     await page.setViewport({
         width: 1920,
         height: 1080,
         deviceScaleFactor: 1
     });
-    
+
     const demoPath = path.resolve(process.argv[2]);
     const fileUrl = `file://${demoPath}`;
-    
+
     console.log(`📄 Loading interface: ${fileUrl}`);
     await page.goto(fileUrl, { waitUntil: 'networkidle0' });
-    
+
     // Hide cursor completely
     await page.addStyleTag({
         content: `
@@ -67,19 +67,19 @@ async function generateScreenshots() {
             }
         `
     });
-    
+
     const duration = parseInt(process.argv[3] || 60);
     const screenshotsDir = 'temp_screenshots';
-    
+
     if (!fs.existsSync(screenshotsDir)) {
         fs.mkdirSync(screenshotsDir);
     }
-    
+
     console.log(`📸 Taking screenshots for ${duration} seconds...`);
-    
+
     // Take screenshots at 2 FPS (every 0.5 seconds)
     const totalScreenshots = duration * 2;
-    
+
     for (let i = 0; i < totalScreenshots; i++) {
         // Simulate some interactions to show the interface is dynamic
         if (i % 10 === 0) {
@@ -96,7 +96,7 @@ async function generateScreenshots() {
                         }
                     }
                 });
-                
+
                 // Highlight different sections
                 const sections = document.querySelectorAll('.country, .chart, .dashboard-panel, .map-container');
                 sections.forEach((section, index) => {
@@ -110,23 +110,23 @@ async function generateScreenshots() {
                 });
             }, i);
         }
-        
+
         const filename = `${screenshotsDir}/frame_${String(i).padStart(6, '0')}.png`;
         await page.screenshot({
             path: filename,
             fullPage: false
         });
-        
+
         if (i % 20 === 0) {
             console.log(`📸 Progress: ${Math.round((i / totalScreenshots) * 100)}%`);
         }
-        
+
         await page.waitForTimeout(500); // 0.5 second intervals
     }
-    
+
     console.log('✅ Screenshots completed');
     await browser.close();
-    
+
     return screenshotsDir;
 }
 
@@ -146,7 +146,7 @@ node temp_screenshot_generator.js "$DEMO_HTML" "$DURATION_INT"
 
 if [ $? -eq 0 ] && [ -d "temp_screenshots" ]; then
     echo "🎬 Creating video from real interface screenshots..."
-    
+
     # Create video from screenshots with narration
     ffmpeg -framerate 2 -i temp_screenshots/frame_%06d.png -i "$NARRATION_FILE" \
         -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p \
@@ -154,11 +154,11 @@ if [ $? -eq 0 ] && [ -d "temp_screenshots" ]; then
         -movflags +faststart \
         -t "$DURATION" \
         "$OUTPUT_FILE" -y
-    
+
     # Clean up
     rm -rf temp_screenshots
     rm -f temp_screenshot_generator.js
-    
+
     if [ $? -eq 0 ]; then
         FINAL_SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
         echo ""

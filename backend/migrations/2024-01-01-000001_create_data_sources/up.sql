@@ -25,9 +25,9 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
-CREATE TRIGGER update_data_sources_updated_at 
-    BEFORE UPDATE ON data_sources 
-    FOR EACH ROW 
+CREATE TRIGGER update_data_sources_updated_at
+    BEFORE UPDATE ON data_sources
+    FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Insert default data sources

@@ -222,20 +222,30 @@ const LoginDialog: React.FC<LoginDialogProps> = ({ open, onClose, onSuccess }) =
       onClose={handleClose}
       maxWidth='sm'
       fullWidth
+      aria-labelledby='login-dialog-title'
+      aria-describedby='login-dialog-description'
+      disableEnforceFocus={false}
+      disableAutoFocus={false}
+      disableRestoreFocus={false}
       PaperProps={{
         sx: { borderRadius: 2 },
       }}
     >
-      <DialogTitle sx={{ pb: 1 }}>
+      <DialogTitle id='login-dialog-title' sx={{ pb: 1 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Typography variant='h5' component='h2'>
             Welcome to EconGraph
           </Typography>
-          <IconButton onClick={handleClose} size='small'>
+          <IconButton onClick={handleClose} size='small' aria-label='Close dialog'>
             <CloseIcon />
           </IconButton>
         </Box>
-        <Typography variant='body2' color='text.secondary' sx={{ mt: 1 }}>
+        <Typography
+          id='login-dialog-description'
+          variant='body2'
+          color='text.secondary'
+          sx={{ mt: 1 }}
+        >
           Sign in to access professional chart collaboration features
         </Typography>
       </DialogTitle>

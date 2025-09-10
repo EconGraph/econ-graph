@@ -35,5 +35,5 @@ DROP TEXT SEARCH DICTIONARY IF EXISTS economic_synonyms;
 -- Note: We don't drop extensions as they might be used by other parts of the system
 -- Extensions that would be dropped if safe:
 -- DROP EXTENSION IF EXISTS fuzzystrmatch;
--- DROP EXTENSION IF EXISTS unaccent; 
+-- DROP EXTENSION IF EXISTS unaccent;
 -- DROP EXTENSION IF EXISTS pg_trgm;

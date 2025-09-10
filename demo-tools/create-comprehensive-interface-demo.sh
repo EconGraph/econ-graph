@@ -44,17 +44,17 @@ cat > temp_browser_demo.js << 'EOF'
 // Automated browser demo script
 setTimeout(() => {
     console.log("Starting automated demo...");
-    
+
     // Simulate interactions with the interface
     const buttons = document.querySelectorAll('button, .tab, .filter-btn');
     let currentIndex = 0;
-    
+
     function highlightNextElement() {
         if (currentIndex < buttons.length) {
             const element = buttons[currentIndex];
             element.style.boxShadow = '0 0 20px #ff6b35';
             element.style.transform = 'scale(1.05)';
-            
+
             setTimeout(() => {
                 element.style.boxShadow = '';
                 element.style.transform = '';
@@ -65,7 +65,7 @@ setTimeout(() => {
             }, 1500);
         }
     }
-    
+
     highlightNextElement();
 }, 1000);
 EOF

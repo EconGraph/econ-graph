@@ -71,19 +71,19 @@ fi
 
 if [ $? -eq 0 ]; then
     echo "✅ Ultra-Comprehensive Demo Video Created Successfully!"
-    
+
     # Get final file size and duration
     FINAL_SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
     FINAL_DURATION=$(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$OUTPUT_FILE")
     FINAL_DURATION_MIN=$(echo "scale=1; $FINAL_DURATION / 60" | bc -l)
-    
+
     echo "📁 Output file: $OUTPUT_FILE"
     echo "💾 File size: $FINAL_SIZE"
     echo "⏱️ Duration: ${FINAL_DURATION_MIN} minutes"
     echo "🎬 Resolution: 1920x1080 HD"
     echo "🎤 Audio: 192kbps AAC"
     echo "📊 Video: H.264, CRF 23"
-    
+
     echo ""
     echo "🏆 ULTRA-COMPREHENSIVE DEMO COMPLETE!"
     echo "🌍 Features Demonstrated:"
@@ -103,7 +103,7 @@ if [ $? -eq 0 ]; then
     echo "   🌐 Revolutionary Open-Source Achievement"
     echo ""
     echo "🎯 Ready for README.md update and GitHub upload!"
-    
+
 else
     echo "❌ Error creating ultra-comprehensive demo video"
     exit 1

@@ -50,7 +50,7 @@ const path = require('path');
 
 async function captureRealisticDemo() {
     console.log('🚀 Launching browser for REALISTIC demo capture...');
-    
+
     const browser = await puppeteer.launch({
         headless: false,
         defaultViewport: null,
@@ -64,21 +64,21 @@ async function captureRealisticDemo() {
             '--allow-file-access-from-files'
         ]
     });
-    
+
     const page = await browser.newPage();
-    
+
     await page.setViewport({
         width: 1920,
         height: 1080,
         deviceScaleFactor: 1
     });
-    
+
     const demoPath = path.resolve(process.argv[2]);
     const fileUrl = `file://${demoPath}`;
-    
+
     console.log(`📄 Loading HONEST demo interface: ${fileUrl}`);
     await page.goto(fileUrl, { waitUntil: 'networkidle0' });
-    
+
     // Hide cursor completely - NO CURSOR IN VIDEO
     await page.addStyleTag({
         content: `
@@ -93,7 +93,7 @@ async function captureRealisticDemo() {
             }
         `
     });
-    
+
     // Add subtle interactions to show the interface works
     await page.evaluate(() => {
         // Only add realistic interactions for features that actually exist
@@ -110,7 +110,7 @@ async function captureRealisticDemo() {
             }
         `;
         document.head.appendChild(style);
-        
+
         // Add a realistic prototype indicator
         const indicator = document.createElement('div');
         indicator.style.cssText = `
@@ -129,10 +129,10 @@ async function captureRealisticDemo() {
         indicator.textContent = '🚀 EconGraph Prototype - React + GraphQL + Rust';
         document.body.appendChild(indicator);
     });
-    
+
     const duration = parseFloat(process.argv[3] || 60) * 1000;
     console.log(`⏱️ Demo will run for ${duration/1000} seconds...`);
-    
+
     // Create realistic interactions showing actual prototype features
     const interactionInterval = setInterval(async () => {
         try {
@@ -150,7 +150,7 @@ async function captureRealisticDemo() {
                         }, 1500);
                     }, index * 200);
                 });
-                
+
                 // Update some sample data to show dynamic nature
                 const dataPoints = document.querySelectorAll('.data-value');
                 dataPoints.forEach((point, index) => {
@@ -165,25 +165,25 @@ async function captureRealisticDemo() {
                     }
                 });
             });
-            
+
         } catch (error) {
             console.log('Interaction note:', error.message);
         }
     }, 4000);
-    
+
     // Keep browser open for the full demo duration
     await new Promise(resolve => setTimeout(resolve, duration));
-    
+
     clearInterval(interactionInterval);
-    
+
     console.log('✅ Realistic demo capture completed');
     console.log('📹 Now use QuickTime or screen recording to capture this browser window');
     console.log('🎯 Make sure to avoid showing the cursor in your recording');
-    
+
     // Keep browser open for manual recording
     console.log('⏳ Keeping browser open for 2 more minutes for manual recording...');
     await new Promise(resolve => setTimeout(resolve, 120000));
-    
+
     await browser.close();
 }
 

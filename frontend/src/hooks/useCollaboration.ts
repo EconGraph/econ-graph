@@ -121,12 +121,21 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
   // Load collaborators for a chart
   const loadCollaborators = useCallback(
     async (targetChartId?: string) => {
-      if (!targetChartId && !chartId) return;
+      const resolvedChartId = targetChartId || chartId;
+
+      // Validate UUID format before making GraphQL call
+      if (!resolvedChartId) return;
+
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(resolvedChartId)) {
+        console.warn('Invalid chartId format:', resolvedChartId, 'Skipping collaborators load');
+        return;
+      }
 
       try {
         const response = await executeGraphQL<ChartCollaboratorsResponse>({
           query: QUERIES.GET_CHART_COLLABORATORS,
-          variables: { chartId: targetChartId || chartId },
+          variables: { chartId: resolvedChartId },
         });
 
         if (response.data) {

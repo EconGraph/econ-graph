@@ -15,13 +15,13 @@ terraform {
 resource "kubernetes_namespace" "admin" {
   metadata {
     name = "econ-graph-admin"
-    
+
     labels = {
       name                 = "econ-graph-admin"
       "app.kubernetes.io/component" = "admin"
       "security.level"     = "restricted"
     }
-    
+
     annotations = {
       "description" = "Administrative interface - RESTRICTED ACCESS"
     }
@@ -37,9 +37,9 @@ resource "kubernetes_network_policy" "admin_isolation" {
 
   spec {
     pod_selector {}
-    
+
     policy_types = ["Ingress", "Egress"]
-    
+
     # Only allow ingress from specific sources
     ingress {
       from {
@@ -50,20 +50,20 @@ resource "kubernetes_network_policy" "admin_isolation" {
           }
         }
       }
-      
+
       from {
         # Allow from specific admin IP ranges (customize as needed)
         ip_block {
           cidr = "10.0.0.0/8"  # Internal cluster traffic
         }
       }
-      
+
       ports {
         protocol = "TCP"
         port     = "3000"
       }
     }
-    
+
     # Restrict egress
     egress {
       # Allow DNS resolution
@@ -72,7 +72,7 @@ resource "kubernetes_network_policy" "admin_isolation" {
         port     = "53"
       }
     }
-    
+
     egress {
       # Allow HTTPS to backend
       to {
@@ -82,7 +82,7 @@ resource "kubernetes_network_policy" "admin_isolation" {
           }
         }
       }
-      
+
       ports {
         protocol = "TCP"
         port     = "8081"  # Admin backend port
@@ -113,7 +113,7 @@ resource "kubernetes_secret" "admin_auth" {
   metadata {
     name      = "admin-auth-secret"
     namespace = kubernetes_namespace.admin.metadata[0].name
-    
+
     annotations = {
       "kubernetes.io/service-account.name" = "admin-frontend"
     }
@@ -133,7 +133,7 @@ resource "kubernetes_deployment" "admin_frontend" {
   metadata {
     name      = "admin-frontend"
     namespace = kubernetes_namespace.admin.metadata[0].name
-    
+
     labels = {
       app                          = "admin-frontend"
       version                      = var.image_tag
@@ -156,7 +156,7 @@ resource "kubernetes_deployment" "admin_frontend" {
         labels = {
           app = "admin-frontend"
         }
-        
+
         annotations = {
           "security.level" = "restricted"
           "access.policy"  = "admin-only"
@@ -165,13 +165,13 @@ resource "kubernetes_deployment" "admin_frontend" {
 
       spec {
         service_account_name = kubernetes_service_account.admin_frontend.metadata[0].name
-        
+
         # Security context
         security_context {
           run_as_non_root = true
           run_as_user     = 1000
           fs_group        = 1000
-          
+
           seccomp_profile {
             type = "RuntimeDefault"
           }
@@ -180,7 +180,7 @@ resource "kubernetes_deployment" "admin_frontend" {
         container {
           name  = "admin-frontend"
           image = "${var.image_repository}/econ-graph-admin:${var.image_tag}"
-          
+
           port {
             container_port = 3000
             name          = "http"
@@ -209,7 +209,7 @@ resource "kubernetes_deployment" "admin_frontend" {
             read_only_root_filesystem  = true
             run_as_non_root           = true
             run_as_user               = 1000
-            
+
             capabilities {
               drop = ["ALL"]
             }
@@ -307,7 +307,7 @@ resource "kubernetes_service_account" "admin_frontend" {
   metadata {
     name      = "admin-frontend"
     namespace = kubernetes_namespace.admin.metadata[0].name
-    
+
     annotations = {
       "description" = "Service account for admin frontend"
     }
@@ -355,11 +355,11 @@ resource "kubernetes_service" "admin_frontend" {
   metadata {
     name      = "admin-frontend-service"
     namespace = kubernetes_namespace.admin.metadata[0].name
-    
+
     labels = {
       app = "admin-frontend"
     }
-    
+
     annotations = {
       "description" = "Admin frontend internal service"
       "access.policy" = "internal-only"
@@ -392,7 +392,7 @@ resource "kubernetes_pod_disruption_budget" "admin_frontend" {
 
   spec {
     min_available = "50%"
-    
+
     selector {
       match_labels = {
         app = "admin-frontend"

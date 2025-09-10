@@ -32,7 +32,7 @@ echo ""
 # Timing information from the narration script (in seconds)
 declare -a TIMINGS=(
     0      # Segment 01: 0s
-    8.5    # Segment 02: 8.5s  
+    8.5    # Segment 02: 8.5s
     15     # Segment 03: 15s
     21     # Segment 04: 21s
     29     # Segment 05: 29s
@@ -92,7 +92,7 @@ filter_complex=""
 for i in {1..19}; do
     segment_index=$((i))  # segment files are inputs 1-19 (input 0 is silence)
     delay_ms=$(echo "${TIMINGS[$((i-1))]} * 1000" | bc)
-    
+
     if [ $i -eq 1 ]; then
         filter_complex="[$segment_index]adelay=${delay_ms}[a$i]"
     else

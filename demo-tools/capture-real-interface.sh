@@ -37,7 +37,7 @@ echo "🎙️ DEMONSTRATE THESE REAL FEATURES:"
 echo "======================================"
 echo ""
 echo "1. 🏠 Dashboard - Main page with navigation"
-echo "2. 📊 Charts - Interactive Chart.js components"  
+echo "2. 📊 Charts - Interactive Chart.js components"
 echo "3. 🔍 Search - Working search functionality"
 echo "4. 🌍 Global Analysis - If available"
 echo "5. 📈 Professional Analysis - Chart tools"
@@ -59,16 +59,16 @@ if [ -f "temp_interface_capture.mov" ] && [ -f "demo-videos/honest_complete_narr
            -c:v libx264 -c:a aac \
            -shortest \
            demo-videos/actual-interface-demo.mp4 -y
-    
+
     rm temp_interface_capture.mov
-    
+
     echo "✅ REAL interface demo created: demo-videos/actual-interface-demo.mp4"
 else
     echo "⚠️ Screen capture failed. Let's try a different approach..."
-    
+
     # Alternative: Create a simple video that just opens the browser
     echo "🌐 Creating video that opens the real interface..."
-    
+
     # Create a simple video that shows the URL and instructions
     ffmpeg -f lavfi -i "color=c=0x2196f3:size=1920x1080:duration=10" \
            -filter_complex "
@@ -80,7 +80,7 @@ else
            -map "[v]" \
            -c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p \
            demo-videos/browser-instructions.mp4 -y
-    
+
     echo "✅ Browser instructions video created"
 fi
 
@@ -94,7 +94,7 @@ echo "🖱️ You can: Click, navigate, interact with real UI"
 echo ""
 echo "This is the genuine EconGraph interface with:"
 echo "   • Material-UI components"
-echo "   • React Router navigation"  
+echo "   • React Router navigation"
 echo "   • Chart.js visualizations"
 echo "   • Working search and filters"
 echo "   • Professional styling"

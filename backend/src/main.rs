@@ -87,27 +87,27 @@ async fn root_handler() -> Result<impl warp::Reply, Infallible> {
     <div class="container">
         <h1>🏢 EconGraph API Server</h1>
         <p class="status">✅ Server is running and healthy!</p>
-        
+
         <h2>📊 Available Endpoints</h2>
-        
+
         <div class="endpoint">
             <div><span class="method">POST/GET</span> <code>/graphql</code></div>
             <p>GraphQL endpoint for economic data queries and mutations</p>
         </div>
-        
+
         <div class="endpoint">
             <div><span class="method">GET</span> <code>/playground</code></div>
             <p><a href="/playground">Interactive GraphQL Playground</a> - Test queries and explore the schema</p>
         </div>
-        
+
         <div class="endpoint">
             <div><span class="method">GET</span> <code>/health</code></div>
             <p><a href="/health">Health check endpoint</a> - API status and version info</p>
         </div>
-        
+
         <h2>🚀 Quick Start</h2>
         <p>Visit the <a href="/playground">GraphQL Playground</a> to start exploring economic data!</p>
-        
+
         <h2>📈 Features</h2>
         <ul>
             <li><strong>Economic Data API</strong> - Access to FRED, BLS, and other economic data sources</li>
@@ -116,7 +116,7 @@ async fn root_handler() -> Result<impl warp::Reply, Infallible> {
             <li><strong>Professional Analytics</strong> - Bloomberg Terminal-level functionality</li>
             <li><strong>Data Transformations</strong> - Growth rates, differences, logarithmic scaling</li>
         </ul>
-        
+
         <p><em>Version: {}</em></p>
     </div>
 </body>

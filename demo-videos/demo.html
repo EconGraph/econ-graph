@@ -7,8 +7,8 @@
     <title>Economic Data Analysis Platform - Demo</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
@@ -210,19 +210,19 @@
         <h1>🏛️ Economic Data Analysis Platform</h1>
         <p>Professional-grade economic time series analysis with interactive visualizations</p>
     </div>
-    
+
     <div class="container">
         <div class="search-section">
             <h2 style="margin-bottom: 20px; color: #2c3e50;">🔍 Search Economic Data</h2>
             <input type="text" class="search-input" id="searchInput" placeholder="Search for economic indicators (e.g., Real GDP, Unemployment Rate, CPI)">
             <button class="search-button" onclick="performSearch()">Search Economic Data</button>
         </div>
-        
+
         <div class="results-section" id="resultsSection">
             <h2 style="margin-bottom: 20px; color: #2c3e50;">📊 Search Results</h2>
             <div id="resultsContainer"></div>
         </div>
-        
+
         <div class="chart-section" id="chartSection">
             <h2 style="margin-bottom: 20px; color: #2c3e50;">📈 Real Gross Domestic Product - Interactive Chart</h2>
             <div class="chart-container" id="chartContainer">
@@ -271,7 +271,7 @@
         ];
 
         let searchTimeout;
-        
+
         document.getElementById('searchInput').addEventListener('input', function(e) {
             clearTimeout(searchTimeout);
             searchTimeout = setTimeout(() => {
@@ -289,14 +289,14 @@
         function performSearch() {
             const searchValue = document.getElementById('searchInput').value;
             if (!searchValue) return;
-            
+
             console.log('🔍 Performing search for:', searchValue);
-            
+
             const resultsSection = document.getElementById('resultsSection');
             const resultsContainer = document.getElementById('resultsContainer');
-            
+
             resultsContainer.innerHTML = '';
-            
+
             searchResults.forEach((result, index) => {
                 setTimeout(() => {
                     const resultItem = document.createElement('div');
@@ -309,17 +309,17 @@
                     resultsContainer.appendChild(resultItem);
                 }, index * 300);
             });
-            
+
             resultsSection.style.display = 'block';
         }
 
         function showChart(result) {
             console.log('📈 Loading chart for:', result.title);
-            
+
             const chartSection = document.getElementById('chartSection');
             chartSection.style.display = 'block';
             chartSection.scrollIntoView({ behavior: 'smooth' });
-            
+
             // Create interactive chart points
             setTimeout(() => {
                 createChartPoints();
@@ -329,18 +329,18 @@
         function createChartPoints() {
             const chartPoints = document.getElementById('chartPoints');
             const tooltip = document.getElementById('tooltip');
-            
+
             // Generate realistic GDP data points
             const dataPoints = [];
             const baseValue = 20000; // $20T base GDP
-            
+
             for (let i = 0; i < 20; i++) {
                 const date = new Date(2020, 0, 1);
                 date.setMonth(date.getMonth() + i * 3); // Quarterly data
-                
+
                 const growth = 1 + (i * 0.015) + (Math.sin(i * 0.5) * 0.02); // Realistic growth with volatility
                 const value = Math.round(baseValue * growth);
-                
+
                 dataPoints.push({
                     date: date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }),
                     value: value,
@@ -348,14 +348,14 @@
                     y: 30 + (Math.random() * 40) // Vary height
                 });
             }
-            
+
             dataPoints.forEach((point, index) => {
                 setTimeout(() => {
                     const chartPoint = document.createElement('div');
                     chartPoint.className = 'chart-point';
                     chartPoint.style.left = point.x + '%';
                     chartPoint.style.top = point.y + '%';
-                    
+
                     chartPoint.addEventListener('mouseenter', (e) => {
                         tooltip.innerHTML = `
                             <strong>${point.date}</strong><br>
@@ -366,15 +366,15 @@
                         tooltip.style.top = (e.pageY - 50) + 'px';
                         tooltip.classList.add('show');
                     });
-                    
+
                     chartPoint.addEventListener('mouseleave', () => {
                         tooltip.classList.remove('show');
                     });
-                    
+
                     chartPoint.addEventListener('click', () => {
                         alert(`Detailed Analysis for ${point.date}:\n\nGDP: $${point.value.toLocaleString()}B\nGrowth Rate: +2.1% QoQ\nRevision Status: Original Release\n\nData Source: Federal Reserve Economic Data (FRED)`);
                     });
-                    
+
                     chartPoints.appendChild(chartPoint);
                 }, index * 100);
             });
@@ -385,11 +385,11 @@
             setTimeout(() => {
                 console.log('🎬 Starting automated demo...');
                 document.getElementById('searchInput').value = 'Real GDP';
-                
+
                 setTimeout(() => {
                     performSearch();
                 }, 2000);
-                
+
                 setTimeout(() => {
                     const firstResult = document.querySelector('.result-item');
                     if (firstResult) {

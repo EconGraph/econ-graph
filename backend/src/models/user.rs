@@ -373,6 +373,48 @@ impl User {
             last_login_at: self.last_login_at,
         }
     }
+
+    /// Convert database User to auth User model
+    pub fn to_auth_user(&self) -> crate::auth::models::User {
+        use crate::auth::models::*;
+
+        let provider = match self.provider.as_str() {
+            "google" => AuthProvider::Google,
+            "facebook" => AuthProvider::Facebook,
+            "email" => AuthProvider::Email,
+            _ => AuthProvider::Email, // Default fallback
+        };
+
+        let role = match self.role.as_str() {
+            "admin" => UserRole::Admin,
+            "analyst" => UserRole::Analyst,
+            "viewer" => UserRole::Viewer,
+            _ => UserRole::Viewer, // Default fallback
+        };
+
+        crate::auth::models::User {
+            id: self.id,
+            email: self.email.clone(),
+            name: self.name.clone(),
+            avatar: self.avatar_url.clone(),
+            provider,
+            provider_id: self.provider_id.clone().unwrap_or_default(),
+            role,
+            organization: self.organization.clone(),
+            preferences: UserPreferences {
+                theme: self.theme.clone().unwrap_or_else(|| "light".to_string()),
+                default_chart_type: self
+                    .default_chart_type
+                    .clone()
+                    .unwrap_or_else(|| "line".to_string()),
+                notifications: self.notifications_enabled.unwrap_or(true),
+                collaboration_enabled: self.collaboration_enabled.unwrap_or(true),
+            },
+            created_at: self.created_at.unwrap_or_else(Utc::now),
+            last_login_at: self.last_login_at.unwrap_or_else(Utc::now),
+            is_active: self.is_active.unwrap_or(true),
+        }
+    }
 }
 
 impl UserSession {

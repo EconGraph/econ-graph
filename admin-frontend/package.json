@@ -4,44 +4,45 @@
   "private": true,
   "description": "Administrative interface for EconGraph platform - INTERNAL USE ONLY",
   "dependencies": {
-    "@types/node": "^20.10.0",
-    "@types/react": "^18.2.45",
-    "@types/react-dom": "^18.2.18",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
+    "@types/node": "20.19.13",
+    "@types/react": "18.3.24",
+    "@types/react-dom": "18.3.7",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
     "react-scripts": "5.0.1",
-    "typescript": "^5.3.3",
-    "web-vitals": "^3.5.0",
-    
-    "@emotion/react": "^11.11.1",
-    "@emotion/styled": "^11.11.0",
-    "@mui/material": "^5.15.0",
-    "@mui/icons-material": "^5.15.0",
-    "@mui/x-date-pickers": "^6.18.3",
-    "@mui/x-data-grid": "^6.18.3",
-    
-    "chart.js": "^4.4.1",
-    "react-chartjs-2": "^5.2.0",
-    "chartjs-adapter-date-fns": "^3.0.0",
-    "date-fns": "^3.0.6",
-    
-    "axios": "^1.6.2",
-    "react-query": "^3.39.3",
-    "react-router-dom": "^6.20.1",
-    
-    "lodash": "^4.17.21",
-    "@types/lodash": "^4.14.202",
-    
-    "react-json-view": "^1.21.3",
-    "react-ace": "^10.1.0",
-    "ace-builds": "^1.32.0"
+    "typescript": "5.9.2",
+    "web-vitals": "3.5.2",
+
+    "@emotion/react": "11.14.0",
+    "@emotion/styled": "11.14.1",
+    "@mui/material": "5.18.0",
+    "@mui/icons-material": "5.18.0",
+    "@mui/x-date-pickers": "6.20.2",
+    "@mui/x-data-grid": "6.20.4",
+
+    "chart.js": "4.5.0",
+    "react-chartjs-2": "5.3.0",
+    "chartjs-adapter-date-fns": "3.0.0",
+    "date-fns": "3.6.0",
+
+    "axios": "1.11.0",
+    "react-query": "3.39.3",
+    "react-router-dom": "6.30.1",
+
+    "lodash": "4.17.21",
+    "@types/lodash": "4.17.20",
+
+    "react-json-view": "1.21.3",
+    "react-ace": "10.1.0",
+    "ace-builds": "1.43.3",
+    "ajv": "8.17.1"
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "^6.1.5",
-    "@testing-library/react": "^14.1.2",
-    "@testing-library/user-event": "^14.5.1",
-    "@types/jest": "^29.5.8",
-    "jest": "^27.5.1"
+    "@testing-library/jest-dom": "6.8.0",
+    "@testing-library/react": "14.3.1",
+    "@testing-library/user-event": "14.6.1",
+    "@types/jest": "29.5.14",
+    "jest": "27.5.1"
   },
   "scripts": {
     "start": "REACT_APP_ENV=admin react-scripts start",
@@ -68,6 +69,16 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "overrides": {
+    "nth-check": "^2.1.1",
+    "postcss": "^8.4.31",
+    "webpack-dev-server": "^5.2.1",
+    "@pmmmwh/react-refresh-webpack-plugin": "^0.5.15",
+    "@types/d3-dispatch": "3.0.4"
+  },
+  "resolutions": {
+    "@types/d3-dispatch": "3.0.4"
   },
   "proxy": "http://localhost:8081"
 }

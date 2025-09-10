@@ -11,7 +11,7 @@ use crate::error::{AppError, AppResult};
 /// Type alias for the database pool
 pub type DatabasePool = Pool<AsyncPgConnection>;
 
-/// Type alias for a pooled connection  
+/// Type alias for a pooled connection
 pub type PooledConn<'a> = PooledConnection<'a, AsyncPgConnection>;
 
 /// Create a database connection pool

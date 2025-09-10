@@ -134,9 +134,9 @@ async function highlightElement(page, selector, duration = 2000) {
       element.style.border = '2px solid #2196f3';
     }
   }, selector);
-  
+
   await page.waitForTimeout(duration);
-  
+
   await page.evaluate((sel) => {
     const element = document.querySelector(sel);
     if (element) {
@@ -152,7 +152,7 @@ async function addNarrationOverlay(page, text, duration) {
     // Remove existing narration
     const existing = document.querySelector('.narration-overlay');
     if (existing) existing.remove();
-    
+
     // Create narration overlay
     const overlay = document.createElement('div');
     overlay.className = 'narration-overlay';
@@ -174,7 +174,7 @@ async function addNarrationOverlay(page, text, duration) {
     `;
     overlay.textContent = narrationText;
     document.body.appendChild(overlay);
-    
+
     // Auto-remove after duration
     setTimeout(() => {
       if (overlay.parentNode) {
@@ -182,19 +182,19 @@ async function addNarrationOverlay(page, text, duration) {
       }
     }, displayDuration);
   }, text, duration);
-  
+
   await page.waitForTimeout(duration);
 }
 
 async function createProfessionalDemo() {
   console.log('🎬 Starting Professional EconGraph Demo Creation...');
-  
+
   // Launch browser with video recording
   const browser = await chromium.launch({
     headless: false,
     args: ['--no-sandbox', '--disable-dev-shm-usage']
   });
-  
+
   const context = await browser.newContext({
     viewport: DEMO_CONFIG.viewport,
     recordVideo: {
@@ -202,116 +202,116 @@ async function createProfessionalDemo() {
       size: DEMO_CONFIG.viewport
     }
   });
-  
+
   const page = await context.newPage();
-  
+
   try {
     console.log('🌐 Navigating to EconGraph Professional...');
-    
+
     // Navigate to the application
     await page.goto(DEMO_CONFIG.baseUrl);
     await page.waitForLoadState('networkidle');
-    
+
     // Introduction narration
     await addNarrationOverlay(page, NARRATION_SCRIPT[0].text, NARRATION_SCRIPT[0].duration);
-    
+
     // Highlight header and interface
     await addNarrationOverlay(page, NARRATION_SCRIPT[1].text, NARRATION_SCRIPT[1].duration);
     await highlightElement(page, 'header');
-    
+
     console.log('🔐 Demonstrating OAuth Authentication...');
-    
+
     // Authentication demonstration
     await addNarrationOverlay(page, NARRATION_SCRIPT[2].text, NARRATION_SCRIPT[2].duration);
     await highlightElement(page, 'button[aria-label*="sign"], button:has-text("Sign In")');
     await page.click('button:has-text("Sign In")');
     await page.waitForTimeout(1000);
-    
+
     // Show login dialog features
     await addNarrationOverlay(page, NARRATION_SCRIPT[3].text, NARRATION_SCRIPT[3].duration);
     await highlightElement(page, '[role="dialog"]');
-    
+
     // Demo the OAuth buttons
     await highlightElement(page, 'button:has-text("Google")');
     await page.waitForTimeout(1000);
     await highlightElement(page, 'button:has-text("Facebook")');
     await page.waitForTimeout(1000);
-    
+
     // Show email form
     await page.click('[role="tab"]:has-text("Sign Up")');
     await page.waitForTimeout(500);
     await typeWithDelay(page, 'input[label*="Name"], input[placeholder*="Name"]', 'Economic Analyst');
     await typeWithDelay(page, 'input[type="email"]', 'analyst@econgraph.com');
     await typeWithDelay(page, 'input[type="password"]', 'SecurePassword123');
-    
+
     // Close dialog (simulate successful login)
     await page.click('button:has-text("Cancel"), button:has-text("Close")');
     await page.waitForTimeout(1000);
-    
+
     console.log('📊 Navigating to Professional Analysis...');
-    
+
     // Navigate to Professional Analysis page
     await page.goto(`${DEMO_CONFIG.baseUrl}/analysis`);
     await page.waitForLoadState('networkidle');
-    
+
     // Professional Analysis narration
     await addNarrationOverlay(page, NARRATION_SCRIPT[4].text, NARRATION_SCRIPT[4].duration);
-    
+
     // Highlight key metrics
     await addNarrationOverlay(page, NARRATION_SCRIPT[5].text, NARRATION_SCRIPT[5].duration);
     await highlightElement(page, '[role="main"] > div:first-child');
-    
+
     console.log('📈 Demonstrating Professional Chart Analytics...');
-    
+
     // Chart analytics demonstration
     await addNarrationOverlay(page, NARRATION_SCRIPT[6].text, NARRATION_SCRIPT[6].duration);
     await highlightElement(page, 'canvas, [data-testid*="chart"], .chart-container');
-    
+
     // Technical analysis controls
     await addNarrationOverlay(page, NARRATION_SCRIPT[7].text, NARRATION_SCRIPT[7].duration);
-    
+
     // Try to expand technical analysis accordion
     const technicalAnalysisButton = page.locator('button:has-text("Technical Analysis"), [aria-expanded]').first();
     if (await technicalAnalysisButton.isVisible()) {
       await technicalAnalysisButton.click();
       await page.waitForTimeout(500);
     }
-    
+
     // Highlight technical indicators
     await highlightElement(page, 'input[type="checkbox"]:near(text*="Moving Average"), label:has-text("SMA")');
     await page.waitForTimeout(1000);
     await highlightElement(page, 'input[type="checkbox"]:near(text*="Bollinger"), label:has-text("Bollinger")');
-    
+
     // Economic cycle detection
     await addNarrationOverlay(page, NARRATION_SCRIPT[8].text, NARRATION_SCRIPT[8].duration);
     await highlightElement(page, 'input[type="checkbox"]:near(text*="Cycle"), label:has-text("Cycle")');
-    
+
     // Economic events
     await addNarrationOverlay(page, NARRATION_SCRIPT[9].text, NARRATION_SCRIPT[9].duration);
     await highlightElement(page, 'input[type="checkbox"]:near(text*="Events"), label:has-text("Events")');
-    
+
     console.log('🤝 Demonstrating Collaboration Features...');
-    
+
     // Collaboration demonstration
     await addNarrationOverlay(page, NARRATION_SCRIPT[10].text, NARRATION_SCRIPT[10].duration);
-    
+
     // Try to open collaboration panel
     const collaborationButton = page.locator('button[aria-label*="collaboration"], button:has-text("Collaboration")').first();
     if (await collaborationButton.isVisible()) {
       await collaborationButton.click();
       await page.waitForTimeout(1000);
     }
-    
+
     // Highlight collaboration features
     await addNarrationOverlay(page, NARRATION_SCRIPT[11].text, NARRATION_SCRIPT[11].duration);
     await highlightElement(page, '[role="complementary"], .collaboration-panel, aside');
-    
+
     // Comment system
     await addNarrationOverlay(page, NARRATION_SCRIPT[12].text, NARRATION_SCRIPT[12].duration);
-    
+
     // Multi-series comparison
     await addNarrationOverlay(page, NARRATION_SCRIPT[13].text, NARRATION_SCRIPT[13].duration);
-    
+
     // Try to add series
     const addSeriesButton = page.locator('button:has-text("Add Series"), button:has-text("Add Comparison")').first();
     if (await addSeriesButton.isVisible()) {
@@ -320,12 +320,12 @@ async function createProfessionalDemo() {
       // Close dialog
       await page.keyboard.press('Escape');
     }
-    
+
     console.log('👤 Demonstrating User Profile...');
-    
+
     // User profile demonstration
     await addNarrationOverlay(page, NARRATION_SCRIPT[14].text, NARRATION_SCRIPT[14].duration);
-    
+
     // Try to click user avatar/menu
     const userButton = page.locator('[data-testid*="user"], button[aria-label*="user"], [role="button"]:has([alt*="user"])').first();
     if (await userButton.isVisible()) {
@@ -334,43 +334,43 @@ async function createProfessionalDemo() {
       await highlightElement(page, '[role="menu"], .user-menu');
       await page.keyboard.press('Escape');
     }
-    
+
     console.log('📱 Demonstrating Mobile Responsiveness...');
-    
+
     // Mobile responsiveness
     await addNarrationOverlay(page, NARRATION_SCRIPT[15].text, NARRATION_SCRIPT[15].duration);
-    
+
     // Resize to mobile
     await page.setViewportSize({ width: 375, height: 812 });
     await page.waitForTimeout(2000);
-    
+
     // Resize back to desktop
     await page.setViewportSize(DEMO_CONFIG.viewport);
     await page.waitForTimeout(1000);
-    
+
     console.log('🔍 Demonstrating Search Integration...');
-    
+
     // Search demonstration
     await addNarrationOverlay(page, NARRATION_SCRIPT[16].text, NARRATION_SCRIPT[16].duration);
     await highlightElement(page, 'input[placeholder*="search"], [role="searchbox"]');
     await typeWithDelay(page, 'input[placeholder*="search"], [role="searchbox"]', 'GDP unemployment');
     await page.keyboard.press('Enter');
     await page.waitForTimeout(2000);
-    
+
     console.log('🎯 Final Summary...');
-    
+
     // Final summary
     await addNarrationOverlay(page, NARRATION_SCRIPT[17].text, NARRATION_SCRIPT[17].duration);
     await addNarrationOverlay(page, NARRATION_SCRIPT[18].text, NARRATION_SCRIPT[18].duration);
-    
+
     // Final highlight of the entire interface
     await page.evaluate(() => {
       document.body.style.boxShadow = 'inset 0 0 50px rgba(33, 150, 243, 0.3)';
     });
     await page.waitForTimeout(3000);
-    
+
     console.log('✅ Demo recording complete!');
-    
+
   } catch (error) {
     console.error('❌ Demo creation failed:', error);
     throw error;
@@ -378,17 +378,17 @@ async function createProfessionalDemo() {
     // Close browser and save video
     await context.close();
     await browser.close();
-    
+
     // Move video file
     const videoFiles = fs.readdirSync('./videos/');
     const videoFile = videoFiles.find(file => file.endsWith('.webm'));
-    
+
     if (videoFile) {
       const oldPath = path.join('./videos/', videoFile);
       const newPath = DEMO_CONFIG.videoPath;
       fs.renameSync(oldPath, newPath);
       console.log(`🎥 Professional demo video saved as: ${newPath}`);
-      
+
       // Clean up videos directory
       fs.rmSync('./videos/', { recursive: true, force: true });
     }
@@ -470,10 +470,10 @@ async function main() {
     console.log('📊 Features: Bloomberg Terminal Analytics + Enterprise OAuth');
     console.log('🎤 Audio: Professional voice walkthrough included');
     console.log('');
-    
+
     await createProfessionalDemo();
     createDemoDocumentation();
-    
+
     console.log('');
     console.log('🎉 Professional Demo Creation Complete!');
     console.log('📁 Files created:');
@@ -481,7 +481,7 @@ async function main() {
     console.log('   - PROFESSIONAL_DEMO_README.md (Documentation)');
     console.log('');
     console.log('🏆 Ready for professional presentation and GitHub showcase!');
-    
+
   } catch (error) {
     console.error('❌ Professional demo creation failed:', error);
     process.exit(1);

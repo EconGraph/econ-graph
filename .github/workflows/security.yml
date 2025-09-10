@@ -128,19 +128,19 @@ jobs:
         title: 'Automated Dependency Updates'
         body: |
           ## Automated Dependency Updates
-          
+
           This PR contains automated updates to project dependencies.
-          
+
           ### Changes:
           - Updated Rust crates to latest compatible versions
           - Updated npm packages to latest compatible versions
           - Applied security fixes where available
-          
+
           ### Testing:
           - [ ] Backend tests pass
           - [ ] Frontend tests pass
           - [ ] Security audits clean
-          
+
           Please review and merge if all checks pass.
         branch: automated-dependency-updates
         delete-branch: true

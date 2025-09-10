@@ -45,7 +45,7 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "🎉 COMPREHENSIVE BUSINESS DEMO COMPLETED SUCCESSFULLY!"
     echo "📁 Output: $OUTPUT_FILE"
-    
+
     # Get final stats
     FINAL_SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
     echo "📊 File size: ${FINAL_SIZE}"
@@ -77,17 +77,17 @@ if [ $? -eq 0 ]; then
     echo "   📊 Board meetings and strategic planning"
     echo ""
     echo "✨ This comprehensive demo makes the complete business case!"
-    
+
     # Also create a version that shows actual interface
     echo ""
     echo "📱 Creating interface screenshot version..."
-    
+
     # Check if we have the demo HTML
     DEMO_HTML="demo-videos/ultra-comprehensive-global-analysis-demo.html"
     if [ ! -f "$DEMO_HTML" ]; then
         DEMO_HTML="demo-videos/comprehensive-global-analysis-demo.html"
     fi
-    
+
     if [ -f "$DEMO_HTML" ]; then
         echo "🌐 Found demo interface: $DEMO_HTML"
         echo "   💡 You can open this file in a browser to see the actual interface"
@@ -101,7 +101,7 @@ if [ $? -eq 0 ]; then
         echo "   4. Play the demo interface while recording"
         echo "   5. Use the generated audio: $NARRATION_FILE"
     fi
-    
+
 else
     echo "❌ Error creating comprehensive business demo video"
     exit 1

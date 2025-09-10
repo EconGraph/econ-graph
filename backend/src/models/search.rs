@@ -76,7 +76,7 @@ pub enum SearchSortOrder {
     Title,
     /// Sort by last updated date (newest first)
     LastUpdated,
-    /// Sort by start date (newest first)  
+    /// Sort by start date (newest first)
     StartDate,
 }
 

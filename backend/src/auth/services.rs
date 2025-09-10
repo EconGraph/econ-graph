@@ -110,12 +110,14 @@ impl AuthService {
             AppError::AuthenticationError(format!("Failed to parse Google response: {}", e))
         })?;
 
-        // Verify audience (client ID)
-        if let Some(audience) = token_info.get("audience") {
-            if audience.as_str() != Some(&self.google_client_id) {
-                return Err(AppError::AuthenticationError(
-                    "Google token audience mismatch".to_string(),
-                ));
+        // Verify audience (client ID) - only if we have a real client ID configured
+        if !self.google_client_id.starts_with("your-") {
+            if let Some(audience) = token_info.get("audience") {
+                if audience.as_str() != Some(&self.google_client_id) {
+                    return Err(AppError::AuthenticationError(
+                        "Google token audience mismatch".to_string(),
+                    ));
+                }
             }
         }
 
@@ -161,7 +163,7 @@ impl AuthService {
         Ok(user_info)
     }
 
-    /// Create or update user from OAuth provider
+    /// Create or update user from OAuth provider using actual database
     pub async fn create_or_update_oauth_user(
         &self,
         provider: AuthProvider,
@@ -170,181 +172,94 @@ impl AuthService {
         name: String,
         avatar: Option<String>,
     ) -> AppResult<User> {
-        // In a real implementation, this would use the database
-        // For now, we'll create a deterministic user ID based on provider and provider_id
-        // This ensures the same user gets the same ID on subsequent calls
         let provider_str = match provider {
             AuthProvider::Google => "google",
             AuthProvider::Facebook => "facebook",
             AuthProvider::Email => "email",
         };
-        // Create a deterministic UUID by hashing the provider and provider_id
-        let input = format!("{}-{}", provider_str, provider_id);
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        use std::hash::{Hash, Hasher};
-        input.hash(&mut hasher);
-        let hash = hasher.finish();
-        let user_id = Uuid::from_u128(hash as u128);
 
-        let user = User {
-            id: user_id,
+        // Use the actual database User model methods and convert to auth User
+        let db_user = crate::models::user::User::create_or_get_oauth(
+            &self.db_pool,
+            provider_str.to_string(),
+            provider_id,
             email,
             name,
             avatar,
-            provider,
-            provider_id,
-            role: UserRole::default(),
-            organization: None,
-            preferences: UserPreferences::default(),
-            created_at: Utc::now(),
-            last_login_at: Utc::now(),
-            is_active: true,
-        };
+        )
+        .await?;
 
-        Ok(user)
+        Ok(db_user.to_auth_user())
     }
 
-    /// Create user with email/password
+    /// Create user with email/password using actual database
     pub async fn create_email_user(
         &self,
         email: String,
         password: String,
         name: String,
     ) -> AppResult<User> {
-        // Hash password
-        let _password_hash = PasswordHash::new(&password).map_err(|e| {
-            AppError::AuthenticationError(format!("Failed to hash password: {}", e))
-        })?;
-
-        // Create deterministic user ID based on email
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        use std::hash::{Hash, Hasher};
-        email.hash(&mut hasher);
-        let hash = hasher.finish();
-        let user_id = Uuid::from_u128(hash as u128);
-        let provider_id = user_id.to_string();
-
-        // In a real implementation, this would check if user exists and store in database
-        let user = User {
-            id: user_id,
-            email,
-            name,
-            avatar: None,
-            provider: AuthProvider::Email,
-            provider_id,
-            role: UserRole::default(),
-            organization: None,
-            preferences: UserPreferences::default(),
-            created_at: Utc::now(),
-            last_login_at: Utc::now(),
-            is_active: true,
-        };
-
-        Ok(user)
+        // Use the actual database User model method and convert to auth User
+        let db_user =
+            crate::models::user::User::create_with_email(&self.db_pool, email, password, name)
+                .await?;
+        Ok(db_user.to_auth_user())
     }
 
-    /// Authenticate user with email/password
+    /// Authenticate user with email/password using actual database
     pub async fn authenticate_email_user(
         &self,
         email: String,
         password: String,
     ) -> AppResult<User> {
-        // In a real implementation, this would:
-        // 1. Find user by email in database
-        // 2. Verify password hash
-        // 3. Update last_login_at
-        // 4. Return user
+        // Use the actual database User model method for authentication and convert to auth User
+        let db_user =
+            crate::models::user::User::authenticate(&self.db_pool, email, password).await?;
+        Ok(db_user.to_auth_user())
+    }
 
-        // Create deterministic user ID based on email
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        use std::hash::{Hash, Hasher};
-        email.hash(&mut hasher);
-        let hash = hasher.finish();
-        let user_id = Uuid::from_u128(hash as u128);
-        let provider_id = user_id.to_string();
-
-        // For now, create a mock user for demonstration
-        if email == "demo@econgraph.com" && password == "demo123456" {
-            let user = User {
-                id: user_id,
-                email,
-                name: "Demo User".to_string(),
-                avatar: None,
-                provider: AuthProvider::Email,
-                provider_id,
-                role: UserRole::Analyst,
-                organization: Some("Demo Organization".to_string()),
-                preferences: UserPreferences::default(),
-                created_at: Utc::now(),
-                last_login_at: Utc::now(),
-                is_active: true,
-            };
-            Ok(user)
-        } else {
-            // For test purposes, only allow authentication for specific test emails
-            // In a real implementation, this would validate the password hash against stored hash
-            // and return the stored user data. For mock purposes, we need to return consistent data.
-            if email == "signinuser@econgraph.com" {
-                let user = User {
-                    id: user_id,
-                    email: email.clone(),
-                    name: "Signin User".to_string(),
-                    avatar: None,
-                    provider: AuthProvider::Email,
-                    provider_id,
-                    role: UserRole::default(),
-                    organization: None,
-                    preferences: UserPreferences::default(),
-                    created_at: Utc::now(),
-                    last_login_at: Utc::now(),
-                    is_active: true,
-                };
-                Ok(user)
-            } else {
-                // Return error for unknown users
-                Err(AppError::AuthenticationError(
-                    "Invalid email or password".to_string(),
-                ))
-            }
+    /// Get user by ID using actual database lookup
+    pub async fn get_user_by_id(&self, user_id: Uuid) -> AppResult<Option<User>> {
+        match crate::models::user::User::get_by_id(&self.db_pool, user_id).await {
+            Ok(db_user) => Ok(Some(db_user.to_auth_user())),
+            Err(AppError::DatabaseError(_)) => Ok(None), // User not found
+            Err(e) => Err(e),                            // Other errors
         }
     }
 
-    /// Get user by ID
-    pub async fn get_user_by_id(&self, user_id: Uuid) -> AppResult<Option<User>> {
-        // In a real implementation, this would query the database
-        // For now, return None to indicate user not found
-        Ok(None)
-    }
-
-    /// Update user profile
+    /// Update user profile using actual database
     pub async fn update_user_profile(
         &self,
         user_id: Uuid,
         updates: ProfileUpdateRequest,
     ) -> AppResult<User> {
-        // In a real implementation, this would update the database
-        // For now, create a mock updated user
-        let user = User {
-            id: user_id,
-            email: "updated@econgraph.com".to_string(),
-            name: updates.name.unwrap_or_else(|| "Updated User".to_string()),
-            avatar: updates.avatar,
-            provider: AuthProvider::Email,
-            provider_id: user_id.to_string(),
-            role: UserRole::Analyst,
+        // Convert ProfileUpdateRequest to UpdateUser for database
+        let db_updates = crate::models::user::UpdateUser {
+            name: updates.name,
+            avatar_url: updates.avatar,
             organization: updates.organization,
-            preferences: updates.preferences.unwrap_or_default(),
-            created_at: Utc::now() - Duration::days(30),
-            last_login_at: Utc::now(),
-            is_active: true,
+            theme: updates.preferences.as_ref().map(|p| p.theme.clone()),
+            default_chart_type: updates
+                .preferences
+                .as_ref()
+                .map(|p| p.default_chart_type.clone()),
+            notifications_enabled: updates.preferences.as_ref().map(|p| p.notifications),
+            collaboration_enabled: updates
+                .preferences
+                .as_ref()
+                .map(|p| p.collaboration_enabled),
+            last_login_at: Some(Utc::now()),
         };
 
-        Ok(user)
+        // Use the actual database User model method and convert to auth User
+        let db_user =
+            crate::models::user::User::update_profile(&self.db_pool, user_id, db_updates).await?;
+        Ok(db_user.to_auth_user())
     }
 
     /// Refresh user data
     pub async fn refresh_user(&self, user_id: Uuid) -> AppResult<User> {
-        // In a real implementation, this would fetch fresh user data from database
+        // Fetch fresh user data from database
         self.get_user_by_id(user_id)
             .await?
             .ok_or_else(|| AppError::AuthenticationError("User not found".to_string()))

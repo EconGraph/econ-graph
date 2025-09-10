@@ -673,6 +673,11 @@ const SeriesExplorer: React.FC = () => {
                 }}
                 label='Data Source'
                 labelId='data-source-label'
+                aria-describedby='data-source-helper'
+                MenuProps={{
+                  disableAutoFocusItem: true,
+                  disableRestoreFocus: true,
+                }}
               >
                 {dataSources.map(source => (
                   <MenuItem key={source} value={source}>
@@ -692,6 +697,11 @@ const SeriesExplorer: React.FC = () => {
                 onChange={e => setSelectedFrequency(e.target.value)}
                 label='Frequency'
                 labelId='frequency-label'
+                aria-describedby='frequency-helper'
+                MenuProps={{
+                  disableAutoFocusItem: true,
+                  disableRestoreFocus: true,
+                }}
               >
                 {frequencies.map(freq => (
                   <MenuItem key={freq} value={freq}>
@@ -705,11 +715,17 @@ const SeriesExplorer: React.FC = () => {
           {/* Category filter */}
           <Grid item xs={12} sm={6} md={2}>
             <FormControl fullWidth>
-              <InputLabel>Category</InputLabel>
+              <InputLabel id='category-label'>Category</InputLabel>
               <Select
                 value={selectedCategory}
                 onChange={e => setSelectedCategory(e.target.value)}
                 label='Category'
+                labelId='category-label'
+                aria-describedby='category-helper'
+                MenuProps={{
+                  disableAutoFocusItem: true,
+                  disableRestoreFocus: true,
+                }}
               >
                 {categories.map(category => (
                   <MenuItem key={category} value={category}>
@@ -773,6 +789,11 @@ const SeriesExplorer: React.FC = () => {
                   onChange={e => setSortBy(e.target.value)}
                   label='Sort By'
                   labelId='sort-by-label'
+                  aria-describedby='sort-by-helper'
+                  MenuProps={{
+                    disableAutoFocusItem: true,
+                    disableRestoreFocus: true,
+                  }}
                 >
                   <MenuItem value='relevance'>Relevance</MenuItem>
                   <MenuItem value='title'>Title</MenuItem>
@@ -782,11 +803,17 @@ const SeriesExplorer: React.FC = () => {
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <FormControl fullWidth>
-                <InputLabel>Sort Order</InputLabel>
+                <InputLabel id='sort-order-label'>Sort Order</InputLabel>
                 <Select
                   value={sortOrder}
                   onChange={e => setSortOrder(e.target.value as 'asc' | 'desc')}
                   label='Sort Order'
+                  labelId='sort-order-label'
+                  aria-describedby='sort-order-helper'
+                  MenuProps={{
+                    disableAutoFocusItem: true,
+                    disableRestoreFocus: true,
+                  }}
                 >
                   <MenuItem value='desc'>Descending</MenuItem>
                   <MenuItem value='asc'>Ascending</MenuItem>

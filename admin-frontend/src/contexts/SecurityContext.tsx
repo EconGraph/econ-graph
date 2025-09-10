@@ -103,10 +103,10 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
 
     // Monitor for developer tools
     const handleDevToolsAttempt = (e: KeyboardEvent) => {
-      const isDev = (e.ctrlKey && e.shiftKey && e.key === 'I') || 
+      const isDev = (e.ctrlKey && e.shiftKey && e.key === 'I') ||
                    (e.ctrlKey && e.shiftKey && e.key === 'J') ||
                    (e.key === 'F12');
-      
+
       if (isDev && process.env.NODE_ENV === 'production') {
         e.preventDefault();
         logSecurityEvent({

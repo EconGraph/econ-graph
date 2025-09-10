@@ -129,7 +129,7 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
           background: 'linear-gradient(90deg, #1976d2 0%, #1565c0 100%)',
         }}
       >
-        <Toolbar>
+        <Toolbar component='nav' role='navigation'>
           {/* Menu button for mobile navigation */}
           <IconButton
             color='inherit'

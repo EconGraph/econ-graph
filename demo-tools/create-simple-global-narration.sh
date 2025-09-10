@@ -39,12 +39,12 @@ declare -a segments=(
 for i in "${!segments[@]}"; do
     segment_num=$(printf "%02d" $((i + 1)))
     output_file="demo-videos/simple-global-audio/simple_segment_${segment_num}.mp3"
-    
+
     echo "🎤 Generating segment ${segment_num}/15: ${segments[i]:0:60}..."
-    
+
     # Use Daniel voice for professional British narration
     say -v Daniel -r 180 -o "demo-videos/simple-global-audio/simple_segment_${segment_num}.aiff" "${segments[i]}"
-    
+
     # Convert to MP3 (requires ffmpeg)
     if command -v ffmpeg &> /dev/null; then
         ffmpeg -i "demo-videos/simple-global-audio/simple_segment_${segment_num}.aiff" \

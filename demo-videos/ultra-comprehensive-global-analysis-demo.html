@@ -627,15 +627,15 @@
                 flex-direction: column;
                 gap: 10px;
             }
-            
+
             .feature-grid {
                 grid-template-columns: 1fr;
             }
-            
+
             .control-group {
                 flex-direction: column;
             }
-            
+
             .dashboard-grid {
                 grid-template-columns: 1fr;
             }
@@ -1391,19 +1391,19 @@
             // Hide all sections
             const sections = document.querySelectorAll('.feature-section');
             sections.forEach(section => section.classList.remove('active'));
-            
+
             // Show selected section
             document.getElementById(sectionId).classList.add('active');
-            
+
             // Update navigation
             const tabs = document.querySelectorAll('.nav-tab');
             tabs.forEach(tab => tab.classList.remove('active'));
             event.target.classList.add('active');
-            
+
             // Update breadcrumb
             const sectionNames = {
                 'network': 'Global Network Map',
-                'dashboard': 'Multi-Country Dashboard', 
+                'dashboard': 'Multi-Country Dashboard',
                 'events': 'Global Events Explorer',
                 'analytics': 'Advanced Analytics'
             };
@@ -1415,9 +1415,9 @@
             const svg = d3.select('#network-svg');
             const width = 800;
             const height = 450;
-            
+
             svg.attr('viewBox', `0 0 ${width} ${height}`);
-            
+
             // Sample data for demonstration
             const countries = [
                 {id: 'US', name: 'United States', x: 200, y: 150, gdp: 26900, region: 'North America'},
@@ -1436,7 +1436,7 @@
                 {id: 'MX', name: 'Mexico', x: 150, y: 220, gdp: 1700, region: 'North America'},
                 {id: 'ID', name: 'Indonesia', x: 580, y: 280, gdp: 1400, region: 'Asia'}
             ];
-            
+
             const links = [
                 {source: 'US', target: 'CN', correlation: 0.72, strength: 'strong'},
                 {source: 'US', target: 'CA', correlation: 0.85, strength: 'very strong'},
@@ -1453,7 +1453,7 @@
                 {source: 'GB', target: 'US', correlation: 0.69, strength: 'moderate'},
                 {source: 'ID', target: 'CN', correlation: 0.52, strength: 'moderate'}
             ];
-            
+
             // Create links
             svg.selectAll('.correlation-link')
                 .data(links)
@@ -1470,7 +1470,7 @@
                     showTooltip(event, `${d.source} ↔ ${d.target}<br/>Correlation: ${d.correlation}<br/>Strength: ${d.strength}`);
                 })
                 .on('mouseout', hideTooltip);
-            
+
             // Create country nodes
             const nodes = svg.selectAll('.country-node')
                 .data(countries)
@@ -1478,13 +1478,13 @@
                 .append('g')
                 .attr('class', 'country-node')
                 .attr('transform', d => `translate(${d.x}, ${d.y})`);
-            
+
             nodes.append('circle')
                 .attr('r', d => Math.max(8, Math.sqrt(d.gdp) / 20))
                 .attr('fill', d => {
                     const colors = {
                         'North America': '#3b82f6',
-                        'Europe': '#10b981', 
+                        'Europe': '#10b981',
                         'Asia': '#f59e0b',
                         'South America': '#ef4444',
                         'Oceania': '#8b5cf6'
@@ -1493,12 +1493,12 @@
                 })
                 .attr('stroke', '#1e40af')
                 .attr('stroke-width', 2);
-            
+
             nodes.append('text')
                 .attr('class', 'country-label')
                 .attr('dy', d => Math.max(8, Math.sqrt(d.gdp) / 20) + 15)
                 .text(d => d.id);
-            
+
             nodes.on('mouseover', function(event, d) {
                 showTooltip(event, `${d.name}<br/>GDP: $${d.gdp}B<br/>Region: ${d.region}`);
             })
@@ -1634,7 +1634,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             // Initialize network visualization
             initializeNetwork();
-            
+
             // Update threshold display
             const thresholdSlider = document.getElementById('correlation-threshold');
             const thresholdValue = document.getElementById('threshold-value');
@@ -1643,13 +1643,13 @@
                     thresholdValue.textContent = this.value;
                 });
             }
-            
+
             // Add hover effects to cards
             document.querySelectorAll('.feature-card, .metric-card, .event-item').forEach(card => {
                 card.addEventListener('mouseenter', function() {
                     this.style.transform = 'translateY(-5px)';
                 });
-                
+
                 card.addEventListener('mouseleave', function() {
                     this.style.transform = 'translateY(0)';
                 });

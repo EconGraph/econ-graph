@@ -22,7 +22,7 @@ import MonitoringPage from './pages/MonitoringPage';
 import SecurityPage from './pages/SecurityPage';
 
 // Protected route wrapper
-function ProtectedRoute({ children, requiredRole = 'admin' }: { 
+function ProtectedRoute({ children, requiredRole = 'admin' }: {
   children: React.ReactNode;
   requiredRole?: string;
 }) {
@@ -57,13 +57,13 @@ function App() {
   return (
     <Routes>
       {/* Public routes (login only) */}
-      <Route 
-        path="/login" 
+      <Route
+        path="/login"
         element={
           isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />
-        } 
+        }
       />
-      
+
       {/* Protected admin routes */}
       <Route path="/" element={
         <ProtectedRoute>
@@ -72,11 +72,11 @@ function App() {
       }>
         {/* Dashboard - default admin page */}
         <Route index element={<DashboardPage />} />
-        
+
         {/* System monitoring and health */}
         <Route path="health" element={<SystemHealthPage />} />
         <Route path="monitoring" element={<MonitoringPage />} />
-        
+
         {/* Data management */}
         <Route path="crawler" element={<CrawlerManagementPage />} />
         <Route path="database" element={
@@ -84,7 +84,7 @@ function App() {
             <DatabaseManagementPage />
           </ProtectedRoute>
         } />
-        
+
         {/* User and security management */}
         <Route path="users" element={
           <ProtectedRoute requiredRole="super_admin">
@@ -93,7 +93,7 @@ function App() {
         } />
         <Route path="security" element={<SecurityPage />} />
         <Route path="audit" element={<AuditLogsPage />} />
-        
+
         {/* System configuration */}
         <Route path="config" element={
           <ProtectedRoute requiredRole="super_admin">
@@ -101,7 +101,7 @@ function App() {
           </ProtectedRoute>
         } />
       </Route>
-      
+
       {/* Catch-all redirect */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

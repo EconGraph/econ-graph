@@ -18,7 +18,7 @@ variable "replica_count" {
   description = "Number of admin frontend replicas"
   type        = number
   default     = 2
-  
+
   validation {
     condition     = var.replica_count >= 1 && var.replica_count <= 10
     error_message = "Replica count must be between 1 and 10."
@@ -84,7 +84,7 @@ variable "allowed_admin_ips" {
   description = "List of IP ranges allowed to access admin interface"
   type        = list(string)
   default     = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
-  
+
   validation {
     condition = length(var.allowed_admin_ips) > 0
     error_message = "At least one IP range must be specified for admin access."
@@ -95,7 +95,7 @@ variable "session_timeout" {
   description = "Admin session timeout in seconds"
   type        = number
   default     = 1800  # 30 minutes
-  
+
   validation {
     condition     = var.session_timeout >= 300 && var.session_timeout <= 7200
     error_message = "Session timeout must be between 300 (5 minutes) and 7200 (2 hours) seconds."
@@ -119,7 +119,7 @@ variable "admin_port" {
   description = "Port for admin interface"
   type        = number
   default     = 3001
-  
+
   validation {
     condition     = var.admin_port >= 1024 && var.admin_port <= 65535
     error_message = "Admin port must be between 1024 and 65535."
@@ -150,7 +150,7 @@ variable "environment" {
   description = "Deployment environment"
   type        = string
   default     = "production"
-  
+
   validation {
     condition     = contains(["development", "staging", "production"], var.environment)
     error_message = "Environment must be one of: development, staging, production."

@@ -10,14 +10,14 @@
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
             background: #f5f5f5;
             color: #333;
             overflow-x: hidden;
         }
-        
+
         .header {
             background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
             color: white;
@@ -25,7 +25,7 @@
             box-shadow: 0 4px 20px rgba(0,0,0,0.15);
             position: relative;
         }
-        
+
         .header::before {
             content: '';
             position: absolute;
@@ -36,12 +36,12 @@
             background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="0.5"/></pattern></defs><rect width="100" height="100" fill="url(%23grid)"/></svg>');
             opacity: 0.3;
         }
-        
+
         .header-content {
             position: relative;
             z-index: 1;
         }
-        
+
         .header h1 {
             font-size: 3em;
             margin-bottom: 15px;
@@ -50,43 +50,43 @@
             gap: 20px;
             text-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
-        
+
         .header p {
             font-size: 1.4em;
             opacity: 0.95;
             margin-bottom: 20px;
         }
-        
+
         .competitive-comparison {
             display: flex;
             gap: 30px;
             margin-top: 20px;
             flex-wrap: wrap;
         }
-        
+
         .competitor {
             background: rgba(255,255,255,0.1);
             padding: 15px 25px;
             border-radius: 8px;
             backdrop-filter: blur(10px);
         }
-        
+
         .competitor .name {
             font-weight: bold;
             font-size: 1.1em;
         }
-        
+
         .competitor .price {
             font-size: 1.3em;
             color: #ffeb3b;
         }
-        
+
         .container {
             max-width: 1600px;
             margin: 0 auto;
             padding: 40px 20px;
         }
-        
+
         .tabs {
             display: flex;
             background: white;
@@ -95,7 +95,7 @@
             box-shadow: 0 4px 20px rgba(0,0,0,0.1);
             overflow: hidden;
         }
-        
+
         .tab {
             flex: 1;
             padding: 25px 20px;
@@ -111,22 +111,22 @@
             font-size: 1.1em;
             position: relative;
         }
-        
+
         .tab:last-child {
             border-right: none;
         }
-        
+
         .tab.active {
             background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
             color: white;
             transform: translateY(-2px);
         }
-        
+
         .tab:hover:not(.active) {
             background: #f0f8ff;
             transform: translateY(-1px);
         }
-        
+
         .content {
             background: white;
             border-radius: 16px;
@@ -135,14 +135,14 @@
             margin-bottom: 40px;
             position: relative;
         }
-        
+
         .feature-showcase {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
             gap: 25px;
             margin-bottom: 40px;
         }
-        
+
         .feature-card {
             background: linear-gradient(135deg, #f8f9ff 0%, #e3f2fd 100%);
             padding: 30px;
@@ -152,7 +152,7 @@
             position: relative;
             overflow: hidden;
         }
-        
+
         .feature-card::before {
             content: '';
             position: absolute;
@@ -162,12 +162,12 @@
             height: 4px;
             background: linear-gradient(90deg, #1976d2, #2196f3, #03a9f4);
         }
-        
+
         .feature-card:hover {
             transform: translateY(-8px);
             box-shadow: 0 12px 40px rgba(25, 118, 210, 0.2);
         }
-        
+
         .feature-card h3 {
             color: #1976d2;
             margin-bottom: 18px;
@@ -176,19 +176,19 @@
             align-items: center;
             gap: 12px;
         }
-        
+
         .feature-card p {
             line-height: 1.6;
             color: #555;
             margin-bottom: 15px;
         }
-        
+
         .feature-metrics {
             display: flex;
             gap: 15px;
             margin-top: 20px;
         }
-        
+
         .metric-badge {
             background: #1976d2;
             color: white;
@@ -197,7 +197,7 @@
             font-size: 0.9em;
             font-weight: 500;
         }
-        
+
         .world-map {
             width: 100%;
             height: 600px;
@@ -209,7 +209,7 @@
             border: 3px solid #2196f3;
             box-shadow: inset 0 0 50px rgba(33, 150, 243, 0.1);
         }
-        
+
         .country-node {
             position: absolute;
             background: #4caf50;
@@ -224,18 +224,18 @@
             font-weight: bold;
             box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         }
-        
+
         .country-node:hover {
             transform: scale(1.8);
             z-index: 10;
             box-shadow: 0 8px 25px rgba(0,0,0,0.3);
         }
-        
+
         .country-node.small { width: 25px; height: 25px; font-size: 10px; }
         .country-node.medium { width: 35px; height: 35px; font-size: 12px; }
         .country-node.large { width: 45px; height: 45px; font-size: 14px; }
         .country-node.xlarge { width: 55px; height: 55px; font-size: 16px; }
-        
+
         .connection-line {
             position: absolute;
             height: 4px;
@@ -244,11 +244,11 @@
             border-radius: 2px;
             box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
         }
-        
+
         .connection-line.strong { height: 6px; opacity: 0.9; }
         .connection-line.medium { height: 4px; opacity: 0.7; }
         .connection-line.weak { height: 2px; opacity: 0.5; }
-        
+
         .country-tooltip {
             position: absolute;
             background: rgba(0,0,0,0.9);
@@ -262,14 +262,14 @@
             transition: opacity 0.3s ease;
             max-width: 250px;
         }
-        
+
         .dashboard-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
             gap: 25px;
             margin: 30px 0;
         }
-        
+
         .metric-card {
             background: white;
             padding: 30px;
@@ -280,12 +280,12 @@
             transition: all 0.3s ease;
             position: relative;
         }
-        
+
         .metric-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 8px 30px rgba(0,0,0,0.15);
         }
-        
+
         .metric-card::before {
             content: '';
             position: absolute;
@@ -297,7 +297,7 @@
             border-radius: 0 16px 0 50px;
             opacity: 0.1;
         }
-        
+
         .metric-value {
             font-size: 3em;
             font-weight: bold;
@@ -306,35 +306,35 @@
             position: relative;
             z-index: 1;
         }
-        
+
         .metric-label {
             color: #666;
             font-size: 1.2em;
             font-weight: 500;
         }
-        
+
         .metric-change {
             font-size: 0.9em;
             margin-top: 8px;
             padding: 4px 8px;
             border-radius: 12px;
         }
-        
+
         .metric-change.positive {
             background: #e8f5e8;
             color: #2e7d32;
         }
-        
+
         .metric-change.negative {
             background: #ffebee;
             color: #d32f2f;
         }
-        
+
         .timeline {
             margin: 30px 0;
             position: relative;
         }
-        
+
         .timeline::before {
             content: '';
             position: absolute;
@@ -345,7 +345,7 @@
             background: linear-gradient(to bottom, #1976d2, #2196f3, #03a9f4);
             border-radius: 2px;
         }
-        
+
         .timeline-item {
             display: flex;
             align-items: flex-start;
@@ -357,13 +357,13 @@
             position: relative;
             transition: all 0.3s ease;
         }
-        
+
         .timeline-item:hover {
             background: white;
             box-shadow: 0 8px 30px rgba(0,0,0,0.1);
             transform: translateX(5px);
         }
-        
+
         .timeline-icon {
             width: 60px;
             height: 60px;
@@ -380,52 +380,52 @@
             position: relative;
             z-index: 2;
         }
-        
+
         .timeline-content h4 {
             color: #1976d2;
             margin-bottom: 12px;
             font-size: 1.4em;
         }
-        
+
         .timeline-date {
             color: #666;
             font-size: 1em;
             margin-bottom: 12px;
             font-weight: 500;
         }
-        
+
         .timeline-content p {
             line-height: 1.7;
             margin-bottom: 15px;
         }
-        
+
         .impact-badges {
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
             margin-top: 15px;
         }
-        
+
         .impact-badge {
             padding: 6px 12px;
             border-radius: 16px;
             font-size: 0.85em;
             font-weight: 500;
         }
-        
+
         .impact-badge.severity-5 { background: #ffebee; color: #d32f2f; }
         .impact-badge.severity-4 { background: #fff3e0; color: #f57c00; }
         .impact-badge.severity-3 { background: #fffde7; color: #f9a825; }
         .impact-badge.countries { background: #e3f2fd; color: #1976d2; }
         .impact-badge.recovered { background: #e8f5e8; color: #2e7d32; }
-        
+
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
             gap: 25px;
             margin-top: 40px;
         }
-        
+
         .stat-box {
             text-align: center;
             padding: 35px 25px;
@@ -436,7 +436,7 @@
             overflow: hidden;
             transition: all 0.3s ease;
         }
-        
+
         .stat-box::before {
             content: '';
             position: absolute;
@@ -448,21 +448,21 @@
             transform: rotate(45deg);
             transition: all 0.6s ease;
         }
-        
+
         .stat-box:hover::before {
             animation: shine 1.5s ease-in-out;
         }
-        
+
         @keyframes shine {
             0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
             100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
         }
-        
+
         .stat-box:hover {
             transform: translateY(-8px);
             box-shadow: 0 12px 40px rgba(25, 118, 210, 0.3);
         }
-        
+
         .stat-number {
             font-size: 3.5em;
             font-weight: bold;
@@ -470,18 +470,18 @@
             position: relative;
             z-index: 1;
         }
-        
+
         .stat-label {
             font-size: 1.2em;
             opacity: 0.95;
             position: relative;
             z-index: 1;
         }
-        
+
         .hidden {
             display: none;
         }
-        
+
         .controls-panel {
             background: linear-gradient(135deg, #f8f9ff 0%, #e8f4fd 100%);
             padding: 30px;
@@ -489,7 +489,7 @@
             margin-bottom: 30px;
             border: 2px solid #e1f5fe;
         }
-        
+
         .controls-title {
             font-size: 1.3em;
             font-weight: 600;
@@ -499,25 +499,25 @@
             align-items: center;
             gap: 10px;
         }
-        
+
         .controls {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
             gap: 25px;
         }
-        
+
         .control-group {
             display: flex;
             flex-direction: column;
             gap: 8px;
         }
-        
+
         .control-group label {
             font-weight: 600;
             color: #1976d2;
             font-size: 1em;
         }
-        
+
         .control-group select, .control-group input {
             padding: 12px 16px;
             border: 2px solid #e1f5fe;
@@ -526,13 +526,13 @@
             transition: all 0.3s ease;
             background: white;
         }
-        
+
         .control-group select:focus, .control-group input:focus {
             outline: none;
             border-color: #1976d2;
             box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
         }
-        
+
         .badge {
             background: #4caf50;
             color: white;
@@ -543,7 +543,7 @@
             margin-left: 15px;
             box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
         }
-        
+
         .achievement-banner {
             background: linear-gradient(135deg, #e8f5e8 0%, #f1f8e9 100%);
             border: 3px solid #4caf50;
@@ -554,7 +554,7 @@
             position: relative;
             overflow: hidden;
         }
-        
+
         .achievement-banner::before {
             content: '🏆';
             position: absolute;
@@ -564,7 +564,7 @@
             opacity: 0.1;
             transform: rotate(15deg);
         }
-        
+
         .achievement-banner h3 {
             color: #2e7d32;
             margin-bottom: 20px;
@@ -572,7 +572,7 @@
             position: relative;
             z-index: 1;
         }
-        
+
         .achievement-banner p {
             color: #666;
             font-size: 1.2em;
@@ -580,7 +580,7 @@
             position: relative;
             z-index: 1;
         }
-        
+
         .loading-animation {
             display: inline-block;
             width: 20px;
@@ -591,15 +591,15 @@
             animation: spin 1s ease-in-out infinite;
             margin-right: 10px;
         }
-        
+
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
-        
+
         .pulse {
             animation: pulse 2s infinite;
         }
-        
+
         @keyframes pulse {
             0% { transform: scale(1); }
             50% { transform: scale(1.05); }
@@ -635,7 +635,7 @@
             </div>
         </div>
     </div>
-    
+
     <div class="container">
         <div class="tabs">
             <div class="tab active" onclick="showTab('network')">
@@ -648,14 +648,14 @@
                 📅 Global Events Explorer
             </div>
         </div>
-        
+
         <!-- Network Map Tab -->
         <div id="network" class="content">
             <h2 style="margin-bottom: 25px; color: #1976d2; font-size: 2.2em;">🌍 Interactive Global Economic Network Map</h2>
             <p style="margin-bottom: 30px; color: #666; font-size: 1.2em; line-height: 1.6;">
                 Visualize economic correlations between major economies with institutional-grade precision. Node size represents GDP magnitude, colors indicate economic health status, and connection thickness shows correlation strength with statistical significance testing.
             </p>
-            
+
             <div class="controls-panel">
                 <div class="controls-title">
                     🎛️ Professional Analysis Controls
@@ -695,7 +695,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="world-map" id="worldMap">
                 <!-- Major Economies -->
                 <div class="country-node xlarge" style="left: 20%; top: 30%;" data-country="US" title="United States">US</div>
@@ -713,7 +713,7 @@
                 <div class="country-node small" style="left: 78%; top: 70%;" data-country="AU" title="Australia">AU</div>
                 <div class="country-node small" style="left: 58%; top: 30%;" data-country="ES" title="Spain">ES</div>
                 <div class="country-node small" style="left: 22%; top: 50%;" data-country="MX" title="Mexico">MX</div>
-                
+
                 <!-- Connection lines with varying strengths -->
                 <div class="connection-line strong" style="left: 25%; top: 32%; width: 48%; transform: rotate(2deg);" data-correlation="0.85"></div>
                 <div class="connection-line medium" style="left: 52%; top: 24%; width: 31%; transform: rotate(12deg);" data-correlation="0.72"></div>
@@ -722,9 +722,9 @@
                 <div class="connection-line weak" style="left: 25%; top: 35%; width: 25%; transform: rotate(25deg);" data-correlation="0.55"></div>
                 <div class="connection-line medium" style="left: 70%; top: 40%; width: 14%; transform: rotate(-30deg);" data-correlation="0.71"></div>
             </div>
-            
+
             <div class="country-tooltip" id="countryTooltip"></div>
-            
+
             <div class="feature-showcase">
                 <div class="feature-card">
                     <h3>🔗 Advanced Network Analysis Engine</h3>
@@ -760,14 +760,14 @@
                 </div>
             </div>
         </div>
-        
+
         <!-- Dashboard Tab -->
         <div id="dashboard" class="content hidden">
             <h2 style="margin-bottom: 25px; color: #1976d2; font-size: 2.2em;">📊 Multi-Country Economic Dashboard</h2>
             <p style="margin-bottom: 30px; color: #666; font-size: 1.2em; line-height: 1.6;">
                 Bloomberg Terminal-style comparative analysis with institutional-grade metrics, professional charting, and comprehensive economic indicator tracking across multiple countries simultaneously.
             </p>
-            
+
             <div class="controls-panel">
                 <div class="controls-title">
                     🎯 Dashboard Configuration
@@ -810,7 +810,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="dashboard-grid" id="dashboardGrid">
                 <div class="metric-card">
                     <div class="metric-value">$23.3T</div>
@@ -858,7 +858,7 @@
                     <div class="metric-change negative">↑ 0.1pp</div>
                 </div>
             </div>
-            
+
             <div class="feature-showcase">
                 <div class="feature-card">
                     <h3>📈 Professional Charting Suite</h3>
@@ -894,14 +894,14 @@
                 </div>
             </div>
         </div>
-        
+
         <!-- Events Tab -->
         <div id="events" class="content hidden">
             <h2 style="margin-bottom: 25px; color: #1976d2; font-size: 2.2em;">📅 Global Economic Events Explorer</h2>
             <p style="margin-bottom: 30px; color: #666; font-size: 1.2em; line-height: 1.6;">
                 Comprehensive tracking of major economic crises and their global impact with detailed country-specific analysis, recovery tracking, and predictive modeling for future economic disruptions.
             </p>
-            
+
             <div class="controls-panel">
                 <div class="controls-title">
                     🔍 Advanced Event Filtering
@@ -942,7 +942,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="timeline" id="eventsTimeline">
                 <div class="timeline-item">
                     <div class="timeline-icon">💰</div>
@@ -960,7 +960,7 @@
                         </p>
                     </div>
                 </div>
-                
+
                 <div class="timeline-item">
                     <div class="timeline-icon">🦠</div>
                     <div class="timeline-content">
@@ -977,7 +977,7 @@
                         </p>
                     </div>
                 </div>
-                
+
                 <div class="timeline-item">
                     <div class="timeline-icon">🏛️</div>
                     <div class="timeline-content">
@@ -994,7 +994,7 @@
                         </p>
                     </div>
                 </div>
-                
+
                 <div class="timeline-item">
                     <div class="timeline-icon">📦</div>
                     <div class="timeline-content">
@@ -1011,7 +1011,7 @@
                         </p>
                     </div>
                 </div>
-                
+
                 <div class="timeline-item">
                     <div class="timeline-icon">🛢️</div>
                     <div class="timeline-content">
@@ -1030,7 +1030,7 @@
                 </div>
             </div>
         </div>
-        
+
         <!-- Global Statistics -->
         <div class="content">
             <h2 style="margin-bottom: 30px; color: #1976d2; text-align: center; font-size: 2.5em;">🏆 Revolutionary Platform Achievement</h2>
@@ -1068,7 +1068,7 @@
                     <div class="stat-label">Real-time Updates</div>
                 </div>
             </div>
-            
+
             <div class="achievement-banner">
                 <h3>🌟 World's First Open-Source Global Economic Network Analysis Platform</h3>
                 <p>
@@ -1080,22 +1080,22 @@
             </div>
         </div>
     </div>
-    
+
     <script>
         // Enhanced interactivity
         function showTab(tabName) {
             document.querySelectorAll('.content').forEach(content => {
                 if (content.id) content.classList.add('hidden');
             });
-            
+
             document.querySelectorAll('.tab').forEach(tab => {
                 tab.classList.remove('active');
             });
-            
+
             document.getElementById(tabName).classList.remove('hidden');
             event.target.classList.add('active');
         }
-        
+
         // Network map interactions
         function updateNetworkMap() {
             const indicator = document.getElementById('indicatorSelect').value;
@@ -1105,30 +1105,30 @@
                 line.style.opacity = Math.random() * 0.5 + 0.5;
             });
         }
-        
+
         function updateCorrelationThreshold() {
             const value = document.getElementById('correlationSlider').value;
             document.getElementById('correlationValue').textContent = value;
-            
+
             // Update connection visibility based on threshold
             document.querySelectorAll('.connection-line').forEach(line => {
                 const correlation = parseFloat(line.dataset.correlation) || Math.random();
                 line.style.display = correlation >= value ? 'block' : 'none';
             });
         }
-        
+
         function updateTimePeriod() {
             const period = document.getElementById('timePeriod').value;
             console.log('Updated time period to:', period);
             // Simulate data refresh
             updateNetworkMap();
         }
-        
+
         function updateImpactFilter() {
             const value = document.getElementById('impactSlider').value;
             document.getElementById('impactValue').textContent = value;
         }
-        
+
         // Enhanced country node interactions
         document.querySelectorAll('.country-node').forEach(node => {
             const countryData = {
@@ -1148,9 +1148,9 @@
                 'ES': { name: 'Spain', gdp: '$1.4T', growth: '+1.1%', population: '47M' },
                 'MX': { name: 'Mexico', gdp: '$1.3T', growth: '+2.0%', population: '128M' }
             };
-            
+
             const tooltip = document.getElementById('countryTooltip');
-            
+
             node.addEventListener('mouseenter', function(e) {
                 const country = this.dataset.country;
                 const data = countryData[country];
@@ -1165,25 +1165,25 @@
                     tooltip.style.left = e.pageX + 15 + 'px';
                     tooltip.style.top = e.pageY - 10 + 'px';
                 }
-                
+
                 this.style.transform = 'scale(1.8)';
                 this.style.zIndex = '10';
                 this.classList.add('pulse');
             });
-            
+
             node.addEventListener('mouseleave', function() {
                 tooltip.style.opacity = '0';
                 this.style.transform = 'scale(1)';
                 this.style.zIndex = '1';
                 this.classList.remove('pulse');
             });
-            
+
             node.addEventListener('mousemove', function(e) {
                 tooltip.style.left = e.pageX + 15 + 'px';
                 tooltip.style.top = e.pageY - 10 + 'px';
             });
         });
-        
+
         // Simulate real-time updates with more sophisticated animation
         setInterval(() => {
             const metrics = document.querySelectorAll('.metric-value');
@@ -1192,13 +1192,13 @@
                 if (!isNaN(currentValue)) {
                     const change = (Math.random() - 0.5) * 0.2;
                     const newValue = (currentValue + change);
-                    
+
                     if (metric.textContent.includes('T')) {
                         metric.textContent = '$' + newValue.toFixed(1) + 'T';
                     } else if (metric.textContent.includes('%')) {
                         metric.textContent = newValue.toFixed(1) + '%';
                     }
-                    
+
                     // Add visual feedback for updates
                     metric.style.color = change > 0 ? '#4caf50' : '#f44336';
                     setTimeout(() => {
@@ -1207,12 +1207,12 @@
                 }
             });
         }, 4000);
-        
+
         // Enhanced loading states
         function showLoading(element) {
             element.innerHTML = '<div class="loading-animation"></div>Loading...';
         }
-        
+
         // Initialize with some dynamic effects
         document.addEventListener('DOMContentLoaded', function() {
             // Animate statistics on load

@@ -144,7 +144,7 @@ async function addNarrationOverlay(page, text, duration) {
     // Remove existing narration
     const existing = document.querySelector('.narration-overlay');
     if (existing) existing.remove();
-    
+
     // Create narration overlay
     const overlay = document.createElement('div');
     overlay.className = 'narration-overlay';
@@ -165,9 +165,9 @@ async function addNarrationOverlay(page, text, duration) {
       border: 1px solid rgba(255, 255, 255, 0.1);
     `;
     overlay.textContent = narrationText;
-    
+
     document.body.appendChild(overlay);
-    
+
     // Remove after duration
     setTimeout(() => {
       if (overlay.parentNode) {
@@ -175,7 +175,7 @@ async function addNarrationOverlay(page, text, duration) {
       }
     }, displayDuration);
   }, text, duration);
-  
+
   await page.waitForTimeout(duration);
 }
 
@@ -189,7 +189,7 @@ async function simulateCollaborationActivity(page) {
       { id: '3', name: 'Dr. Emily Watson', avatar: null, isOnline: false, role: 'owner' },
       { id: '4', name: 'James Park', avatar: null, isOnline: true, role: 'editor' },
     ];
-    
+
     // Add to window for demo purposes
     window.mockCollaborators = mockCollaborators;
   });
@@ -197,12 +197,12 @@ async function simulateCollaborationActivity(page) {
 
 async function createCollaborationDemo() {
   console.log('🎬 Starting Collaboration-Focused Demo Recording...');
-  
-  const browser = await chromium.launch({ 
+
+  const browser = await chromium.launch({
     headless: false,
     args: ['--no-sandbox', '--disable-web-security']
   });
-  
+
   const context = await browser.newContext({
     viewport: { width: DEMO_CONFIG.width, height: DEMO_CONFIG.height },
     recordVideo: {
@@ -210,65 +210,65 @@ async function createCollaborationDemo() {
       size: { width: DEMO_CONFIG.width, height: DEMO_CONFIG.height }
     }
   });
-  
+
   const page = await context.newPage();
-  
+
   try {
     console.log('📱 Setting up demo environment...');
-    
+
     // Navigate to the application
     await page.goto(DEMO_CONFIG.baseUrl);
     await page.waitForLoadState('networkidle');
-    
+
     // Introduction narration
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[0].text, COLLABORATION_NARRATION_SCRIPT[0].duration);
-    
+
     console.log('🤝 Showcasing Collaboration Workspace...');
-    
+
     // Show collaboration workspace
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[1].text, COLLABORATION_NARRATION_SCRIPT[1].duration);
-    
+
     // Navigate to a chart page with collaboration features
     await page.goto(`${DEMO_CONFIG.baseUrl}/series/GDPC1`);
     await page.waitForLoadState('networkidle');
-    
+
     // Simulate collaboration activity
     await simulateCollaborationActivity(page);
-    
+
     // Show active collaborators
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[2].text, COLLABORATION_NARRATION_SCRIPT[2].duration);
-    
+
     // Try to open collaboration panel
     const collaborationButton = await page.locator('button:has-text("Collaboration"), [aria-label*="collaboration"], [title*="collaboration"]').first();
     if (await collaborationButton.isVisible()) {
       await collaborationButton.click();
       await page.waitForTimeout(1000);
     }
-    
+
     console.log('📝 Demonstrating Chart Annotations...');
-    
+
     // Annotation creation
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[3].text, COLLABORATION_NARRATION_SCRIPT[3].duration);
-    
+
     // Try to create annotation
     const addAnnotationButton = await page.locator('button:has-text("Add Annotation"), button:has-text("Annotate")').first();
     if (await addAnnotationButton.isVisible()) {
       await addAnnotationButton.click();
       await page.waitForTimeout(1000);
-      
+
       // Fill annotation form
       await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[4].text, COLLABORATION_NARRATION_SCRIPT[4].duration);
-      
+
       // Try to fill form fields
       await page.fill('input[label*="Title"], input[placeholder*="Title"]', 'COVID-19 Economic Impact');
       await page.waitForTimeout(500);
-      
+
       await page.fill('textarea[label*="Description"], textarea[placeholder*="Description"]', 'Major economic disruption due to pandemic lockdowns and Federal Reserve emergency response measures.');
       await page.waitForTimeout(1000);
-      
+
       await page.fill('input[type="date"]', '2020-03-15');
       await page.waitForTimeout(500);
-      
+
       // Select annotation type
       const typeSelect = await page.locator('select, [role="combobox"]').first();
       if (await typeSelect.isVisible()) {
@@ -276,9 +276,9 @@ async function createCollaborationDemo() {
         await page.waitForTimeout(500);
         await page.click('option:has-text("Vertical Line"), [role="option"]:has-text("line")');
       }
-      
+
       await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[5].text, COLLABORATION_NARRATION_SCRIPT[5].duration);
-      
+
       // Submit annotation
       const submitButton = await page.locator('button:has-text("Add"), button:has-text("Create"), button:has-text("Save")').first();
       if (await submitButton.isVisible()) {
@@ -286,27 +286,27 @@ async function createCollaborationDemo() {
         await page.waitForTimeout(1000);
       }
     }
-    
+
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[6].text, COLLABORATION_NARRATION_SCRIPT[6].duration);
-    
+
     console.log('💬 Demonstrating Comment System...');
-    
+
     // Comment system demonstration
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[7].text, COLLABORATION_NARRATION_SCRIPT[7].duration);
-    
+
     // Try to add comment
     const commentButton = await page.locator('button:has-text("Comment"), [aria-label*="comment"]').first();
     if (await commentButton.isVisible()) {
       await commentButton.click();
       await page.waitForTimeout(1000);
-      
+
       await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[8].text, COLLABORATION_NARRATION_SCRIPT[8].duration);
-      
+
       // Fill comment
       const commentField = await page.locator('textarea[placeholder*="comment"], input[placeholder*="comment"]').first();
       if (await commentField.isVisible()) {
         await typeWithDelay(page, 'textarea[placeholder*="comment"], input[placeholder*="comment"]', 'The Fed responded with unprecedented monetary policy measures including zero interest rates and quantitative easing.');
-        
+
         const submitComment = await page.locator('button:has-text("Comment"), button:has-text("Post"), button:has-text("Add Comment")').first();
         if (await submitComment.isVisible()) {
           await submitComment.click();
@@ -314,12 +314,12 @@ async function createCollaborationDemo() {
         }
       }
     }
-    
+
     console.log('🔧 Showing Annotation Management...');
-    
+
     // Annotation management features
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[9].text, COLLABORATION_NARRATION_SCRIPT[9].duration);
-    
+
     // Show filtering options
     const filterSelect = await page.locator('select:has(option:has-text("All")), [role="combobox"]:has-text("Filter")').first();
     if (await filterSelect.isVisible()) {
@@ -329,49 +329,49 @@ async function createCollaborationDemo() {
       await page.click('option:has-text("Mine"), [role="option"]:has-text("Mine")');
       await page.waitForTimeout(1000);
     }
-    
+
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[10].text, COLLABORATION_NARRATION_SCRIPT[10].duration);
-    
+
     console.log('👥 Demonstrating Permission System...');
-    
+
     // Permission system
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[11].text, COLLABORATION_NARRATION_SCRIPT[11].duration);
-    
+
     // Show sharing features
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[12].text, COLLABORATION_NARRATION_SCRIPT[12].duration);
-    
+
     const shareButton = await page.locator('button:has-text("Share"), [aria-label*="share"]').first();
     if (await shareButton.isVisible()) {
       await shareButton.click();
       await page.waitForTimeout(2000);
-      
+
       // Close share dialog
       const closeButton = await page.locator('button:has-text("Close"), button:has-text("Cancel")').first();
       if (await closeButton.isVisible()) {
         await closeButton.click();
       }
     }
-    
+
     console.log('📊 Highlighting Professional Features...');
-    
+
     // Professional workflow features
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[13].text, COLLABORATION_NARRATION_SCRIPT[13].duration);
-    
+
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[14].text, COLLABORATION_NARRATION_SCRIPT[14].duration);
-    
+
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[15].text, COLLABORATION_NARRATION_SCRIPT[15].duration);
-    
+
     // Mobile responsiveness mention
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[16].text, COLLABORATION_NARRATION_SCRIPT[16].duration);
-    
+
     // Future of collaboration
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[17].text, COLLABORATION_NARRATION_SCRIPT[17].duration);
-    
+
     // Closing
     await addNarrationOverlay(page, COLLABORATION_NARRATION_SCRIPT[18].text, COLLABORATION_NARRATION_SCRIPT[18].duration);
-    
+
     console.log('✅ Demo recording completed successfully!');
-    
+
   } catch (error) {
     console.error('❌ Demo recording failed:', error);
     throw error;

@@ -47,7 +47,7 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "✅ Final honest demo video created successfully!"
     echo "📁 Output: $OUTPUT_FILE"
-    
+
     # Get final stats
     FINAL_SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
     echo "📊 File size: ${FINAL_SIZE}"
@@ -64,4 +64,3 @@ else
     echo "❌ Error creating video"
     exit 1
 fi
-

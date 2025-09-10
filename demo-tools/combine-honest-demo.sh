@@ -85,11 +85,11 @@ if [ $? -eq 0 ]; then
     echo "✅ Honest demo video created successfully!"
     echo "📁 Output: $OUTPUT_FILE"
     echo ""
-    
+
     # Get final video info
     FINAL_DURATION=$(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$OUTPUT_FILE")
     FINAL_SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
-    
+
     echo "📊 Final video stats:"
     echo "   Duration: ${FINAL_DURATION} seconds"
     echo "   File size: ${FINAL_SIZE}"
@@ -102,7 +102,7 @@ if [ $? -eq 0 ]; then
     echo "   ✅ No false claims about non-existent features"
     echo ""
     echo "🚀 Ready to update documentation and commit!"
-    
+
 else
     echo "❌ Error creating video. Check the logs above."
     exit 1

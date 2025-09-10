@@ -33,7 +33,7 @@ CREATE TABLE global_economic_indicators (
     frequency VARCHAR(20) NOT NULL, -- Annual, Quarterly, Monthly
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    
+
     UNIQUE(country_id, indicator_code)
 );
 
@@ -46,7 +46,7 @@ CREATE TABLE global_indicator_data (
     is_preliminary BOOLEAN NOT NULL DEFAULT false,
     data_source VARCHAR(50) NOT NULL, -- World Bank, IMF, OECD, etc.
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    
+
     UNIQUE(indicator_id, date)
 );
 
@@ -63,7 +63,7 @@ CREATE TABLE country_correlations (
     p_value DECIMAL(10,8), -- Statistical significance
     is_significant BOOLEAN NOT NULL DEFAULT false,
     calculated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    
+
     UNIQUE(country_a_id, country_b_id, indicator_category, time_period_start, time_period_end),
     CHECK (country_a_id != country_b_id),
     CHECK (correlation_coefficient >= -1.0 AND correlation_coefficient <= 1.0)
@@ -81,7 +81,7 @@ CREATE TABLE trade_relationships (
     trade_balance_usd DECIMAL(20,2), -- Export - Import
     trade_intensity DECIMAL(8,6), -- Trade as % of GDP
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    
+
     UNIQUE(exporter_country_id, importer_country_id, trade_flow_type, year),
     CHECK (exporter_country_id != importer_country_id)
 );
@@ -113,7 +113,7 @@ CREATE TABLE event_country_impacts (
     recovery_time_days INTEGER, -- Time to return to pre-event levels
     confidence_score DECIMAL(3,2), -- 0-1 confidence in measurement
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    
+
     UNIQUE(event_id, country_id, impact_type)
 );
 
@@ -129,7 +129,7 @@ CREATE TABLE leading_indicators (
     time_period_start DATE NOT NULL,
     time_period_end DATE NOT NULL,
     calculated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    
+
     UNIQUE(leading_country_id, following_country_id, indicator_category),
     CHECK (leading_country_id != following_country_id),
     CHECK (lead_time_months >= 1 AND lead_time_months <= 24)
@@ -162,19 +162,19 @@ CREATE INDEX idx_event_impacts_country ON event_country_impacts(country_id, impa
 CREATE INDEX idx_leading_indicators_strength ON leading_indicators(correlation_strength DESC, predictive_accuracy DESC);
 
 -- Create updated_at triggers
-CREATE TRIGGER update_countries_updated_at 
-    BEFORE UPDATE ON countries 
-    FOR EACH ROW 
+CREATE TRIGGER update_countries_updated_at
+    BEFORE UPDATE ON countries
+    FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_global_indicators_updated_at 
-    BEFORE UPDATE ON global_economic_indicators 
-    FOR EACH ROW 
+CREATE TRIGGER update_global_indicators_updated_at
+    BEFORE UPDATE ON global_economic_indicators
+    FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_global_events_updated_at 
-    BEFORE UPDATE ON global_economic_events 
-    FOR EACH ROW 
+CREATE TRIGGER update_global_events_updated_at
+    BEFORE UPDATE ON global_economic_events
+    FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Insert major countries for initial data

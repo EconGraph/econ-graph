@@ -35,21 +35,21 @@ resource "kubernetes_config_map" "postgresql_config" {
   data = {
     "postgresql.conf" = <<-EOT
       # PostgreSQL configuration optimized for time series data
-      
+
       # Memory settings
       shared_buffers = 256MB
       effective_cache_size = 1GB
       work_mem = 16MB
       maintenance_work_mem = 256MB
-      
+
       # Checkpoint settings
       checkpoint_completion_target = 0.9
       wal_buffers = 16MB
-      
+
       # Query planner
       random_page_cost = 1.1
       effective_io_concurrency = 200
-      
+
       # Logging
       log_destination = 'stderr'
       logging_collector = on
@@ -57,29 +57,29 @@ resource "kubernetes_config_map" "postgresql_config" {
       log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
       log_statement = 'all'
       log_min_duration_statement = 1000
-      
+
       # Connection settings
       max_connections = 100
-      
+
       # Time series optimizations
       max_wal_size = 2GB
       min_wal_size = 1GB
     EOT
-    
+
     "init.sql" = <<-EOT
       -- Initialize database for EconGraph
       CREATE DATABASE econ_graph;
       CREATE USER econgraph WITH ENCRYPTED PASSWORD '${var.password}';
       GRANT ALL PRIVILEGES ON DATABASE econ_graph TO econgraph;
-      
+
       -- Connect to the database
       \c econ_graph;
-      
+
       -- Enable required extensions
       CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
       CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
       CREATE EXTENSION IF NOT EXISTS "pg_trgm";
-      
+
       -- Grant permissions on extensions
       GRANT ALL ON SCHEMA public TO econgraph;
     EOT

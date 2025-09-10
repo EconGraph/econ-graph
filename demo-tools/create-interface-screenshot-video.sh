@@ -60,7 +60,7 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "🎬 Playing the interface screenshot video..."
     open "$OUTPUT_FILE"
-    
+
     # Clean up screenshot
     rm "$SCREENSHOT_FILE"
 else

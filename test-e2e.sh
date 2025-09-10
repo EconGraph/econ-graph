@@ -41,19 +41,19 @@ print_warning() {
 # Function to check if PostgreSQL is ready
 wait_for_postgres() {
     print_step "Waiting for PostgreSQL to be ready..."
-    
+
     local counter=0
     while ! docker exec econ-graph-test-postgres pg_isready -h localhost -p 5432 -U postgres >/dev/null 2>&1; do
         if [ $counter -ge $POSTGRES_READY_TIMEOUT ]; then
             print_error "PostgreSQL failed to start within ${POSTGRES_READY_TIMEOUT} seconds"
             return 1
         fi
-        
+
         echo -n "."
         sleep 1
         ((counter++))
     done
-    
+
     print_success "PostgreSQL is ready!"
     return 0
 }
@@ -61,14 +61,14 @@ wait_for_postgres() {
 # Function to start test database
 start_test_database() {
     print_step "Starting test PostgreSQL database..."
-    
+
     # Stop existing container if running
     if docker ps -q -f name=econ-graph-test-postgres >/dev/null 2>&1; then
         print_warning "Stopping existing test database..."
         docker stop econ-graph-test-postgres >/dev/null 2>&1
         docker rm econ-graph-test-postgres >/dev/null 2>&1
     fi
-    
+
     # Start fresh PostgreSQL container
     docker run -d \
         --name econ-graph-test-postgres \
@@ -77,7 +77,7 @@ start_test_database() {
         -e POSTGRES_DB=econ_graph_test \
         -p 5433:5432 \
         postgres:14 >/dev/null
-    
+
     if wait_for_postgres; then
         print_success "Test database started successfully"
         return 0
@@ -90,28 +90,28 @@ start_test_database() {
 # Function to run backend integration tests
 run_backend_tests() {
     print_step "Running backend integration tests..."
-    
+
     cd backend
-    
+
     # Set test environment variables
     export DATABASE_URL="postgresql://testuser:testpassword@localhost:5433/econ_graph_test"
     export RUST_LOG=info
     export TEST_ENV=true
-    
+
     # Run database migrations
     print_step "Running database migrations..."
     diesel migration run --database-url="$DATABASE_URL" || {
         print_error "Database migrations failed"
         return 1
     }
-    
+
     # Run backend integration tests
     print_step "Executing backend end-to-end tests..."
     timeout $BACKEND_TEST_TIMEOUT cargo test e2e_tests --lib --verbose -- --test-threads=1 || {
         print_error "Backend integration tests failed"
         return 1
     }
-    
+
     print_success "Backend integration tests completed successfully"
     cd ..
     return 0
@@ -120,9 +120,9 @@ run_backend_tests() {
 # Function to run frontend integration tests
 run_frontend_tests() {
     print_step "Running frontend integration tests..."
-    
+
     cd frontend
-    
+
     # Install dependencies if needed
     if [ ! -d "node_modules" ]; then
         print_step "Installing frontend dependencies..."
@@ -131,19 +131,19 @@ run_frontend_tests() {
             return 1
         }
     fi
-    
+
     # Set test environment variables
     export NODE_ENV=test
     export REACT_APP_GRAPHQL_ENDPOINT=http://localhost:8080/graphql
     export REACT_APP_TEST_MODE=true
-    
+
     # Run frontend integration tests
     print_step "Executing frontend end-to-end tests..."
     timeout $FRONTEND_TEST_TIMEOUT npm test -- --testNamePattern="End-to-End" --watchAll=false --coverage=false || {
         print_error "Frontend integration tests failed"
         return 1
     }
-    
+
     print_success "Frontend integration tests completed successfully"
     cd ..
     return 0
@@ -152,44 +152,44 @@ run_frontend_tests() {
 # Function to run combined integration tests
 run_combined_tests() {
     print_step "Running combined frontend + backend integration tests..."
-    
+
     # This would start both backend server and run frontend tests against it
     # For now, we'll simulate this with a comprehensive test
-    
+
     cd backend
     export DATABASE_URL="postgresql://testuser:testpassword@localhost:5433/econ_graph_test"
-    
+
     # Start backend server in background
     print_step "Starting backend server for integration testing..."
     cargo run &
     BACKEND_PID=$!
-    
+
     # Give server time to start
     sleep 5
-    
+
     # Test server health
     if curl -f http://localhost:8080/health >/dev/null 2>&1; then
         print_success "Backend server is running and healthy"
     else
         print_warning "Backend server health check failed, continuing anyway..."
     fi
-    
+
     cd ../frontend
-    
+
     # Run frontend tests against running backend
     export REACT_APP_GRAPHQL_ENDPOINT=http://localhost:8080/graphql
-    
+
     print_step "Running frontend tests against live backend..."
     npm test -- --testNamePattern="Integration" --watchAll=false || {
         print_error "Combined integration tests failed"
         kill $BACKEND_PID 2>/dev/null
         return 1
     }
-    
+
     # Clean up backend server
     kill $BACKEND_PID 2>/dev/null
     print_success "Combined integration tests completed successfully"
-    
+
     cd ..
     return 0
 }
@@ -197,26 +197,26 @@ run_combined_tests() {
 # Function to generate test report
 generate_test_report() {
     print_step "Generating test report..."
-    
+
     local report_file="e2e-test-report.md"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
+
     cat > "$report_file" << EOF
 # End-to-End Integration Test Report
 
-**Generated**: $timestamp  
-**Test Suite**: Frontend + Backend Integration  
-**Database**: PostgreSQL with testcontainers  
+**Generated**: $timestamp
+**Test Suite**: Frontend + Backend Integration
+**Database**: PostgreSQL with testcontainers
 
 ## Test Results Summary
 
 ### ✅ Backend Integration Tests
 - **GraphQL API Workflow**: Complete data flow from API to database
-- **Crawler Monitoring**: Queue operations and worker coordination  
+- **Crawler Monitoring**: Queue operations and worker coordination
 - **Search Integration**: Full-text search with filtering
 - **Data Transformations**: YoY, MoM, QoQ calculations with BigDecimal precision
 
-### ✅ Frontend Integration Tests  
+### ✅ Frontend Integration Tests
 - **Dashboard Integration**: Series list loading and display
 - **Search Functionality**: Query execution and result handling
 - **Chart Integration**: Data visualization with transformations
@@ -237,7 +237,7 @@ generate_test_report() {
 - ✅ Connection pooling and async operations
 - ✅ Data integrity and foreign key constraints
 
-### API Integration  
+### API Integration
 - ✅ GraphQL schema validation
 - ✅ Query and mutation execution
 - ✅ Data transformation pipeline
@@ -253,14 +253,14 @@ generate_test_report() {
 
 The system has been validated for:
 - **Production Data Volumes**: Tested with 1000+ data points
-- **Concurrent Operations**: Multi-user scenarios simulated  
+- **Concurrent Operations**: Multi-user scenarios simulated
 - **Error Recovery**: Graceful handling of failures
 - **Performance Benchmarks**: Sub-2-second response times
 - **Data Accuracy**: Financial precision with BigDecimal
 
 ---
 
-**Status**: ✅ **ALL INTEGRATION TESTS PASSED**  
+**Status**: ✅ **ALL INTEGRATION TESTS PASSED**
 **Recommendation**: **APPROVED FOR PRODUCTION DEPLOYMENT**
 EOF
 
@@ -270,17 +270,17 @@ EOF
 # Function to cleanup test resources
 cleanup() {
     print_step "Cleaning up test resources..."
-    
+
     # Stop test database
     if docker ps -q -f name=econ-graph-test-postgres >/dev/null 2>&1; then
         docker stop econ-graph-test-postgres >/dev/null 2>&1
         docker rm econ-graph-test-postgres >/dev/null 2>&1
         print_success "Test database cleaned up"
     fi
-    
+
     # Kill any remaining backend processes
     pkill -f "cargo run" 2>/dev/null || true
-    
+
     print_success "Cleanup completed"
 }
 
@@ -289,13 +289,13 @@ main() {
     echo "🎯 End-to-End Integration Test Suite"
     echo "Testing complete frontend + backend integration"
     echo ""
-    
+
     # Set up cleanup trap
     trap cleanup EXIT
-    
+
     # Start test infrastructure
     start_test_database || exit 1
-    
+
     # Run test suites
     if [ "${1:-all}" = "backend" ]; then
         run_backend_tests || exit 1
@@ -309,10 +309,10 @@ main() {
         run_frontend_tests || exit 1
         run_combined_tests || exit 1
     fi
-    
+
     # Generate report
     generate_test_report
-    
+
     echo ""
     echo "🎉 End-to-End Integration Tests Completed Successfully!"
     echo "======================================================="
@@ -330,7 +330,7 @@ if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     echo "Test Suites:"
     echo "  all        Run all integration tests (default)"
     echo "  backend    Run only backend integration tests"
-    echo "  frontend   Run only frontend integration tests" 
+    echo "  frontend   Run only frontend integration tests"
     echo "  combined   Run combined frontend+backend tests"
     echo ""
     echo "Examples:"

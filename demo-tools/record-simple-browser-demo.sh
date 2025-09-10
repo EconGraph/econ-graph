@@ -34,12 +34,12 @@ osascript << 'EOF'
 tell application "Google Chrome"
     activate
     delay 2
-    
+
     -- Position the window for clean recording
     tell front window
         set bounds to {200, 100, 1600, 1000}  -- x, y, width, height for 1400x900 window
     end tell
-    
+
     delay 1
 end tell
 EOF
@@ -68,7 +68,7 @@ ffmpeg -f avfoundation -i "1" -i "demo-tools/generated-audio/investor_narration_
 if [ -f demo-videos/econ-graph-browser-demo.mp4 ]; then
     SIZE=$(ls -lh demo-videos/econ-graph-browser-demo.mp4 | awk '{print $5}')
     DURATION=$(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 demo-videos/econ-graph-browser-demo.mp4 | cut -d. -f1)
-    
+
     echo ""
     echo "✅ PROFESSIONAL BROWSER-ONLY VIDEO CREATED!"
     echo "📁 File: demo-videos/econ-graph-browser-demo.mp4"

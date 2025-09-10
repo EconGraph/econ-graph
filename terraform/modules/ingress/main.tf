@@ -31,7 +31,7 @@ resource "helm_release" "nginx_ingress" {
     yamlencode({
       controller = {
         replicaCount = 2
-        
+
         # Resource limits
         resources = {
           limits = {
@@ -43,7 +43,7 @@ resource "helm_release" "nginx_ingress" {
             memory = "128Mi"
           }
         }
-        
+
         # Metrics for monitoring
         metrics = {
           enabled = true
@@ -51,7 +51,7 @@ resource "helm_release" "nginx_ingress" {
             enabled = true
           }
         }
-        
+
         # Configuration
         config = {
           "use-forwarded-headers"    = "true"
@@ -64,7 +64,7 @@ resource "helm_release" "nginx_ingress" {
           "proxy-buffer-size"       = "16k"
           "proxy-body-size"         = "50m"
         }
-        
+
         # Service configuration
         service = {
           type = "LoadBalancer"
@@ -73,13 +73,13 @@ resource "helm_release" "nginx_ingress" {
             "service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled" = "true"
           }
         }
-        
+
         # Pod disruption budget
         podDisruptionBudget = {
           enabled      = true
           minAvailable = 1
         }
-        
+
         # Auto-scaling
         autoscaling = {
           enabled     = true
@@ -87,7 +87,7 @@ resource "helm_release" "nginx_ingress" {
           maxReplicas = 10
           targetCPUUtilizationPercentage = 70
         }
-        
+
         # Node affinity for better distribution
         affinity = {
           podAntiAffinity = {
@@ -118,7 +118,7 @@ resource "helm_release" "nginx_ingress" {
 # Install cert-manager for automatic SSL certificates
 resource "helm_release" "cert_manager" {
   count = var.enable_cert_manager ? 1 : 0
-  
+
   name       = "cert-manager"
   repository = "https://charts.jetstack.io"
   chart      = "cert-manager"
@@ -144,7 +144,7 @@ resource "helm_release" "cert_manager" {
           memory = "32Mi"
         }
       }
-      
+
       webhook = {
         resources = {
           limits = {
@@ -157,7 +157,7 @@ resource "helm_release" "cert_manager" {
           }
         }
       }
-      
+
       cainjector = {
         resources = {
           limits = {
@@ -170,7 +170,7 @@ resource "helm_release" "cert_manager" {
           }
         }
       }
-      
+
       # Metrics for monitoring
       prometheus = {
         enabled = true
@@ -185,7 +185,7 @@ resource "helm_release" "cert_manager" {
 # ClusterIssuer for Let's Encrypt certificates
 resource "kubernetes_manifest" "letsencrypt_prod" {
   count = var.enable_cert_manager ? 1 : 0
-  
+
   manifest = {
     apiVersion = "cert-manager.io/v1"
     kind       = "ClusterIssuer"
@@ -211,14 +211,14 @@ resource "kubernetes_manifest" "letsencrypt_prod" {
       }
     }
   }
-  
+
   depends_on = [helm_release.cert_manager]
 }
 
 # ClusterIssuer for Let's Encrypt staging (for testing)
 resource "kubernetes_manifest" "letsencrypt_staging" {
   count = var.enable_cert_manager ? 1 : 0
-  
+
   manifest = {
     apiVersion = "cert-manager.io/v1"
     kind       = "ClusterIssuer"
@@ -244,7 +244,7 @@ resource "kubernetes_manifest" "letsencrypt_staging" {
       }
     }
   }
-  
+
   depends_on = [helm_release.cert_manager]
 }
 
@@ -258,11 +258,11 @@ resource "kubernetes_ingress_v1" "econgraph" {
       "nginx.ingress.kubernetes.io/rewrite-target" = "/"
       "nginx.ingress.kubernetes.io/ssl-redirect"   = "true"
       "nginx.ingress.kubernetes.io/force-ssl-redirect" = "true"
-      
+
       # SSL configuration
       "cert-manager.io/cluster-issuer" = var.enable_cert_manager ? "letsencrypt-prod" : ""
       "nginx.ingress.kubernetes.io/ssl-protocols" = "TLSv1.2 TLSv1.3"
-      
+
       # Security headers
       "nginx.ingress.kubernetes.io/configuration-snippet" = <<-EOT
         more_set_headers "X-Frame-Options: SAMEORIGIN";
@@ -271,11 +271,11 @@ resource "kubernetes_ingress_v1" "econgraph" {
         more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
         more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' wss:";
       EOT
-      
+
       # Rate limiting
       "nginx.ingress.kubernetes.io/rate-limit" = "100"
       "nginx.ingress.kubernetes.io/rate-limit-window" = "1m"
-      
+
       # Proxy configuration
       "nginx.ingress.kubernetes.io/proxy-body-size" = "50m"
       "nginx.ingress.kubernetes.io/proxy-read-timeout" = "300"
@@ -331,7 +331,7 @@ resource "kubernetes_ingress_v1" "econgraph" {
       }
     }
   }
-  
+
   depends_on = [helm_release.nginx_ingress]
 }
 
@@ -345,10 +345,10 @@ resource "kubernetes_ingress_v1" "monitoring" {
       "nginx.ingress.kubernetes.io/rewrite-target" = "/"
       "nginx.ingress.kubernetes.io/ssl-redirect"   = "true"
       "nginx.ingress.kubernetes.io/force-ssl-redirect" = "true"
-      
+
       # SSL configuration
       "cert-manager.io/cluster-issuer" = var.enable_cert_manager ? "letsencrypt-prod" : ""
-      
+
       # Authentication (basic auth for additional security)
       "nginx.ingress.kubernetes.io/auth-type" = "basic"
       "nginx.ingress.kubernetes.io/auth-secret" = "monitoring-auth"
@@ -385,7 +385,7 @@ resource "kubernetes_ingress_v1" "monitoring" {
       }
     }
   }
-  
+
   depends_on = [helm_release.nginx_ingress]
 }
 
@@ -400,7 +400,7 @@ resource "kubernetes_secret" "monitoring_auth" {
     # Username: admin, Password: admin123 (change in production!)
     auth = base64encode("admin:$2y$10$2b2cu8Fw7FoTN.oJCjRYEuVGmWBJPJgJoJGwFJJEWKCQKCvZKOqiC")
   }
-  
+
   type = "Opaque"
 }
 

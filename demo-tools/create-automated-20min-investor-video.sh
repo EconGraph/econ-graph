@@ -166,7 +166,7 @@ function createLivePreviewOverlay() {
         border: 2px solid #4CAF50;
         min-width: 250px;
     `;
-    
+
     overlay.innerHTML = `
         <div style="display: flex; align-items: center; margin-bottom: 10px;">
             <div style="width: 12px; height: 12px; background: #ff4444; border-radius: 50%; margin-right: 10px; animation: pulse 2s infinite;"></div>
@@ -175,7 +175,7 @@ function createLivePreviewOverlay() {
         <div id="demo-status">🚀 Initializing automated demo...</div>
         <div id="demo-progress" style="margin-top: 10px; font-size: 12px; opacity: 0.8;">Ready for investor presentation</div>
     `;
-    
+
     // Add pulsing animation
     const style = document.createElement('style');
     style.textContent = `
@@ -187,7 +187,7 @@ function createLivePreviewOverlay() {
     `;
     document.head.appendChild(style);
     document.body.appendChild(overlay);
-    
+
     return overlay;
 }
 
@@ -202,13 +202,13 @@ function updateLiveStatus(status, progress = '') {
 async function typeWithEffect(element, text, speed = 100) {
     element.value = '';
     element.focus();
-    
+
     for (const char of text) {
         element.value += char;
         element.dispatchEvent(new Event('input', { bubbles: true }));
         await delay(speed);
     }
-    
+
     // Flash effect to show completion
     element.style.backgroundColor = '#e3f2fd';
     await delay(500);
@@ -223,7 +223,7 @@ function highlightElement(element, duration = 2000) {
         border: 2px solid #2196F3 !important;
         transition: all 0.3s ease !important;
     `;
-    
+
     setTimeout(() => {
         element.style.cssText = originalStyle;
     }, duration);
@@ -231,22 +231,22 @@ function highlightElement(element, duration = 2000) {
 
 async function automatedDemo() {
     console.log('🎬 Starting ENHANCED 20-minute EconGraph live demo...');
-    
+
     // Create live preview overlay
     const overlay = createLivePreviewOverlay();
-    
+
     // Wait for initial load
     updateLiveStatus('🔄 Loading EconGraph application...', 'Preparing investor demonstration');
     await delay(4000);
-    
+
     updateLiveStatus('📊 Demonstrating search capabilities...', 'Market opportunity: $8.2B financial analytics');
-    
+
     // Enhanced search functionality demonstration
     const searchInput = document.querySelector('input[placeholder*="search"], input[type="search"], .MuiInputBase-input');
     if (searchInput) {
         highlightElement(searchInput, 3000);
         await delay(1000);
-        
+
         const searchTerms = [
             'unemployment rate',
             'gdp growth quarterly',
@@ -255,14 +255,14 @@ async function automatedDemo() {
             'federal funds rate',
             'housing market data'
         ];
-        
+
         for (let i = 0; i < searchTerms.length; i++) {
             const term = searchTerms[i];
             updateLiveStatus(`🔍 Searching: "${term}"`, `Demo progress: ${Math.round((i+1)/searchTerms.length * 20)}% complete`);
-            
+
             await typeWithEffect(searchInput, term, 120);
             await delay(2500);
-            
+
             // Simulate clicking on search results with visual feedback
             const searchResults = document.querySelectorAll('[data-testid*="search-result"], .search-result, .MuiListItem-button');
             if (searchResults.length > 0) {
@@ -272,25 +272,25 @@ async function automatedDemo() {
             }
         }
     }
-    
+
     // Enhanced chart interactions
     updateLiveStatus('📈 Demonstrating data transformations...', 'Professional-grade analytics capabilities');
     await delay(2000);
-    
+
     const transformSelect = document.querySelector('select, .MuiSelect-root, [role="combobox"]');
     if (transformSelect) {
         highlightElement(transformSelect, 3000);
         transformSelect.click();
         await delay(1500);
-        
+
         const options = document.querySelectorAll('option, .MuiMenuItem-root, [role="option"]');
         const transformations = ['Year-over-Year', 'Quarter-over-Quarter', 'Month-over-Month'];
-        
+
         for (let i = 0; i < Math.min(3, options.length); i++) {
-            const option = Array.from(options).find(opt => 
+            const option = Array.from(options).find(opt =>
                 transformations.some(t => opt.textContent.includes(t.split('-')[0]))
             );
-            
+
             if (option) {
                 updateLiveStatus(`🔄 Applying ${transformations[i % transformations.length]} transformation`, 'Real-time data processing');
                 highlightElement(option, 2000);
@@ -300,27 +300,27 @@ async function automatedDemo() {
             }
         }
     }
-    
+
     // Enhanced navigation demonstration
     updateLiveStatus('🧭 Exploring application features...', 'Comprehensive platform demonstration');
-    
+
     const navSections = [
         { name: 'Global Analysis', selector: '[href*="global"], .MuiTab-root' },
         { name: 'Professional Charts', selector: '[href*="professional"], [href*="analysis"]' },
         { name: 'Data Sources', selector: '[href*="sources"], [href*="data"]' },
         { name: 'Series Explorer', selector: '[href*="series"], [href*="explore"]' }
     ];
-    
+
     for (let i = 0; i < navSections.length; i++) {
         const section = navSections[i];
         updateLiveStatus(`🎯 Demonstrating ${section.name}`, `Feature showcase: ${Math.round((i+1)/navSections.length * 60)}% complete`);
-        
+
         const navElement = document.querySelector(section.selector);
         if (navElement) {
             highlightElement(navElement, 3000);
             navElement.click();
             await delay(6000);
-            
+
             // Interact with page-specific elements
             const interactiveElements = document.querySelectorAll('button:not([disabled]), .MuiCard-root, .chart-container');
             if (interactiveElements.length > 0) {
@@ -333,22 +333,22 @@ async function automatedDemo() {
             }
         }
     }
-    
+
     // Enhanced chart interaction demonstration
     updateLiveStatus('🔍 Interactive chart analysis...', 'Enterprise-grade visualization tools');
-    
+
     const charts = document.querySelectorAll('canvas, [data-testid*="chart"], .chart-container');
     for (const chart of charts) {
         if (chart.offsetWidth > 0) {
             highlightElement(chart, 4000);
-            
+
             const rect = chart.getBoundingClientRect();
             const points = [
                 { x: rect.left + rect.width * 0.3, y: rect.top + rect.height * 0.5 },
                 { x: rect.left + rect.width * 0.7, y: rect.top + rect.height * 0.3 },
                 { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.7 }
             ];
-            
+
             for (const point of points) {
                 chart.dispatchEvent(new MouseEvent('mousemove', {
                     clientX: point.x,
@@ -356,7 +356,7 @@ async function automatedDemo() {
                     bubbles: true
                 }));
                 await delay(1500);
-                
+
                 chart.dispatchEvent(new MouseEvent('click', {
                     clientX: point.x,
                     clientY: point.y,
@@ -367,28 +367,28 @@ async function automatedDemo() {
             break;
         }
     }
-    
+
     // Return to dashboard with final message
     updateLiveStatus('🏠 Returning to dashboard...', 'Demo completing - Investment opportunity ready');
-    
+
     const homeLink = document.querySelector('a[href="/"], a[href="#/"], [data-testid="home"], [data-testid="dashboard"]');
     if (homeLink) {
         highlightElement(homeLink, 2000);
         homeLink.click();
         await delay(4000);
     }
-    
+
     // Final live preview message
     updateLiveStatus('✅ Live demo completed!', 'Ready for investor questions');
-    
+
     // Keep overlay visible for final moments
     await delay(10000);
-    
+
     // Fade out overlay
     overlay.style.transition = 'opacity 2s ease';
     overlay.style.opacity = '0';
     setTimeout(() => overlay.remove(), 2000);
-    
+
     console.log('✅ Enhanced automated demo sequence completed with live preview!');
 }
 
@@ -422,7 +422,7 @@ cargo run --release &
 BACKEND_PID=$!
 sleep 10
 
-# Start frontend  
+# Start frontend
 echo "🌐 Starting React frontend..."
 cd ../frontend
 npm start &
@@ -443,12 +443,12 @@ tell application "Google Chrome"
     activate
     open location "http://localhost:3000"
     delay 5
-    
+
     -- Position browser window for optimal recording
     tell front window
         set bounds to {100, 100, 1400, 900}
     end tell
-    
+
     -- Inject automation script
     tell active tab of front window
         execute javascript "
@@ -466,13 +466,13 @@ osascript << 'APPLESCRIPT'
 tell application "QuickTime Player"
     activate
     delay 2
-    
+
     -- Create new screen recording
     tell application "System Events"
         tell process "QuickTime Player"
             click menu item "New Screen Recording" of menu "File" of menu bar 1
             delay 3
-            
+
             -- Click the record button (you'll need to manually select the area)
             -- The recording interface will appear
         end tell
@@ -515,7 +515,7 @@ show_progress() {
     local duration=$1
     local message=$2
     echo "🎯 $message"
-    
+
     for ((i=1; i<=duration; i++)); do
         printf "\r⏱️  Progress: [%-50s] %d/%d minutes" \
                $(printf "%*s" $((i*50/duration)) "" | tr ' ' '█') \

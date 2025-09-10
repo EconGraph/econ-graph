@@ -50,24 +50,24 @@ ffmpeg -i "$VIDEO_FILE" -i "$AUDIO_FILE" \
 
 if [ $? -eq 0 ]; then
     echo "✅ Real Working Demo Video Created Successfully!"
-    
+
     # Get final file size and duration
     FINAL_SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
     FINAL_DURATION=$(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$OUTPUT_FILE")
     FINAL_DURATION_MIN=$(echo "scale=1; $FINAL_DURATION / 60" | bc -l)
-    
+
     echo "📁 Output file: $OUTPUT_FILE"
     echo "💾 File size: $FINAL_SIZE"
     echo "⏱️ Duration: ${FINAL_DURATION_MIN} minutes"
     echo "🎬 Resolution: 1920x1080 HD"
     echo "🎤 Audio: 192kbps AAC with ultra-comprehensive narration"
     echo "📊 Video: H.264 with REAL working demo content"
-    
+
     echo ""
     echo "🏆 REAL WORKING DEMO COMPLETE!"
     echo "🎯 This video now has ACTUAL EconGraph interface content!"
     echo "📺 Ready to upload to GitHub and showcase real features!"
-    
+
 else
     echo "❌ Error creating real working demo video"
     exit 1

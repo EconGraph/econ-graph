@@ -32,36 +32,36 @@ osascript << 'EOF'
 tell application "Google Chrome"
     activate
     delay 1
-    
+
     -- Open the application
     if (count of windows) = 0 then
         make new window
     end if
-    
+
     set URL of active tab of front window to "http://localhost:3000"
     delay 3
-    
+
     -- Position and size the window for optimal recording
     tell front window
         set bounds to {100, 100, 1500, 900}  -- x, y, width, height
     end tell
-    
+
     delay 2
-    
+
     -- Add recording indicator
     tell active tab of front window
         execute javascript "
             // Remove any existing indicators
             const existing = document.querySelectorAll('.demo-indicator');
             existing.forEach(el => el.remove());
-            
+
             // Create professional recording indicator
             const indicator = document.createElement('div');
             indicator.className = 'demo-indicator';
             indicator.style.cssText = 'position: fixed; top: 10px; right: 10px; background: #ff4444; color: white; padding: 8px 16px; border-radius: 4px; font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto; font-size: 14px; font-weight: 500; z-index: 10000; box-shadow: 0 2px 8px rgba(0,0,0,0.2);';
             indicator.textContent = '🔴 RECORDING';
             document.body.appendChild(indicator);
-            
+
             // Add professional title
             const title = document.createElement('div');
             title.className = 'demo-indicator';
@@ -80,28 +80,28 @@ cat > /tmp/chrome_interaction.scpt << 'EOF'
 tell application "Google Chrome"
     activate
     delay 3
-    
+
     tell active tab of front window
         -- Scroll to show different parts of the application
         execute javascript "window.scrollTo({top: 0, behavior: 'smooth'});"
     end tell
     delay 2
-    
+
     tell active tab of front window
         execute javascript "window.scrollTo({top: 300, behavior: 'smooth'});"
     end tell
     delay 3
-    
+
     tell active tab of front window
         execute javascript "window.scrollTo({top: 600, behavior: 'smooth'});"
     end tell
     delay 3
-    
+
     tell active tab of front window
         execute javascript "window.scrollTo({top: 0, behavior: 'smooth'});"
     end tell
     delay 2
-    
+
     -- Try to interact with navigation
     tell active tab of front window
         execute javascript "
@@ -112,7 +112,7 @@ tell application "Google Chrome"
         "
     end tell
     delay 4
-    
+
     -- Search interaction
     tell active tab of front window
         execute javascript "
@@ -135,14 +135,14 @@ tell application "Google Chrome"
         "
     end tell
     delay 6
-    
+
     -- Navigate through sections
     tell active tab of front window
         execute javascript "
             const clickableElements = document.querySelectorAll('a[href], .MuiTab-root, button, .MuiCard-root, .MuiListItem-root');
             let clickCount = 0;
             const maxClicks = 3;
-            
+
             const clickNext = () => {
                 if (clickCount < maxClicks && clickCount < clickableElements.length) {
                     const element = clickableElements[clickCount];
@@ -153,12 +153,12 @@ tell application "Google Chrome"
                     }
                 }
             };
-            
+
             setTimeout(clickNext, 1000);
         "
     end tell
     delay 15
-    
+
     -- Final success message
     tell active tab of front window
         execute javascript "

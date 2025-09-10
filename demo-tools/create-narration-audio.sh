@@ -42,19 +42,19 @@ declare -a SEGMENTS=(
 for i in "${!SEGMENTS[@]}"; do
     segment_num=$(printf "%02d" $((i + 1)))
     output_file="demo-videos/audio-segments/segment_${segment_num}.aiff"
-    
+
     echo "  🎙️  Generating segment ${segment_num}/19..."
-    
+
     # Use macOS 'say' command to generate high-quality speech
     say -v "$VOICE" -r "$RATE" -o "$output_file" "${SEGMENTS[$i]}"
-    
+
     # Convert to high-quality MP3 for better compression
     mp3_file="demo-videos/audio-segments/segment_${segment_num}.mp3"
     ffmpeg -i "$output_file" -codec:a libmp3lame -b:a 192k "$mp3_file" -y >/dev/null 2>&1
-    
+
     # Remove the AIFF file to save space
     rm "$output_file"
-    
+
     echo "    ✅ Created: $mp3_file"
 done
 

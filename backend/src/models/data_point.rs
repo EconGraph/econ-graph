@@ -61,7 +61,7 @@ pub struct DataPoint {
 
     /// The observation date for this data point
     /// For monthly data: typically the last day of the month
-    /// For quarterly data: typically the last day of the quarter  
+    /// For quarterly data: typically the last day of the quarter
     /// For annual data: typically December 31st of the year
     pub date: NaiveDate,
 
@@ -298,7 +298,7 @@ pub struct DataQueryParams {
     /// Inclusive bound - data points on or after this date are included
     pub start_date: Option<NaiveDate>,
 
-    /// Optional end date for filtering observations  
+    /// Optional end date for filtering observations
     /// Inclusive bound - data points on or before this date are included
     pub end_date: Option<NaiveDate>,
 

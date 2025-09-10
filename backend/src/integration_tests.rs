@@ -90,7 +90,7 @@ mod tests {
         }
 
         let relationship_count: i64 = diesel::sql_query(
-            "SELECT COUNT(*) as count FROM economic_series es 
+            "SELECT COUNT(*) as count FROM economic_series es
              INNER JOIN data_sources ds ON es.source_id = ds.id
              INNER JOIN data_points dp ON dp.series_id = es.id
              WHERE ds.name = 'Test Integration Source'",

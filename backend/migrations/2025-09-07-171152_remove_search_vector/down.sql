@@ -6,7 +6,7 @@ ALTER TABLE economic_series ADD COLUMN search_vector tsvector;
 CREATE OR REPLACE FUNCTION update_data_source_search_vector()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.search_vector := 
+    NEW.search_vector :=
         setweight(to_tsvector('economic_search', COALESCE(NEW.name, '')), 'A') ||
         setweight(to_tsvector('economic_search', COALESCE(NEW.description, '')), 'B');
     RETURN NEW;
@@ -16,7 +16,7 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION update_economic_series_search_vector()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.search_vector := 
+    NEW.search_vector :=
         setweight(to_tsvector('economic_search', COALESCE(NEW.title, '')), 'A') ||
         setweight(to_tsvector('economic_search', COALESCE(NEW.description, '')), 'B') ||
         setweight(to_tsvector('economic_search', COALESCE(NEW.external_id, '')), 'C') ||

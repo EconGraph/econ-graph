@@ -18,6 +18,7 @@ This directory contains all the necessary files to deploy EconGraph to a local K
 ```
 
 This script will:
+
 1. Create a local Kubernetes cluster using Terraform
 2. Build Docker images for frontend and backend
 3. Deploy the application to the cluster
@@ -25,7 +26,7 @@ This script will:
 
 ## 📁 Directory Structure
 
-```
+```text
 k8s/
 ├── manifests/           # Kubernetes deployment manifests
 │   ├── namespace.yaml   # Namespace definition
@@ -77,24 +78,27 @@ terraform apply
 
 After deployment, the application will be available at:
 
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:8080
-- **GraphQL**: http://localhost:8080/graphql
-- **Health Check**: http://localhost:8080/health
+- **Frontend**: <http://localhost:3000>
+- **Backend API**: <http://localhost:8080>
+- **GraphQL**: <http://localhost:8080/graphql>
+- **Health Check**: <http://localhost:8080/health>
 
 ## 📊 Monitoring
 
 ### View Pods
+
 ```bash
 kubectl get pods -n econ-graph
 ```
 
 ### View Services
+
 ```bash
 kubectl get services -n econ-graph
 ```
 
 ### View Logs
+
 ```bash
 # Backend logs
 kubectl logs -f deployment/econ-graph-backend -n econ-graph
@@ -104,6 +108,7 @@ kubectl logs -f deployment/econ-graph-frontend -n econ-graph
 ```
 
 ### Scale Deployments
+
 ```bash
 # Scale backend to 3 replicas
 kubectl scale deployment econ-graph-backend --replicas=3 -n econ-graph
@@ -137,11 +142,13 @@ echo -n "your-secret" | base64
 ## 🗑️ Cleanup
 
 ### Remove Application Only
+
 ```bash
 ./scripts/deploy/teardown.sh
 ```
 
 ### Remove Entire Cluster
+
 ```bash
 kind delete cluster --name econ-graph
 ```
@@ -157,6 +164,7 @@ kind delete cluster --name econ-graph
 3. **Pods not starting**: Check logs with `kubectl logs <pod-name> -n econ-graph`
 
 4. **Ingress not working**: Verify NGINX ingress controller is running:
+
    ```bash
    kubectl get pods -n ingress-nginx
    ```
@@ -196,6 +204,7 @@ resources:
 ### Scaling
 
 For production use, consider:
+
 - Horizontal Pod Autoscaler (HPA)
 - Vertical Pod Autoscaler (VPA)
 - Cluster Autoscaler

@@ -95,7 +95,7 @@ ffmpeg -i "$RECORDED_VIDEO" -i "demo-videos/complete_global_narration.mp3" \
 
 if [ $? -eq 0 ]; then
     echo "✅ Demo video created: $OUTPUT_VIDEO"
-    
+
     # Clean up temporary video
     rm -f "$RECORDED_VIDEO"
 else
@@ -138,7 +138,7 @@ if [ -f "$OUTPUT_VIDEO" ]; then
     echo ""
     echo "📊 Final Demo File Information:"
     ls -lh "$OUTPUT_VIDEO"
-    
+
     # Get video duration
     duration=$(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$OUTPUT_VIDEO" 2>/dev/null)
     if [ ! -z "$duration" ]; then

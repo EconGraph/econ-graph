@@ -19,7 +19,7 @@ jobs:
   test-before-release:
     name: Run Full Test Suite
     runs-on: ubuntu-latest
-    
+
     services:
       postgres:
         image: postgres:15
@@ -158,7 +158,7 @@ jobs:
       run: |
         # Get the previous tag
         PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-        
+
         # Generate changelog
         if [ -n "$PREVIOUS_TAG" ]; then
           echo "## Changes since $PREVIOUS_TAG" > CHANGELOG.md
@@ -167,7 +167,7 @@ jobs:
           echo "## Initial Release" > CHANGELOG.md
           echo "- Initial release of EconGraph" >> CHANGELOG.md
         fi
-        
+
         # Set output for use in release
         echo "changelog<<EOF" >> $GITHUB_OUTPUT
         cat CHANGELOG.md >> $GITHUB_OUTPUT

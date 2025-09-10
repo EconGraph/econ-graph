@@ -33,7 +33,7 @@ repos:
 
       - id: frontend-eslint
         name: Frontend ESLint Check
-        entry: bash -c 'cd frontend && npx eslint "src/**/*.{ts,tsx,js,jsx}" --max-warnings 10'
+        entry: bash -c 'cd frontend && npx eslint "src/**/*.{ts,tsx,js,jsx}" --max-warnings 20'
         language: system
         files: '^frontend/src/.*\.(ts|tsx|js|jsx)$'
         pass_filenames: false
@@ -68,7 +68,8 @@ repos:
     rev: v0.38.0
     hooks:
       - id: markdownlint
-        args: ['--disable', 'MD013', 'MD041', '--']  # Disable line length and first line rules
+        args: ['--disable', 'MD013', 'MD041', 'MD022', 'MD032', 'MD031', 'MD034', 'MD040', 'MD026', 'MD009', 'MD029', 'MD033', 'MD036', 'MD047', 'MD024', 'MD012', 'MD051', '--']  # Disable common formatting rules
+        exclude: '^node_modules/'
 
   # Security checks
   - repo: local

@@ -61,7 +61,7 @@ impl SearchService {
         })?;
 
         let results = diesel::sql_query(
-            "SELECT es.id, es.title, es.description, es.external_id, es.source_id, es.frequency, 
+            "SELECT es.id, es.title, es.description, es.external_id, es.source_id, es.frequency,
                     es.units, es.start_date, es.end_date, es.last_updated, es.is_active,
                     CASE WHEN es.title ILIKE '%' || $1 || '%' THEN 1.0 ELSE 0.5 END as rank,
                     CASE WHEN es.title ILIKE '%' || $1 || '%' THEN 1.0 ELSE 0.5 END as similarity_score

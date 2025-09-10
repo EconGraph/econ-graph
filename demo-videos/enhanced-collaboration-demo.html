@@ -6,8 +6,8 @@
     <title>EconGraph - Enhanced Collaboration Demo</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
@@ -130,7 +130,7 @@
             transform: scale(1.5);
             box-shadow: 0 0 20px rgba(231, 76, 60, 0.6);
         }
-        
+
         /* COVID-19 Vertical Line Annotation */
         .covid-annotation {
             position: absolute;
@@ -142,7 +142,7 @@
             z-index: 10;
             animation: fadeInAnnotation 3s ease-in-out 4s both;
         }
-        
+
         .covid-label {
             position: absolute;
             left: 37%;
@@ -157,7 +157,7 @@
             animation: fadeInAnnotation 3s ease-in-out 4.5s both;
             box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
         }
-        
+
         @keyframes fadeInAnnotation {
             from { opacity: 0; transform: translateY(-10px); }
             to { opacity: 1; transform: translateY(0); }
@@ -178,12 +178,12 @@
             border: 1px solid rgba(255,255,255,0.3);
             animation: slideInRight 1s ease-out 1s both;
         }
-        
+
         @keyframes slideInRight {
             from { transform: translateX(100%); opacity: 0; }
             to { transform: translateX(0); opacity: 1; }
         }
-        
+
         .collaboration-header {
             display: flex;
             align-items: center;
@@ -191,14 +191,14 @@
             padding-bottom: 15px;
             border-bottom: 2px solid #f0f0f0;
         }
-        
+
         .collaboration-header h3 {
             margin: 0;
             color: #2c3e50;
             font-size: 18px;
             flex-grow: 1;
         }
-        
+
         .online-indicator {
             background: #4caf50;
             color: white;
@@ -207,18 +207,18 @@
             font-size: 12px;
             font-weight: bold;
         }
-        
+
         .collaborators-section {
             margin-bottom: 20px;
         }
-        
+
         .collaborators-title {
             font-size: 14px;
             font-weight: bold;
             color: #2c3e50;
             margin-bottom: 12px;
         }
-        
+
         .collaborator-item {
             display: flex;
             align-items: center;
@@ -228,12 +228,12 @@
             border-radius: 8px;
             transition: all 0.3s ease;
         }
-        
+
         .collaborator-item:hover {
             background: rgba(52, 152, 219, 0.1);
             transform: translateX(5px);
         }
-        
+
         /* Green dots for online status */
         .online-dot {
             width: 12px;
@@ -245,7 +245,7 @@
             animation: pulse 2s infinite;
             border: 2px solid white;
         }
-        
+
         .offline-dot {
             width: 12px;
             height: 12px;
@@ -254,35 +254,35 @@
             margin-right: 10px;
             border: 2px solid white;
         }
-        
+
         @keyframes pulse {
             0% { box-shadow: 0 0 8px rgba(76, 175, 80, 0.6); }
             50% { box-shadow: 0 0 15px rgba(76, 175, 80, 0.8); }
             100% { box-shadow: 0 0 8px rgba(76, 175, 80, 0.6); }
         }
-        
+
         .collaborator-info {
             flex-grow: 1;
         }
-        
+
         .collaborator-name {
             font-size: 14px;
             font-weight: 600;
             color: #2c3e50;
             margin-bottom: 2px;
         }
-        
+
         .collaborator-role {
             font-size: 12px;
             color: #7f8c8d;
             text-transform: capitalize;
         }
-        
+
         .annotations-section {
             border-top: 1px solid #eee;
             padding-top: 20px;
         }
-        
+
         .annotations-title {
             font-size: 16px;
             font-weight: bold;
@@ -291,7 +291,7 @@
             display: flex;
             align-items: center;
         }
-        
+
         .annotation-item {
             background: #f8f9fa;
             padding: 12px;
@@ -300,31 +300,31 @@
             border-left: 4px solid #3498db;
             transition: all 0.3s ease;
         }
-        
+
         .annotation-item:hover {
             background: #e3f2fd;
             transform: translateX(5px);
         }
-        
+
         .annotation-title {
             font-weight: bold;
             font-size: 13px;
             color: #2c3e50;
             margin-bottom: 4px;
         }
-        
+
         .annotation-meta {
             font-size: 11px;
             color: #7f8c8d;
             margin-bottom: 6px;
         }
-        
+
         .annotation-description {
             font-size: 12px;
             color: #34495e;
             line-height: 1.4;
         }
-        
+
         .add-comment-btn {
             width: 100%;
             padding: 12px;
@@ -338,7 +338,7 @@
             margin-top: 15px;
             transition: all 0.3s ease;
         }
-        
+
         .add-comment-btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
@@ -376,14 +376,14 @@
         <h1>🏛️ EconGraph - Collaboration Platform</h1>
         <p>Professional-grade economic time series analysis with real-time team collaboration</p>
     </div>
-    
+
     <div class="container">
         <div class="search-section">
             <h2 style="margin-bottom: 20px; color: #2c3e50;">🔍 Search Economic Data</h2>
             <input type="text" class="search-input" id="searchInput" placeholder="Search for economic indicators (e.g., Real GDP, Unemployment Rate, CPI)" value="Real GDP">
             <button class="search-button" onclick="performSearch()">Search Economic Data</button>
         </div>
-        
+
         <div class="chart-section" id="chartSection">
             <h2 style="margin-bottom: 20px; color: #2c3e50;">📈 Real Gross Domestic Product - Collaborative Chart Analysis</h2>
             <div class="chart-container" id="chartContainer">
@@ -420,10 +420,10 @@
             <h3>🤝 Live Collaboration</h3>
             <div class="online-indicator">4 Online</div>
         </div>
-        
+
         <div class="collaborators-section">
             <div class="collaborators-title">Active Team Members</div>
-            
+
             <div class="collaborator-item">
                 <div class="online-dot"></div>
                 <div class="collaborator-info">
@@ -431,7 +431,7 @@
                     <div class="collaborator-role">Senior Economist</div>
                 </div>
             </div>
-            
+
             <div class="collaborator-item">
                 <div class="online-dot"></div>
                 <div class="collaborator-info">
@@ -439,7 +439,7 @@
                     <div class="collaborator-role">Data Analyst</div>
                 </div>
             </div>
-            
+
             <div class="collaborator-item">
                 <div class="online-dot"></div>
                 <div class="collaborator-info">
@@ -447,7 +447,7 @@
                     <div class="collaborator-role">Research Director</div>
                 </div>
             </div>
-            
+
             <div class="collaborator-item">
                 <div class="offline-dot"></div>
                 <div class="collaborator-info">
@@ -456,28 +456,28 @@
                 </div>
             </div>
         </div>
-        
+
         <div class="annotations-section">
             <div class="annotations-title">📝 Recent Annotations</div>
-            
+
             <div class="annotation-item">
                 <div class="annotation-title">COVID-19 Economic Impact</div>
                 <div class="annotation-meta">Sarah Chen • 3 min ago • March 2020</div>
                 <div class="annotation-description">Major economic disruption period with unprecedented policy responses and market volatility.</div>
             </div>
-            
+
             <div class="annotation-item">
                 <div class="annotation-title">Federal Reserve Response</div>
                 <div class="annotation-meta">Dr. Emily Watson • 8 min ago</div>
                 <div class="annotation-description">Emergency monetary policy measures including zero interest rates and quantitative easing programs.</div>
             </div>
-            
+
             <div class="annotation-item">
                 <div class="annotation-title">Recovery Phase Analysis</div>
                 <div class="annotation-meta">Michael Rodriguez • 15 min ago</div>
                 <div class="annotation-description">Economic recovery patterns and labor market adjustments following the initial shock period.</div>
             </div>
-            
+
             <button class="add-comment-btn">💬 Add New Comment</button>
         </div>
     </div>
@@ -486,18 +486,18 @@
         // Enhanced collaboration demo features
         document.addEventListener('DOMContentLoaded', function() {
             console.log('🤝 Starting enhanced collaboration demo...');
-            
+
             // Auto-start the demo
             setTimeout(() => {
                 performSearch();
                 createChartPoints();
             }, 2000);
-            
+
             // Simulate real-time collaboration activity
             let activityCounter = 0;
             setInterval(() => {
                 activityCounter++;
-                
+
                 // Pulse online indicators every 10 seconds
                 if (activityCounter % 20 === 0) {
                     const onlineDots = document.querySelectorAll('.online-dot');
@@ -510,7 +510,7 @@
                         }, index * 200);
                     });
                 }
-                
+
                 // Add new annotation every 30 seconds
                 if (activityCounter % 60 === 0) {
                     addNewAnnotation();
@@ -522,25 +522,25 @@
             console.log('🔍 Performing collaborative search...');
             const chartSection = document.getElementById('chartSection');
             chartSection.style.display = 'block';
-            
+
             // Smooth scroll to chart
             chartSection.scrollIntoView({ behavior: 'smooth' });
         }
 
         function createChartPoints() {
             const chartPoints = document.getElementById('chartPoints');
-            
+
             // Generate realistic GDP data points
             const dataPoints = [];
             const baseValue = 20000; // $20T base GDP
-            
+
             for (let i = 0; i < 20; i++) {
                 const date = new Date(2020, 0, 1);
                 date.setMonth(date.getMonth() + i * 3); // Quarterly data
-                
+
                 const growth = 1 + (i * 0.015) + (Math.sin(i * 0.5) * 0.02); // Realistic growth with volatility
                 const value = Math.round(baseValue * growth);
-                
+
                 dataPoints.push({
                     date: date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }),
                     value: value,
@@ -548,18 +548,18 @@
                     y: 30 + (Math.random() * 40) // Vary height
                 });
             }
-            
+
             dataPoints.forEach((point, index) => {
                 setTimeout(() => {
                     const chartPoint = document.createElement('div');
                     chartPoint.className = 'chart-point';
                     chartPoint.style.left = point.x + '%';
                     chartPoint.style.top = point.y + '%';
-                    
+
                     chartPoint.addEventListener('click', () => {
                         alert(`Collaborative Analysis for ${point.date}:\n\nGDP: $${point.value.toLocaleString()}B\nGrowth Rate: +2.1% QoQ\nTeam Comments: 3 active discussions\n\nData Source: Federal Reserve Economic Data (FRED)\nCollaborators: Sarah Chen, Dr. Emily Watson`);
                     });
-                    
+
                     chartPoints.appendChild(chartPoint);
                 }, index * 100);
             });
@@ -570,7 +570,7 @@
             const newAnnotation = document.createElement('div');
             newAnnotation.className = 'annotation-item';
             newAnnotation.style.animation = 'fadeIn 0.5s ease-in-out';
-            
+
             const annotations = [
                 {
                     title: 'Labor Market Trends',
@@ -585,21 +585,21 @@
                     description: 'CPI trends showing moderate inflation pressures within target ranges.'
                 }
             ];
-            
+
             const randomAnnotation = annotations[Math.floor(Math.random() * annotations.length)];
-            
+
             newAnnotation.innerHTML = `
                 <div class="annotation-title">${randomAnnotation.title}</div>
                 <div class="annotation-meta">${randomAnnotation.author} • ${randomAnnotation.time}</div>
                 <div class="annotation-description">${randomAnnotation.description}</div>
             `;
-            
+
             // Insert at the top of annotations
             const firstAnnotation = annotationsSection.querySelector('.annotation-item');
             if (firstAnnotation) {
                 annotationsSection.insertBefore(newAnnotation, firstAnnotation);
             }
-            
+
             // Remove old annotations to keep the list manageable
             const allAnnotations = annotationsSection.querySelectorAll('.annotation-item');
             if (allAnnotations.length > 4) {

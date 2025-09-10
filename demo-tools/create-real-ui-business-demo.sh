@@ -68,7 +68,7 @@ cat > temp_business_demo_script.md << 'EOF'
 ### [0-15 seconds] **Opening & Value Proposition**
 **SAY:** "This is EconGraph - a working economic data visualization prototype. What you're seeing is the actual React application running locally, not a mockup or slideshow."
 
-**DO:** 
+**DO:**
 - Show the main dashboard loading
 - Point out the professional Material-UI interface
 - Highlight the navigation menu

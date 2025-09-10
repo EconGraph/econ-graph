@@ -14,7 +14,7 @@ CREATE TABLE economic_series (
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    
+
     -- Ensure unique external_id per source
     UNIQUE(source_id, external_id)
 );
@@ -29,7 +29,7 @@ CREATE INDEX idx_economic_series_is_active ON economic_series(is_active);
 CREATE INDEX idx_economic_series_last_updated ON economic_series(last_updated);
 
 -- Create updated_at trigger
-CREATE TRIGGER update_economic_series_updated_at 
-    BEFORE UPDATE ON economic_series 
-    FOR EACH ROW 
+CREATE TRIGGER update_economic_series_updated_at
+    BEFORE UPDATE ON economic_series
+    FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();

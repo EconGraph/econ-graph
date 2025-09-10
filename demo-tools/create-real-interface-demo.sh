@@ -38,7 +38,7 @@ const path = require('path');
 
 async function captureInterface() {
     console.log('🚀 Launching browser for REAL interface capture...');
-    
+
     const browser = await puppeteer.launch({
         headless: false,
         defaultViewport: null,
@@ -52,23 +52,23 @@ async function captureInterface() {
             '--allow-file-access-from-files'
         ]
     });
-    
+
     const page = await browser.newPage();
-    
+
     // Set viewport for professional presentation
     await page.setViewport({
         width: 1920,
         height: 1080,
         deviceScaleFactor: 1
     });
-    
+
     // Load the actual demo HTML file
     const demoPath = path.resolve(process.argv[2]);
     const fileUrl = `file://${demoPath}`;
-    
+
     console.log(`📄 Loading REAL interface: ${fileUrl}`);
     await page.goto(fileUrl, { waitUntil: 'networkidle0' });
-    
+
     // Hide ALL cursors completely
     await page.addStyleTag({
         content: `
@@ -83,7 +83,7 @@ async function captureInterface() {
             }
         `
     });
-    
+
     // Add some dynamic interactions to show the interface is live
     await page.evaluate(() => {
         // Add subtle animations to show the interface is interactive
@@ -101,10 +101,10 @@ async function captureInterface() {
         `;
         document.head.appendChild(style);
     });
-    
+
     const duration = parseFloat(process.argv[3] || 60) * 1000;
     console.log(`⏱️ Recording interface for ${duration/1000} seconds...`);
-    
+
     // Create a sequence of interactions to show the interface is real
     const interactionInterval = setInterval(async () => {
         try {
@@ -115,7 +115,7 @@ async function captureInterface() {
                 await randomCountry.click();
                 await page.waitForTimeout(1000);
             }
-            
+
             // Update data values to show real-time nature
             await page.evaluate(() => {
                 const dataElements = document.querySelectorAll('.data-value, .metric-value');
@@ -132,25 +132,25 @@ async function captureInterface() {
                     }
                 });
             });
-            
+
         } catch (error) {
             console.log('Interaction error (normal):', error.message);
         }
     }, 3000);
-    
+
     // Keep the page open for the full duration
     await new Promise(resolve => setTimeout(resolve, duration));
-    
+
     clearInterval(interactionInterval);
-    
+
     console.log('✅ Interface capture completed - browser will stay open for manual recording');
     console.log('📹 NOW START YOUR SCREEN RECORDING SOFTWARE');
     console.log('🎯 Record this browser window for the full narration duration');
-    
+
     // Keep browser open for manual recording
     console.log('⏳ Keeping browser open for 60 more seconds for manual recording...');
     await new Promise(resolve => setTimeout(resolve, 60000));
-    
+
     await browser.close();
 }
 

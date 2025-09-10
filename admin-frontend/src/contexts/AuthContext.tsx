@@ -40,7 +40,7 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
   switch (action.type) {
     case 'LOGIN_START':
       return { ...state, loading: true };
-    
+
     case 'LOGIN_SUCCESS':
       return {
         ...state,
@@ -49,7 +49,7 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         loading: false,
         sessionWarning: false,
       };
-    
+
     case 'LOGIN_FAILURE':
       return {
         ...state,
@@ -57,26 +57,26 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         isAuthenticated: false,
         loading: false,
       };
-    
+
     case 'LOGOUT':
       return {
         ...initialState,
         loading: false,
       };
-    
+
     case 'SESSION_WARNING':
       return {
         ...state,
         sessionWarning: action.payload,
       };
-    
+
     case 'REFRESH_TOKEN':
       return {
         ...state,
         user: action.payload,
         sessionWarning: false,
       };
-    
+
     default:
       return state;
   }
@@ -134,16 +134,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const sessionExpiry = new Date(user.sessionExpiry).getTime();
     const now = Date.now();
     const timeToExpiry = sessionExpiry - now;
-    
+
     // Warn 5 minutes before expiry
     const warningTime = timeToExpiry - (5 * 60 * 1000);
-    
+
     if (warningTime > 0) {
       setTimeout(() => {
         dispatch({ type: 'SESSION_WARNING', payload: true });
       }, warningTime);
     }
-    
+
     // Auto-logout at expiry
     if (timeToExpiry > 0) {
       setTimeout(() => {
@@ -154,7 +154,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (username: string, password: string, mfaCode?: string) => {
     dispatch({ type: 'LOGIN_START' });
-    
+
     try {
       // REQUIREMENT: Secure admin authentication with MFA support
       const response = await fetch('/api/admin/auth/login', {
@@ -180,20 +180,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const { user, token } = await response.json();
-      
+
       // Store token securely
       localStorage.setItem('admin_token', token);
-      
+
       // Log successful login
       console.log('🔒 Admin login successful', {
         user: user.username,
         role: user.role,
         timestamp: new Date().toISOString(),
       });
-      
+
       dispatch({ type: 'LOGIN_SUCCESS', payload: user });
       startSessionMonitoring(user);
-      
+
     } catch (error) {
       console.error('🚨 Admin login failed:', error);
       dispatch({ type: 'LOGIN_FAILURE' });
@@ -204,7 +204,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = () => {
     // REQUIREMENT: Secure logout with session cleanup
     const token = localStorage.getItem('admin_token');
-    
+
     if (token) {
       // Notify backend of logout
       fetch('/api/admin/auth/logout', {
@@ -214,15 +214,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         },
       }).catch(console.error);
     }
-    
+
     // Clear local storage
     localStorage.removeItem('admin_token');
-    
+
     // Log logout
     console.log('🔒 Admin logout', {
       timestamp: new Date().toISOString(),
     });
-    
+
     dispatch({ type: 'LOGOUT' });
   };
 
@@ -246,10 +246,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const { user, token: newToken } = await response.json();
       localStorage.setItem('admin_token', newToken);
-      
+
       dispatch({ type: 'REFRESH_TOKEN', payload: user });
       startSessionMonitoring(user);
-      
+
     } catch (error) {
       console.error('Session refresh failed:', error);
       logout();
@@ -277,7 +277,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { user } = await response.json();
       dispatch({ type: 'REFRESH_TOKEN', payload: user });
       startSessionMonitoring(user);
-      
+
     } catch (error) {
       console.error('Session extension failed:', error);
       throw error;

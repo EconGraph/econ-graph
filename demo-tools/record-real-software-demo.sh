@@ -37,14 +37,14 @@ cat > /tmp/demo_interaction.scpt << 'EOF'
 tell application "Google Chrome"
     activate
     delay 2
-    
+
     -- Maximize window
     tell front window
         set bounds to {0, 0, 1920, 1080}
     end tell
-    
+
     delay 2
-    
+
     -- Simulate some interactions with JavaScript
     tell active tab of front window
         -- Add a visual indicator that this is being recorded
@@ -54,13 +54,13 @@ tell application "Google Chrome"
             indicator.style.cssText = 'position: fixed; top: 20px; left: 20px; background: #ff0000; color: white; padding: 10px 20px; border-radius: 5px; font-family: Arial; font-size: 16px; font-weight: bold; z-index: 10000; box-shadow: 0 2px 10px rgba(0,0,0,0.3);';
             indicator.textContent = '🔴 LIVE DEMO RECORDING';
             document.body.appendChild(indicator);
-            
+
             // Add title overlay
             const title = document.createElement('div');
             title.style.cssText = 'position: fixed; top: 80px; left: 20px; background: rgba(0,0,0,0.8); color: white; padding: 15px 25px; border-radius: 10px; font-family: Arial; font-size: 24px; font-weight: bold; z-index: 10000;';
             title.textContent = 'EconGraph - Economic Data Visualization Platform';
             document.body.appendChild(title);
-            
+
             // Add subtitle
             const subtitle = document.createElement('div');
             subtitle.style.cssText = 'position: fixed; top: 140px; left: 20px; background: rgba(25,118,210,0.9); color: white; padding: 10px 20px; border-radius: 5px; font-family: Arial; font-size: 16px; z-index: 10000;';
@@ -68,25 +68,25 @@ tell application "Google Chrome"
             document.body.appendChild(subtitle);
         "
     end tell
-    
+
     delay 5
-    
+
     -- Scroll and interact with the page
     tell active tab of front window
         execute javascript "window.scrollTo(0, 300);"
     end tell
     delay 3
-    
+
     tell active tab of front window
         execute javascript "window.scrollTo(0, 600);"
     end tell
     delay 3
-    
+
     tell active tab of front window
         execute javascript "window.scrollTo(0, 0);"
     end tell
     delay 2
-    
+
     -- Try to click on navigation elements
     tell active tab of front window
         execute javascript "
@@ -97,7 +97,7 @@ tell application "Google Chrome"
         "
     end tell
     delay 4
-    
+
     -- Try to interact with search if available
     tell active tab of front window
         execute javascript "
@@ -110,7 +110,7 @@ tell application "Google Chrome"
         "
     end tell
     delay 5
-    
+
     -- Navigate through different sections
     tell active tab of front window
         execute javascript "
@@ -123,7 +123,7 @@ tell application "Google Chrome"
         "
     end tell
     delay 10
-    
+
     -- Final message
     tell active tab of front window
         execute javascript "

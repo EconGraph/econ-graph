@@ -101,18 +101,18 @@ echo "Generating professional British-accented narration for investor pitch..."
 # Create narration audio using macOS text-to-speech with British voice
 if command -v say &> /dev/null; then
     echo "🗣️  Generating British-accented narration..."
-    
+
     # Use Daniel (British voice) for professional investor pitch
     say -v Daniel -o ../demo-videos/investor-pitch-intro.aiff "Welcome to EconGraph - the future of economic intelligence platforms. The global economic data analytics market is worth 8.2 billion dollars and growing 15 percent annually. Current solutions like Bloomberg Terminal cost 24,000 dollars per year per seat with limited customization. We're disrupting this with an open-source, highly customizable platform that provides real-time economic insights at a fraction of the cost."
-    
+
     say -v Daniel -o ../demo-videos/investor-pitch-tech.aiff "Built on cutting-edge Rust backend for maximum performance and reliability. Modern React frontend with TypeScript for enterprise-grade user experience. GraphQL API for flexible data access and integration. PostgreSQL with advanced indexing for sub-second query performance. Kubernetes-ready architecture for infinite scalability with 99.9 percent uptime."
-    
+
     say -v Daniel -o ../demo-videos/investor-pitch-features.aiff "Let me show you our powerful search and visualization capabilities. Search for any economic indicator - GDP, unemployment, inflation, trade data. Interactive charts with hover tooltips showing exact values and revision history. Data transformations include Year-over-Year, Quarter-over-Quarter, and Month-over-Month growth calculations for comprehensive analysis."
-    
+
     say -v Daniel -o ../demo-videos/investor-pitch-business.aiff "Our freemium business model offers core features free, with premium features paid. Enterprise licenses cost 2,400 dollars per year per seat - that's a 90 percent savings versus Bloomberg. We target financial institutions, government agencies, and research organizations with API access tiers and custom deployment solutions."
-    
+
     say -v Daniel -o ../demo-videos/investor-pitch-roadmap.aiff "Our roadmap includes advanced machine learning features - Random Forest models for forecasting, LSTM neural networks for time series prediction, and Global Economic Network analysis with clustering algorithms. We're seeking 2 million dollars Series A funding for team expansion and feature development."
-    
+
     # Convert to MP3 for better compatibility
     echo "🔄 Converting to MP3 format..."
     for file in ../demo-videos/investor-pitch-*.aiff; do
@@ -122,7 +122,7 @@ if command -v say &> /dev/null; then
             echo "✅ Created: $(basename "$mp3_file")"
         fi
     done
-    
+
     # Combine all segments into one comprehensive narration
     echo "🎵 Combining all narration segments..."
     ffmpeg -i ../demo-videos/investor-pitch-intro.mp3 \
@@ -132,7 +132,7 @@ if command -v say &> /dev/null; then
            -i ../demo-videos/investor-pitch-roadmap.mp3 \
            -filter_complex "[0:0][1:0][2:0][3:0][4:0]concat=n=5:v=0:a=1[out]" \
            -map "[out]" ../demo-videos/comprehensive-investor-narration-british.mp3 -y 2>/dev/null
-    
+
     echo "✅ British-accented investor pitch narration created!"
 else
     echo "⚠️  'say' command not available. You'll need to create narration manually."

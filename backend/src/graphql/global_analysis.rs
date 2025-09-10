@@ -282,7 +282,7 @@ impl GlobalAnalysisQuery {
         ctx: &Context<'_>,
     ) -> GqlResult<Vec<CountryWithEconomicDataType>> {
         let pool = ctx.data::<DatabasePool>()?;
-        
+
         let countries = GlobalAnalysisService::get_countries_with_economic_data(pool)
             .await
             .map_err(|e| async_graphql::Error::new(format!("Failed to get countries: {}", e)))?;
@@ -299,7 +299,7 @@ impl GlobalAnalysisQuery {
     ) -> GqlResult<Vec<CorrelationNetworkNodeType>> {
         let pool = ctx.data::<DatabasePool>()?;
         let min_corr = min_correlation.unwrap_or(0.3);
-        
+
         let network = GlobalAnalysisService::get_correlation_network(
             pool,
             &indicator_category.to_string(),
@@ -320,7 +320,7 @@ impl GlobalAnalysisQuery {
         min_impact_score: Option<f64>,
     ) -> GqlResult<Vec<GlobalEventWithImpactsType>> {
         let pool = ctx.data::<DatabasePool>()?;
-        
+
         let start = start_date
             .as_ref()
             .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
@@ -350,7 +350,7 @@ impl GlobalAnalysisQuery {
         min_correlation: Option<f64>,
     ) -> GqlResult<Vec<CountryCorrelationType>> {
         let pool = ctx.data::<DatabasePool>()?;
-        
+
         let start = NaiveDate::parse_from_str(&start_date, "%Y-%m-%d")
             .map_err(|_| async_graphql::Error::new("Invalid start_date format. Use YYYY-MM-DD"))?;
         let end = NaiveDate::parse_from_str(&end_date, "%Y-%m-%d")

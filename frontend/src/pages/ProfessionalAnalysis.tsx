@@ -532,10 +532,20 @@ const ProfessionalAnalysis: React.FC = () => {
         onClose={() => setSeriesSelectionOpen(false)}
         maxWidth='md'
         fullWidth
+        aria-labelledby='series-selection-title'
+        aria-describedby='series-selection-description'
+        disableEnforceFocus={false}
+        disableAutoFocus={false}
+        disableRestoreFocus={false}
       >
-        <DialogTitle>Add Comparison Series</DialogTitle>
+        <DialogTitle id='series-selection-title'>Add Comparison Series</DialogTitle>
         <DialogContent>
-          <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
+          <Typography
+            id='series-selection-description'
+            variant='body2'
+            color='text.secondary'
+            sx={{ mb: 2 }}
+          >
             Select additional economic series to overlay on the chart for comparative analysis.
           </Typography>
 

@@ -34,43 +34,43 @@ osascript << 'EOF'
 tell application "Google Chrome"
     activate
     delay 1
-    
+
     -- Open new window if needed
     if (count of windows) = 0 then
         make new window
     end if
-    
+
     set URL of active tab of front window to "http://localhost:3000"
     delay 4
-    
+
     -- Position window for optimal 20-minute recording
     tell front window
         set bounds to {150, 80, 1650, 1000}  -- Larger window for comprehensive demo
     end tell
-    
+
     delay 3
-    
+
     -- Add comprehensive demo indicators
     tell active tab of front window
         execute javascript "
             // Remove any existing indicators
             const existing = document.querySelectorAll('.demo-indicator');
             existing.forEach(el => el.remove());
-            
+
             // Create comprehensive demo indicator
             const indicator = document.createElement('div');
             indicator.className = 'demo-indicator';
             indicator.style.cssText = 'position: fixed; top: 15px; right: 15px; background: #ff4444; color: white; padding: 10px 20px; border-radius: 6px; font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto; font-size: 14px; font-weight: 600; z-index: 10000; box-shadow: 0 3px 12px rgba(0,0,0,0.3);';
             indicator.innerHTML = '🔴 LIVE: 20-MIN COMPREHENSIVE DEMO';
             document.body.appendChild(indicator);
-            
+
             // Add professional title overlay
             const title = document.createElement('div');
             title.className = 'demo-indicator';
             title.style.cssText = 'position: fixed; top: 70px; left: 20px; background: linear-gradient(135deg, #1976d2, #1565c0); color: white; padding: 16px 24px; border-radius: 8px; font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto; font-size: 20px; font-weight: 700; z-index: 10000; box-shadow: 0 4px 16px rgba(0,0,0,0.2);';
             title.textContent = 'EconGraph - Comprehensive Investor Demonstration';
             document.body.appendChild(title);
-            
+
             // Add feature showcase subtitle
             const subtitle = document.createElement('div');
             subtitle.className = 'demo-indicator';
@@ -89,32 +89,32 @@ cat > /tmp/comprehensive_demo_interaction.scpt << 'EOF'
 tell application "Google Chrome"
     activate
     delay 3
-    
+
     -- PHASE 1: Landing Page & Overview (0-2 minutes)
     tell active tab of front window
         execute javascript "
             const updatePhase = (phase, description) => {
                 const existing = document.querySelector('.phase-indicator');
                 if (existing) existing.remove();
-                
+
                 const indicator = document.createElement('div');
                 indicator.className = 'demo-indicator phase-indicator';
                 indicator.style.cssText = 'position: fixed; bottom: 20px; left: 20px; background: rgba(156,39,176,0.9); color: white; padding: 12px 20px; border-radius: 6px; font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto; font-size: 14px; font-weight: 600; z-index: 10000;';
                 indicator.innerHTML = phase + '<br><small>' + description + '</small>';
                 document.body.appendChild(indicator);
             };
-            
+
             updatePhase('PHASE 1: Landing & Overview', 'Market Opportunity & Platform Introduction');
             window.scrollTo({top: 0, behavior: 'smooth'});
         "
     end tell
     delay 8
-    
+
     -- PHASE 2: Navigation & Architecture (2-4 minutes)
     tell active tab of front window
         execute javascript "
             updatePhase('PHASE 2: Navigation Demo', 'UI Components & Architecture');
-            
+
             // Navigate through main sections
             const navElements = document.querySelectorAll('a, .MuiTab-root, [role=\"tab\"], .MuiButton-root');
             if (navElements.length > 0) {
@@ -123,7 +123,7 @@ tell application "Google Chrome"
         "
     end tell
     delay 6
-    
+
     tell active tab of front window
         execute javascript "
             // Try different navigation elements
@@ -134,26 +134,26 @@ tell application "Google Chrome"
         "
     end tell
     delay 8
-    
+
     -- PHASE 3: Search & Data Discovery (4-7 minutes)
     tell active tab of front window
         execute javascript "
             updatePhase('PHASE 3: Search & Discovery', 'Advanced Search & Data Exploration');
-            
+
             // Find and interact with search
             const searchInput = document.querySelector('input[type=\"search\"], input[placeholder*=\"search\"], .MuiInputBase-input, input[type=\"text\"]');
             if (searchInput) {
                 searchInput.focus();
-                
+
                 // Demonstrate multiple search terms
                 const searchTerms = ['GDP', 'Inflation', 'Employment', 'Consumer Price', 'Federal Reserve'];
                 let termIndex = 0;
-                
+
                 const performSearch = () => {
                     if (termIndex < searchTerms.length) {
                         const term = searchTerms[termIndex];
                         searchInput.value = '';
-                        
+
                         // Simulate realistic typing
                         let charIndex = 0;
                         const typeInterval = setInterval(() => {
@@ -172,22 +172,22 @@ tell application "Google Chrome"
                         }, 150);
                     }
                 };
-                
+
                 setTimeout(performSearch, 1000);
             }
         "
     end tell
     delay 20
-    
+
     -- PHASE 4: Data Visualization & Charts (7-11 minutes)
     tell active tab of front window
         execute javascript "
             updatePhase('PHASE 4: Data Visualization', 'Interactive Charts & Transformations');
-            
+
             // Click on chart elements and data series
             const chartElements = document.querySelectorAll('.MuiCard-root, .chart-container, canvas, .recharts-wrapper, [data-testid*=\"chart\"]');
             let chartIndex = 0;
-            
+
             const interactWithCharts = () => {
                 if (chartIndex < Math.min(chartElements.length, 3)) {
                     const element = chartElements[chartIndex];
@@ -201,27 +201,27 @@ tell application "Google Chrome"
                     }
                 }
             };
-            
+
             setTimeout(interactWithCharts, 1000);
         "
     end tell
     delay 25
-    
+
     -- PHASE 5: Data Transformations (11-14 minutes)
     tell active tab of front window
         execute javascript "
             updatePhase('PHASE 5: Data Transformations', 'YoY, QoQ, Growth Rates & Analytics');
-            
+
             // Look for transformation buttons/controls
             const transformButtons = document.querySelectorAll('button, .MuiButton-root, .MuiToggleButton-root, [role=\"button\"]');
             const transformKeywords = ['transform', 'yoy', 'qoq', 'growth', 'rate', 'percent', 'change', 'log'];
-            
+
             let transformIndex = 0;
             const tryTransformations = () => {
                 if (transformIndex < transformButtons.length) {
                     const button = transformButtons[transformIndex];
                     const buttonText = button.textContent.toLowerCase();
-                    
+
                     if (transformKeywords.some(keyword => buttonText.includes(keyword))) {
                         button.scrollIntoView({behavior: 'smooth', block: 'center'});
                         setTimeout(() => {
@@ -238,27 +238,27 @@ tell application "Google Chrome"
                     window.scrollTo({top: 0, behavior: 'smooth'});
                 }
             };
-            
+
             setTimeout(tryTransformations, 1000);
         "
     end tell
     delay 20
-    
+
     -- PHASE 6: Collaboration Features (14-16 minutes)
     tell active tab of front window
         execute javascript "
             updatePhase('PHASE 6: Collaboration', 'Comments, Annotations & Team Features');
-            
+
             // Look for collaboration elements
             const collabElements = document.querySelectorAll('[data-testid*=\"collab\"], [aria-label*=\"comment\"], [aria-label*=\"share\"], .collaboration, .comment');
-            
+
             collabElements.forEach((element, index) => {
                 setTimeout(() => {
                     element.scrollIntoView({behavior: 'smooth', block: 'center'});
                     setTimeout(() => element.click(), 1000);
                 }, index * 3000);
             });
-            
+
             // Try to find and interact with any modal or popup elements
             setTimeout(() => {
                 const modals = document.querySelectorAll('.MuiDialog-root, .MuiPopover-root, .modal, .popup');
@@ -276,18 +276,18 @@ tell application "Google Chrome"
         "
     end tell
     delay 15
-    
+
     -- PHASE 7: Global Analysis & Advanced Features (16-18 minutes)
     tell active tab of front window
         execute javascript "
             updatePhase('PHASE 7: Global Analysis', 'International Data & Network Analysis');
-            
+
             // Navigate to global/international sections
             const globalLinks = document.querySelectorAll('a[href*=\"global\"], a[href*=\"international\"], a[href*=\"world\"], .global, .international');
-            
+
             if (globalLinks.length > 0) {
                 globalLinks[0].click();
-                
+
                 setTimeout(() => {
                     // Interact with global visualizations
                     const globalViz = document.querySelectorAll('svg, canvas, .map, .network, .globe');
@@ -304,18 +304,18 @@ tell application "Google Chrome"
         "
     end tell
     delay 12
-    
+
     -- PHASE 8: Data Sources & Technical Architecture (18-19 minutes)
     tell active tab of front window
         execute javascript "
             updatePhase('PHASE 8: Data Sources', 'Technical Stack & Data Pipeline');
-            
+
             // Navigate to data sources section
             const sourceLinks = document.querySelectorAll('a[href*=\"source\"], a[href*=\"data\"], .data-sources, .sources');
-            
+
             if (sourceLinks.length > 0) {
                 sourceLinks[0].click();
-                
+
                 setTimeout(() => {
                     window.scrollTo({top: 0, behavior: 'smooth'});
                     setTimeout(() => {
@@ -329,18 +329,18 @@ tell application "Google Chrome"
         "
     end tell
     delay 8
-    
+
     -- PHASE 9: Final Demo Summary (19-20 minutes)
     tell active tab of front window
         execute javascript "
             updatePhase('PHASE 9: Demo Complete', 'Investment Opportunity Summary');
-            
+
             // Return to main page for summary
             window.location.href = 'http://localhost:3000';
-            
+
             setTimeout(() => {
                 window.scrollTo({top: 0, behavior: 'smooth'});
-                
+
                 // Add final success overlay
                 setTimeout(() => {
                     const final = document.createElement('div');
@@ -401,7 +401,7 @@ rm -f /tmp/comprehensive_demo_interaction.scpt
 if [ -f demo-videos/econ-graph-comprehensive-20min-browser-demo.mp4 ]; then
     SIZE=$(ls -lh demo-videos/econ-graph-comprehensive-20min-browser-demo.mp4 | awk '{print $5}')
     DURATION=$(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 demo-videos/econ-graph-comprehensive-20min-browser-demo.mp4 | cut -d. -f1)
-    
+
     echo ""
     echo "🎉 COMPREHENSIVE 20-MINUTE DEMO CREATED!"
     echo "📁 File: demo-videos/econ-graph-comprehensive-20min-browser-demo.mp4"

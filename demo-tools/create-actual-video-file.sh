@@ -17,7 +17,7 @@ echo "🎨 Generating video slides with key investor points..."
 # Create slide images using ImageMagick (if available) or fallback to simple approach
 if command -v convert &> /dev/null; then
     echo "📊 Creating professional slides..."
-    
+
     # Slide 1: Title
     convert -size 1920x1080 xc:white \
         -font Arial -pointsize 72 -fill "#1976d2" \
@@ -81,7 +81,7 @@ fi
 if [ -f demo-videos/econ-graph-investor-demo-20min.mp4 ]; then
     DURATION=$(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 demo-videos/econ-graph-investor-demo-20min.mp4 2>/dev/null || echo "unknown")
     SIZE=$(ls -lh demo-videos/econ-graph-investor-demo-20min.mp4 | awk '{print $5}')
-    
+
     echo ""
     echo "✅ Video created successfully!"
     echo "📁 File: demo-videos/econ-graph-investor-demo-20min.mp4"

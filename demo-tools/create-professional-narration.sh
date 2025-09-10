@@ -32,13 +32,13 @@ say -v "Alex" -r 160 -o "$OUTPUT_AUDIO" "$(cat "$NARRATION_TEXT" | grep -v "^\["
 
 if [ $? -eq 0 ]; then
     echo "✅ Professional narration created: $OUTPUT_AUDIO"
-    
+
     # Get duration
     DURATION=$(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$OUTPUT_AUDIO" 2>/dev/null)
     if [ ! -z "$DURATION" ]; then
         echo "⏱️  Duration: ${DURATION} seconds"
     fi
-    
+
     FILE_SIZE=$(du -h "$OUTPUT_AUDIO" | cut -f1)
     echo "📊 File size: ${FILE_SIZE}"
     echo ""

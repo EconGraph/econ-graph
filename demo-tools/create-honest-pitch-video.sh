@@ -78,7 +78,7 @@ const path = require('path');
 
 async function createPitchVideo() {
     console.log('🚀 Launching browser for honest pitch video...');
-    
+
     const browser = await puppeteer.launch({
         headless: false,
         defaultViewport: null,
@@ -92,21 +92,21 @@ async function createPitchVideo() {
             '--allow-file-access-from-files'
         ]
     });
-    
+
     const page = await browser.newPage();
-    
+
     await page.setViewport({
         width: 1920,
         height: 1080,
         deviceScaleFactor: 1
     });
-    
+
     const demoPath = path.resolve(process.argv[2]);
     const fileUrl = `file://${demoPath}`;
-    
+
     console.log(`📄 Loading honest demo interface: ${fileUrl}`);
     await page.goto(fileUrl, { waitUntil: 'networkidle0' });
-    
+
     // Hide cursor completely for professional pitch
     await page.addStyleTag({
         content: `
@@ -118,7 +118,7 @@ async function createPitchVideo() {
             }
         `
     });
-    
+
     // Add pitch-specific enhancements
     await page.evaluate(() => {
         // Add honest pitch indicator
@@ -140,7 +140,7 @@ async function createPitchVideo() {
         `;
         pitchIndicator.textContent = '🎯 EconGraph v4.0.0 - Honest Prototype + Brilliant Roadmap';
         document.body.appendChild(pitchIndicator);
-        
+
         // Add roadmap teaser
         const roadmapTeaser = document.createElement('div');
         roadmapTeaser.style.cssText = `
@@ -161,7 +161,7 @@ async function createPitchVideo() {
         `;
         roadmapTeaser.innerHTML = '🤖 Coming: Random Forest • LSTM • D3.js Maps • AI Analytics';
         document.body.appendChild(roadmapTeaser);
-        
+
         // Add fadeInOut animation
         const style = document.createElement('style');
         style.textContent = `
@@ -175,7 +175,7 @@ async function createPitchVideo() {
         `;
         document.head.appendChild(style);
     });
-    
+
     console.log('🎬 Honest pitch video setup complete!');
     console.log('📹 RECORD THIS BROWSER WINDOW for your pitch video');
     console.log('🎯 Use the pitch script to narrate over the interface');
@@ -183,7 +183,7 @@ async function createPitchVideo() {
     console.log('');
     console.log('📄 Pitch script available in: temp_pitch_script.txt');
     console.log('');
-    
+
     // Create realistic interactions during recording
     const interactionInterval = setInterval(async () => {
         try {
@@ -200,7 +200,7 @@ async function createPitchVideo() {
                         }, 2000);
                     }, index * 300);
                 });
-                
+
                 // Show data transformations working
                 const dataElements = document.querySelectorAll('.data-value, .metric-value');
                 dataElements.forEach((el, index) => {
@@ -219,11 +219,11 @@ async function createPitchVideo() {
             console.log('Interaction note:', error.message);
         }
     }, 5000);
-    
+
     // Keep browser open for pitch recording
     console.log('⏳ Browser will stay open for 3 minutes for pitch recording...');
     await new Promise(resolve => setTimeout(resolve, 180000));
-    
+
     clearInterval(interactionInterval);
     console.log('✅ Pitch video session completed!');
     await browser.close();

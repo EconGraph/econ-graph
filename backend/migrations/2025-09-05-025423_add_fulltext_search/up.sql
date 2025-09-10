@@ -50,7 +50,7 @@ BEGIN
     ),
     -- Full-text search results
     fts_results AS (
-        SELECT 
+        SELECT
             es.*,
             ts_rank(es.search_vector, st.query) as fts_rank,
             0.0 as similarity_score,
@@ -60,7 +60,7 @@ BEGIN
     ),
     -- Trigram similarity results for spelling correction
     trigram_results AS (
-        SELECT 
+        SELECT
             es.*,
             0.0 as fts_rank,
             GREATEST(
@@ -85,7 +85,7 @@ BEGIN
         UNION ALL
         SELECT *, fts_rank + similarity_score as total_rank FROM trigram_results
     )
-    SELECT 
+    SELECT
         cr.id,
         cr.title,
         cr.description,
@@ -106,14 +106,14 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 -- Add search vector column to economic_series table
-ALTER TABLE economic_series 
+ALTER TABLE economic_series
 ADD COLUMN search_vector tsvector;
 
 -- Create function to update search vector
 CREATE OR REPLACE FUNCTION update_economic_series_search_vector()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.search_vector := 
+    NEW.search_vector :=
         setweight(to_tsvector('economic_search', COALESCE(NEW.title, '')), 'A') ||
         setweight(to_tsvector('economic_search', COALESCE(NEW.description, '')), 'B') ||
         setweight(to_tsvector('economic_search', COALESCE(NEW.external_id, '')), 'C') ||
@@ -128,40 +128,40 @@ CREATE TRIGGER update_economic_series_search_vector_trigger
     FOR EACH ROW EXECUTE FUNCTION update_economic_series_search_vector();
 
 -- Update existing records with search vectors
-UPDATE economic_series SET 
-    search_vector = 
+UPDATE economic_series SET
+    search_vector =
         setweight(to_tsvector('economic_search', COALESCE(title, '')), 'A') ||
         setweight(to_tsvector('economic_search', COALESCE(description, '')), 'B') ||
         setweight(to_tsvector('economic_search', COALESCE(external_id, '')), 'C') ||
         setweight(to_tsvector('economic_search', COALESCE(units, '')), 'D');
 
 -- Create GIN index for full-text search (CONCURRENTLY removed for migration compatibility)
-CREATE INDEX idx_economic_series_search_vector 
+CREATE INDEX idx_economic_series_search_vector
 ON economic_series USING GIN (search_vector);
 
 -- Create GIN index for trigram similarity search
-CREATE INDEX idx_economic_series_title_trigram 
+CREATE INDEX idx_economic_series_title_trigram
 ON economic_series USING GIN (title gin_trgm_ops);
 
-CREATE INDEX idx_economic_series_description_trigram 
+CREATE INDEX idx_economic_series_description_trigram
 ON economic_series USING GIN (description gin_trgm_ops);
 
-CREATE INDEX idx_economic_series_external_id_trigram 
+CREATE INDEX idx_economic_series_external_id_trigram
 ON economic_series USING GIN (external_id gin_trgm_ops);
 
 -- Create composite index for filtering active series
-CREATE INDEX idx_economic_series_active_search 
+CREATE INDEX idx_economic_series_active_search
 ON economic_series (is_active) WHERE is_active = true;
 
 -- Add similar search capabilities to data_sources table
-ALTER TABLE data_sources 
+ALTER TABLE data_sources
 ADD COLUMN search_vector tsvector;
 
 -- Create function to update data source search vector
 CREATE OR REPLACE FUNCTION update_data_source_search_vector()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.search_vector := 
+    NEW.search_vector :=
         setweight(to_tsvector('economic_search', COALESCE(NEW.name, '')), 'A') ||
         setweight(to_tsvector('economic_search', COALESCE(NEW.description, '')), 'B');
     RETURN NEW;
@@ -174,31 +174,31 @@ CREATE TRIGGER update_data_source_search_vector_trigger
     FOR EACH ROW EXECUTE FUNCTION update_data_source_search_vector();
 
 -- Update existing data source records
-UPDATE data_sources SET 
-    search_vector = 
+UPDATE data_sources SET
+    search_vector =
         setweight(to_tsvector('economic_search', COALESCE(name, '')), 'A') ||
         setweight(to_tsvector('economic_search', COALESCE(description, '')), 'B');
 
 -- Create indices for data sources (CONCURRENTLY removed for migration compatibility)
-CREATE INDEX idx_data_sources_search_vector 
+CREATE INDEX idx_data_sources_search_vector
 ON data_sources USING GIN (search_vector);
 
-CREATE INDEX idx_data_sources_name_trigram 
+CREATE INDEX idx_data_sources_name_trigram
 ON data_sources USING GIN (name gin_trgm_ops);
 
-CREATE INDEX idx_data_sources_description_trigram 
+CREATE INDEX idx_data_sources_description_trigram
 ON data_sources USING GIN (description gin_trgm_ops);
 
 -- Create search statistics view for monitoring
 CREATE VIEW search_statistics AS
-SELECT 
+SELECT
     'economic_series' as table_name,
     COUNT(*) as total_records,
     COUNT(*) FILTER (WHERE search_vector IS NOT NULL) as indexed_records,
     AVG(length(search_vector::text)) as avg_vector_length
 FROM economic_series
 UNION ALL
-SELECT 
+SELECT
     'data_sources' as table_name,
     COUNT(*) as total_records,
     COUNT(*) FILTER (WHERE search_vector IS NOT NULL) as indexed_records,

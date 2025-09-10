@@ -8,7 +8,7 @@ mkdir -p demo-videos/narration
 # Segment 1: Introduction (0-8 seconds)
 say -v Daniel -o "demo-videos/narration/01_intro.aiff" "Welcome to EconGraph's revolutionary Global Economic Network Analysis System. This Bloomberg Terminal-level platform provides institutional-grade economic visualization and analysis."
 
-# Segment 2: Navigation (8-12 seconds)  
+# Segment 2: Navigation (8-12 seconds)
 say -v Daniel -o "demo-videos/narration/02_navigation.aiff" "Let's explore the Global Analysis features that rival premium financial terminals costing over twenty thousand dollars per year."
 
 # Segment 3: Network Map Introduction (12-18 seconds)

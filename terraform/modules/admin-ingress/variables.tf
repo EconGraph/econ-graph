@@ -5,7 +5,7 @@
 variable "admin_domain" {
   description = "Domain name for admin interface (e.g., admin.internal.company.com)"
   type        = string
-  
+
   validation {
     condition     = can(regex("^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\\.[a-zA-Z]{2,}$", var.admin_domain))
     error_message = "Admin domain must be a valid domain name."
@@ -33,7 +33,7 @@ variable "admin_service_port" {
 variable "allowed_admin_ips" {
   description = "List of IP ranges allowed to access admin interface"
   type        = list(string)
-  
+
   validation {
     condition     = length(var.allowed_admin_ips) > 0
     error_message = "At least one IP range must be specified for admin access."
@@ -62,7 +62,7 @@ variable "rate_limit_rps" {
   description = "Rate limit in requests per second for admin interface"
   type        = number
   default     = 10
-  
+
   validation {
     condition     = var.rate_limit_rps >= 1 && var.rate_limit_rps <= 100
     error_message = "Rate limit must be between 1 and 100 requests per second."
@@ -73,7 +73,7 @@ variable "rate_limit_connections" {
   description = "Maximum concurrent connections per IP"
   type        = number
   default     = 5
-  
+
   validation {
     condition     = var.rate_limit_connections >= 1 && var.rate_limit_connections <= 50
     error_message = "Connection limit must be between 1 and 50."
@@ -158,7 +158,7 @@ variable "log_retention_days" {
   description = "Number of days to retain access logs"
   type        = number
   default     = 90
-  
+
   validation {
     condition     = var.log_retention_days >= 30 && var.log_retention_days <= 365
     error_message = "Log retention must be between 30 and 365 days."

@@ -8,7 +8,7 @@ CREATE TABLE data_points (
     is_original_release BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    
+
     -- Ensure unique combination of series, date, and revision
     UNIQUE(series_id, date, revision_date, is_original_release)
 );
@@ -22,9 +22,9 @@ CREATE INDEX idx_data_points_series_date ON data_points(series_id, date);
 CREATE INDEX idx_data_points_series_date_revision ON data_points(series_id, date, revision_date);
 
 -- Create updated_at trigger
-CREATE TRIGGER update_data_points_updated_at 
-    BEFORE UPDATE ON data_points 
-    FOR EACH ROW 
+CREATE TRIGGER update_data_points_updated_at
+    BEFORE UPDATE ON data_points
+    FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Create index for latest revisions (performance optimization)

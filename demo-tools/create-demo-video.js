@@ -8,7 +8,7 @@ const path = require('path');
 
 async function createEpicDemoVideo() {
     console.log('🎬 Starting Epic Demo Video Creation...');
-    
+
     const browser = await chromium.launch({
         headless: false, // Show browser for recording
         slowMo: 800,     // Slow down for better video
@@ -18,7 +18,7 @@ async function createEpicDemoVideo() {
             '--disable-features=VizDisplayCompositor'
         ]
     });
-    
+
     const context = await browser.newContext({
         viewport: { width: 1920, height: 1080 },
         recordVideo: {
@@ -26,12 +26,12 @@ async function createEpicDemoVideo() {
             size: { width: 1920, height: 1080 }
         }
     });
-    
+
     const page = await context.newPage();
-    
+
     try {
         console.log('📱 Phase 1: Loading Economic Data Analysis Platform...');
-        
+
         // Create a simple demo HTML page since we need a working frontend
         const demoHTML = `
 <!DOCTYPE html>
@@ -42,8 +42,8 @@ async function createEpicDemoVideo() {
     <title>Economic Data Analysis Platform - Demo</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
@@ -245,19 +245,19 @@ async function createEpicDemoVideo() {
         <h1>🏛️ Economic Data Analysis Platform</h1>
         <p>Professional-grade economic time series analysis with interactive visualizations</p>
     </div>
-    
+
     <div class="container">
         <div class="search-section">
             <h2 style="margin-bottom: 20px; color: #2c3e50;">🔍 Search Economic Data</h2>
             <input type="text" class="search-input" id="searchInput" placeholder="Search for economic indicators (e.g., Real GDP, Unemployment Rate, CPI)">
             <button class="search-button" onclick="performSearch()">Search Economic Data</button>
         </div>
-        
+
         <div class="results-section" id="resultsSection">
             <h2 style="margin-bottom: 20px; color: #2c3e50;">📊 Search Results</h2>
             <div id="resultsContainer"></div>
         </div>
-        
+
         <div class="chart-section" id="chartSection">
             <h2 style="margin-bottom: 20px; color: #2c3e50;">📈 Real Gross Domestic Product - Interactive Chart</h2>
             <div class="chart-container" id="chartContainer">
@@ -306,7 +306,7 @@ async function createEpicDemoVideo() {
         ];
 
         let searchTimeout;
-        
+
         document.getElementById('searchInput').addEventListener('input', function(e) {
             clearTimeout(searchTimeout);
             searchTimeout = setTimeout(() => {
@@ -324,14 +324,14 @@ async function createEpicDemoVideo() {
         function performSearch() {
             const searchValue = document.getElementById('searchInput').value;
             if (!searchValue) return;
-            
+
             console.log('🔍 Performing search for:', searchValue);
-            
+
             const resultsSection = document.getElementById('resultsSection');
             const resultsContainer = document.getElementById('resultsContainer');
-            
+
             resultsContainer.innerHTML = '';
-            
+
             searchResults.forEach((result, index) => {
                 setTimeout(() => {
                     const resultItem = document.createElement('div');
@@ -344,17 +344,17 @@ async function createEpicDemoVideo() {
                     resultsContainer.appendChild(resultItem);
                 }, index * 300);
             });
-            
+
             resultsSection.style.display = 'block';
         }
 
         function showChart(result) {
             console.log('📈 Loading chart for:', result.title);
-            
+
             const chartSection = document.getElementById('chartSection');
             chartSection.style.display = 'block';
             chartSection.scrollIntoView({ behavior: 'smooth' });
-            
+
             // Create interactive chart points
             setTimeout(() => {
                 createChartPoints();
@@ -364,18 +364,18 @@ async function createEpicDemoVideo() {
         function createChartPoints() {
             const chartPoints = document.getElementById('chartPoints');
             const tooltip = document.getElementById('tooltip');
-            
+
             // Generate realistic GDP data points
             const dataPoints = [];
             const baseValue = 20000; // $20T base GDP
-            
+
             for (let i = 0; i < 20; i++) {
                 const date = new Date(2020, 0, 1);
                 date.setMonth(date.getMonth() + i * 3); // Quarterly data
-                
+
                 const growth = 1 + (i * 0.015) + (Math.sin(i * 0.5) * 0.02); // Realistic growth with volatility
                 const value = Math.round(baseValue * growth);
-                
+
                 dataPoints.push({
                     date: date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }),
                     value: value,
@@ -383,14 +383,14 @@ async function createEpicDemoVideo() {
                     y: 30 + (Math.random() * 40) // Vary height
                 });
             }
-            
+
             dataPoints.forEach((point, index) => {
                 setTimeout(() => {
                     const chartPoint = document.createElement('div');
                     chartPoint.className = 'chart-point';
                     chartPoint.style.left = point.x + '%';
                     chartPoint.style.top = point.y + '%';
-                    
+
                     chartPoint.addEventListener('mouseenter', (e) => {
                         tooltip.innerHTML = \`
                             <strong>\${point.date}</strong><br>
@@ -401,15 +401,15 @@ async function createEpicDemoVideo() {
                         tooltip.style.top = (e.pageY - 50) + 'px';
                         tooltip.classList.add('show');
                     });
-                    
+
                     chartPoint.addEventListener('mouseleave', () => {
                         tooltip.classList.remove('show');
                     });
-                    
+
                     chartPoint.addEventListener('click', () => {
                         alert(\`Detailed Analysis for \${point.date}:\\n\\nGDP: $\${point.value.toLocaleString()}B\\nGrowth Rate: +2.1% QoQ\\nRevision Status: Original Release\\n\\nData Source: Federal Reserve Economic Data (FRED)\`);
                     });
-                    
+
                     chartPoints.appendChild(chartPoint);
                 }, index * 100);
             });
@@ -420,11 +420,11 @@ async function createEpicDemoVideo() {
             setTimeout(() => {
                 console.log('🎬 Starting automated demo...');
                 document.getElementById('searchInput').value = 'Real GDP';
-                
+
                 setTimeout(() => {
                     performSearch();
                 }, 2000);
-                
+
                 setTimeout(() => {
                     const firstResult = document.querySelector('.result-item');
                     if (firstResult) {
@@ -440,38 +440,38 @@ async function createEpicDemoVideo() {
         // Write demo HTML to file
         fs.writeFileSync('./demo-videos/demo.html', demoHTML);
         const demoPath = path.resolve('./demo-videos/demo.html');
-        
+
         console.log('🌐 Loading demo page...');
         await page.goto(`file://${demoPath}`);
         await page.waitForLoadState('networkidle');
-        
+
         console.log('📸 Phase 2: Capturing application interface...');
         await page.waitForTimeout(3000);
-        
+
         console.log('🔍 Phase 3: Demonstrating search functionality...');
         const searchInput = page.locator('#searchInput');
         await searchInput.clear();
         await searchInput.type('Real GDP', { delay: 200 });
         await page.waitForTimeout(1000);
-        
+
         console.log('📊 Phase 4: Executing search...');
         await page.click('.search-button');
         await page.waitForTimeout(2000);
-        
+
         console.log('📈 Phase 5: Selecting search result and loading chart...');
         await page.click('.result-item:first-child');
         await page.waitForTimeout(3000);
-        
+
         console.log('🖱️  Phase 6: Demonstrating interactive tooltips...');
         await page.waitForSelector('.chart-point');
         const chartPoints = await page.locator('.chart-point').all();
-        
+
         for (let i = 0; i < Math.min(5, chartPoints.length); i++) {
             await chartPoints[i].hover();
             await page.waitForTimeout(800);
             await chartPoints[i].click();
             await page.waitForTimeout(1000);
-            
+
             // Close alert if it appears
             try {
                 await page.getByRole('button', { name: 'OK' }).click({ timeout: 500 });
@@ -479,43 +479,43 @@ async function createEpicDemoVideo() {
                 // Alert might not appear, continue
             }
         }
-        
+
         console.log('⚡ Phase 7: Demonstrating advanced interactions...');
         await page.evaluate(() => {
             window.scrollTo({ top: 0, behavior: 'smooth' });
         });
         await page.waitForTimeout(2000);
-        
+
         await page.evaluate(() => {
             window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
         });
         await page.waitForTimeout(2000);
-        
+
         console.log('🎊 Phase 8: Final demonstration complete!');
         await page.waitForTimeout(3000);
-        
+
         console.log('✅ Demo video recording complete!');
-        
+
     } catch (error) {
         console.error('❌ Demo error:', error);
     }
-    
+
     await context.close();
     await browser.close();
-    
+
     // Find the video file
     const videoFiles = fs.readdirSync('./demo-videos/').filter(f => f.endsWith('.webm'));
     if (videoFiles.length > 0) {
         const videoPath = `./demo-videos/${videoFiles[0]}`;
         const newVideoPath = './demo-videos/epic-system-demo.webm';
         fs.renameSync(videoPath, newVideoPath);
-        
+
         console.log('🎥 Video saved as: epic-system-demo.webm');
         console.log('📁 Video location:', path.resolve(newVideoPath));
-        
+
         return newVideoPath;
     }
-    
+
     return null;
 }
 

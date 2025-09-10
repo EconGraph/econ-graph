@@ -65,25 +65,25 @@ if [ -f "temp_screen_capture.mp4" ] && [ -f "$NARRATION_FILE" ]; then
            -c:v copy -c:a aac \
            -shortest \
            "$OUTPUT_FILE" -y
-    
+
     rm temp_screen_capture.mp4
-    
+
     echo "✅ Real interface video created: $OUTPUT_FILE"
-    
+
     # Get file size
     FINAL_SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
     echo "📊 File size: ${FINAL_SIZE}"
-    
+
     echo ""
     echo "🎯 This video shows:"
     echo "   ✅ ACTUAL screen recording of the browser"
     echo "   ✅ REAL React components and interface"
     echo "   ✅ NO fake text boxes or overlays"
     echo "   ✅ Genuine EconGraph application in action"
-    
+
     # Open the video
     open "$OUTPUT_FILE"
-    
+
 else
     echo "❌ Screen recording failed"
     echo "💡 Alternative: The interface is still running at $REACT_URL"

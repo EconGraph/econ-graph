@@ -77,33 +77,33 @@ cat > demo-videos/honest-demo-info.html << 'EOF'
     <div class="container">
         <h1>🌍 EconGraph</h1>
         <div class="prototype-badge">PROTOTYPE DEMONSTRATION</div>
-        
+
         <div class="sample-data">
             📊 This demo shows sample data and UI concepts only
         </div>
-        
+
         <div class="features">
             <div class="feature">
                 🗺️ <strong>Interactive World Map</strong><br>
                 5 sample countries with basic correlation visualization
             </div>
-            
+
             <div class="feature">
                 📊 <strong>Multi-Country Dashboard</strong><br>
                 Sample economic data for demonstration purposes
             </div>
-            
+
             <div class="feature">
                 📈 <strong>Global Events Explorer</strong><br>
                 6 major economic events with basic information
             </div>
-            
+
             <div class="feature">
                 🎯 <strong>Honest Implementation</strong><br>
                 No false claims • Sample data only • Prototype UI concepts
             </div>
         </div>
-        
+
         <div class="sample-data">
             ✅ What you see is what's actually implemented<br>
             ❌ No exaggerated features or capabilities
@@ -121,4 +121,3 @@ echo "🎬 This creates a simple, honest video that matches the narration exactl
 echo "The video will show clear text describing only implemented features."
 echo ""
 echo "✅ Ready to create honest demo video!"
-

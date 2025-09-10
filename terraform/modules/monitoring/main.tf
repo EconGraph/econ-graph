@@ -96,7 +96,7 @@ resource "helm_release" "prometheus" {
             }
           ]
         }
-        
+
         # Grafana configuration
         grafana.ini = {
           server = {
@@ -262,7 +262,7 @@ resource "kubernetes_config_map" "econgraph_dashboard" {
         timezone    = "browser"
         schemaVersion = 27
         version     = 1
-        
+
         panels = [
           # Backend metrics
           {
@@ -289,7 +289,7 @@ resource "kubernetes_config_map" "econgraph_dashboard" {
               }
             }
           },
-          
+
           # Database connections
           {
             id    = 2
@@ -303,7 +303,7 @@ resource "kubernetes_config_map" "econgraph_dashboard" {
             ]
             gridPos = { h = 8, w = 12, x = 0, y = 4 }
           },
-          
+
           # Crawler queue status
           {
             id    = 3
@@ -325,7 +325,7 @@ resource "kubernetes_config_map" "econgraph_dashboard" {
             ]
             gridPos = { h = 8, w = 12, x = 12, y = 4 }
           },
-          
+
           # API Response times
           {
             id    = 4
@@ -348,7 +348,7 @@ resource "kubernetes_config_map" "econgraph_dashboard" {
             gridPos = { h = 8, w = 24, x = 0, y = 12 }
           }
         ]
-        
+
         time = {
           from = "now-1h"
           to   = "now"
@@ -380,7 +380,7 @@ resource "kubernetes_config_map" "database_dashboard" {
         timezone    = "browser"
         schemaVersion = 27
         version     = 1
-        
+
         panels = [
           # Database size
           {
@@ -401,7 +401,7 @@ resource "kubernetes_config_map" "database_dashboard" {
               }
             }
           },
-          
+
           # Table sizes
           {
             id    = 2
@@ -415,7 +415,7 @@ resource "kubernetes_config_map" "database_dashboard" {
             ]
             gridPos = { h = 8, w = 12, x = 0, y = 4 }
           },
-          
+
           # Query performance
           {
             id    = 3
@@ -429,7 +429,7 @@ resource "kubernetes_config_map" "database_dashboard" {
             ]
             gridPos = { h = 8, w = 12, x = 12, y = 4 }
           },
-          
+
           # Connection pool
           {
             id    = 4
@@ -448,7 +448,7 @@ resource "kubernetes_config_map" "database_dashboard" {
             gridPos = { h = 8, w = 24, x = 0, y = 12 }
           }
         ]
-        
+
         time = {
           from = "now-6h"
           to   = "now"
@@ -480,7 +480,7 @@ resource "kubernetes_config_map" "crawler_dashboard" {
         timezone    = "browser"
         schemaVersion = 27
         version     = 1
-        
+
         panels = [
           # Active crawlers
           {
@@ -495,7 +495,7 @@ resource "kubernetes_config_map" "crawler_dashboard" {
             ]
             gridPos = { h = 4, w = 6, x = 0, y = 0 }
           },
-          
+
           # Queue processing rate
           {
             id    = 2
@@ -509,7 +509,7 @@ resource "kubernetes_config_map" "crawler_dashboard" {
             ]
             gridPos = { h = 8, w = 12, x = 0, y = 4 }
           },
-          
+
           # Data source status
           {
             id    = 3
@@ -524,7 +524,7 @@ resource "kubernetes_config_map" "crawler_dashboard" {
             ]
             gridPos = { h = 8, w = 12, x = 12, y = 4 }
           },
-          
+
           # Error rates
           {
             id    = 4
@@ -539,7 +539,7 @@ resource "kubernetes_config_map" "crawler_dashboard" {
             gridPos = { h = 8, w = 24, x = 0, y = 12 }
           }
         ]
-        
+
         time = {
           from = "now-2h"
           to   = "now"

@@ -21,7 +21,7 @@ if [ -z "$ELEVENLABS_API_KEY" ]; then
     echo ""
     echo "Alternatively, using macOS 'say' command for narration..."
     echo ""
-    
+
     # Narration segments that match exactly what's shown in the video
     declare -a segments=(
         "Welcome to EconGraph's Global Economic Network Analysis platform."
@@ -60,12 +60,12 @@ if [ -z "$ELEVENLABS_API_KEY" ]; then
     for i in "${!segments[@]}"; do
         segment_num=$(printf "%02d" $((i + 1)))
         output_file="demo-videos/global-audio/global_segment_${segment_num}.mp3"
-        
+
         echo "🎤 Generating segment ${segment_num}/29: ${segments[i]:0:60}..."
-        
+
         # Use Daniel voice for professional British narration
         say -v Daniel -r 180 -o "demo-videos/global-audio/global_segment_${segment_num}.aiff" "${segments[i]}"
-        
+
         # Convert to MP3 (requires ffmpeg)
         if command -v ffmpeg &> /dev/null; then
             ffmpeg -i "demo-videos/global-audio/global_segment_${segment_num}.aiff" \
@@ -77,7 +77,7 @@ if [ -z "$ELEVENLABS_API_KEY" ]; then
             mv "demo-videos/global-audio/global_segment_${segment_num}.aiff" \
                "demo-videos/global-audio/global_segment_${segment_num}.aiff"
         fi
-        
+
         if [ $? -eq 0 ]; then
             echo "✅ Generated: $output_file"
         else
@@ -85,7 +85,7 @@ if [ -z "$ELEVENLABS_API_KEY" ]; then
             exit 1
         fi
     done
-    
+
 else
     echo "✅ ElevenLabs API Key found"
     echo "🎙️  Generating professional AI narration..."
@@ -134,9 +134,9 @@ else
     for i in "${!segments[@]}"; do
         segment_num=$(printf "%02d" $((i + 1)))
         output_file="demo-videos/global-audio/global_segment_${segment_num}.mp3"
-        
+
         echo "🎤 Generating segment ${segment_num}/29: ${segments[i]:0:60}..."
-        
+
         curl -X POST \
             "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
             -H "Accept: audio/mpeg" \
@@ -153,14 +153,14 @@ else
                 }
             }" \
             --output "$output_file"
-        
+
         if [ $? -eq 0 ]; then
             echo "✅ Generated: $output_file"
         else
             echo "❌ Failed to generate segment ${segment_num}"
             exit 1
         fi
-        
+
         # Small delay to respect API limits
         sleep 1
     done

@@ -13,7 +13,7 @@ CREATE TABLE crawl_queue (
     scheduled_for TIMESTAMPTZ,
     locked_by VARCHAR(100),
     locked_at TIMESTAMPTZ,
-    
+
     -- Ensure unique combination of source and series_id for pending/processing items
     CONSTRAINT unique_active_queue_item UNIQUE(source, series_id) DEFERRABLE INITIALLY DEFERRED
 );
@@ -31,17 +31,17 @@ CREATE INDEX idx_crawl_queue_processing ON crawl_queue(status, priority DESC, sc
 WHERE status IN ('pending', 'retrying');
 
 -- Create updated_at trigger
-CREATE TRIGGER update_crawl_queue_updated_at 
-    BEFORE UPDATE ON crawl_queue 
-    FOR EACH ROW 
+CREATE TRIGGER update_crawl_queue_updated_at
+    BEFORE UPDATE ON crawl_queue
+    FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Add constraint to validate status values
-ALTER TABLE crawl_queue ADD CONSTRAINT check_crawl_queue_status 
+ALTER TABLE crawl_queue ADD CONSTRAINT check_crawl_queue_status
     CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'retrying', 'cancelled'));
 
 -- Add constraint to validate priority range
-ALTER TABLE crawl_queue ADD CONSTRAINT check_crawl_queue_priority 
+ALTER TABLE crawl_queue ADD CONSTRAINT check_crawl_queue_priority
     CHECK (priority >= 1 AND priority <= 10);
 
 -- Add constraint to ensure locked items have lock information
