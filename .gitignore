@@ -82,3 +82,11 @@ docker-compose.override.yml
 # Temporary files
 tmp/
 temp/
+
+# Playwright
+/frontend/test-results/
+/frontend/playwright-report/
+/frontend/playwright/.cache/
+/frontend/debug-*.png
+/frontend/debug-*.jpg
+/frontend/debug-*.jpeg

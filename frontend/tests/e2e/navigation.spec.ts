@@ -87,4 +87,30 @@ test.describe('Navigation', () => {
     // Sidebar should close
     await expect(sidebar).not.toBeVisible();
   });
+
+  test('should navigate from main entry page (Dashboard) to hero page (About)', async ({ page }) => {
+    // Start at the main entry page (Dashboard)
+    await expect(page).toHaveURL('/');
+
+    // Verify we're on the Dashboard
+    await expect(page.getByRole('heading', { name: /economic dashboard/i })).toBeVisible();
+
+    // Navigate to About page via sidebar
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.getByRole('button', { name: /open drawer/i }).click();
+    await page.getByRole('button', { name: 'About' }).click();
+
+    // Verify we're on the About page
+    await expect(page).toHaveURL('/about');
+
+    // Verify the hero section is displayed
+    await expect(page.getByRole('heading', { name: 'EconGraph', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Modern Economic Data Visualization Platform' })).toBeVisible();
+    await expect(page.getByText('Version 3.7.2')).toBeVisible();
+
+    // Verify hero section navigation links are present
+    await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Explore Series' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Data Sources' })).toBeVisible();
+  });
 });
