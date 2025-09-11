@@ -292,7 +292,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
 
         if (!response.ok) {
-          throw new Error('Google authentication failed');
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Google authentication failed');
         }
 
         const authData = await response.json();
@@ -598,7 +599,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       if (!response.ok) {
-        throw new Error('Profile update failed');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Profile update failed');
       }
 
       const updatedUser = await response.json();
