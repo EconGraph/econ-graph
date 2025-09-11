@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: econ-graph
+data:
+  local-config.yaml: |
+    auth_enabled: false
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9096
+    common:
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: 1
+      ring:
+        instance_addr: 127.0.0.1
+        kvstore:
+          store: inmemory
+    query_scheduler:
+      max_outstanding_requests_per_tenant: 2048
+    schema_config:
+      configs:
+        - from: 2020-10-24
+          store: boltdb-shipper
+          object_store: filesystem
+          schema: v11
+          index:
+            prefix: index_
+            period: 24h
+    limits_config:
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+      max_line_size: 256000
+      max_entries_limit_per_query: 5000
+      max_query_series: 500
+      max_query_lookback: 0s
+      max_query_length: 721h
+      max_query_parallelism: 32
+      cardinality_limit: 100000
+      max_streams_matchers_per_query: 1000
+      max_concurrent_tail_requests: 10
+      max_cache_freshness_per_query: 1m
+      max_queriers_per_tenant: 0
+      allow_structured_metadata: false
+    table_manager:
+      retention_deletes_enabled: false
+      retention_period: 0s
+    compactor:
+      working_directory: /loki
+      compaction_interval: 10m
+      retention_enabled: false
