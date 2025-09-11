@@ -19,8 +19,9 @@ pub async fn create_pool(database_url: &str) -> AppResult<DatabasePool> {
     let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
 
     let pool = Pool::builder()
-        .max_size(10)
+        .max_size(20)
         .connection_timeout(Duration::from_secs(30))
+        .idle_timeout(Some(Duration::from_secs(300))) // 5 minutes idle timeout
         .build(config)
         .await
         .map_err(|e| AppError::InternalError(format!("Failed to create database pool: {}", e)))?;
@@ -34,7 +35,9 @@ pub async fn test_connection(pool: &DatabasePool) -> AppResult<()> {
     use diesel_async::RunQueryDsl;
 
     let mut conn = pool.get().await.map_err(|e| {
-        AppError::InternalError(format!("Failed to get database connection: {}", e))
+        let error_msg = format!("Failed to get database connection: {}", e);
+        tracing::error!("Database connection pool error: {}", error_msg);
+        AppError::InternalError(error_msg)
     })?;
 
     // Test with a simple query
@@ -115,10 +118,12 @@ where
     E: From<diesel::result::Error> + From<AppError> + Send,
 {
     let mut conn = pool.get().await.map_err(|e| {
-        E::from(AppError::InternalError(format!(
-            "Failed to get database connection: {}",
-            e
-        )))
+        let error_msg = format!("Failed to get database connection: {}", e);
+        tracing::error!(
+            "Database connection pool error in transaction: {}",
+            error_msg
+        );
+        E::from(AppError::InternalError(error_msg))
     })?;
 
     // Execute the function with the dereferenced connection
