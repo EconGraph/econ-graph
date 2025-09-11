@@ -144,7 +144,7 @@ data:
           "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
           "targets": [
             {
-              "expr": "{app=\"econ-graph-backend\"} |= \"auth\"",
+              "expr": "{job=\"econ-graph-logs\", app=\"econ-graph-backend\"} |= \"auth\"",
               "refId": "A",
               "datasource": {
                 "type": "loki",
@@ -170,7 +170,7 @@ data:
           "gridPos": { "h": 12, "w": 12, "x": 0, "y": 12 },
           "targets": [
             {
-              "expr": "{app=\"econ-graph-backend\"} |= \"database\" |= \"connection\"",
+              "expr": "{job=\"econ-graph-logs\", app=\"econ-graph-backend\"} |= \"database\" |= \"connection\"",
               "refId": "A",
               "datasource": {
                 "type": "loki",
@@ -196,7 +196,7 @@ data:
           "gridPos": { "h": 12, "w": 12, "x": 12, "y": 12 },
           "targets": [
             {
-              "expr": "{namespace=\"econ-graph\"} |= \"error\" |= \"ERROR\"",
+              "expr": "{job=\"econ-graph-logs\"} |= \"error\" |= \"ERROR\"",
               "refId": "A",
               "datasource": {
                 "type": "loki",
@@ -222,7 +222,7 @@ data:
           "gridPos": { "h": 12, "w": 24, "x": 0, "y": 24 },
           "targets": [
             {
-              "expr": "{app=\"econ-graph-backend\"}",
+              "expr": "{job=\"econ-graph-logs\"}",
               "refId": "A",
               "datasource": {
                 "type": "loki",

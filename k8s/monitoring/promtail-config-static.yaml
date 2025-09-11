@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promtail-config
+  namespace: econ-graph
+data:
+  config.yml: |
+    server:
+      http_listen_port: 9080
+      grpc_listen_port: 0
+    positions:
+      filename: /tmp/positions.yaml
+    clients:
+      - url: http://loki-service:3100/loki/api/v1/push
+    scrape_configs:
+    - job_name: econ-graph-logs
+      static_configs:
+      - targets:
+        - localhost
+        labels:
+          job: econ-graph-logs
+          namespace: econ-graph
+          app: econ-graph-backend
+          pod: econ-graph-backend-7ffbf56464-tbhz5
+          container: backend
+          __path__: /var/log/pods/econ-graph_econ-graph-backend-7ffbf56464-tbhz5_0f3216dc-25c6-4e59-bc83-009ee30d3bc9/backend/0.log
+      - targets:
+        - localhost
+        labels:
+          job: econ-graph-logs
+          namespace: econ-graph
+          app: econ-graph-backend
+          pod: econ-graph-backend-7ffbf56464-l2mqh
+          container: backend
+          __path__: /var/log/pods/econ-graph_econ-graph-backend-7ffbf56464-l2mqh_57232ff0-9f3f-4c3e-82d0-9fe067a9f58c/backend/0.log
+      - targets:
+        - localhost
+        labels:
+          job: econ-graph-logs
+          namespace: econ-graph
+          app: econ-graph-frontend
+          pod: econ-graph-frontend-779899895d-2ccpx
+          container: frontend
+          __path__: /var/log/pods/econ-graph_econ-graph-frontend-779899895d-2ccpx_e2be5ad2-d564-48a9-b880-abdea4b77c1f/frontend/0.log
+      - targets:
+        - localhost
+        labels:
+          job: econ-graph-logs
+          namespace: econ-graph
+          app: econ-graph-frontend
+          pod: econ-graph-frontend-779899895d-f2xkj
+          container: frontend
+          __path__: /var/log/pods/econ-graph_econ-graph-frontend-779899895d-f2xkj_78927867-1d0e-44c3-afe6-c6fa0f9103bc/frontend/0.log
