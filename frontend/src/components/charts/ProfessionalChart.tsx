@@ -251,7 +251,7 @@ const ProfessionalChart: React.FC<ProfessionalChartProps> = ({
             tension: 0.1,
             pointRadius: 1,
             pointHoverRadius: 4,
-            yAxisID: index === 0 ? 'y1' : 'y',
+            yAxisID: index === 0 && secondarySeries.length > 0 ? 'y1' : 'y',
             borderDash: index % 2 === 1 ? [5, 5] : undefined,
           });
         }
