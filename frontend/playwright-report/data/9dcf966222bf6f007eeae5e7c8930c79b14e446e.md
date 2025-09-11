@@ -1,0 +1,176 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - navigation [ref=e5]:
+        - generic [ref=e6] [cursor=pointer]:
+          - img [ref=e7] [cursor=pointer]
+          - generic [ref=e9] [cursor=pointer]: EconGraph
+        - generic [ref=e12]:
+          - generic:
+            - img
+          - textbox [ref=e14]
+        - button [ref=e16] [cursor=pointer]:
+          - img [ref=e18] [cursor=pointer]
+          - text: Sign In
+    - navigation [ref=e20]
+    - main [ref=e21]:
+      - generic [ref=e23]:
+        - generic [ref=e24]:
+          - generic [ref=e25]:
+            - heading [level=1] [ref=e26]: Economic Dashboard
+            - button [ref=e27] [cursor=pointer]:
+              - img [ref=e29] [cursor=pointer]
+              - text: Enable Collaboration
+          - paragraph [ref=e31]: Key economic indicators with professional collaboration features
+        - generic [ref=e32]:
+          - heading [level=5] [ref=e34]: Key Indicators
+          - generic [ref=e37] [cursor=pointer]:
+            - generic [ref=e38] [cursor=pointer]:
+              - img [ref=e39] [cursor=pointer]
+              - generic [ref=e41] [cursor=pointer]:
+                - generic [ref=e42] [cursor=pointer]: Real Gross Domestic Product
+                - generic [ref=e44] [cursor=pointer]: BEA
+            - generic [ref=e45] [cursor=pointer]: $27.36T
+            - generic [ref=e46] [cursor=pointer]:
+              - generic [ref=e47] [cursor=pointer]:
+                - img [ref=e48] [cursor=pointer]
+                - generic [ref=e51] [cursor=pointer]: +2.4%
+              - generic [ref=e52] [cursor=pointer]: Q3 2024
+          - generic [ref=e55] [cursor=pointer]:
+            - generic [ref=e56] [cursor=pointer]:
+              - img [ref=e57] [cursor=pointer]
+              - generic [ref=e59] [cursor=pointer]:
+                - generic [ref=e60] [cursor=pointer]: Unemployment Rate
+                - generic [ref=e62] [cursor=pointer]: BLS
+            - generic [ref=e63] [cursor=pointer]: 3.7%
+            - generic [ref=e64] [cursor=pointer]:
+              - generic [ref=e65] [cursor=pointer]:
+                - img [ref=e66] [cursor=pointer]
+                - generic [ref=e69] [cursor=pointer]: "-0.1%"
+              - generic [ref=e70] [cursor=pointer]: Nov 2024
+          - generic [ref=e73] [cursor=pointer]:
+            - generic [ref=e74] [cursor=pointer]:
+              - img [ref=e75] [cursor=pointer]
+              - generic [ref=e77] [cursor=pointer]:
+                - generic [ref=e78] [cursor=pointer]: Consumer Price Index
+                - generic [ref=e80] [cursor=pointer]: BLS
+            - generic [ref=e81] [cursor=pointer]: 3.2%
+            - generic [ref=e82] [cursor=pointer]:
+              - generic [ref=e83] [cursor=pointer]:
+                - img [ref=e84] [cursor=pointer]
+                - generic [ref=e87] [cursor=pointer]: +0.2%
+              - generic [ref=e88] [cursor=pointer]: Nov 2024
+          - generic [ref=e91] [cursor=pointer]:
+            - generic [ref=e92] [cursor=pointer]:
+              - img [ref=e93] [cursor=pointer]
+              - generic [ref=e95] [cursor=pointer]:
+                - generic [ref=e96] [cursor=pointer]: Federal Funds Rate
+                - generic [ref=e98] [cursor=pointer]: Federal Reserve
+            - generic [ref=e99] [cursor=pointer]: 5.25%
+            - generic [ref=e100] [cursor=pointer]:
+              - generic [ref=e103] [cursor=pointer]: 0.0%
+              - generic [ref=e104] [cursor=pointer]: Dec 2024
+          - generic [ref=e106]:
+            - generic [ref=e107]:
+              - heading [level=6] [ref=e108]: Recent Data Releases
+              - button [ref=e109] [cursor=pointer]:
+                - img [ref=e110] [cursor=pointer]
+            - list [ref=e112]:
+              - listitem [ref=e113]:
+                - img [ref=e115]
+                - generic [ref=e117]:
+                  - generic [ref=e118]: Employment Situation Summary
+                  - paragraph [ref=e119]:
+                    - generic [ref=e120]:
+                      - paragraph [ref=e121]: Nonfarm Payrolls, Unemployment Rate
+                      - generic [ref=e122]: BLS • 12/5/2024
+                - button [ref=e124] [cursor=pointer]:
+                  - img [ref=e125] [cursor=pointer]
+              - listitem [ref=e127]:
+                - img [ref=e129]
+                - generic [ref=e131]:
+                  - generic [ref=e132]: Consumer Price Index
+                  - paragraph [ref=e133]:
+                    - generic [ref=e134]:
+                      - paragraph [ref=e135]: CPI-U, Core CPI
+                      - generic [ref=e136]: BLS • 12/9/2024
+                - button [ref=e138] [cursor=pointer]:
+                  - img [ref=e139] [cursor=pointer]
+              - listitem [ref=e141]:
+                - img [ref=e143]
+                - generic [ref=e145]:
+                  - generic [ref=e146]: Industrial Production
+                  - paragraph [ref=e147]:
+                    - generic [ref=e148]:
+                      - paragraph [ref=e149]: Industrial Production Index
+                      - generic [ref=e150]: Federal Reserve • 12/14/2024
+                - button [ref=e152] [cursor=pointer]:
+                  - img [ref=e153] [cursor=pointer]
+            - button [ref=e156] [cursor=pointer]:
+              - img [ref=e158] [cursor=pointer]
+              - text: Explore All Series
+          - generic [ref=e161]:
+            - heading [level=6] [ref=e162]: Quick Actions
+            - generic [ref=e163]:
+              - button [ref=e164] [cursor=pointer]:
+                - img [ref=e166] [cursor=pointer]
+                - text: Employment Data
+              - button [ref=e168] [cursor=pointer]:
+                - img [ref=e170] [cursor=pointer]
+                - text: Inflation Indicators
+              - button [ref=e172] [cursor=pointer]:
+                - img [ref=e174] [cursor=pointer]
+                - text: GDP & Growth
+              - button [ref=e176] [cursor=pointer]: Browse Data Sources
+            - generic [ref=e177]:
+              - heading [level=6] [ref=e178]: System Status
+              - generic [ref=e179]:
+                - paragraph [ref=e180]: Data Freshness
+                - generic [ref=e182]: Current
+              - progressbar [ref=e183]
+              - generic [ref=e185]: "Last updated: 2 hours ago"
+  - dialog "Welcome to EconGraph Close dialog Sign in to access professional chart collaboration features" [ref=e188]:
+    - heading "Welcome to EconGraph Close dialog Sign in to access professional chart collaboration features" [level=2] [ref=e189]:
+      - generic [ref=e190]:
+        - heading "Welcome to EconGraph" [level=2] [ref=e191]
+        - button "Close dialog" [ref=e192] [cursor=pointer]:
+          - img [ref=e193] [cursor=pointer]
+      - paragraph [ref=e195]: Sign in to access professional chart collaboration features
+    - generic [ref=e196]:
+      - generic [ref=e197]:
+        - button "Continue with Google" [ref=e198] [cursor=pointer]:
+          - img [ref=e200] [cursor=pointer]
+          - text: Continue with Google
+        - button "Facebook (Unavailable)" [disabled]:
+          - generic:
+            - img
+          - text: Facebook (Unavailable)
+      - separator [ref=e202]:
+        - paragraph [ref=e204]: or
+      - generic [ref=e205]:
+        - tablist [ref=e208]:
+          - tab "Sign In" [selected] [ref=e209] [cursor=pointer]: Sign In
+          - tab "Sign Up" [ref=e210] [cursor=pointer]: Sign Up
+        - tabpanel [ref=e212]:
+          - generic [ref=e214]:
+            - generic [ref=e215]:
+              - generic [ref=e216]: Email
+              - generic [ref=e217]:
+                - img [ref=e220]
+                - textbox "Email" [ref=e222]
+                - group:
+                  - generic: Email
+            - generic [ref=e223]:
+              - generic [ref=e224]: Password
+              - generic [ref=e225]:
+                - img [ref=e228]
+                - textbox "Password" [ref=e230]
+                - button [ref=e232] [cursor=pointer]:
+                  - img [ref=e233] [cursor=pointer]
+                - group:
+                  - generic: Password
+    - button "Sign In" [ref=e236] [cursor=pointer]: Sign In
+```

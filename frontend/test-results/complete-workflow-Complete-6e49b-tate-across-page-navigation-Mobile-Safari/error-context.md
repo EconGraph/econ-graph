@@ -1,0 +1,135 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - navigation [ref=e5]:
+      - button "open drawer" [ref=e6] [cursor=pointer]:
+        - img [ref=e7] [cursor=pointer]
+      - generic [ref=e9] [cursor=pointer]:
+        - img [ref=e10] [cursor=pointer]
+        - generic [ref=e12] [cursor=pointer]: EconGraph
+      - generic [ref=e15]:
+        - generic:
+          - img
+        - textbox "search economic series" [ref=e17]
+      - button "Sign In" [ref=e19] [cursor=pointer]:
+        - img [ref=e21] [cursor=pointer]
+        - text: Sign In
+  - main [ref=e23]:
+    - generic [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]:
+          - heading "Economic Dashboard" [level=1] [ref=e28]
+          - button "Enable Collaboration" [ref=e29] [cursor=pointer]:
+            - img [ref=e31] [cursor=pointer]
+            - text: Enable Collaboration
+        - paragraph [ref=e33]: Key economic indicators with professional collaboration features
+      - generic [ref=e34]:
+        - heading "Key Indicators" [level=5] [ref=e36]
+        - generic [ref=e39] [cursor=pointer]:
+          - generic [ref=e40] [cursor=pointer]:
+            - img [ref=e41] [cursor=pointer]
+            - generic [ref=e43] [cursor=pointer]:
+              - generic [ref=e44] [cursor=pointer]: Real Gross Domestic Product
+              - generic [ref=e46] [cursor=pointer]: BEA
+          - generic [ref=e47] [cursor=pointer]: $27.36T
+          - generic [ref=e48] [cursor=pointer]:
+            - generic [ref=e49] [cursor=pointer]:
+              - img [ref=e50] [cursor=pointer]
+              - generic [ref=e53] [cursor=pointer]: +2.4%
+            - generic [ref=e54] [cursor=pointer]: Q3 2024
+        - generic [ref=e57] [cursor=pointer]:
+          - generic [ref=e58] [cursor=pointer]:
+            - img [ref=e59] [cursor=pointer]
+            - generic [ref=e61] [cursor=pointer]:
+              - generic [ref=e62] [cursor=pointer]: Unemployment Rate
+              - generic [ref=e64] [cursor=pointer]: BLS
+          - generic [ref=e65] [cursor=pointer]: 3.7%
+          - generic [ref=e66] [cursor=pointer]:
+            - generic [ref=e67] [cursor=pointer]:
+              - img [ref=e68] [cursor=pointer]
+              - generic [ref=e71] [cursor=pointer]: "-0.1%"
+            - generic [ref=e72] [cursor=pointer]: Nov 2024
+        - generic [ref=e75] [cursor=pointer]:
+          - generic [ref=e76] [cursor=pointer]:
+            - img [ref=e77] [cursor=pointer]
+            - generic [ref=e79] [cursor=pointer]:
+              - generic [ref=e80] [cursor=pointer]: Consumer Price Index
+              - generic [ref=e82] [cursor=pointer]: BLS
+          - generic [ref=e83] [cursor=pointer]: 3.2%
+          - generic [ref=e84] [cursor=pointer]:
+            - generic [ref=e85] [cursor=pointer]:
+              - img [ref=e86] [cursor=pointer]
+              - generic [ref=e89] [cursor=pointer]: +0.2%
+            - generic [ref=e90] [cursor=pointer]: Nov 2024
+        - generic [ref=e93] [cursor=pointer]:
+          - generic [ref=e94] [cursor=pointer]:
+            - img [ref=e95] [cursor=pointer]
+            - generic [ref=e97] [cursor=pointer]:
+              - generic [ref=e98] [cursor=pointer]: Federal Funds Rate
+              - generic [ref=e100] [cursor=pointer]: Federal Reserve
+          - generic [ref=e101] [cursor=pointer]: 5.25%
+          - generic [ref=e102] [cursor=pointer]:
+            - generic [ref=e105] [cursor=pointer]: 0.0%
+            - generic [ref=e106] [cursor=pointer]: Dec 2024
+        - generic [ref=e108]:
+          - generic [ref=e109]:
+            - heading "Recent Data Releases" [level=6] [ref=e110]
+            - button "refresh data" [ref=e111] [cursor=pointer]:
+              - img [ref=e112] [cursor=pointer]
+          - list [ref=e114]:
+            - listitem [ref=e115]:
+              - img [ref=e117]
+              - generic [ref=e119]:
+                - generic [ref=e120]: Employment Situation Summary
+                - paragraph [ref=e121]:
+                  - generic [ref=e122]:
+                    - paragraph [ref=e123]: Nonfarm Payrolls, Unemployment Rate
+                    - generic [ref=e124]: BLS • 12/5/2024
+              - button "view details" [ref=e126] [cursor=pointer]:
+                - img [ref=e127] [cursor=pointer]
+            - listitem [ref=e129]:
+              - img [ref=e131]
+              - generic [ref=e133]:
+                - generic [ref=e134]: Consumer Price Index
+                - paragraph [ref=e135]:
+                  - generic [ref=e136]:
+                    - paragraph [ref=e137]: CPI-U, Core CPI
+                    - generic [ref=e138]: BLS • 12/9/2024
+              - button "view details" [ref=e140] [cursor=pointer]:
+                - img [ref=e141] [cursor=pointer]
+            - listitem [ref=e143]:
+              - img [ref=e145]
+              - generic [ref=e147]:
+                - generic [ref=e148]: Industrial Production
+                - paragraph [ref=e149]:
+                  - generic [ref=e150]:
+                    - paragraph [ref=e151]: Industrial Production Index
+                    - generic [ref=e152]: Federal Reserve • 12/14/2024
+              - button "view details" [ref=e154] [cursor=pointer]:
+                - img [ref=e155] [cursor=pointer]
+          - button "Explore All Series" [ref=e158] [cursor=pointer]:
+            - img [ref=e160] [cursor=pointer]
+            - text: Explore All Series
+        - generic [ref=e163]:
+          - heading "Quick Actions" [level=6] [ref=e164]
+          - generic [ref=e165]:
+            - button "Employment Data" [ref=e166] [cursor=pointer]:
+              - img [ref=e168] [cursor=pointer]
+              - text: Employment Data
+            - button "Inflation Indicators" [ref=e170] [cursor=pointer]:
+              - img [ref=e172] [cursor=pointer]
+              - text: Inflation Indicators
+            - button "GDP & Growth" [ref=e174] [cursor=pointer]:
+              - img [ref=e176] [cursor=pointer]
+              - text: GDP & Growth
+            - button "Browse Data Sources" [ref=e178] [cursor=pointer]: Browse Data Sources
+          - generic [ref=e179]:
+            - heading "System Status" [level=6] [ref=e180]
+            - generic [ref=e181]:
+              - paragraph [ref=e182]: Data Freshness
+              - generic [ref=e184]: Current
+            - progressbar [ref=e185]
+            - generic [ref=e187]: "Last updated: 2 hours ago"
+```
