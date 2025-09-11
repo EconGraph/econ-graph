@@ -95,6 +95,32 @@ const About: React.FC = () => {
             A next-generation economic data platform that combines the comprehensive data coverage
             of FRED with modern web technologies and intuitive user experience.
           </Typography>
+          <Typography variant='body2' sx={{ mt: 2, opacity: 0.8 }}>
+            Version 3.7.2
+          </Typography>
+          <Box sx={{ mt: 3, display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <Link
+              href='/'
+              color='inherit'
+              sx={{ textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}
+            >
+              Dashboard
+            </Link>
+            <Link
+              href='/explore'
+              color='inherit'
+              sx={{ textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}
+            >
+              Explore Series
+            </Link>
+            <Link
+              href='/sources'
+              color='inherit'
+              sx={{ textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}
+            >
+              Data Sources
+            </Link>
+          </Box>
         </Box>
       </Paper>
 

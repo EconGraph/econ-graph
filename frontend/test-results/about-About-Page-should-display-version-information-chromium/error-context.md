@@ -1,0 +1,117 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - navigation [ref=e5]:
+      - generic [ref=e6] [cursor=pointer]:
+        - img [ref=e7] [cursor=pointer]
+        - generic [ref=e9] [cursor=pointer]: EconGraph
+      - generic [ref=e12]:
+        - generic:
+          - img
+        - textbox "search economic series" [ref=e14]
+      - button "Sign In" [ref=e16] [cursor=pointer]:
+        - img [ref=e18] [cursor=pointer]
+        - text: Sign In
+  - navigation "Main navigation" [ref=e20]
+  - main [ref=e21]:
+    - generic [ref=e23]:
+      - generic [ref=e25]:
+        - img [ref=e26]
+        - heading "EconGraph" [level=1] [ref=e28]
+        - heading "Modern Economic Data Visualization Platform" [level=5] [ref=e29]
+        - paragraph [ref=e30]: A next-generation economic data platform that combines the comprehensive data coverage of FRED with modern web technologies and intuitive user experience.
+      - generic [ref=e31]:
+        - generic [ref=e32]:
+          - generic [ref=e33]:
+            - heading "About EconGraph" [level=5] [ref=e34]
+            - paragraph [ref=e35]: EconGraph is a modern economic data visualization platform inspired by the Federal Reserve Economic Data (FRED) system. While FRED provides excellent data coverage, EconGraph focuses on delivering that same comprehensive data through a more intuitive, responsive, and feature-rich interface.
+            - heading "Key Improvements Over FRED" [level=6] [ref=e36]
+            - list [ref=e37]:
+              - listitem [ref=e38]:
+                - img [ref=e40]
+                - generic [ref=e42]:
+                  - generic [ref=e43]: Interactive Charts
+                  - paragraph [ref=e44]: Hover tooltips, date range selection, and real-time transformations
+              - listitem [ref=e45]:
+                - img [ref=e47]
+                - generic [ref=e49]:
+                  - generic [ref=e50]: Modern Performance
+                  - paragraph [ref=e51]: GraphQL API with efficient data loading and client-side caching
+              - listitem [ref=e52]:
+                - img [ref=e54]
+                - generic [ref=e56]:
+                  - generic [ref=e57]: Revision Tracking
+                  - paragraph [ref=e58]: Compare original releases with later revisions for better analysis
+              - listitem [ref=e59]:
+                - img [ref=e61]
+                - generic [ref=e63]:
+                  - generic [ref=e64]: Responsive Design
+                  - paragraph [ref=e65]: Works seamlessly on desktop, tablet, and mobile devices
+          - generic [ref=e66]:
+            - heading "Features" [level=5] [ref=e67]
+            - generic [ref=e68]:
+              - generic [ref=e71]:
+                - generic [ref=e72]:
+                  - img [ref=e73]
+                  - heading "Interactive Visualizations" [level=6] [ref=e75]
+                - paragraph [ref=e76]: Modern charts with tooltips, zoom, and real-time data transformations
+              - generic [ref=e79]:
+                - generic [ref=e80]:
+                  - img [ref=e81]
+                  - heading "Fast Performance" [level=6] [ref=e83]
+                - paragraph [ref=e84]: GraphQL API with efficient data loading and caching for quick responses
+              - generic [ref=e87]:
+                - generic [ref=e88]:
+                  - img [ref=e89]
+                  - heading "Data Integrity" [level=6] [ref=e91]
+                - paragraph [ref=e92]: Track original releases vs. revisions to understand data evolution
+              - generic [ref=e95]:
+                - generic [ref=e96]:
+                  - img [ref=e97]
+                  - heading "Modern Infrastructure" [level=6] [ref=e99]
+                - paragraph [ref=e100]: Kubernetes deployment with monitoring and automated scaling
+        - generic [ref=e101]:
+          - generic [ref=e102]:
+            - heading "Data Sources" [level=6] [ref=e103]
+            - list [ref=e104]:
+              - listitem [ref=e105]:
+                - img [ref=e107]
+                - generic [ref=e110]: Federal Reserve Economic Data (FRED)
+              - listitem [ref=e111]:
+                - img [ref=e113]
+                - generic [ref=e116]: Bureau of Labor Statistics (BLS)
+              - listitem [ref=e117]:
+                - img [ref=e119]
+                - generic [ref=e122]: U.S. Census Bureau
+              - listitem [ref=e123]:
+                - img [ref=e125]
+                - generic [ref=e128]: World Bank Open Data
+          - generic [ref=e129]:
+            - heading "Technology Stack" [level=6] [ref=e130]
+            - generic [ref=e131]:
+              - generic [ref=e133]: React
+              - generic [ref=e135]: TypeScript
+              - generic [ref=e137]: Material-UI
+              - generic [ref=e139]: Chart.js
+              - generic [ref=e141]: GraphQL
+              - generic [ref=e143]: Rust
+              - generic [ref=e145]: PostgreSQL
+              - generic [ref=e147]: Diesel ORM
+              - generic [ref=e149]: Kubernetes
+              - generic [ref=e151]: Terraform
+              - generic [ref=e153]: Grafana
+          - generic [ref=e154]:
+            - heading "Open Source" [level=6] [ref=e155]:
+              - img [ref=e156]
+              - text: Open Source
+            - paragraph [ref=e158]: EconGraph is built with modern, open-source technologies and follows best practices for scalability, security, and maintainability.
+            - link "View on GitHub" [ref=e159] [cursor=pointer]:
+              - /url: https://github.com/econograph/econograph
+              - img [ref=e160] [cursor=pointer]
+              - text: View on GitHub
+      - generic [ref=e162]:
+        - paragraph [ref=e163]: EconGraph is an independent project and is not affiliated with the Federal Reserve Bank of St. Louis or FRED.
+        - paragraph [ref=e164]: Built with ❤️ for the economics and data visualization community.
+```

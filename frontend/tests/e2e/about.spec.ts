@@ -8,27 +8,17 @@ test.describe('About Page', () => {
   test('should display about page', async ({ page }) => {
     await expect(page.locator('main')).toBeVisible();
 
-    // Check for about page specific content
-    const aboutContent = page.getByText(/about/i).or(
-      page.getByText(/econograph/i).or(
-        page.getByText(/economic data/i)
-      )
-    );
+    // Check for about page specific content - use specific heading
+    const aboutContent = page.getByRole('heading', { name: 'About EconGraph' });
 
     await expect(aboutContent).toBeVisible();
   });
 
   test('should display application description', async ({ page }) => {
-    // Look for application description
-    const description = page.getByText(/modern economic/i).or(
-      page.getByText(/data visualization/i).or(
-        page.getByText(/time series/i).or(
-          page.getByText(/economic analysis/i)
-        )
-      )
-    );
+    // Look for application description - use specific heading to avoid strict mode violation
+    const description = page.getByRole('heading', { name: 'Modern Economic Data Visualization Platform' });
 
-    await expect(description.first()).toBeVisible();
+    await expect(description).toBeVisible();
   });
 
   test('should display features list', async ({ page }) => {
@@ -44,17 +34,9 @@ test.describe('About Page', () => {
 
   test('should display technology stack information', async ({ page }) => {
     // Look for technology information
-    const techInfo = page.getByText(/technology/i).or(
-      page.getByText(/built with/i).or(
-        page.getByText(/react/i).or(
-          page.getByText(/rust/i).or(
-            page.getByText(/graphql/i)
-          )
-        )
-      )
-    );
+    const techInfo = page.getByRole('heading', { name: 'Technology Stack' });
 
-    await expect(techInfo.first()).toBeVisible();
+    await expect(techInfo).toBeVisible();
   });
 
   test('should display contact information or links', async ({ page }) => {
@@ -74,20 +56,16 @@ test.describe('About Page', () => {
 
   test('should display version information', async ({ page }) => {
     // Look for version information
-    const versionInfo = page.getByText(/version/i).or(
-      page.getByText(/v3\./i).or(
-        page.locator('[data-testid="version"]')
-      )
-    );
+    const versionInfo = page.getByText('Version 3.7.2');
 
-    await expect(versionInfo.first()).toBeVisible();
+    await expect(versionInfo).toBeVisible();
   });
 
   test('should have navigation back to main sections', async ({ page }) => {
     // Look for navigation links
-    const navLinks = page.getByRole('link', { name: /dashboard/i }).or(
-      page.getByRole('link', { name: /explore/i }).or(
-        page.getByRole('link', { name: /sources/i })
+    const navLinks = page.getByRole('link', { name: 'Dashboard' }).or(
+      page.getByRole('link', { name: 'Explore Series' }).or(
+        page.getByRole('link', { name: 'Data Sources' })
       )
     );
 
@@ -99,10 +77,8 @@ test.describe('About Page', () => {
 
     await expect(page.locator('main')).toBeVisible();
 
-    // Content should still be readable on mobile
-    const aboutContent = page.getByText(/about/i).or(
-      page.getByText(/econograph/i)
-    );
+    // Content should still be readable on mobile - use specific heading
+    const aboutContent = page.getByRole('heading', { name: 'About EconGraph' });
 
     await expect(aboutContent).toBeVisible();
   });
