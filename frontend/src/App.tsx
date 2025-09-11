@@ -19,7 +19,7 @@ import GlobalAnalysis from './pages/GlobalAnalysis';
  * This creates a responsive layout with navigation that's more intuitive than FRED's interface
  */
 function App() {
-  const [sidebarOpen, setSidebarOpen] = React.useState(false);
+  const [sidebarOpen, setSidebarOpen] = React.useState(true);
 
   const handleSidebarToggle = () => {
     setSidebarOpen(!sidebarOpen);
