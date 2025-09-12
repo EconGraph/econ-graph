@@ -5,7 +5,7 @@
 [![Tests](https://img.shields.io/badge/Tests-157%20Passing-brightgreen)](https://github.com/jmalicki/econ-graph/actions)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%2B%20Axum-orange)](https://github.com/jmalicki/econ-graph/tree/main/backend)
 [![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-blue)](https://github.com/jmalicki/econ-graph/tree/main/frontend)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-MS--RSL-red.svg)](LICENSE)
 
 ## 🎬 **FULLY AUTOMATED 20-MINUTE INVESTOR VIDEO**
 
@@ -348,23 +348,25 @@ econ-graph/
 
 ---
 
-## 🤝 **Contributing**
+## 📄 **License & Usage**
 
-We welcome contributions! This is a working prototype with room for improvement.
+This project is licensed under the **Microsoft Reference Source License (MS-RSL)**. This license allows you to view the source code for reference purposes only.
 
-### **Development Workflow**
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Run tests (`cargo test && npm test`)
-4. Commit changes (`git commit -m 'Add amazing feature'`)
-5. Push to branch (`git push origin feature/amazing-feature`)
-6. Open a Pull Request
+### **License Restrictions**
+- ✅ **Viewing**: You may view the source code for educational and reference purposes
+- ❌ **Commercial Use**: Commercial use is prohibited without a separate commercial license
+- ❌ **Modification**: You may not modify or create derivative works
+- ❌ **Distribution**: You may not distribute the software or any portion of it
+- ❌ **Copying**: You may not copy the source code except for viewing purposes
+
+### **Commercial Licensing**
+For commercial use, enterprise licensing, or any questions about usage rights, please contact: **licensing@econ-graph.com**
 
 ---
 
-## 📄 **License**
+## 📄 **License Details**
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Microsoft Reference Source License (MS-RSL) - see the [LICENSE](LICENSE) file for complete terms and conditions.
 
 ---
 

@@ -1,3 +1,7 @@
+// Copyright (c) 2024 EconGraph. All rights reserved.
+// Licensed under the Microsoft Reference Source License (MS-RSL).
+// See LICENSE file for complete terms and conditions.
+
 use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 use async_graphql::Schema;
 use async_graphql_warp::{GraphQLBadRequest, GraphQLResponse};
