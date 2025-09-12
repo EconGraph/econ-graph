@@ -76,9 +76,53 @@ jobs:
           k8s/monitoring/grafana-*.yaml
         retention-days: 30
 
-  backend-tests:
-    name: Backend Tests (Rust)
+  backend-smoke-tests:
+    name: Backend Smoke Tests (Fast)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Check Rust formatting
+      run: cargo fmt --all -- --check
+      working-directory: backend
+
+    - name: Run Clippy (linting)
+      run: cargo clippy --all-targets --all-features -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
+      working-directory: backend
+
+    - name: Build backend
+      run: cargo build --verbose
+      working-directory: backend
+
+    - name: Run fast unit tests (no database)
+      run: cargo test --lib -- --test-threads=4 --nocapture config auth::services metrics
+      working-directory: backend
+      env:
+        RUST_LOG: warn
+
+  backend-database-tests:
+    name: Backend Database Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -101,8 +145,6 @@ jobs:
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
-      with:
-        components: rustfmt, clippy
 
     - name: Cache Rust dependencies
       uses: actions/cache@v3
@@ -134,17 +176,99 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
-    - name: Check Rust formatting
-      run: cargo fmt --all -- --check
+    - name: Run database model tests
+      run: cargo test --lib -- --test-threads=2 --nocapture models::data_source models::economic_series models::data_point models::crawl_queue models::search
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
+        RUST_LOG: warn
+
+  backend-service-tests:
+    name: Backend Service Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5433:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Install diesel CLI
+      run: cargo install diesel_cli --no-default-features --features postgres
       working-directory: backend
 
-    - name: Run Clippy (linting)
-      run: cargo clippy --all-targets --all-features -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
-      working-directory: backend
+    - name: Wait for PostgreSQL
+      run: |
+        until pg_isready -h localhost -p 5433 -U postgres; do
+          echo "Waiting for postgres..."
+          sleep 2
+        done
 
-    - name: Build backend
-      run: cargo build --verbose
+    - name: Setup database
+      run: |
+        diesel setup
+        diesel migration run
       working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5433/econ_graph_test
+
+    - name: Run service and integration tests
+      run: cargo test --lib -- --test-threads=2 --nocapture services::queue_service services::global_analysis_service services::crawler services::search_service services::series_service services::collaboration_service auth::integration_tests auth::comprehensive_integration_tests collaboration_integration_tests
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5433/econ_graph_test
+        RUST_LOG: warn
+
+  backend-license-compliance:
+    name: Backend License Compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
 
     - name: Install cargo-deny
       run: cargo install cargo-deny
@@ -152,12 +276,6 @@ jobs:
     - name: Check backend license compliance
       run: cargo deny check licenses
       working-directory: backend
-
-    - name: Run backend tests
-      run: cargo test --verbose
-      working-directory: backend
-      env:
-        DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
   frontend-tests:
     name: Frontend Tests (React)
@@ -207,7 +325,7 @@ jobs:
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [backend-tests, frontend-tests]
+    needs: [backend-smoke-tests, backend-database-tests, backend-service-tests, frontend-tests]
 
     services:
       postgres:
@@ -293,7 +411,7 @@ jobs:
   comprehensive-e2e:
     name: Comprehensive End-to-End Tests
     runs-on: ubuntu-latest
-    needs: [backend-tests, frontend-tests]
+    needs: [backend-smoke-tests, backend-database-tests, backend-service-tests, frontend-tests]
 
     services:
       postgres:
@@ -421,7 +539,7 @@ jobs:
   docker-build:
     name: Docker Build Test
     runs-on: ubuntu-latest
-    needs: [backend-tests, frontend-tests]
+    needs: [backend-smoke-tests, backend-database-tests, backend-service-tests, frontend-tests]
 
     steps:
     - name: Checkout code
