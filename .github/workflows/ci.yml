@@ -18,6 +18,50 @@ env:
   DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
 jobs:
+  shared-rust-cache:
+    name: Shared Rust Build Cache
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      cache-key: ${{ steps.cache-key.outputs.key }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Generate cache key
+      id: cache-key
+      run: echo "key=${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}" >> $GITHUB_OUTPUT
+
+    - name: Cache shared Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+        key: ${{ steps.cache-key.outputs.key }}
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Install shared tools
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
+        if ! command -v cargo-audit &> /dev/null; then
+          cargo install cargo-audit
+        fi
+        if ! command -v cargo-deny &> /dev/null; then
+          cargo install cargo-deny
+        fi
+      working-directory: backend
+
   grafana-dashboard-validation:
     name: Grafana Dashboard Validation
     runs-on: ubuntu-latest
@@ -89,6 +133,7 @@ jobs:
     name: Backend Smoke Tests (Fast)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    needs: [shared-rust-cache]
 
     steps:
     - name: Checkout code
@@ -107,10 +152,11 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ needs.shared-rust-cache.outputs.cache-key }}
         restore-keys: |
-          ${{ runner.os }}-cargo-
+          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-shared-cargo-
 
     - name: Check Rust formatting
       run: cargo fmt --all -- --check
@@ -169,11 +215,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup database
@@ -226,11 +278,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup database
@@ -283,11 +341,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup database
@@ -340,11 +404,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup database
@@ -397,11 +467,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup database
@@ -454,11 +530,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup database
@@ -511,11 +593,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup database
@@ -568,11 +656,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup database
@@ -625,11 +719,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup database
@@ -682,11 +782,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup database
@@ -739,11 +845,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup database
@@ -796,11 +908,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup database
@@ -853,11 +971,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup database
@@ -951,11 +1075,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup database
@@ -1058,11 +1188,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
+      run: |
+        if ! command -v diesel &> /dev/null; then
+          cargo install diesel_cli --no-default-features --features postgres
+        fi
       working-directory: backend
 
     - name: Setup test database
@@ -1125,11 +1261,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-audit-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install cargo-audit
-      run: cargo install cargo-audit
+      run: |
+        if ! command -v cargo-audit &> /dev/null; then
+          cargo install cargo-audit
+        fi
 
     - name: Run Rust security audit
       run: cargo audit
@@ -1210,8 +1352,11 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Check Rust code formatting
       run: cargo fmt --all -- --check
@@ -1260,11 +1405,17 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
 
     - name: Install cargo-deny
-      run: cargo install cargo-deny
+      run: |
+        if ! command -v cargo-deny &> /dev/null; then
+          cargo install cargo-deny
+        fi
 
     - name: Install license-checker
       run: npm install -g license-checker
