@@ -5,14 +5,14 @@
   "dependencies": {
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
-    "@mui/icons-material": "5.18.0",
-    "@mui/material": "5.18.0",
-    "@mui/x-date-pickers": "6.20.2",
+    "@mui/icons-material": "^5.18.0",
+    "@mui/material": "^5.18.0",
+    "@mui/x-date-pickers": "^6.20.2",
     "@types/d3": "7.4.3",
     "@types/lodash": "4.17.20",
-    "@types/node": "20.19.13",
-    "@types/react": "18.3.24",
-    "@types/react-dom": "18.3.7",
+    "@types/node": "^20.19.13",
+    "@types/react": "^18.3.24",
+    "@types/react-dom": "^18.3.7",
     "@types/topojson-client": "3.1.5",
     "ajv": "8.17.1",
     "axios": "^1.12.0",
@@ -22,9 +22,9 @@
     "d3": "7.9.0",
     "date-fns": "2.30.0",
     "lodash": "4.17.21",
-    "react": "18.3.1",
+    "react": "^18.3.1",
     "react-chartjs-2": "5.3.0",
-    "react-dom": "18.3.1",
+    "react-dom": "^18.3.1",
     "react-query": "3.39.3",
     "react-router-dom": "6.30.1",
     "react-scripts": "^5.0.1",
@@ -35,17 +35,17 @@
   "devDependencies": {
     "@apollo/client": "4.0.4",
     "@playwright/test": "^1.55.0",
-    "@testing-library/jest-dom": "6.8.0",
-    "@testing-library/react": "14.3.1",
-    "@testing-library/user-event": "14.6.1",
-    "@types/jest": "29.5.14",
-    "jest": "27.5.1",
-    "jest-environment-jsdom": "29.7.0",
+    "@testing-library/jest-dom": "^6.8.0",
+    "@testing-library/react": "^14.3.1",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/jest": "^29.5.14",
+    "jest": "^27.5.1",
+    "jest-environment-jsdom": "^29.7.0",
     "msw": "2.11.1",
     "prettier": "3.6.2",
     "react-test-renderer": "18.3.1",
     "resize-observer-polyfill": "1.5.1",
-    "typescript": "4.9.5"
+    "typescript": "^4.9.5"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -110,7 +110,8 @@
     "nth-check": "^2.1.1",
     "postcss": "^8.4.31",
     "@types/d3-dispatch": "3.0.4",
-    "webpack-dev-server": "^5.1.0"
+    "webpack-dev-server": "^5.1.0",
+    "@pmmmwh/react-refresh-webpack-plugin": "^0.5.15"
   },
   "resolutions": {
     "@types/d3-dispatch": "3.0.4"
