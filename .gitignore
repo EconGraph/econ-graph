@@ -90,3 +90,9 @@ temp/
 /frontend/debug-*.png
 /frontend/debug-*.jpg
 /frontend/debug-*.jpeg
+
+# Generated reports
+codebase-analysis-report.md
+
+# Analysis configuration (customizable)
+codebase-analysis-config*.env
