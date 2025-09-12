@@ -146,13 +146,6 @@ jobs:
       run: cargo build --verbose
       working-directory: backend
 
-    - name: Install cargo-deny
-      run: cargo install cargo-deny
-
-    - name: Check backend license compliance
-      run: cargo deny check licenses
-      working-directory: backend
-
     - name: Run backend tests
       run: cargo test --verbose
       working-directory: backend
@@ -178,13 +171,6 @@ jobs:
       run: npm ci
       working-directory: frontend
 
-    - name: Install license-checker
-      run: npm install -g license-checker
-
-    - name: Check frontend license compliance
-      run: license-checker --config .license-checker.json
-      working-directory: frontend
-
     - name: Check TypeScript compilation
       run: npm run build
       working-directory: frontend
@@ -207,7 +193,7 @@ jobs:
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [backend-tests, frontend-tests]
+    needs: [backend-tests, frontend-tests, license-compliance]
 
     services:
       postgres:
@@ -293,7 +279,7 @@ jobs:
   comprehensive-e2e:
     name: Comprehensive End-to-End Tests
     runs-on: ubuntu-latest
-    needs: [backend-tests, frontend-tests]
+    needs: [backend-tests, frontend-tests, license-compliance]
 
     services:
       postgres:
@@ -421,7 +407,7 @@ jobs:
   docker-build:
     name: Docker Build Test
     runs-on: ubuntu-latest
-    needs: [backend-tests, frontend-tests]
+    needs: [backend-tests, frontend-tests, license-compliance]
 
     steps:
     - name: Checkout code
@@ -499,3 +485,84 @@ jobs:
     - name: Check TypeScript types
       run: npx tsc --noEmit
       working-directory: frontend
+
+  license-compliance:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install cargo-deny
+      run: cargo install cargo-deny
+
+    - name: Install license-checker
+      run: npm install -g license-checker
+
+    - name: Install frontend dependencies
+      run: npm ci
+      working-directory: frontend
+
+    - name: 🔍 Check Backend License Compliance
+      run: |
+        echo "🔍 Checking backend license compliance with cargo-deny..."
+        cargo deny check licenses
+        echo "✅ Backend license compliance check passed"
+      working-directory: backend
+
+    - name: 🔍 Check Frontend License Compliance
+      run: |
+        echo "🔍 Checking frontend license compliance with license-checker..."
+        license-checker --config .license-checker.json
+        echo "✅ Frontend license compliance check passed"
+      working-directory: frontend
+
+    - name: 📋 Generate License Report
+      run: |
+        echo "📋 Generating comprehensive license report..."
+        echo "=============================================="
+
+        echo "Backend Dependencies (Rust):"
+        echo "----------------------------"
+        cargo deny check licenses --format json > backend-licenses.json || true
+        echo "Backend license check completed"
+
+        echo ""
+        echo "Frontend Dependencies (Node.js):"
+        echo "--------------------------------"
+        license-checker --config .license-checker.json --json > frontend-licenses.json || true
+        echo "Frontend license check completed"
+
+        echo ""
+        echo "✅ License compliance check completed successfully"
+      working-directory: frontend
+
+    - name: Upload license reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: license-compliance-reports-${{ github.sha }}
+        path: |
+          backend-licenses.json
+          frontend-licenses.json
+        retention-days: 30
