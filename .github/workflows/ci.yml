@@ -122,10 +122,10 @@ jobs:
 
 
 
-  backend-database-tests:
-    name: Backend Database Tests
+  backend-models-basic-tests:
+    name: Backend Models Basic Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 12
     needs: [backend-smoke-tests]
 
     services:
@@ -171,16 +171,16 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
-    - name: Run backend database tests
-      run: cargo test --lib -- --test-threads=2 --nocapture models::data_source models::economic_series models::data_point models::crawl_queue models::search
+    - name: Run backend models basic tests
+      run: cargo test --lib -- --test-threads=2 --nocapture models::data_source::tests::simple_tests models::economic_series::tests::simple_tests models::data_point::tests::simple_tests models::crawl_queue::tests::simple_tests models::search::tests::simple_tests
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
-  backend-service-tests:
-    name: Backend Service Tests
+  backend-models-advanced-tests:
+    name: Backend Models Advanced Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 12
     needs: [backend-smoke-tests]
 
     services:
@@ -226,11 +226,616 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5433/econ_graph_test
 
-    - name: Run backend service tests
-      run: cargo test --lib -- --test-threads=2 --nocapture services::queue_service services::global_analysis_service services::crawler services::search_service services::series_service services::collaboration_service auth::integration_tests auth::comprehensive_integration_tests collaboration_integration_tests
+    - name: Run backend models advanced tests
+      run: cargo test --lib -- --test-threads=2 --nocapture models::data_source::tests models::economic_series::tests models::data_point::tests models::crawl_queue::tests models::search::tests models::series_metadata::tests
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5433/econ_graph_test
+
+  backend-crawler-unit-tests:
+    name: Backend Crawler Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-smoke-tests]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5434:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install diesel CLI
+      run: cargo install diesel_cli --no-default-features --features postgres
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5434/econ_graph_test
+
+    - name: Run backend crawler unit tests
+      run: cargo test --lib -- --test-threads=2 --nocapture services::crawler::tests::test_catalog_downloader_creation services::crawler::tests::test_series_downloader_creation services::crawler::simple_crawler_service::tests services::crawler::enhanced_crawler_scheduler::tests
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5434/econ_graph_test
+
+  backend-crawler-integration-tests:
+    name: Backend Crawler Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-smoke-tests]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5435:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install diesel CLI
+      run: cargo install diesel_cli --no-default-features --features postgres
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5435/econ_graph_test
+
+    - name: Run backend crawler integration tests
+      run: cargo test --lib -- --test-threads=2 --nocapture services::crawler::tests::test_crawler_with_database services::crawler::tests::test_file_crawling_with_series_downloader services::crawler::tests::test_file_url_crawling services::crawler::tests::test_file_url_error_handling services::crawler::tests::test_file_url_with_special_characters services::crawler::tests::test_multiple_file_urls
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5435/econ_graph_test
+
+  backend-queue-basic-tests:
+    name: Backend Queue Basic Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-smoke-tests]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5436:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install diesel CLI
+      run: cargo install diesel_cli --no-default-features --features postgres
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5436/econ_graph_test
+
+    - name: Run backend queue basic tests
+      run: cargo test --lib -- --test-threads=2 --nocapture services::queue_service::tests::test_get_and_lock_next_item services::queue_service::tests::test_queue_item_locking_and_unlocking services::queue_service::tests::test_queue_status_updates services::queue_service::tests::test_queue_retry_logic services::queue_service::tests::test_queue_skip_locked_functionality
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5436/econ_graph_test
+
+  backend-queue-advanced-tests:
+    name: Backend Queue Advanced Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-smoke-tests]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5437:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install diesel CLI
+      run: cargo install diesel_cli --no-default-features --features postgres
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5437/econ_graph_test
+
+    - name: Run backend queue advanced tests
+      run: cargo test --lib -- --test-threads=2 --nocapture services::queue_service::tests::test_queue_concurrent_access services::queue_service::tests::test_queue_statistics_with_processing_time services::queue_service::tests::test_queue_statistics_empty services::queue_service::tests::test_queue_error_handling services::queue_service::tests::test_queue_scheduled_items services::queue_service::tests::test_get_stuck_items services::queue_service::tests::test_unlock_stuck_items services::queue_service::tests::test_mark_item_failed services::queue_service::tests::test_cleanup_old_queue_items
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5437/econ_graph_test
+
+  backend-global-analysis-basic-tests:
+    name: Backend Global Analysis Basic Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-smoke-tests]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5438:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install diesel CLI
+      run: cargo install diesel_cli --no-default-features --features postgres
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5438/econ_graph_test
+
+    - name: Run backend global analysis basic tests
+      run: cargo test --lib -- --test-threads=2 --nocapture services::global_analysis_service::tests::test_get_countries_with_economic_data services::global_analysis_service::tests::test_get_global_events_with_impacts services::global_analysis_service::tests::test_get_global_events_with_filters services::global_analysis_service::tests::test_direct_event_query services::global_analysis_service::tests::test_event_insertion_only services::global_analysis_service::tests::test_trade_partners_retrieval
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5438/econ_graph_test
+
+  backend-global-analysis-advanced-tests:
+    name: Backend Global Analysis Advanced Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-smoke-tests]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5439:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install diesel CLI
+      run: cargo install diesel_cli --no-default-features --features postgres
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5439/econ_graph_test
+
+    - name: Run backend global analysis advanced tests
+      run: cargo test --lib -- --test-threads=2 --nocapture services::global_analysis_service::tests::test_get_correlation_network services::global_analysis_service::tests::test_calculate_country_correlations services::global_analysis_service::tests::test_calculate_economic_health_score services::global_analysis_service::tests::test_correlation_network_centrality_calculation services::global_analysis_service::tests::test_error_handling_database_connection_failure
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5439/econ_graph_test
+
+  backend-series-discovery-basic-tests:
+    name: Backend Series Discovery Basic Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-smoke-tests]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5440:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install diesel CLI
+      run: cargo install diesel_cli --no-default-features --features postgres
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5440/econ_graph_test
+
+    - name: Run backend series discovery basic tests
+      run: cargo test --lib -- --test-threads=2 --nocapture services::series_discovery::boc::tests::test_boc_data_source_creation services::series_discovery::boe::tests::test_boe_data_source_creation services::series_discovery::boj::tests::test_boj_data_source_creation services::series_discovery::ecb::tests::test_ecb_data_source_creation services::series_discovery::fhfa::tests::test_fhfa_data_source_creation services::series_discovery::ilo::tests::test_ilo_data_source_creation services::series_discovery::oecd::tests::test_oecd_data_source_creation services::series_discovery::rba::tests::test_rba_data_source_creation services::series_discovery::snb::tests::test_snb_data_source_creation services::series_discovery::unstats::tests::test_unstats_data_source_creation services::series_discovery::wto::tests::test_wto_data_source_creation
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5440/econ_graph_test
+
+  backend-series-discovery-integration-tests:
+    name: Backend Series Discovery Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-smoke-tests]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5441:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install diesel CLI
+      run: cargo install diesel_cli --no-default-features --features postgres
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5441/econ_graph_test
+
+    - name: Run backend series discovery integration tests
+      run: cargo test --lib -- --test-threads=2 --nocapture services::series_discovery::boc::tests::test_discover_series services::series_discovery::boe::tests::test_discover_series services::series_discovery::boj::tests::test_discover_series services::series_discovery::ecb::tests::test_discover_series services::series_discovery::fhfa::tests::test_discover_series services::series_discovery::ilo::tests::test_discover_series services::series_discovery::oecd::tests::test_discover_series services::series_discovery::rba::tests::test_discover_series services::series_discovery::snb::tests::test_discover_series services::series_discovery::unstats::tests::test_discover_series services::series_discovery::wto::tests::test_discover_series
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5441/econ_graph_test
+
+  backend-auth-integration-tests:
+    name: Backend Auth Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-smoke-tests]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5442:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install diesel CLI
+      run: cargo install diesel_cli --no-default-features --features postgres
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5442/econ_graph_test
+
+    - name: Run backend auth integration tests
+      run: cargo test --lib -- --test-threads=2 --nocapture auth::integration_tests auth::comprehensive_integration_tests
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5442/econ_graph_test
+
+  backend-collaboration-integration-tests:
+    name: Backend Collaboration Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-smoke-tests]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5443:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install diesel CLI
+      run: cargo install diesel_cli --no-default-features --features postgres
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5443/econ_graph_test
+
+    - name: Run backend collaboration integration tests
+      run: cargo test --lib -- --test-threads=2 --nocapture collaboration_integration_tests services::collaboration_service::tests
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5443/econ_graph_test
+
+  backend-remaining-service-tests:
+    name: Backend Remaining Service Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-smoke-tests]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5444:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install diesel CLI
+      run: cargo install diesel_cli --no-default-features --features postgres
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5444/econ_graph_test
+
+    - name: Run backend remaining service tests
+      run: cargo test --lib -- --test-threads=2 --nocapture services::search_service services::series_service services::comprehensive_series_catalog::tests services::series_discovery::boc::tests::test_discover_boc_series_integration services::series_discovery::boe::tests::test_discover_boe_series_integration services::series_discovery::boe::tests::test_fetch_boe_data services::series_discovery::boj::tests::test_discover_boj_series_integration services::series_discovery::boj::tests::test_fetch_boj_data services::series_discovery::ecb::tests::test_discover_ecb_series_integration services::series_discovery::ecb::tests::test_fetch_ecb_data services::series_discovery::fhfa::tests::test_fhfa_hpi_data_structure services::series_discovery::ilo::tests::test_discover_ilo_series_integration services::series_discovery::oecd::tests::test_discover_oecd_series_integration services::series_discovery::oecd::tests::test_fetch_oecd_data services::series_discovery::rba::tests::test_discover_rba_series_integration services::series_discovery::snb::tests::test_discover_snb_series_integration services::series_discovery::unstats::tests::test_discover_unstats_series_integration services::series_discovery::wto::tests::test_discover_wto_series_integration services::series_discovery::wto::tests::test_fetch_wto_data
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5444/econ_graph_test
 
 
   frontend-tests:
@@ -275,7 +880,7 @@ jobs:
     name: Backend Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    needs: [backend-smoke-tests, backend-database-tests, backend-service-tests]
+    needs: [backend-smoke-tests, backend-models-basic-tests, backend-models-advanced-tests, backend-crawler-unit-tests, backend-crawler-integration-tests, backend-queue-basic-tests, backend-queue-advanced-tests, backend-global-analysis-basic-tests, backend-global-analysis-advanced-tests, backend-series-discovery-basic-tests, backend-series-discovery-integration-tests, backend-auth-integration-tests, backend-collaboration-integration-tests, backend-remaining-service-tests]
 
     services:
       postgres:
