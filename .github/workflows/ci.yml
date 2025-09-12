@@ -146,6 +146,13 @@ jobs:
       run: cargo build --verbose
       working-directory: backend
 
+    - name: Install cargo-deny
+      run: cargo install cargo-deny
+
+    - name: Check backend license compliance
+      run: cargo deny check licenses
+      working-directory: backend
+
     - name: Run backend tests
       run: cargo test --verbose
       working-directory: backend
@@ -169,6 +176,13 @@ jobs:
 
     - name: Install frontend dependencies
       run: npm ci
+      working-directory: frontend
+
+    - name: Install license-checker
+      run: npm install -g license-checker
+
+    - name: Check frontend license compliance
+      run: license-checker --config .license-checker.json
       working-directory: frontend
 
     - name: Check TypeScript compilation
