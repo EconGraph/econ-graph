@@ -5,6 +5,13 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to run CI on (leave empty for current branch)'
+        required: false
+        default: ''
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,6 +27,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup validation tools
       run: |
@@ -84,6 +93,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -146,6 +157,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -201,6 +214,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -256,6 +271,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -311,6 +328,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -366,6 +385,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -421,6 +442,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -476,6 +499,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -531,6 +556,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -586,6 +613,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -641,6 +670,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -696,6 +727,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -751,6 +784,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -806,6 +841,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -845,6 +882,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -900,6 +939,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -950,6 +991,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -996,6 +1039,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -1068,6 +1113,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -1109,6 +1156,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -1140,6 +1189,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
@@ -1190,6 +1241,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
