@@ -13,6 +13,7 @@ mod config;
 mod database;
 mod error;
 mod graphql;
+mod mcp_server;
 mod metrics;
 mod models;
 mod schema;
@@ -133,6 +134,11 @@ async fn root_handler() -> Result<impl warp::Reply, Infallible> {
         <div class="endpoint">
             <div><span class="method">GET</span> <code>/metrics</code></div>
             <p><a href="/metrics">Prometheus metrics endpoint</a> - Application metrics for monitoring</p>
+        </div>
+
+        <div class="endpoint">
+            <div><span class="method">POST</span> <code>/mcp</code></div>
+            <p>MCP (Model Context Protocol) server endpoint - AI model integration for economic data access</p>
         </div>
 
         <h2>🚀 Quick Start</h2>
@@ -319,6 +325,15 @@ async fn main() -> AppResult<()> {
     // Authentication routes
     let auth_filter = auth_routes(auth_service);
 
+    // MCP Server routes
+    let mcp_server = Arc::new(mcp_server::EconGraphMcpServer::new(Arc::new(pool.clone())));
+
+    let mcp_filter = warp::path("mcp")
+        .and(warp::post())
+        .and(warp::body::bytes())
+        .and(warp::any().map(move || mcp_server.clone()))
+        .and_then(mcp_server::mcp_handler);
+
     // Combine all routes
     let routes = root_filter
         .or(graphql_filter)
@@ -326,6 +341,7 @@ async fn main() -> AppResult<()> {
         .or(health_filter)
         .or(metrics_filter)
         .or(auth_filter)
+        .or(mcp_filter)
         .with(cors)
         .with(warp::trace::request());
 

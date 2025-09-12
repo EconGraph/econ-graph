@@ -80,11 +80,13 @@ echo "🏗️  Building Docker images for v3.7.4..."
 echo "🏷️  Tagging images with v3.7.4..."
 docker tag econ-graph-backend:latest econ-graph-backend:v3.7.4
 docker tag econ-graph-frontend:latest econ-graph-frontend:v3.7.4
+docker tag econ-graph-chart-api:latest econ-graph-chart-api:v1.0.0
 
 # Load images into kind cluster
 echo "📦 Loading images into kind cluster..."
 kind load docker-image econ-graph-backend:v3.7.4 --name econ-graph
 kind load docker-image econ-graph-frontend:v3.7.4 --name econ-graph
+kind load docker-image econ-graph-chart-api:v1.0.0 --name econ-graph
 
 # Check if PostgreSQL is running
 echo "🗄️  Checking PostgreSQL..."
@@ -182,6 +184,7 @@ kill $MONITOR_PID 2>/dev/null || true
 echo "🔄 Restarting deployments..."
 kubectl rollout restart deployment/econ-graph-backend -n econ-graph
 kubectl rollout restart deployment/econ-graph-frontend -n econ-graph
+kubectl rollout restart deployment/chart-api-service -n econ-graph
 
 # Restart Grafana to pick up updated dashboards
 echo "🔄 Restarting Grafana to pick up updated dashboards..."
@@ -191,6 +194,7 @@ kubectl rollout restart statefulset/grafana -n econ-graph
 echo "⏳ Waiting for rollouts to complete..."
 kubectl rollout status deployment/econ-graph-backend -n econ-graph --timeout=300s
 kubectl rollout status deployment/econ-graph-frontend -n econ-graph --timeout=300s
+kubectl rollout status deployment/chart-api-service -n econ-graph --timeout=300s
 kubectl rollout status statefulset/grafana -n econ-graph --timeout=300s
 
 # Show final pod status
@@ -227,11 +231,15 @@ echo ""
 echo "📋 Monitor deployment:"
 echo "  kubectl logs -f deployment/econ-graph-backend -n econ-graph"
 echo "  kubectl logs -f deployment/econ-graph-frontend -n econ-graph"
+echo "  kubectl logs -f deployment/chart-api-service -n econ-graph"
 echo ""
 echo "✅ Services are accessible via NodePort:"
 echo "  Frontend: http://localhost:${FRONTEND_NODEPORT}"
 echo "  Backend:  http://localhost:${BACKEND_NODEPORT}"
 echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT} (admin/admin123)"
+echo ""
+echo "🔒 Internal Services (not exposed externally):"
+echo "  Chart API Service: chart-api-service.econ-graph.svc.cluster.local:3001"
 
 # Test service accessibility
 echo ""

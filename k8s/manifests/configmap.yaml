@@ -18,6 +18,9 @@ data:
   GOOGLE_CLIENT_SECRET: "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"
   FACEBOOK_ACCESS_TOKEN: "EAAPjY3gQKzABPVnOZA7Alyz4yGZANbHYvIqYtf87P4ET2LLbMzgs3fE0sjzmOhbZAfRaT4sAPgLPwSKgJnC3sI6pZAFhOeUto1bt7iwEd5iVu6ecZAlI35ianxY7uwCHNUjsBHM2hMS01lNdPCjc0s9LGXESKWnOALMAFEZA9ynw4enIjVWAOl56K3ECkZC249CTmq9w5fwvssv0JIj0tenZBeWUd1tnY4eFbd7Yy6LpnDQvEh8wugCb9o02mhesnDHcQ4utxLRsdx2n"
 
+  # Chart API Service configuration
+  CHART_API_SERVICE_URL: "http://chart-api-service.econ-graph.svc.cluster.local:3001/api/chart"
+
   # Frontend configuration
   REACT_APP_API_URL: "http://localhost"
   REACT_APP_BACKEND_PORT: "9876"

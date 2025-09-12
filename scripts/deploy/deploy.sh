@@ -92,6 +92,11 @@ kubectl apply -f k8s/manifests/frontend-deployment.yaml
 kubectl apply -f k8s/manifests/frontend-service.yaml
 kubectl apply -f k8s/manifests/ingress.yaml
 
+# Deploy chart API service (internal only)
+echo "📊 Deploying chart API service..."
+kubectl apply -f k8s/manifests/chart-api-deployment.yaml
+kubectl apply -f k8s/manifests/chart-api-service.yaml
+
 echo "⏳ Waiting for deployments to be ready..."
 echo "📊 Monitoring pod status (updates every 10 seconds):"
 kubectl get pods -n econ-graph
@@ -115,6 +120,10 @@ kubectl wait --for=condition=available --timeout=300s deployment/econ-graph-back
 # Wait for frontend deployment
 echo "Waiting for frontend deployment..."
 kubectl wait --for=condition=available --timeout=300s deployment/econ-graph-frontend -n econ-graph
+
+# Wait for chart API service deployment
+echo "Waiting for chart API service deployment..."
+kubectl wait --for=condition=available --timeout=300s deployment/chart-api-service -n econ-graph
 
 # Stop monitoring
 kill $MONITOR_PID 2>/dev/null || true
@@ -195,3 +204,7 @@ echo "  kubectl get pods -n econ-graph"
 echo "  kubectl get services -n econ-graph"
 echo "  kubectl logs -f deployment/econ-graph-backend -n econ-graph"
 echo "  kubectl logs -f deployment/econ-graph-frontend -n econ-graph"
+echo "  kubectl logs -f deployment/chart-api-service -n econ-graph"
+echo ""
+echo "🔒 Internal Services (not exposed externally):"
+echo "  Chart API Service: chart-api-service.econ-graph.svc.cluster.local:3001"

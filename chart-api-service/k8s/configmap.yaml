@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chart-api-service-config
+  namespace: econ-graph
+  labels:
+    app: chart-api-service
+    component: chart-api
+data:
+  NODE_ENV: "production"
+  PORT: "3001"
+  LOG_LEVEL: "info"
+  # Chart API specific configuration
+  CHART_API_MAX_REQUEST_SIZE: "10mb"
+  CHART_API_RATE_LIMIT_WINDOW: "900000"  # 15 minutes in milliseconds
+  CHART_API_RATE_LIMIT_MAX: "1000"
+  # Security configuration
+  SECURITY_INTERNAL_NETWORK_ONLY: "true"
+  SECURITY_REQUIRE_HEADERS: "true"

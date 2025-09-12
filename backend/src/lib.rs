@@ -4,6 +4,7 @@ pub mod config;
 pub mod database;
 pub mod error;
 pub mod graphql;
+pub mod mcp_server;
 pub mod metrics;
 pub mod models;
 pub mod schema;

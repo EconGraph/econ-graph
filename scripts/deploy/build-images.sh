@@ -30,13 +30,21 @@ docker build \
   -t econ-graph-frontend:v3.7.2 .
 echo "✅ Frontend image built successfully"
 
+# Build chart API service image
+echo "📦 Building chart API service image..."
+cd ../chart-api-service
+docker build -t econ-graph-chart-api:v1.0.0 .
+echo "✅ Chart API service image built successfully"
+
 # Load images into kind cluster
 echo "🚀 Loading images into kind cluster..."
 kind load docker-image econ-graph-backend:v3.7.2 --name econ-graph
 kind load docker-image econ-graph-frontend:v3.7.2 --name econ-graph
+kind load docker-image econ-graph-chart-api:v1.0.0 --name econ-graph
 
 echo "🎉 All images built and loaded successfully!"
 echo ""
 echo "Images available in kind cluster:"
 echo "  - econ-graph-backend:v3.7.2"
 echo "  - econ-graph-frontend:v3.7.2"
+echo "  - econ-graph-chart-api:v1.0.0"

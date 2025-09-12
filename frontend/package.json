@@ -19,8 +19,10 @@
     "chart.js": "4.5.0",
     "chartjs-adapter-date-fns": "3.0.0",
     "chartjs-plugin-annotation": "3.1.0",
+    "cors": "^2.8.5",
     "d3": "7.9.0",
     "date-fns": "2.30.0",
+    "express": "^4.18.2",
     "lodash": "4.17.21",
     "react": "^18.3.1",
     "react-chartjs-2": "5.3.0",
@@ -45,6 +47,7 @@
     "prettier": "3.6.2",
     "react-test-renderer": "18.3.1",
     "resize-observer-polyfill": "1.5.1",
+    "supertest": "^7.1.4",
     "typescript": "^4.9.5"
   },
   "scripts": {
@@ -57,6 +60,7 @@
     "prettier-check": "prettier --check 'src/**/*.{js,ts,tsx,css}'",
     "prettier-fix": "prettier --write 'src/**/*.{js,ts,tsx,css}'",
     "typecheck": "tsc --noEmit",
+    "start-private-chart-api": "node src/server/privateChartServer.js",
     "eslint-check": "eslint src --ext .ts,.tsx",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
