@@ -103,7 +103,7 @@ mockito = "1.2"
 tempfile = "3.8"
 
 # Integration testing with real databases
-testcontainers = "0.25"
+testcontainers = { version = "0.25", features = ["blocking"] }
 testcontainers-modules = { version = "0.13", features = ["postgres"] }
 
 # Additional testing utilities
