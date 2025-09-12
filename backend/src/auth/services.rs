@@ -89,35 +89,40 @@ impl AuthService {
         Ok(token_data.claims)
     }
 
-    /// Verify Google OAuth token
-    pub async fn verify_google_token(&self, token: &str) -> AppResult<GoogleUserInfo> {
+    /// Verify Google OAuth ID token
+    pub async fn verify_google_token(&self, id_token: &str) -> AppResult<GoogleUserInfo> {
+        // First, verify the ID token with Google's tokeninfo endpoint
         let url = format!(
-            "https://www.googleapis.com/oauth2/v1/tokeninfo?access_token={}",
-            token
+            "https://oauth2.googleapis.com/tokeninfo?id_token={}",
+            id_token
         );
 
         let response = self.http_client.get(&url).send().await.map_err(|e| {
             let error = AppError::AuthenticationError(format!(
-                "Google token verification failed - HTTP client error: {}",
+                "Google ID token verification failed - HTTP client error: {}",
                 e
             ));
-            error.log_with_context("Google OAuth token verification");
+            error.log_with_context("Google OAuth ID token verification");
             error
         })?;
 
         if !response.status().is_success() {
             let status = response.status();
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             let error = AppError::AuthenticationError(format!(
-                "Google token verification failed - HTTP status: {}",
-                status
+                "Google ID token verification failed - HTTP status: {} - {}",
+                status, error_text
             ));
-            error.log_with_context("Google OAuth token verification");
+            error.log_with_context("Google OAuth ID token verification");
             return Err(error);
         }
 
         let token_info: serde_json::Value = response.json().await.map_err(|e| {
             let error = AppError::AuthenticationError(format!(
-                "Google token verification failed - JSON parsing error: {}",
+                "Google ID token verification failed - JSON parsing error: {}",
                 e
             ));
             error.log_with_context("Google OAuth response parsing");
@@ -126,46 +131,58 @@ impl AuthService {
 
         // Verify audience (client ID) - only if we have a real client ID configured
         if !self.google_client_id.starts_with("your-") {
-            if let Some(audience) = token_info.get("audience") {
+            if let Some(audience) = token_info.get("aud") {
                 if audience.as_str() != Some(&self.google_client_id) {
                     let error = AppError::AuthenticationError(
-                        "Google token audience mismatch - token not intended for this application"
+                        "Google ID token audience mismatch - token not intended for this application"
                             .to_string(),
                     );
                     error.log_with_context("Google OAuth audience verification");
                     return Err(error);
                 }
+            } else {
+                let error = AppError::AuthenticationError(
+                    "Google ID token missing audience claim".to_string(),
+                );
+                error.log_with_context("Google OAuth audience verification");
+                return Err(error);
             }
         }
 
-        // Get user info from Google
-        let user_info_url = format!(
-            "https://www.googleapis.com/oauth2/v1/userinfo?access_token={}",
-            token
-        );
-
-        let user_response = self
-            .http_client
-            .get(&user_info_url)
-            .send()
-            .await
-            .map_err(|e| {
-                let error = AppError::AuthenticationError(format!(
-                    "Google token verification failed - user info retrieval error: {}",
-                    e
-                ));
-                error.log_with_context("Google OAuth user info retrieval");
-                error
-            })?;
-
-        let user_info: GoogleUserInfo = user_response.json().await.map_err(|e| {
-            let error = AppError::AuthenticationError(format!(
-                "Google token verification failed - user info parsing error: {}",
-                e
-            ));
-            error.log_with_context("Google OAuth user info parsing");
-            error
-        })?;
+        // Extract user info from the token info response
+        let user_info = GoogleUserInfo {
+            id: token_info
+                .get("sub")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    AppError::AuthenticationError(
+                        "Google ID token missing subject claim".to_string(),
+                    )
+                })?
+                .to_string(),
+            email: token_info
+                .get("email")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    AppError::AuthenticationError("Google ID token missing email claim".to_string())
+                })?
+                .to_string(),
+            name: token_info
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    AppError::AuthenticationError("Google ID token missing name claim".to_string())
+                })?
+                .to_string(),
+            avatar: token_info
+                .get("picture")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            verified_email: token_info
+                .get("email_verified")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        };
 
         Ok(user_info)
     }

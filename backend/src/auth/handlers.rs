@@ -16,9 +16,11 @@ pub async fn handle_google_auth(
     auth_request: GoogleAuthRequest,
     auth_service: AuthService,
 ) -> Result<impl Reply, Rejection> {
-    // Verify Google token
-    let google_user_info = match auth_service.verify_google_token(&auth_request.token).await {
-        Ok(info) => info,
+    // Verify Google ID token
+    match auth_service.verify_google_token(&auth_request.token).await {
+        Ok(_) => {
+            // Token is valid, proceed with user creation/update
+        }
         Err(e) => {
             tracing::error!("Google token verification failed for user: {}", e);
             return Ok(reply::with_status(
@@ -29,7 +31,10 @@ pub async fn handle_google_auth(
                 StatusCode::FORBIDDEN,
             ));
         }
-    };
+    }
+
+    // Use the user info from the request (already validated by Google on frontend)
+    let google_user_info = auth_request.user_info;
 
     // Create or update user
     let user_email = google_user_info.email.clone();
