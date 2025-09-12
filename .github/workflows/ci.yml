@@ -1176,8 +1176,6 @@ jobs:
         file: ./backend/Dockerfile
         push: false
         tags: econ-graph-backend:test
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
 
     - name: Build frontend Docker image
       uses: docker/build-push-action@v5
@@ -1186,8 +1184,6 @@ jobs:
         file: ./frontend/Dockerfile
         push: false
         tags: econ-graph-frontend:test
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
 
   quality-checks:
     name: Code Quality Checks
