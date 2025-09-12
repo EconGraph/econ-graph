@@ -187,6 +187,26 @@ impl DataSource {
         }
     }
 
+    /// Create FHFA (Federal Housing Finance Agency) source
+    pub fn fhfa() -> NewDataSource {
+        NewDataSource {
+            name: "Federal Housing Finance Agency (FHFA)".to_string(),
+            description: Some(
+                "House Price Index data measuring changes in single-family home values".to_string(),
+            ),
+            base_url: "https://api.fhfa.gov".to_string(),
+            api_key_required: false,
+            rate_limit_per_minute: 1000,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some(
+                "https://www.fhfa.gov/data/developer-information".to_string(),
+            ),
+        }
+    }
+
     /// Find data source by name
     pub async fn find_by_name(
         pool: &crate::database::DatabasePool,
