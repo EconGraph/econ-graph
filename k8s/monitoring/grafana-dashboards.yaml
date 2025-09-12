@@ -8,264 +8,701 @@ metadata:
 data:
   econgraph-overview.json: |
     {
-      "id": null,
-      "uid": "econgraph-overview",
-      "title": "EconGraph Platform Overview",
-      "description": "High-level overview of the EconGraph platform performance and health",
-      "tags": ["econgraph", "overview", "platform"],
-      "timezone": "browser",
-      "schemaVersion": 37,
-      "version": 1,
-      "refresh": "30s",
-      "time": {
-        "from": "now-1h",
-        "to": "now"
-      },
-      "panels": [
-        {
-          "id": 1,
-          "title": "System Status",
-          "type": "stat",
-          "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 },
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "palette-classic" },
-              "custom": {
-                "displayMode": "basic",
-                "orientation": "horizontal"
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "red", "value": null },
-                  { "color": "yellow", "value": 0.5 },
-                  { "color": "green", "value": 0.8 }
-                ]
-              },
-              "unit": "percent"
-            }
-          },
-          "options": {
-            "reduceOptions": {
-              "values": false,
-              "calcs": ["lastNotNull"],
-              "fields": ""
-            },
-            "orientation": "auto",
-            "textMode": "auto",
-            "colorMode": "background",
-            "graphMode": "area",
-            "justifyMode": "auto"
-          },
-          "targets": [
-            {
-              "expr": "up{job=\"econgraph-backend\"}",
-              "refId": "A",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
-              }
-            }
-          ]
+      "dashboard": {
+        "id": null,
+        "uid": "econgraph-overview",
+        "title": "EconGraph Platform Overview",
+        "description": "High-level overview of the EconGraph platform performance and health",
+        "tags": ["econgraph", "overview", "platform"],
+        "timezone": "browser",
+        "schemaVersion": 37,
+        "version": 1,
+        "refresh": "30s",
+        "time": {
+          "from": "now-1h",
+          "to": "now"
         },
-        {
-          "id": 2,
-          "title": "API Request Rate",
-          "type": "stat",
-          "gridPos": { "h": 8, "w": 6, "x": 6, "y": 0 },
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "palette-classic" },
-              "custom": {
-                "displayMode": "basic",
-                "orientation": "horizontal"
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "yellow", "value": 10 },
-                  { "color": "red", "value": 50 }
-                ]
-              },
-              "unit": "reqps"
-            }
-          },
-          "options": {
-            "reduceOptions": {
-              "values": false,
-              "calcs": ["lastNotNull"],
-              "fields": ""
-            },
-            "orientation": "auto",
-            "textMode": "auto",
-            "colorMode": "background",
-            "graphMode": "area",
-            "justifyMode": "auto"
-          },
-          "targets": [
-            {
-              "expr": "sum(rate(http_requests_total{job=\"econgraph-backend\"}[5m]))",
-              "refId": "A",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus"
+        "panels": [
+          {
+            "id": 1,
+            "title": "System Status",
+            "type": "stat",
+            "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 },
+            "fieldConfig": {
+              "defaults": {
+                "color": { "mode": "palette-classic" },
+                "custom": {
+                  "displayMode": "basic",
+                  "orientation": "horizontal"
+                },
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": null },
+                    { "color": "yellow", "value": 0.5 },
+                    { "color": "green", "value": 0.8 }
+                  ]
+                },
+                "unit": "percent"
               }
+            },
+            "options": {
+              "reduceOptions": {
+                "values": false,
+                "calcs": ["lastNotNull"],
+                "fields": ""
+              },
+              "orientation": "auto",
+              "textMode": "auto",
+              "colorMode": "background",
+              "graphMode": "area",
+              "justifyMode": "auto"
+            },
+            "targets": [
+              {
+                "expr": "count(kube_pod_status_phase{namespace=\"econ-graph\", phase=\"Running\"})",
+                "legendFormat": "Running Pods",
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "API Request Rate",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 9, "x": 6, "y": 0 },
+            "fieldConfig": {
+              "defaults": {
+                "color": { "mode": "palette-classic" },
+                "custom": {
+                  "axisLabel": "",
+                  "axisPlacement": "auto",
+                  "barAlignment": 0,
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "gradientMode": "none",
+                  "hideFrom": { "legend": false, "tooltip": false, "vis": false },
+                  "lineInterpolation": "linear",
+                  "lineWidth": 1,
+                  "pointSize": 5,
+                  "scaleDistribution": { "type": "linear" },
+                  "showPoints": "never",
+                  "spanNulls": false,
+                  "stacking": { "group": "A", "mode": "none" },
+                  "thresholdsStyle": { "mode": "off" }
+                },
+                "unit": "reqps"
+              }
+            },
+            "options": {
+              "legend": {
+                "calcs": [],
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": { "mode": "single", "sort": "none" }
+            },
+            "targets": [
+              {
+                "expr": "sum(rate(container_network_receive_bytes_total[5m]))",
+                "legendFormat": "Network Receive (bytes/sec)",
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "sum(rate(container_network_transmit_bytes_total[5m]))",
+                "legendFormat": "Network Transmit (bytes/sec)",
+                "refId": "B",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "sum(container_memory_usage_bytes)",
+                "legendFormat": "Total Memory Usage (bytes)",
+                "refId": "C",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "sum(rate(container_cpu_usage_seconds_total[5m]))",
+                "legendFormat": "Total CPU Usage (cores/sec)",
+                "refId": "D",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "title": "Response Time Percentiles",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 9, "x": 15, "y": 0 },
+            "fieldConfig": {
+              "defaults": {
+                "color": { "mode": "palette-classic" },
+                "custom": {
+                  "axisLabel": "",
+                  "axisPlacement": "auto",
+                  "barAlignment": 0,
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "gradientMode": "none",
+                  "hideFrom": { "legend": false, "tooltip": false, "vis": false },
+                  "lineInterpolation": "linear",
+                  "lineWidth": 2,
+                  "pointSize": 5,
+                  "scaleDistribution": { "type": "linear" },
+                  "showPoints": "never",
+                  "spanNulls": false,
+                  "stacking": { "group": "A", "mode": "none" },
+                  "thresholdsStyle": { "mode": "off" }
+                },
+                "unit": "s"
+              }
+            },
+            "options": {
+              "legend": {
+                "calcs": [],
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": { "mode": "single", "sort": "none" }
+            },
+            "targets": [
+              {
+                "expr": "sum(container_memory_usage_bytes{id=~\".*burstable.*\"})",
+                "legendFormat": "Burstable Pods Memory",
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "sum(container_memory_usage_bytes{id=~\".*besteffort.*\"})",
+                "legendFormat": "BestEffort Pods Memory",
+                "refId": "B",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "sum(rate(container_cpu_usage_seconds_total{id=~\".*burstable.*\"}[5m]))",
+                "legendFormat": "Burstable Pods CPU",
+                "refId": "C",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "title": "Active Pods",
+            "type": "stat",
+            "gridPos": { "h": 4, "w": 6, "x": 0, "y": 8 },
+            "fieldConfig": {
+              "defaults": {
+                "color": { "mode": "thresholds" },
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": null },
+                    { "color": "yellow", "value": 1 },
+                    { "color": "green", "value": 2 }
+                  ]
+                }
+              }
+            },
+            "options": {
+              "colorMode": "background",
+              "graphMode": "area",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "values": false,
+                "calcs": ["lastNotNull"],
+                "fields": ""
+              },
+              "textMode": "auto"
+            },
+            "targets": [
+              {
+                "expr": "count(kube_pod_status_phase{namespace=\"econ-graph\", pod=~\".*backend.*\", phase=\"Running\"})",
+                "legendFormat": "Backend Pods",
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "count(kube_pod_status_phase{namespace=\"econ-graph\", pod=~\".*frontend.*\", phase=\"Running\"})",
+                "legendFormat": "Frontend Pods",
+                "refId": "B",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "count(kube_pod_status_phase{namespace=\"econ-graph\", pod=~\".*crawler.*\", phase=\"Running\"})",
+                "legendFormat": "Crawler Pods",
+                "refId": "C",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              }
+            ]
+          },
+          {
+            "id": 5,
+            "title": "Database Connections",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 9, "x": 6, "y": 8 },
+            "fieldConfig": {
+              "defaults": {
+                "color": { "mode": "palette-classic" },
+                "custom": {
+                  "axisLabel": "",
+                  "axisPlacement": "auto",
+                  "barAlignment": 0,
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "gradientMode": "none",
+                  "hideFrom": { "legend": false, "tooltip": false, "vis": false },
+                  "lineInterpolation": "linear",
+                  "lineWidth": 1,
+                  "pointSize": 5,
+                  "scaleDistribution": { "type": "linear" },
+                  "showPoints": "never",
+                  "spanNulls": false,
+                  "stacking": { "group": "A", "mode": "none" },
+                  "thresholdsStyle": { "mode": "off" }
+                },
+                "unit": "short"
+              }
+            },
+            "options": {
+              "legend": {
+                "calcs": [],
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": { "mode": "single", "sort": "none" }
+            },
+            "targets": [
+              {
+                "expr": "count(kube_pod_status_phase{namespace=\"econ-graph\", pod=~\".*postgres.*\", phase=\"Running\"})",
+                "legendFormat": "PostgreSQL Pods",
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "sum(kube_pod_container_resource_requests{namespace=\"econ-graph\", pod=~\".*postgres.*\", resource=\"memory\"})",
+                "legendFormat": "PostgreSQL Memory Requests",
+                "refId": "B",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              }
+            ]
+          },
+          {
+            "id": 6,
+            "title": "Memory Usage",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 9, "x": 15, "y": 8 },
+            "fieldConfig": {
+              "defaults": {
+                "color": { "mode": "palette-classic" },
+                "custom": {
+                  "axisLabel": "",
+                  "axisPlacement": "auto",
+                  "barAlignment": 0,
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "gradientMode": "none",
+                  "hideFrom": { "legend": false, "tooltip": false, "vis": false },
+                  "lineInterpolation": "linear",
+                  "lineWidth": 1,
+                  "pointSize": 5,
+                  "scaleDistribution": { "type": "linear" },
+                  "showPoints": "never",
+                  "spanNulls": false,
+                  "stacking": { "group": "A", "mode": "none" },
+                  "thresholdsStyle": { "mode": "off" }
+                },
+                "unit": "bytes"
+              }
+            },
+            "options": {
+              "legend": {
+                "calcs": [],
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": { "mode": "single", "sort": "none" }
+            },
+            "targets": [
+              {
+                "expr": "sum(kube_pod_container_resource_requests{namespace=\"econ-graph\", pod=~\".*backend.*\", resource=\"memory\"})",
+                "legendFormat": "Backend Memory Requests",
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "sum(kube_pod_container_resource_requests{namespace=\"econ-graph\", pod=~\".*frontend.*\", resource=\"memory\"})",
+                "legendFormat": "Frontend Memory Requests",
+                "refId": "B",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "sum(kube_pod_container_resource_requests{namespace=\"econ-graph\", pod=~\".*crawler.*\", resource=\"memory\"})",
+                "legendFormat": "Crawler Memory Requests",
+                "refId": "C",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "sum(kube_pod_container_resource_requests{namespace=\"econ-graph\", pod=~\".*postgres.*\", resource=\"memory\"})",
+                "legendFormat": "PostgreSQL Memory Requests",
+                "refId": "D",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              }
+            ]
+          },
+          {
+            "id": 7,
+            "title": "CPU Usage",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+            "fieldConfig": {
+              "defaults": {
+                "color": { "mode": "palette-classic" },
+                "custom": {
+                  "axisLabel": "",
+                  "axisPlacement": "auto",
+                  "barAlignment": 0,
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "gradientMode": "none",
+                  "hideFrom": { "legend": false, "tooltip": false, "vis": false },
+                  "lineInterpolation": "linear",
+                  "lineWidth": 1,
+                  "pointSize": 5,
+                  "scaleDistribution": { "type": "linear" },
+                  "showPoints": "never",
+                  "spanNulls": false,
+                  "stacking": { "group": "A", "mode": "none" },
+                  "thresholdsStyle": { "mode": "off" }
+                },
+                "unit": "percent"
+              }
+            },
+            "options": {
+              "legend": {
+                "calcs": [],
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": { "mode": "single", "sort": "none" }
+            },
+            "targets": [
+              {
+                "expr": "sum(kube_pod_container_resource_requests{namespace=\"econ-graph\", pod=~\".*backend.*\", resource=\"cpu\"}) * 100",
+                "legendFormat": "Backend CPU Requests (cores)",
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "sum(kube_pod_container_resource_requests{namespace=\"econ-graph\", pod=~\".*frontend.*\", resource=\"cpu\"}) * 100",
+                "legendFormat": "Frontend CPU Requests (cores)",
+                "refId": "B",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "sum(kube_pod_container_resource_requests{namespace=\"econ-graph\", pod=~\".*crawler.*\", resource=\"cpu\"}) * 100",
+                "legendFormat": "Crawler CPU Requests (cores)",
+                "refId": "C",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "sum(kube_pod_container_resource_requests{namespace=\"econ-graph\", pod=~\".*postgres.*\", resource=\"cpu\"}) * 100",
+                "legendFormat": "PostgreSQL CPU Requests (cores)",
+                "refId": "D",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              }
+            ]
+          },
+          {
+            "id": 8,
+            "title": "Network I/O",
+            "type": "graph",
+            "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+            "fieldConfig": {
+              "defaults": {
+                "color": { "mode": "palette-classic" },
+                "custom": {
+                  "axisLabel": "",
+                  "axisPlacement": "auto",
+                  "barAlignment": 0,
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "gradientMode": "none",
+                  "hideFrom": { "legend": false, "tooltip": false, "vis": false },
+                  "lineInterpolation": "linear",
+                  "lineWidth": 1,
+                  "pointSize": 5,
+                  "scaleDistribution": { "type": "linear" },
+                  "showPoints": "never",
+                  "spanNulls": false,
+                  "stacking": { "group": "A", "mode": "none" },
+                  "thresholdsStyle": { "mode": "off" }
+                },
+                "unit": "Bps"
+              }
+            },
+            "options": {
+              "legend": {
+                "calcs": [],
+                "displayMode": "list",
+                "placement": "bottom"
+              },
+              "tooltip": { "mode": "single", "sort": "none" }
+            },
+            "targets": [
+              {
+                "expr": "sum(rate(container_network_receive_bytes_total[5m]))",
+                "legendFormat": "Inbound Traffic",
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              },
+              {
+                "expr": "sum(rate(container_network_transmit_bytes_total[5m]))",
+                "legendFormat": "Outbound Traffic",
+                "refId": "B",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus-uid"
+                }
+              }
+            ]
+          }
+        ],
+        "templating": {
+          "list": []
+        },
+        "annotations": {
+          "list": [
+            {
+              "builtIn": 1,
+              "datasource": "-- Grafana --",
+              "enable": true,
+              "hide": true,
+              "iconColor": "rgba(0, 211, 255, 1)",
+              "name": "Annotations & Alerts",
+              "type": "dashboard"
             }
           ]
         }
-      ],
-      "templating": {
-        "list": []
       }
     }
   logging-dashboard.json: |
     {
-      "id": null,
-      "uid": "econgraph-logging",
-      "title": "EconGraph Logs & Debugging",
-      "description": "Real-time log monitoring and debugging for EconGraph platform",
-      "tags": ["econgraph", "logs", "debugging"],
-      "timezone": "browser",
-      "schemaVersion": 37,
-      "version": 1,
-      "refresh": "10s",
-      "time": {
-        "from": "now-1h",
-        "to": "now"
-      },
-      "panels": [
-        {
-          "id": 1,
-          "title": "Authentication Logs",
-          "type": "logs",
-          "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
-          "targets": [
-            {
-              "expr": "{job=\"econ-graph-logs\", app=\"econ-graph-backend\"} |= \"auth\"",
-              "refId": "A",
-              "datasource": {
-                "type": "loki",
-                "uid": "loki"
-              }
-            }
-          ],
-          "options": {
-            "showTime": true,
-            "showLabels": true,
-            "showCommonLabels": false,
-            "wrapLogMessage": true,
-            "prettifyLogMessage": false,
-            "enableLogDetails": true,
-            "dedupStrategy": "none",
-            "sortOrder": "Descending"
-          }
+      "dashboard": {
+        "id": null,
+        "uid": "econgraph-logging",
+        "title": "EconGraph Logs & Debugging",
+        "description": "Real-time log monitoring and debugging for EconGraph platform",
+        "tags": ["econgraph", "logs", "debugging"],
+        "timezone": "browser",
+        "schemaVersion": 37,
+        "version": 1,
+        "refresh": "10s",
+        "time": {
+          "from": "now-1h",
+          "to": "now"
         },
-        {
-          "id": 2,
-          "title": "Database Connection Logs",
-          "type": "logs",
-          "gridPos": { "h": 12, "w": 12, "x": 0, "y": 12 },
-          "targets": [
-            {
-              "expr": "{job=\"econ-graph-logs\", app=\"econ-graph-backend\"} |= \"database\" |= \"connection\"",
-              "refId": "A",
-              "datasource": {
-                "type": "loki",
-                "uid": "loki"
-              }
-            }
-          ],
-          "options": {
-            "showTime": true,
-            "showLabels": true,
-            "showCommonLabels": false,
-            "wrapLogMessage": true,
-            "prettifyLogMessage": false,
-            "enableLogDetails": true,
-            "dedupStrategy": "none",
-            "sortOrder": "Descending"
-          }
-        },
-        {
-          "id": 3,
-          "title": "Error Logs",
-          "type": "logs",
-          "gridPos": { "h": 12, "w": 12, "x": 12, "y": 12 },
-          "targets": [
-            {
-              "expr": "{job=\"econ-graph-logs\"} |= \"error\" |= \"ERROR\"",
-              "refId": "A",
-              "datasource": {
-                "type": "loki",
-                "uid": "loki"
-              }
-            }
-          ],
-          "options": {
-            "showTime": true,
-            "showLabels": true,
-            "showCommonLabels": false,
-            "wrapLogMessage": true,
-            "prettifyLogMessage": false,
-            "enableLogDetails": true,
-            "dedupStrategy": "none",
-            "sortOrder": "Descending"
-          }
-        },
-        {
-          "id": 4,
-          "title": "All Backend Logs",
-          "type": "logs",
-          "gridPos": { "h": 12, "w": 24, "x": 0, "y": 24 },
-          "targets": [
-            {
-              "expr": "{job=\"econ-graph-logs\"}",
-              "refId": "A",
-              "datasource": {
-                "type": "loki",
-                "uid": "loki"
-              }
-            }
-          ],
-          "options": {
-            "showTime": true,
-            "showLabels": true,
-            "showCommonLabels": false,
-            "wrapLogMessage": true,
-            "prettifyLogMessage": false,
-            "enableLogDetails": true,
-            "dedupStrategy": "none",
-            "sortOrder": "Descending"
-          }
-        }
-      ],
-      "templating": {
-        "list": [
+        "panels": [
           {
-            "name": "namespace",
-            "type": "textbox",
-            "label": "Namespace",
-            "query": "econ-graph",
-            "current": {
-              "selected": false,
-              "text": "econ-graph",
-              "value": "econ-graph"
+            "id": 1,
+            "title": "Authentication Logs",
+            "type": "logs",
+            "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
+            "targets": [
+              {
+                "expr": "{app=\"econ-graph-backend\"} |= \"auth\"",
+                "refId": "A",
+                "datasource": {
+                  "type": "loki",
+                  "uid": "loki-uid"
+                }
+              }
+            ],
+            "options": {
+              "showTime": true,
+              "showLabels": true,
+              "showCommonLabels": false,
+              "wrapLogMessage": true,
+              "prettifyLogMessage": false,
+              "enableLogDetails": true,
+              "dedupStrategy": "none",
+              "sortOrder": "Descending"
             }
           },
           {
-            "name": "app",
-            "type": "textbox",
-            "label": "App",
-            "query": "econ-graph-backend",
-            "current": {
-              "selected": false,
-              "text": "econ-graph-backend",
-              "value": "econ-graph-backend"
+            "id": 2,
+            "title": "Database Connection Logs",
+            "type": "logs",
+            "gridPos": { "h": 12, "w": 12, "x": 0, "y": 12 },
+            "targets": [
+              {
+                "expr": "{app=\"econ-graph-backend\"} |= \"database\" |= \"connection\"",
+                "refId": "A",
+                "datasource": {
+                  "type": "loki",
+                  "uid": "loki-uid"
+                }
+              }
+            ],
+            "options": {
+              "showTime": true,
+              "showLabels": true,
+              "showCommonLabels": false,
+              "wrapLogMessage": true,
+              "prettifyLogMessage": false,
+              "enableLogDetails": true,
+              "dedupStrategy": "none",
+              "sortOrder": "Descending"
+            }
+          },
+          {
+            "id": 3,
+            "title": "Error Logs",
+            "type": "logs",
+            "gridPos": { "h": 12, "w": 12, "x": 12, "y": 12 },
+            "targets": [
+              {
+                "expr": "{namespace=\"econ-graph\"} |= \"error\" |= \"ERROR\"",
+                "refId": "A",
+                "datasource": {
+                  "type": "loki",
+                  "uid": "loki-uid"
+                }
+              }
+            ],
+            "options": {
+              "showTime": true,
+              "showLabels": true,
+              "showCommonLabels": false,
+              "wrapLogMessage": true,
+              "prettifyLogMessage": false,
+              "enableLogDetails": true,
+              "dedupStrategy": "none",
+              "sortOrder": "Descending"
+            }
+          },
+          {
+            "id": 4,
+            "title": "All Backend Logs",
+            "type": "logs",
+            "gridPos": { "h": 12, "w": 24, "x": 0, "y": 24 },
+            "targets": [
+              {
+                "expr": "{app=\"econ-graph-backend\"}",
+                "refId": "A",
+                "datasource": {
+                  "type": "loki",
+                  "uid": "loki-uid"
+                }
+              }
+            ],
+            "options": {
+              "showTime": true,
+              "showLabels": true,
+              "showCommonLabels": false,
+              "wrapLogMessage": true,
+              "prettifyLogMessage": false,
+              "enableLogDetails": true,
+              "dedupStrategy": "none",
+              "sortOrder": "Descending"
             }
           }
-        ]
+        ],
+        "templating": {
+          "list": [
+            {
+              "name": "namespace",
+              "type": "textbox",
+              "label": "Namespace",
+              "query": "econ-graph",
+              "current": {
+                "selected": false,
+                "text": "econ-graph",
+                "value": "econ-graph"
+              }
+            },
+            {
+              "name": "app",
+              "type": "textbox",
+              "label": "App",
+              "query": "econ-graph-backend",
+              "current": {
+                "selected": false,
+                "text": "econ-graph-backend",
+                "value": "econ-graph-backend"
+              }
+            }
+          ]
+        }
       }
     }

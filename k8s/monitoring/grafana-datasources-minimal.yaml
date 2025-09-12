@@ -11,11 +11,7 @@ data:
       type: prometheus
       access: proxy
       url: http://prometheus-service:9090
-      uid: prometheus-uid
-      isDefault: true
     - name: Loki
       type: loki
       access: proxy
       url: http://loki-service:3100
-      uid: loki-uid
-      isDefault: false

@@ -46,10 +46,17 @@ data:
       max_cache_freshness_per_query: 1m
       max_queriers_per_tenant: 0
       allow_structured_metadata: false
+    ingester:
+      chunk_idle_period: 30s
+      chunk_block_size: 262144
+      chunk_target_size: 1572864
+      chunk_retain_period: 30s
+      max_chunk_age: 5m
+      chunk_encoding: gzip
     table_manager:
       retention_deletes_enabled: false
       retention_period: 0s
     compactor:
       working_directory: /loki
-      compaction_interval: 10m
+      compaction_interval: 1m
       retention_enabled: false

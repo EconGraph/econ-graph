@@ -21,40 +21,38 @@ data:
           - econ-graph
       relabel_configs:
       - source_labels: [__meta_kubernetes_pod_controller_name]
-        regex: ([0-9a-z-.]+?)(-[0-9a-f]{8,10})?
-        action: replace
-        target_label: __tmp_controller_name
-      - source_labels: [__meta_kubernetes_pod_label_app]
-        action: replace
-        target_label: app
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        target_label: pod
+        regex: econ-graph-backend.*
+        action: keep
       - source_labels: [__meta_kubernetes_pod_node_name]
-        action: replace
-        target_label: node
+        target_label: __host__
       - action: replace
-        replacement: $1
+        replacement: /var/log/pods/$1/$2/$3/*.log
         separator: /
-        source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_pod_label_app]
-        target_label: job
+        source_labels: [__meta_kubernetes_pod_namespace, __meta_kubernetes_pod_name, __meta_kubernetes_pod_uid]
+        target_label: __path__
+      - action: replace
+        source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - action: replace
+        source_labels: [__meta_kubernetes_pod_node_name]
+        target_label: node
       - action: replace
         source_labels: [__meta_kubernetes_namespace]
         target_label: namespace
       - action: replace
-        source_labels: [__meta_kubernetes_pod_name]
-        target_label: instance
-      - action: replace
         source_labels: [__meta_kubernetes_pod_container_name]
         target_label: container
       - action: replace
-        replacement: /var/log/pods/*$1/*.log
-        separator: /
-        source_labels: [__meta_kubernetes_pod_uid, __meta_kubernetes_pod_container_name]
-        target_label: __path__
-      - action: replace
-        regex: true/(.*)
-        replacement: /var/log/pods/*$1/*.log
-        separator: /
-        source_labels: [__meta_kubernetes_pod_annotationpresent_kubernetes_io_config_hash, __meta_kubernetes_pod_annotation_kubernetes_io_config_hash, __meta_kubernetes_pod_container_name]
-        target_label: __path__
+        source_labels: [__meta_kubernetes_pod_controller_name]
+        target_label: app
+      pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\S+) (?P<stream>stdout|stderr) (?P<flags>\S+) (?P<content>.*)$'
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+      - labels:
+          stream:
+          flags:
+      - output:
+          source: content

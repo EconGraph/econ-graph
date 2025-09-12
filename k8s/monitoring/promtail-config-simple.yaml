@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promtail-config
+  namespace: econ-graph
+data:
+  config.yml: |
+    server:
+      http_listen_port: 9080
+      grpc_listen_port: 0
+    positions:
+      filename: /tmp/positions.yaml
+    clients:
+      - url: http://loki-service:3100/loki/api/v1/push
+    scrape_configs:
+    - job_name: kubernetes-pods
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - econ-graph
+      relabel_configs:
+      # Keep only pods from econ-graph namespace
+      - source_labels: [__meta_kubernetes_namespace]
+        action: keep
+        regex: econ-graph
+      # Set the log path - use the standard Kubernetes log path
+      - source_labels: [__meta_kubernetes_pod_uid, __meta_kubernetes_pod_container_name]
+        action: replace
+        target_label: __path__
+        replacement: /var/log/pods/$1/$2/*.log
+      # Add labels
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: replace
+        target_label: app
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: pod
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        action: replace
+        target_label: container
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        action: replace
+        target_label: node

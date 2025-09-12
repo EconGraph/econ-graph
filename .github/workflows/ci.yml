@@ -11,6 +11,71 @@ env:
   DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
 jobs:
+  grafana-dashboard-validation:
+    name: Grafana Dashboard Validation
+    runs-on: ubuntu-latest
+    continue-on-error: true  # Don't gate other jobs on this
+    timeout-minutes: 15
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup validation tools
+      run: |
+        # Install jq for JSON validation
+        sudo apt-get update
+        sudo apt-get install -y jq
+
+        # Install yq for YAML validation
+        sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        sudo chmod +x /usr/local/bin/yq
+
+    - name: Make validation script executable
+      run: chmod +x scripts/test-grafana-dashboards.sh
+
+    - name: 🔍 JSON Syntax Validation
+      run: ./scripts/test-grafana-dashboards.sh --step=json-syntax
+      continue-on-error: true
+
+    - name: 🏗️ Dashboard Structure Validation
+      run: ./scripts/test-grafana-dashboards.sh --step=dashboard-structure
+      continue-on-error: true
+
+    - name: 🔗 Datasource Consistency Validation
+      run: ./scripts/test-grafana-dashboards.sh --step=datasource-consistency
+      continue-on-error: true
+
+    - name: 📊 PromQL Query Validation
+      run: ./scripts/test-grafana-dashboards.sh --step=promql-queries
+      continue-on-error: true
+
+    - name: 📝 LogQL Query Validation
+      run: ./scripts/test-grafana-dashboards.sh --step=logql-queries
+      continue-on-error: true
+
+    - name: 📋 ConfigMap Structure Validation
+      run: ./scripts/test-grafana-dashboards.sh --step=configmap-structure
+      continue-on-error: true
+
+    - name: 🔧 Kubernetes Deployment Validation
+      run: ./scripts/test-grafana-dashboards.sh --step=k8s-deployment
+      continue-on-error: true
+
+    - name: 🎯 Complete Dashboard Validation
+      run: ./scripts/test-grafana-dashboards.sh
+      continue-on-error: true
+
+    - name: Upload validation results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: grafana-validation-results-${{ github.sha }}
+        path: |
+          grafana-dashboards/
+          k8s/monitoring/grafana-*.yaml
+        retention-days: 30
+
   backend-tests:
     name: Backend Tests (Rust)
     runs-on: ubuntu-latest

@@ -1,11 +1,12 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: grafana
   namespace: econ-graph
   labels:
     app: grafana
 spec:
+  serviceName: grafana-service
   replicas: 1
   selector:
     matchLabels:
@@ -20,26 +21,43 @@ spec:
         image: grafana/grafana:latest
         ports:
         - containerPort: 3000
+          name: http
         env:
         - name: GF_SECURITY_ADMIN_PASSWORD
           value: "admin123"
         - name: GF_USERS_ALLOW_SIGN_UP
           value: "false"
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
         volumeMounts:
         - name: grafana-storage
           mountPath: /var/lib/grafana
         - name: grafana-config
           mountPath: /etc/grafana/provisioning/datasources
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "100m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
+        - name: grafana-dashboard-provider
+          mountPath: /etc/grafana/provisioning/dashboards
+        - name: grafana-dashboards
+          mountPath: /var/lib/grafana/dashboards/default
       volumes:
-      - name: grafana-storage
-        emptyDir: {}
       - name: grafana-config
         configMap:
           name: grafana-datasources
+      - name: grafana-dashboard-provider
+        configMap:
+          name: grafana-dashboard-provider
+      - name: grafana-dashboards
+        configMap:
+          name: grafana-dashboards
+  volumeClaimTemplates:
+  - metadata:
+      name: grafana-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi
