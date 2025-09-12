@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="description" content="EconGraph - Modern Economic Data Visualization" />
+    <title>EconGraph</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+                sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        #root {
+            height: 100vh;
+        }
+
+        /* Debug styles to see the layout issue */
+        main {
+            border: 2px solid red !important;
+            background-color: rgba(255, 0, 0, 0.1) !important;
+        }
+
+        .MuiContainer-root {
+            border: 2px solid blue !important;
+            background-color: rgba(0, 0, 255, 0.1) !important;
+        }
+
+        /* Simulate the exact App.tsx layout structure */
+        .app-container {
+            display: flex;
+            height: 100vh;
+        }
+
+        .sidebar {
+            width: 240px;
+            background-color: #f5f5f5;
+            border-right: 1px solid #ddd;
+            padding: 20px;
+            position: fixed;
+            height: 100vh;
+            z-index: 1000;
+        }
+
+        .main-content {
+            flex-grow: 1;
+            padding-top: 64px; /* Account for header height */
+            margin-left: 240px; /* Desktop sidebar width */
+            transition: margin-left 0.3s ease;
+            width: calc(100% - 240px); /* Ensure proper width calculation */
+            min-height: 100vh;
+            padding-left: 0px !important; /* Override any MUI padding */
+        }
+
+        .main-content .MuiContainer-root {
+            max-width: none !important; /* Override Container max width */
+            width: 100% !important; /* Force full width */
+            padding-left: 0px !important; /* Remove padding */
+            padding-right: 0px !important; /* Remove padding */
+        }
+
+        .content-wrapper {
+            padding-top: 24px;
+            padding-bottom: 24px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root">
+        <!-- Simulate the exact App.tsx structure -->
+        <div class="app-container">
+            <!-- Sidebar simulation -->
+            <div class="sidebar">
+                <h3>Sidebar</h3>
+                <p>This simulates the sidebar (240px wide)</p>
+            </div>
+
+            <!-- Main content area - matches App.tsx Box component='main' -->
+            <main class="main-content">
+                <div class="content-wrapper">
+                    <h1>Main Content Area</h1>
+                    <p>This simulates the main content with exact App.tsx styling.</p>
+                    <p>Current width: <span id="width-display"></span></p>
+                    <p>Current margin-left: <span id="margin-display"></span></p>
+
+                    <!-- Container simulation - matches MUI Container -->
+                    <div class="MuiContainer-root" style="max-width: 1200px; margin: 0 auto; padding: 0 16px;">
+                        <h2>Container Content</h2>
+                        <p>This simulates the MUI Container component.</p>
+                        <p>Container width: <span id="container-width"></span></p>
+                        <p>Container margin-left: <span id="container-margin-left"></span></p>
+                        <p>Container padding-left: <span id="container-padding-left"></span></p>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script>
+        // Update width displays
+        function updateDisplays() {
+            const main = document.querySelector('main');
+            const container = document.querySelector('.MuiContainer-root');
+            const mainStyles = window.getComputedStyle(main);
+            const containerStyles = window.getComputedStyle(container);
+
+            document.getElementById('width-display').textContent = mainStyles.width;
+            document.getElementById('margin-display').textContent = mainStyles.marginLeft;
+            document.getElementById('container-width').textContent = containerStyles.width;
+            document.getElementById('container-margin-left').textContent = containerStyles.marginLeft;
+            document.getElementById('container-padding-left').textContent = containerStyles.paddingLeft;
+        }
+
+        updateDisplays();
+        window.addEventListener('resize', updateDisplays);
+    </script>
+</body>
+</html>
