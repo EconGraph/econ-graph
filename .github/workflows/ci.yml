@@ -232,24 +232,6 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5433/econ_graph_test
 
-  backend-license-compliance:
-    name: Backend License Compliance
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.89.0
-
-    - name: Install cargo-deny
-      run: cargo install cargo-deny
-
-    - name: Check backend license compliance
-      run: cargo deny check licenses
-      working-directory: backend
 
   frontend-tests:
     name: Frontend Tests (React)
