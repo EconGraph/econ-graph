@@ -6,6 +6,7 @@
 pub mod bea;
 pub mod bls;
 pub mod census;
+pub mod fhfa;
 pub mod fred;
 pub mod imf;
 pub mod world_bank;
@@ -71,6 +72,11 @@ impl SeriesDiscoveryService {
         imf::discover_imf_series(&self.client, pool).await
     }
 
+    /// Discover FHFA series using the FHFA House Price Index API
+    pub async fn discover_fhfa_series(&self, pool: &DatabasePool) -> AppResult<Vec<String>> {
+        fhfa::discover_fhfa_series(&self.client, pool).await
+    }
+
     /// Search FRED series by query
     pub async fn search_fred_series(&self, query: &str) -> AppResult<Vec<fred::FredSeriesInfo>> {
         fred::search_fred_series(&self.client, &self.fred_api_key, query).await
@@ -103,6 +109,10 @@ impl SeriesDiscoveryService {
 
         if let Ok(imf_series) = self.discover_imf_series(pool).await {
             all_series.extend(imf_series);
+        }
+
+        if let Ok(fhfa_series) = self.discover_fhfa_series(pool).await {
+            all_series.extend(fhfa_series);
         }
 
         Ok(all_series)
