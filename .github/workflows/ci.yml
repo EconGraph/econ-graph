@@ -1158,7 +1158,7 @@ jobs:
   docker-build:
     name: Docker Build Test
     runs-on: ubuntu-latest
-    needs: [backend-integration-tests, frontend-integration-tests]
+    needs: [backend-smoke-tests]
 
     steps:
     - name: Checkout code
