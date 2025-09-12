@@ -1125,19 +1125,6 @@ jobs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
 
-    - name: Cache Rust dependencies (read-only from smoke tests)
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
-        restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
-          ${{ runner.os }}-shared-cargo-
-
-
     - name: Run Rust security audit
       run: cargo audit
       working-directory: backend
@@ -1207,18 +1194,6 @@ jobs:
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
-    - name: Cache Rust dependencies (read-only from smoke tests)
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
-        restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
-          ${{ runner.os }}-shared-cargo-
-
     - name: Check Rust code formatting
       run: cargo fmt --all -- --check
       working-directory: backend
@@ -1259,18 +1234,6 @@ jobs:
         node-version: '18'
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
-
-    - name: Cache Rust dependencies (read-only from smoke tests)
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
-        restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
-          ${{ runner.os }}-shared-cargo-
 
 
     - name: Install license-checker
