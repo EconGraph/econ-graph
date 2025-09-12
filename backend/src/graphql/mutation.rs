@@ -21,14 +21,14 @@ impl Mutation {
         let sources = input.sources.unwrap_or_else(|| vec!["FRED".to_string()]);
         let series_ids = input.series_ids.unwrap_or_else(|| vec!["GDP".to_string()]);
 
-        for source in &sources {
-            for series_id in &series_ids {
-                let items =
-                    crate::services::crawler_service::trigger_manual_crawl(pool, source, series_id)
-                        .await?;
-                _queued_items.extend(items);
-            }
-        }
+        let items = crate::services::crawler::simple_crawler_service::trigger_manual_crawl(
+            pool,
+            Some(sources),
+            Some(series_ids),
+            1, // priority
+        )
+        .await?;
+        _queued_items.push(items);
 
         // Return updated crawler status
         Ok(CrawlerStatusType {

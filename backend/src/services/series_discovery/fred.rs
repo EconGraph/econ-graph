@@ -73,6 +73,20 @@ pub async fn discover_fred_series(
         "expenditure",
     ];
 
+    // First, get popular series from FRED API
+    match get_popular_fred_series(client, api_key).await {
+        Ok(popular_series) => {
+            for series_info in popular_series {
+                store_fred_series(pool, &fred_source.id, &series_info).await?;
+                discovered_series.push(series_info.id);
+            }
+        }
+        Err(e) => {
+            eprintln!("Failed to get popular FRED series: {}", e);
+        }
+    }
+
+    // Then search for additional series by category
     for term in search_terms {
         println!("Searching FRED for: {}", term);
 
@@ -111,26 +125,59 @@ async fn store_fred_series(
     source_id: &Uuid,
     series_info: &FredSeriesInfo,
 ) -> AppResult<()> {
-    let new_series = NewEconomicSeries {
+    let new_metadata = crate::models::NewSeriesMetadata {
         source_id: *source_id,
         external_id: series_info.id.clone(),
         title: series_info.title.clone(),
         description: series_info.notes.clone(),
         units: Some(series_info.units.clone()),
-        frequency: series_info.frequency.clone(),
-        seasonal_adjustment: Some(series_info.seasonal_adjustment.clone()),
-        start_date: None,
-        end_date: None,
+        frequency: Some(series_info.frequency.clone()),
+        geographic_level: Some("United States".to_string()),
+        data_url: Some(format!(
+            "https://fred.stlouisfed.org/series/{}",
+            series_info.id
+        )),
+        api_endpoint: Some(format!(
+            "https://api.stlouisfed.org/fred/series/observations?series_id={}&file_type=json",
+            series_info.id
+        )),
         is_active: true,
-        first_discovered_at: Some(chrono::Utc::now()),
-        last_crawled_at: None,
-        first_missing_date: None,
-        crawl_status: None,
-        crawl_error_message: None,
     };
 
-    EconomicSeries::get_or_create(pool, &series_info.id, *source_id, &new_series).await?;
+    crate::models::SeriesMetadata::get_or_create(pool, *source_id, &series_info.id, &new_metadata)
+        .await?;
     Ok(())
+}
+
+/// Get popular FRED series
+pub async fn get_popular_fred_series(
+    client: &Client,
+    api_key: &str,
+) -> AppResult<Vec<FredSeriesInfo>> {
+    let url = format!(
+        "https://api.stlouisfed.org/fred/series/search?search_text=*&api_key={}&file_type=json&limit=100&sort_order=popularity",
+        api_key
+    );
+
+    let response = client.get(&url).send().await.map_err(|e| {
+        AppError::ExternalApiError(format!("FRED popular series request failed: {}", e))
+    })?;
+
+    if !response.status().is_success() {
+        return Err(AppError::ExternalApiError(format!(
+            "FRED popular series request failed with status: {}",
+            response.status()
+        )));
+    }
+
+    let search_response: FredSearchResponse = response.json().await.map_err(|e| {
+        AppError::ExternalApiError(format!(
+            "Failed to parse FRED popular series response: {}",
+            e
+        ))
+    })?;
+
+    Ok(search_response.seriess)
 }
 
 /// Search FRED series by query string

@@ -207,6 +207,203 @@ impl DataSource {
         }
     }
 
+    /// Create ECB (European Central Bank) source
+    pub fn ecb() -> NewDataSource {
+        NewDataSource {
+            name: "European Central Bank (ECB)".to_string(),
+            description: Some(
+                "Eurozone monetary policy, inflation, GDP, employment, and trade data".to_string(),
+            ),
+            base_url: "https://sdw-wsrest.ecb.europa.eu/service".to_string(),
+            api_key_required: false,
+            rate_limit_per_minute: 1000,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some("https://sdw-wsrest.ecb.europa.eu/help/".to_string()),
+        }
+    }
+
+    /// Create OECD (Organisation for Economic Co-operation and Development) source
+    pub fn oecd() -> NewDataSource {
+        NewDataSource {
+            name: "OECD (Organisation for Economic Co-operation and Development)".to_string(),
+            description: Some(
+                "Comprehensive economic, social, and environmental data for OECD countries and partner economies".to_string(),
+            ),
+            base_url: "https://sdmx.oecd.org/public/rest/data".to_string(),
+            api_key_required: false,
+            rate_limit_per_minute: 1000,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some(
+                "https://data-explorer.oecd.org/vis?fs[0]=Topic%2C1%7C1%7C1%7C0&fs[1]=Country%2C1%7C1%7C1%7C0&fs[2]=Measure%2C1%7C1%7C1%7C0&fs[3]=Time%2C1%7C1%7C1%7C0&pg=0&fc=Topic&lc=en&fs[4]=Subject%2C1%7C1%7C1%7C0".to_string(),
+            ),
+        }
+    }
+
+    /// Create Bank of England (BoE) source
+    pub fn boe() -> NewDataSource {
+        NewDataSource {
+            name: "Bank of England (BoE)".to_string(),
+            description: Some(
+                "UK monetary policy, inflation, GDP, employment, financial stability, and exchange rate data".to_string(),
+            ),
+            base_url: "https://www.bankofengland.co.uk/boeapps/database".to_string(),
+            api_key_required: false,
+            rate_limit_per_minute: 1000,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some(
+                "https://www.bankofengland.co.uk/statistics/data".to_string(),
+            ),
+        }
+    }
+
+    /// Create World Trade Organization (WTO) source
+    pub fn wto() -> NewDataSource {
+        NewDataSource {
+            name: "World Trade Organization (WTO)".to_string(),
+            description: Some(
+                "International trade data including merchandise and services trade for WTO member countries".to_string(),
+            ),
+            base_url: "https://api.wto.org/timeseries/v1".to_string(),
+            api_key_required: false,
+            rate_limit_per_minute: 1000,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some(
+                "https://www.wto.org/english/res_e/statis_e/data_explorer_e.htm".to_string(),
+            ),
+        }
+    }
+
+    /// Create Bank of Japan (BoJ) source
+    pub fn boj() -> NewDataSource {
+        NewDataSource {
+            name: "Bank of Japan (BoJ)".to_string(),
+            description: Some(
+                "Japanese monetary policy, inflation, GDP, employment, and financial stability data".to_string(),
+            ),
+            base_url: "https://www.stat-search.boj.or.jp/ssi/mtshtml".to_string(),
+            api_key_required: false,
+            rate_limit_per_minute: 1000,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some(
+                "https://www.boj.or.jp/en/statistics/".to_string(),
+            ),
+        }
+    }
+
+    /// Create Reserve Bank of Australia (RBA) source
+    pub fn rba() -> NewDataSource {
+        NewDataSource {
+            name: "Reserve Bank of Australia (RBA)".to_string(),
+            description: Some(
+                "Australian monetary policy, inflation, GDP, employment, and financial stability data".to_string(),
+            ),
+            base_url: "https://www.rba.gov.au/statistics".to_string(),
+            api_key_required: false,
+            rate_limit_per_minute: 1000,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some(
+                "https://www.rba.gov.au/statistics/".to_string(),
+            ),
+        }
+    }
+
+    /// Create Bank of Canada (BoC) source
+    pub fn boc() -> NewDataSource {
+        NewDataSource {
+            name: "Bank of Canada (BoC)".to_string(),
+            description: Some(
+                "Canadian monetary policy, inflation, GDP, employment, and financial stability data".to_string(),
+            ),
+            base_url: "https://www.bankofcanada.ca/valet".to_string(),
+            api_key_required: false,
+            rate_limit_per_minute: 1000,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some(
+                "https://www.bankofcanada.ca/valet/docs/".to_string(),
+            ),
+        }
+    }
+
+    /// Create Swiss National Bank (SNB) source
+    pub fn snb() -> NewDataSource {
+        NewDataSource {
+            name: "Swiss National Bank (SNB)".to_string(),
+            description: Some(
+                "Swiss monetary policy, inflation, GDP, employment, and financial stability data"
+                    .to_string(),
+            ),
+            base_url: "https://data.snb.ch".to_string(),
+            api_key_required: false,
+            rate_limit_per_minute: 1000,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some("https://data.snb.ch/en".to_string()),
+        }
+    }
+
+    /// Create UN Statistics Division source
+    pub fn unstats() -> NewDataSource {
+        NewDataSource {
+            name: "UN Statistics Division".to_string(),
+            description: Some(
+                "Global economic, social, and environmental data from the United Nations Statistics Division".to_string(),
+            ),
+            base_url: "https://unstats.un.org".to_string(),
+            api_key_required: false,
+            rate_limit_per_minute: 1000,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some(
+                "https://unstats.un.org/home/".to_string(),
+            ),
+        }
+    }
+
+    /// Create International Labour Organization (ILO) source
+    pub fn ilo() -> NewDataSource {
+        NewDataSource {
+            name: "International Labour Organization (ILO)".to_string(),
+            description: Some(
+                "Global labor market and employment data from the International Labour Organization".to_string(),
+            ),
+            base_url: "https://www.ilo.org".to_string(),
+            api_key_required: false,
+            rate_limit_per_minute: 1000,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some(
+                "https://www.ilo.org/global/statistics-and-databases/lang--en/index.htm".to_string(),
+            ),
+        }
+    }
+
     /// Find data source by name
     pub async fn find_by_name(
         pool: &crate::database::DatabasePool,

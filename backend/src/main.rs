@@ -35,7 +35,7 @@ use config::Config;
 use database::{create_pool, DatabasePool};
 use error::{AppError, AppResult};
 use graphql::schema::create_schema_with_data;
-use services::crawler::start_crawler;
+// use services::crawler::start_crawler; // TODO: Implement start_crawler function
 
 #[derive(Clone)]
 pub struct AppState {
@@ -280,13 +280,15 @@ async fn main() -> AppResult<()> {
     // Start background crawler (if enabled in config)
     // For now, crawler is always enabled - in production this could be configurable
     info!("🕷️  Starting background crawler...");
-    match start_crawler().await {
-        Ok(_) => info!("✅ Background crawler started successfully"),
-        Err(e) => {
-            eprintln!("⚠️  Warning: Failed to start background crawler: {}", e);
-            info!("⚠️  Background crawler failed to start, continuing without crawler");
-        }
-    }
+    // TODO: Implement crawler startup
+    // match start_crawler().await {
+    //     Ok(_) => info!("✅ Background crawler started successfully"),
+    //     Err(e) => {
+    //         eprintln!("⚠️  Warning: Failed to start background crawler: {}", e);
+    //         info!("⚠️  Background crawler failed to start, continuing without crawler");
+    //     }
+    // }
+    info!("⚠️  Background crawler startup temporarily disabled");
 
     // Create Warp filters
     let cors = warp::cors()

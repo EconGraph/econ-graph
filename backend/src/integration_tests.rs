@@ -216,7 +216,7 @@ mod tests {
         let pool = container.pool();
 
         // Test crawler status
-        let status = crate::services::crawler_service_simple::get_crawler_status()
+        let status = crate::services::crawler::simple_crawler_service::get_crawler_status()
             .await
             .expect("Should get crawler status");
 

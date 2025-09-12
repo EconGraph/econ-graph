@@ -176,7 +176,7 @@ impl Query {
 
         // Get actual crawler status from service
         let crawler_service_status =
-            crate::services::crawler_service_simple::get_crawler_status().await?;
+            crate::services::crawler::simple_crawler_service::get_crawler_status().await?;
 
         // Determine if crawler is actually running based on queue activity
         let is_running = crawler_service_status.is_running

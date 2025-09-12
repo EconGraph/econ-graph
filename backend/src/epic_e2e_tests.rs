@@ -8,7 +8,7 @@ use crate::models::data_point::{DataPoint, NewDataPoint};
 use crate::models::data_source::{DataSource, NewDataSource};
 use crate::models::economic_series::{EconomicSeries, NewEconomicSeries};
 use crate::models::search::SearchParams;
-use crate::services::crawler_service_simple::get_crawler_status;
+use crate::services::crawler::simple_crawler_service::get_crawler_status;
 use async_graphql::Request;
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, Months, NaiveDate, Utc};

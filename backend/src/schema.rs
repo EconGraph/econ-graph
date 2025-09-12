@@ -301,6 +301,30 @@ diesel::table! {
 }
 
 diesel::table! {
+    series_metadata (id) {
+        id -> Uuid,
+        source_id -> Uuid,
+        #[max_length = 255]
+        external_id -> Varchar,
+        #[max_length = 500]
+        title -> Varchar,
+        description -> Nullable<Text>,
+        #[max_length = 100]
+        units -> Nullable<Varchar>,
+        #[max_length = 50]
+        frequency -> Nullable<Varchar>,
+        #[max_length = 100]
+        geographic_level -> Nullable<Varchar>,
+        data_url -> Nullable<Text>,
+        api_endpoint -> Nullable<Text>,
+        last_discovered_at -> Nullable<Timestamptz>,
+        is_active -> Bool,
+        created_at -> Nullable<Timestamptz>,
+        updated_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
     trade_relationships (id) {
         id -> Uuid,
         exporter_country_id -> Uuid,
@@ -385,6 +409,7 @@ diesel::joinable!(event_country_impacts -> global_economic_events (event_id));
 diesel::joinable!(global_economic_events -> countries (primary_country_id));
 diesel::joinable!(global_economic_indicators -> countries (country_id));
 diesel::joinable!(global_indicator_data -> global_economic_indicators (indicator_id));
+diesel::joinable!(series_metadata -> data_sources (source_id));
 diesel::joinable!(user_data_source_preferences -> data_sources (data_source_id));
 diesel::joinable!(user_data_source_preferences -> users (user_id));
 diesel::joinable!(user_sessions -> users (user_id));
@@ -405,6 +430,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     global_economic_indicators,
     global_indicator_data,
     leading_indicators,
+    series_metadata,
     trade_relationships,
     user_data_source_preferences,
     user_sessions,

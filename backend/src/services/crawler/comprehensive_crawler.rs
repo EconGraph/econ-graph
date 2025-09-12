@@ -8,9 +8,10 @@ use tokio::time::{sleep, Duration};
 use crate::database::DatabasePool;
 use crate::error::{AppError, AppResult};
 use crate::models::{CrawlQueueItem, DataSource, NewCrawlQueueItem, QueuePriority};
+use crate::services::crawler::legacy_crawler_service::CrawlerService;
 use crate::services::{
     comprehensive_series_catalog::ComprehensiveSeriesCatalog,
-    series_discovery::SeriesDiscoveryService, CrawlerService,
+    series_discovery::SeriesDiscoveryService,
 };
 
 /// Comprehensive crawler that can discover and catalog all available series

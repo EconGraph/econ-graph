@@ -240,7 +240,7 @@ async fn test_crawler_monitoring_workflow() {
     assert_eq!(final_stats.completed_items, 1);
 
     // Test crawler status (admin dashboard would display this)
-    let crawler_status = crate::services::crawler_service_simple::get_crawler_status()
+    let crawler_status = crate::services::crawler::simple_crawler_service::get_crawler_status()
         .await
         .expect("Should get crawler status");
 
