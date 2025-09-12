@@ -310,11 +310,7 @@ Companies can integrate economic data into their AI-powered analytics workflows 
 - **Authentication**: Secure access control for sensitive data
 - **Rate Limiting**: Protection against abuse and overuse
 
-## Contributing
-
-The MCP server is part of the EconGraph project. Contributions are welcome! Please see the main project README for contribution guidelines.
-
 ## License
 
-This project is licensed under the same terms as the main EconGraph project.
+This project is licensed under the Microsoft Reference Source License (MS-RSL). See the main project LICENSE file for complete terms and conditions.
 

@@ -214,19 +214,13 @@ const WorldMap: React.FC = () => {
 
 ---
 
-## 🤝 **Contributing to the Roadmap**
+## 🎯 **Development Priorities**
 
-### 📝 **How to Contribute**
-1. **Feature Requests**: Open GitHub issues with detailed feature descriptions
-2. **Technical Proposals**: Submit PRs with technical design documents
-3. **Research**: Contribute economic modeling research and methodologies
-4. **Implementation**: Help implement roadmap features
-
-### 🎯 **Priority Criteria**
+### 📝 **Feature Development Criteria**
 - **User Impact**: How much value does this add for economists and analysts?
 - **Technical Feasibility**: Can this be implemented with current technology stack?
 - **Maintenance Burden**: How much ongoing maintenance will this require?
-- **Community Interest**: How many users are requesting this feature?
+- **Market Demand**: How many users are requesting this feature?
 
 ---
 
@@ -271,6 +265,6 @@ const WorldMap: React.FC = () => {
 
 ---
 
-**Have ideas for the roadmap? [Open an issue](https://github.com/jmalicki/econ-graph/issues) or [start a discussion](https://github.com/jmalicki/econ-graph/discussions)!**
+**This roadmap represents our internal development priorities and strategic direction.**
 
 </div>
