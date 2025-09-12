@@ -13,6 +13,8 @@ import DataSources from './pages/DataSources';
 import About from './pages/About';
 import ProfessionalAnalysis from './pages/ProfessionalAnalysis';
 import GlobalAnalysis from './pages/GlobalAnalysis';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import UserDataDeletion from './pages/UserDataDeletion';
 
 // Sidebar width constant - must match Sidebar.tsx
 const SIDEBAR_WIDTH = 240;
@@ -58,6 +60,8 @@ function App() {
                 <Route path='/about' element={<About />} />
                 <Route path='/analysis/:id?' element={<ProfessionalAnalysis />} />
                 <Route path='/global' element={<GlobalAnalysis />} />
+                <Route path='/privacy' element={<PrivacyPolicy />} />
+                <Route path='/user-data-deletion' element={<UserDataDeletion />} />
               </Routes>
             </Container>
           </Box>

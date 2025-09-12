@@ -64,6 +64,13 @@ pub fn auth_routes(auth_service: AuthService) -> BoxedFilter<(impl Reply,)> {
         .and(warp::post())
         .and_then(handle_logout);
 
+    // Facebook data deletion callback route
+    let facebook_data_deletion = warp::path!("auth" / "facebook" / "data-deletion")
+        .and(warp::post())
+        .and(warp::body::form())
+        .and(with_auth_service(auth_service.clone()))
+        .and_then(handle_facebook_data_deletion);
+
     google_auth
         .or(facebook_auth)
         .or(login)
@@ -71,6 +78,7 @@ pub fn auth_routes(auth_service: AuthService) -> BoxedFilter<(impl Reply,)> {
         .or(get_profile)
         .or(update_profile)
         .or(logout)
+        .or(facebook_data_deletion)
         .with(cors)
         .recover(handle_auth_rejection)
         .boxed()

@@ -24,6 +24,7 @@ import {
   Settings as SettingsIcon,
   ExitToApp as ExitToAppIcon,
   Analytics as AnalyticsIcon,
+  PrivacyTip as PrivacyTipIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -236,6 +237,12 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                     </ListItemIcon>
                     <ListItemText>Professional Analysis</ListItemText>
                   </MenuItem>
+                  <MenuItem onClick={() => navigate('/privacy')}>
+                    <ListItemIcon>
+                      <PrivacyTipIcon fontSize='small' />
+                    </ListItemIcon>
+                    <ListItemText>Privacy Policy</ListItemText>
+                  </MenuItem>
                   <Divider />
                   <MenuItem onClick={handleSignOut}>
                     <ListItemIcon>
@@ -246,21 +253,31 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                 </Menu>
               </>
             ) : (
-              <Button
-                color='inherit'
-                variant='outlined'
-                startIcon={<PersonIcon />}
-                onClick={() => setLoginOpen(true)}
-                sx={{
-                  borderColor: 'rgba(255, 255, 255, 0.5)',
-                  '&:hover': {
-                    borderColor: 'white',
-                    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                  },
-                }}
-              >
-                Sign In
-              </Button>
+              <>
+                <Button
+                  color='inherit'
+                  variant='text'
+                  onClick={() => navigate('/privacy')}
+                  sx={{ display: { xs: 'none', sm: 'flex' } }}
+                >
+                  Privacy
+                </Button>
+                <Button
+                  color='inherit'
+                  variant='outlined'
+                  startIcon={<PersonIcon />}
+                  onClick={() => setLoginOpen(true)}
+                  sx={{
+                    borderColor: 'rgba(255, 255, 255, 0.5)',
+                    '&:hover': {
+                      borderColor: 'white',
+                      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                    },
+                  }}
+                >
+                  Sign In
+                </Button>
+              </>
             )}
           </Box>
         </Toolbar>
