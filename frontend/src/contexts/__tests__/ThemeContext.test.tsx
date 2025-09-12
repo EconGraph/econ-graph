@@ -51,6 +51,14 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 describe('ThemeContext', () => {
   beforeEach(() => {
     // Reset localStorage mock for each test
+    (window.localStorage.getItem as jest.Mock).mockClear();
+    (window.localStorage.setItem as jest.Mock).mockClear();
+    (window.localStorage.removeItem as jest.Mock).mockClear();
+    (window.localStorage.clear as jest.Mock).mockClear();
+  });
+
+  it('should initialize with light theme by default', () => {
+    (window.localStorage.getItem as jest.Mock).mockReturnValue(null);
     jest.clearAllMocks();
 
     // Clear any existing localStorage state
@@ -59,7 +67,7 @@ describe('ThemeContext', () => {
     }
   });
 
-  it('should initialize with light theme by default', () => {
+  it('should initialize with light theme when localStorage is null', () => {
     (window.localStorage.getItem as jest.Mock).mockReturnValue(null);
 
     render(

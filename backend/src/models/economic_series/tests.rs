@@ -49,6 +49,11 @@ mod simple_tests {
             start_date: Some(NaiveDate::from_ymd_opt(2020, 1, 1).unwrap()),
             end_date: None,
             is_active: true,
+            first_discovered_at: Some(chrono::Utc::now()),
+            last_crawled_at: None,
+            first_missing_date: None,
+            crawl_status: None,
+            crawl_error_message: None,
         };
 
         assert_eq!(series.external_id, "TEST_001");

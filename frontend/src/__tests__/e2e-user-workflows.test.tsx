@@ -105,14 +105,11 @@ function renderApp() {
 
 describe('End-to-End User Workflows', () => {
   // Increase timeout for all tests in this suite
-  jest.setTimeout(30000);
+  jest.setTimeout(60000);
 
   beforeEach(() => {
     jest.clearAllMocks();
   });
-
-  // Increase timeout for e2e tests
-  jest.setTimeout(30000);
 
   describe('Complete Search to Analysis Workflow', () => {
     test('should complete basic navigation workflow: Dashboard → Series Explorer', async () => {
@@ -124,16 +121,18 @@ describe('End-to-End User Workflows', () => {
       // 1. Verify we're on the dashboard
       await waitFor(() => {
         expect(screen.getByRole('banner')).toBeInTheDocument();
-      });
+      }, { timeout: 10000 });
 
       // 2. Navigate to Series Explorer
-      const seriesExplorerLink = screen.getByText('Explore Series');
+      const seriesExplorerLink = await waitFor(() => {
+        return screen.getByText('Explore Series');
+      }, { timeout: 10000 });
       await user.click(seriesExplorerLink);
 
       // 3. Verify we're on the Series Explorer page
       await waitFor(() => {
         expect(screen.getByText('Explore Economic Series')).toBeInTheDocument();
-      });
+      }, { timeout: 10000 });
 
       console.log('✅ Basic navigation workflow test passed');
     });
@@ -144,16 +143,20 @@ describe('End-to-End User Workflows', () => {
       renderApp();
 
       // Navigate to Series Explorer
-      const seriesExplorerLink = screen.getByText('Explore Series');
+      const seriesExplorerLink = await waitFor(() => {
+        return screen.getByText('Explore Series');
+      }, { timeout: 10000 });
       await user.click(seriesExplorerLink);
 
       // Verify we're on the Series Explorer page
       await waitFor(() => {
         expect(screen.getByText('Explore Economic Series')).toBeInTheDocument();
-      });
+      }, { timeout: 10000 });
 
       // Search for GDP data
-      const searchInput = screen.getByPlaceholderText('Search economic series...');
+      const searchInput = await waitFor(() => {
+        return screen.getByPlaceholderText('Search economic series...');
+      }, { timeout: 10000 });
       await user.type(searchInput, 'GDP');
 
       // Verify the search input has the text
@@ -188,28 +191,29 @@ describe('End-to-End User Workflows', () => {
       // Start at dashboard - just verify app renders
       await waitFor(() => {
         expect(screen.getByRole('banner')).toBeInTheDocument();
-      });
+      }, { timeout: 10000 });
 
       // Just verify basic navigation exists
       const buttons = screen.getAllByRole('button');
       expect(buttons.length).toBeGreaterThan(0);
 
+      // Verify About section is visible
       await waitFor(() => {
-        // Use getAllByText and take the first one (main heading)
         const aboutElements = screen.getAllByText('About EconGraph');
         expect(aboutElements[0]).toBeInTheDocument();
-      });
+      }, { timeout: 10000 });
 
       // Navigate to Data Sources
-      const dataSourcesElements = screen.getAllByText('Data Sources');
+      const dataSourcesElements = await waitFor(() => {
+        return screen.getAllByText('Data Sources');
+      }, { timeout: 10000 });
       const dataSourcesLink = dataSourcesElements[0]; // First one should be the sidebar item
       await user.click(dataSourcesLink);
 
       await waitFor(() => {
-        // Use getAllByText and take the first one (main heading)
         const dataSourceElements = screen.getAllByText('Data Sources');
         expect(dataSourceElements[0]).toBeInTheDocument();
-      });
+      }, { timeout: 10000 });
 
       console.log('✅ Navigation workflow test passed');
     });

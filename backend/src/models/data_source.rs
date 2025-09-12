@@ -19,6 +19,14 @@ pub struct DataSource {
     pub rate_limit_per_minute: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub is_visible: bool,
+    pub is_enabled: bool,
+    pub requires_admin_approval: bool,
+    pub crawl_frequency_hours: i32,
+    pub last_crawl_at: Option<DateTime<Utc>>,
+    pub crawl_status: Option<String>,
+    pub crawl_error_message: Option<String>,
+    pub api_documentation_url: Option<String>,
 }
 
 /// New data source for insertion
@@ -34,6 +42,12 @@ pub struct NewDataSource {
     pub api_key_required: bool,
     #[validate(range(min = 1, max = 10000))]
     pub rate_limit_per_minute: i32,
+    pub is_visible: bool,
+    pub is_enabled: bool,
+    pub requires_admin_approval: bool,
+    pub crawl_frequency_hours: i32,
+    #[validate(url)]
+    pub api_documentation_url: Option<String>,
 }
 
 /// Data source update model
@@ -49,6 +63,8 @@ pub struct UpdateDataSource {
     pub api_key_required: Option<bool>,
     #[validate(range(min = 1, max = 10000))]
     pub rate_limit_per_minute: Option<i32>,
+    #[validate(url)]
+    pub api_documentation_url: Option<String>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -64,6 +80,11 @@ impl DataSource {
             base_url: "https://api.stlouisfed.org/fred".to_string(),
             api_key_required: true,
             rate_limit_per_minute: 120,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 6,
+            api_documentation_url: Some("https://fred.stlouisfed.org/docs/api/fred/".to_string()),
         }
     }
 
@@ -78,6 +99,13 @@ impl DataSource {
             base_url: "https://api.bls.gov/publicAPI/v2".to_string(),
             api_key_required: true,
             rate_limit_per_minute: 500,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 12,
+            api_documentation_url: Some(
+                "https://www.bls.gov/developers/api_signature_v2.htm".to_string(),
+            ),
         }
     }
 
@@ -91,6 +119,13 @@ impl DataSource {
             base_url: "https://api.census.gov/data".to_string(),
             api_key_required: true,
             rate_limit_per_minute: 500,
+            is_visible: false,
+            is_enabled: false,
+            requires_admin_approval: true,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some(
+                "https://www.census.gov/data/developers/data-sets.html".to_string(),
+            ),
         }
     }
 
@@ -104,6 +139,51 @@ impl DataSource {
             base_url: "https://api.worldbank.org/v2".to_string(),
             api_key_required: false,
             rate_limit_per_minute: 1000,
+            is_visible: false,
+            is_enabled: false,
+            requires_admin_approval: true,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some("https://datahelpdesk.worldbank.org/knowledgebase/articles/898581-api-basic-call-structures".to_string()),
+        }
+    }
+
+    /// Create BEA source
+    pub fn bea() -> NewDataSource {
+        NewDataSource {
+            name: "Bureau of Economic Analysis (BEA)".to_string(),
+            description: Some(
+                "U.S. economic statistics including GDP, NIPA, ITA, and Regional data".to_string(),
+            ),
+            base_url: "https://apps.bea.gov/api/data".to_string(),
+            api_key_required: true,
+            rate_limit_per_minute: 1000,
+            is_visible: false,
+            is_enabled: false,
+            requires_admin_approval: true,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some(
+                "https://apps.bea.gov/api/bea_web_service_api_user_guide.htm".to_string(),
+            ),
+        }
+    }
+
+    /// Create IMF source
+    pub fn imf() -> NewDataSource {
+        NewDataSource {
+            name: "International Monetary Fund (IMF)".to_string(),
+            description: Some(
+                "Global economic and financial data including IFS, BOP, GFS, and WEO".to_string(),
+            ),
+            base_url: "https://dataservices.imf.org/REST/SDMX_JSON.svc".to_string(),
+            api_key_required: false,
+            rate_limit_per_minute: 1000,
+            is_visible: false,
+            is_enabled: false,
+            requires_admin_approval: true,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some(
+                "https://data.imf.org/en/Resource-Pages/IMF-API".to_string(),
+            ),
         }
     }
 
@@ -186,6 +266,11 @@ impl Default for NewDataSource {
             base_url: String::new(),
             api_key_required: false,
             rate_limit_per_minute: 60,
+            is_visible: false,
+            is_enabled: false,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some("https://example.com/api/docs".to_string()),
         }
     }
 }
@@ -198,6 +283,7 @@ impl Default for UpdateDataSource {
             base_url: None,
             api_key_required: None,
             rate_limit_per_minute: None,
+            api_documentation_url: Some("https://example.com/api/docs".to_string()),
             updated_at: Utc::now(),
         }
     }
@@ -258,6 +344,11 @@ mod _inline_tests {
             base_url: "https://api.example.com".to_string(),
             api_key_required: false,
             rate_limit_per_minute: 100,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some("https://api.example.com/docs".to_string()),
         };
 
         // Verify valid configuration passes validation
@@ -273,6 +364,11 @@ mod _inline_tests {
             base_url: "not-a-url".to_string(), // Invalid URL format
             api_key_required: false,
             rate_limit_per_minute: 100,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some("https://example.com/api/docs".to_string()),
         };
 
         assert!(
@@ -287,6 +383,11 @@ mod _inline_tests {
             base_url: "https://api.example.com".to_string(),
             api_key_required: false,
             rate_limit_per_minute: 50000, // Unrealistically high rate limit
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some("https://example.com/api/docs".to_string()),
         };
 
         assert!(

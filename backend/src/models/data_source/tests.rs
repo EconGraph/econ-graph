@@ -24,6 +24,11 @@ mod simple_tests {
             base_url: "https://api.example.com".to_string(),
             api_key_required: false,
             rate_limit_per_minute: 100,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some("https://api.example.com/docs".to_string()),
         };
 
         assert_eq!(source.name, "Test Source");
@@ -44,6 +49,7 @@ mod simple_tests {
             base_url: Some("https://api.updated.com".to_string()),
             api_key_required: Some(true),
             rate_limit_per_minute: Some(200),
+            api_documentation_url: Some("https://api.updated.com/docs".to_string()),
             updated_at: chrono::Utc::now(),
         };
 

@@ -164,6 +164,11 @@ pub async fn crawl_fred_series(pool: &DatabasePool, series_id: &str) -> AppResul
         start_date: None, // Will be updated after processing observations
         end_date: None,   // Will be updated after processing observations
         is_active: true,
+        first_discovered_at: Some(chrono::Utc::now()),
+        last_crawled_at: None,
+        first_missing_date: None,
+        crawl_status: None,
+        crawl_error_message: None,
     };
 
     let economic_series =
@@ -425,6 +430,11 @@ pub async fn crawl_bls_series(pool: &DatabasePool, series_id: &str) -> AppResult
         start_date: None, // Will be updated after processing data points
         end_date: None,   // Will be updated after processing data points
         is_active: true,
+        first_discovered_at: Some(chrono::Utc::now()),
+        last_crawled_at: None,
+        first_missing_date: None,
+        crawl_status: None,
+        crawl_error_message: None,
     };
 
     let economic_series =

@@ -26,6 +26,11 @@ pub struct EconomicSeries {
     pub is_active: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub first_discovered_at: Option<DateTime<Utc>>,
+    pub last_crawled_at: Option<DateTime<Utc>>,
+    pub first_missing_date: Option<NaiveDate>,
+    pub crawl_status: Option<String>,
+    pub crawl_error_message: Option<String>,
 }
 
 /// New economic series for insertion
@@ -48,6 +53,12 @@ pub struct NewEconomicSeries {
     pub start_date: Option<NaiveDate>,
     pub end_date: Option<NaiveDate>,
     pub is_active: bool,
+    pub first_discovered_at: Option<DateTime<Utc>>,
+    pub last_crawled_at: Option<DateTime<Utc>>,
+    pub first_missing_date: Option<NaiveDate>,
+    #[validate(length(max = 50))]
+    pub crawl_status: Option<String>,
+    pub crawl_error_message: Option<String>,
 }
 
 /// Economic series update model
@@ -133,6 +144,11 @@ impl Default for NewEconomicSeries {
             start_date: None,
             end_date: None,
             is_active: true,
+            first_discovered_at: Some(chrono::Utc::now()),
+            last_crawled_at: None,
+            first_missing_date: None,
+            crawl_status: None,
+            crawl_error_message: None,
         }
     }
 }

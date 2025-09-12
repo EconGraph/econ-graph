@@ -735,6 +735,29 @@ impl DataPoint {
 
         Ok(data_points)
     }
+
+    /// Get a data point by series ID and specific date
+    pub async fn get_by_series_and_date(
+        pool: &crate::database::DatabasePool,
+        series_id: uuid::Uuid,
+        date: &chrono::NaiveDate,
+    ) -> crate::error::AppResult<Option<Self>> {
+        use crate::schema::data_points::dsl;
+        use diesel_async::RunQueryDsl;
+
+        let mut conn = pool.get().await?;
+
+        let data_point = diesel_async::RunQueryDsl::first(
+            dsl::data_points
+                .filter(dsl::series_id.eq(series_id))
+                .filter(dsl::date.eq(*date)),
+            &mut conn,
+        )
+        .await
+        .optional()?;
+
+        Ok(data_point)
+    }
 }
 
 // Inline tests moved to external test file

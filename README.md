@@ -389,4 +389,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Built as a learning project for full-stack development with Rust and React**
 
-</div>
+</div># PostgreSQL 17.6 Environment

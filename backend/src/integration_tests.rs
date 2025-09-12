@@ -33,6 +33,11 @@ mod tests {
             base_url: "https://test.example.com/api".to_string(),
             api_key_required: true,
             rate_limit_per_minute: 100,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some("https://test.example.com/docs".to_string()),
         };
 
         let created_source = DataSource::create(&pool, new_source)
@@ -51,6 +56,11 @@ mod tests {
             start_date: Some(NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()),
             end_date: Some(NaiveDate::from_ymd_opt(2024, 12, 31).unwrap()),
             is_active: true,
+            first_discovered_at: Some(chrono::Utc::now()),
+            last_crawled_at: None,
+            first_missing_date: None,
+            crawl_status: None,
+            crawl_error_message: None,
         };
 
         let created_series = EconomicSeries::create(&pool, &new_series)
@@ -117,6 +127,11 @@ mod tests {
             start_date: None,
             end_date: None,
             is_active: true,
+            first_discovered_at: Some(chrono::Utc::now()),
+            last_crawled_at: None,
+            first_missing_date: None,
+            crawl_status: None,
+            crawl_error_message: None,
         };
 
         // This should fail due to foreign key constraint
