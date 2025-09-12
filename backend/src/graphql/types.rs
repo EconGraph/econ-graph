@@ -893,21 +893,21 @@ pub struct UserType {
     /// Organization
     pub organization: Option<String>,
     /// UI theme preference
-    pub theme: Option<String>,
+    pub theme: String,
     /// Default chart type preference
-    pub default_chart_type: Option<String>,
+    pub default_chart_type: String,
     /// Whether notifications are enabled
-    pub notifications_enabled: Option<bool>,
+    pub notifications_enabled: bool,
     /// Whether collaboration features are enabled
-    pub collaboration_enabled: Option<bool>,
+    pub collaboration_enabled: bool,
     /// Whether the account is active
-    pub is_active: Option<bool>,
+    pub is_active: bool,
     /// Whether email is verified
-    pub email_verified: Option<bool>,
+    pub email_verified: bool,
     /// Creation timestamp
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
     /// Last update timestamp
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: DateTime<Utc>,
     /// Last login timestamp
     pub last_login_at: Option<DateTime<Utc>>,
 }

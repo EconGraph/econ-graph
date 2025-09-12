@@ -38,11 +38,11 @@ mod tests {
             password_hash: None,
             role: "user".to_string(),
             organization: Some("Test Org".to_string()),
-            theme: None,
-            default_chart_type: None,
-            notifications_enabled: Some(true),
-            collaboration_enabled: Some(true),
-            email_verified: Some(true),
+            theme: "light".to_string(),
+            default_chart_type: "line".to_string(),
+            notifications_enabled: true,
+            collaboration_enabled: true,
+            email_verified: true,
         };
 
         let user = diesel::insert_into(users::table)

@@ -33,14 +33,14 @@ pub struct User {
     pub password_hash: Option<String>,
     pub role: String,
     pub organization: Option<String>,
-    pub theme: Option<String>,
-    pub default_chart_type: Option<String>,
-    pub notifications_enabled: Option<bool>,
-    pub collaboration_enabled: Option<bool>,
-    pub is_active: Option<bool>,
-    pub email_verified: Option<bool>,
-    pub created_at: Option<DateTime<Utc>>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub theme: String,
+    pub default_chart_type: String,
+    pub notifications_enabled: bool,
+    pub collaboration_enabled: bool,
+    pub is_active: bool,
+    pub email_verified: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
     pub last_login_at: Option<DateTime<Utc>>,
 }
 
@@ -55,11 +55,11 @@ pub struct NewUser {
     pub password_hash: Option<String>,
     pub role: String,
     pub organization: Option<String>,
-    pub theme: Option<String>,
-    pub default_chart_type: Option<String>,
-    pub notifications_enabled: Option<bool>,
-    pub collaboration_enabled: Option<bool>,
-    pub email_verified: Option<bool>,
+    pub theme: String,
+    pub default_chart_type: String,
+    pub notifications_enabled: bool,
+    pub collaboration_enabled: bool,
+    pub email_verified: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, AsChangeset)]
@@ -83,8 +83,8 @@ pub struct UserSession {
     pub user_id: Uuid,
     pub token_hash: String,
     pub expires_at: DateTime<Utc>,
-    pub created_at: Option<DateTime<Utc>>,
-    pub last_used_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub last_used_at: DateTime<Utc>,
     pub user_agent: Option<String>,
     pub ip_address: Option<String>,
 }
@@ -177,11 +177,11 @@ impl User {
             password_hash: Some(password_hash),
             role: "viewer".to_string(),
             organization: None,
-            theme: Some("light".to_string()),
-            default_chart_type: Some("line".to_string()),
-            notifications_enabled: Some(true),
-            collaboration_enabled: Some(true),
-            email_verified: Some(false),
+            theme: "light".to_string(),
+            default_chart_type: "line".to_string(),
+            notifications_enabled: true,
+            collaboration_enabled: true,
+            email_verified: false,
         };
 
         let user = diesel::insert_into(users::table)
@@ -258,11 +258,11 @@ impl User {
             password_hash: None,
             role: "viewer".to_string(),
             organization: None,
-            theme: Some("light".to_string()),
-            default_chart_type: Some("line".to_string()),
-            notifications_enabled: Some(true),
-            collaboration_enabled: Some(true),
-            email_verified: Some(true), // OAuth accounts are considered verified
+            theme: "light".to_string(),
+            default_chart_type: "line".to_string(),
+            notifications_enabled: true,
+            collaboration_enabled: true,
+            email_verified: true, // OAuth accounts are considered verified
         };
 
         let user = diesel::insert_into(users::table)
@@ -361,15 +361,12 @@ impl User {
             role: self.role.clone(),
             organization: self.organization.clone(),
             preferences: UserPreferences {
-                theme: self.theme.clone().unwrap_or_else(|| "light".to_string()),
-                default_chart_type: self
-                    .default_chart_type
-                    .clone()
-                    .unwrap_or_else(|| "line".to_string()),
-                notifications: self.notifications_enabled.unwrap_or(true),
-                collaboration_enabled: self.collaboration_enabled.unwrap_or(true),
+                theme: self.theme.clone(),
+                default_chart_type: self.default_chart_type.clone(),
+                notifications: self.notifications_enabled,
+                collaboration_enabled: self.collaboration_enabled,
             },
-            created_at: self.created_at.unwrap_or_else(Utc::now),
+            created_at: self.created_at,
             last_login_at: self.last_login_at,
         }
     }
@@ -402,17 +399,14 @@ impl User {
             role,
             organization: self.organization.clone(),
             preferences: UserPreferences {
-                theme: self.theme.clone().unwrap_or_else(|| "light".to_string()),
-                default_chart_type: self
-                    .default_chart_type
-                    .clone()
-                    .unwrap_or_else(|| "line".to_string()),
-                notifications: self.notifications_enabled.unwrap_or(true),
-                collaboration_enabled: self.collaboration_enabled.unwrap_or(true),
+                theme: self.theme.clone(),
+                default_chart_type: self.default_chart_type.clone(),
+                notifications: self.notifications_enabled,
+                collaboration_enabled: self.collaboration_enabled,
             },
-            created_at: self.created_at.unwrap_or_else(Utc::now),
+            created_at: self.created_at,
             last_login_at: self.last_login_at.unwrap_or_else(Utc::now),
-            is_active: self.is_active.unwrap_or(true),
+            is_active: self.is_active,
         }
     }
 }
@@ -506,7 +500,7 @@ impl UserSession {
         let _ = diesel::update(user_sessions::table)
             .filter(user_sessions::user_id.eq(user_id))
             .filter(user_sessions::expires_at.gt(Utc::now()))
-            .set(user_sessions::last_used_at.eq(Some(Utc::now())))
+            .set(user_sessions::last_used_at.eq(Utc::now()))
             .execute(&mut conn)
             .await;
 
