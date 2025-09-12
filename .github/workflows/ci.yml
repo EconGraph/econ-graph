@@ -181,7 +181,7 @@ jobs:
     name: Backend Service Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [backend-database-tests]
+    needs: [backend-smoke-tests]
 
     services:
       postgres:
