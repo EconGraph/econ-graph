@@ -13,6 +13,9 @@ import About from './pages/About';
 import ProfessionalAnalysis from './pages/ProfessionalAnalysis';
 import GlobalAnalysis from './pages/GlobalAnalysis';
 
+// Sidebar width constant - must match Sidebar.tsx
+const SIDEBAR_WIDTH = 240;
+
 /**
  * REQUIREMENT: Modern application that is easier to use than FRED
  * PURPOSE: Main application component that provides routing and layout structure
@@ -39,7 +42,7 @@ function App() {
           sx={{
             flexGrow: 1,
             pt: { xs: 7, sm: 8 }, // Account for header height
-            pl: { sm: sidebarOpen ? 30 : 0 }, // Account for sidebar when open
+            pl: { sm: sidebarOpen ? `${SIDEBAR_WIDTH}px` : 0 }, // Account for sidebar when open
             transition: 'padding-left 0.3s ease',
           }}
         >

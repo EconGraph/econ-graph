@@ -1,18 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import {
-  Drawer,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Divider,
-  Box,
-  Typography,
-  useTheme,
-  useMediaQuery,
-} from '@mui/material';
+import { Drawer, Divider, Box, Typography, useTheme, useMediaQuery } from '@mui/material';
 import {
   Dashboard as DashboardIcon,
   Explore as ExploreIcon,
@@ -96,59 +84,89 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onClose }) => {
     <>
       {showDivider && <Divider sx={{ my: 1 }} />}
       {items.map(item => (
-        <ListItem key={item.path} disablePadding>
-          <ListItemButton
-            selected={location.pathname === item.path}
-            onClick={() => handleNavigation(item.path)}
-            sx={{
-              minHeight: 48,
-              px: 2.5,
-              '&.Mui-selected': {
-                backgroundColor: theme.palette.primary.main,
-                color: theme.palette.primary.contrastText,
-                '&:hover': {
-                  backgroundColor: theme.palette.primary.dark,
-                },
-                '& .MuiListItemIcon-root': {
-                  color: theme.palette.primary.contrastText,
-                },
-              },
+        <div
+          key={item.path}
+          data-testid={`sidebar-nav-${item.text.toLowerCase().replace(/\s+/g, '-')}`}
+          role='button'
+          tabIndex={0}
+          aria-label={`Navigate to ${item.text}: ${item.description}`}
+          aria-current={location.pathname === item.path ? 'page' : undefined}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            minHeight: '48px',
+            padding: '0 20px',
+            cursor: 'pointer',
+            backgroundColor:
+              location.pathname === item.path ? theme.palette.primary.main : 'transparent',
+            color:
+              location.pathname === item.path
+                ? theme.palette.primary.contrastText
+                : theme.palette.text.primary,
+            position: 'relative',
+            left: '0',
+            transform: 'translateX(0)',
+            visibility: 'visible',
+            width: '100%',
+            boxSizing: 'border-box',
+          }}
+          onClick={() => handleNavigation(item.path)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleNavigation(item.path);
+            }
+          }}
+        >
+          <div
+            style={{
+              minWidth: '0',
+              marginRight: '24px',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
             }}
           >
-            <ListItemIcon
-              sx={{
-                minWidth: 0,
-                mr: 3,
-                justifyContent: 'center',
-              }}
-            >
-              {item.icon}
-            </ListItemIcon>
-            <ListItemText
-              primary={item.text}
-              secondary={item.description}
-              primaryTypographyProps={{
+            {item.icon}
+          </div>
+          <div style={{ flex: 1 }}>
+            <div
+              data-testid={`sidebar-nav-${item.text.toLowerCase().replace(/\s+/g, '-')}-title`}
+              style={{
                 fontSize: '0.875rem',
                 fontWeight: location.pathname === item.path ? 600 : 400,
+                color: 'inherit',
               }}
-              secondaryTypographyProps={{
+            >
+              {item.text}
+            </div>
+            <div
+              data-testid={`sidebar-nav-${item.text.toLowerCase().replace(/\s+/g, '-')}-description`}
+              style={{
                 fontSize: '0.75rem',
                 color:
                   location.pathname === item.path
                     ? theme.palette.primary.contrastText
                     : theme.palette.text.secondary,
+                display: 'block',
               }}
-            />
-          </ListItemButton>
-        </ListItem>
+            >
+              {item.description}
+            </div>
+          </div>
+        </div>
       ))}
     </>
   );
 
   const drawerContent = (
-    <Box sx={{ overflow: 'auto', height: '100%' }}>
+    <div
+      data-testid='sidebar-content'
+      style={{ overflow: 'auto', height: '100%', position: 'relative' }}
+    >
       {/* Sidebar header */}
       <Box
+        data-testid='sidebar-header'
         sx={{
           p: 2,
           background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
@@ -157,23 +175,24 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onClose }) => {
       >
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
           <TrendingUpIcon sx={{ mr: 1 }} />
-          <Typography variant='h6' sx={{ fontWeight: 600 }}>
+          <Typography data-testid='sidebar-title' variant='h6' sx={{ fontWeight: 600 }}>
             EconGraph
           </Typography>
         </Box>
-        <Typography variant='body2' sx={{ opacity: 0.8 }}>
+        <Typography data-testid='sidebar-subtitle' variant='body2' sx={{ opacity: 0.8 }}>
           Economic Data Visualization
         </Typography>
       </Box>
 
       {/* Navigation items */}
-      <List sx={{ pt: 2 }}>
-        {renderNavigationItems(navigationItems)}
-        {renderNavigationItems(secondaryItems, true)}
-      </List>
+      <div data-testid='sidebar-navigation' style={{ paddingTop: '16px' }}>
+        <div data-testid='sidebar-primary-nav'>{renderNavigationItems(navigationItems)}</div>
+        <div data-testid='sidebar-secondary-nav'>{renderNavigationItems(secondaryItems, true)}</div>
+      </div>
 
       {/* Footer info */}
       <Box
+        data-testid='sidebar-footer'
         sx={{
           position: 'absolute',
           bottom: 0,
@@ -184,36 +203,69 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onClose }) => {
           backgroundColor: theme.palette.background.paper,
         }}
       >
-        <Typography variant='caption' color='text.secondary'>
+        <Typography data-testid='sidebar-footer-text' variant='caption' color='text.secondary'>
           Built with modern web technologies
         </Typography>
       </Box>
-    </Box>
+    </div>
   );
 
-  return (
-    <Drawer
-      variant={isMobile ? 'temporary' : 'persistent'}
-      open={open}
-      onClose={onClose}
-      ModalProps={{
-        keepMounted: true, // Better mobile performance
-      }}
-      sx={{
-        width: drawerWidth,
-        flexShrink: 0,
-        '& .MuiDrawer-paper': {
+  // For mobile, use Material-UI Drawer
+  if (isMobile) {
+    return (
+      <Drawer
+        variant='temporary'
+        open={open}
+        onClose={onClose}
+        anchor='left'
+        ModalProps={{
+          keepMounted: true, // Better mobile performance
+        }}
+        sx={{
           width: drawerWidth,
-          boxSizing: 'border-box',
-          borderRight: `1px solid ${theme.palette.divider}`,
-          background: theme.palette.background.default,
-        },
+          flexShrink: 0,
+          '& .MuiDrawer-paper': {
+            width: drawerWidth,
+            boxSizing: 'border-box',
+            borderRight: `1px solid ${theme.palette.divider}`,
+            background: theme.palette.background.default,
+          },
+        }}
+        role='navigation'
+        aria-label='Main navigation'
+      >
+        {drawerContent}
+      </Drawer>
+    );
+  }
+
+  // For desktop, use a simple Box instead of Drawer
+  if (!open) return null;
+
+  return (
+    <div
+      data-testid='sidebar-desktop'
+      style={{
+        width: `${drawerWidth}px`,
+        flexShrink: 0,
+        height: '100vh',
+        position: 'fixed',
+        top: '64px', // Below header
+        left: '0px',
+        zIndex: 9999,
+        borderRight: '1px solid #ccc',
+        background: '#f5f5f5',
+        boxShadow: '2px 0 5px rgba(0,0,0,0.1)',
+        overflow: 'auto',
+        // Force positioning to ensure sidebar is visible
+        transform: 'translateX(0)',
+        visibility: 'visible',
       }}
       role='navigation'
       aria-label='Main navigation'
     >
       {drawerContent}
-    </Drawer>
+    </div>
   );
 };
 

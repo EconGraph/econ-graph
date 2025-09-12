@@ -102,8 +102,8 @@ test.describe('Navigation', () => {
     // Verify we're on the About page
     await expect(page).toHaveURL('/about');
 
-    // Verify the hero section is displayed
-    await expect(page.getByRole('heading', { name: 'EconGraph', exact: true })).toBeVisible();
+    // Verify the hero section is displayed (use more specific selector to avoid sidebar conflict)
+    await expect(page.locator('h1').filter({ hasText: 'EconGraph' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Modern Economic Data Visualization Platform' })).toBeVisible();
     await expect(page.getByText('Version 3.7.2')).toBeVisible();
 
