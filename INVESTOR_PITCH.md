@@ -163,7 +163,7 @@
 
 ### Current Team (Bootstrap Phase)
 - **Technical Founder**: Full-stack development, product vision
-- **Open Source Contributors**: Community-driven development
+- **Internal Development**: Proprietary development and research
 
 ### Series A Hiring Plan ($2M Funding)
 **Engineering Team (8 people - $1.2M annually)**

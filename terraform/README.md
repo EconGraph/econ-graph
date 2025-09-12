@@ -399,7 +399,7 @@ For issues and questions:
 1. Check the troubleshooting section above
 2. Review Kubernetes and application logs
 3. Consult the monitoring dashboards
-4. Create an issue in the project repository
+4. Contact the development team directly
 
 ---
 
