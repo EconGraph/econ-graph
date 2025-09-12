@@ -7,6 +7,7 @@ import '@testing-library/jest-dom';
 import 'whatwg-fetch'; // Polyfill for fetch in test environment
 import { configure } from '@testing-library/react';
 import ResizeObserver from 'resize-observer-polyfill';
+import './test-utils/testIsolation';
 // Removed unused imports: mockSeriesData, mockDataSources, mockSearchResults, mockSuggestions
 
 // Configure React Testing Library for CI environment
@@ -310,26 +311,38 @@ jest.mock('@mui/material/useMediaQuery', () => {
   return jest.fn(() => false);
 });
 
-// Mock localStorage for components that use it
-const localStorageMock = {
+// Create isolated localStorage mock for each test
+const createLocalStorageMock = () => ({
   getItem: jest.fn(),
   setItem: jest.fn(),
   removeItem: jest.fn(),
   clear: jest.fn(),
-};
-Object.defineProperty(window, 'localStorage', {
-  value: localStorageMock,
+  length: 0,
+  key: jest.fn(),
 });
 
-// Mock sessionStorage
-const sessionStorageMock = {
+// Create isolated sessionStorage mock for each test
+const createSessionStorageMock = () => ({
   getItem: jest.fn(),
   setItem: jest.fn(),
   removeItem: jest.fn(),
   clear: jest.fn(),
-};
+  length: 0,
+  key: jest.fn(),
+});
+
+// Global storage mocks that will be reset for each test
+let localStorageMock = createLocalStorageMock();
+let sessionStorageMock = createSessionStorageMock();
+
+Object.defineProperty(window, 'localStorage', {
+  value: localStorageMock,
+  writable: true,
+});
+
 Object.defineProperty(window, 'sessionStorage', {
   value: sessionStorageMock,
+  writable: true,
 });
 
 // Suppress console warnings during tests (optional)
@@ -337,11 +350,30 @@ const originalConsoleWarn = console.warn;
 const originalConsoleError = console.error;
 
 beforeEach(() => {
+  // Reset localStorage mock for each test to prevent state pollution
+  localStorageMock = createLocalStorageMock();
+  Object.defineProperty(window, 'localStorage', {
+    value: localStorageMock,
+    writable: true,
+  });
+
+  // Reset sessionStorage mock for each test
+  sessionStorageMock = createSessionStorageMock();
+  Object.defineProperty(window, 'sessionStorage', {
+    value: sessionStorageMock,
+    writable: true,
+  });
+
+  // Clear all mocks to prevent test pollution
+  jest.clearAllMocks();
+
+  // Suppress console warnings during tests
   console.warn = jest.fn();
   console.error = jest.fn();
 });
 
 afterEach(() => {
+  // Restore original console methods
   console.warn = originalConsoleWarn;
   console.error = originalConsoleError;
 });

@@ -92,7 +92,10 @@
     "moduleNameMapper": {
       "^react-app/jest$": "react-app/jest",
       "^d3$": "<rootDir>/src/__mocks__/d3.js"
-    }
+    },
+    "clearMocks": true,
+    "resetMocks": true,
+    "restoreMocks": true
   },
   "browserslist": {
     "production": [
