@@ -322,10 +322,11 @@ jobs:
         flags: frontend
         name: frontend-coverage
 
-  integration-tests:
-    name: Integration Tests
+  backend-integration-tests:
+    name: Backend Integration Tests
     runs-on: ubuntu-latest
-    needs: [backend-smoke-tests, backend-database-tests, backend-service-tests, frontend-tests]
+    timeout-minutes: 25
+    needs: [backend-smoke-tests, backend-database-tests, backend-service-tests]
 
     services:
       postgres:
@@ -348,13 +349,6 @@ jobs:
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
 
     - name: Cache Rust dependencies
       uses: actions/cache@v3
@@ -381,14 +375,6 @@ jobs:
       run: cargo build --release
       working-directory: backend
 
-    - name: Install frontend dependencies
-      run: npm ci
-      working-directory: frontend
-
-    - name: Build frontend
-      run: npm run build
-      working-directory: frontend
-
     - name: Run backend integration tests
       run: cargo test --release integration_tests
       working-directory: backend
@@ -401,6 +387,31 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
+  frontend-integration-tests:
+    name: Frontend Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [frontend-tests]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install frontend dependencies
+      run: npm ci
+      working-directory: frontend
+
+    - name: Build frontend
+      run: npm run build
+      working-directory: frontend
+
     - name: Run frontend integration tests
       run: npm test -- --testNamePattern="End-to-End" --watchAll=false --coverage=false
       working-directory: frontend
@@ -411,7 +422,7 @@ jobs:
   comprehensive-e2e:
     name: Comprehensive End-to-End Tests
     runs-on: ubuntu-latest
-    needs: [backend-smoke-tests, backend-database-tests, backend-service-tests, frontend-tests]
+    needs: [backend-integration-tests, frontend-integration-tests]
 
     services:
       postgres:
@@ -539,7 +550,7 @@ jobs:
   docker-build:
     name: Docker Build Test
     runs-on: ubuntu-latest
-    needs: [backend-smoke-tests, backend-database-tests, backend-service-tests, frontend-tests]
+    needs: [backend-integration-tests, frontend-integration-tests]
 
     steps:
     - name: Checkout code
