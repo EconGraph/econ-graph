@@ -158,13 +158,21 @@ impl Default for Config {
 mod tests {
     use super::*;
 
+    #[serial_test::serial]
     #[test]
     fn test_config_default() {
         // REQUIREMENT: The application should have sensible defaults for development
         // PURPOSE: Verify that default configuration values are set correctly for local development
         // This ensures developers can run the app without extensive configuration setup
 
+        // Store original values to restore later
+        let original_database_url = env::var("DATABASE_URL").ok();
+        let original_backend_port = env::var("BACKEND_PORT").ok();
+        let original_frontend_port = env::var("FRONTEND_PORT").ok();
+        let original_cors_allowed_origins = env::var("CORS_ALLOWED_ORIGINS").ok();
+
         // Clear environment variables to test true defaults
+        env::remove_var("DATABASE_URL");
         env::remove_var("BACKEND_PORT");
         env::remove_var("FRONTEND_PORT");
         env::remove_var("CORS_ALLOWED_ORIGINS");
@@ -178,17 +186,45 @@ mod tests {
         // Verify CORS allows React dev server - required for frontend development
         assert_eq!(config.cors.allowed_origins, vec!["http://localhost:3000"]);
 
-        // Clean up environment to avoid affecting other tests
-        env::remove_var("BACKEND_PORT");
-        env::remove_var("FRONTEND_PORT");
-        env::remove_var("CORS_ALLOWED_ORIGINS");
+        // Restore original environment variables
+        if let Some(val) = original_database_url {
+            env::set_var("DATABASE_URL", val);
+        } else {
+            env::remove_var("DATABASE_URL");
+        }
+        if let Some(val) = original_backend_port {
+            env::set_var("BACKEND_PORT", val);
+        } else {
+            env::remove_var("BACKEND_PORT");
+        }
+        if let Some(val) = original_frontend_port {
+            env::set_var("FRONTEND_PORT", val);
+        } else {
+            env::remove_var("FRONTEND_PORT");
+        }
+        if let Some(val) = original_cors_allowed_origins {
+            env::set_var("CORS_ALLOWED_ORIGINS", val);
+        } else {
+            env::remove_var("CORS_ALLOWED_ORIGINS");
+        }
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_config_from_env() {
         // REQUIREMENT: The application should be configurable via environment variables for deployment
         // PURPOSE: Verify that configuration can be overridden using environment variables
         // This is essential for containerized deployments and different environments
+
+        // Store original values to restore later
+        let original_database_url = env::var("DATABASE_URL").ok();
+        let original_backend_port = env::var("BACKEND_PORT").ok();
+        let original_frontend_port = env::var("FRONTEND_PORT").ok();
+
+        // Clear any existing environment variables first to ensure clean test state
+        env::remove_var("DATABASE_URL");
+        env::remove_var("BACKEND_PORT");
+        env::remove_var("FRONTEND_PORT");
 
         // Set test environment variables
         env::set_var(
@@ -208,9 +244,21 @@ mod tests {
         assert_eq!(config.server.port, 9000);
         assert_eq!(config.cors.allowed_origins, vec!["http://localhost:4000"]);
 
-        // Clean up environment to avoid affecting other tests
-        env::remove_var("DATABASE_URL");
-        env::remove_var("BACKEND_PORT");
-        env::remove_var("FRONTEND_PORT");
+        // Restore original environment variables
+        if let Some(val) = original_database_url {
+            env::set_var("DATABASE_URL", val);
+        } else {
+            env::remove_var("DATABASE_URL");
+        }
+        if let Some(val) = original_backend_port {
+            env::set_var("BACKEND_PORT", val);
+        } else {
+            env::remove_var("BACKEND_PORT");
+        }
+        if let Some(val) = original_frontend_port {
+            env::set_var("FRONTEND_PORT", val);
+        } else {
+            env::remove_var("FRONTEND_PORT");
+        }
     }
 }
