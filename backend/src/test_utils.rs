@@ -115,7 +115,59 @@ impl TestContainer {
 
         use diesel_async::RunQueryDsl;
         // REQUIREMENT: Clean database state between tests
-        // Truncate all tables in reverse dependency order
+        // Truncate all tables in reverse dependency order to avoid foreign key constraints
+
+        // Global analysis tables (newest schema)
+        diesel_async::RunQueryDsl::execute(
+            diesel::sql_query("TRUNCATE TABLE event_country_impacts CASCADE"),
+            &mut conn,
+        )
+        .await
+        .expect("Failed to truncate event_country_impacts");
+
+        diesel_async::RunQueryDsl::execute(
+            diesel::sql_query("TRUNCATE TABLE global_economic_events CASCADE"),
+            &mut conn,
+        )
+        .await
+        .expect("Failed to truncate global_economic_events");
+
+        diesel_async::RunQueryDsl::execute(
+            diesel::sql_query("TRUNCATE TABLE country_correlations CASCADE"),
+            &mut conn,
+        )
+        .await
+        .expect("Failed to truncate country_correlations");
+
+        diesel_async::RunQueryDsl::execute(
+            diesel::sql_query("TRUNCATE TABLE trade_relationships CASCADE"),
+            &mut conn,
+        )
+        .await
+        .expect("Failed to truncate trade_relationships");
+
+        diesel_async::RunQueryDsl::execute(
+            diesel::sql_query("TRUNCATE TABLE global_indicator_data CASCADE"),
+            &mut conn,
+        )
+        .await
+        .expect("Failed to truncate global_indicator_data");
+
+        diesel_async::RunQueryDsl::execute(
+            diesel::sql_query("TRUNCATE TABLE global_economic_indicators CASCADE"),
+            &mut conn,
+        )
+        .await
+        .expect("Failed to truncate global_economic_indicators");
+
+        diesel_async::RunQueryDsl::execute(
+            diesel::sql_query("TRUNCATE TABLE countries CASCADE"),
+            &mut conn,
+        )
+        .await
+        .expect("Failed to truncate countries");
+
+        // Original tables
         diesel_async::RunQueryDsl::execute(
             diesel::sql_query("TRUNCATE TABLE data_points CASCADE"),
             &mut conn,

@@ -584,3 +584,719 @@ impl GlobalAnalysisService {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{
+        NewCountry, NewEventCountryImpact, NewGlobalEconomicEvent, NewGlobalEconomicIndicator,
+        NewGlobalIndicatorData, NewTradeRelationship,
+    };
+    use crate::test_utils::TestContainer;
+    use chrono::NaiveDate;
+    use diesel::prelude::*;
+    use diesel_async::RunQueryDsl;
+    use serial_test::serial;
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    /// Test helper to create test data for global analysis
+    async fn setup_test_data(container: &TestContainer) -> AppResult<(Uuid, Uuid, Uuid)> {
+        let pool = container.pool();
+        let mut conn = pool
+            .get()
+            .await
+            .map_err(|e| AppError::database_error(format!("Failed to get connection: {}", e)))?;
+
+        // Generate unique test identifiers to avoid conflicts with migration data
+        let test_id = Uuid::new_v4().to_string()[..8].to_string(); // Use 8 chars for better uniqueness
+
+        // Create test countries using NewCountry structs with TEST prefix to avoid conflicts
+        let country_a = NewCountry {
+            iso_code: format!("T{}", &test_id[..2]), // T + 2 chars = 3 total
+            iso_code_2: format!("T{}", &test_id[..1]), // T + 1 char = 2 total
+            name: format!("TEST United States {}", test_id),
+            region: "North America".to_string(),
+            sub_region: Some("Northern America".to_string()),
+            income_group: Some("High income".to_string()),
+            population: Some(331_000_000),
+            gdp_usd: Some(BigDecimal::from(25_000_000_000_000i64)),
+            gdp_per_capita_usd: Some(BigDecimal::from(75_000i64)),
+            latitude: Some(BigDecimal::from_str("39.8283").unwrap()),
+            longitude: Some(BigDecimal::from_str("-98.5795").unwrap()),
+            currency_code: Some("USD".to_string()),
+            is_active: Some(true),
+        };
+
+        let country_b = NewCountry {
+            iso_code: format!("C{}", &test_id[..2]), // C + 2 chars = 3 total
+            iso_code_2: format!("C{}", &test_id[..1]), // C + 1 char = 2 total
+            name: format!("TEST China {}", test_id),
+            region: "Asia".to_string(),
+            sub_region: Some("Eastern Asia".to_string()),
+            income_group: Some("Upper middle income".to_string()),
+            population: Some(1_400_000_000),
+            gdp_usd: Some(BigDecimal::from(17_000_000_000_000i64)),
+            gdp_per_capita_usd: Some(BigDecimal::from(12_000i64)),
+            latitude: Some(BigDecimal::from_str("35.8617").unwrap()),
+            longitude: Some(BigDecimal::from_str("104.1954").unwrap()),
+            currency_code: Some("CNY".to_string()),
+            is_active: Some(true),
+        };
+
+        let country_c = NewCountry {
+            iso_code: format!("G{}", &test_id[..2]), // G + 2 chars = 3 total
+            iso_code_2: format!("G{}", &test_id[..1]), // G + 1 char = 2 total
+            name: format!("TEST Germany {}", test_id),
+            region: "Europe".to_string(),
+            sub_region: Some("Western Europe".to_string()),
+            income_group: Some("High income".to_string()),
+            population: Some(83_000_000),
+            gdp_usd: Some(BigDecimal::from(4_000_000_000_000i64)),
+            gdp_per_capita_usd: Some(BigDecimal::from(48_000i64)),
+            latitude: Some(BigDecimal::from_str("51.1657").unwrap()),
+            longitude: Some(BigDecimal::from_str("10.4515").unwrap()),
+            currency_code: Some("EUR".to_string()),
+            is_active: Some(true),
+        };
+
+        // Insert countries
+        let country_a_result = diesel::insert_into(crate::schema::countries::table)
+            .values(&country_a)
+            .returning(Country::as_returning())
+            .get_result::<Country>(&mut conn)
+            .await
+            .map_err(|e| AppError::database_error(format!("Failed to create country A: {}", e)))?;
+
+        let country_b_result = diesel::insert_into(crate::schema::countries::table)
+            .values(&country_b)
+            .returning(Country::as_returning())
+            .get_result::<Country>(&mut conn)
+            .await
+            .map_err(|e| AppError::database_error(format!("Failed to create country B: {}", e)))?;
+
+        let country_c_result = diesel::insert_into(crate::schema::countries::table)
+            .values(&country_c)
+            .returning(Country::as_returning())
+            .get_result::<Country>(&mut conn)
+            .await
+            .map_err(|e| AppError::database_error(format!("Failed to create country C: {}", e)))?;
+
+        // Create economic indicators for country A
+        let gdp_indicator = NewGlobalEconomicIndicator {
+            country_id: country_a_result.id,
+            indicator_code: "GDP".to_string(),
+            indicator_name: "Gross Domestic Product".to_string(),
+            category: "GDP".to_string(),
+            subcategory: Some("Total economic output".to_string()),
+            unit: Some("USD".to_string()),
+            frequency: "Annual".to_string(),
+        };
+
+        let gdp_growth_indicator = NewGlobalEconomicIndicator {
+            country_id: country_a_result.id,
+            indicator_code: "GDP_GROWTH".to_string(),
+            indicator_name: "GDP Growth Rate".to_string(),
+            category: "GDP_GROWTH".to_string(),
+            subcategory: Some("Annual GDP growth percentage".to_string()),
+            unit: Some("Percent".to_string()),
+            frequency: "Annual".to_string(),
+        };
+
+        // Insert indicators
+        let gdp_indicator_result =
+            diesel::insert_into(crate::schema::global_economic_indicators::table)
+                .values(&gdp_indicator)
+                .returning(crate::models::GlobalEconomicIndicator::as_returning())
+                .get_result::<crate::models::GlobalEconomicIndicator>(&mut conn)
+                .await
+                .map_err(|e| {
+                    AppError::database_error(format!("Failed to create GDP indicator: {}", e))
+                })?;
+
+        let gdp_growth_indicator_result =
+            diesel::insert_into(crate::schema::global_economic_indicators::table)
+                .values(&gdp_growth_indicator)
+                .returning(crate::models::GlobalEconomicIndicator::as_returning())
+                .get_result::<crate::models::GlobalEconomicIndicator>(&mut conn)
+                .await
+                .map_err(|e| {
+                    AppError::database_error(format!(
+                        "Failed to create GDP growth indicator: {}",
+                        e
+                    ))
+                })?;
+
+        // Create indicator data
+        let gdp_data = NewGlobalIndicatorData {
+            indicator_id: gdp_indicator_result.id,
+            date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
+            value: Some(BigDecimal::from(25_000_000_000_000i64)),
+            is_preliminary: Some(false),
+            data_source: "Test Data".to_string(),
+        };
+
+        let gdp_growth_data = NewGlobalIndicatorData {
+            indicator_id: gdp_growth_indicator_result.id,
+            date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
+            value: Some(BigDecimal::from_str("2.5").unwrap()),
+            is_preliminary: Some(false),
+            data_source: "Test Data".to_string(),
+        };
+
+        diesel::insert_into(crate::schema::global_indicator_data::table)
+            .values(&gdp_data)
+            .execute(&mut conn)
+            .await
+            .map_err(|e| AppError::database_error(format!("Failed to create GDP data: {}", e)))?;
+
+        diesel::insert_into(crate::schema::global_indicator_data::table)
+            .values(&gdp_growth_data)
+            .execute(&mut conn)
+            .await
+            .map_err(|e| {
+                AppError::database_error(format!("Failed to create GDP growth data: {}", e))
+            })?;
+
+        // Create trade relationship
+        let trade_relationship = NewTradeRelationship {
+            exporter_country_id: country_a_result.id,
+            importer_country_id: country_b_result.id,
+            trade_flow_type: "Export".to_string(),
+            year: 2023,
+            export_value_usd: Some(BigDecimal::from(500_000_000_000i64)),
+            import_value_usd: Some(BigDecimal::from(400_000_000_000i64)),
+            trade_balance_usd: Some(BigDecimal::from(100_000_000_000i64)),
+            trade_intensity: Some(BigDecimal::from_str("0.8").unwrap()),
+        };
+
+        diesel::insert_into(crate::schema::trade_relationships::table)
+            .values(&trade_relationship)
+            .execute(&mut conn)
+            .await
+            .map_err(|e| {
+                AppError::database_error(format!("Failed to create trade relationship: {}", e))
+            })?;
+
+        // Create global economic event with unique name to avoid conflicts with migration data
+        let event = NewGlobalEconomicEvent {
+            name: format!("TEST COVID-19 Pandemic {}", test_id),
+            description: Some("Global economic disruption from COVID-19".to_string()),
+            event_type: "Pandemic".to_string(),
+            severity: "Critical".to_string(),
+            start_date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            end_date: Some(NaiveDate::from_ymd_opt(2022, 12, 31).unwrap()),
+            primary_country_id: Some(country_a_result.id),
+            affected_regions: Some(vec![Some("Global".to_string())]),
+            economic_impact_score: Some(BigDecimal::from_str("9.5").unwrap()),
+        };
+
+        let event_result = diesel::insert_into(crate::schema::global_economic_events::table)
+            .values(&event)
+            .returning(GlobalEconomicEvent::as_returning())
+            .get_result::<GlobalEconomicEvent>(&mut conn)
+            .await
+            .map_err(|e| {
+                AppError::database_error(format!("Failed to create global event: {}", e))
+            })?;
+
+        // Create event country impact
+        let impact = NewEventCountryImpact {
+            event_id: event_result.id,
+            country_id: country_a_result.id,
+            impact_type: "Economic".to_string(),
+            impact_magnitude: Some(BigDecimal::from_str("-5.2").unwrap()),
+            impact_duration_days: Some(365),
+            recovery_time_days: Some(730),
+            confidence_score: Some(BigDecimal::from_str("0.9").unwrap()),
+        };
+
+        diesel::insert_into(crate::schema::event_country_impacts::table)
+            .values(&impact)
+            .execute(&mut conn)
+            .await
+            .map_err(|e| {
+                AppError::database_error(format!("Failed to create event impact: {}", e))
+            })?;
+
+        Ok((
+            country_a_result.id,
+            country_b_result.id,
+            country_c_result.id,
+        ))
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_countries_with_economic_data() {
+        let container = TestContainer::new().await;
+        container.clean_database().await; // Clean database to avoid test pollution
+        let pool = container.pool();
+
+        // Setup test data
+        let (country_a_id, _country_b_id, _country_c_id) = setup_test_data(&container)
+            .await
+            .expect("Failed to setup test data");
+
+        // Test the service method
+        let result = GlobalAnalysisService::get_countries_with_economic_data(pool)
+            .await
+            .expect("Failed to get countries with economic data");
+
+        // Verify results
+        assert!(!result.is_empty(), "Should return at least one country");
+
+        let usa_country = result
+            .iter()
+            .find(|c| c.country.id == country_a_id)
+            .expect("Should find USA country");
+
+        assert!(usa_country.country.name.starts_with("TEST United States"));
+        assert!(usa_country.country.iso_code.starts_with("T"));
+        assert!(usa_country.latest_gdp.is_some(), "Should have GDP data");
+        assert!(
+            usa_country.latest_gdp_growth.is_some(),
+            "Should have GDP growth data"
+        );
+        assert!(
+            usa_country.economic_health_score.is_some(),
+            "Should have health score"
+        );
+        assert!(
+            !usa_country.trade_partners.is_empty(),
+            "Should have trade partners"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_calculate_country_correlations() {
+        let container = TestContainer::new().await;
+        container.clean_database().await; // Clean database to avoid test pollution
+        let pool = container.pool();
+
+        // Setup test data
+        let (country_a_id, country_b_id, _country_c_id) = setup_test_data(&container)
+            .await
+            .expect("Failed to setup test data");
+
+        let start_date = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        let end_date = NaiveDate::from_ymd_opt(2023, 12, 31).unwrap();
+
+        // Test the service method
+        let result = GlobalAnalysisService::calculate_country_correlations(
+            pool, "GDP", start_date, end_date, 0.5,
+        )
+        .await
+        .expect("Failed to calculate correlations");
+
+        // Verify results
+        assert!(!result.is_empty(), "Should return at least one correlation");
+
+        let correlation = &result[0];
+        assert_eq!(correlation.indicator_category, "GDP");
+        assert!(
+            correlation
+                .correlation_coefficient
+                .to_f64()
+                .unwrap_or(0.0)
+                .abs()
+                >= 0.5
+        );
+        assert!(correlation.is_significant);
+        assert!(correlation.sample_size > 0);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_correlation_network() {
+        let container = TestContainer::new().await;
+        container.clean_database().await; // Clean database to avoid test pollution
+        let pool = container.pool();
+
+        // Setup test data
+        let (_country_a_id, _country_b_id, _country_c_id) = setup_test_data(&container)
+            .await
+            .expect("Failed to setup test data");
+
+        // First calculate correlations to populate the database
+        let start_date = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        let end_date = NaiveDate::from_ymd_opt(2023, 12, 31).unwrap();
+
+        println!(
+            "Calculating correlations for GDP from {} to {}",
+            start_date, end_date
+        );
+        let correlation_result = GlobalAnalysisService::calculate_country_correlations(
+            pool, "GDP", start_date, end_date, 0.3,
+        )
+        .await;
+
+        match correlation_result {
+            Ok(correlations) => {
+                println!(
+                    "Successfully calculated {} correlations",
+                    correlations.len()
+                );
+                for (i, corr) in correlations.iter().enumerate() {
+                    println!(
+                        "Correlation {}: {} <-> {} = {:.3}",
+                        i, corr.country_a_id, corr.country_b_id, corr.correlation_coefficient
+                    );
+                }
+            }
+            Err(e) => {
+                println!("Failed to calculate correlations: {:?}", e);
+                panic!("Failed to calculate correlations: {:?}", e);
+            }
+        }
+
+        // Test the service method
+        println!("Getting correlation network for GDP with threshold 0.3");
+        let result = GlobalAnalysisService::get_correlation_network(pool, "GDP", 0.3)
+            .await
+            .expect("Failed to get correlation network");
+
+        println!("Got {} network nodes", result.len());
+        for (i, node) in result.iter().enumerate() {
+            println!(
+                "Node {}: {} (centrality: {:.3}, connections: {})",
+                i,
+                node.country.iso_code,
+                node.centrality_score,
+                node.connections.len()
+            );
+        }
+
+        // Verify results
+        assert!(
+            !result.is_empty(),
+            "Should return at least one network node"
+        );
+
+        let node = &result[0];
+        assert!(!node.connections.is_empty(), "Node should have connections");
+        assert!(
+            node.centrality_score >= 0.0,
+            "Centrality score should be non-negative"
+        );
+        assert_eq!(
+            node.country.iso_code.len(),
+            3,
+            "Country should have valid ISO code"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_global_events_with_impacts() {
+        let container = TestContainer::new().await;
+        container.clean_database().await; // Clean database to avoid test pollution
+        let pool = container.pool();
+
+        // Setup test data
+        let (_country_a_id, _country_b_id, _country_c_id) = setup_test_data(&container)
+            .await
+            .expect("Failed to setup test data");
+
+        // Test the service method
+        let result = GlobalAnalysisService::get_global_events_with_impacts(
+            pool, None, // start_date_filter
+            None, // end_date_filter
+            None, // min_impact_score
+        )
+        .await
+        .expect("Failed to get global events with impacts");
+
+        // Verify results
+        assert!(!result.is_empty(), "Should return at least one event");
+
+        // Find our test event among all events
+        let test_event = result
+            .iter()
+            .find(|e| e.event.name.starts_with("TEST COVID-19 Pandemic"))
+            .expect("Should find our test event");
+
+        println!("Event name: {}", test_event.event.name);
+        println!("Event type: {}", test_event.event.event_type);
+        println!("Event severity: {}", test_event.event.severity);
+        assert_eq!(test_event.event.event_type, "Pandemic");
+        assert_eq!(test_event.event.severity, "Critical");
+        assert!(
+            !test_event.country_impacts.is_empty(),
+            "Should have country impacts"
+        );
+        assert!(
+            test_event.affected_country_count > 0,
+            "Should have affected countries"
+        );
+        assert!(
+            test_event.total_economic_impact.is_some(),
+            "Should have economic impact score"
+        );
+    }
+
+    /// Test just the event insertion to verify data is stored correctly
+    #[tokio::test]
+    #[serial]
+    async fn test_event_insertion_only() {
+        let container = TestContainer::new().await;
+        container.clean_database().await; // Clean database to avoid test pollution
+        let pool = container.pool();
+        let mut conn = pool.get().await.expect("Failed to get connection");
+
+        // Create a simple test event
+        let test_event = NewGlobalEconomicEvent {
+            name: "Test Event".to_string(),
+            description: Some("Test description".to_string()),
+            event_type: "Pandemic".to_string(),
+            severity: "Critical".to_string(),
+            start_date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            end_date: Some(NaiveDate::from_ymd_opt(2022, 12, 31).unwrap()),
+            primary_country_id: None,
+            affected_regions: Some(vec![Some("Global".to_string())]),
+            economic_impact_score: Some(BigDecimal::from_str("9.5").unwrap()),
+        };
+
+        // Insert the event
+        let inserted_event = diesel::insert_into(crate::schema::global_economic_events::table)
+            .values(&test_event)
+            .returning(GlobalEconomicEvent::as_returning())
+            .get_result::<GlobalEconomicEvent>(&mut conn)
+            .await
+            .expect("Failed to insert test event");
+
+        println!("Inserted event type: {}", inserted_event.event_type);
+        assert_eq!(inserted_event.event_type, "Pandemic");
+        assert_eq!(inserted_event.name, "Test Event");
+    }
+
+    /// Test direct database query to see what's actually stored
+    #[tokio::test]
+    #[serial]
+    async fn test_direct_event_query() {
+        let container = TestContainer::new().await;
+        container.clean_database().await; // Clean database to avoid test pollution
+        let pool = container.pool();
+        let mut conn = pool.get().await.expect("Failed to get connection");
+
+        // Setup test data
+        let (_country_a_id, _country_b_id, _country_c_id) = setup_test_data(&container)
+            .await
+            .expect("Failed to setup test data");
+
+        // Query events directly from database - look for our test event
+        use crate::schema::global_economic_events::dsl::*;
+        let events = global_economic_events
+            .filter(name.like("TEST COVID-19 Pandemic%"))
+            .load::<GlobalEconomicEvent>(&mut conn)
+            .await
+            .expect("Failed to query events");
+
+        assert!(!events.is_empty(), "Should find the test event");
+        let event = &events[0];
+        println!("Direct query - Event type: {}", event.event_type);
+        assert_eq!(event.event_type, "Pandemic");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_global_events_with_filters() {
+        let container = TestContainer::new().await;
+        container.clean_database().await; // Clean database to avoid test pollution
+        let pool = container.pool();
+
+        // Setup test data
+        let (_country_a_id, _country_b_id, _country_c_id) = setup_test_data(&container)
+            .await
+            .expect("Failed to setup test data");
+
+        // Test with date filters that include our test event (2020-2022)
+        let start_filter = NaiveDate::from_ymd_opt(2019, 1, 1);
+        let end_filter = NaiveDate::from_ymd_opt(2023, 12, 31); // Extended to include our test event
+        let min_impact = Some(5.0);
+
+        let result = GlobalAnalysisService::get_global_events_with_impacts(
+            pool,
+            start_filter,
+            end_filter,
+            min_impact,
+        )
+        .await
+        .expect("Failed to get filtered global events");
+
+        // Verify results - find our test event
+        let test_event = result
+            .iter()
+            .find(|e| e.event.name.starts_with("TEST COVID-19 Pandemic"))
+            .expect("Should find our test event within the date range");
+
+        assert!(test_event.event.start_date >= start_filter.unwrap());
+        assert!(
+            test_event
+                .event
+                .end_date
+                .unwrap_or(test_event.event.start_date)
+                <= end_filter.unwrap()
+        );
+
+        if let Some(impact_score) = &test_event.total_economic_impact {
+            assert!(impact_score.to_f64().unwrap_or(0.0) >= 5.0);
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_calculate_economic_health_score() {
+        let container = TestContainer::new().await;
+        container.clean_database().await; // Clean database to avoid test pollution
+        let pool = container.pool();
+
+        // Setup test data
+        let (country_a_id, _country_b_id, _country_c_id) = setup_test_data(&container)
+            .await
+            .expect("Failed to setup test data");
+
+        // Get countries with economic data
+        let result = GlobalAnalysisService::get_countries_with_economic_data(pool)
+            .await
+            .expect("Failed to get countries with economic data");
+
+        let usa_country = result
+            .iter()
+            .find(|c| c.country.id == country_a_id)
+            .expect("Should find USA country");
+
+        // Verify health score calculation
+        if let Some(health_score) = usa_country.economic_health_score {
+            assert!(
+                health_score >= 0.0 && health_score <= 100.0,
+                "Health score should be between 0 and 100, got: {}",
+                health_score
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_trade_partners_retrieval() {
+        let container = TestContainer::new().await;
+        container.clean_database().await; // Clean database to avoid test pollution
+        let pool = container.pool();
+
+        // Setup test data
+        let (country_a_id, country_b_id, _country_c_id) = setup_test_data(&container)
+            .await
+            .expect("Failed to setup test data");
+
+        // Get countries with economic data
+        let result = GlobalAnalysisService::get_countries_with_economic_data(pool)
+            .await
+            .expect("Failed to get countries with economic data");
+
+        let usa_country = result
+            .iter()
+            .find(|c| c.country.id == country_a_id)
+            .expect("Should find USA country");
+
+        // Verify trade partners
+        assert!(
+            !usa_country.trade_partners.is_empty(),
+            "Should have trade partners"
+        );
+
+        let china_partner = usa_country
+            .trade_partners
+            .iter()
+            .find(|p| p.country.id == country_b_id)
+            .expect("Should find China as trade partner");
+
+        assert!(china_partner.country.name.starts_with("TEST China"));
+        assert!(china_partner.trade_value_usd > BigDecimal::from(0));
+        assert!(china_partner.trade_intensity > 0.0);
+        assert!(!china_partner.relationship_type.is_empty());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_error_handling_database_connection_failure() {
+        // Test error handling when database connection fails
+        // This is a bit tricky to test without actually breaking the connection
+        // For now, we'll test with invalid parameters that should cause errors
+
+        let container = TestContainer::new().await;
+        container.clean_database().await; // Clean database to avoid test pollution
+        let pool = container.pool();
+
+        // Test with invalid date range (end before start)
+        let start_date = NaiveDate::from_ymd_opt(2023, 12, 31).unwrap();
+        let end_date = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+
+        let result = GlobalAnalysisService::calculate_country_correlations(
+            pool,
+            "INVALID_CATEGORY",
+            start_date,
+            end_date,
+            0.5,
+        )
+        .await;
+
+        // Should still succeed but return empty results due to mock implementation
+        assert!(
+            result.is_ok(),
+            "Should handle invalid parameters gracefully"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_correlation_network_centrality_calculation() {
+        let container = TestContainer::new().await;
+        container.clean_database().await; // Clean database to avoid test pollution
+        let pool = container.pool();
+
+        // Setup test data
+        let (_country_a_id, _country_b_id, _country_c_id) = setup_test_data(&container)
+            .await
+            .expect("Failed to setup test data");
+
+        // Calculate correlations first
+        let start_date = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        let end_date = NaiveDate::from_ymd_opt(2023, 12, 31).unwrap();
+
+        GlobalAnalysisService::calculate_country_correlations(
+            pool, "GDP", start_date, end_date, 0.1, // Low threshold to get more correlations
+        )
+        .await
+        .expect("Failed to calculate correlations");
+
+        // Get correlation network
+        let result = GlobalAnalysisService::get_correlation_network(pool, "GDP", 0.1)
+            .await
+            .expect("Failed to get correlation network");
+
+        // Verify centrality scores are calculated correctly
+        for node in &result {
+            assert!(
+                node.centrality_score >= 0.0,
+                "Centrality score should be non-negative"
+            );
+
+            // If node has connections, centrality should be > 0
+            if !node.connections.is_empty() {
+                assert!(
+                    node.centrality_score > 0.0,
+                    "Node with connections should have positive centrality"
+                );
+            }
+        }
+
+        // Verify nodes are sorted by centrality (highest first)
+        for i in 1..result.len() {
+            assert!(
+                result[i - 1].centrality_score >= result[i].centrality_score,
+                "Nodes should be sorted by centrality score (descending)"
+            );
+        }
+    }
+}
