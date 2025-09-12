@@ -119,10 +119,14 @@ jobs:
       env:
         RUST_LOG: warn
 
+
+
+
   backend-database-tests:
     name: Backend Database Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [backend-smoke-tests]
 
     services:
       postgres:
@@ -154,19 +158,10 @@ jobs:
           ~/.cargo/git
           backend/target
         key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
       run: cargo install diesel_cli --no-default-features --features postgres
       working-directory: backend
-
-    - name: Wait for PostgreSQL
-      run: |
-        until pg_isready -h localhost -p 5432 -U postgres; do
-          echo "Waiting for postgres..."
-          sleep 2
-        done
 
     - name: Setup database
       run: |
@@ -176,17 +171,17 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
-    - name: Run database model tests
+    - name: Run backend database tests
       run: cargo test --lib -- --test-threads=2 --nocapture models::data_source models::economic_series models::data_point models::crawl_queue models::search
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
-        RUST_LOG: warn
 
   backend-service-tests:
     name: Backend Service Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: [backend-database-tests]
 
     services:
       postgres:
@@ -218,19 +213,10 @@ jobs:
           ~/.cargo/git
           backend/target
         key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
 
     - name: Install diesel CLI
       run: cargo install diesel_cli --no-default-features --features postgres
       working-directory: backend
-
-    - name: Wait for PostgreSQL
-      run: |
-        until pg_isready -h localhost -p 5433 -U postgres; do
-          echo "Waiting for postgres..."
-          sleep 2
-        done
 
     - name: Setup database
       run: |
@@ -240,12 +226,11 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5433/econ_graph_test
 
-    - name: Run service and integration tests
+    - name: Run backend service tests
       run: cargo test --lib -- --test-threads=2 --nocapture services::queue_service services::global_analysis_service services::crawler services::search_service services::series_service services::collaboration_service auth::integration_tests auth::comprehensive_integration_tests collaboration_integration_tests
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5433/econ_graph_test
-        RUST_LOG: warn
 
   backend-license-compliance:
     name: Backend License Compliance
@@ -258,17 +243,6 @@ jobs:
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
-
-    - name: Cache Rust dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
 
     - name: Install cargo-deny
       run: cargo install cargo-deny
@@ -294,13 +268,6 @@ jobs:
 
     - name: Install frontend dependencies
       run: npm ci
-      working-directory: frontend
-
-    - name: Install license-checker
-      run: npm install -g license-checker
-
-    - name: Check frontend license compliance
-      run: license-checker --config .license-checker.json
       working-directory: frontend
 
     - name: Check TypeScript compilation
@@ -628,3 +595,84 @@ jobs:
     - name: Check TypeScript types
       run: npx tsc --noEmit
       working-directory: frontend
+
+  license-compliance:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install cargo-deny
+      run: cargo install cargo-deny
+
+    - name: Install license-checker
+      run: npm install -g license-checker
+
+    - name: Install frontend dependencies
+      run: npm ci
+      working-directory: frontend
+
+    - name: 🔍 Check Backend License Compliance
+      run: |
+        echo "🔍 Checking backend license compliance with cargo-deny..."
+        cargo deny check licenses
+        echo "✅ Backend license compliance check passed"
+      working-directory: backend
+
+    - name: 🔍 Check Frontend License Compliance
+      run: |
+        echo "🔍 Checking frontend license compliance with license-checker..."
+        license-checker --config .license-checker.json
+        echo "✅ Frontend license compliance check passed"
+      working-directory: frontend
+
+    - name: 📋 Generate License Report
+      run: |
+        echo "📋 Generating comprehensive license report..."
+        echo "=============================================="
+
+        echo "Backend Dependencies (Rust):"
+        echo "----------------------------"
+        cargo deny check licenses --format json > backend-licenses.json || true
+        echo "Backend license check completed"
+
+        echo ""
+        echo "Frontend Dependencies (Node.js):"
+        echo "--------------------------------"
+        license-checker --config .license-checker.json --json > frontend-licenses.json || true
+        echo "Frontend license check completed"
+
+        echo ""
+        echo "✅ License compliance check completed successfully"
+      working-directory: frontend
+
+    - name: Upload license reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: license-compliance-reports-${{ github.sha }}
+        path: |
+          backend-licenses.json
+          frontend-licenses.json
+        retention-days: 30
