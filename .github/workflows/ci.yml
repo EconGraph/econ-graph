@@ -225,12 +225,14 @@ jobs:
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
+        PATH: $HOME/.cargo/bin:$PATH
 
     - name: Run backend models basic tests
       run: cargo test --lib -- --test-threads=2 --nocapture models::data_source::tests::simple_tests models::economic_series::tests::simple_tests models::data_point::tests::simple_tests models::crawl_queue::tests::simple_tests models::search::tests::simple_tests
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
+        PATH: $HOME/.cargo/bin:$PATH
 
   backend-models-advanced-tests:
     name: Backend Models Advanced Tests
@@ -994,6 +996,7 @@ jobs:
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
+        PATH: $HOME/.cargo/bin:$PATH
 
     - name: Build backend
       run: cargo build --release
@@ -1004,12 +1007,14 @@ jobs:
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
+        PATH: $HOME/.cargo/bin:$PATH
 
     - name: Run backend e2e tests with testcontainers
       run: cargo test --release e2e_tests --lib
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
+        PATH: $HOME/.cargo/bin:$PATH
 
   frontend-integration-tests:
     name: Frontend Integration Tests
