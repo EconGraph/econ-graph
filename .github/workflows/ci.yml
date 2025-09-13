@@ -287,6 +287,18 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Debug cargo bin directory after cache restoration
+      run: |
+        echo "=== DEBUGGING CARGO BIN DIRECTORY ==="
+        echo "Contents of ~/.cargo/bin:"
+        ls -la ~/.cargo/bin/ || echo "~/.cargo/bin does not exist"
+        echo "Checking for cc in ~/.cargo/bin:"
+        ls -la ~/.cargo/bin/cc* || echo "No cc* files in ~/.cargo/bin"
+        echo "Current PATH: $PATH"
+        echo "Which cc command:"
+        which cc || echo "cc not found"
+        echo "=== END CARGO BIN DEBUGGING ==="
+
     - name: Setup database
       run: |
         $HOME/.cargo/bin/diesel setup
