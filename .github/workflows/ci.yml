@@ -109,9 +109,8 @@ jobs:
           ~/.cargo/git
           ~/.cargo/bin
           backend/target
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Install shared tools
@@ -156,9 +155,8 @@ jobs:
           ~/.cargo/git
           ~/.cargo/bin
           backend/target
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Check Rust formatting
@@ -216,9 +214,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Setup database
@@ -273,9 +270,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Setup database
@@ -330,9 +326,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Setup database
@@ -387,9 +382,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Setup database
@@ -444,9 +438,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Setup database
@@ -501,9 +494,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Setup database
@@ -558,9 +550,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Setup database
@@ -615,9 +606,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Setup database
@@ -672,9 +662,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Setup database
@@ -729,9 +718,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Setup database
@@ -786,9 +774,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Setup database
@@ -843,9 +830,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Setup database
@@ -900,9 +886,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Setup database
@@ -998,9 +983,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Setup database
@@ -1106,9 +1090,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-${{ hashFiles('backend/Cargo.toml') }}
+        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}-
           ${{ runner.os }}-shared-cargo-
 
     - name: Install diesel CLI
