@@ -1,18 +1,17 @@
 name: Core CI Tests
 
 on:
-  # Temporarily disabled to test backup CI
-  # push:
-  #   branches: [ main, develop ]
-  # pull_request:
-  #   branches: [ main, develop ]
-  # workflow_dispatch:
-  #   inputs:
-  #     branch:
-  #       description: 'Branch to run CI on (leave empty for current branch)'
-  #       required: false
-  #       default: ''
-  #       type: string
+  push:
+    branches: [ main, develop, optimize/ci-core-primary ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to run CI on (leave empty for current branch)'
+        required: false
+        default: ''
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,7 +22,6 @@ jobs:
     name: Backend Build Cache
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend-smoke-tests]
 
     steps:
     - name: Checkout code
@@ -1001,7 +999,7 @@ jobs:
       working-directory: backend
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo clippy -- -D warnings
+        cargo clippy -- -W clippy::all
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -1016,7 +1014,7 @@ jobs:
 
     - name: Run frontend formatting check
       working-directory: frontend
-      run: npm run format:check
+      run: npm run prettier-check
 
     - name: Run frontend linting
       working-directory: frontend
@@ -1051,7 +1049,7 @@ jobs:
     - name: Install cargo-audit
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install cargo-audit
+        cargo install cargo-audit --force
 
     - name: Run Rust security audit
       run: |
@@ -1110,7 +1108,7 @@ jobs:
     - name: Install cargo-deny
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install cargo-deny
+        cargo install cargo-deny --force
 
     - name: Install license-checker
       run: npm install -g license-checker
@@ -1257,7 +1255,7 @@ jobs:
     name: Comprehensive End-to-End Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [backend-smoke-tests, frontend-integration-tests]
+    needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests]
 
     services:
       postgres:

@@ -174,7 +174,7 @@ impl CrawlQueueItem {
             && !self.is_locked()
             && self
                 .scheduled_for
-                .map_or(true, |scheduled| scheduled <= Utc::now())
+                .is_none_or(|scheduled| scheduled <= Utc::now())
     }
 
     /// Calculate processing duration if locked

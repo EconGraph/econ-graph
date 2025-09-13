@@ -176,7 +176,7 @@ impl ComprehensiveCrawler {
         println!("🚀 Starting full discovery and crawl process...");
 
         // Step 1: Discover all available series
-        let discovery_results = self.discover_all_series(pool).await?;
+        let _discovery_results = self.discover_all_series(pool).await?;
 
         // Step 2: Queue all series for crawling
         self.queue_all_series_for_crawling(pool).await?;
@@ -214,7 +214,7 @@ impl ComprehensiveCrawler {
     async fn determine_source(
         &self,
         external_id: &str,
-        source_id: uuid::Uuid,
+        _source_id: uuid::Uuid,
     ) -> AppResult<String> {
         // Try to determine from series ID pattern first
         if external_id.len() >= 10 && external_id.chars().all(|c| c.is_alphanumeric()) {

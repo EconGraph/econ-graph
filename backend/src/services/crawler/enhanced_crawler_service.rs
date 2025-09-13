@@ -69,7 +69,7 @@ impl EnhancedCrawlerService {
         let response_time_ms = (end_time - start_time).num_milliseconds() as i32;
 
         // Update crawl attempt with results
-        let updated_attempt = match &crawl_result {
+        let _updated_attempt = match &crawl_result {
             Ok(result) => {
                 CrawlAttempt::update_completion(
                     pool,
@@ -226,9 +226,9 @@ impl EnhancedCrawlerService {
     /// Crawl BLS series with tracking
     async fn crawl_bls_series(
         &self,
-        pool: &DatabasePool,
-        series_id: &Uuid,
-        external_id: &str,
+        _pool: &DatabasePool,
+        _series_id: &Uuid,
+        _external_id: &str,
     ) -> AppResult<CrawlResult> {
         // BLS crawling implementation would go here
         // For now, return a placeholder result
@@ -285,7 +285,7 @@ impl EnhancedCrawlerService {
         &self,
         pool: &DatabasePool,
     ) -> AppResult<Vec<CrawlableSeries>> {
-        let conn = pool
+        let _conn = pool
             .get()
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;

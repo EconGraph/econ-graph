@@ -166,7 +166,7 @@ impl GlobalAnalysisService {
     /// Get correlation network for visualization
     pub async fn get_correlation_network(
         pool: &DatabasePool,
-        indicator_category: &str,
+        _indicator_category: &str,
         min_correlation: f64,
     ) -> AppResult<Vec<CorrelationNetworkNode>> {
         use crate::schema::country_correlations::dsl::*;
@@ -450,7 +450,7 @@ impl GlobalAnalysisService {
         // GDP growth factor
         if let Some(gdp_growth) = indicators.get("GDP_GROWTH") {
             let growth_rate = gdp_growth.to_f64().unwrap_or(0.0);
-            score += (growth_rate * 10.0).min(20.0).max(-20.0);
+            score += (growth_rate * 10.0).clamp(-20.0, 20.0);
             factors += 1;
         }
 
@@ -470,7 +470,7 @@ impl GlobalAnalysisService {
         }
 
         if factors > 0 {
-            Some(score.max(0.0).min(100.0))
+            Some(score.clamp(0.0, 100.0))
         } else {
             None
         }

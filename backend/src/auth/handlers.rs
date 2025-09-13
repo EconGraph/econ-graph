@@ -415,7 +415,7 @@ pub async fn handle_logout() -> Result<impl Reply, Rejection> {
 /// PURPOSE: Comply with Facebook's data deletion requirements for app approval
 pub async fn handle_facebook_data_deletion(
     form_data: std::collections::HashMap<String, String>,
-    auth_service: AuthService,
+    _auth_service: AuthService,
 ) -> Result<impl Reply, Rejection> {
     // Extract the signed request from Facebook
     let signed_request = match form_data.get("signed_request") {
