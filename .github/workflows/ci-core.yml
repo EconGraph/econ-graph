@@ -1014,7 +1014,7 @@ jobs:
 
     - name: Run frontend formatting check
       working-directory: frontend
-      run: npm run format:check
+      run: npm run prettier-check
 
     - name: Run frontend linting
       working-directory: frontend
