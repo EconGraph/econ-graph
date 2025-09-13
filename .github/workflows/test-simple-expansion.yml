@@ -1,0 +1,30 @@
+name: Simple Shell Expansion Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-expansion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+    - name: Test shell expansion in env section
+      run: |
+        echo "=== TESTING SHELL EXPANSION IN ENV SECTION ==="
+        echo "PLAIN_HOME: $PLAIN_HOME"
+        echo "ESCAPED_HOME: $ESCAPED_HOME"
+        echo "SINGLE_QUOTED_HOME: $SINGLE_QUOTED_HOME"
+        echo "DOUBLE_QUOTED_HOME: $DOUBLE_QUOTED_HOME"
+        echo "GITHUB_ACTIONS_HOME: $GITHUB_ACTIONS_HOME"
+        echo "CURLY_BRACES_HOME: $CURLY_BRACES_HOME"
+        echo "COMMAND_SUB_HOME: $COMMAND_SUB_HOME"
+        echo "=== END TEST ==="
+      env:
+        PLAIN_HOME: "$HOME/.cargo/bin"
+        ESCAPED_HOME: "\\$HOME/.cargo/bin"
+        SINGLE_QUOTED_HOME: '$HOME/.cargo/bin'
+        DOUBLE_QUOTED_HOME: "$HOME/.cargo/bin"
+        GITHUB_ACTIONS_HOME: "${{ env.HOME }}/.cargo/bin"
+        CURLY_BRACES_HOME: "${HOME}/.cargo/bin"
+        COMMAND_SUB_HOME: "$(echo $HOME)/.cargo/bin"
