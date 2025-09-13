@@ -35,7 +35,14 @@ impl SeriesDownloader {
             .await?;
 
         // Find the data source
-        let data_source = DataSource::find_by_name(pool, source_name).await?;
+        let data_source = DataSource::find_by_name(pool, source_name)
+            .await?
+            .ok_or_else(|| {
+                crate::error::AppError::ValidationError(format!(
+                    "Data source not found: {}",
+                    source_name
+                ))
+            })?;
 
         // Find the series metadata
         let series_metadata =
@@ -86,7 +93,14 @@ impl SeriesDownloader {
             .await?;
 
         // Find the data source
-        let data_source = DataSource::find_by_name(pool, source_name).await?;
+        let data_source = DataSource::find_by_name(pool, source_name)
+            .await?
+            .ok_or_else(|| {
+                crate::error::AppError::ValidationError(format!(
+                    "Data source not found: {}",
+                    source_name
+                ))
+            })?;
 
         // Get all available series for this source
         let all_series = SeriesMetadata::find_by_source(pool, data_source.id).await?;
