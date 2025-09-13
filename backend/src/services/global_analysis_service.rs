@@ -2,13 +2,10 @@ use crate::database::DatabasePool;
 use crate::error::{AppError, AppResult};
 use crate::models::{
     CorrelationConnection, CorrelationNetworkNode, Country, CountryCorrelation,
-    CountryWithEconomicData, GlobalEconomicEvent, GlobalEventWithImpacts, IndicatorCategory,
-    NewCountryCorrelation, TradePartner,
+    CountryWithEconomicData, GlobalEconomicEvent, GlobalEventWithImpacts, NewCountryCorrelation,
+    TradePartner,
 };
-use crate::schema::{
-    countries, country_correlations, event_country_impacts, global_economic_events,
-    global_economic_indicators, global_indicator_data, trade_relationships,
-};
+use crate::schema::{countries, country_correlations};
 use bigdecimal::{BigDecimal, ToPrimitive};
 use chrono::{NaiveDate, Utc};
 use diesel::prelude::*;

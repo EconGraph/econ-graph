@@ -8,7 +8,7 @@ use crate::error::{AppError, AppResult};
 use crate::schema::{audit_logs, security_events};
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::RunQueryDsl;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;

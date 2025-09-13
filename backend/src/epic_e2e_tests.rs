@@ -2,16 +2,12 @@
 // PURPOSE: Demonstrate complete system functionality from data ingestion to visualization
 // This showcases the entire economic data pipeline in action with real-world scenarios
 
-use crate::database::{create_pool, DatabasePool};
-use crate::graphql::{create_schema, create_schema_with_data};
+use crate::database::DatabasePool;
 use crate::models::data_point::{DataPoint, NewDataPoint};
 use crate::models::data_source::{DataSource, NewDataSource};
 use crate::models::economic_series::{EconomicSeries, NewEconomicSeries};
-use crate::models::search::SearchParams;
-use crate::services::crawler::simple_crawler_service::get_crawler_status;
-use async_graphql::Request;
 use bigdecimal::BigDecimal;
-use chrono::{DateTime, Months, NaiveDate, Utc};
+use chrono::{Months, NaiveDate};
 use std::str::FromStr;
 
 /// Epic E2E Test Configuration
@@ -39,6 +35,11 @@ impl Default for EpicE2ETestConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::create_pool;
+    use crate::graphql::create_schema_with_data;
+    use crate::models::SearchParams;
+    use crate::services::simple_crawler_service::get_crawler_status;
+    use async_graphql::Request;
     use serial_test::serial;
     use testcontainers::runners::AsyncRunner;
     use testcontainers_modules::postgres::Postgres;

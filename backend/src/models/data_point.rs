@@ -679,7 +679,6 @@ impl DataPoint {
         pool: &crate::database::DatabasePool,
     ) -> crate::error::AppResult<Vec<Self>> {
         use crate::schema::data_points::dsl;
-        use diesel_async::RunQueryDsl;
 
         let mut conn = pool.get().await?;
 
@@ -696,7 +695,6 @@ impl DataPoint {
         new_data_point: &NewDataPoint,
     ) -> crate::error::AppResult<Self> {
         use crate::schema::data_points::dsl;
-        use diesel_async::RunQueryDsl;
 
         let mut conn = pool.get().await?;
 
@@ -715,7 +713,6 @@ impl DataPoint {
         new_data_points: &[NewDataPoint],
     ) -> crate::error::AppResult<Vec<Self>> {
         use crate::schema::data_points::dsl;
-        use diesel_async::RunQueryDsl;
 
         let mut conn = pool.get().await?;
 
@@ -736,7 +733,6 @@ impl DataPoint {
         end_date: chrono::NaiveDate,
     ) -> crate::error::AppResult<Vec<Self>> {
         use crate::schema::data_points::dsl;
-        use diesel_async::RunQueryDsl;
 
         let mut conn = pool.get().await?;
 
@@ -759,7 +755,6 @@ impl DataPoint {
         date: &chrono::NaiveDate,
     ) -> crate::error::AppResult<Option<Self>> {
         use crate::schema::data_points::dsl;
-        use diesel_async::RunQueryDsl;
 
         let mut conn = pool.get().await?;
 

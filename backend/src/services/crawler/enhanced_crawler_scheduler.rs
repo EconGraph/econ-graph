@@ -3,12 +3,11 @@
 // This provides intelligent scheduling, priority management, and error handling
 
 use crate::services::comprehensive_series_catalog::{
-    ComprehensiveSeriesCatalog, DataFrequency, DataSource, EconomicCategory, SeriesDefinition,
+    ComprehensiveSeriesCatalog, DataFrequency, DataSource, EconomicCategory,
 };
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use tokio::time::{sleep, Duration as TokioDuration};
 use uuid::Uuid;
 
 /// Represents the current status of a crawl job

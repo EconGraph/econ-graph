@@ -7,9 +7,8 @@ use crate::auth::models::*;
 use crate::database::DatabasePool;
 use crate::error::{AppError, AppResult};
 use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use reqwest::Client;
-use serde_json::json;
 use std::env;
 use uuid::Uuid;
 

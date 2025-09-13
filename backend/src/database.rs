@@ -32,8 +32,6 @@ pub async fn create_pool(database_url: &str) -> AppResult<DatabasePool> {
 
 /// Test database connectivity
 pub async fn test_connection(pool: &DatabasePool) -> AppResult<()> {
-    use diesel_async::RunQueryDsl;
-
     let mut conn = pool.get().await.map_err(|e| {
         let error_msg = format!("Failed to get database connection: {}", e);
         tracing::error!("Database connection pool error: {}", error_msg);

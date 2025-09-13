@@ -3,13 +3,12 @@
 // See LICENSE file for complete terms and conditions.
 
 use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
-use async_graphql::Schema;
-use async_graphql_warp::{GraphQLBadRequest, GraphQLResponse};
+use async_graphql_warp::GraphQLResponse;
 use serde_json::json;
 use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::signal;
-use tracing::{info, warn};
+use tracing::info;
 use warp::Filter;
 
 mod auth;

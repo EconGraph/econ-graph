@@ -1,6 +1,6 @@
 //! Enhanced crawler service with crawl attempts tracking and data source visibility controls
 
-use bigdecimal::{BigDecimal, FromPrimitive};
+use bigdecimal::BigDecimal;
 use chrono::{DateTime, NaiveDate, Utc};
 use diesel::prelude::*;
 use diesel::ExpressionMethods;
@@ -12,10 +12,7 @@ use uuid::Uuid;
 
 use crate::database::DatabasePool;
 use crate::error::{AppError, AppResult};
-use crate::models::{
-    CrawlAttempt, CrawlQueueItem, DataPoint, DataSource, EconomicSeries, NewCrawlAttempt,
-    NewCrawlQueueItem, NewDataPoint, NewEconomicSeries, QueuePriority,
-};
+use crate::models::{CrawlAttempt, DataPoint, NewCrawlAttempt, NewDataPoint};
 
 /// Enhanced crawler service with comprehensive tracking
 pub struct EnhancedCrawlerService {
@@ -288,7 +285,7 @@ impl EnhancedCrawlerService {
         &self,
         pool: &DatabasePool,
     ) -> AppResult<Vec<CrawlableSeries>> {
-        let mut conn = pool
+        let conn = pool
             .get()
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;

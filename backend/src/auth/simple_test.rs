@@ -5,7 +5,7 @@
  */
 use crate::auth::models::*;
 use crate::auth::services::AuthService;
-use crate::database::{create_pool, DatabasePool};
+use crate::database::create_pool;
 
 /// Simple test function to verify authentication works
 pub async fn test_auth_system() -> Result<(), Box<dyn std::error::Error>> {

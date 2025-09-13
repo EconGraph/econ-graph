@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::models::{
     AnnotationComment, ChartAnnotation, ChartCollaborator, DataPoint, DataSource, EconomicSeries,
-    SearchSortOrder, SearchStatistics, SearchSuggestion, SeriesSearchResult, SuggestionType, User,
+    SearchSortOrder, SearchSuggestion, SeriesSearchResult, SuggestionType, User,
 };
 
 /// GraphQL representation of an economic series
