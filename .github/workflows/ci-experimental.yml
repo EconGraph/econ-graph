@@ -1,0 +1,86 @@
+name: Experimental Features
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to run CI on (leave empty for current branch)'
+        required: false
+        default: ''
+        type: string
+      experiment:
+        description: 'Run experimental job (ramdisk)'
+        required: false
+        default: ''
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
+
+jobs:
+  experimental-ramdisk-build-cache:
+    name: Experimental RAM Disk Build Cache
+    runs-on: ubuntu-latest
+    if: github.event.inputs.experiment == 'ramdisk'
+    timeout-minutes: 15
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Setup RAM disk for cargo
+      run: |
+        echo "Setting up RAM disk for cargo operations..."
+        # Create 4GB tmpfs for cargo (conservative approach)
+        sudo mkdir -p /tmp/cargo-ramdisk
+        sudo mount -t tmpfs -o size=4G tmpfs /tmp/cargo-ramdisk
+        sudo chown runner:runner /tmp/cargo-ramdisk
+        ln -sf /tmp/cargo-ramdisk ~/.cargo
+        echo "RAM disk setup complete"
+
+    - name: Install PostgreSQL
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y postgresql postgresql-contrib
+
+    - name: Start PostgreSQL
+      run: |
+        sudo systemctl start postgresql
+        sudo -u postgres psql -c "CREATE USER postgres WITH PASSWORD 'password';"
+        sudo -u postgres psql -c "CREATE DATABASE econ_graph_test OWNER postgres;"
+        sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE econ_graph_test TO postgres;"
+
+    - name: Run database migrations
+      working-directory: backend
+      run: |
+        cargo install diesel_cli --no-default-features --features postgres
+        diesel migration run
+
+    - name: Build with RAM disk cache
+      working-directory: backend
+      run: |
+        echo "Building with RAM disk cache..."
+        time cargo build --release
+        echo "Build completed"
+
+    - name: Run tests with RAM disk cache
+      working-directory: backend
+      run: |
+        echo "Running tests with RAM disk cache..."
+        time cargo test --release
+        echo "Tests completed"
+
+    - name: Show RAM disk usage
+      run: |
+        echo "RAM disk usage:"
+        df -h /tmp/cargo-ramdisk
+        echo "RAM disk contents:"
+        ls -la /tmp/cargo-ramdisk

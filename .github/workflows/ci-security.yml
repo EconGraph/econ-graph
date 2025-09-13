@@ -1,0 +1,127 @@
+name: Security & Compliance
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to run CI on (leave empty for current branch)'
+        required: false
+        default: ''
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
+
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+
+    - name: Run Rust security audit
+      working-directory: backend
+      run: cargo audit
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install frontend dependencies
+      working-directory: frontend
+      run: npm ci
+
+    - name: Run NPM security audit
+      working-directory: frontend
+      run: npm audit --audit-level=moderate
+
+  license-compliance:
+    name: License Compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
+
+    - name: Install cargo-license
+      run: cargo install cargo-license
+
+    - name: Check Rust license compliance
+      working-directory: backend
+      run: |
+        cargo license --json > rust-licenses.json
+        echo "Rust dependency licenses exported to rust-licenses.json"
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install frontend dependencies
+      working-directory: frontend
+      run: npm ci
+
+    - name: Install license checker
+      run: npm install -g license-checker
+
+    - name: Check NPM license compliance
+      working-directory: frontend
+      run: |
+        license-checker --json > npm-licenses.json
+        echo "NPM dependency licenses exported to npm-licenses.json"
+
+    - name: Upload license reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: license-reports
+        path: |
+          rust-licenses.json
+          frontend/npm-licenses.json
