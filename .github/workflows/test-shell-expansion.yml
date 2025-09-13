@@ -52,28 +52,22 @@ jobs:
 
         echo "=== END SHELL EXPANSION METHODS TEST ==="
 
-    - name: Test all expansion combinations
+    - name: Test key expansion patterns
       run: |
-        echo "=== TESTING ALL EXPANSION COMBINATIONS ==="
+        echo "=== TESTING KEY EXPANSION PATTERNS ==="
         echo "1. Plain \$HOME: $PLAIN_HOME"
         echo "2. Escaped \\\$HOME: $ESCAPED_HOME"
-        echo "3. Double escaped \\\\\$HOME: $DOUBLE_ESCAPED_HOME"
-        echo "4. Single quotes '\$HOME': $SINGLE_QUOTED_HOME"
-        echo "5. Double quotes \"\$HOME\": $DOUBLE_QUOTED_HOME"
-        echo "6. GitHub Actions \${{ env.HOME }}: $GITHUB_ACTIONS_HOME"
-        echo "7. Mixed \$HOME/\$USER: $MIXED_VARS"
-        echo "8. Curly braces \${HOME}: $CURLY_BRACES_HOME"
-        echo "9. Backticks \`echo \$HOME\`: $BACKTICKS_HOME"
-        echo "10. Command substitution \$(echo \$HOME): $COMMAND_SUB_HOME"
-        echo "=== END ALL COMBINATIONS TEST ==="
+        echo "3. Single quotes '\$HOME': $SINGLE_QUOTED_HOME"
+        echo "4. Double quotes \"\$HOME\": $DOUBLE_QUOTED_HOME"
+        echo "5. GitHub Actions \${{ env.HOME }}: $GITHUB_ACTIONS_HOME"
+        echo "6. Curly braces \${HOME}: $CURLY_BRACES_HOME"
+        echo "7. Command substitution \$(echo \$HOME): $COMMAND_SUB_HOME"
+        echo "=== END KEY PATTERNS TEST ==="
       env:
         PLAIN_HOME: "$HOME/.cargo/bin"
         ESCAPED_HOME: "\\$HOME/.cargo/bin"
-        DOUBLE_ESCAPED_HOME: "\\\\$HOME/.cargo/bin"
         SINGLE_QUOTED_HOME: '$HOME/.cargo/bin'
         DOUBLE_QUOTED_HOME: "$HOME/.cargo/bin"
         GITHUB_ACTIONS_HOME: "${{ env.HOME }}/.cargo/bin"
-        MIXED_VARS: "$HOME/$USER/.cargo/bin"
         CURLY_BRACES_HOME: "${HOME}/.cargo/bin"
-        BACKTICKS_HOME: "`echo $HOME`/.cargo/bin"
         COMMAND_SUB_HOME: "$(echo $HOME)/.cargo/bin"
