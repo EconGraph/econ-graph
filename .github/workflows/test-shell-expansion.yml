@@ -3,36 +3,34 @@ name: Test Shell Expansion in GitHub Actions
 on:
   workflow_dispatch:
 
+env:
+  # This should be expanded by GitHub Actions at workflow level
+  WORKFLOW_LEVEL_VAR: "workflow-expanded"
+  # This should be treated as literal by GitHub Actions, expanded by shell in job
+  SHELL_EXPANSION_VAR: "$HOME/.cargo/bin"
+
 jobs:
   test-shell-expansion:
     runs-on: ubuntu-latest
     timeout-minutes: 1
 
     steps:
-    - name: Install build tools
+    - name: Test GitHub Actions vs Shell expansion
       run: |
-        sudo apt-get update && sudo apt-get install -y build-essential
-        echo "cc installed: $(which cc)"
-
-    - name: Test shell expansion in YAML env
-      run: |
-        echo "=== TESTING SHELL EXPANSION IN YAML ENV ==="
-        echo "Current PATH: $PATH"
-        echo "Testing which cc:"
-        which cc || echo "❌ cc not found"
-        echo "Testing cc command:"
-        cc --version || echo "❌ cc command failed"
-        echo "=== END SHELL EXPANSION TEST ==="
+        echo "=== TESTING EXPANSION BEHAVIOR ==="
+        echo "WORKFLOW_LEVEL_VAR: $WORKFLOW_LEVEL_VAR"
+        echo "SHELL_EXPANSION_VAR: $SHELL_EXPANSION_VAR"
+        echo "HOME variable: $HOME"
+        echo "=== END EXPANSION TEST ==="
       env:
-        PATH: "$HOME/.cargo/bin:$PATH"
+        # This should be expanded by shell during job execution
+        JOB_LEVEL_SHELL_VAR: "$HOME/.cargo/bin"
+        # This should be expanded by GitHub Actions before job execution
+        JOB_LEVEL_WORKFLOW_VAR: "${{ env.WORKFLOW_LEVEL_VAR }}"
 
-    - name: Test shell expansion in run command
+    - name: Test literal vs expanded behavior
       run: |
-        echo "=== TESTING SHELL EXPANSION IN RUN COMMAND ==="
-        export PATH="$HOME/.cargo/bin:$PATH"
-        echo "Current PATH: $PATH"
-        echo "Testing which cc:"
-        which cc || echo "❌ cc not found"
-        echo "Testing cc command:"
-        cc --version || echo "❌ cc command failed"
-        echo "=== END RUN COMMAND TEST ==="
+        echo "=== TESTING LITERAL VS EXPANDED ==="
+        echo "JOB_LEVEL_SHELL_VAR (should expand to actual path): $JOB_LEVEL_SHELL_VAR"
+        echo "JOB_LEVEL_WORKFLOW_VAR (should be pre-expanded): $JOB_LEVEL_WORKFLOW_VAR"
+        echo "=== END LITERAL VS EXPANDED TEST ==="
