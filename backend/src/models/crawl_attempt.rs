@@ -515,6 +515,7 @@ mod tests {
                 description: Some("Test source for crawl attempts".to_string()),
                 base_url: "https://test-crawl.example.com/api".to_string(),
                 api_key_required: false,
+                api_key_name: None,
                 rate_limit_per_minute: 100,
                 is_visible: true,
                 is_enabled: true,

@@ -68,6 +68,7 @@ async fn test_basic_queue_operations() {
         description: Some("Source for testing queue operations".to_string()),
         base_url: "https://queue.example.com/api".to_string(),
         api_key_required: false,
+        api_key_name: None,
         rate_limit_per_minute: 100,
         is_visible: true,
         is_enabled: true,
