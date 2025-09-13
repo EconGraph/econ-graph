@@ -25,8 +25,6 @@ pub struct CorsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrawlerConfig {
-    pub fred_api_key: Option<String>,
-    pub bls_api_key: Option<String>,
     pub max_concurrent_jobs: usize,
     pub queue_poll_interval_seconds: u64,
 }
@@ -79,8 +77,6 @@ impl Config {
             },
 
             crawler: CrawlerConfig {
-                fred_api_key: env::var("FRED_API_KEY").ok(),
-                bls_api_key: env::var("BLS_API_KEY").ok(),
                 max_concurrent_jobs: env::var("MAX_CONCURRENT_JOBS")
                     .unwrap_or_else(|_| "10".to_string())
                     .parse()
@@ -133,8 +129,6 @@ impl Default for Config {
                 )],
             },
             crawler: CrawlerConfig {
-                fred_api_key: None,
-                bls_api_key: None,
                 max_concurrent_jobs: 5,
                 queue_poll_interval_seconds: 10,
             },

@@ -16,7 +16,7 @@ impl CatalogDownloader {
     /// Create a new catalog downloader
     pub fn new(client: Client) -> Self {
         Self {
-            discovery_service: SeriesDiscoveryService::new(None, None, None, None),
+            discovery_service: SeriesDiscoveryService::new(),
         }
     }
 
