@@ -12,12 +12,93 @@ on:
         required: false
         default: ''
         type: string
+      experiment:
+        description: 'Run experimental job (ramdisk)'
+        required: false
+        default: ''
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
   DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
 jobs:
+  experimental-ramdisk-build-cache:
+    name: Experimental RAM Disk Build Cache
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.experiment == 'ramdisk'
+    timeout-minutes: 15
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Setup RAM disk for cargo
+      run: |
+        echo "Setting up RAM disk for cargo operations..."
+        # Create 4GB tmpfs for cargo (conservative approach)
+        sudo mkdir -p /tmp/cargo-ramdisk
+        sudo mount -t tmpfs -o size=4G tmpfs /tmp/cargo-ramdisk
+        sudo chown runner:runner /tmp/cargo-ramdisk
+        ln -sf /tmp/cargo-ramdisk ~/.cargo
+
+        # Verify setup
+        echo "RAM disk setup complete:"
+        df -h /tmp/cargo-ramdisk
+        ls -la ~/.cargo
+        echo "Available space:"
+        df -h ~/.cargo
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Install shared tools
+      run: |
+        echo "Installing shared tools..."
+        echo "Current PATH: $PATH"
+        echo "CARGO_HOME: $CARGO_HOME"
+        echo "HOME: $HOME"
+
+               # Install diesel_cli
+               echo "Installing diesel_cli..."
+               $HOME/.cargo/bin/cargo install diesel_cli --no-default-features --features postgres --verbose --force
+
+               # Install cargo-audit
+               echo "Installing cargo-audit..."
+               $HOME/.cargo/bin/cargo install cargo-audit --verbose --force
+
+               # Install cargo-deny
+               echo "Installing cargo-deny..."
+               $HOME/.cargo/bin/cargo install cargo-deny --verbose --force
+
+        # Verify installations
+        echo "Verifying installations..."
+        ls -la $HOME/.cargo/bin/
+        $HOME/.cargo/bin/diesel --version || echo "diesel not found"
+        $HOME/.cargo/bin/cargo-audit --version || echo "cargo-audit not found"
+        $HOME/.cargo/bin/cargo-deny --version || echo "cargo-deny not found"
+      working-directory: backend
+
+    - name: Build backend
+      run: cargo build --verbose
+      working-directory: backend
+
   grafana-dashboard-validation:
     name: Grafana Dashboard Validation
     runs-on: ubuntu-latest
@@ -96,6 +177,22 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
       with:
         components: rustfmt, clippy
+
+    - name: Setup RAM disk for cargo
+      run: |
+        echo "Setting up RAM disk for cargo operations..."
+        # Create 4GB tmpfs for cargo (conservative approach)
+        sudo mkdir -p /tmp/cargo-ramdisk
+        sudo mount -t tmpfs -o size=4G tmpfs /tmp/cargo-ramdisk
+        sudo chown runner:runner /tmp/cargo-ramdisk
+        ln -sf /tmp/cargo-ramdisk ~/.cargo
+
+        # Verify setup
+        echo "RAM disk setup complete:"
+        df -h /tmp/cargo-ramdisk
+        ls -la ~/.cargo
+        echo "Available space:"
+        df -h ~/.cargo
 
     - name: Cache Rust dependencies
       uses: actions/cache@v3
