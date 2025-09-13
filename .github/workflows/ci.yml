@@ -120,17 +120,17 @@ jobs:
         echo "CARGO_HOME: $CARGO_HOME"
         echo "HOME: $HOME"
 
-        # Install diesel_cli
-        echo "Installing diesel_cli..."
-        $HOME/.cargo/bin/cargo install diesel_cli --no-default-features --features postgres --verbose
+               # Install diesel_cli
+               echo "Installing diesel_cli..."
+               $HOME/.cargo/bin/cargo install diesel_cli --no-default-features --features postgres --verbose --force
 
-        # Install cargo-audit
-        echo "Installing cargo-audit..."
-        $HOME/.cargo/bin/cargo install cargo-audit --verbose
+               # Install cargo-audit
+               echo "Installing cargo-audit..."
+               $HOME/.cargo/bin/cargo install cargo-audit --verbose --force
 
-        # Install cargo-deny
-        echo "Installing cargo-deny..."
-        $HOME/.cargo/bin/cargo install cargo-deny --verbose
+               # Install cargo-deny
+               echo "Installing cargo-deny..."
+               $HOME/.cargo/bin/cargo install cargo-deny --verbose --force
 
         # Verify installations
         echo "Verifying installations..."
