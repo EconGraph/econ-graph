@@ -170,6 +170,22 @@ impl Default for UpdateEconomicSeries {
 }
 
 impl EconomicSeries {
+    /// Find all economic series
+    pub async fn find_all(
+        pool: &crate::database::DatabasePool,
+    ) -> crate::error::AppResult<Vec<Self>> {
+        use crate::schema::economic_series::dsl;
+
+        let mut conn = pool.get().await?;
+
+        let series = dsl::economic_series
+            .select(Self::as_select())
+            .load::<Self>(&mut conn)
+            .await?;
+
+        Ok(series)
+    }
+
     /// Find economic series by external ID and data source
     pub async fn find_by_external_id(
         pool: &crate::database::DatabasePool,

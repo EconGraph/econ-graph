@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod crawl_attempt;
 pub mod crawl_queue;
 pub mod data_point;

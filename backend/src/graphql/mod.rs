@@ -1,3 +1,4 @@
+pub mod context;
 pub mod dataloaders;
 pub mod mutation;
 pub mod query;

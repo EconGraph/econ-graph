@@ -119,9 +119,8 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     };
 
     // Monitor for multiple failed access attempts
-    let failedAttempts = 0;
     const resetFailedAttempts = () => {
-      failedAttempts = 0;
+      // Reset logic can be implemented here if needed
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);

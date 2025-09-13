@@ -4,6 +4,7 @@
 
 use diesel::prelude::*;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use imara_diff::{Algorithm, UnifiedDiffBuilder};
 use std::fs;
 use std::process::Command;
 use testcontainers::{runners::AsyncRunner, ContainerAsync};
@@ -325,11 +326,9 @@ async fn test_schema_compatibility_comparison() {
         println!("Generated schema length: {}", normalized_generated.len());
         println!("Existing schema length: {}", normalized_existing.len());
 
-        // Find differences
-        let differences = find_schema_differences(&normalized_generated, &normalized_existing);
-        for diff in differences {
-            println!("Difference: {}", diff);
-        }
+        // Generate and print unified diff
+        let diff_output = generate_schema_diff(&generated_schema, &existing_schema);
+        println!("{}", diff_output);
 
         panic!(
             "Schema compatibility test failed - generated schema does not match existing schema.rs"
@@ -337,4 +336,21 @@ async fn test_schema_compatibility_comparison() {
     }
 
     println!("✅ Schema compatibility test passed - schemas match");
+}
+
+/// Generate a proper unified diff between two schemas using imara-diff
+fn generate_schema_diff(generated_schema: &str, existing_schema: &str) -> String {
+    // Use imara-diff to generate a proper unified diff
+    let input = imara_diff::intern::InternedInput::new(generated_schema, existing_schema);
+
+    let builder = UnifiedDiffBuilder::new(&input);
+
+    let result = imara_diff::diff(Algorithm::Histogram, &input, builder);
+
+    // If we got diff output, use it
+    if !result.is_empty() {
+        result
+    } else {
+        "✅ No differences found between schemas.\n".to_string()
+    }
 }

@@ -990,3 +990,204 @@ pub struct DeleteAnnotationInput {
     /// Annotation ID to delete
     pub annotation_id: ID,
 }
+
+// Admin GraphQL Types
+
+/// Input for creating a new user (admin only)
+#[derive(InputObject)]
+pub struct CreateUserInput {
+    /// Email address
+    pub email: String,
+    /// Display name
+    pub name: String,
+    /// Password (for email-based users)
+    pub password: Option<String>,
+    /// User role
+    pub role: String,
+    /// Organization (optional)
+    pub organization: Option<String>,
+    /// Whether account is active
+    pub is_active: Option<bool>,
+    /// Whether to send welcome email
+    pub send_welcome_email: Option<bool>,
+}
+
+/// Input for updating a user (admin only)
+#[derive(InputObject)]
+pub struct UpdateUserInput {
+    /// Email address
+    pub email: Option<String>,
+    /// Display name (optional)
+    pub name: Option<String>,
+    /// Avatar URL (optional)
+    pub avatar_url: Option<String>,
+    /// User role (optional)
+    pub role: Option<String>,
+    /// Organization (optional)
+    pub organization: Option<String>,
+    /// UI theme preference
+    pub theme: Option<String>,
+    /// Default chart type preference
+    pub default_chart_type: Option<String>,
+    /// Whether notifications are enabled
+    pub notifications_enabled: Option<bool>,
+    /// Whether collaboration features are enabled
+    pub collaboration_enabled: Option<bool>,
+    /// Whether account is active (optional)
+    pub is_active: Option<bool>,
+    /// Whether email is verified (optional)
+    pub email_verified: Option<bool>,
+}
+
+/// Input for filtering users (admin only)
+#[derive(InputObject)]
+pub struct UserFilterInput {
+    /// Filter by role
+    pub role: Option<String>,
+    /// Filter by organization
+    pub organization: Option<String>,
+    /// Filter by active status
+    pub is_active: Option<bool>,
+    /// Filter by email verified status
+    pub email_verified: Option<bool>,
+    /// Search term for name or email
+    pub search_query: Option<String>,
+}
+
+/// Input for filtering audit logs (admin only)
+#[derive(InputObject)]
+pub struct AuditLogFilterInput {
+    /// Filter by user ID
+    pub user_id: Option<ID>,
+    /// Filter by action
+    pub action: Option<String>,
+    /// Filter by resource type
+    pub resource_type: Option<String>,
+    /// Created after date
+    pub created_after: Option<DateTime<Utc>>,
+    /// Created before date
+    pub created_before: Option<DateTime<Utc>>,
+}
+
+/// GraphQL connection for users
+#[derive(SimpleObject)]
+pub struct UserConnection {
+    /// List of users
+    pub nodes: Vec<UserType>,
+    /// Total count of users
+    pub total_count: i32,
+    /// Pagination info
+    pub page_info: PageInfo,
+}
+
+/// GraphQL representation of a user session
+#[derive(Clone, SimpleObject)]
+pub struct UserSessionType {
+    /// Session ID
+    pub id: ID,
+    /// User ID
+    pub user_id: ID,
+    /// Session creation time
+    pub created_at: DateTime<Utc>,
+    /// Last activity time
+    pub last_activity: DateTime<Utc>,
+    /// Session expiration time
+    pub expires_at: DateTime<Utc>,
+    /// User agent string
+    pub user_agent: Option<String>,
+    /// IP address
+    pub ip_address: Option<String>,
+    /// Whether session is active
+    pub is_active: bool,
+}
+
+/// GraphQL representation of system health
+#[derive(Clone, SimpleObject)]
+pub struct SystemHealthType {
+    /// Overall system status
+    pub status: String,
+    /// System metrics
+    pub metrics: SystemMetricsType,
+    /// Last updated timestamp
+    pub last_updated: DateTime<Utc>,
+}
+
+/// GraphQL representation of system metrics
+#[derive(Clone, SimpleObject)]
+pub struct SystemMetricsType {
+    /// Total number of users
+    pub total_users: i32,
+    /// Number of active users
+    pub active_users: i32,
+    /// Total number of sessions
+    pub total_sessions: i32,
+    /// Number of active sessions
+    pub active_sessions: i32,
+    /// Database size in MB
+    pub database_size_mb: f64,
+    /// Number of queue items
+    pub queue_items: i32,
+    /// API requests per minute
+    pub api_requests_per_minute: f64,
+    /// Average response time in milliseconds
+    pub average_response_time_ms: f64,
+}
+
+/// GraphQL representation of a security event
+#[derive(Clone, SimpleObject)]
+pub struct SecurityEventType {
+    /// Event ID
+    pub id: ID,
+    /// Event type
+    pub event_type: String,
+    /// User ID (if applicable)
+    pub user_id: Option<ID>,
+    /// User email (if applicable)
+    pub user_email: Option<String>,
+    /// IP address
+    pub ip_address: Option<String>,
+    /// User agent
+    pub user_agent: Option<String>,
+    /// Event description
+    pub description: String,
+    /// Event severity
+    pub severity: String,
+    /// Event timestamp
+    pub created_at: DateTime<Utc>,
+}
+
+/// GraphQL representation of an audit log entry
+#[derive(Clone, SimpleObject)]
+pub struct AuditLogType {
+    /// Log entry ID
+    pub id: ID,
+    /// User ID who performed action
+    pub user_id: ID,
+    /// User name who performed action
+    pub user_name: String,
+    /// Action performed
+    pub action: String,
+    /// Type of resource affected
+    pub resource_type: String,
+    /// ID of resource affected
+    pub resource_id: Option<String>,
+    /// IP address
+    pub ip_address: Option<String>,
+    /// User agent
+    pub user_agent: Option<String>,
+    /// Additional details
+    pub details: Option<String>,
+    /// Action timestamp
+    pub created_at: DateTime<Utc>,
+}
+
+/// GraphQL connection for audit logs
+#[derive(SimpleObject)]
+pub struct AuditLogConnection {
+    /// List of audit log entries
+    pub nodes: Vec<AuditLogType>,
+    /// Total count of entries
+    pub total_count: i32,
+    /// Pagination info
+    pub page_info: PageInfo,
+}

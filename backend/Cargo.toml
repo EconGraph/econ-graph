@@ -121,3 +121,4 @@ once_cell = "1.19"
 # Warp already included above
 futures = "0.3.31"
 rust_decimal_macros = "1.37.1"
+imara-diff = "0.1"

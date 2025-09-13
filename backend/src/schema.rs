@@ -13,6 +13,25 @@ diesel::table! {
 }
 
 diesel::table! {
+    audit_logs (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        #[max_length = 255]
+        user_name -> Varchar,
+        #[max_length = 100]
+        action -> Varchar,
+        #[max_length = 50]
+        resource_type -> Varchar,
+        #[max_length = 255]
+        resource_id -> Nullable<Varchar>,
+        ip_address -> Nullable<Text>,
+        user_agent -> Nullable<Text>,
+        details -> Nullable<Jsonb>,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     chart_annotations (id) {
         id -> Uuid,
         user_id -> Uuid,
@@ -301,6 +320,27 @@ diesel::table! {
 }
 
 diesel::table! {
+    security_events (id) {
+        id -> Uuid,
+        #[max_length = 50]
+        event_type -> Varchar,
+        user_id -> Nullable<Uuid>,
+        #[max_length = 255]
+        user_email -> Nullable<Varchar>,
+        #[max_length = 20]
+        severity -> Varchar,
+        ip_address -> Nullable<Text>,
+        user_agent -> Nullable<Text>,
+        description -> Text,
+        metadata -> Nullable<Jsonb>,
+        resolved -> Nullable<Bool>,
+        resolved_by -> Nullable<Uuid>,
+        resolved_at -> Nullable<Timestamptz>,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     series_metadata (id) {
         id -> Uuid,
         source_id -> Uuid,
@@ -400,6 +440,7 @@ diesel::table! {
 
 diesel::joinable!(annotation_comments -> chart_annotations (annotation_id));
 diesel::joinable!(annotation_comments -> users (user_id));
+diesel::joinable!(audit_logs -> users (user_id));
 diesel::joinable!(chart_annotations -> users (user_id));
 diesel::joinable!(crawl_attempts -> economic_series (series_id));
 diesel::joinable!(data_points -> economic_series (series_id));
@@ -416,6 +457,7 @@ diesel::joinable!(user_sessions -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     annotation_comments,
+    audit_logs,
     chart_annotations,
     chart_collaborators,
     countries,
@@ -430,6 +472,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     global_economic_indicators,
     global_indicator_data,
     leading_indicators,
+    security_events,
     series_metadata,
     trade_relationships,
     user_data_source_preferences,

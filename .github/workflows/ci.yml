@@ -12,6 +12,11 @@ on:
         required: false
         default: ''
         type: string
+      experiment:
+        description: 'Run experimental job (ramdisk)'
+        required: false
+        default: ''
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -100,6 +105,22 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
       with:
         components: rustfmt, clippy
+
+    - name: Setup RAM disk for cargo
+      run: |
+        echo "Setting up RAM disk for cargo operations..."
+        # Create 4GB tmpfs for cargo (conservative approach)
+        sudo mkdir -p /tmp/cargo-ramdisk
+        sudo mount -t tmpfs -o size=4G tmpfs /tmp/cargo-ramdisk
+        sudo chown runner:runner /tmp/cargo-ramdisk
+        ln -sf /tmp/cargo-ramdisk ~/.cargo
+
+        # Verify setup
+        echo "RAM disk setup complete:"
+        df -h /tmp/cargo-ramdisk
+        ls -la ~/.cargo
+        echo "Available space:"
+        df -h ~/.cargo
 
     - name: Cache Rust dependencies
       uses: actions/cache@v3

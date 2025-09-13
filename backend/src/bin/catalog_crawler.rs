@@ -82,6 +82,10 @@ enum Commands {
         /// Output file path
         #[arg(long, default_value = "catalog_migration.sql")]
         output_file: String,
+
+        /// Maximum number of rows per bulk INSERT statement
+        #[arg(long, default_value = "1000")]
+        bulk_insert_limit: usize,
     },
 }
 
@@ -130,7 +134,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::ExportCatalog {
             database_url,
             output_file,
-        } => export_catalog_to_sql(database_url, output_file).await,
+            bulk_insert_limit,
+        } => export_catalog_to_sql(database_url, output_file, bulk_insert_limit).await,
     }
 }
 
@@ -377,50 +382,360 @@ fn parse_api_keys(api_keys: Vec<String>) -> HashMap<String, String> {
 async fn export_catalog_to_sql(
     database_url: String,
     output_file: String,
+    bulk_insert_limit: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    info!("Exporting catalog data to {}", output_file);
+    info!(
+        "Exporting catalog data to {} with bulk insert limit of {}",
+        output_file, bulk_insert_limit
+    );
 
     // Create database pool
     let pool = create_pool(&database_url).await?;
 
-    // Get all series metadata
+    // Get all data to export
+    let data_sources = DataSource::find_all(&pool).await?;
     let series_metadata =
         econ_graph_backend::models::series_metadata::SeriesMetadata::find_all(&pool).await?;
+    let economic_series =
+        econ_graph_backend::models::economic_series::EconomicSeries::find_all(&pool).await?;
+    let data_points = econ_graph_backend::models::data_point::DataPoint::find_all(&pool).await?;
+    let crawl_attempts =
+        econ_graph_backend::models::crawl_attempt::CrawlAttempt::find_all(&pool).await?;
 
     // Generate SQL migration
     let mut sql = String::new();
-    sql.push_str("-- Auto-generated catalog migration\n");
-    sql.push_str("-- Generated from real data source catalogs\n\n");
+    sql.push_str("-- Auto-generated catalog migration from crawler integration test\n");
+    sql.push_str("-- Generated from real data source catalogs and series data\n");
+    sql.push_str(&format!(
+        "-- Generated at: {}\n\n",
+        chrono::Utc::now().to_rfc3339()
+    ));
 
-    // Insert series metadata
-    sql.push_str("-- Insert series metadata\n");
-    for metadata in &series_metadata {
-        sql.push_str(&format!(
-            "INSERT INTO series_metadata (id, source_id, external_id, title, description, units, frequency, geographic_level, data_url, api_endpoint, last_discovered_at, is_active, created_at, updated_at) VALUES ('{}', '{}', '{}', '{}', {}, {}, {}, {}, {}, {}, {}, {}, '{}', '{}');\n",
-            metadata.id,
-            metadata.source_id,
-            metadata.external_id,
-            metadata.title.replace("'", "''"),
-            metadata.description.as_ref().map(|d| format!("'{}'", d.replace("'", "''"))).unwrap_or_else(|| "NULL".to_string()),
-            metadata.units.as_ref().map(|u| format!("'{}'", u.replace("'", "''"))).unwrap_or_else(|| "NULL".to_string()),
-            metadata.frequency.as_ref().map(|f| format!("'{}'", f.replace("'", "''"))).unwrap_or_else(|| "NULL".to_string()),
-            metadata.geographic_level.as_ref().map(|g| format!("'{}'", g.replace("'", "''"))).unwrap_or_else(|| "NULL".to_string()),
-            metadata.data_url.as_ref().map(|u| format!("'{}'", u.replace("'", "''"))).unwrap_or_else(|| "NULL".to_string()),
-            metadata.api_endpoint.as_ref().map(|e| format!("'{}'", e.replace("'", "''"))).unwrap_or_else(|| "NULL".to_string()),
-            metadata.last_discovered_at.map(|t| t.to_rfc3339()).unwrap_or_else(|| "NULL".to_string()),
-            metadata.is_active,
-            metadata.created_at.map(|t| t.to_rfc3339()).unwrap_or_else(|| "NULL".to_string()),
-            metadata.updated_at.map(|t| t.to_rfc3339()).unwrap_or_else(|| "NULL".to_string())
-        ));
+    // Helper function to escape SQL strings
+    fn escape_sql_string(s: &str) -> String {
+        s.replace("'", "''")
+    }
+
+    // Helper function to format nullable string
+    fn format_nullable_string(s: &Option<String>) -> String {
+        s.as_ref()
+            .map(|s| format!("'{}'", escape_sql_string(s)))
+            .unwrap_or_else(|| "NULL".to_string())
+    }
+
+    // Helper function to format nullable timestamp
+    fn format_nullable_timestamp(t: &Option<chrono::DateTime<chrono::Utc>>) -> String {
+        t.map(|t| format!("'{}'", t.to_rfc3339()))
+            .unwrap_or_else(|| "NULL".to_string())
+    }
+
+    // Helper function to format nullable date
+    fn format_nullable_date(d: &Option<chrono::NaiveDate>) -> String {
+        d.map(|d| format!("'{}'", d))
+            .unwrap_or_else(|| "NULL".to_string())
+    }
+
+    // Helper function to format required timestamp
+    fn format_required_timestamp(t: &chrono::DateTime<chrono::Utc>) -> String {
+        format!("'{}'", t.to_rfc3339())
+    }
+
+    // Helper function to create bulk INSERT statements
+    fn create_bulk_insert<T, F>(
+        table_name: &str,
+        columns: &[&str],
+        items: &[T],
+        limit: usize,
+        row_formatter: F,
+    ) -> String
+    where
+        F: Fn(&T) -> String,
+    {
+        if items.is_empty() {
+            return String::new();
+        }
+
+        let mut result = String::new();
+        let columns_str = columns.join(", ");
+
+        for chunk in items.chunks(limit) {
+            result.push_str(&format!(
+                "INSERT INTO {} ({}) VALUES\n",
+                table_name, columns_str
+            ));
+
+            let values: Vec<String> = chunk.iter().map(&row_formatter).collect();
+            result.push_str(&values.join(",\n"));
+            result.push_str(";\n\n");
+        }
+
+        result
+    }
+
+    // Export data sources
+    if !data_sources.is_empty() {
+        sql.push_str("-- Data Sources\n");
+        let data_source_insert = create_bulk_insert(
+            "data_sources",
+            &[
+                "id",
+                "name",
+                "description",
+                "base_url",
+                "api_key_required",
+                "rate_limit_per_minute",
+                "created_at",
+                "updated_at",
+                "is_visible",
+                "is_enabled",
+                "requires_admin_approval",
+                "crawl_frequency_hours",
+                "last_crawl_at",
+                "crawl_status",
+                "crawl_error_message",
+                "api_documentation_url",
+            ],
+            &data_sources,
+            bulk_insert_limit,
+            |ds| {
+                format!(
+                    "('{}', '{}', {}, '{}', {}, {}, '{}', '{}', {}, {}, {}, {}, {}, {}, {}, {})",
+                    ds.id,
+                    escape_sql_string(&ds.name),
+                    format_nullable_string(&ds.description),
+                    escape_sql_string(&ds.base_url),
+                    ds.api_key_required,
+                    ds.rate_limit_per_minute,
+                    ds.created_at.to_rfc3339(),
+                    ds.updated_at.to_rfc3339(),
+                    ds.is_visible,
+                    ds.is_enabled,
+                    ds.requires_admin_approval,
+                    ds.crawl_frequency_hours,
+                    format_nullable_timestamp(&ds.last_crawl_at),
+                    format_nullable_string(&ds.crawl_status),
+                    format_nullable_string(&ds.crawl_error_message),
+                    format_nullable_string(&ds.api_documentation_url)
+                )
+            },
+        );
+        sql.push_str(&data_source_insert);
+    }
+
+    // Export series metadata
+    if !series_metadata.is_empty() {
+        sql.push_str("-- Series Metadata\n");
+        let series_metadata_insert = create_bulk_insert(
+            "series_metadata",
+            &[
+                "id",
+                "source_id",
+                "external_id",
+                "title",
+                "description",
+                "units",
+                "frequency",
+                "geographic_level",
+                "data_url",
+                "api_endpoint",
+                "last_discovered_at",
+                "is_active",
+                "created_at",
+                "updated_at",
+            ],
+            &series_metadata,
+            bulk_insert_limit,
+            |sm| {
+                format!(
+                    "('{}', '{}', '{}', '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+                    sm.id,
+                    sm.source_id,
+                    escape_sql_string(&sm.external_id),
+                    escape_sql_string(&sm.title),
+                    format_nullable_string(&sm.description),
+                    format_nullable_string(&sm.units),
+                    format_nullable_string(&sm.frequency),
+                    format_nullable_string(&sm.geographic_level),
+                    format_nullable_string(&sm.data_url),
+                    format_nullable_string(&sm.api_endpoint),
+                    format_nullable_timestamp(&sm.last_discovered_at),
+                    sm.is_active,
+                    format_nullable_timestamp(&sm.created_at),
+                    format_nullable_timestamp(&sm.updated_at)
+                )
+            },
+        );
+        sql.push_str(&series_metadata_insert);
+    }
+
+    // Export economic series
+    if !economic_series.is_empty() {
+        sql.push_str("-- Economic Series\n");
+        let economic_series_insert = create_bulk_insert(
+            "economic_series",
+            &[
+                "id",
+                "source_id",
+                "external_id",
+                "title",
+                "description",
+                "units",
+                "frequency",
+                "seasonal_adjustment",
+                "start_date",
+                "end_date",
+                "last_updated",
+                "is_active",
+                "created_at",
+                "updated_at",
+                "first_discovered_at",
+                "last_crawled_at",
+                "first_missing_date",
+                "crawl_status",
+                "crawl_error_message",
+            ],
+            &economic_series,
+            bulk_insert_limit,
+            |es| {
+                format!(
+                "('{}', '{}', '{}', '{}', {}, {}, '{}', {}, {}, {}, {}, {}, '{}', '{}', {}, {}, {}, {}, {})",
+                es.id,
+                es.source_id,
+                escape_sql_string(&es.external_id),
+                escape_sql_string(&es.title),
+                format_nullable_string(&es.description),
+                format_nullable_string(&es.units),
+                escape_sql_string(&es.frequency),
+                format_nullable_string(&es.seasonal_adjustment),
+                format_nullable_date(&es.start_date),
+                format_nullable_date(&es.end_date),
+                format_nullable_timestamp(&es.last_updated),
+                es.is_active,
+                format_required_timestamp(&es.created_at),
+                format_required_timestamp(&es.updated_at),
+                format_nullable_timestamp(&es.first_discovered_at),
+                format_nullable_timestamp(&es.last_crawled_at),
+                format_nullable_date(&es.first_missing_date),
+                format_nullable_string(&es.crawl_status),
+                format_nullable_string(&es.crawl_error_message)
+            )
+            },
+        );
+        sql.push_str(&economic_series_insert);
+    }
+
+    // Export data points
+    if !data_points.is_empty() {
+        sql.push_str("-- Data Points\n");
+        let data_points_insert = create_bulk_insert(
+            "data_points",
+            &[
+                "id",
+                "series_id",
+                "date",
+                "value",
+                "revision_date",
+                "is_original_release",
+                "created_at",
+                "updated_at",
+            ],
+            &data_points,
+            bulk_insert_limit,
+            |dp| {
+                format!(
+                    "('{}', '{}', '{}', {}, '{}', {}, '{}', '{}')",
+                    dp.id,
+                    dp.series_id,
+                    dp.date,
+                    dp.value
+                        .as_ref()
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "NULL".to_string()),
+                    dp.revision_date,
+                    dp.is_original_release,
+                    format_required_timestamp(&dp.created_at),
+                    format_required_timestamp(&dp.updated_at)
+                )
+            },
+        );
+        sql.push_str(&data_points_insert);
+    }
+
+    // Export crawl attempts
+    if !crawl_attempts.is_empty() {
+        sql.push_str("-- Crawl Attempts\n");
+        let crawl_attempts_insert = create_bulk_insert(
+            "crawl_attempts",
+            &[
+                "id",
+                "series_id",
+                "attempted_at",
+                "completed_at",
+                "crawl_method",
+                "crawl_url",
+                "http_status_code",
+                "data_found",
+                "new_data_points",
+                "latest_data_date",
+                "data_freshness_hours",
+                "success",
+                "error_type",
+                "error_message",
+                "retry_count",
+                "response_time_ms",
+                "data_size_bytes",
+                "rate_limit_remaining",
+                "user_agent",
+                "request_headers",
+                "response_headers",
+                "created_at",
+                "updated_at",
+            ],
+            &crawl_attempts,
+            bulk_insert_limit,
+            |ca| {
+                format!(
+                "('{}', '{}', '{}', {}, '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, '{}', '{}')",
+                ca.id,
+                ca.series_id,
+                ca.attempted_at.to_rfc3339(),
+                format_nullable_timestamp(&ca.completed_at),
+                escape_sql_string(&ca.crawl_method),
+                format_nullable_string(&ca.crawl_url),
+                ca.http_status_code.map(|c| c.to_string()).unwrap_or_else(|| "NULL".to_string()),
+                ca.data_found,
+                ca.new_data_points.map(|n| n.to_string()).unwrap_or_else(|| "NULL".to_string()),
+                ca.latest_data_date.map(|d| format!("'{}'", d)).unwrap_or_else(|| "NULL".to_string()),
+                ca.data_freshness_hours.map(|h| h.to_string()).unwrap_or_else(|| "NULL".to_string()),
+                ca.success,
+                format_nullable_string(&ca.error_type),
+                format_nullable_string(&ca.error_message),
+                ca.retry_count.map(|r| r.to_string()).unwrap_or_else(|| "NULL".to_string()),
+                ca.response_time_ms.map(|r| r.to_string()).unwrap_or_else(|| "NULL".to_string()),
+                ca.data_size_bytes.map(|d| d.to_string()).unwrap_or_else(|| "NULL".to_string()),
+                ca.rate_limit_remaining.map(|r| r.to_string()).unwrap_or_else(|| "NULL".to_string()),
+                format_nullable_string(&ca.user_agent),
+                ca.request_headers.as_ref().map(|h| format!("'{}'", h)).unwrap_or_else(|| "NULL".to_string()),
+                ca.response_headers.as_ref().map(|h| format!("'{}'", h)).unwrap_or_else(|| "NULL".to_string()),
+                ca.created_at.to_rfc3339(),
+                ca.updated_at.to_rfc3339()
+            )
+            },
+        );
+        sql.push_str(&crawl_attempts_insert);
     }
 
     // Write to file
     std::fs::write(&output_file, sql)?;
 
     info!(
-        "Exported {} series metadata entries to {}",
+        "Exported catalog data to {}: {} data sources, {} series metadata, {} economic series, {} data points, {} crawl attempts",
+        output_file,
+        data_sources.len(),
         series_metadata.len(),
-        output_file
+        economic_series.len(),
+        data_points.len(),
+        crawl_attempts.len()
     );
 
     Ok(())
