@@ -132,7 +132,7 @@ async fn test_crawler_with_database() -> AppResult<()> {
 
     // Test that we can find the data source by name
     let found_source = DataSource::find_by_name(pool, "Test Data Source").await?;
-    assert_eq!(found_source.id, data_source.id);
+    assert_eq!(found_source.unwrap().id, data_source.id);
 
     // Test that we can find the series metadata
     let found_metadata =

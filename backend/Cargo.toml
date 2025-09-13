@@ -101,6 +101,10 @@ path = "src/main.rs"
 name = "crawler"
 path = "src/bin/crawler.rs"
 
+[[bin]]
+name = "catalog_crawler"
+path = "src/bin/catalog_crawler.rs"
+
 [dev-dependencies]
 # Testing
 tokio-test = "0.4"
