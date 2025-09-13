@@ -310,13 +310,13 @@ impl EnhancedCrawlerScheduler {
         let completed_today = self
             .completed_jobs
             .values()
-            .filter(|r| r.end_time.map_or(false, |t| t >= today_start))
+            .filter(|r| r.end_time.is_some_and(|t| t >= today_start))
             .count();
 
         let failed_today = self
             .failed_jobs
             .values()
-            .filter(|r| r.end_time.map_or(false, |t| t >= today_start))
+            .filter(|r| r.end_time.is_some_and(|t| t >= today_start))
             .count();
 
         let total_today = completed_today + failed_today;

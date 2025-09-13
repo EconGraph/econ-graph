@@ -355,9 +355,7 @@ fn calculate_performance_score(duration: std::time::Duration, successful_searche
     let time_penalty = duration.as_millis() as f64 / 1000.0; // Penalty for slow execution
     let success_bonus = successful_searches as f64 * 2.0; // Bonus for successful operations
 
-    (base_score + success_bonus - time_penalty)
-        .max(0.0)
-        .min(100.0)
+    (base_score + success_bonus - time_penalty).clamp(0.0, 100.0)
 }
 
 /// Comprehensive test report structure
