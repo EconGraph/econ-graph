@@ -1125,6 +1125,18 @@ jobs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
 
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-audit-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+
     - name: Run Rust security audit
       run: cargo audit
       working-directory: backend
@@ -1235,6 +1247,17 @@ jobs:
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Install cargo-deny
+      run: cargo install cargo-deny
 
     - name: Install license-checker
       run: npm install -g license-checker
