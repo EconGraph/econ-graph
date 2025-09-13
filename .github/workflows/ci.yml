@@ -135,7 +135,7 @@ jobs:
     name: Backend Smoke Tests (Fast)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [backend-smoke-tests]
+    needs: [backend-build-cache]
 
     steps:
     - name: Checkout code
@@ -964,7 +964,7 @@ jobs:
     name: Backend Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    needs: [backend-smoke-tests, backend-models-basic-tests, backend-models-advanced-tests, backend-crawler-unit-tests, backend-crawler-integration-tests, backend-queue-basic-tests, backend-queue-advanced-tests, backend-global-analysis-basic-tests, backend-global-analysis-advanced-tests, backend-series-discovery-basic-tests, backend-series-discovery-integration-tests, backend-auth-integration-tests, backend-collaboration-integration-tests, backend-remaining-service-tests]
+    needs: [backend-models-basic-tests, backend-models-advanced-tests, backend-crawler-unit-tests, backend-crawler-integration-tests, backend-queue-basic-tests, backend-queue-advanced-tests, backend-global-analysis-basic-tests, backend-global-analysis-advanced-tests, backend-series-discovery-basic-tests, backend-series-discovery-integration-tests, backend-auth-integration-tests, backend-collaboration-integration-tests, backend-remaining-service-tests]
     if: github.ref == 'refs/heads/main' || github.event.inputs.branch == 'main' || github.event.inputs.branch == ''
 
     services:
