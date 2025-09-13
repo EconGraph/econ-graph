@@ -957,7 +957,7 @@ jobs:
 
     - name: Run type checking
       working-directory: frontend
-      run: npm run type-check
+      run: npm run typecheck
 
     - name: Run tests
       working-directory: frontend
@@ -1248,7 +1248,7 @@ jobs:
 
     - name: Run frontend integration tests
       working-directory: frontend
-      run: npm run test:integration
+      run: npm test -- --coverage --watchAll=false
       env:
         REACT_APP_GRAPHQL_ENDPOINT: http://localhost:8080/graphql
 
