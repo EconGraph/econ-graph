@@ -1,0 +1,24 @@
+This document is a comprehensive list of AI developer expectations, bsed on mistakes I have noticed, that all AI agents should have in their context while working on this project.  It is inspired by Cursor's memory feature, but at some point it is good for it to be static, so it can be shared across projects.
+
+
+* When starting a new task, you should always create a new branch off of main for work related to that task.  You should do it by running:
+```
+git fetch
+git branch -b your_agent_name/descriptive_branch_name_for_your_task origin/main
+```
+This avoids multiple agents checking out main from different git worktrees at the same time.
+* Please make sure to not use interactive merge, or other interactive git commands.  You just hang and your human developer has to rescue you by typing `:wq`.  If you're working overnight, that's hours of work lost.
+* Always write lots of tests, and make sure that every feature you write is covered.  This means you can iterate against them and fix them until it works.
+* Never just delete tests out of frustration, unless you are knowingly changing them to be improved in a way that fully captures the original intent of the tests.
+* If you are struggling with a more comprehensive test, write smaller more targeted tests to test your hypotheses before making changes, and please do small proof of concepts rather than trying to iterate on the whole program.  Write a utility that you suspect captures the essence of the bug, test that, and see if your proposed feature fixes it.
+* Your commit messages should have a clear, succinct first line that summarizes the nature of your change.  Then, follow it by a detailed description of what you did and why.  Ideally, prefix it with `chore:`, `feature:`, `fix:`, etc.  Basically you should follow the guidelines of [Conversational Commits](https://www.conventionalcommits.org/en/v1.0.0/).
+* Similar guidelines for titles and descriptions of github PRs.  The title should summarize, the first line of the description should summarize only slightly more, and the body should go into detail.  As you update commits, feel free to change to body - but it shouldn't be a work log, it should describe the problem you're solving and what your solution encompasses, and any big details other developers really should know.
+* You've been given access to the `gh` commandline tool.  I shouldn't have to constantly remind you of that.
+* Your human overseer prefers the socratic method when talking about potential solutions.  If I question you, I want to hear your reasoning, or for you to convince me what you're doing is not a bug with citations to documentations of the library you're using - I don't want you to just change it.
+* Do not delete existing features of the codebase just because you're frustrated at integrating them with yours.  You have to make them work together.
+* If you are tagging or giving version numbers, they can only move forwards, not backwards.  And you should realistically use [Semantic Versioning](https://semver.org/) where possible.  But all version numbers begin with a 0 major number until your human overseer has decided to call something 1.0.0, since before 1.0.0 rapid development is occuring and there is no sense in constantly incrementing major version numbers into the 100s when you are rapidly experimenting.
+* You should go on long loops of making more tests, iterating on them, fixing the code, if stuck making smaller code changes and more focused tests to test core hypotheses, and continuing to iterate until your task is accomplished.  If you are truly stuck in a loop and you are unable to discover new ideas, then stop as you are flailing.  But preferably, you really try harder rather than stopping for user input.  Ideally you should be able to work independently and productively for hours at a time.
+* If your attempt to commit causes pre-commit hook failures, *actually fix them*, do not under any circumstances just run `git commit --no-verify` or `git push --no-verify` unless your human has actually told you to.
+* If you notice your chosen port isn't working (e.g. for a dockerized postgres) please choose a random port, don't just keep incrementing it by one.  And by no means try to kill whatever is already on the port you want.  Just pick a different port, and don't hardcode it, allow it to easy be changed by environment variable so you can easily change port numbers on the fly.
+* If you modify a database schema, don't forget to run the schema integration test to avoid hard to debug Diesel ORM issues
+* Any documentation-only commits should be tagged with "[no ci]" somewhere in the title
