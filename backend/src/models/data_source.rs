@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
+use diesel_async::RunQueryDsl;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
@@ -408,19 +409,32 @@ impl DataSource {
     pub async fn find_by_name(
         pool: &crate::database::DatabasePool,
         name: &str,
-    ) -> crate::error::AppResult<Self> {
+    ) -> crate::error::AppResult<Option<Self>> {
         use crate::schema::data_sources::dsl;
 
         let mut conn = pool.get().await?;
         let name = name.to_string();
 
-        let source = diesel_async::RunQueryDsl::first(
-            dsl::data_sources.filter(dsl::name.eq(name)),
-            &mut conn,
-        )
-        .await?;
+        let source = dsl::data_sources
+            .filter(dsl::name.eq(name))
+            .first::<Self>(&mut conn)
+            .await
+            .optional()?;
 
         Ok(source)
+    }
+
+    /// Find all data sources
+    pub async fn find_all(
+        pool: &crate::database::DatabasePool,
+    ) -> crate::error::AppResult<Vec<Self>> {
+        use crate::schema::data_sources::dsl;
+
+        let mut conn = pool.get().await?;
+
+        let sources = diesel_async::RunQueryDsl::load(dsl::data_sources, &mut conn).await?;
+
+        Ok(sources)
     }
 
     /// Create a new data source
@@ -451,11 +465,12 @@ impl DataSource {
     ) -> crate::error::AppResult<Self> {
         // Try to find existing source first
         match Self::find_by_name(pool, &new_source.name).await {
-            Ok(existing) => Ok(existing),
-            Err(_) => {
+            Ok(Some(existing)) => Ok(existing),
+            Ok(None) => {
                 // Source doesn't exist, create it
                 Self::create(pool, new_source).await
             }
+            Err(e) => Err(e),
         }
     }
 }

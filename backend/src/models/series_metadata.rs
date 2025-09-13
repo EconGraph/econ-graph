@@ -235,6 +235,17 @@ impl SeriesMetadata {
 
         Ok(metadata)
     }
+
+    /// Find all series metadata
+    pub async fn find_all(pool: &DatabasePool) -> AppResult<Vec<Self>> {
+        use crate::schema::series_metadata::dsl;
+
+        let mut conn = pool.get().await?;
+
+        let metadata = diesel_async::RunQueryDsl::load(dsl::series_metadata, &mut conn).await?;
+
+        Ok(metadata)
+    }
 }
 
 #[cfg(test)]
