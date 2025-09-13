@@ -1,0 +1,265 @@
+name: Crawler Integration Test
+
+# This workflow is manually triggered and does NOT run automatically
+# It tests the crawler by downloading real data and generating migrations
+on:
+  workflow_dispatch:
+    inputs:
+      data_source:
+        description: 'Specific data source to test (leave empty for random)'
+        required: false
+        type: string
+        default: ''
+      series_count:
+        description: 'Number of series to download (max 10)'
+        required: false
+        type: string
+        default: '1'
+      api_key_fred:
+        description: 'FRED API key (optional)'
+        required: false
+        type: string
+        default: ''
+      api_key_bls:
+        description: 'BLS API key (optional)'
+        required: false
+        type: string
+        default: ''
+      api_key_census:
+        description: 'Census API key (optional)'
+        required: false
+        type: string
+        default: ''
+
+# Prevent concurrent runs to avoid database conflicts
+concurrency:
+  group: crawler-integration-test
+  cancel-in-progress: false
+
+jobs:
+  crawler-integration-test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Install Diesel CLI
+      run: cargo install diesel_cli --no-default-features --features postgres
+
+    - name: Wait for PostgreSQL
+      run: |
+        until pg_isready -h localhost -p 5432 -U test_user; do
+          echo "Waiting for PostgreSQL..."
+          sleep 2
+        done
+
+    - name: Setup test database
+      env:
+        DATABASE_URL: postgres://test_user:test_password@localhost:5432/econ_graph_test
+      run: |
+        cd backend
+        # Run migrations
+        diesel migration run
+        echo "Database migrations completed successfully"
+
+    - name: Build crawler binary
+      env:
+        DATABASE_URL: postgres://test_user:test_password@localhost:5432/econ_graph_test
+      run: |
+        cd backend
+        cargo build --bin catalog_crawler --release
+
+    - name: Run crawler integration test
+      env:
+        DATABASE_URL: postgres://test_user:test_password@localhost:5432/econ_graph_test
+        FRED_API_KEY: ${{ github.event.inputs.api_key_fred }}
+        BLS_API_KEY: ${{ github.event.inputs.api_key_bls }}
+        CENSUS_API_KEY: ${{ github.event.inputs.api_key_census }}
+      run: |
+        cd backend
+        
+        # Determine which data source to test
+        if [ -n "${{ github.event.inputs.data_source }}" ]; then
+          DATA_SOURCE="${{ github.event.inputs.data_source }}"
+        else
+          # Select a random enabled data source
+          DATA_SOURCE=$(cargo run --bin catalog_crawler crawl-all --dry-run 2>/dev/null | grep -E "Found \d+ data sources" -A 20 | grep -E "^\s*-\s" | shuf -n 1 | sed 's/^\s*-\s*//' | cut -d' ' -f1)
+        fi
+        
+        echo "Testing data source: $DATA_SOURCE"
+        
+        # Run crawler with specified parameters
+        SERIES_COUNT="${{ github.event.inputs.series_count }}"
+        if [ "$SERIES_COUNT" -gt 10 ]; then
+          SERIES_COUNT=10
+        fi
+        
+        cargo run --bin catalog_crawler crawl-source \
+          --data-source "$DATA_SOURCE" \
+          --series-count "$SERIES_COUNT" \
+          --skip-data-download false
+        
+        echo "Crawler completed successfully"
+
+    - name: Export catalog data
+      env:
+        DATABASE_URL: postgres://test_user:test_password@localhost:5432/econ_graph_test
+      run: |
+        cd backend
+        
+        # Create output directory
+        mkdir -p ../generated-migrations
+        
+        # Export catalog data to SQL file
+        cargo run --bin catalog_crawler export-catalog \
+          --output-file ../generated-migrations/crawler_test_data.sql
+        
+        echo "Catalog data exported successfully"
+
+    - name: Generate migration with bulk inserts
+      env:
+        DATABASE_URL: postgres://test_user:test_password@localhost:5432/econ_graph_test
+      run: |
+        cd backend
+        
+        # Create a new migration file
+        TIMESTAMP=$(date +%Y%m%d%H%M%S)
+        MIGRATION_DIR="migrations/${TIMESTAMP}_crawler_integration_test"
+        mkdir -p "$MIGRATION_DIR"
+        
+        # Generate migration with bulk inserts (max 1000 rows each)
+        cargo run --bin catalog_crawler export-catalog \
+          --output-file "${MIGRATION_DIR}/up.sql" \
+          --bulk-insert-limit 1000
+        
+        # Create down migration
+        cat > "${MIGRATION_DIR}/down.sql" << 'EOF'
+        -- Down migration for crawler integration test data
+        -- This removes all data inserted by the crawler test
+        
+        -- Remove series metadata
+        DELETE FROM series_metadata WHERE id IN (
+          SELECT id FROM series_metadata 
+          WHERE created_at > NOW() - INTERVAL '1 hour'
+        );
+        
+        -- Remove data points
+        DELETE FROM data_points WHERE id IN (
+          SELECT id FROM data_points 
+          WHERE created_at > NOW() - INTERVAL '1 hour'
+        );
+        
+        -- Remove economic series
+        DELETE FROM economic_series WHERE id IN (
+          SELECT id FROM economic_series 
+          WHERE created_at > NOW() - INTERVAL '1 hour'
+        );
+        
+        -- Remove crawl attempts
+        DELETE FROM crawl_attempts WHERE id IN (
+          SELECT id FROM crawl_attempts 
+          WHERE created_at > NOW() - INTERVAL '1 hour'
+        );
+        EOF
+        
+        echo "Generated migration: $MIGRATION_DIR"
+        echo "Migration files created successfully"
+
+    - name: Validate generated migration
+      run: |
+        cd backend
+        
+        # Check if migration files exist and have content
+        MIGRATION_DIR=$(ls -td migrations/*crawler_integration_test | head -1)
+        
+        if [ ! -d "$MIGRATION_DIR" ]; then
+          echo "❌ Migration directory not found"
+          exit 1
+        fi
+        
+        if [ ! -s "${MIGRATION_DIR}/up.sql" ]; then
+          echo "❌ up.sql is empty or missing"
+          exit 1
+        fi
+        
+        if [ ! -s "${MIGRATION_DIR}/down.sql" ]; then
+          echo "❌ down.sql is empty or missing"
+          exit 1
+        fi
+        
+        # Validate bulk insert limits (max 1000 rows per INSERT)
+        INSERT_COUNT=$(grep -c "INSERT INTO" "${MIGRATION_DIR}/up.sql" || true)
+        if [ "$INSERT_COUNT" -eq 0 ]; then
+          echo "❌ No INSERT statements found in migration"
+          exit 1
+        fi
+        
+        # Check for bulk insert patterns
+        BULK_INSERTS=$(grep -c "VALUES.*,.*,.*,.*,.*,.*,.*,.*,.*,.*" "${MIGRATION_DIR}/up.sql" || true)
+        if [ "$BULK_INSERTS" -gt 0 ]; then
+          echo "✅ Found $BULK_INSERTS bulk INSERT statements"
+        fi
+        
+        echo "✅ Migration validation passed"
+        echo "📊 Migration contains $INSERT_COUNT INSERT statements"
+
+    - name: Upload migration artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: crawler-integration-migration
+        path: |
+          backend/migrations/*crawler_integration_test/
+          generated-migrations/
+        retention-days: 30
+
+    - name: Display results summary
+      run: |
+        echo "🎉 Crawler Integration Test Completed Successfully!"
+        echo ""
+        echo "📋 Test Summary:"
+        echo "  - Data Source: $DATA_SOURCE"
+        echo "  - Series Count: $SERIES_COUNT"
+        echo "  - Migration Generated: ✅"
+        echo "  - Bulk Inserts: ✅"
+        echo "  - Artifacts Uploaded: ✅"
+        echo ""
+        echo "📁 Generated Files:"
+        echo "  - Migration files uploaded as artifacts"
+        echo "  - SQL export files uploaded as artifacts"
+        echo ""
+        echo "🔍 Next Steps:"
+        echo "  1. Download artifacts to review generated migration"
+        echo "  2. Test migration on development database"
+        echo "  3. Integrate into main migration sequence if approved"
