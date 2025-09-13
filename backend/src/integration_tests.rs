@@ -32,7 +32,6 @@ mod tests {
             description: Some("Integration test data source".to_string()),
             base_url: "https://test.example.com/api".to_string(),
             api_key_required: true,
-            api_key_name: Some("TEST_API_KEY".to_string()),
             rate_limit_per_minute: 100,
             is_visible: true,
             is_enabled: true,

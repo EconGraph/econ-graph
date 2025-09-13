@@ -201,8 +201,6 @@ diesel::table! {
         crawl_error_message -> Nullable<Text>,
         #[max_length = 500]
         api_documentation_url -> Nullable<Varchar>,
-        #[max_length = 255]
-        api_key_name -> Nullable<Varchar>,
     }
 }
 
