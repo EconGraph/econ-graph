@@ -115,15 +115,29 @@ jobs:
 
     - name: Install shared tools
       run: |
-        if ! command -v diesel &> /dev/null; then
-          $HOME/.cargo/bin/cargo install diesel_cli --no-default-features --features postgres
-        fi
-        if ! command -v cargo-audit &> /dev/null; then
-          $HOME/.cargo/bin/cargo install cargo-audit
-        fi
-        if ! command -v cargo-deny &> /dev/null; then
-          $HOME/.cargo/bin/cargo install cargo-deny
-        fi
+        echo "Installing shared tools..."
+        echo "Current PATH: $PATH"
+        echo "CARGO_HOME: $CARGO_HOME"
+        echo "HOME: $HOME"
+
+        # Install diesel_cli
+        echo "Installing diesel_cli..."
+        $HOME/.cargo/bin/cargo install diesel_cli --no-default-features --features postgres --verbose
+
+        # Install cargo-audit
+        echo "Installing cargo-audit..."
+        $HOME/.cargo/bin/cargo install cargo-audit --verbose
+
+        # Install cargo-deny
+        echo "Installing cargo-deny..."
+        $HOME/.cargo/bin/cargo install cargo-deny --verbose
+
+        # Verify installations
+        echo "Verifying installations..."
+        ls -la $HOME/.cargo/bin/
+        $HOME/.cargo/bin/diesel --version || echo "diesel not found"
+        $HOME/.cargo/bin/cargo-audit --version || echo "cargo-audit not found"
+        $HOME/.cargo/bin/cargo-deny --version || echo "cargo-deny not found"
       working-directory: backend
 
     - name: Build backend
