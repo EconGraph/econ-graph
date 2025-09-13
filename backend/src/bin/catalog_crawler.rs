@@ -4,13 +4,13 @@
 //! and downloads a small number of series from each source for initial data population.
 
 use clap::{Parser, Subcommand};
-use econ_graph_backend::config::ApiKeyConfig;
 use econ_graph_backend::database::{create_pool, DatabasePool};
 use econ_graph_backend::models::data_source::DataSource;
 use econ_graph_backend::services::crawler::catalog_downloader::CatalogDownloader;
 use econ_graph_backend::services::crawler::series_downloader::SeriesDownloader;
 use econ_graph_backend::services::series_discovery::SeriesDiscoveryService;
 use reqwest::Client;
+use std::collections::HashMap;
 use tracing::{error, info, warn};
 
 /// Catalog crawler for populating data sources with real catalog data
@@ -34,6 +34,10 @@ enum Commands {
         #[arg(long)]
         database_url: String,
 
+        /// API keys for data sources (format: SOURCE_NAME=API_KEY)
+        #[arg(long, num_args = 0..)]
+        api_key: Vec<String>,
+
         /// Dry run - don't actually download data
         #[arg(long)]
         dry_run: bool,
@@ -55,6 +59,10 @@ enum Commands {
         /// Database URL
         #[arg(long)]
         database_url: String,
+
+        /// API key for the data source
+        #[arg(long)]
+        api_key: Option<String>,
 
         /// Dry run - don't actually download data
         #[arg(long)]
@@ -92,19 +100,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::CrawlAll {
             series_count,
             database_url,
+            api_key,
             dry_run,
             skip_data_download,
-        } => crawl_all_sources(database_url, series_count, dry_run, skip_data_download).await,
+        } => {
+            crawl_all_sources(
+                database_url,
+                api_key,
+                series_count,
+                dry_run,
+                skip_data_download,
+            )
+            .await
+        }
         Commands::CrawlSource {
             source_name,
             series_count,
             database_url,
+            api_key,
             dry_run,
             skip_data_download,
         } => {
             crawl_single_source(
                 source_name,
                 database_url,
+                api_key,
                 series_count,
                 dry_run,
                 skip_data_download,
@@ -122,18 +142,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Crawl all available data sources
 async fn crawl_all_sources(
     database_url: String,
+    api_keys: Vec<String>,
     series_count: usize,
     dry_run: bool,
     skip_data_download: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting catalog crawl for all data sources");
 
-    // Load API keys from environment variables
-    let api_keys = ApiKeyConfig::from_env();
-    info!(
-        "Loaded API keys for sources: {:?}",
-        api_keys.get_configured_sources()
-    );
+    // Parse API keys
+    let api_key_map = parse_api_keys(api_keys);
 
     // Create database pool
     let pool = create_pool(&database_url).await?;
@@ -142,7 +159,7 @@ async fn crawl_all_sources(
     let client = Client::new();
 
     // Create services
-    let discovery_service = SeriesDiscoveryService::new();
+    let discovery_service = SeriesDiscoveryService::new(None, None, None, None);
     let catalog_downloader = CatalogDownloader::new(client.clone());
     let series_downloader = SeriesDownloader::new(client);
 
@@ -161,14 +178,8 @@ async fn crawl_all_sources(
 
         info!("Crawling data source: {}", data_source.name);
 
-        // Check if we have the required API key
-        if data_source.api_key_required && !api_keys.has_required_key(&data_source.name, true) {
-            warn!(
-                "Skipping {} - API key required but not configured",
-                data_source.name
-            );
-            continue;
-        }
+        // Get API key for this source
+        let api_key = api_key_map.get(&data_source.name.to_uppercase());
 
         match crawl_data_source(
             &data_source,
@@ -176,6 +187,7 @@ async fn crawl_all_sources(
             &discovery_service,
             &catalog_downloader,
             &series_downloader,
+            api_key.map(|k| k.as_str()),
             series_count,
             dry_run,
             skip_data_download,
@@ -212,14 +224,12 @@ async fn crawl_all_sources(
 async fn crawl_single_source(
     source_name: String,
     database_url: String,
+    api_key: Option<String>,
     series_count: usize,
     dry_run: bool,
     skip_data_download: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting catalog crawl for data source: {}", source_name);
-
-    // Load API keys from environment variables
-    let api_keys = ApiKeyConfig::from_env();
 
     // Create database pool
     let pool = create_pool(&database_url).await?;
@@ -233,20 +243,11 @@ async fn crawl_single_source(
         return Err(format!("Data source '{}' is disabled", source_name).into());
     }
 
-    // Check if we have the required API key
-    if data_source.api_key_required && !api_keys.has_required_key(&data_source.name, true) {
-        return Err(format!(
-            "Data source '{}' requires API key but none configured",
-            source_name
-        )
-        .into());
-    }
-
     // Create HTTP client
     let client = Client::new();
 
     // Create services
-    let discovery_service = SeriesDiscoveryService::new();
+    let discovery_service = SeriesDiscoveryService::new(api_key.clone(), None, None, None);
     let catalog_downloader = CatalogDownloader::new(client.clone());
     let series_downloader = SeriesDownloader::new(client);
 
@@ -257,6 +258,7 @@ async fn crawl_single_source(
         &discovery_service,
         &catalog_downloader,
         &series_downloader,
+        api_key.as_deref(),
         series_count,
         dry_run,
         skip_data_download,
@@ -278,6 +280,7 @@ async fn crawl_data_source(
     discovery_service: &SeriesDiscoveryService,
     catalog_downloader: &CatalogDownloader,
     series_downloader: &SeriesDownloader,
+    api_key: Option<&str>,
     series_count: usize,
     dry_run: bool,
     skip_data_download: bool,
@@ -360,6 +363,19 @@ async fn crawl_data_source(
     }
 
     Ok((discovered_series.len(), downloaded_count))
+}
+
+/// Parse API keys from command line arguments
+fn parse_api_keys(api_keys: Vec<String>) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+
+    for key_arg in api_keys {
+        if let Some((key, value)) = key_arg.split_once('=') {
+            map.insert(key.to_uppercase(), value.to_string());
+        }
+    }
+
+    map
 }
 
 /// Export catalog data to SQL migration file

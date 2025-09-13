@@ -21,7 +21,6 @@ pub mod unstats;
 pub mod world_bank;
 pub mod wto;
 
-use crate::config::ApiKeyConfig;
 use crate::database::DatabasePool;
 use crate::error::{AppError, AppResult};
 use crate::models::{DataSource, EconomicSeries, NewEconomicSeries};
@@ -31,54 +30,46 @@ use uuid::Uuid;
 /// Series discovery service for automated cataloging
 pub struct SeriesDiscoveryService {
     client: Client,
-    api_keys: ApiKeyConfig,
-}
-
-impl Default for SeriesDiscoveryService {
-    fn default() -> Self {
-        Self::new()
-    }
+    fred_api_key: Option<String>,
+    bls_api_key: Option<String>,
+    census_api_key: Option<String>,
+    bea_api_key: Option<String>,
 }
 
 impl SeriesDiscoveryService {
-    /// Create a new series discovery service with API keys from environment variables
-    pub fn new() -> Self {
+    pub fn new(
+        fred_api_key: Option<String>,
+        bls_api_key: Option<String>,
+        census_api_key: Option<String>,
+        bea_api_key: Option<String>,
+    ) -> Self {
         Self {
             client: Client::new(),
-            api_keys: ApiKeyConfig::from_env(),
-        }
-    }
-
-    /// Create a new series discovery service with custom API key configuration
-    pub fn with_api_keys(api_keys: ApiKeyConfig) -> Self {
-        Self {
-            client: Client::new(),
-            api_keys,
+            fred_api_key,
+            bls_api_key,
+            census_api_key,
+            bea_api_key,
         }
     }
 
     /// Discover all FRED series by searching through categories
     pub async fn discover_fred_series(&self, pool: &DatabasePool) -> AppResult<Vec<String>> {
-        let api_key = self.api_keys.get_key("FRED").cloned();
-        fred::discover_fred_series(&self.client, &api_key, pool).await
+        fred::discover_fred_series(&self.client, &self.fred_api_key, pool).await
     }
 
     /// Discover BLS series using the BLS API v2 surveys endpoint
     pub async fn discover_bls_series(&self, pool: &DatabasePool) -> AppResult<Vec<String>> {
-        let api_key = self.api_keys.get_key("BLS").cloned();
-        bls::discover_bls_series(&self.client, &api_key, pool).await
+        bls::discover_bls_series(&self.client, &self.bls_api_key, pool).await
     }
 
     /// Discover Census series using the Census Data API
     pub async fn discover_census_series(&self, pool: &DatabasePool) -> AppResult<Vec<String>> {
-        let api_key = self.api_keys.get_key("CENSUS").cloned();
-        census::discover_census_series(&self.client, &api_key, pool).await
+        census::discover_census_series(&self.client, &self.census_api_key, pool).await
     }
 
     /// Discover BEA series using the BEA Data API
     pub async fn discover_bea_series(&self, pool: &DatabasePool) -> AppResult<Vec<String>> {
-        let api_key = self.api_keys.get_key("BEA").cloned();
-        bea::discover_bea_series(&self.client, &api_key, pool).await
+        bea::discover_bea_series(&self.client, &self.bea_api_key, pool).await
     }
 
     /// Discover World Bank series using the World Bank Indicators API
@@ -148,8 +139,7 @@ impl SeriesDiscoveryService {
 
     /// Search FRED series by query
     pub async fn search_fred_series(&self, query: &str) -> AppResult<Vec<fred::FredSeriesInfo>> {
-        let api_key = self.api_keys.get_key("FRED").cloned();
-        fred::search_fred_series(&self.client, &api_key, query).await
+        fred::search_fred_series(&self.client, &self.fred_api_key, query).await
     }
 
     /// Discover all series from all sources
