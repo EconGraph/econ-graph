@@ -147,6 +147,20 @@ pub enum CrawlErrorType {
 }
 
 impl CrawlAttempt {
+    /// Find all crawl attempts
+    pub async fn find_all(pool: &DatabasePool) -> AppResult<Vec<Self>> {
+        let mut conn = pool
+            .get()
+            .await
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+
+        let attempts = crawl_attempts::table
+            .load::<CrawlAttempt>(&mut conn)
+            .await?;
+
+        Ok(attempts)
+    }
+
     /// Create a new crawl attempt
     pub async fn create(pool: &DatabasePool, new_attempt: &NewCrawlAttempt) -> AppResult<Self> {
         let mut conn = pool

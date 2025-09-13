@@ -674,6 +674,22 @@ impl Default for UpdateDataPoint {
 }
 
 impl DataPoint {
+    /// Find all data points
+    pub async fn find_all(
+        pool: &crate::database::DatabasePool,
+    ) -> crate::error::AppResult<Vec<Self>> {
+        use crate::schema::data_points::dsl;
+        use diesel_async::RunQueryDsl;
+
+        let mut conn = pool.get().await?;
+
+        let data_points =
+            diesel_async::RunQueryDsl::load(dsl::data_points.select(Self::as_select()), &mut conn)
+                .await?;
+
+        Ok(data_points)
+    }
+
     /// Create a new data point
     pub async fn create(
         pool: &crate::database::DatabasePool,
