@@ -1256,7 +1256,7 @@ jobs:
     name: Comprehensive End-to-End Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [backend-smoke-tests]
+    needs: [backend-smoke-tests, frontend-integration-tests]
 
     services:
       postgres:
