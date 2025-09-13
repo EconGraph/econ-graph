@@ -85,40 +85,6 @@ jobs:
           k8s/monitoring/grafana-*.yaml
         retention-days: 30
 
-  debug-diesel-install:
-    name: Debug Diesel Installation
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    if: github.event_name == 'workflow_dispatch'
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.branch || github.ref }}
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.89.0
-
-    - name: Install diesel_cli
-      run: |
-        echo "Installing diesel_cli..."
-        $HOME/.cargo/bin/cargo install diesel_cli --no-default-features --features postgres --verbose
-        echo "Installation complete"
-
-    - name: Verify diesel installation
-      run: |
-        echo "Checking diesel installation..."
-        echo "PATH: $PATH"
-        echo "HOME: $HOME"
-        echo "CARGO_HOME: $CARGO_HOME"
-        echo "Contents of ~/.cargo/bin/:"
-        ls -la $HOME/.cargo/bin/ || echo "Directory not found"
-        echo "Looking for diesel executable:"
-        find $HOME/.cargo -name "diesel" -type f 2>/dev/null || echo "diesel not found"
-        echo "Testing diesel command:"
-        $HOME/.cargo/bin/diesel --version || echo "diesel command failed"
-
   backend-build-cache:
     name: Backend Build & Cache
     runs-on: ubuntu-latest
