@@ -18,8 +18,8 @@ env:
   DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
 jobs:
-  backend-smoke-tests:
-    name: Backend Smoke Tests
+  backend-build-cache:
+    name: Backend Build Cache
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -40,38 +40,103 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
+          ~/.cargo/bin
           backend/target
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
-          ${{ runner.os }}-cargo-registry-
+          ${{ runner.os }}-shared-cargo-
 
-    - name: Install PostgreSQL
+    - name: Install shared tools
       run: |
-        sudo apt-get update
-        sudo apt-get install -y postgresql postgresql-contrib
+        echo "Installing shared tools..."
+        echo "Current PATH: $PATH"
+        echo "CARGO_HOME: $CARGO_HOME"
+        echo "HOME: $HOME"
 
-    - name: Start PostgreSQL
-      run: |
-        sudo systemctl start postgresql
-        sudo -u postgres psql -c "CREATE USER postgres WITH PASSWORD 'password';"
-        sudo -u postgres psql -c "CREATE DATABASE econ_graph_test OWNER postgres;"
-        sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE econ_graph_test TO postgres;"
+        # Set up cargo bin directory and PATH
+        export CARGO_BIN_DIR="$HOME/.cargo/bin"
+        export PATH="$CARGO_BIN_DIR:$PATH"
 
-    - name: Run database migrations
+        # Install diesel_cli
+        echo "Installing diesel_cli..."
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+
+        # Install cargo-audit
+        echo "Installing cargo-audit..."
+        cargo install cargo-audit --verbose --force
+
+        # Install cargo-deny
+        echo "Installing cargo-deny..."
+        cargo install cargo-deny --verbose --force
+
+        # Verify installations
+        echo "Verifying installations..."
+        ls -la "$CARGO_BIN_DIR/"
+        diesel --version || echo "diesel not found"
+        cargo-audit --version || echo "cargo-audit not found"
+        cargo-deny --version || echo "cargo-deny not found"
       working-directory: backend
+
+    - name: Build backend
       run: |
-        cargo install diesel_cli --no-default-features --features postgres
-        diesel migration run
-
-    - name: Run smoke tests
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo build --verbose
       working-directory: backend
-      run: cargo test --lib smoke
 
-  backend-database-tests:
-    name: Backend Database Tests
+  backend-smoke-tests:
+    name: Backend Smoke Tests (Fast)
     runs-on: ubuntu-latest
-    needs: [backend-smoke-tests]
-    timeout-minutes: 15
+    timeout-minutes: 5
+    needs: [backend-build-cache]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Check Rust formatting
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo fmt --all -- --check
+      working-directory: backend
+
+    - name: Run Clippy (linting)
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo clippy --all-targets --all-features -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
+      working-directory: backend
+
+    - name: Run fast unit tests (no database)
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --lib -- --test-threads=4 --nocapture config auth::services metrics
+      working-directory: backend
+      env:
+        RUST_LOG: warn
+
+  backend-models-basic-tests:
+    name: Backend Models Basic Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    needs: [backend-build-cache]
 
     services:
       postgres:
@@ -104,26 +169,50 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
+          ~/.cargo/bin
           backend/target
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
-          ${{ runner.os }}-cargo-registry-
+          ${{ runner.os }}-shared-cargo-
 
-    - name: Run database migrations
-      working-directory: backend
+    - name: Debug cargo bin directory after cache restoration
       run: |
-        cargo install diesel_cli --no-default-features --features postgres
+        echo "=== DEBUGGING CARGO BIN DIRECTORY ==="
+        echo "HOME: $HOME"
+        echo "PATH: $PATH"
+        echo "CARGO_HOME: $CARGO_HOME"
+        ls -la "$HOME/.cargo/bin/" || echo "cargo bin directory not found"
+        which cargo || echo "cargo not in PATH"
+        which diesel || echo "diesel not in PATH"
+        echo "=== END DEBUGGING ==="
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
         diesel migration run
-
-    - name: Run database tests
       working-directory: backend
-      run: cargo test --lib database
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
-  backend-service-tests:
-    name: Backend Service Tests
+    - name: Run backend models basic tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        echo "=== RUST ENVIRONMENT DEBUGGING ==="
+        rustc --version || echo "rustc command failed"
+        cargo --version || echo "cargo command failed"
+        cc --version || echo "cc command failed"
+        echo "=== END RUST ENVIRONMENT DEBUGGING ==="
+        cargo test --lib -- --test-threads=2 --nocapture models::data_source::tests::simple_tests models::economic_series::tests::simple_tests models::data_point::tests::simple_tests models::crawl_queue::tests::simple_tests models::search::tests::simple_tests
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
+
+  backend-models-advanced-tests:
+    name: Backend Models Advanced Tests
     runs-on: ubuntu-latest
-    needs: [backend-smoke-tests]
-    timeout-minutes: 15
+    timeout-minutes: 12
+    needs: [backend-build-cache]
 
     services:
       postgres:
@@ -137,7 +226,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
         ports:
-          - 5432:5432
+          - 5433:5432
 
     steps:
     - name: Checkout code
@@ -156,20 +245,688 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
+          ~/.cargo/bin
           backend/target
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
-          ${{ runner.os }}-cargo-registry-
+          ${{ runner.os }}-shared-cargo-
 
-    - name: Run database migrations
-      working-directory: backend
+    - name: Setup database
       run: |
-        cargo install diesel_cli --no-default-features --features postgres
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
         diesel migration run
-
-    - name: Run service tests
       working-directory: backend
-      run: cargo test --lib service
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5433/econ_graph_test
+
+    - name: Run backend models advanced tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --lib -- --test-threads=2 --nocapture models::data_source::tests models::economic_series::tests models::data_point::tests models::crawl_queue::tests models::search::tests models::series_metadata::tests
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5433/econ_graph_test
+
+  backend-crawler-unit-tests:
+    name: Backend Crawler Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-build-cache]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5434:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5434/econ_graph_test
+
+    - name: Run backend crawler unit tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --lib -- --test-threads=2 --nocapture services::crawler::tests::test_catalog_downloader_creation services::crawler::tests::test_series_downloader_creation services::crawler::simple_crawler_service::tests services::crawler::enhanced_crawler_scheduler::tests
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5434/econ_graph_test
+
+  backend-crawler-integration-tests:
+    name: Backend Crawler Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-build-cache]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5435:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5435/econ_graph_test
+
+    - name: Run backend crawler integration tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --lib -- --test-threads=2 --nocapture services::crawler::tests::test_crawler_with_database services::crawler::tests::test_file_crawling_with_series_downloader services::crawler::tests::test_file_url_crawling services::crawler::tests::test_file_url_error_handling services::crawler::tests::test_file_url_with_special_characters services::crawler::tests::test_multiple_file_urls
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5435/econ_graph_test
+
+  backend-queue-basic-tests:
+    name: Backend Queue Basic Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-build-cache]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5436:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5436/econ_graph_test
+
+    - name: Run backend queue basic tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --lib -- --test-threads=2 --nocapture services::queue_service::tests::test_get_and_lock_next_item services::queue_service::tests::test_queue_item_locking_and_unlocking services::queue_service::tests::test_queue_status_updates services::queue_service::tests::test_queue_retry_logic services::queue_service::tests::test_queue_skip_locked_functionality
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5436/econ_graph_test
+
+  backend-queue-advanced-tests:
+    name: Backend Queue Advanced Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-build-cache]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5437:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5437/econ_graph_test
+
+    - name: Run backend queue advanced tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --lib -- --test-threads=2 --nocapture services::queue_service::tests::test_queue_concurrent_access services::queue_service::tests::test_queue_statistics_with_processing_time services::queue_service::tests::test_queue_statistics_empty services::queue_service::tests::test_queue_error_handling services::queue_service::tests::test_queue_scheduled_items services::queue_service::tests::test_get_stuck_items services::queue_service::tests::test_unlock_stuck_items services::queue_service::tests::test_mark_item_failed services::queue_service::tests::test_cleanup_old_queue_items
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5437/econ_graph_test
+
+  backend-global-analysis-basic-tests:
+    name: Backend Global Analysis Basic Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-build-cache]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5438:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5438/econ_graph_test
+
+    - name: Run backend global analysis basic tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --lib -- --test-threads=2 --nocapture services::global_analysis_service::tests::test_get_countries_with_economic_data services::global_analysis_service::tests::test_get_global_events_with_impacts services::global_analysis_service::tests::test_get_global_events_with_filters services::global_analysis_service::tests::test_direct_event_query services::global_analysis_service::tests::test_event_insertion_only services::global_analysis_service::tests::test_trade_partners_retrieval
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5438/econ_graph_test
+
+  backend-global-analysis-advanced-tests:
+    name: Backend Global Analysis Advanced Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-build-cache]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5439:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5439/econ_graph_test
+
+    - name: Run backend global analysis advanced tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --lib -- --test-threads=2 --nocapture services::global_analysis_service::tests::test_get_correlation_network services::global_analysis_service::tests::test_calculate_country_correlations services::global_analysis_service::tests::test_calculate_economic_health_score services::global_analysis_service::tests::test_correlation_network_centrality_calculation services::global_analysis_service::tests::test_error_handling_database_connection_failure
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5439/econ_graph_test
+
+  backend-series-discovery-basic-tests:
+    name: Backend Series Discovery Basic Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-build-cache]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5440:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5440/econ_graph_test
+
+    - name: Run backend series discovery basic tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --lib -- --test-threads=2 --nocapture services::series_discovery::boc::tests::test_boc_data_source_creation services::series_discovery::boe::tests::test_boe_data_source_creation services::series_discovery::boj::tests::test_boj_data_source_creation services::series_discovery::ecb::tests::test_ecb_data_source_creation services::series_discovery::fhfa::tests::test_fhfa_data_source_creation services::series_discovery::ilo::tests::test_ilo_data_source_creation services::series_discovery::oecd::tests::test_oecd_data_source_creation services::series_discovery::rba::tests::test_rba_data_source_creation services::series_discovery::snb::tests::test_snb_data_source_creation services::series_discovery::unstats::tests::test_unstats_data_source_creation services::series_discovery::wto::tests::test_wto_data_source_creation
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5440/econ_graph_test
+
+  backend-series-discovery-integration-tests:
+    name: Backend Series Discovery Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-build-cache]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5441:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5441/econ_graph_test
+
+    - name: Run backend series discovery integration tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --lib -- --test-threads=2 --nocapture services::series_discovery::boc::tests::test_discover_series services::series_discovery::boe::tests::test_discover_series services::series_discovery::boj::tests::test_discover_series services::series_discovery::ecb::tests::test_discover_series services::series_discovery::fhfa::tests::test_discover_series services::series_discovery::ilo::tests::test_discover_series services::series_discovery::oecd::tests::test_discover_series services::series_discovery::rba::tests::test_discover_series services::series_discovery::snb::tests::test_discover_series services::series_discovery::unstats::tests::test_discover_series services::series_discovery::wto::tests::test_discover_series
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5441/econ_graph_test
+
+  backend-auth-integration-tests:
+    name: Backend Auth Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-build-cache]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5442:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5442/econ_graph_test
+
+    - name: Run backend auth integration tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --lib -- --test-threads=2 --nocapture auth::integration_tests auth::comprehensive_integration_tests
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5442/econ_graph_test
+
+  backend-collaboration-integration-tests:
+    name: Backend Collaboration Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-build-cache]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5443:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5443/econ_graph_test
+
+    - name: Run backend collaboration integration tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --lib -- --test-threads=2 --nocapture collaboration_integration_tests services::collaboration_service::tests
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5443/econ_graph_test
+
+  backend-remaining-service-tests:
+    name: Backend Remaining Service Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [backend-build-cache]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5444:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5444/econ_graph_test
+
+    - name: Run backend remaining service tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --lib -- --test-threads=2 --nocapture services::search_service services::series_service services::comprehensive_series_catalog::tests services::series_discovery::boc::tests::test_discover_boc_series_integration services::series_discovery::boe::tests::test_discover_boe_series_integration services::series_discovery::boe::tests::test_fetch_boe_data services::series_discovery::boj::tests::test_discover_boj_series_integration services::series_discovery::boj::tests::test_fetch_boj_data services::series_discovery::ecb::tests::test_discover_ecb_series_integration services::series_discovery::ecb::tests::test_fetch_ecb_data services::series_discovery::fhfa::tests::test_fhfa_hpi_data_structure services::series_discovery::ilo::tests::test_discover_ilo_series_integration services::series_discovery::oecd::tests::test_discover_oecd_series_integration services::series_discovery::oecd::tests::test_fetch_oecd_data services::series_discovery::rba::tests::test_discover_rba_series_integration services::series_discovery::rba::tests::test_fetch_rba_data services::series_discovery::snb::tests::test_discover_snb_series_integration services::series_discovery::snb::tests::test_fetch_snb_data services::series_discovery::unstats::tests::test_discover_unstats_series_integration services::series_discovery::unstats::tests::test_fetch_unstats_data services::series_discovery::wto::tests::test_discover_wto_series_integration services::series_discovery::wto::tests::test_fetch_wto_data
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5444/econ_graph_test
 
   frontend-tests:
     name: Frontend Tests
@@ -234,11 +991,15 @@ jobs:
 
     - name: Run Rust formatting check
       working-directory: backend
-      run: cargo fmt -- --check
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo fmt -- --check
 
     - name: Run Rust clippy
       working-directory: backend
-      run: cargo clippy -- -D warnings
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo clippy -- -D warnings
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
