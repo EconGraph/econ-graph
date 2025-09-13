@@ -1,4 +1,4 @@
-name: Instant PATH Test
+name: Quick PATH Test
 
 # Disabled auto-triggering - this is a test workflow
 # on:
@@ -7,7 +7,7 @@ name: Instant PATH Test
 jobs:
   test-path:
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    timeout-minutes: 2
 
     steps:
     - name: Install build tools
@@ -15,16 +15,16 @@ jobs:
         sudo apt-get update && sudo apt-get install -y build-essential
         echo "cc installed: $(which cc)"
 
-    - name: Test PATH expansion issue
+    - name: Test PATH expansion
       run: |
-        echo "=== REPRODUCING THE ISSUE ==="
+        echo "=== TESTING PATH EXPANSION ==="
         echo "HOME: $HOME"
         echo "Original PATH: $PATH"
-        echo "Setting PATH like in our CI:"
+        echo "Setting PATH like in CI (old way):"
         export PATH="$HOME/.cargo/bin:$PATH"
         echo "New PATH: $PATH"
         echo "Testing which cc:"
-        which cc || echo "❌ cc not found - THIS IS THE ISSUE"
+        which cc || echo "❌ cc not found with old PATH"
         echo "Testing cc command:"
         cc --version || echo "❌ cc command failed"
         echo "=== END TEST ==="

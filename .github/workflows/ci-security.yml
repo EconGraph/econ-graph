@@ -1,17 +1,15 @@
 name: Security & Compliance
 
 on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main, develop ]
-  workflow_dispatch:
-    inputs:
-      branch:
-        description: 'Branch to run CI on (leave empty for current branch)'
-        required: false
-        default: ''
-        type: string
+  # Disabled auto-triggering to avoid confusion with ci-core.yml
+  # Uncomment the lines below to enable manual dispatch
+  # workflow_dispatch:
+  #   inputs:
+  #     branch:
+  #       description: 'Branch to run CI on (leave empty for current branch)'
+  #       required: false
+  #       default: ''
+  #       type: string
 
 env:
   CARGO_TERM_COLOR: always

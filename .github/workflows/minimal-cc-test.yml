@@ -1,0 +1,45 @@
+name: Minimal CC Test
+
+# Disabled auto-triggering - this is a test workflow
+# on:
+#   workflow_dispatch:
+
+jobs:
+  test-cc-issue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+    - name: Install build tools
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        echo "cc installed: $(which cc)"
+        echo "cc version: $(cc --version)"
+
+    - name: Test PATH issue reproduction
+      run: |
+        echo "=== REPRODUCING THE ISSUE ==="
+        echo "Original PATH: $PATH"
+        echo "HOME variable: $HOME"
+        echo "Setting PATH like in our CI:"
+        export PATH="$HOME/.cargo/bin:$PATH"
+        echo "New PATH: $PATH"
+        echo "Testing which cc:"
+        which cc || echo "❌ cc not found - THIS IS THE ISSUE"
+        echo "Testing cc command:"
+        cc --version || echo "❌ cc command failed"
+        echo "=== END REPRODUCTION ==="
+
+    - name: Test minimal Rust compilation
+      run: |
+        echo "=== TESTING RUST COMPILATION ==="
+        export PATH="$HOME/.cargo/bin:$PATH"
+        echo "PATH: $PATH"
+        echo "Creating minimal Rust project..."
+        mkdir -p test-project
+        cd test-project
+        echo 'fn main() { println!("Hello"); }' > main.rs
+        echo 'cargo --version' | bash || echo "❌ cargo not found"
+        echo "Testing compilation (this should fail with cc not found):"
+        cargo build 2>&1 | head -10 || echo "❌ Compilation failed as expected"
+        echo "=== END RUST TEST ==="
