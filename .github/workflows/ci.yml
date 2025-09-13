@@ -11,6 +11,63 @@ env:
   DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
 jobs:
+  test-diesel-cache:
+    name: Test Diesel Cache (Manual)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+        key: ${{ runner.os }}-diesel-test-v1
+        restore-keys: |
+          ${{ runner.os }}-diesel-test-
+
+    - name: Install and test diesel CLI
+      run: |
+        echo "Installing diesel_cli..."
+        cargo install diesel_cli --no-default-features --features postgres --verbose
+        echo "Verifying installation..."
+        which diesel
+        diesel --version
+        echo "PATH: $PATH"
+        echo "Testing diesel setup..."
+        diesel setup
+        echo "Testing diesel migration..."
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
+        PATH: $HOME/.cargo/bin:$PATH
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
   grafana-dashboard-validation:
     name: Grafana Dashboard Validation
     runs-on: ubuntu-latest
