@@ -25,6 +25,6 @@ jobs:
         ESCAPED_HOME: "\\$HOME/.cargo/bin"
         SINGLE_QUOTED_HOME: '$HOME/.cargo/bin'
         DOUBLE_QUOTED_HOME: "$HOME/.cargo/bin"
-        GITHUB_ACTIONS_HOME: "${{ env.HOME }}/.cargo/bin"
+        GITHUB_ACTIONS_HOME: "${{ runner.temp }}/.cargo/bin"
         CURLY_BRACES_HOME: "${HOME}/.cargo/bin"
         COMMAND_SUB_HOME: "$(echo $HOME)/.cargo/bin"
