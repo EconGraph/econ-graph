@@ -1162,6 +1162,7 @@ jobs:
     name: Backend Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    needs: [backend-smoke-tests]
 
     services:
       postgres:
@@ -1226,6 +1227,7 @@ jobs:
     name: Frontend Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: [frontend-tests]
 
     steps:
     - name: Checkout code
