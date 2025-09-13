@@ -1,7 +1,8 @@
 name: Quick PATH Test
 
-on:
-  workflow_dispatch:
+# Disabled auto-triggering - this is a test workflow
+# on:
+#   workflow_dispatch:
 
 jobs:
   test-path:

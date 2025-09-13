@@ -1,7 +1,8 @@
 name: Test Shell Expansion in GitHub Actions
 
-on:
-  workflow_dispatch:
+# Disabled auto-triggering - this is a test workflow
+# on:
+#   workflow_dispatch:
 
 env:
   # This should be expanded by GitHub Actions at workflow level

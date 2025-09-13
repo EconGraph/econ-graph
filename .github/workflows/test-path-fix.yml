@@ -1,9 +1,11 @@
 name: Test PATH Fix
 
-on:
-  workflow_dispatch:
-  push:
-    branches: [ test-path-fix ]
+# Disabled auto-triggering - this is a test workflow
+# on:
+  # Disabled auto-triggering - this is a test workflow
+  # workflow_dispatch:
+  # push:
+  #   branches: [ test-path-fix ]
 
 jobs:
   test-path-expansion:
