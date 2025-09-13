@@ -1,91 +1,93 @@
-# GitHub Actions for Playwright Tests
+# CI/CD Workflows
 
-This directory contains GitHub Actions workflows for running Playwright end-to-end tests.
+This directory contains the CI/CD workflows for the EconGraph project, split into logical, manageable pieces for better maintainability and understanding.
 
-## Available Workflows
+## Workflow Files
 
-### 1. `playwright-tests.yml` - Local Test Environment
-- **Trigger**: Runs on version tags (e.g., `v3.7.2`, `v3.8.0`)
-- **Purpose**: Sets up a local test environment and runs Playwright tests
-- **Use Case**: When you want to test against a locally built version
+### Core Tests (`ci-core.yml`)
+**Purpose**: Basic functionality tests that should run on every commit
+- `backend-smoke-tests` - Quick backend health checks
+- `backend-database-tests` - Database-specific tests (depends on smoke tests)
+- `backend-service-tests` - Service layer tests (depends on smoke tests)
+- `frontend-tests` - Frontend unit tests and linting
+- `quality-checks` - Code formatting and linting checks
 
-### 2. `playwright-tests-deployed.yml` - Deployed Application
-- **Trigger**: Runs on version tags (e.g., `v3.7.2`, `v3.8.0`)
-- **Purpose**: Runs Playwright tests against a deployed application
-- **Use Case**: When you want to test against a live/staging environment
+**Triggers**: Push to main/develop, PRs, manual dispatch
 
-### 3. `playwright-tests-comprehensive.yml` - Full Stack Testing
-- **Trigger**: Runs on version tags (e.g., `v3.7.2`, `v3.8.0`)
-- **Purpose**: Sets up the entire stack (backend + frontend + database) and runs tests
-- **Use Case**: When you want comprehensive testing of the full application
+### Integration Tests (`ci-integration.yml`)
+**Purpose**: End-to-end and integration testing
+- `backend-integration-tests` - Full backend integration tests (depends on core backend tests)
+- `frontend-integration-tests` - Frontend integration and E2E tests (depends on frontend tests)
 
-## How to Use
+**Triggers**: Push to main/develop, PRs, manual dispatch
 
-### Option 1: Test Against Deployed Application (Recommended)
-Use `playwright-tests-deployed.yml` if you have a deployed application:
+### Security & Compliance (`ci-security.yml`)
+**Purpose**: Security audits and license compliance
+- `security-audit` - Rust and NPM security vulnerability scanning
+- `license-compliance` - License checking for all dependencies
 
-1. Set the `PLAYWRIGHT_BASE_URL` repository variable to your deployed URL
-2. Create a new tag: `git tag v3.7.3 && git push origin v3.7.3`
-3. The workflow will automatically run
+**Triggers**: Push to main/develop, PRs, manual dispatch
 
-### Option 2: Test Against Local Build
-Use `playwright-tests.yml` for local testing:
+### Build & Deploy (`ci-build.yml`)
+**Purpose**: Building and validating deployment artifacts
+- `grafana-dashboard-validation` - Validates Grafana dashboard JSON files
+- `docker-build` - Builds and tests Docker images (depends on integration tests)
 
-1. Create a new tag: `git tag v3.7.3 && git push origin v3.7.3`
-2. The workflow will build the frontend and run tests locally
+**Triggers**: Push to main/develop, PRs, manual dispatch
 
-### Option 3: Full Stack Testing
-Use `playwright-tests-comprehensive.yml` for complete testing:
+### Experimental (`ci-experimental.yml`)
+**Purpose**: Experimental features and performance testing
+- `experimental-ramdisk-build-cache` - Tests build performance with RAM disk caching
 
-1. Create a new tag: `git tag v3.7.3 && git push origin v3.7.3`
-2. The workflow will set up the entire application stack and run tests
+**Triggers**: Manual dispatch only (with experiment parameter)
 
-## Configuration
+## Workflow Dependencies
 
-### Environment Variables
-- `PLAYWRIGHT_BASE_URL`: Base URL for the application under test (default: `http://localhost`)
+```
+Core Tests (ci-core.yml)
+├── backend-smoke-tests
+├── backend-database-tests (needs: backend-smoke-tests)
+├── backend-service-tests (needs: backend-smoke-tests)
+├── frontend-tests
+└── quality-checks
 
-### Repository Variables
-Set these in your GitHub repository settings:
-- `PLAYWRIGHT_BASE_URL`: URL of your deployed application (e.g., `https://your-app.com`)
+Integration Tests (ci-integration.yml)
+├── backend-integration-tests (needs: backend-smoke-tests, backend-database-tests, backend-service-tests)
+└── frontend-integration-tests (needs: frontend-tests)
 
-## Test Results
-
-All workflows upload the following artifacts:
-- **playwright-report**: HTML report of test results
-- **playwright-test-results**: Raw test results and videos
-- **playwright-screenshots**: Screenshots of failed tests (only on failure)
-
-## Current Test Coverage
-
-The Playwright tests cover:
-- ✅ Navigation system (5/5 tests passing)
-- ✅ Dashboard functionality (6/7 tests passing)
-- ✅ Authentication flows (4/8 tests passing)
-- ✅ About page (5/11 tests passing)
-- ✅ Responsive design
-- ✅ Error handling
-
-## Running Tests Locally
-
-To run the same tests locally:
-
-```bash
-cd frontend
-npm install
-npx playwright install
-npx playwright test
+Build & Deploy (ci-build.yml)
+└── docker-build (needs: backend-integration-tests, frontend-integration-tests)
 ```
 
-## Troubleshooting
+## Environment Variables
 
-### Tests Failing in CI
-1. Check the uploaded screenshots and videos
-2. Verify the `PLAYWRIGHT_BASE_URL` is correct
-3. Ensure the deployed application is accessible
-4. Check the GitHub Actions logs for detailed error messages
+All workflows share these environment variables:
+- `CARGO_TERM_COLOR: always` - Colored Rust output
+- `DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test` - Test database connection
 
-### Performance Issues
-- The workflows have a 60-90 minute timeout
-- Tests run in parallel where possible
-- Consider using the simpler `playwright-tests-deployed.yml` for faster execution
+## Benefits of This Structure
+
+1. **Easier to Understand**: Each workflow has a clear, focused purpose
+2. **Faster Feedback**: Core tests run independently and provide quick feedback
+3. **Better Debugging**: Issues are isolated to specific workflow files
+4. **Selective Running**: You can run specific types of tests manually
+5. **Maintainable**: Smaller files are easier to modify and review
+
+## Running Workflows
+
+### Automatic Triggers
+- **Push to main/develop**: All workflows run automatically
+- **Pull Requests**: All workflows run automatically
+
+### Manual Triggers
+- **Core Tests**: `gh workflow run ci-core.yml`
+- **Integration Tests**: `gh workflow run ci-integration.yml`
+- **Security Checks**: `gh workflow run ci-security.yml`
+- **Build & Deploy**: `gh workflow run ci-build.yml`
+- **Experimental**: `gh workflow run ci-experimental.yml --field experiment=ramdisk`
+
+## Migration Notes
+
+- The original monolithic `ci.yml` has been backed up as `ci-original-backup.yml`
+- All job dependencies and environment variables have been preserved
+- The new structure maintains the same test coverage and quality gates

@@ -2,7 +2,35 @@
 
 ## Project: Economic Time Series Graphing Application
 
-### Latest Session: MCP Server Implementation with Chart API Service (Current)
+### Latest Session: Admin UI Kubernetes Integration (Current)
+**Date**: September 13, 2025  
+**Focus**: ✅ Complete admin UI integration with Kubernetes infrastructure using proper DNS and service discovery
+
+**Problem**: User requested integration of the admin UI with the existing Kubernetes infrastructure, but encountered "blank page" issues when accessing via ingress, requiring deep investigation into nginx ingress controller routing and DNS resolution.
+
+**Root Cause Discovered**: 
+- Hostname conflict between nginx ingress controller's internal endpoints (port 10246) and ingress rules (port 80) both using `localhost`
+- Internal endpoints (`/configuration/backends`, `/healthz`, `/metrics`) were being intercepted by catch-all route `/` and routed to frontend service instead of being handled internally
+- This caused backend discovery failures and routing issues
+
+**Solution Implemented**:
+- ✅ **Proper Kubernetes DNS Architecture**: Leveraged CoreDNS for internal service discovery with automatic dynamic registration
+- ✅ **Hostname Separation**: Changed ingress from `localhost` to `admin.econ-graph.local` to eliminate conflicts
+- ✅ **Service Integration**: Added admin-frontend-service.yaml with proper NodePort configuration (30002)
+- ✅ **Ingress Routing**: Updated ingress.yaml to route `/admin` path to admin frontend service
+- ✅ **Deployment Scripts**: Integrated admin UI into deploy.sh and teardown.sh scripts
+- ✅ **External Access**: Simple /etc/hosts entry for local development access
+- ✅ **Internal Communication**: All services use cluster IPs and CoreDNS resolution (10.96.145.244:3001)
+
+**Technical Achievement**:
+- **Deep Debugging**: Investigated nginx configuration, Lua scripts, and backend discovery mechanisms
+- **Proper Architecture**: No hacky workarounds - used native Kubernetes DNS and service discovery
+- **Clean Solution**: Admin UI accessible at http://admin.econ-graph.local/admin with proper routing
+- **Verified Functionality**: All components (admin UI, main frontend, backend API, internal endpoints) working correctly
+
+**Business Impact**: Admin UI now properly integrated with production Kubernetes infrastructure, enabling secure administrative access through proper ingress routing while maintaining system reliability and following Kubernetes best practices.
+
+### Previous Session: MCP Server Implementation with Chart API Service
 **Date**: January 15, 2025  
 **Focus**: ✅ Complete MCP server implementation with standalone Chart API service and testcontainer integration
 

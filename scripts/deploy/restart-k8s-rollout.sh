@@ -184,6 +184,7 @@ kill $MONITOR_PID 2>/dev/null || true
 echo "🔄 Restarting deployments..."
 kubectl rollout restart deployment/econ-graph-backend -n econ-graph
 kubectl rollout restart deployment/econ-graph-frontend -n econ-graph
+kubectl rollout restart deployment/econ-graph-admin-frontend -n econ-graph
 kubectl rollout restart deployment/chart-api-service -n econ-graph
 
 # Restart Grafana to pick up updated dashboards
@@ -194,6 +195,7 @@ kubectl rollout restart statefulset/grafana -n econ-graph
 echo "⏳ Waiting for rollouts to complete..."
 kubectl rollout status deployment/econ-graph-backend -n econ-graph --timeout=300s
 kubectl rollout status deployment/econ-graph-frontend -n econ-graph --timeout=300s
+kubectl rollout status deployment/econ-graph-admin-frontend -n econ-graph --timeout=300s
 kubectl rollout status deployment/chart-api-service -n econ-graph --timeout=300s
 kubectl rollout status statefulset/grafana -n econ-graph --timeout=300s
 
@@ -231,10 +233,12 @@ echo ""
 echo "📋 Monitor deployment:"
 echo "  kubectl logs -f deployment/econ-graph-backend -n econ-graph"
 echo "  kubectl logs -f deployment/econ-graph-frontend -n econ-graph"
+echo "  kubectl logs -f deployment/econ-graph-admin-frontend -n econ-graph"
 echo "  kubectl logs -f deployment/chart-api-service -n econ-graph"
 echo ""
 echo "✅ Services are accessible via NodePort:"
 echo "  Frontend: http://localhost:${FRONTEND_NODEPORT}"
+echo "  Admin UI: http://admin.econ-graph.local/admin (add '127.0.0.1 admin.econ-graph.local' to /etc/hosts)"
 echo "  Backend:  http://localhost:${BACKEND_NODEPORT}"
 echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT} (admin/admin123)"
 echo ""

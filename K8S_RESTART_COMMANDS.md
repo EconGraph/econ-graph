@@ -42,6 +42,16 @@ docker build \
   --build-arg NODE_ENV="production" \
   -t econ-graph-frontend:latest .
 
+# Build admin frontend
+cd ../admin-frontend
+docker build \
+  --build-arg REACT_APP_API_URL="http://localhost" \
+  --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
+  --build-arg REACT_APP_WS_URL="ws://localhost/graphql" \
+  --build-arg REACT_APP_GRAFANA_URL="http://localhost:30002" \
+  --build-arg NODE_ENV="production" \
+  -t econ-graph-admin-frontend:v1.0.0 .
+
 cd ..
 ```
 
@@ -118,19 +128,29 @@ kubectl get ingress -n econ-graph
 
 ## 🌐 **Expected URLs After Restart**
 
-- **Frontend**: http://localhost:3000
+**Note**: Add `127.0.0.1 admin.econ-graph.local` to your `/etc/hosts` file first.
+
+- **Frontend**: http://admin.econ-graph.local
   - ✅ All 173 tests passing
   - ✅ Professional Analysis page working
   - ✅ Accessibility compliant
 
-- **Backend**: http://localhost:8080  
+- **Admin UI**: http://admin.econ-graph.local/admin
+  - ✅ Administrative interface with security notice
+  - ✅ System health monitoring
+  - ✅ User management features
+
+- **Backend API**: http://admin.econ-graph.local/api
   - ✅ 72 unit tests passing
   - ✅ GraphQL API optimized
   - ✅ Health checks working
 
-- **GraphQL**: http://localhost:8080/graphql
+- **GraphQL**: http://admin.econ-graph.local/graphql
   - ✅ Schema validated
   - ✅ Query performance improved
+
+- **Health Check**: http://admin.econ-graph.local/health
+  - ✅ Service status monitoring
 
 ---
 

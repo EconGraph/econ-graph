@@ -22,9 +22,12 @@ kubectl config use-context kind-econ-graph
 
 # Remove application resources
 echo "📋 Removing application resources..."
+kubectl delete -f k8s/manifests/admin-ingress.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/ingress.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/frontend-service.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/frontend-deployment.yaml --ignore-not-found=true
+kubectl delete -f k8s/manifests/admin-frontend-service.yaml --ignore-not-found=true
+kubectl delete -f k8s/manifests/admin-frontend-deployment.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/backend-service.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/backend-deployment.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/chart-api-service.yaml --ignore-not-found=true

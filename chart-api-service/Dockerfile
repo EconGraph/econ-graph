@@ -13,9 +13,9 @@ RUN npm ci --only=production && npm cache clean --force
 # Production stage
 FROM node:18-alpine AS production
 
-# Create app user
-RUN addgroup -g 1000 -S nodejs && \
-    adduser -S nodejs -u 1000
+# Create app user (use existing node user if available)
+RUN addgroup -S nodejs 2>/dev/null || true && \
+    adduser -S nodejs -G nodejs 2>/dev/null || true
 
 # Set working directory
 WORKDIR /app

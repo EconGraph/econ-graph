@@ -35,7 +35,6 @@ import {
   Speed,
   Security,
   CloudQueue,
-  Database,
   Web,
 } from '@mui/icons-material';
 
@@ -377,7 +376,7 @@ export default function SystemHealthPage() {
                           />
                         </Box>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Database fontSize="small" color="action" />
+                          <Storage fontSize="small" color="action" />
                           <Typography variant="caption">Disk: {service.resources.disk}%</Typography>
                           <LinearProgress
                             variant="determinate"

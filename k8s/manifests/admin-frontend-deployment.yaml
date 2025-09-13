@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: econ-graph-admin-frontend
+  namespace: econ-graph
+  labels:
+    app: econ-graph-admin-frontend
+    component: admin-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: econ-graph-admin-frontend
+  template:
+    metadata:
+      labels:
+        app: econ-graph-admin-frontend
+        component: admin-frontend
+    spec:
+      containers:
+      - name: admin-frontend
+        image: econ-graph-admin-frontend:v1.0.0
+        imagePullPolicy: Never  # Use local image
+        ports:
+        - containerPort: 3001
+          name: http
+        env:
+        # Port Configuration
+        - name: REACT_APP_BACKEND_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: REACT_APP_BACKEND_PORT
+        - name: REACT_APP_FRONTEND_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: REACT_APP_FRONTEND_PORT
+        - name: REACT_APP_ADMIN_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: REACT_APP_ADMIN_PORT
+        # Admin Frontend Configuration
+        - name: REACT_APP_API_URL
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: REACT_APP_ADMIN_API_URL
+        - name: REACT_APP_GRAPHQL_URL
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: REACT_APP_ADMIN_GRAPHQL_URL
+        - name: REACT_APP_WS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: REACT_APP_ADMIN_WS_URL
+        - name: REACT_APP_GRAFANA_URL
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: REACT_APP_GRAFANA_URL
+        - name: REACT_APP_GOOGLE_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: REACT_APP_GOOGLE_CLIENT_ID
+        - name: REACT_APP_FACEBOOK_APP_ID
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: REACT_APP_FACEBOOK_APP_ID
+        - name: NODE_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: NODE_ENV
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3001
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      restartPolicy: Always

@@ -30,5 +30,12 @@ data:
   REACT_APP_FACEBOOK_APP_ID: "demo-facebook-app-id"
   REACT_APP_GOOGLE_CLIENT_ID: "80227441551-3dv05tkflnfrjpqv5fgii7b8br0brt7m.apps.googleusercontent.com"
 
+  # Admin Frontend configuration
+  REACT_APP_ADMIN_PORT: "3001"
+  REACT_APP_ADMIN_API_URL: "http://localhost"
+  REACT_APP_ADMIN_GRAPHQL_URL: "/graphql"
+  REACT_APP_ADMIN_WS_URL: "ws://localhost/graphql"
+  REACT_APP_GRAFANA_URL: "http://localhost:30002"
+
   # Environment
   NODE_ENV: "development"

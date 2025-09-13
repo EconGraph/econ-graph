@@ -35,6 +35,8 @@ k8s/
 │   ├── postgres.yaml    # PostgreSQL service
 │   ├── backend-deployment.yaml  # Backend deployment
 │   ├── frontend-deployment.yaml # Frontend deployment
+│   ├── admin-frontend-deployment.yaml # Admin UI deployment
+│   ├── admin-frontend-service.yaml    # Admin UI service
 │   └── ingress.yaml     # Ingress configuration
 └── README.md           # This file
 
@@ -78,10 +80,13 @@ terraform apply
 
 After deployment, the application will be available at:
 
-- **Frontend**: <http://localhost:3000>
-- **Backend API**: <http://localhost:8080>
-- **GraphQL**: <http://localhost:8080/graphql>
-- **Health Check**: <http://localhost:8080/health>
+- **Frontend**: <http://admin.econ-graph.local> (add `127.0.0.1 admin.econ-graph.local` to `/etc/hosts`)
+- **Admin UI**: <http://admin.econ-graph.local/admin>
+- **Backend API**: <http://admin.econ-graph.local/api>
+- **GraphQL**: <http://admin.econ-graph.local/graphql>
+- **Health Check**: <http://admin.econ-graph.local/health>
+
+**Note**: All services use the `admin.econ-graph.local` hostname to avoid nginx ingress controller conflicts with internal endpoints.
 
 ## 📊 Monitoring
 
@@ -105,6 +110,9 @@ kubectl logs -f deployment/econ-graph-backend -n econ-graph
 
 # Frontend logs
 kubectl logs -f deployment/econ-graph-frontend -n econ-graph
+
+# Admin UI logs
+kubectl logs -f deployment/econ-graph-admin-frontend -n econ-graph
 ```
 
 ### Scale Deployments
