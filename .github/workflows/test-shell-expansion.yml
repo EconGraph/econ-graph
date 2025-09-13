@@ -59,7 +59,7 @@ jobs:
         echo "2. Escaped \\\$HOME: $ESCAPED_HOME"
         echo "3. Single quotes '\$HOME': $SINGLE_QUOTED_HOME"
         echo "4. Double quotes \"\$HOME\": $DOUBLE_QUOTED_HOME"
-        echo "5. GitHub Actions \${{ env.HOME }}: $GITHUB_ACTIONS_HOME"
+        echo "5. GitHub Actions \${{ runner.temp }}: $GITHUB_ACTIONS_HOME"
         echo "6. Curly braces \${HOME}: $CURLY_BRACES_HOME"
         echo "7. Command substitution \$(echo \$HOME): $COMMAND_SUB_HOME"
         echo "=== END KEY PATTERNS TEST ==="
