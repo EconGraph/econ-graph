@@ -17,6 +17,25 @@ spec:
         app: econ-graph-backend
         component: backend
     spec:
+      initContainers:
+      - name: wait-for-postgres
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Waiting for PostgreSQL to be ready..."
+          until nc -z postgres-service 5432; do
+            echo "PostgreSQL is unavailable - sleeping"
+            sleep 2
+          done
+          echo "PostgreSQL is ready!"
+        resources:
+          requests:
+            memory: "16Mi"
+            cpu: "10m"
+          limits:
+            memory: "32Mi"
+            cpu: "50m"
       containers:
       - name: backend
         image: econ-graph-backend:v3.7.2
@@ -86,16 +105,28 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "500m"
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 9876
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 30  # Allow up to 150 seconds for startup (30 * 5s)
         livenessProbe:
           httpGet:
             path: /health
             port: 9876
           initialDelaySeconds: 30
           periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
         readinessProbe:
           httpGet:
             path: /health
             port: 9876
-          initialDelaySeconds: 5
+          initialDelaySeconds: 15  # Increased from 5 to allow for migrations
           periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
       restartPolicy: Always
