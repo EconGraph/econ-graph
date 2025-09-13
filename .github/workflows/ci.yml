@@ -46,16 +46,23 @@ jobs:
 
     - name: Install and test diesel CLI
       run: |
+        echo "Current PATH: $PATH"
+        echo "CARGO_HOME: $CARGO_HOME"
+        echo "Looking for cargo..."
+        which cargo || echo "cargo not found in PATH"
+        ls -la $HOME/.cargo/bin/ || echo "~/.cargo/bin does not exist"
+        echo "Using full path to cargo..."
+        $HOME/.cargo/bin/cargo --version
         echo "Installing diesel_cli..."
-        cargo install diesel_cli --no-default-features --features postgres --verbose
+        $HOME/.cargo/bin/cargo install diesel_cli --no-default-features --features postgres --verbose
         echo "Verifying installation..."
         which diesel
-        diesel --version
+        $HOME/.cargo/bin/diesel --version
         echo "PATH: $PATH"
         echo "Testing diesel setup..."
-        diesel setup
+        $HOME/.cargo/bin/diesel setup
         echo "Testing diesel migration..."
-        diesel migration run
+        $HOME/.cargo/bin/diesel migration run
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
