@@ -21,7 +21,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
-  PATH: ${{ runner.home }}/.cargo/bin:$PATH
 
 jobs:
   grafana-dashboard-validation:
@@ -214,7 +213,9 @@ jobs:
       working-directory: backend
 
     - name: Run fast unit tests (no database)
-      run: cargo test --lib -- --test-threads=4 --nocapture config auth::services metrics
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --lib -- --test-threads=4 --nocapture config auth::services metrics
       working-directory: backend
       env:
         RUST_LOG: warn
@@ -317,7 +318,7 @@ jobs:
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
-        PATH: ${{ runner.home }}/.cargo/bin:$PATH
+        PATH: $HOME/.cargo/bin:$PATH
 
     - name: Run backend models basic tests
       run: |
@@ -334,7 +335,7 @@ jobs:
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
-        PATH: ${{ runner.home }}/.cargo/bin:$PATH
+        PATH: $HOME/.cargo/bin:$PATH
 
   backend-models-advanced-tests:
     name: Backend Models Advanced Tests
@@ -1540,7 +1541,7 @@ jobs:
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
-        PATH: ${{ runner.home }}/.cargo/bin:$PATH
+        PATH: $HOME/.cargo/bin:$PATH
 
     - name: Build backend
       run: cargo build --release
@@ -1551,14 +1552,14 @@ jobs:
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
-        PATH: ${{ runner.home }}/.cargo/bin:$PATH
+        PATH: $HOME/.cargo/bin:$PATH
 
     - name: Run backend e2e tests with testcontainers
       run: cargo test --release e2e_tests --lib
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
-        PATH: ${{ runner.home }}/.cargo/bin:$PATH
+        PATH: $HOME/.cargo/bin:$PATH
 
   frontend-integration-tests:
     name: Frontend Integration Tests
