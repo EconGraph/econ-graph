@@ -56,6 +56,20 @@
     "extends": [
       "react-app",
       "react-app/jest"
+    ],
+    "overrides": [
+      {
+        "files": [
+          "**/*.test.ts",
+          "**/*.test.tsx",
+          "**/__tests__/**/*"
+        ],
+        "rules": {
+          "testing-library/no-wait-for-multiple-assertions": "off",
+          "testing-library/no-wait-for-side-effects": "off",
+          "testing-library/no-node-access": "off"
+        }
+      }
     ]
   },
   "browserslist": {

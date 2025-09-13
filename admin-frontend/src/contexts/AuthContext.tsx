@@ -2,7 +2,7 @@
 // PURPOSE: Provide secure authentication and session management for administrators
 // This ensures only authorized personnel can access administrative functions
 
-import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
 
 interface User {
   id: string;
@@ -94,6 +94,55 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(authReducer, initialState);
 
+  // Logout function
+  const logout = useCallback(() => {
+    // REQUIREMENT: Secure logout with session cleanup
+    const token = localStorage.getItem('admin_token');
+
+    if (token) {
+      // Notify backend of logout
+      fetch('/api/admin/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      }).catch(console.error);
+    }
+
+    // Clear local storage
+    localStorage.removeItem('admin_token');
+
+    // Log logout
+    console.log('🔒 Admin logout', {
+      timestamp: new Date().toISOString(),
+    });
+
+    dispatch({ type: 'LOGOUT' });
+  }, []);
+
+  // Session monitoring and warnings
+  const startSessionMonitoring = useCallback((user: User) => {
+    const sessionExpiry = new Date(user.sessionExpiry).getTime();
+    const now = Date.now();
+    const timeToExpiry = sessionExpiry - now;
+
+    // Warn 5 minutes before expiry
+    const warningTime = timeToExpiry - (5 * 60 * 1000);
+
+    if (warningTime > 0) {
+      setTimeout(() => {
+        dispatch({ type: 'SESSION_WARNING', payload: true });
+      }, warningTime);
+    }
+
+    // Auto-logout at expiry
+    if (timeToExpiry > 0) {
+      setTimeout(() => {
+        logout();
+      }, timeToExpiry);
+    }
+  }, [logout]);
+
   // Check for existing session on mount
   useEffect(() => {
     const checkExistingSession = async () => {
@@ -127,30 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     checkExistingSession();
-  }, []);
-
-  // Session monitoring and warnings
-  const startSessionMonitoring = (user: User) => {
-    const sessionExpiry = new Date(user.sessionExpiry).getTime();
-    const now = Date.now();
-    const timeToExpiry = sessionExpiry - now;
-
-    // Warn 5 minutes before expiry
-    const warningTime = timeToExpiry - (5 * 60 * 1000);
-
-    if (warningTime > 0) {
-      setTimeout(() => {
-        dispatch({ type: 'SESSION_WARNING', payload: true });
-      }, warningTime);
-    }
-
-    // Auto-logout at expiry
-    if (timeToExpiry > 0) {
-      setTimeout(() => {
-        logout();
-      }, timeToExpiry);
-    }
-  };
+  }, [startSessionMonitoring]);
 
   const login = async (username: string, password: string, mfaCode?: string) => {
     dispatch({ type: 'LOGIN_START' });
@@ -201,30 +227,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const logout = () => {
-    // REQUIREMENT: Secure logout with session cleanup
-    const token = localStorage.getItem('admin_token');
-
-    if (token) {
-      // Notify backend of logout
-      fetch('/api/admin/auth/logout', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      }).catch(console.error);
-    }
-
-    // Clear local storage
-    localStorage.removeItem('admin_token');
-
-    // Log logout
-    console.log('🔒 Admin logout', {
-      timestamp: new Date().toISOString(),
-    });
-
-    dispatch({ type: 'LOGOUT' });
-  };
 
   const refreshSession = async () => {
     try {

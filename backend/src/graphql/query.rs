@@ -1,10 +1,11 @@
 use async_graphql::*;
+use chrono::Utc;
 use diesel::SelectableHelper;
 use uuid::Uuid;
 
 use crate::{
     database::DatabasePool,
-    graphql::types::*,
+    graphql::{context::require_admin, types::*},
     models::search::SearchParams,
     services::{search_service::SearchService, series_service},
 };
@@ -369,6 +370,292 @@ impl Query {
             .optional()?;
 
         Ok(user.map(UserType::from))
+    }
+
+    // Admin Queries
+
+    /// Get all users (admin only)
+    async fn users(
+        &self,
+        ctx: &Context<'_>,
+        filter: Option<UserFilterInput>,
+        pagination: Option<PaginationInput>,
+    ) -> Result<UserConnection> {
+        // Require admin role
+        let _admin_user = require_admin(ctx)?;
+        let pool = ctx.data::<DatabasePool>()?;
+
+        use crate::schema::users;
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+
+        let mut conn = pool.get().await?;
+
+        // Build query with filters
+        let mut query = users::table.into_boxed();
+
+        if let Some(filter) = &filter {
+            if let Some(role) = &filter.role {
+                query = query.filter(users::role.eq(role));
+            }
+            if let Some(organization) = &filter.organization {
+                query = query.filter(users::organization.eq(organization));
+            }
+            if let Some(is_active) = filter.is_active {
+                query = query.filter(users::is_active.eq(is_active));
+            }
+            if let Some(email_verified) = filter.email_verified {
+                query = query.filter(users::email_verified.eq(email_verified));
+            }
+            if let Some(search_query) = &filter.search_query {
+                let search_pattern = format!("%{}%", search_query);
+                let pattern_clone = search_pattern.clone();
+                query = query.filter(
+                    users::name
+                        .ilike(search_pattern)
+                        .or(users::email.ilike(pattern_clone)),
+                );
+            }
+        }
+
+        // Get total count (rebuild query to avoid move)
+        let mut count_query = users::table.into_boxed();
+        if let Some(filter) = &filter {
+            if let Some(role) = &filter.role {
+                count_query = count_query.filter(users::role.eq(role));
+            }
+            if let Some(organization) = &filter.organization {
+                count_query = count_query.filter(users::organization.eq(organization));
+            }
+            if let Some(is_active) = filter.is_active {
+                count_query = count_query.filter(users::is_active.eq(is_active));
+            }
+            if let Some(email_verified) = filter.email_verified {
+                count_query = count_query.filter(users::email_verified.eq(email_verified));
+            }
+            if let Some(search_query) = &filter.search_query {
+                let search_pattern = format!("%{}%", search_query);
+                let pattern_clone = search_pattern.clone();
+                count_query = count_query.filter(
+                    users::name
+                        .ilike(search_pattern)
+                        .or(users::email.ilike(pattern_clone)),
+                );
+            }
+        }
+
+        let total_count: i64 = count_query.count().get_result(&mut conn).await?;
+
+        // Apply pagination
+        let limit = pagination
+            .as_ref()
+            .and_then(|p| p.first)
+            .unwrap_or(50)
+            .min(100) as i64; // Cap at 100
+
+        let offset = pagination
+            .as_ref()
+            .and_then(|p| p.after.clone())
+            .and_then(|cursor| cursor.parse::<i64>().ok())
+            .unwrap_or(0);
+
+        let users_list: Vec<crate::models::User> = query
+            .select(crate::models::User::as_select())
+            .order(users::created_at.desc())
+            .limit(limit)
+            .offset(offset)
+            .load(&mut conn)
+            .await?;
+
+        let has_next_page = (offset + limit) < total_count;
+        let has_previous_page = offset > 0;
+
+        Ok(UserConnection {
+            nodes: users_list.into_iter().map(UserType::from).collect(),
+            total_count: total_count as i32,
+            page_info: PageInfo {
+                has_next_page,
+                has_previous_page,
+                start_cursor: if has_previous_page {
+                    Some(offset.to_string())
+                } else {
+                    None
+                },
+                end_cursor: if has_next_page {
+                    Some((offset + limit).to_string())
+                } else {
+                    None
+                },
+            },
+        })
+    }
+
+    /// Get user sessions (admin only)
+    async fn user_sessions(
+        &self,
+        ctx: &Context<'_>,
+        user_id: Option<ID>,
+    ) -> Result<Vec<UserSessionType>> {
+        // Require admin role
+        let _admin_user = require_admin(ctx)?;
+        let pool = ctx.data::<DatabasePool>()?;
+
+        use crate::schema::user_sessions;
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+
+        let mut conn = pool.get().await?;
+
+        let mut query = user_sessions::table.into_boxed();
+
+        if let Some(user_id_str) = user_id {
+            let user_uuid = uuid::Uuid::parse_str(&user_id_str)?;
+            query = query.filter(user_sessions::user_id.eq(user_uuid));
+        }
+
+        let sessions: Vec<crate::models::UserSession> = query
+            .select(crate::models::UserSession::as_select())
+            .order(user_sessions::created_at.desc())
+            .load(&mut conn)
+            .await?;
+
+        Ok(sessions
+            .into_iter()
+            .map(|session| UserSessionType {
+                id: ID::from(session.id),
+                user_id: ID::from(session.user_id),
+                created_at: session.created_at,
+                last_activity: session.last_used_at,
+                expires_at: session.expires_at,
+                user_agent: session.user_agent,
+                ip_address: session.ip_address,
+                is_active: session.expires_at > Utc::now(),
+            })
+            .collect())
+    }
+
+    /// Get active user sessions (admin only)
+    async fn active_sessions(&self, ctx: &Context<'_>) -> Result<Vec<UserSessionType>> {
+        // Require admin role
+        let _admin_user = require_admin(ctx)?;
+        let pool = ctx.data::<DatabasePool>()?;
+
+        use crate::schema::user_sessions;
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+
+        let mut conn = pool.get().await?;
+
+        let sessions: Vec<crate::models::UserSession> = user_sessions::table
+            .filter(user_sessions::expires_at.gt(Utc::now()))
+            .select(crate::models::UserSession::as_select())
+            .order(user_sessions::last_used_at.desc())
+            .load(&mut conn)
+            .await?;
+
+        Ok(sessions
+            .into_iter()
+            .map(|session| UserSessionType {
+                id: ID::from(session.id),
+                user_id: ID::from(session.user_id),
+                created_at: session.created_at,
+                last_activity: session.last_used_at,
+                expires_at: session.expires_at,
+                user_agent: session.user_agent,
+                ip_address: session.ip_address,
+                is_active: true, // All sessions here are active by definition
+            })
+            .collect())
+    }
+
+    /// Get system health metrics (admin only)
+    async fn system_health(&self, ctx: &Context<'_>) -> Result<SystemHealthType> {
+        // Require admin role
+        let _admin_user = require_admin(ctx)?;
+        let pool = ctx.data::<DatabasePool>()?;
+
+        use crate::schema::{crawl_queue, user_sessions, users};
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+
+        let mut conn = pool.get().await?;
+
+        // Get user counts
+        let total_users: i64 = users::table.count().get_result(&mut conn).await?;
+
+        let active_users: i64 = users::table
+            .filter(users::last_login_at.gt(Utc::now() - chrono::Duration::hours(24)))
+            .count()
+            .get_result(&mut conn)
+            .await?;
+
+        // Get session counts
+        let total_sessions: i64 = user_sessions::table.count().get_result(&mut conn).await?;
+
+        let active_sessions: i64 = user_sessions::table
+            .filter(user_sessions::expires_at.gt(Utc::now()))
+            .count()
+            .get_result(&mut conn)
+            .await?;
+
+        // Get queue items count
+        let queue_items: i64 = crawl_queue::table.count().get_result(&mut conn).await?;
+
+        // Basic service status
+        Ok(SystemHealthType {
+            status: "healthy".to_string(),
+            metrics: SystemMetricsType {
+                total_users: total_users as i32,
+                active_users: active_users as i32,
+                total_sessions: total_sessions as i32,
+                active_sessions: active_sessions as i32,
+                database_size_mb: 0.0, // Would need special query for this
+                queue_items: queue_items as i32,
+                api_requests_per_minute: 0.0, // Would need metrics collection
+                average_response_time_ms: 0.0, // Would need metrics collection
+            },
+            last_updated: Utc::now(),
+        })
+    }
+
+    /// Get security events (admin only)
+    async fn security_events(
+        &self,
+        ctx: &Context<'_>,
+        _limit: Option<i32>,
+    ) -> Result<Vec<SecurityEventType>> {
+        // Require admin role
+        let _admin_user = require_admin(ctx)?;
+        let _pool = ctx.data::<DatabasePool>()?;
+
+        // Get security events logic would go here
+        // For now, return empty vector
+        Ok(vec![])
+    }
+
+    /// Get audit logs (admin only)
+    async fn audit_logs(
+        &self,
+        ctx: &Context<'_>,
+        _filter: Option<AuditLogFilterInput>,
+        _pagination: Option<PaginationInput>,
+    ) -> Result<AuditLogConnection> {
+        // Require admin role
+        let _admin_user = require_admin(ctx)?;
+        let _pool = ctx.data::<DatabasePool>()?;
+
+        // Get audit logs logic would go here
+        // For now, return empty connection
+        Ok(AuditLogConnection {
+            nodes: vec![],
+            total_count: 0,
+            page_info: PageInfo {
+                has_next_page: false,
+                has_previous_page: false,
+                start_cursor: None,
+                end_cursor: None,
+            },
+        })
     }
 }
 
