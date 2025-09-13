@@ -22,7 +22,6 @@ jobs:
     name: Backend Build Cache
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [backend-smoke-tests]
 
     steps:
     - name: Checkout code
@@ -88,6 +87,7 @@ jobs:
     name: Backend Smoke Tests (Fast)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    needs: [backend-build-cache]
 
     steps:
     - name: Checkout code
@@ -1255,7 +1255,7 @@ jobs:
     name: Comprehensive End-to-End Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [backend-smoke-tests, frontend-integration-tests]
+    needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests]
 
     services:
       postgres:
