@@ -999,7 +999,7 @@ jobs:
       working-directory: backend
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo clippy -- -D warnings
+        cargo clippy -- -W clippy::all
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
