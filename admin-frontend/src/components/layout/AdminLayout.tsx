@@ -170,11 +170,11 @@ export default function AdminLayout() {
       <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
           <Avatar sx={{ bgcolor: 'primary.main', mr: 1 }}>
-            {user?.name?.charAt(0) || 'A'}
+            {user?.username?.charAt(0) || 'A'}
           </Avatar>
           <Box>
             <Typography variant="subtitle2" noWrap>
-              {user?.name || 'Administrator'}
+              {user?.username || 'Administrator'}
             </Typography>
             <Chip
               label={user?.role || 'unknown'}

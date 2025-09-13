@@ -7,10 +7,14 @@ metadata:
     nginx.ingress.kubernetes.io/cors-allow-origin: "*"
     nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
     nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "5"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "5"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "5"
 spec:
   ingressClassName: nginx
   rules:
-  - host: localhost
+  - host: admin.econ-graph.local
     http:
       paths:
       - path: /api
@@ -48,6 +52,13 @@ spec:
             name: econ-graph-backend-service
             port:
               number: 9876
+      - path: /admin
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-admin-frontend-service
+            port:
+              number: 3001
       - path: /
         pathType: Prefix
         backend:

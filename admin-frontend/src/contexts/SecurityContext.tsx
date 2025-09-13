@@ -19,6 +19,7 @@ interface SecurityContextType {
   checkAccess: (requiredRole: string, resource?: string) => boolean;
   logSecurityEvent: (event: Omit<SecurityEvent, 'id' | 'timestamp'>) => void;
   getSecurityEvents: () => SecurityEvent[];
+  securityEvents: SecurityEvent[];
   isSecureConnection: boolean;
   sessionRemainingTime: number;
 }
@@ -254,6 +255,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     checkAccess,
     logSecurityEvent,
     getSecurityEvents,
+    securityEvents,
     isSecureConnection,
     sessionRemainingTime,
   };

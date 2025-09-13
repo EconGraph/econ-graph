@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: econ-graph-admin-frontend-service
+  namespace: econ-graph
+  labels:
+    app: econ-graph-admin-frontend
+  annotations:
+    service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
+spec:
+  type: NodePort
+  ports:
+  - port: 3001
+    targetPort: 3001
+    nodePort: 30002
+    protocol: TCP
+    name: http
+  selector:
+    app: econ-graph-admin-frontend
