@@ -244,13 +244,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -313,13 +336,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -380,13 +426,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -447,13 +516,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -514,13 +606,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -581,13 +696,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -648,13 +786,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -715,13 +876,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -782,13 +966,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -849,13 +1056,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -916,13 +1146,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -983,13 +1236,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -1050,13 +1326,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -1158,13 +1457,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -1272,13 +1594,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -1362,13 +1707,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Install cargo-audit
       run: $HOME/.cargo/bin/cargo install cargo-audit
@@ -1479,13 +1847,36 @@ jobs:
 
     - name: Install system build tools
       run: |
+        echo "=== DEBUGGING BUILD TOOLS INSTALLATION ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for existing cc command..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+
+        echo "Installing build-essential..."
         sudo apt-get update && sudo apt-get install -y build-essential
+
+        echo "After installation - checking commands..."
+        which cc || echo "cc still not found after installation"
+        which gcc || echo "gcc still not found after installation"
+        ls -la /usr/bin/cc* || echo "No cc* files in /usr/bin/"
+        ls -la /usr/bin/gcc* || echo "No gcc* files in /usr/bin/"
+
         # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        echo "Creating cc symlink if needed..."
         if ! command -v cc >/dev/null 2>&1; then
+          echo "cc not found, creating symlink..."
           sudo ln -sf $(which gcc) /usr/bin/cc
+          echo "Symlink created: $(ls -la /usr/bin/cc)"
+        else
+          echo "cc already available: $(which cc)"
         fi
+
         # Verify cc is available
+        echo "Final verification..."
         cc --version || echo "cc command verification failed"
+        echo "=== END DEBUGGING ==="
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
