@@ -1049,7 +1049,7 @@ jobs:
     - name: Install cargo-audit
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install cargo-audit
+        cargo install cargo-audit --force
 
     - name: Run Rust security audit
       run: |
@@ -1108,7 +1108,7 @@ jobs:
     - name: Install cargo-deny
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install cargo-deny
+        cargo install cargo-deny --force
 
     - name: Install license-checker
       run: npm install -g license-checker
