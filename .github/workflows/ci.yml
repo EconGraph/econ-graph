@@ -109,7 +109,7 @@ jobs:
           ~/.cargo/git
           ~/.cargo/bin
           backend/target
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -155,7 +155,7 @@ jobs:
           ~/.cargo/git
           ~/.cargo/bin
           backend/target
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -214,7 +214,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -270,7 +270,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -326,7 +326,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -382,7 +382,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -438,7 +438,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -494,7 +494,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -550,7 +550,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -606,7 +606,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -662,7 +662,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -718,7 +718,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -774,7 +774,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -830,7 +830,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -886,7 +886,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -983,7 +983,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
@@ -1090,7 +1090,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.cargo/bin
-        key: ${{ runner.os }}-shared-cargo-${{ hashFiles('backend/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
