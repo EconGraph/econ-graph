@@ -1,4 +1,4 @@
-This document is a comprehensive list of AI developer expectations, bsed on mistakes I have noticed, that all AI agents should have in their context while working on this project.  It is inspired by Cursor's memory feature, but at some point it is good for it to be static, so it can be shared across projects.
+This document is a comprehensive list of AI developer expectations, based on mistakes I have noticed, that all AI agents should have in their context while working on this project.  It is inspired by Cursor's memory feature, but at some point it is good for it to be static, so it can be shared across projects.
 
 
 * When starting a new task, you should always create a new branch off of main for work related to that task.  You should do it by running:
