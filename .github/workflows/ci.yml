@@ -243,7 +243,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -305,7 +312,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -365,7 +379,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -425,7 +446,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -485,7 +513,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -545,7 +580,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -605,7 +647,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -665,7 +714,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -725,7 +781,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -785,7 +848,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -845,7 +915,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -905,7 +982,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -965,7 +1049,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -1066,7 +1157,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Cache Rust dependencies (read-only from smoke tests)
       uses: actions/cache@v3
@@ -1173,7 +1271,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -1256,7 +1361,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Install cargo-audit
       run: $HOME/.cargo/bin/cargo install cargo-audit
@@ -1366,7 +1478,14 @@ jobs:
       uses: dtolnay/rust-toolchain@1.89.0
 
     - name: Install system build tools
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        # Ensure cc command is available (sometimes build-essential doesn't create the symlink)
+        if ! command -v cc >/dev/null 2>&1; then
+          sudo ln -sf $(which gcc) /usr/bin/cc
+        fi
+        # Verify cc is available
+        cc --version || echo "cc command verification failed"
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
