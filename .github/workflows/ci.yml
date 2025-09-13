@@ -297,7 +297,17 @@ jobs:
         PATH: $HOME/.cargo/bin:$PATH
 
     - name: Run backend models basic tests
-      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture models::data_source::tests::simple_tests models::economic_series::tests::simple_tests models::data_point::tests::simple_tests models::crawl_queue::tests::simple_tests models::search::tests::simple_tests
+      run: |
+        echo "=== DEBUGGING RUST COMPILATION ENVIRONMENT ==="
+        echo "Current PATH: $PATH"
+        echo "Current working directory: $(pwd)"
+        echo "Checking for cc command in Rust environment..."
+        which cc || echo "cc not found in PATH"
+        which gcc || echo "gcc not found in PATH"
+        echo "Testing cc command..."
+        cc --version || echo "cc command failed"
+        echo "=== END RUST ENVIRONMENT DEBUGGING ==="
+        $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture models::data_source::tests::simple_tests models::economic_series::tests::simple_tests models::data_point::tests::simple_tests models::crawl_queue::tests::simple_tests models::search::tests::simple_tests
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
