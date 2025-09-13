@@ -34,3 +34,46 @@ jobs:
         echo "JOB_LEVEL_SHELL_VAR (should expand to actual path): $JOB_LEVEL_SHELL_VAR"
         echo "JOB_LEVEL_WORKFLOW_VAR (should be pre-expanded): $JOB_LEVEL_WORKFLOW_VAR"
         echo "=== END LITERAL VS EXPANDED TEST ==="
+
+    - name: Test actual shell expansion methods
+      run: |
+        echo "=== TESTING ACTUAL SHELL EXPANSION METHODS ==="
+        echo "Method 1 - Direct shell expansion:"
+        export EXPANDED_PATH="$HOME/.cargo/bin"
+        echo "EXPANDED_PATH: $EXPANDED_PATH"
+
+        echo "Method 2 - Using eval:"
+        eval "export EVAL_PATH=$HOME/.cargo/bin"
+        echo "EVAL_PATH: $EVAL_PATH"
+
+        echo "Method 3 - Using printf:"
+        export PRINTF_PATH=$(printf "%s" "$HOME/.cargo/bin")
+        echo "PRINTF_PATH: $PRINTF_PATH"
+
+        echo "=== END SHELL EXPANSION METHODS TEST ==="
+
+    - name: Test all expansion combinations
+      run: |
+        echo "=== TESTING ALL EXPANSION COMBINATIONS ==="
+        echo "1. Plain \$HOME: $PLAIN_HOME"
+        echo "2. Escaped \\\$HOME: $ESCAPED_HOME"
+        echo "3. Double escaped \\\\\$HOME: $DOUBLE_ESCAPED_HOME"
+        echo "4. Single quotes '\$HOME': $SINGLE_QUOTED_HOME"
+        echo "5. Double quotes \"\$HOME\": $DOUBLE_QUOTED_HOME"
+        echo "6. GitHub Actions \${{ env.HOME }}: $GITHUB_ACTIONS_HOME"
+        echo "7. Mixed \$HOME/\$USER: $MIXED_VARS"
+        echo "8. Curly braces \${HOME}: $CURLY_BRACES_HOME"
+        echo "9. Backticks \`echo \$HOME\`: $BACKTICKS_HOME"
+        echo "10. Command substitution \$(echo \$HOME): $COMMAND_SUB_HOME"
+        echo "=== END ALL COMBINATIONS TEST ==="
+      env:
+        PLAIN_HOME: "$HOME/.cargo/bin"
+        ESCAPED_HOME: "\\$HOME/.cargo/bin"
+        DOUBLE_ESCAPED_HOME: "\\\\$HOME/.cargo/bin"
+        SINGLE_QUOTED_HOME: '$HOME/.cargo/bin'
+        DOUBLE_QUOTED_HOME: "$HOME/.cargo/bin"
+        GITHUB_ACTIONS_HOME: "${{ env.HOME }}/.cargo/bin"
+        MIXED_VARS: "$HOME/$USER/.cargo/bin"
+        CURLY_BRACES_HOME: "${HOME}/.cargo/bin"
+        BACKTICKS_HOME: "`echo $HOME`/.cargo/bin"
+        COMMAND_SUB_HOME: "$(echo $HOME)/.cargo/bin"
