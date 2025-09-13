@@ -1145,7 +1145,7 @@ jobs:
       run: cargo install cargo-audit
 
     - name: Run Rust security audit
-      run: cargo audit
+      run: $HOME/.cargo/bin/cargo audit
       working-directory: backend
 
     - name: Setup Node.js for npm audit
@@ -1268,7 +1268,7 @@ jobs:
     - name: 🔍 Check Backend License Compliance
       run: |
         echo "🔍 Checking backend license compliance with cargo-deny..."
-        cargo deny check licenses
+        $HOME/.cargo/bin/cargo deny check licenses
         echo "✅ Backend license compliance check passed"
       working-directory: backend
 
