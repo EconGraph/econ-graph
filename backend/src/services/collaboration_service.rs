@@ -8,6 +8,7 @@ use chrono::NaiveDate;
 use diesel::prelude::*;
 use diesel::SelectableHelper;
 use diesel_async::RunQueryDsl;
+use std::fmt;
 use uuid::Uuid;
 
 use crate::{
@@ -40,15 +41,6 @@ impl PermissionLevel {
         }
     }
 
-    pub fn to_string(&self) -> String {
-        match self {
-            PermissionLevel::View => "view".to_string(),
-            PermissionLevel::Comment => "comment".to_string(),
-            PermissionLevel::Edit => "edit".to_string(),
-            PermissionLevel::Admin => "admin".to_string(),
-        }
-    }
-
     pub fn can_view(&self) -> bool {
         true // All permission levels can view
     }
@@ -66,6 +58,17 @@ impl PermissionLevel {
 
     pub fn can_admin(&self) -> bool {
         matches!(self, PermissionLevel::Admin)
+    }
+}
+
+impl fmt::Display for PermissionLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PermissionLevel::View => write!(f, "view"),
+            PermissionLevel::Comment => write!(f, "comment"),
+            PermissionLevel::Edit => write!(f, "edit"),
+            PermissionLevel::Admin => write!(f, "admin"),
+        }
     }
 }
 

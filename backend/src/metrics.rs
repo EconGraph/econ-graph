@@ -272,7 +272,6 @@ pub async fn metrics_handler() -> Result<impl Reply, warp::Rejection> {
 }
 
 /// Helper functions for recording metrics
-
 /// Record HTTP request metrics
 pub fn record_http_request(method: &str, endpoint: &str, status_code: u16, duration: f64) {
     METRICS

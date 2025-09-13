@@ -430,7 +430,7 @@ impl CrawlAttempt {
             adjusted_frequency * 4 // Low data found rate, reduce frequency significantly
         };
 
-        final_frequency.max(1).min(168 * 4) // Between 1 hour and 4 weeks
+        final_frequency.clamp(1, 168 * 4) // Between 1 hour and 4 weeks
     }
 }
 

@@ -74,7 +74,7 @@ pub struct NewSeriesMetadata {
 }
 
 /// Update series metadata
-#[derive(Debug, Clone, Serialize, Deserialize, AsChangeset)]
+#[derive(Debug, Clone, Serialize, Deserialize, AsChangeset, Default)]
 #[diesel(table_name = series_metadata)]
 pub struct UpdateSeriesMetadata {
     /// Series title
@@ -95,22 +95,6 @@ pub struct UpdateSeriesMetadata {
     pub last_discovered_at: Option<DateTime<Utc>>,
     /// Whether this series is currently active
     pub is_active: bool,
-}
-
-impl Default for UpdateSeriesMetadata {
-    fn default() -> Self {
-        Self {
-            title: None,
-            description: None,
-            units: None,
-            frequency: None,
-            geographic_level: None,
-            data_url: None,
-            api_endpoint: None,
-            last_discovered_at: None,
-            is_active: false,
-        }
-    }
 }
 
 impl SeriesMetadata {
