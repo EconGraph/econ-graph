@@ -5,11 +5,9 @@
  */
 use crate::auth::models::*;
 use crate::auth::services::AuthService;
-use crate::error::AppError;
 use serde_json::json;
-use std::convert::Infallible;
 use validator::Validate;
-use warp::{http::StatusCode, reject, reply, Rejection, Reply};
+use warp::{http::StatusCode, reply, Rejection, Reply};
 
 /// Handle Google OAuth authentication
 pub async fn handle_google_auth(

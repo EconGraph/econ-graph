@@ -19,5 +19,4 @@ pub mod simple_crawler_service;
 mod tests;
 
 pub use catalog_downloader::CatalogDownloader;
-pub use cli::CrawlerCli;
 pub use series_downloader::SeriesDownloader;

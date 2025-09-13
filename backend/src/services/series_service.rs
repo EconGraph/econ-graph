@@ -1,4 +1,3 @@
-use bigdecimal::BigDecimal;
 use chrono::Datelike;
 use diesel::prelude::*;
 use diesel::SelectableHelper;
@@ -484,6 +483,7 @@ fn calculate_mom_changes(data_points: Vec<DataPoint>) -> Vec<TransformedDataPoin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bigdecimal::BigDecimal;
     use chrono::NaiveDate;
     use rust_decimal_macros::dec;
     use uuid::Uuid;

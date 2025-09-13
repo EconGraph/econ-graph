@@ -12,7 +12,6 @@ use diesel_async::RunQueryDsl;
 
 use crate::database::DatabasePool;
 use crate::error::{AppError, AppResult};
-use crate::models::{CrawlAttempt, CrawlStatistics, DataSource};
 use crate::services::{
     enhanced_crawler_service::{CrawlableSeries, EnhancedCrawlerService},
     series_discovery::SeriesDiscoveryService,

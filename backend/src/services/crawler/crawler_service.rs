@@ -1,7 +1,5 @@
-use std::sync::Arc;
-use tokio::time::{sleep, Duration};
-use tokio_cron_scheduler::{Job, JobScheduler};
-use tracing::{error, info, warn};
+use tokio_cron_scheduler::JobScheduler;
+use tracing::info;
 
 use crate::{
     error::AppResult,

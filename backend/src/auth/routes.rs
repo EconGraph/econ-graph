@@ -5,7 +5,6 @@
  */
 use crate::auth::handlers::*;
 use crate::auth::middleware::{handle_auth_rejection, with_auth};
-use crate::auth::models::*;
 use crate::auth::services::AuthService;
 use warp::{filters::BoxedFilter, Filter, Reply};
 

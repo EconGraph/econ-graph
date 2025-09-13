@@ -4,7 +4,7 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use uuid::Uuid;
 
 use crate::{
-    database::{create_pool, DatabasePool},
+    database::DatabasePool,
     error::AppResult,
     models::{CrawlQueueItem, QueueStatistics, QueueStatus, UpdateCrawlQueueItem},
     schema::crawl_queue,

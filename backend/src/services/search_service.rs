@@ -4,13 +4,9 @@
 
 use crate::database::DatabasePool;
 use crate::error::{AppError, AppResult};
-use crate::models::search::{
-    SearchAnalytics, SearchParams, SearchSortOrder, SearchStatistics, SearchSuggestion,
-    SeriesSearchResult, SuggestionType,
-};
+use crate::models::search::{SearchParams, SearchSuggestion, SeriesSearchResult, SuggestionType};
 use diesel::prelude::*;
-use diesel_async::pooled_connection::bb8::Pool;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::RunQueryDsl;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use validator::Validate;

@@ -2,7 +2,7 @@
 
 use crate::database::DatabasePool;
 use crate::error::{AppError, AppResult};
-use crate::models::{DataSource, EconomicSeries, NewEconomicSeries};
+use crate::models::DataSource;
 use reqwest::Client;
 use serde::Deserialize;
 use uuid::Uuid;

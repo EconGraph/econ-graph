@@ -8,7 +8,6 @@ use crate::services::crawler::{CatalogDownloader, SeriesDownloader};
 use clap::{Parser, Subcommand};
 use reqwest::Client;
 use std::env;
-use tokio;
 
 #[derive(Parser)]
 #[command(name = "crawler")]

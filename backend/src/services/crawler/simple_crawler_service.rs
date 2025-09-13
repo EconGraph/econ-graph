@@ -13,9 +13,7 @@ use tracing::{error, info, warn};
 use crate::{
     database::DatabasePool,
     error::{AppError, AppResult},
-    models::{
-        DataPoint, DataSource, EconomicSeries, NewDataPoint, NewDataSource, NewEconomicSeries,
-    },
+    models::{DataPoint, DataSource, EconomicSeries, NewDataPoint, NewEconomicSeries},
 };
 
 /// Crawler status information

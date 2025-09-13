@@ -22,10 +22,8 @@ pub mod world_bank;
 pub mod wto;
 
 use crate::database::DatabasePool;
-use crate::error::{AppError, AppResult};
-use crate::models::{DataSource, EconomicSeries, NewEconomicSeries};
+use crate::error::AppResult;
 use reqwest::Client;
-use uuid::Uuid;
 
 /// Series discovery service for automated cataloging
 pub struct SeriesDiscoveryService {
