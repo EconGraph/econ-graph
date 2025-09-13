@@ -1,0 +1,38 @@
+name: Test Shell Expansion in GitHub Actions
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-shell-expansion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+
+    steps:
+    - name: Install build tools
+      run: |
+        sudo apt-get update && sudo apt-get install -y build-essential
+        echo "cc installed: $(which cc)"
+
+    - name: Test shell expansion in YAML env
+      run: |
+        echo "=== TESTING SHELL EXPANSION IN YAML ENV ==="
+        echo "Current PATH: $PATH"
+        echo "Testing which cc:"
+        which cc || echo "❌ cc not found"
+        echo "Testing cc command:"
+        cc --version || echo "❌ cc command failed"
+        echo "=== END SHELL EXPANSION TEST ==="
+      env:
+        PATH: "$HOME/.cargo/bin:$PATH"
+
+    - name: Test shell expansion in run command
+      run: |
+        echo "=== TESTING SHELL EXPANSION IN RUN COMMAND ==="
+        export PATH="$HOME/.cargo/bin:$PATH"
+        echo "Current PATH: $PATH"
+        echo "Testing which cc:"
+        which cc || echo "❌ cc not found"
+        echo "Testing cc command:"
+        cc --version || echo "❌ cc command failed"
+        echo "=== END RUN COMMAND TEST ==="
