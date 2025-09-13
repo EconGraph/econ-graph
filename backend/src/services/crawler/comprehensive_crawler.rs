@@ -28,12 +28,7 @@ impl ComprehensiveCrawler {
         bea_api_key: Option<String>,
     ) -> Self {
         Self {
-            discovery_service: SeriesDiscoveryService::new(
-                fred_api_key.clone(),
-                bls_api_key.clone(),
-                census_api_key.clone(),
-                bea_api_key.clone(),
-            ),
+            discovery_service: SeriesDiscoveryService::new(),
             crawler_service: CrawlerService::new(fred_api_key, bls_api_key),
         }
     }
