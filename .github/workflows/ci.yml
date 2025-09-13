@@ -5,6 +5,13 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to run CI on (leave empty for current branch)'
+        required: false
+        default: ''
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
