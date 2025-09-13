@@ -141,7 +141,7 @@ jobs:
       working-directory: backend
 
     - name: Build backend
-      run: cargo build --verbose
+      run: $HOME/.cargo/bin/cargo build --verbose
       working-directory: backend
 
   backend-smoke-tests:
@@ -174,15 +174,15 @@ jobs:
           ${{ runner.os }}-shared-cargo-
 
     - name: Check Rust formatting
-      run: cargo fmt --all -- --check
+      run: $HOME/.cargo/bin/cargo fmt --all -- --check
       working-directory: backend
 
     - name: Run Clippy (linting)
-      run: cargo clippy --all-targets --all-features -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
+      run: $HOME/.cargo/bin/cargo clippy --all-targets --all-features -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
       working-directory: backend
 
     - name: Run fast unit tests (no database)
-      run: cargo test --lib -- --test-threads=4 --nocapture config auth::services metrics
+      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=4 --nocapture config auth::services metrics
       working-directory: backend
       env:
         RUST_LOG: warn
@@ -243,7 +243,7 @@ jobs:
         PATH: $HOME/.cargo/bin:$PATH
 
     - name: Run backend models basic tests
-      run: cargo test --lib -- --test-threads=2 --nocapture models::data_source::tests::simple_tests models::economic_series::tests::simple_tests models::data_point::tests::simple_tests models::crawl_queue::tests::simple_tests models::search::tests::simple_tests
+      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture models::data_source::tests::simple_tests models::economic_series::tests::simple_tests models::data_point::tests::simple_tests models::crawl_queue::tests::simple_tests models::search::tests::simple_tests
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
@@ -301,7 +301,7 @@ jobs:
         DATABASE_URL: postgresql://postgres:password@localhost:5433/econ_graph_test
 
     - name: Run backend models advanced tests
-      run: cargo test --lib -- --test-threads=2 --nocapture models::data_source::tests models::economic_series::tests models::data_point::tests models::crawl_queue::tests models::search::tests models::series_metadata::tests
+      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture models::data_source::tests models::economic_series::tests models::data_point::tests models::crawl_queue::tests models::search::tests models::series_metadata::tests
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5433/econ_graph_test
@@ -358,7 +358,7 @@ jobs:
         DATABASE_URL: postgresql://postgres:password@localhost:5434/econ_graph_test
 
     - name: Run backend crawler unit tests
-      run: cargo test --lib -- --test-threads=2 --nocapture services::crawler::tests::test_catalog_downloader_creation services::crawler::tests::test_series_downloader_creation services::crawler::simple_crawler_service::tests services::crawler::enhanced_crawler_scheduler::tests
+      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture services::crawler::tests::test_catalog_downloader_creation services::crawler::tests::test_series_downloader_creation services::crawler::simple_crawler_service::tests services::crawler::enhanced_crawler_scheduler::tests
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5434/econ_graph_test
@@ -415,7 +415,7 @@ jobs:
         DATABASE_URL: postgresql://postgres:password@localhost:5435/econ_graph_test
 
     - name: Run backend crawler integration tests
-      run: cargo test --lib -- --test-threads=2 --nocapture services::crawler::tests::test_crawler_with_database services::crawler::tests::test_file_crawling_with_series_downloader services::crawler::tests::test_file_url_crawling services::crawler::tests::test_file_url_error_handling services::crawler::tests::test_file_url_with_special_characters services::crawler::tests::test_multiple_file_urls
+      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture services::crawler::tests::test_crawler_with_database services::crawler::tests::test_file_crawling_with_series_downloader services::crawler::tests::test_file_url_crawling services::crawler::tests::test_file_url_error_handling services::crawler::tests::test_file_url_with_special_characters services::crawler::tests::test_multiple_file_urls
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5435/econ_graph_test
@@ -472,7 +472,7 @@ jobs:
         DATABASE_URL: postgresql://postgres:password@localhost:5436/econ_graph_test
 
     - name: Run backend queue basic tests
-      run: cargo test --lib -- --test-threads=2 --nocapture services::queue_service::tests::test_get_and_lock_next_item services::queue_service::tests::test_queue_item_locking_and_unlocking services::queue_service::tests::test_queue_status_updates services::queue_service::tests::test_queue_retry_logic services::queue_service::tests::test_queue_skip_locked_functionality
+      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture services::queue_service::tests::test_get_and_lock_next_item services::queue_service::tests::test_queue_item_locking_and_unlocking services::queue_service::tests::test_queue_status_updates services::queue_service::tests::test_queue_retry_logic services::queue_service::tests::test_queue_skip_locked_functionality
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5436/econ_graph_test
@@ -529,7 +529,7 @@ jobs:
         DATABASE_URL: postgresql://postgres:password@localhost:5437/econ_graph_test
 
     - name: Run backend queue advanced tests
-      run: cargo test --lib -- --test-threads=2 --nocapture services::queue_service::tests::test_queue_concurrent_access services::queue_service::tests::test_queue_statistics_with_processing_time services::queue_service::tests::test_queue_statistics_empty services::queue_service::tests::test_queue_error_handling services::queue_service::tests::test_queue_scheduled_items services::queue_service::tests::test_get_stuck_items services::queue_service::tests::test_unlock_stuck_items services::queue_service::tests::test_mark_item_failed services::queue_service::tests::test_cleanup_old_queue_items
+      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture services::queue_service::tests::test_queue_concurrent_access services::queue_service::tests::test_queue_statistics_with_processing_time services::queue_service::tests::test_queue_statistics_empty services::queue_service::tests::test_queue_error_handling services::queue_service::tests::test_queue_scheduled_items services::queue_service::tests::test_get_stuck_items services::queue_service::tests::test_unlock_stuck_items services::queue_service::tests::test_mark_item_failed services::queue_service::tests::test_cleanup_old_queue_items
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5437/econ_graph_test
@@ -586,7 +586,7 @@ jobs:
         DATABASE_URL: postgresql://postgres:password@localhost:5438/econ_graph_test
 
     - name: Run backend global analysis basic tests
-      run: cargo test --lib -- --test-threads=2 --nocapture services::global_analysis_service::tests::test_get_countries_with_economic_data services::global_analysis_service::tests::test_get_global_events_with_impacts services::global_analysis_service::tests::test_get_global_events_with_filters services::global_analysis_service::tests::test_direct_event_query services::global_analysis_service::tests::test_event_insertion_only services::global_analysis_service::tests::test_trade_partners_retrieval
+      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture services::global_analysis_service::tests::test_get_countries_with_economic_data services::global_analysis_service::tests::test_get_global_events_with_impacts services::global_analysis_service::tests::test_get_global_events_with_filters services::global_analysis_service::tests::test_direct_event_query services::global_analysis_service::tests::test_event_insertion_only services::global_analysis_service::tests::test_trade_partners_retrieval
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5438/econ_graph_test
@@ -643,7 +643,7 @@ jobs:
         DATABASE_URL: postgresql://postgres:password@localhost:5439/econ_graph_test
 
     - name: Run backend global analysis advanced tests
-      run: cargo test --lib -- --test-threads=2 --nocapture services::global_analysis_service::tests::test_get_correlation_network services::global_analysis_service::tests::test_calculate_country_correlations services::global_analysis_service::tests::test_calculate_economic_health_score services::global_analysis_service::tests::test_correlation_network_centrality_calculation services::global_analysis_service::tests::test_error_handling_database_connection_failure
+      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture services::global_analysis_service::tests::test_get_correlation_network services::global_analysis_service::tests::test_calculate_country_correlations services::global_analysis_service::tests::test_calculate_economic_health_score services::global_analysis_service::tests::test_correlation_network_centrality_calculation services::global_analysis_service::tests::test_error_handling_database_connection_failure
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5439/econ_graph_test
@@ -700,7 +700,7 @@ jobs:
         DATABASE_URL: postgresql://postgres:password@localhost:5440/econ_graph_test
 
     - name: Run backend series discovery basic tests
-      run: cargo test --lib -- --test-threads=2 --nocapture services::series_discovery::boc::tests::test_boc_data_source_creation services::series_discovery::boe::tests::test_boe_data_source_creation services::series_discovery::boj::tests::test_boj_data_source_creation services::series_discovery::ecb::tests::test_ecb_data_source_creation services::series_discovery::fhfa::tests::test_fhfa_data_source_creation services::series_discovery::ilo::tests::test_ilo_data_source_creation services::series_discovery::oecd::tests::test_oecd_data_source_creation services::series_discovery::rba::tests::test_rba_data_source_creation services::series_discovery::snb::tests::test_snb_data_source_creation services::series_discovery::unstats::tests::test_unstats_data_source_creation services::series_discovery::wto::tests::test_wto_data_source_creation
+      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture services::series_discovery::boc::tests::test_boc_data_source_creation services::series_discovery::boe::tests::test_boe_data_source_creation services::series_discovery::boj::tests::test_boj_data_source_creation services::series_discovery::ecb::tests::test_ecb_data_source_creation services::series_discovery::fhfa::tests::test_fhfa_data_source_creation services::series_discovery::ilo::tests::test_ilo_data_source_creation services::series_discovery::oecd::tests::test_oecd_data_source_creation services::series_discovery::rba::tests::test_rba_data_source_creation services::series_discovery::snb::tests::test_snb_data_source_creation services::series_discovery::unstats::tests::test_unstats_data_source_creation services::series_discovery::wto::tests::test_wto_data_source_creation
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5440/econ_graph_test
@@ -757,7 +757,7 @@ jobs:
         DATABASE_URL: postgresql://postgres:password@localhost:5441/econ_graph_test
 
     - name: Run backend series discovery integration tests
-      run: cargo test --lib -- --test-threads=2 --nocapture services::series_discovery::boc::tests::test_discover_series services::series_discovery::boe::tests::test_discover_series services::series_discovery::boj::tests::test_discover_series services::series_discovery::ecb::tests::test_discover_series services::series_discovery::fhfa::tests::test_discover_series services::series_discovery::ilo::tests::test_discover_series services::series_discovery::oecd::tests::test_discover_series services::series_discovery::rba::tests::test_discover_series services::series_discovery::snb::tests::test_discover_series services::series_discovery::unstats::tests::test_discover_series services::series_discovery::wto::tests::test_discover_series
+      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture services::series_discovery::boc::tests::test_discover_series services::series_discovery::boe::tests::test_discover_series services::series_discovery::boj::tests::test_discover_series services::series_discovery::ecb::tests::test_discover_series services::series_discovery::fhfa::tests::test_discover_series services::series_discovery::ilo::tests::test_discover_series services::series_discovery::oecd::tests::test_discover_series services::series_discovery::rba::tests::test_discover_series services::series_discovery::snb::tests::test_discover_series services::series_discovery::unstats::tests::test_discover_series services::series_discovery::wto::tests::test_discover_series
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5441/econ_graph_test
@@ -814,7 +814,7 @@ jobs:
         DATABASE_URL: postgresql://postgres:password@localhost:5442/econ_graph_test
 
     - name: Run backend auth integration tests
-      run: cargo test --lib -- --test-threads=2 --nocapture auth::integration_tests auth::comprehensive_integration_tests
+      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture auth::integration_tests auth::comprehensive_integration_tests
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5442/econ_graph_test
@@ -871,7 +871,7 @@ jobs:
         DATABASE_URL: postgresql://postgres:password@localhost:5443/econ_graph_test
 
     - name: Run backend collaboration integration tests
-      run: cargo test --lib -- --test-threads=2 --nocapture collaboration_integration_tests services::collaboration_service::tests
+      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture collaboration_integration_tests services::collaboration_service::tests
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5443/econ_graph_test
@@ -928,7 +928,7 @@ jobs:
         DATABASE_URL: postgresql://postgres:password@localhost:5444/econ_graph_test
 
     - name: Run backend remaining service tests
-      run: cargo test --lib -- --test-threads=2 --nocapture services::search_service services::series_service services::comprehensive_series_catalog::tests services::series_discovery::boc::tests::test_discover_boc_series_integration services::series_discovery::boe::tests::test_discover_boe_series_integration services::series_discovery::boe::tests::test_fetch_boe_data services::series_discovery::boj::tests::test_discover_boj_series_integration services::series_discovery::boj::tests::test_fetch_boj_data services::series_discovery::ecb::tests::test_discover_ecb_series_integration services::series_discovery::ecb::tests::test_fetch_ecb_data services::series_discovery::fhfa::tests::test_fhfa_hpi_data_structure services::series_discovery::ilo::tests::test_discover_ilo_series_integration services::series_discovery::oecd::tests::test_discover_oecd_series_integration services::series_discovery::oecd::tests::test_fetch_oecd_data services::series_discovery::rba::tests::test_discover_rba_series_integration services::series_discovery::snb::tests::test_discover_snb_series_integration services::series_discovery::unstats::tests::test_discover_unstats_series_integration services::series_discovery::wto::tests::test_discover_wto_series_integration services::series_discovery::wto::tests::test_fetch_wto_data
+      run: $HOME/.cargo/bin/cargo test --lib -- --test-threads=2 --nocapture services::search_service services::series_service services::comprehensive_series_catalog::tests services::series_discovery::boc::tests::test_discover_boc_series_integration services::series_discovery::boe::tests::test_discover_boe_series_integration services::series_discovery::boe::tests::test_fetch_boe_data services::series_discovery::boj::tests::test_discover_boj_series_integration services::series_discovery::boj::tests::test_fetch_boj_data services::series_discovery::ecb::tests::test_discover_ecb_series_integration services::series_discovery::ecb::tests::test_fetch_ecb_data services::series_discovery::fhfa::tests::test_fhfa_hpi_data_structure services::series_discovery::ilo::tests::test_discover_ilo_series_integration services::series_discovery::oecd::tests::test_discover_oecd_series_integration services::series_discovery::oecd::tests::test_fetch_oecd_data services::series_discovery::rba::tests::test_discover_rba_series_integration services::series_discovery::snb::tests::test_discover_snb_series_integration services::series_discovery::unstats::tests::test_discover_unstats_series_integration services::series_discovery::wto::tests::test_discover_wto_series_integration services::series_discovery::wto::tests::test_fetch_wto_data
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5444/econ_graph_test
@@ -1027,18 +1027,18 @@ jobs:
         PATH: $HOME/.cargo/bin:$PATH
 
     - name: Build backend
-      run: cargo build --release
+      run: $HOME/.cargo/bin/cargo build --release
       working-directory: backend
 
     - name: Run backend integration tests
-      run: cargo test --release integration_tests
+      run: $HOME/.cargo/bin/cargo test --release integration_tests
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
         PATH: $HOME/.cargo/bin:$PATH
 
     - name: Run backend e2e tests with testcontainers
-      run: cargo test --release e2e_tests --lib
+      run: $HOME/.cargo/bin/cargo test --release e2e_tests --lib
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
@@ -1144,7 +1144,7 @@ jobs:
         DATABASE_URL: postgresql://testuser:testpassword@localhost:5433/econ_graph_test
 
     - name: Build backend for e2e tests
-      run: cargo build --release
+      run: $HOME/.cargo/bin/cargo build --release
       working-directory: backend
 
     - name: Install frontend dependencies
@@ -1263,11 +1263,11 @@ jobs:
         cache-dependency-path: frontend/package-lock.json
 
     - name: Check Rust code formatting
-      run: cargo fmt --all -- --check
+      run: $HOME/.cargo/bin/cargo fmt --all -- --check
       working-directory: backend
 
     - name: Run Rust linting
-      run: cargo clippy --all-targets --all-features -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
+      run: $HOME/.cargo/bin/cargo clippy --all-targets --all-features -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
       working-directory: backend
 
     - name: Install frontend dependencies
