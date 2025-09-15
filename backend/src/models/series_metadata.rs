@@ -255,6 +255,7 @@ mod tests {
             requires_admin_approval: false,
             crawl_frequency_hours: 24,
             api_documentation_url: Some("https://api.test.com/docs".to_string()),
+            api_key_name: None,
         };
 
         let data_source = crate::models::data_source::DataSource::get_or_create(pool, test_source)
@@ -326,6 +327,7 @@ mod tests {
             requires_admin_approval: false,
             crawl_frequency_hours: 24,
             api_documentation_url: Some("https://api.test2.com/docs".to_string()),
+            api_key_name: None,
         };
 
         let data_source = crate::models::data_source::DataSource::get_or_create(pool, test_source)

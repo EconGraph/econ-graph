@@ -28,6 +28,7 @@ pub struct DataSource {
     pub crawl_status: Option<String>,
     pub crawl_error_message: Option<String>,
     pub api_documentation_url: Option<String>,
+    pub api_key_name: Option<String>,
 }
 
 /// New data source for insertion
@@ -49,6 +50,7 @@ pub struct NewDataSource {
     pub crawl_frequency_hours: i32,
     #[validate(url)]
     pub api_documentation_url: Option<String>,
+    pub api_key_name: Option<String>,
 }
 
 /// Data source update model
@@ -86,6 +88,7 @@ impl DataSource {
             requires_admin_approval: false,
             crawl_frequency_hours: 6,
             api_documentation_url: Some("https://fred.stlouisfed.org/docs/api/fred/".to_string()),
+            api_key_name: Some("FRED_API_KEY".to_string()),
         }
     }
 
@@ -107,6 +110,7 @@ impl DataSource {
             api_documentation_url: Some(
                 "https://www.bls.gov/developers/api_signature_v2.htm".to_string(),
             ),
+            api_key_name: Some("BLS_API_KEY".to_string()),
         }
     }
 
@@ -118,15 +122,16 @@ impl DataSource {
                 "Demographic and economic data from the U.S. Census Bureau".to_string(),
             ),
             base_url: "https://api.census.gov/data".to_string(),
-            api_key_required: true,
+            api_key_required: false, // Census API doesn't require authentication
             rate_limit_per_minute: 500,
-            is_visible: false,
-            is_enabled: false,
-            requires_admin_approval: true,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
             crawl_frequency_hours: 24,
             api_documentation_url: Some(
                 "https://www.census.gov/data/developers/data-sets.html".to_string(),
             ),
+            api_key_name: None,
         }
     }
 
@@ -145,6 +150,7 @@ impl DataSource {
             requires_admin_approval: true,
             crawl_frequency_hours: 24,
             api_documentation_url: Some("https://datahelpdesk.worldbank.org/knowledgebase/articles/898581-api-basic-call-structures".to_string()),
+            api_key_name: None,
         }
     }
 
@@ -165,6 +171,7 @@ impl DataSource {
             api_documentation_url: Some(
                 "https://apps.bea.gov/api/bea_web_service_api_user_guide.htm".to_string(),
             ),
+            api_key_name: Some("BEA_API_KEY".to_string()),
         }
     }
 
@@ -185,6 +192,7 @@ impl DataSource {
             api_documentation_url: Some(
                 "https://data.imf.org/en/Resource-Pages/IMF-API".to_string(),
             ),
+            api_key_name: Some("IMF_API_KEY".to_string()),
         }
     }
 
@@ -205,6 +213,7 @@ impl DataSource {
             api_documentation_url: Some(
                 "https://www.fhfa.gov/data/developer-information".to_string(),
             ),
+            api_key_name: None,
         }
     }
 
@@ -223,6 +232,7 @@ impl DataSource {
             requires_admin_approval: false,
             crawl_frequency_hours: 24,
             api_documentation_url: Some("https://sdw-wsrest.ecb.europa.eu/help/".to_string()),
+            api_key_name: None,
         }
     }
 
@@ -243,6 +253,7 @@ impl DataSource {
             api_documentation_url: Some(
                 "https://data-explorer.oecd.org/vis?fs[0]=Topic%2C1%7C1%7C1%7C0&fs[1]=Country%2C1%7C1%7C1%7C0&fs[2]=Measure%2C1%7C1%7C1%7C0&fs[3]=Time%2C1%7C1%7C1%7C0&pg=0&fc=Topic&lc=en&fs[4]=Subject%2C1%7C1%7C1%7C0".to_string(),
             ),
+            api_key_name: None,
         }
     }
 
@@ -263,6 +274,7 @@ impl DataSource {
             api_documentation_url: Some(
                 "https://www.bankofengland.co.uk/statistics/data".to_string(),
             ),
+            api_key_name: None,
         }
     }
 
@@ -283,6 +295,7 @@ impl DataSource {
             api_documentation_url: Some(
                 "https://www.wto.org/english/res_e/statis_e/data_explorer_e.htm".to_string(),
             ),
+            api_key_name: None,
         }
     }
 
@@ -303,6 +316,7 @@ impl DataSource {
             api_documentation_url: Some(
                 "https://www.boj.or.jp/en/statistics/".to_string(),
             ),
+            api_key_name: None,
         }
     }
 
@@ -323,6 +337,7 @@ impl DataSource {
             api_documentation_url: Some(
                 "https://www.rba.gov.au/statistics/".to_string(),
             ),
+            api_key_name: None,
         }
     }
 
@@ -343,6 +358,7 @@ impl DataSource {
             api_documentation_url: Some(
                 "https://www.bankofcanada.ca/valet/docs/".to_string(),
             ),
+            api_key_name: None,
         }
     }
 
@@ -362,6 +378,7 @@ impl DataSource {
             requires_admin_approval: false,
             crawl_frequency_hours: 24,
             api_documentation_url: Some("https://data.snb.ch/en".to_string()),
+            api_key_name: None,
         }
     }
 
@@ -382,6 +399,7 @@ impl DataSource {
             api_documentation_url: Some(
                 "https://unstats.un.org/home/".to_string(),
             ),
+            api_key_name: None,
         }
     }
 
@@ -402,6 +420,7 @@ impl DataSource {
             api_documentation_url: Some(
                 "https://www.ilo.org/global/statistics-and-databases/lang--en/index.htm".to_string(),
             ),
+            api_key_name: None,
         }
     }
 
@@ -503,6 +522,7 @@ impl Default for NewDataSource {
             requires_admin_approval: false,
             crawl_frequency_hours: 24,
             api_documentation_url: Some("https://example.com/api/docs".to_string()),
+            api_key_name: None,
         }
     }
 }
@@ -581,6 +601,7 @@ mod _inline_tests {
             requires_admin_approval: false,
             crawl_frequency_hours: 24,
             api_documentation_url: Some("https://api.example.com/docs".to_string()),
+            api_key_name: None,
         };
 
         // Verify valid configuration passes validation
@@ -601,6 +622,7 @@ mod _inline_tests {
             requires_admin_approval: false,
             crawl_frequency_hours: 24,
             api_documentation_url: Some("https://example.com/api/docs".to_string()),
+            api_key_name: None,
         };
 
         assert!(
@@ -620,6 +642,7 @@ mod _inline_tests {
             requires_admin_approval: false,
             crawl_frequency_hours: 24,
             api_documentation_url: Some("https://example.com/api/docs".to_string()),
+            api_key_name: None,
         };
 
         assert!(

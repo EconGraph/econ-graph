@@ -291,7 +291,7 @@ async fn crawl_data_source(
     let discovered_series = match data_source.name.to_lowercase().as_str() {
         "fred" => discovery_service.discover_fred_series(pool).await?,
         "bls" => discovery_service.discover_bls_series(pool).await?,
-        "census" => discovery_service.discover_census_series(pool).await?,
+        "u.s. census bureau" | "census" => discovery_service.discover_census_series(pool).await?,
         "bea" => discovery_service.discover_bea_series(pool).await?,
         "world bank" => discovery_service.discover_world_bank_series(pool).await?,
         "imf" => discovery_service.discover_imf_series(pool).await?,

@@ -8,8 +8,8 @@ repos:
   - repo: local
     hooks:
       - id: rust-fmt
-        name: Rust Format Check
-        entry: bash -c 'cd backend && cargo fmt --all -- --check'
+        name: Rust Format Fix
+        entry: bash -c 'cd backend && cargo fmt --all'
         language: system
         files: '^backend/.*\.rs$'
         pass_filenames: false

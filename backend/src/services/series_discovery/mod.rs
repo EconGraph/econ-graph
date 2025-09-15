@@ -62,7 +62,8 @@ impl SeriesDiscoveryService {
 
     /// Discover Census series using the Census Data API
     pub async fn discover_census_series(&self, pool: &DatabasePool) -> AppResult<Vec<String>> {
-        census::discover_census_series(&self.client, &self.census_api_key, pool).await
+        let series = census::discover_census_series(pool).await?;
+        Ok(series.into_iter().map(|s| s.external_id).collect())
     }
 
     /// Discover BEA series using the BEA Data API
