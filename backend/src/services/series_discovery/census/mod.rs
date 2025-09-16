@@ -147,6 +147,14 @@ pub async fn execute_query(client: &Client, query: &CensusQueryBuilder) -> AppRe
         )));
     }
 
+    // Handle 204 No Content responses (known API limitation for multi-year queries)
+    if response.status() == 204 {
+        return Err(AppError::ExternalApiError(
+            "Census API returned 204 No Content - no data available for the requested parameters"
+                .to_string(),
+        ));
+    }
+
     let text = response.text().await.map_err(|e| {
         AppError::ExternalApiError(format!("Failed to read Census response: {}", e))
     })?;
