@@ -18,6 +18,8 @@ mod error;
 mod graphql;
 mod mcp_server;
 mod metrics;
+mod metrics_enhanced;
+mod metrics_service;
 mod models;
 mod schema;
 mod services;
@@ -264,8 +266,20 @@ async fn main() -> AppResult<()> {
 
     // Initialize metrics
     info!("📊 Initializing Prometheus metrics...");
-    let _metrics = &metrics::METRICS; // Initialize metrics
+    let _metrics = &metrics::METRICS; // Initialize original metrics
+    let _enhanced_metrics = &metrics_enhanced::METRICS; // Initialize enhanced metrics
     info!("✅ Prometheus metrics initialized");
+
+    // Start metrics service for periodic updates
+    info!("🔄 Starting metrics service...");
+    metrics_service::start_metrics_service(Arc::new(pool.clone())).await
+        .map_err(|e| {
+            let error = AppError::DatabaseError(format!("Failed to start metrics service: {}", e));
+            error.log_with_context("Application startup metrics service");
+            eprintln!("❌ Failed to start metrics service: {}", e);
+            error
+        })?;
+    info!("✅ Metrics service started successfully");
 
     // Start uptime counter task
     let uptime_task = tokio::spawn(async {
@@ -364,7 +378,7 @@ async fn main() -> AppResult<()> {
     // Metrics endpoint for Prometheus
     let metrics_filter = warp::path("metrics")
         .and(warp::get())
-        .and_then(metrics::metrics_handler);
+        .and_then(metrics_enhanced::metrics_handler);
 
     // Root endpoint
     let root_filter = warp::path::end().and(warp::get()).and_then(root_handler);

@@ -1,4 +1,4 @@
-//! Prometheus metrics collection for the EconGraph backend
+//! Enhanced Prometheus metrics collection for the EconGraph backend
 //!
 //! This module provides comprehensive metrics collection for monitoring
 //! application performance, database operations, GraphQL queries, and more.
@@ -73,6 +73,10 @@ pub struct AppMetrics {
     pub data_source_health: IntGauge,
     pub queue_processing_rate: Histogram,
     pub cache_hit_ratio: Histogram,
+    pub api_rate_limit_hits: IntCounterVec,
+    pub data_quality_score: Histogram,
+    pub user_sessions_active: IntGauge,
+    pub chart_rendering_time: HistogramVec,
 }
 
 impl AppMetrics {
@@ -225,6 +229,91 @@ impl AppMetrics {
             IntGauge::new("memory_usage_bytes", "Current memory usage in bytes")?;
         registry.register(Box::new(memory_usage_bytes.clone()))?;
 
+        // Application-specific metrics
+        let economic_series_total = IntGauge::new(
+            "economic_series_total",
+            "Total number of economic series in the database",
+        )?;
+        registry.register(Box::new(economic_series_total.clone()))?;
+
+        let data_points_total = IntGauge::new(
+            "data_points_total",
+            "Total number of data points in the database",
+        )?;
+        registry.register(Box::new(data_points_total.clone()))?;
+
+        let active_users_total = IntGauge::new(
+            "active_users_total",
+            "Total number of active users",
+        )?;
+        registry.register(Box::new(active_users_total.clone()))?;
+
+        let chart_annotations_total = IntGauge::new(
+            "chart_annotations_total",
+            "Total number of chart annotations",
+        )?;
+        registry.register(Box::new(chart_annotations_total.clone()))?;
+
+        let search_queries_total = IntCounterVec::new(
+            Opts::new("search_queries_total", "Total number of search queries"),
+            &["query_type", "result_count_range"],
+        )?;
+        registry.register(Box::new(search_queries_total.clone()))?;
+
+        let search_query_duration_seconds = HistogramVec::new(
+            HistogramOpts::new(
+                "search_query_duration_seconds",
+                "Search query execution time in seconds",
+            ),
+            &["query_type"],
+        )?;
+        registry.register(Box::new(search_query_duration_seconds.clone()))?;
+
+        let data_source_health = IntGauge::new(
+            "data_source_health",
+            "Health status of data sources (1=healthy, 0=unhealthy)",
+        )?;
+        registry.register(Box::new(data_source_health.clone()))?;
+
+        let queue_processing_rate = Histogram::with_opts(HistogramOpts::new(
+            "queue_processing_rate",
+            "Queue processing rate in items per second",
+        ))?;
+        registry.register(Box::new(queue_processing_rate.clone()))?;
+
+        let cache_hit_ratio = Histogram::with_opts(HistogramOpts::new(
+            "cache_hit_ratio",
+            "Cache hit ratio (0.0 to 1.0)",
+        ))?;
+        registry.register(Box::new(cache_hit_ratio.clone()))?;
+
+        let api_rate_limit_hits = IntCounterVec::new(
+            Opts::new("api_rate_limit_hits", "Total number of API rate limit hits"),
+            &["source", "endpoint"],
+        )?;
+        registry.register(Box::new(api_rate_limit_hits.clone()))?;
+
+        let data_quality_score = Histogram::with_opts(HistogramOpts::new(
+            "data_quality_score",
+            "Data quality score (0.0 to 1.0)",
+        ))?;
+        registry.register(Box::new(data_quality_score.clone()))?;
+
+        let user_sessions_active = IntGauge::new(
+            "user_sessions_active",
+            "Number of active user sessions",
+        )?;
+        registry.register(Box::new(user_sessions_active.clone()))?;
+
+        let chart_rendering_time = HistogramVec::new(
+            HistogramOpts::new(
+                "chart_rendering_time_seconds",
+                "Chart rendering time in seconds",
+            ),
+            &["chart_type", "data_points_count_range"],
+        )?;
+        registry.register(Box::new(chart_rendering_time.clone()))?;
+
         Ok(AppMetrics {
             http_requests_total,
             http_request_duration_seconds,
@@ -246,6 +335,19 @@ impl AppMetrics {
             errors_total,
             app_uptime_seconds,
             memory_usage_bytes,
+            economic_series_total,
+            data_points_total,
+            active_users_total,
+            chart_annotations_total,
+            search_queries_total,
+            search_query_duration_seconds,
+            data_source_health,
+            queue_processing_rate,
+            cache_hit_ratio,
+            api_rate_limit_hits,
+            data_quality_score,
+            user_sessions_active,
+            chart_rendering_time,
         })
     }
 }
@@ -396,6 +498,69 @@ pub fn update_memory_usage(bytes: i64) {
 /// Increment uptime counter (should be called periodically)
 pub fn increment_uptime(seconds: u64) {
     METRICS.app_uptime_seconds.inc_by(seconds);
+}
+
+/// Application-specific metric recording functions
+pub fn update_economic_series_count(count: i64) {
+    METRICS.economic_series_total.set(count);
+}
+
+pub fn update_data_points_count(count: i64) {
+    METRICS.data_points_total.set(count);
+}
+
+pub fn update_active_users_count(count: i64) {
+    METRICS.active_users_total.set(count);
+}
+
+pub fn update_chart_annotations_count(count: i64) {
+    METRICS.chart_annotations_total.set(count);
+}
+
+pub fn record_search_query(query_type: &str, result_count_range: &str, duration: f64) {
+    METRICS
+        .search_queries_total
+        .with_label_values(&[query_type, result_count_range])
+        .inc();
+
+    METRICS
+        .search_query_duration_seconds
+        .with_label_values(&[query_type])
+        .observe(duration);
+}
+
+pub fn update_data_source_health(healthy: bool) {
+    METRICS.data_source_health.set(if healthy { 1 } else { 0 });
+}
+
+pub fn record_queue_processing_rate(rate: f64) {
+    METRICS.queue_processing_rate.observe(rate);
+}
+
+pub fn record_cache_hit_ratio(ratio: f64) {
+    METRICS.cache_hit_ratio.observe(ratio);
+}
+
+pub fn record_api_rate_limit_hit(source: &str, endpoint: &str) {
+    METRICS
+        .api_rate_limit_hits
+        .with_label_values(&[source, endpoint])
+        .inc();
+}
+
+pub fn record_data_quality_score(score: f64) {
+    METRICS.data_quality_score.observe(score);
+}
+
+pub fn update_user_sessions_active(count: i64) {
+    METRICS.user_sessions_active.set(count);
+}
+
+pub fn record_chart_rendering_time(chart_type: &str, data_points_count_range: &str, duration: f64) {
+    METRICS
+        .chart_rendering_time
+        .with_label_values(&[chart_type, data_points_count_range])
+        .observe(duration);
 }
 
 #[cfg(test)]
@@ -554,6 +719,91 @@ mod tests {
             IntGauge::new("memory_usage_bytes", "Current memory usage in bytes")?;
         registry.register(Box::new(memory_usage_bytes.clone()))?;
 
+        // Application-specific metrics
+        let economic_series_total = IntGauge::new(
+            "economic_series_total",
+            "Total number of economic series in the database",
+        )?;
+        registry.register(Box::new(economic_series_total.clone()))?;
+
+        let data_points_total = IntGauge::new(
+            "data_points_total",
+            "Total number of data points in the database",
+        )?;
+        registry.register(Box::new(data_points_total.clone()))?;
+
+        let active_users_total = IntGauge::new(
+            "active_users_total",
+            "Total number of active users",
+        )?;
+        registry.register(Box::new(active_users_total.clone()))?;
+
+        let chart_annotations_total = IntGauge::new(
+            "chart_annotations_total",
+            "Total number of chart annotations",
+        )?;
+        registry.register(Box::new(chart_annotations_total.clone()))?;
+
+        let search_queries_total = IntCounterVec::new(
+            Opts::new("search_queries_total", "Total number of search queries"),
+            &["query_type", "result_count_range"],
+        )?;
+        registry.register(Box::new(search_queries_total.clone()))?;
+
+        let search_query_duration_seconds = HistogramVec::new(
+            HistogramOpts::new(
+                "search_query_duration_seconds",
+                "Search query execution time in seconds",
+            ),
+            &["query_type"],
+        )?;
+        registry.register(Box::new(search_query_duration_seconds.clone()))?;
+
+        let data_source_health = IntGauge::new(
+            "data_source_health",
+            "Health status of data sources (1=healthy, 0=unhealthy)",
+        )?;
+        registry.register(Box::new(data_source_health.clone()))?;
+
+        let queue_processing_rate = Histogram::with_opts(HistogramOpts::new(
+            "queue_processing_rate",
+            "Queue processing rate in items per second",
+        ))?;
+        registry.register(Box::new(queue_processing_rate.clone()))?;
+
+        let cache_hit_ratio = Histogram::with_opts(HistogramOpts::new(
+            "cache_hit_ratio",
+            "Cache hit ratio (0.0 to 1.0)",
+        ))?;
+        registry.register(Box::new(cache_hit_ratio.clone()))?;
+
+        let api_rate_limit_hits = IntCounterVec::new(
+            Opts::new("api_rate_limit_hits", "Total number of API rate limit hits"),
+            &["source", "endpoint"],
+        )?;
+        registry.register(Box::new(api_rate_limit_hits.clone()))?;
+
+        let data_quality_score = Histogram::with_opts(HistogramOpts::new(
+            "data_quality_score",
+            "Data quality score (0.0 to 1.0)",
+        ))?;
+        registry.register(Box::new(data_quality_score.clone()))?;
+
+        let user_sessions_active = IntGauge::new(
+            "user_sessions_active",
+            "Number of active user sessions",
+        )?;
+        registry.register(Box::new(user_sessions_active.clone()))?;
+
+        let chart_rendering_time = HistogramVec::new(
+            HistogramOpts::new(
+                "chart_rendering_time_seconds",
+                "Chart rendering time in seconds",
+            ),
+            &["chart_type", "data_points_count_range"],
+        )?;
+        registry.register(Box::new(chart_rendering_time.clone()))?;
+
         Ok(AppMetrics {
             http_requests_total,
             http_request_duration_seconds,
@@ -575,6 +825,19 @@ mod tests {
             errors_total,
             app_uptime_seconds,
             memory_usage_bytes,
+            economic_series_total,
+            data_points_total,
+            active_users_total,
+            chart_annotations_total,
+            search_queries_total,
+            search_query_duration_seconds,
+            data_source_health,
+            queue_processing_rate,
+            cache_hit_ratio,
+            api_rate_limit_hits,
+            data_quality_score,
+            user_sessions_active,
+            chart_rendering_time,
         })
     }
 
@@ -628,6 +891,20 @@ mod tests {
         update_memory_usage(1024 * 1024);
         increment_uptime(60);
 
+        // Test application-specific metrics
+        update_economic_series_count(1000);
+        update_data_points_count(50000);
+        update_active_users_count(25);
+        update_chart_annotations_count(150);
+        record_search_query("series", "0-10", 0.1);
+        update_data_source_health(true);
+        record_queue_processing_rate(5.5);
+        record_cache_hit_ratio(0.85);
+        record_api_rate_limit_hit("fred", "/series");
+        record_data_quality_score(0.92);
+        update_user_sessions_active(12);
+        record_chart_rendering_time("line", "100-1000", 0.05);
+
         // Generate metrics and verify they contain our recorded values
         let metrics_output = generate_metrics().expect("Should generate metrics");
         assert!(metrics_output.contains("http_requests_total"));
@@ -636,6 +913,16 @@ mod tests {
         assert!(metrics_output.contains("auth_attempts_total"));
         assert!(metrics_output.contains("crawler_requests_total"));
         assert!(metrics_output.contains("errors_total"));
+        assert!(metrics_output.contains("economic_series_total"));
+        assert!(metrics_output.contains("data_points_total"));
+        assert!(metrics_output.contains("search_queries_total"));
+        assert!(metrics_output.contains("data_source_health"));
+        assert!(metrics_output.contains("queue_processing_rate"));
+        assert!(metrics_output.contains("cache_hit_ratio"));
+        assert!(metrics_output.contains("api_rate_limit_hits"));
+        assert!(metrics_output.contains("data_quality_score"));
+        assert!(metrics_output.contains("user_sessions_active"));
+        assert!(metrics_output.contains("chart_rendering_time_seconds"));
     }
 
     #[tokio::test]
