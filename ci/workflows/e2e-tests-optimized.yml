@@ -1,0 +1,147 @@
+name: E2E Tests (Optimized with Caching)
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      test_group:
+        description: 'Test group to run'
+        required: false
+        default: 'core'
+        type: choice
+        options:
+          - core
+          - analysis
+          - debug
+          - comprehensive
+          - mobile-core
+          - mobile-analysis
+          - mobile-comprehensive
+          - all
+      parallel:
+        description: 'Run all test groups in parallel'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  # Step 1: Build and push Docker images (with caching)
+  build-images:
+    name: Build & Push Docker Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      image-tag: ${{ steps.build.outputs.image-tag }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ghcr.io/${{ github.repository }}/econ-graph-backend
+          ghcr.io/${{ github.repository }}/econ-graph-frontend
+          ghcr.io/${{ github.repository }}/econ-graph-test-runner
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push backend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        file: ./backend/ci/docker/Dockerfile.test
+        push: true
+        tags: ghcr.io/${{ github.repository }}/econ-graph-backend:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push frontend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        file: ./frontend/ci/docker/Dockerfile.test
+        push: true
+        tags: ghcr.io/${{ github.repository }}/econ-graph-frontend:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push test runner image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./ci/docker/Dockerfile.test-runner-unified
+        push: true
+        tags: ghcr.io/${{ github.repository }}/econ-graph-test-runner:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  # Step 2: Run E2E tests (using pre-built images)
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: build-images
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Pull Docker images
+      run: |
+        docker pull ghcr.io/${{ github.repository }}/econ-graph-backend:${{ github.sha }}
+        docker pull ghcr.io/${{ github.repository }}/econ-graph-frontend:${{ github.sha }}
+        docker pull ghcr.io/${{ github.repository }}/econ-graph-test-runner:${{ github.sha }}
+
+    - name: Tag images for local use
+      run: |
+        docker tag ghcr.io/${{ github.repository }}/econ-graph-backend:${{ github.sha }} econ-graph-backend:latest
+        docker tag ghcr.io/${{ github.repository }}/econ-graph-frontend:${{ github.sha }} econ-graph-frontend:latest
+        docker tag ghcr.io/${{ github.repository }}/econ-graph-test-runner:${{ github.sha }} econ-graph-test-runner:latest
+
+    - name: Run E2E Tests
+      run: |
+        cd ci
+        if [ "${{ github.event.inputs.parallel }}" = "true" ]; then
+          ./scripts/run-tests-unified.sh --parallel
+        elif [ "${{ github.event.inputs.test_group }}" = "all" ]; then
+          ./scripts/run-tests-unified.sh --parallel
+        else
+          ./scripts/run-tests-unified.sh --group ${{ github.event.inputs.test_group || 'core' }}
+        fi
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: e2e-test-results
+        path: ci/test-results/
+        retention-days: 7

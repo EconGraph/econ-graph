@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
+ * Mobile browser e2e tests configuration
  * @see https://playwright.dev/docs/test-configuration
  */
 export default defineConfig({
@@ -33,32 +34,25 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
 
-  /* Configure projects for major browsers */
+  /* Configure projects for mobile browsers only */
   projects: [
+    /* Test against mobile viewports - Chrome only for CI stability */
     {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
-
-    {
-      name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
-    },
-
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
-    },
-
-    /* Mobile browsers disabled for CI stability - they require additional setup */
-    /* {
       name: 'Mobile Chrome',
       use: { ...devices['Pixel 5'] },
     },
     {
-      name: 'Mobile Safari',
+      name: 'Mobile Chrome (Galaxy S5)',
+      use: { ...devices['Galaxy S5'] },
+    },
+    {
+      name: 'Mobile Chrome (iPhone 12)',
       use: { ...devices['iPhone 12'] },
-    }, */
+    },
+    {
+      name: 'Mobile Chrome (iPhone SE)',
+      use: { ...devices['iPhone SE'] },
+    },
   ],
 
   /* Run your local dev server before starting the tests */

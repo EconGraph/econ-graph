@@ -22,3 +22,9 @@ pub mod e2e_tests;
 pub mod epic_e2e_tests;
 #[cfg(test)]
 pub mod graphql_annotation_tests;
+
+#[cfg(test)]
+pub mod e2e_database_test;
+
+#[cfg(test)]
+pub mod e2e_postgresql_health_check;

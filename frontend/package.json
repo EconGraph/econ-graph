@@ -68,7 +68,19 @@
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:debug": "playwright test --debug",
     "test:e2e:report": "playwright show-report",
-    "test:e2e:install": "playwright install"
+    "test:e2e:install": "playwright install",
+    "test:e2e:mobile": "playwright test --config=playwright.mobile.config.ts",
+    "test:e2e:mobile:ui": "playwright test --config=playwright.mobile.config.ts --ui",
+    "test:e2e:mobile:headed": "playwright test --config=playwright.mobile.config.ts --headed",
+    "test:e2e:mobile:debug": "playwright test --config=playwright.mobile.config.ts --debug",
+    "test:e2e:mobile:report": "playwright show-report --config=playwright.mobile.config.ts",
+    "test:e2e:core": "playwright test --config=ci/configs/playwright-core.config.ts",
+    "test:e2e:analysis": "playwright test --config=ci/configs/playwright-analysis.config.ts",
+    "test:e2e:debug": "playwright test --config=ci/configs/playwright-debug.config.ts",
+    "test:e2e:comprehensive": "playwright test tests/e2e/complete-workflow.spec.ts",
+    "test:e2e:mobile:core": "playwright test --config=ci/configs/playwright-mobile-core.config.ts",
+    "test:e2e:mobile:analysis": "playwright test --config=ci/configs/playwright-mobile-analysis.config.ts",
+    "test:e2e:mobile:comprehensive": "playwright test --config=ci/configs/playwright-mobile-comprehensive.config.ts"
   },
   "eslintConfig": {
     "extends": [

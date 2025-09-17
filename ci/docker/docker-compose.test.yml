@@ -1,0 +1,120 @@
+version: '3.8'
+
+services:
+  # Backend service for tests
+  backend:
+    image: econ-graph-backend:latest
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/econ_graph_test
+      - RUST_LOG=info
+    ports:
+      - "9876:9876"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - test-network
+
+  # PostgreSQL database for tests
+  postgres:
+    image: postgres:17
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=econ_graph_test
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  # Core tests - basic functionality
+  test-core:
+    build:
+      context: ../../frontend
+      dockerfile: ../../ci/docker/Dockerfile.test
+    environment:
+      - BACKEND_URL=http://backend:9876
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/econ_graph_test
+    command: ["npm", "run", "test:e2e:core"]
+    volumes:
+      - ./test-results/core:/app/test-results
+    depends_on:
+      - backend
+    networks:
+      - test-network
+
+  # Analysis tests - professional and global analysis
+  test-analysis:
+    build:
+      context: ../../frontend
+      dockerfile: ../../ci/docker/Dockerfile.test
+    environment:
+      - BACKEND_URL=http://backend:9876
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/econ_graph_test
+    command: ["npm", "run", "test:e2e:analysis"]
+    volumes:
+      - ./test-results/analysis:/app/test-results
+    depends_on:
+      - backend
+    networks:
+      - test-network
+
+  # Debug tests - visual and debugging tests
+  test-debug:
+    build:
+      context: ../../frontend
+      dockerfile: ../../ci/docker/Dockerfile.test
+    environment:
+      - BACKEND_URL=http://backend:9876
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/econ_graph_test
+    command: ["npm", "run", "test:e2e:debug"]
+    volumes:
+      - ./test-results/debug:/app/test-results
+    depends_on:
+      - backend
+    networks:
+      - test-network
+
+  # Comprehensive tests - full workflow tests
+  test-comprehensive:
+    build:
+      context: ../../frontend
+      dockerfile: ../../ci/docker/Dockerfile.test
+    environment:
+      - BACKEND_URL=http://backend:9876
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/econ_graph_test
+    command: ["npm", "run", "test:e2e:comprehensive"]
+    volumes:
+      - ./test-results/comprehensive:/app/test-results
+    depends_on:
+      - backend
+    networks:
+      - test-network
+
+  # Mobile tests - mobile browser tests
+  test-mobile:
+    build:
+      context: ../../frontend
+      dockerfile: ../../ci/docker/Dockerfile.test
+    environment:
+      - BACKEND_URL=http://backend:9876
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/econ_graph_test
+    command: ["npm", "run", "test:e2e:mobile"]
+    volumes:
+      - ./test-results/mobile:/app/test-results
+    depends_on:
+      - backend
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge
+
+volumes:
+  test-results:

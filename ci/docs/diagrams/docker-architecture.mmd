@@ -1,0 +1,50 @@
+graph TD
+    subgraph "Docker Services"
+        A[PostgreSQL<br/>Database]
+        B[Backend<br/>Rust Service]
+        C[Frontend<br/>React App]
+        D[Test Runner<br/>Playwright]
+    end
+
+    subgraph "Docker Images"
+        E[postgres:17]
+        F[econ-graph-backend<br/>Built from Cargo.toml]
+        G[econ-graph-frontend<br/>Built from package.json]
+        H[econ-graph-test-runner<br/>Unified with args]
+    end
+
+    subgraph "Test Execution"
+        I[Core Tests]
+        J[Analysis Tests]
+        K[Debug Tests]
+        L[Comprehensive Tests]
+        M[Mobile Core Tests]
+        N[Mobile Analysis Tests]
+        O[Mobile Comprehensive Tests]
+    end
+
+    E --> A
+    F --> B
+    G --> C
+    H --> D
+
+    A --> B
+    B --> C
+    C --> D
+
+    D --> I
+    D --> J
+    D --> K
+    D --> L
+    D --> M
+    D --> N
+    D --> O
+
+    style A fill:#ffebee
+    style B fill:#e8eaf6
+    style C fill:#e0f7fa
+    style D fill:#f1f8e9
+    style E fill:#fce4ec
+    style F fill:#e3f2fd
+    style G fill:#e8f5e8
+    style H fill:#fff3e0

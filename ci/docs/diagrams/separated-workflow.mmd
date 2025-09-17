@@ -1,0 +1,38 @@
+graph TD
+    subgraph "Build Phase"
+        A[Code Push/PR] --> B[Checkout Code]
+        B --> C[Setup Docker Buildx]
+        C --> D[Build Backend Image]
+        C --> E[Build Frontend Image]
+        C --> F[Build Test Runner Image]
+        D --> G[Save Images as Artifacts]
+        E --> G
+        F --> G
+    end
+
+    subgraph "Test Phase"
+        G --> H[Download Images]
+        H --> I[Load Images]
+        I --> J[Run Core Tests]
+        I --> K[Run Analysis Tests]
+        I --> L[Run Debug Tests]
+        I --> M[Run Comprehensive Tests]
+        I --> N[Run Mobile Core Tests]
+        I --> O[Run Mobile Analysis Tests]
+        I --> P[Run Mobile Comprehensive Tests]
+
+        J --> Q[Upload Test Results]
+        K --> Q
+        L --> Q
+        M --> Q
+        N --> Q
+        O --> Q
+        P --> Q
+    end
+
+    Q --> R[Deploy/Notify]
+
+    style A fill:#e1f5fe
+    style G fill:#f3e5f5
+    style Q fill:#e8f5e8
+    style R fill:#fff3e0

@@ -1,0 +1,41 @@
+graph TD
+    subgraph "Test Groups"
+        A[Core Tests<br/>Authentication<br/>Series Explorer<br/>Visual Checks]
+        B[Analysis Tests<br/>Professional Analysis<br/>Global Analysis]
+        C[Debug Tests<br/>Visual Checks<br/>Console Logging]
+        D[Comprehensive Tests<br/>Complete Workflow<br/>End-to-End Journey]
+        E[Mobile Core Tests<br/>Mobile Authentication<br/>Mobile Navigation]
+        F[Mobile Analysis Tests<br/>Mobile Charts<br/>Mobile Interactions]
+        G[Mobile Comprehensive Tests<br/>Mobile Workflows]
+    end
+
+    subgraph "Infrastructure"
+        H[PostgreSQL Database]
+        I[Backend Service]
+        J[Frontend Service]
+        K[Test Runner Container]
+    end
+
+    H --> I
+    I --> J
+    J --> K
+
+    K --> A
+    K --> B
+    K --> C
+    K --> D
+    K --> E
+    K --> F
+    K --> G
+
+    style A fill:#e3f2fd
+    style B fill:#e8f5e8
+    style C fill:#fff3e0
+    style D fill:#fce4ec
+    style E fill:#f3e5f5
+    style F fill:#e0f2f1
+    style G fill:#fff8e1
+    style H fill:#ffebee
+    style I fill:#e8eaf6
+    style J fill:#e0f7fa
+    style K fill:#f1f8e9

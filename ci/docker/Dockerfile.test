@@ -1,0 +1,48 @@
+# Frontend Test Image
+# Pre-built frontend for E2E tests using actual project dependencies
+FROM node:20-alpine as builder
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files first for better layer caching
+COPY package*.json ./
+COPY dev-server/package*.json ./dev-server/
+
+# Install dependencies
+RUN npm ci
+RUN cd dev-server && npm ci
+
+# Copy source code
+COPY . ./
+
+# Build frontend using actual project build process
+RUN npm run build
+
+# Runtime image
+FROM node:20-alpine
+
+# Install system dependencies
+RUN apk add --no-cache curl
+
+# Set working directory
+WORKDIR /app
+
+# Copy built application and dev-server
+COPY --from=builder /app/build ./build
+COPY --from=builder /app/dev-server ./dev-server
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/dev-server/package*.json ./dev-server/
+
+# Install only production dependencies for dev-server
+RUN cd dev-server && npm ci --only=production
+
+# Expose port
+EXPOSE 18473
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:18473 || exit 1
+
+# Start dev server using actual project script
+CMD ["cd", "dev-server", "&&", "npm", "start"]

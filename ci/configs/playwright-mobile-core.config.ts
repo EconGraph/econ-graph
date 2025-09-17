@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
+ * Mobile Core Tests Configuration
+ * Essential mobile functionality: navigation, basic interactions, responsive design
  * @see https://playwright.dev/docs/test-configuration
  */
 export default defineConfig({
@@ -33,32 +35,27 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
 
-  /* Configure projects for major browsers */
+  /* Configure projects for mobile browsers - core functionality only */
   projects: [
+    /* Test against mobile viewports - Chrome only for CI stability */
     {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
-
-    {
-      name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
-    },
-
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
-    },
-
-    /* Mobile browsers disabled for CI stability - they require additional setup */
-    /* {
-      name: 'Mobile Chrome',
+      name: 'Mobile Chrome Core',
       use: { ...devices['Pixel 5'] },
+      testMatch: [
+        '**/authentication.spec.ts',
+        '**/series-explorer.spec.ts',
+        '**/visual-check.spec.ts',
+      ],
     },
     {
-      name: 'Mobile Safari',
-      use: { ...devices['iPhone 12'] },
-    }, */
+      name: 'Mobile Chrome Galaxy Core',
+      use: { ...devices['Galaxy S5'] },
+      testMatch: [
+        '**/authentication.spec.ts',
+        '**/series-explorer.spec.ts',
+        '**/visual-check.spec.ts',
+      ],
+    },
   ],
 
   /* Run your local dev server before starting the tests */

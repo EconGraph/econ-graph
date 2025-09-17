@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
+ * Mobile Comprehensive Tests Configuration
+ * Full mobile workflow testing: complete user journeys on mobile devices
  * @see https://playwright.dev/docs/test-configuration
  */
 export default defineConfig({
@@ -33,32 +35,23 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
 
-  /* Configure projects for major browsers */
+  /* Configure projects for mobile browsers - comprehensive testing */
   projects: [
+    /* Test against mobile viewports - Chrome only for CI stability */
     {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
-
-    {
-      name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
-    },
-
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
-    },
-
-    /* Mobile browsers disabled for CI stability - they require additional setup */
-    /* {
-      name: 'Mobile Chrome',
+      name: 'Mobile Chrome Comprehensive',
       use: { ...devices['Pixel 5'] },
+      testMatch: [
+        '**/complete-workflow.spec.ts',
+      ],
     },
     {
-      name: 'Mobile Safari',
+      name: 'Mobile Chrome iPhone Comprehensive',
       use: { ...devices['iPhone 12'] },
-    }, */
+      testMatch: [
+        '**/complete-workflow.spec.ts',
+      ],
+    },
   ],
 
   /* Run your local dev server before starting the tests */

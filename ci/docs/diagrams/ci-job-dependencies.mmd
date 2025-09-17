@@ -1,0 +1,70 @@
+graph LR
+    subgraph "Phase 1: Setup & Quality"
+        A[Code Push/PR] --> B[Checkout Code]
+        B --> C[Backend Build Cache]
+        B --> D[Frontend Tests]
+        B --> E[Quality Checks]
+        B --> F[Security Audit]
+        B --> G[License Compliance]
+    end
+
+    subgraph "Phase 2: Backend Unit Tests"
+        C --> H[Backend Smoke Tests]
+        C --> I[Backend Models Basic]
+        C --> J[Backend Models Advanced]
+        C --> K[Backend Crawler Unit]
+        C --> L[Backend Crawler Integration]
+        C --> M[Backend Queue Basic]
+        C --> N[Backend Queue Advanced]
+        C --> O[Backend Global Analysis Basic]
+        C --> P[Backend Global Analysis Advanced]
+        C --> Q[Backend Series Discovery Basic]
+        C --> R[Backend Series Discovery Integration]
+        C --> S[Backend Auth Integration]
+        C --> T[Backend Collaboration Integration]
+        C --> U[Backend Remaining Services]
+    end
+
+    subgraph "Phase 3: Integration Tests"
+        H --> V[Backend Integration Tests]
+        I --> V
+        J --> V
+        K --> V
+        L --> V
+        M --> V
+        N --> V
+        O --> V
+        P --> V
+        Q --> V
+        R --> V
+        S --> V
+        T --> V
+        U --> V
+
+        D --> W[Frontend Integration Tests]
+    end
+
+    subgraph "Phase 4: End-to-End Tests"
+        H --> X[Comprehensive E2E Tests]
+        V --> X
+        W --> X
+        V --> Y[Mobile E2E Tests]
+    end
+
+    subgraph "Phase 5: Docker Build"
+        H --> Z[Docker Build Test]
+        Z --> AA[Deploy/Notify]
+    end
+
+    style A fill:#e1f5fe
+    style C fill:#f3e5f5
+    style D fill:#e8f5e8
+    style E fill:#fff3e0
+    style F fill:#ffebee
+    style G fill:#f1f8e9
+    style V fill:#e3f2fd
+    style W fill:#e8f5e8
+    style X fill:#fce4ec
+    style Y fill:#c8e6c9
+    style Z fill:#fff3e0
+    style AA fill:#e1f5fe
