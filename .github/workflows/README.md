@@ -33,19 +33,7 @@ This directory contains the CI/CD workflows for the EconGraph project, cleaned u
 
 **Triggers**: Version tags (v*)
 
-## Disabled Workflows (Available for Manual Use)
-
-### Integration Tests (`ci-integration.yml`)
-**Purpose**: Alternative integration testing approach
-**Status**: Disabled (use ci-core.yml instead)
-
-### Security & Compliance (`ci-security.yml`)
-**Purpose**: Alternative security testing approach  
-**Status**: Disabled (use security.yml instead)
-
-### Build & Deploy (`ci-build.yml`)
-**Purpose**: Docker build validation
-**Status**: Disabled (can be enabled manually when needed)
+## Manual-Only Workflows
 
 ### Experimental (`ci-experimental.yml`)
 **Purpose**: Performance testing and experimental features
@@ -64,13 +52,6 @@ Core Tests (ci-core.yml)
 ├── backend-service-tests (needs: backend-smoke-tests)
 ├── frontend-tests
 └── quality-checks
-
-Integration Tests (ci-integration.yml)
-├── backend-integration-tests (needs: backend-smoke-tests, backend-database-tests, backend-service-tests)
-└── frontend-integration-tests (needs: frontend-tests)
-
-Build & Deploy (ci-build.yml)
-└── docker-build (needs: backend-integration-tests, frontend-integration-tests)
 ```
 
 ## Environment Variables
@@ -95,13 +76,14 @@ All workflows share these environment variables:
 
 ### Manual Triggers
 - **Core Tests**: `gh workflow run ci-core.yml`
-- **Integration Tests**: `gh workflow run ci-integration.yml`
-- **Security Checks**: `gh workflow run ci-security.yml`
-- **Build & Deploy**: `gh workflow run ci-build.yml`
+- **Security Checks**: `gh workflow run security.yml`
+- **Crawler Integration**: `gh workflow run crawler-integration-test.yml`
 - **Experimental**: `gh workflow run ci-experimental.yml --field experiment=ramdisk`
+- **RAM Disk Cache**: `gh workflow run ramdisk-build-cache.yml`
 
 ## Cleanup Summary
 
+- **Removed broken workflows** (ci-build.yml, ci-integration.yml, ci-security.yml) that had no active triggers
 - **Removed 9 experimental test workflows** that were disabled and causing confusion
 - **Removed backup and disabled workflow files** that were no longer needed
 - **Cleaned up excessive CI infrastructure** including unused scripts and documentation
