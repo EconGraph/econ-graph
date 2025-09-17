@@ -1,0 +1,45 @@
+[package]
+name = "econ-graph-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Core dependencies
+econ-graph-core = { path = "../econ-graph-core" }
+econ-graph-services = { path = "../econ-graph-services" }
+econ-graph-graphql = { path = "../econ-graph-graphql" }
+
+# Async runtime
+tokio.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Web framework
+warp.workspace = true
+
+# GraphQL
+async-graphql.workspace = true
+
+# HTTP client
+reqwest.workspace = true
+
+# Futures
+futures.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Database
+diesel-async.workspace = true
+
+# Test dependencies
+[dev-dependencies]
+serial_test.workspace = true
+tokio-test.workspace = true

@@ -1,0 +1,66 @@
+[package]
+name = "econ-graph-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Database
+diesel.workspace = true
+diesel-async.workspace = true
+bb8.workspace = true
+diesel_migrations.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Date/Time
+chrono.workspace = true
+
+# UUID
+uuid.workspace = true
+
+# Decimal handling
+bigdecimal.workspace = true
+rust_decimal.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Validation
+validator.workspace = true
+
+# Configuration
+config.workspace = true
+dotenvy.workspace = true
+
+# Async runtime
+tokio.workspace = true
+
+# Lazy static initialization
+once_cell.workspace = true
+
+# Logging (needed for error handling)
+tracing.workspace = true
+
+# HTTP client (needed for error types)
+reqwest.workspace = true
+
+# Web framework (needed for error handling)
+warp.workspace = true
+
+# GraphQL (needed for error types)
+async-graphql.workspace = true
+
+# Authentication (needed for user model)
+bcrypt.workspace = true
+jsonwebtoken.workspace = true
+
+# Test dependencies
+[dev-dependencies]
+serial_test.workspace = true
+tokio-test.workspace = true
+testcontainers.workspace = true
+testcontainers-modules.workspace = true

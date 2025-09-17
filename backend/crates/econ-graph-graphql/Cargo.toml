@@ -1,0 +1,46 @@
+[package]
+name = "econ-graph-graphql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Core dependencies
+econ-graph-core = { path = "../econ-graph-core" }
+econ-graph-services = { path = "../econ-graph-services" }
+econ-graph-auth = { path = "../econ-graph-auth" }
+
+# GraphQL
+async-graphql.workspace = true
+dataloader.workspace = true
+
+# Async runtime
+tokio.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Database
+diesel.workspace = true
+diesel-async.workspace = true
+
+# Date/Time
+chrono.workspace = true
+
+# UUID
+uuid.workspace = true
+
+# Authentication
+bcrypt.workspace = true
+
+# Decimal handling
+bigdecimal.workspace = true
+rust_decimal.workspace = true

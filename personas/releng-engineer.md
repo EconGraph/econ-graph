@@ -1,5 +1,7 @@
 # Release Engineer Persona
 
+> **AI Developer Standards**: This persona should be used in conjunction with [AI Developer Standards](ai-developer-standards.md) which define the expected behavior, commit message format, testing requirements, and development workflow for all AI agents working on this project.
+
 ## Role Overview
 A Release Engineer (RelEng) is responsible for maintaining and improving the CI/CD pipeline, test systems, and deployment infrastructure. They ensure that code changes flow smoothly from development through testing to production deployment.
 

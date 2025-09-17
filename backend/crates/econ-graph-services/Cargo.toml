@@ -1,0 +1,70 @@
+[package]
+name = "econ-graph-services"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Core dependency
+econ-graph-core = { path = "../econ-graph-core" }
+
+# Database
+diesel.workspace = true
+diesel-async.workspace = true
+
+# HTTP client for crawling
+reqwest.workspace = true
+
+# Async runtime
+tokio.workspace = true
+async-trait.workspace = true
+
+# CSV parsing for data feeds
+csv.workspace = true
+
+# URL parsing
+url.workspace = true
+
+# Cron job scheduling
+tokio-cron-scheduler.workspace = true
+
+# Futures
+futures.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Date/Time
+chrono.workspace = true
+
+# UUID
+uuid.workspace = true
+
+# Decimal handling
+bigdecimal.workspace = true
+rust_decimal.workspace = true
+
+# Validation
+validator.workspace = true
+
+# CLI
+clap.workspace = true
+
+# Random
+rand.workspace = true
+
+# Test dependencies
+[dev-dependencies]
+serial_test.workspace = true
+tokio-test.workspace = true
+tempfile.workspace = true
+rust_decimal_macros.workspace = true

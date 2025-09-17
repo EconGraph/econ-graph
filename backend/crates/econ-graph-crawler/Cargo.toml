@@ -1,0 +1,51 @@
+[package]
+name = "econ-graph-crawler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "crawler"
+path = "src/bin/crawler.rs"
+
+[[bin]]
+name = "catalog_crawler"
+path = "src/bin/catalog_crawler.rs"
+
+[dependencies]
+# Core dependencies
+econ-graph-core = { path = "../econ-graph-core" }
+econ-graph-services = { path = "../econ-graph-services" }
+
+# HTTP client for crawling
+reqwest.workspace = true
+
+# Async runtime
+tokio.workspace = true
+
+# CLI argument parsing
+clap.workspace = true
+
+# CSV parsing for data feeds
+csv.workspace = true
+
+# URL parsing
+url.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Date/Time
+chrono.workspace = true
+
+# UUID
+uuid.workspace = true

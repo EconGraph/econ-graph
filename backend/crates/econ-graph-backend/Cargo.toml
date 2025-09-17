@@ -1,0 +1,51 @@
+[package]
+name = "econ-graph-backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "econ-graph-backend"
+path = "src/main.rs"
+
+[dependencies]
+# All other crates
+econ-graph-core = { path = "../econ-graph-core" }
+econ-graph-services = { path = "../econ-graph-services" }
+econ-graph-auth = { path = "../econ-graph-auth" }
+econ-graph-graphql = { path = "../econ-graph-graphql" }
+econ-graph-mcp = { path = "../econ-graph-mcp" }
+
+# Web framework
+warp.workspace = true
+tokio-stream.workspace = true
+
+# Async runtime
+tokio.workspace = true
+
+# GraphQL
+async-graphql.workspace = true
+async-graphql-warp.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Metrics
+prometheus.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Lazy static initialization
+once_cell.workspace = true
+
+# Test dependencies
+[dev-dependencies]
+serial_test.workspace = true
+tokio-test.workspace = true

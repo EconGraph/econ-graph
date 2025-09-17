@@ -1,0 +1,46 @@
+[package]
+name = "econ-graph-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Core dependency
+econ-graph-core = { path = "../econ-graph-core" }
+
+# Authentication and security
+bcrypt.workspace = true
+jsonwebtoken.workspace = true
+
+# OAuth clients
+oauth2.workspace = true
+
+# Async runtime
+tokio.workspace = true
+async-trait.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Web framework
+warp.workspace = true
+
+# Date/Time
+chrono.workspace = true
+
+# UUID
+uuid.workspace = true
+
+# Validation
+validator.workspace = true
+
+# HTTP client
+reqwest.workspace = true
