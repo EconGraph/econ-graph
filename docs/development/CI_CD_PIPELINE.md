@@ -522,9 +522,77 @@ This ensures that documentation stays up-to-date with the actual CI/CD implement
 - Self-hosted runners should only be considered if CI volume increases significantly
 - All optimizations should maintain the current parallelization benefits we've achieved
 
+## Workflow Troubleshooting
+
+### Common Issues and Solutions
+
+#### Workflow Parsing Failures (0s Duration)
+**Symptoms**: Workflows fail immediately with 0s duration and "workflow file issue" error
+**Root Causes**:
+- Invalid job definitions (jobs without required sections like `steps`)
+- GitHub showing orphaned workflows from deleted branches as active
+- YAML syntax errors in workflow files
+
+**Solutions**:
+1. **Validate Job Structure**: Ensure all jobs have required sections (`steps`, `runs-on`, etc.)
+2. **Clean Orphaned Workflows**: Use `gh workflow list --all` to identify workflows that don't exist in the repository
+3. **Force Cache Refresh**: Add timestamps to workflow files to force GitHub to refresh its cache
+4. **YAML Validation**: Use `python3 -c "import yaml; yaml.safe_load(open('workflow.yml'))"` to validate syntax
+
+#### License Compliance Failures
+**Symptoms**: License compliance job fails with exit code 4 during `cargo deny check licenses`
+**Root Causes**:
+- Workspace crates using licenses not allowed by `deny.toml` configuration
+- Missing license exceptions for internal workspace packages
+
+**Solutions**:
+1. **Check Workspace License**: Verify `backend/Cargo.toml` workspace license setting
+2. **Update License Exceptions**: Add exceptions in `deny.toml` for all workspace crates:
+   ```toml
+   exceptions = [
+       { allow = ["MS-PL"], crate = "econ-graph-backend" },
+       { allow = ["MS-PL"], crate = "econ-graph-auth" },
+       { allow = ["MS-PL"], crate = "econ-graph-core" },
+       # ... add all workspace crates
+   ]
+   ```
+3. **Test Locally**: Run `cargo deny check licenses` in the backend directory to validate
+
+#### Workflow Cache Issues
+**Symptoms**: GitHub shows workflows as "active" that don't exist in the repository
+**Root Causes**:
+- Deleted test branches leaving orphaned workflows in GitHub's cache
+- GitHub not refreshing workflow cache after branch deletions
+
+**Solutions**:
+1. **Identify Orphaned Workflows**: Compare `gh workflow list --all` with actual files in `.github/workflows/`
+2. **Force Cache Refresh**: Make small changes to workflow files (add timestamps)
+3. **Clean Test Branches**: Ensure test branches are properly deleted after workflow testing
+
+### Debugging Commands
+
+```bash
+# Check workflow status
+gh workflow list --all
+
+# Validate YAML syntax
+python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci-core.yml'))"
+
+# Test license compliance locally
+cd backend && cargo deny check licenses
+
+# Check specific workflow run
+gh run view <run-id>
+
+# View job details
+gh run view --job <job-id>
+```
+
 ## Related Files
 
 - `.github/workflows/ci-core.yml` - Current CI configuration
-- `backend/Cargo.toml` - Rust dependencies
+- `backend/Cargo.toml` - Rust dependencies and workspace license
+- `backend/deny.toml` - License compliance configuration
 - `frontend/package.json` - Node.js dependencies
+- `frontend/.license-checker.json` - Frontend license compliance configuration
 - `docs/development/CI_OPTIMIZATION_NOTES.md` - Detailed optimization strategies

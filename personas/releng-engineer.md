@@ -108,6 +108,8 @@ A Release Engineer (RelEng) is responsible for maintaining and improving the CI/
 - **Vulnerability Management**: Keeping dependencies and infrastructure secure
 - **Access Control**: Managing permissions and secrets across environments
 - **Audit Trails**: Maintaining compliance with security and regulatory requirements
+- **License Compliance Failures**: Internal workspace packages using licenses not allowed by compliance tools
+- **Missing License Exceptions**: Internal packages not properly exempted from license restrictions
 
 ## Best Practices
 
