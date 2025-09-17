@@ -3,8 +3,22 @@ name: Core CI Tests
 on:
   push:
     branches: [ main, develop, optimize/ci-core-primary ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'README.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.github/workflows/README.md'
   pull_request:
     branches: [ main, develop ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'README.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.github/workflows/README.md'
   workflow_dispatch:
     inputs:
       branch:
