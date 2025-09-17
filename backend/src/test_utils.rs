@@ -110,8 +110,12 @@ impl TestContainer {
     }
 
     /// Clean all tables for fresh test state
-    pub async fn clean_database(&self) {
-        let mut conn = self.pool.get().await.expect("Failed to get connection");
+    pub async fn clean_database(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| format!("Failed to get connection: {}", e))?;
 
         use diesel_async::RunQueryDsl;
         // REQUIREMENT: Clean database state between tests
@@ -123,49 +127,49 @@ impl TestContainer {
             &mut conn,
         )
         .await
-        .expect("Failed to truncate event_country_impacts");
+        .map_err(|e| format!("Failed to truncate event_country_impacts: {}", e))?;
 
         diesel_async::RunQueryDsl::execute(
             diesel::sql_query("TRUNCATE TABLE global_economic_events CASCADE"),
             &mut conn,
         )
         .await
-        .expect("Failed to truncate global_economic_events");
+        .map_err(|e| format!("Failed to truncate global_economic_events: {}", e))?;
 
         diesel_async::RunQueryDsl::execute(
             diesel::sql_query("TRUNCATE TABLE country_correlations CASCADE"),
             &mut conn,
         )
         .await
-        .expect("Failed to truncate country_correlations");
+        .map_err(|e| format!("Failed to truncate country_correlations: {}", e))?;
 
         diesel_async::RunQueryDsl::execute(
             diesel::sql_query("TRUNCATE TABLE trade_relationships CASCADE"),
             &mut conn,
         )
         .await
-        .expect("Failed to truncate trade_relationships");
+        .map_err(|e| format!("Failed to truncate trade_relationships: {}", e))?;
 
         diesel_async::RunQueryDsl::execute(
             diesel::sql_query("TRUNCATE TABLE global_indicator_data CASCADE"),
             &mut conn,
         )
         .await
-        .expect("Failed to truncate global_indicator_data");
+        .map_err(|e| format!("Failed to truncate global_indicator_data: {}", e))?;
 
         diesel_async::RunQueryDsl::execute(
             diesel::sql_query("TRUNCATE TABLE global_economic_indicators CASCADE"),
             &mut conn,
         )
         .await
-        .expect("Failed to truncate global_economic_indicators");
+        .map_err(|e| format!("Failed to truncate global_economic_indicators: {}", e))?;
 
         diesel_async::RunQueryDsl::execute(
             diesel::sql_query("TRUNCATE TABLE countries CASCADE"),
             &mut conn,
         )
         .await
-        .expect("Failed to truncate countries");
+        .map_err(|e| format!("Failed to truncate countries: {}", e))?;
 
         // Original tables
         diesel_async::RunQueryDsl::execute(
@@ -173,28 +177,28 @@ impl TestContainer {
             &mut conn,
         )
         .await
-        .expect("Failed to truncate data_points");
+        .map_err(|e| format!("Failed to truncate data_points: {}", e))?;
 
         diesel_async::RunQueryDsl::execute(
             diesel::sql_query("TRUNCATE TABLE economic_series CASCADE"),
             &mut conn,
         )
         .await
-        .expect("Failed to truncate economic_series");
+        .map_err(|e| format!("Failed to truncate economic_series: {}", e))?;
 
         diesel_async::RunQueryDsl::execute(
             diesel::sql_query("TRUNCATE TABLE data_sources CASCADE"),
             &mut conn,
         )
         .await
-        .expect("Failed to truncate data_sources");
+        .map_err(|e| format!("Failed to truncate data_sources: {}", e))?;
 
         diesel_async::RunQueryDsl::execute(
             diesel::sql_query("TRUNCATE TABLE crawl_queue CASCADE"),
             &mut conn,
         )
         .await
-        .expect("Failed to truncate crawl_queue");
+        .map_err(|e| format!("Failed to truncate crawl_queue: {}", e))?;
 
         // Reset sequences (PostgreSQL auto-generates sequence names)
         // Note: Sequences are auto-generated with UUID primary keys, so this is not needed
@@ -202,6 +206,8 @@ impl TestContainer {
         //     diesel::sql_query("ALTER SEQUENCE data_sources_id_seq RESTART WITH 1"),
         //     &mut conn
         // ).await.expect("Failed to reset sequence");
+
+        Ok(())
     }
 
     /// Insert test data for common test scenarios
