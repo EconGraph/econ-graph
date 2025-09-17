@@ -22,3 +22,33 @@ This avoids multiple agents checking out main from different git worktrees at th
 * If you notice your chosen port isn't working (e.g. for a dockerized postgres) please choose a random port, don't just keep incrementing it by one.  And by no means try to kill whatever is already on the port you want.  Just pick a different port, and don't hardcode it, allow it to easy be changed by environment variable so you can easily change port numbers on the fly.
 * If you modify a database schema, don't forget to run the schema integration test to avoid hard to debug Diesel ORM issues
 * Any documentation-only commits should be tagged with "[no ci]" somewhere in the title
+
+## Database Testing Best Practices
+
+* When working with database tests, always ensure that `clean_database()` methods return `Result<(), Error>` and handle errors properly. Never use `.expect()` in test utilities as this can mask real issues.
+* Database constraint violations in tests often indicate poor test isolation. Always ensure tests clean up after themselves and use unique identifiers to avoid conflicts.
+* When you see "duplicate key value violates unique constraint" errors in CI, this usually means either:
+  * The database cleaning isn't working properly
+  * Tests are running in parallel and interfering with each other
+  * Test data setup is using non-unique identifiers
+* Always handle `Result` types properly in test utilities. Use `map_err()` to convert errors and `?` to propagate them, not `.expect()`.
+
+## Rust Compiler Warning Management
+
+* Fix unused variable warnings systematically by prefixing with underscore (`_variable_name`) when the variable is intentionally unused.
+* Handle "unused `Result` that must be used" warnings by either:
+  * Properly handling the Result with `match` or `if let`
+  * Using `let _ = result;` when you intentionally want to ignore the result
+  * Using `result.expect("meaningful error message")` only when you're certain it won't fail
+* Run `cargo fix --lib -p package_name --tests` to automatically apply many warning fixes.
+* Never ignore compiler warnings in CI - they often indicate real issues that should be addressed.
+
+## CI Failure Debugging
+
+* When CI fails, always check the detailed logs using `gh run view RUN_ID --log-failed` to see the actual error messages.
+* Common CI failure patterns:
+  * Database constraint violations: Usually test isolation issues
+  * Container timeouts: Often Docker resource issues or network problems
+  * Compilation errors: Usually missing dependencies or syntax issues
+  * Test failures: Check if tests are properly isolated and cleaned up
+* Always fix the root cause, not just the symptoms. For example, if you see database constraint violations, fix the test isolation rather than just changing the test data.

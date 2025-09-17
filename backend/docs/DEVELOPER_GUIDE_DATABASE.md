@@ -248,6 +248,82 @@ diesel migration list
 - **2025-09-12**: Added series metadata tracking
 - **2025-09-12**: Enhanced crawler schema
 
+## Test Database Management
+
+### Proper Test Cleanup Implementation
+
+When implementing `clean_database()` methods in test utilities:
+
+```rust
+// ✅ CORRECT: Return Result and handle errors properly
+pub async fn clean_database(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut conn = self.pool.get().await.map_err(|e| format!("Failed to get connection: {}", e))?;
+    
+    diesel_async::RunQueryDsl::execute(
+        diesel::sql_query("TRUNCATE TABLE countries CASCADE"),
+        &mut conn,
+    )
+    .await
+    .map_err(|e| format!("Failed to truncate countries: {}", e))?;
+    
+    Ok(())
+}
+
+// ❌ WRONG: Using expect() masks real errors
+pub async fn clean_database(&self) {
+    let mut conn = self.pool.get().await.expect("Failed to get connection");
+    // ... rest of implementation
+}
+```
+
+### Test Isolation Best Practices
+
+1. **Always use unique identifiers in test data:**
+   ```rust
+   // ✅ CORRECT: Use UUIDs for unique test data
+   let test_id = Uuid::new_v4().to_string()[..8].to_string();
+   let country = NewCountry {
+       iso_code: format!("T{}", &test_id[..2]),
+       iso_code_2: format!("T{}", &test_id[..1]),
+       // ...
+   };
+   ```
+
+2. **Handle database cleaning Results properly:**
+   ```rust
+   // ✅ CORRECT: Handle the Result
+   container.clean_database().await.expect("Failed to clean database");
+   
+   // ❌ WRONG: Ignoring the Result
+   container.clean_database().await;
+   ```
+
+### Common Test Database Issues
+
+**Problem:** `duplicate key value violates unique constraint "countries_iso_code_2_key"`
+
+**Root Causes:**
+- Database cleaning not working properly
+- Tests running in parallel with shared data
+- Non-unique test identifiers
+
+**Solutions:**
+1. Ensure `clean_database()` returns `Result` and is handled properly
+2. Use `#[serial]` attribute for tests that modify shared data
+3. Generate unique identifiers for test data
+4. Verify database is actually cleaned between tests
+
+**Problem:** `unused Result that must be used` warnings
+
+**Solution:**
+```rust
+// ✅ CORRECT: Handle the Result
+let _ = container.clean_database().await;
+
+// ✅ BETTER: Proper error handling
+container.clean_database().await.expect("Failed to clean database");
+```
+
 ## Troubleshooting Checklist
 
 When encountering database issues:
@@ -259,6 +335,9 @@ When encountering database issues:
 5. ✅ Verify schema: `diesel print-schema`
 6. ✅ Run tests: `cargo test --lib`
 7. ✅ Check logs: `docker logs econ-graph3-postgres-1`
+8. ✅ **NEW:** Check for database constraint violations in test logs
+9. ✅ **NEW:** Verify test isolation with `#[serial]` attributes
+10. ✅ **NEW:** Ensure `clean_database()` returns `Result` and is handled properly
 
 ## Additional Resources
 
