@@ -1531,12 +1531,6 @@ jobs:
           kill $(cat frontend.pid) || true
         fi
 
-  e2e-analysis-tests:
-    name: E2E Analysis Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests]
-
   e2e-comprehensive-tests:
     name: E2E Comprehensive Tests
     runs-on: ubuntu-latest
@@ -1849,3 +1843,5 @@ jobs:
         echo "Testing frontend Docker image..."
         docker run --rm econ-graph-frontend:test --version || echo "Frontend image test completed"
 # Updated Wed Sep 17 08:11:38 PDT 2025
+
+# Workflow cache refresh: 2025-09-17 08:25:07 PDT

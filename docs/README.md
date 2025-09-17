@@ -42,6 +42,9 @@ Welcome to the comprehensive documentation for EconGraph - the economic data vis
 - **[Vibe Coding](./development/VIBE_CODING.md)** - Development workflow and standards
 - **[CI/CD Pipeline](./development/CI_CD_PIPELINE.md)** - Continuous integration and deployment
 - **[CI Optimization Notes](./development/CI_OPTIMIZATION_NOTES.md)** - CI performance optimization
+- **[Near-Term Features](./development/NEAR_TERM_FEATURES.md)** - Implementation guide for next 3-6 months
+- **[Global Analysis Roadmap](./development/GLOBAL_ANALYSIS_ROADMAP.md)** - Comprehensive global analysis feature roadmap
+- **[Global Analysis UI Roadmap](./development/GLOBAL_ANALYSIS_UI_ROADMAP.md)** - UI-focused roadmap assuming data infrastructure is ready
 
 ### 🔌 [API Documentation](./api/)
 - **[GraphQL API](./api/GRAPHQL_API.md)** - GraphQL API reference and schema

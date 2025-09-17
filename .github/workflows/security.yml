@@ -293,3 +293,5 @@ jobs:
       with:
         sarif_file: 'frontend-trivy.sarif'
         category: 'frontend-docker'
+
+# Workflow cache refresh: 2025-09-17 08:25:07 PDT

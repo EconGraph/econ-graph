@@ -108,8 +108,6 @@ A Release Engineer (RelEng) is responsible for maintaining and improving the CI/
 - **Vulnerability Management**: Keeping dependencies and infrastructure secure
 - **Access Control**: Managing permissions and secrets across environments
 - **Audit Trails**: Maintaining compliance with security and regulatory requirements
-- **License Compliance Failures**: Internal workspace packages using licenses not allowed by compliance tools
-- **Missing License Exceptions**: Internal packages not properly exempted from license restrictions
 
 ## Best Practices
 
@@ -189,3 +187,32 @@ A Release Engineer (RelEng) is responsible for maintaining and improving the CI/
 - **Proof of Concepts**: Develop proof of concepts for new tools or processes
 - **Knowledge Sharing**: Share knowledge and best practices with the broader engineering team
 - **Community Engagement**: Participate in relevant communities and conferences
+
+## Workflow Validation and Maintenance
+
+### Automated CI/CD Workflow Validation
+- **Validation Automation**: Create automated scripts in `ci/scripts/` to validate all GitHub Actions CI/CD workflows
+- **YAML Syntax Checking**: Ensure all workflow files have valid YAML syntax
+- **Job Structure Validation**: Verify all jobs have proper `steps` sections and valid configurations
+- **Orphaned Workflow Detection**: Identify workflows with no active triggers that may be causing CI noise
+- **Naming Consistency**: Ensure all workflows have descriptive names for better maintainability
+
+### Validation Principles
+1. **Syntax Validation**: Validate YAML syntax before deployment
+2. **Structure Validation**: Ensure every job has a non-empty `steps` section
+3. **Trigger Validation**: Check for active triggers (push, pull_request, schedule, workflow_dispatch, repository_dispatch)
+4. **Naming Validation**: Verify workflows have descriptive names
+5. **Error Reporting**: Provide clear, actionable error messages
+
+### Integration with CI/CD
+- **Pre-commit Hooks**: Run workflow validation before committing changes
+- **CI Pipeline Integration**: Include validation in the main CI pipeline to catch issues early
+- **Automated Testing**: Treat workflow validation as a first-class test that must pass
+- **Documentation**: Maintain validation processes as part of the standard RelEng toolkit
+
+### Common Issues to Detect
+- **Invalid Job Definitions**: Jobs without `steps` sections (causes 0s duration failures)
+- **Orphaned Workflows**: Workflows from deleted branches showing as active in GitHub
+- **Malformed YAML**: Syntax errors that prevent workflow parsing
+- **Missing Triggers**: Workflows that can't be executed
+- **Poor Naming**: Workflows without descriptive names making maintenance difficult

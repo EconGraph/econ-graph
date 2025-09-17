@@ -99,3 +99,50 @@ This cleanup eliminates:
 - Potential costs from unused or experimental workflows
 
 The remaining workflows provide comprehensive testing while being clearly organized and cost-effective.
+
+## Workflow Validation
+
+### Automated Validation Script
+
+Use the `ci/scripts/validate-ci-workflows.sh` script to validate all GitHub Actions CI/CD workflows before committing changes:
+
+```bash
+# Run CI/CD workflow validation
+./ci/scripts/validate-ci-workflows.sh
+```
+
+### Validation Checks
+
+The script performs the following checks:
+
+1. **YAML Syntax Validation**: Ensures all workflow files have valid YAML syntax
+2. **Job Structure Validation**: Verifies all jobs have proper `steps` sections
+3. **Orphaned Workflow Detection**: Identifies workflows with no active triggers
+4. **Naming Consistency**: Ensures workflows have descriptive names
+
+### Integration
+
+- **Pre-commit**: Run validation before committing workflow changes
+- **CI Pipeline**: Validation is integrated into the main CI pipeline
+- **Error Reporting**: Provides clear, actionable error messages with color-coded output
+
+### Common Issues Detected
+
+- **Invalid Job Definitions**: Jobs without `steps` sections (causes 0s duration failures)
+- **Orphaned Workflows**: Workflows from deleted branches showing as active in GitHub
+- **Malformed YAML**: Syntax errors that prevent workflow parsing
+- **Missing Triggers**: Workflows that can't be executed
+- **Poor Naming**: Workflows without descriptive names
+
+### Example Output
+
+```bash
+🔍 Validating GitHub Actions CI/CD workflows...
+📋 Checking YAML syntax...
+✅ ci-core.yml - Valid YAML syntax
+❌ ci-core.yml - Job structure issues found
+⚠️  experimental.yml - No active triggers (may be orphaned)
+📊 Validation Summary:
+❌ Found 1 validation errors
+💡 Fix the errors above before committing workflow changes
+```
