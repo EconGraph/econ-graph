@@ -1,45 +1,59 @@
 # CI/CD Workflows
 
-This directory contains the CI/CD workflows for the EconGraph project, split into logical, manageable pieces for better maintainability and understanding.
+This directory contains the CI/CD workflows for the EconGraph project, cleaned up and optimized for better maintainability and reduced costs.
 
-## Workflow Files
+## Active Workflow Files
 
-### Core Tests (`ci-core.yml`)
-**Purpose**: Basic functionality tests that should run on every commit
-- `backend-smoke-tests` - Quick backend health checks
-- `backend-database-tests` - Database-specific tests (depends on smoke tests)
-- `backend-service-tests` - Service layer tests (depends on smoke tests)
-- `frontend-tests` - Frontend unit tests and linting
-- `quality-checks` - Code formatting and linting checks
+### Core Tests (`ci-core.yml`) - **PRIMARY WORKFLOW**
+**Purpose**: Comprehensive testing that runs on every commit
+- 20+ parallel backend test jobs covering all service layers
+- Frontend tests, quality checks, security audits, and E2E tests
+- All essential functionality validation
 
 **Triggers**: Push to main/develop, PRs, manual dispatch
+
+### Security (`security.yml`)
+**Purpose**: Daily security vulnerability scanning
+- Rust and NPM security audits
+- License compliance checking
+
+**Triggers**: Daily at 2 AM UTC, manual dispatch
+
+### Crawler Integration Test (`crawler-integration-test.yml`)
+**Purpose**: Manual testing of data crawler functionality
+- Tests specific data source crawling
+- Validates migration generation
+
+**Triggers**: Manual dispatch only
+
+### Playwright Tests (`playwright-tests*.yml`)
+**Purpose**: End-to-end testing on version releases
+- Comprehensive E2E testing
+- Mobile and desktop browser testing
+
+**Triggers**: Version tags (v*)
+
+## Disabled Workflows (Available for Manual Use)
 
 ### Integration Tests (`ci-integration.yml`)
-**Purpose**: End-to-end and integration testing
-- `backend-integration-tests` - Full backend integration tests (depends on core backend tests)
-- `frontend-integration-tests` - Frontend integration and E2E tests (depends on frontend tests)
-
-**Triggers**: Push to main/develop, PRs, manual dispatch
+**Purpose**: Alternative integration testing approach
+**Status**: Disabled (use ci-core.yml instead)
 
 ### Security & Compliance (`ci-security.yml`)
-**Purpose**: Security audits and license compliance
-- `security-audit` - Rust and NPM security vulnerability scanning
-- `license-compliance` - License checking for all dependencies
-
-**Triggers**: Push to main/develop, PRs, manual dispatch
+**Purpose**: Alternative security testing approach  
+**Status**: Disabled (use security.yml instead)
 
 ### Build & Deploy (`ci-build.yml`)
-**Purpose**: Building and validating deployment artifacts
-- `grafana-dashboard-validation` - Validates Grafana dashboard JSON files
-- `docker-build` - Builds and tests Docker images (depends on integration tests)
-
-**Triggers**: Push to main/develop, PRs, manual dispatch
+**Purpose**: Docker build validation
+**Status**: Disabled (can be enabled manually when needed)
 
 ### Experimental (`ci-experimental.yml`)
-**Purpose**: Experimental features and performance testing
-- `experimental-ramdisk-build-cache` - Tests build performance with RAM disk caching
+**Purpose**: Performance testing and experimental features
+**Status**: Manual dispatch only
 
-**Triggers**: Manual dispatch only (with experiment parameter)
+### RAM Disk Build Cache (`ramdisk-build-cache.yml`)
+**Purpose**: Build performance optimization testing
+**Status**: Manual dispatch only
 
 ## Workflow Dependencies
 
@@ -86,8 +100,20 @@ All workflows share these environment variables:
 - **Build & Deploy**: `gh workflow run ci-build.yml`
 - **Experimental**: `gh workflow run ci-experimental.yml --field experiment=ramdisk`
 
-## Migration Notes
+## Cleanup Summary
 
-- The original monolithic `ci.yml` has been backed up as `ci-original-backup.yml`
-- All job dependencies and environment variables have been preserved
-- The new structure maintains the same test coverage and quality gates
+- **Removed 9 experimental test workflows** that were disabled and causing confusion
+- **Removed backup and disabled workflow files** that were no longer needed
+- **Cleaned up excessive CI infrastructure** including unused scripts and documentation
+- **Consolidated to essential workflows** with clear purposes and triggers
+- **Maintained full test coverage** through the primary ci-core.yml workflow
+
+## Cost Optimization
+
+This cleanup eliminates:
+- Dead workflows that could trigger accidentally
+- Redundant CI infrastructure and documentation
+- Confusion about which workflows are active
+- Potential costs from unused or experimental workflows
+
+The remaining workflows provide comprehensive testing while being clearly organized and cost-effective.
