@@ -39,7 +39,7 @@ concurrency:
 jobs:
   crawler-integration-test:
     runs-on: ubuntu-latest
-    
+
     services:
       postgres:
         image: postgres:17
@@ -109,7 +109,7 @@ jobs:
         CENSUS_API_KEY: ${{ github.event.inputs.api_key_census }}
       run: |
         cd backend
-        
+
         # Determine which data source to test
         if [ -n "${{ github.event.inputs.data_source }}" ]; then
           DATA_SOURCE="${{ github.event.inputs.data_source }}"
@@ -117,20 +117,20 @@ jobs:
           # Select a random enabled data source
           DATA_SOURCE=$(cargo run --bin catalog_crawler crawl-all --dry-run 2>/dev/null | grep -E "Found \d+ data sources" -A 20 | grep -E "^\s*-\s" | shuf -n 1 | sed 's/^\s*-\s*//' | cut -d' ' -f1)
         fi
-        
+
         echo "Testing data source: $DATA_SOURCE"
-        
+
         # Run crawler with specified parameters
         SERIES_COUNT="${{ github.event.inputs.series_count }}"
         if [ "$SERIES_COUNT" -gt 10 ]; then
           SERIES_COUNT=10
         fi
-        
+
         cargo run --bin catalog_crawler crawl-source \
           --data-source "$DATA_SOURCE" \
           --series-count "$SERIES_COUNT" \
           --skip-data-download false
-        
+
         echo "Crawler completed successfully"
 
     - name: Export catalog data
@@ -138,14 +138,14 @@ jobs:
         DATABASE_URL: postgres://test_user:test_password@localhost:5432/econ_graph_test
       run: |
         cd backend
-        
+
         # Create output directory
         mkdir -p ../generated-migrations
-        
+
         # Export catalog data to SQL file
         cargo run --bin catalog_crawler export-catalog \
           --output-file ../generated-migrations/crawler_test_data.sql
-        
+
         echo "Catalog data exported successfully"
 
     - name: Generate migration with bulk inserts
@@ -153,85 +153,85 @@ jobs:
         DATABASE_URL: postgres://test_user:test_password@localhost:5432/econ_graph_test
       run: |
         cd backend
-        
+
         # Create a new migration file
         TIMESTAMP=$(date +%Y%m%d%H%M%S)
         MIGRATION_DIR="migrations/${TIMESTAMP}_crawler_integration_test"
         mkdir -p "$MIGRATION_DIR"
-        
+
         # Generate migration with bulk inserts (max 1000 rows each)
         cargo run --bin catalog_crawler export-catalog \
           --output-file "${MIGRATION_DIR}/up.sql" \
           --bulk-insert-limit 1000
-        
+
         # Create down migration
         cat > "${MIGRATION_DIR}/down.sql" << 'EOF'
         -- Down migration for crawler integration test data
         -- This removes all data inserted by the crawler test
-        
+
         -- Remove series metadata
         DELETE FROM series_metadata WHERE id IN (
-          SELECT id FROM series_metadata 
+          SELECT id FROM series_metadata
           WHERE created_at > NOW() - INTERVAL '1 hour'
         );
-        
+
         -- Remove data points
         DELETE FROM data_points WHERE id IN (
-          SELECT id FROM data_points 
+          SELECT id FROM data_points
           WHERE created_at > NOW() - INTERVAL '1 hour'
         );
-        
+
         -- Remove economic series
         DELETE FROM economic_series WHERE id IN (
-          SELECT id FROM economic_series 
+          SELECT id FROM economic_series
           WHERE created_at > NOW() - INTERVAL '1 hour'
         );
-        
+
         -- Remove crawl attempts
         DELETE FROM crawl_attempts WHERE id IN (
-          SELECT id FROM crawl_attempts 
+          SELECT id FROM crawl_attempts
           WHERE created_at > NOW() - INTERVAL '1 hour'
         );
         EOF
-        
+
         echo "Generated migration: $MIGRATION_DIR"
         echo "Migration files created successfully"
 
     - name: Validate generated migration
       run: |
         cd backend
-        
+
         # Check if migration files exist and have content
         MIGRATION_DIR=$(ls -td migrations/*crawler_integration_test | head -1)
-        
+
         if [ ! -d "$MIGRATION_DIR" ]; then
           echo "❌ Migration directory not found"
           exit 1
         fi
-        
+
         if [ ! -s "${MIGRATION_DIR}/up.sql" ]; then
           echo "❌ up.sql is empty or missing"
           exit 1
         fi
-        
+
         if [ ! -s "${MIGRATION_DIR}/down.sql" ]; then
           echo "❌ down.sql is empty or missing"
           exit 1
         fi
-        
+
         # Validate bulk insert limits (max 1000 rows per INSERT)
         INSERT_COUNT=$(grep -c "INSERT INTO" "${MIGRATION_DIR}/up.sql" || true)
         if [ "$INSERT_COUNT" -eq 0 ]; then
           echo "❌ No INSERT statements found in migration"
           exit 1
         fi
-        
+
         # Check for bulk insert patterns
         BULK_INSERTS=$(grep -c "VALUES.*,.*,.*,.*,.*,.*,.*,.*,.*,.*" "${MIGRATION_DIR}/up.sql" || true)
         if [ "$BULK_INSERTS" -gt 0 ]; then
           echo "✅ Found $BULK_INSERTS bulk INSERT statements"
         fi
-        
+
         echo "✅ Migration validation passed"
         echo "📊 Migration contains $INSERT_COUNT INSERT statements"
 

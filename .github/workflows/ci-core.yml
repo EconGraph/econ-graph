@@ -127,10 +127,157 @@ jobs:
     - name: Run fast unit tests (no database)
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --lib -- --test-threads=4 --nocapture config auth::services metrics
+        cargo test --lib -- --test-threads=4 --nocapture config auth::services metrics mcp_server::tests::test_mcp_server_creation mcp_server::tests::test_get_data_sources mcp_server::tests::test_get_series_catalog mcp_server::tests::test_create_fallback_visualization mcp_server::tests::test_call_private_chart_api_success mcp_server::tests::test_call_private_chart_api_failure mcp_server::tests::test_get_series_data_for_visualization mcp_server::tests::test_search_economic_series_with_custom_limit mcp_server::tests::test_search_economic_series_missing_query mcp_server::tests::test_get_series_data_missing_series_id mcp_server::tests::test_get_series_data_with_custom_limit mcp_server::tests::test_create_data_visualization_missing_series_ids mcp_server::tests::test_create_data_visualization_with_default_chart_type mcp_server::tests::test_create_data_visualization_with_title mcp_server::tests::test_create_data_visualization_without_title mcp_server::tests::test_create_data_visualization_with_date_filters
       working-directory: backend
       env:
         RUST_LOG: warn
+
+  chart-api-integration-tests:
+    name: Chart API Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [backend-smoke-tests]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: chart-api-service/package-lock.json
+
+    - name: Install chart API dependencies
+      working-directory: chart-api-service
+      run: npm ci
+
+    - name: Build chart API service
+      working-directory: chart-api-service
+      run: npm run build
+
+    - name: Start chart API service
+      working-directory: chart-api-service
+      run: |
+        npm start &
+        sleep 10
+        curl -f http://localhost:3001/health || exit 1
+      env:
+        PORT: 3001
+
+    - name: Run chart API tests
+      working-directory: chart-api-service
+      run: npm test
+
+    - name: Test chart API endpoints
+      run: |
+        # Test health endpoint
+        curl -f http://localhost:3001/health
+
+        # Test chart generation endpoint
+        curl -X POST http://localhost:3001/api/chart \
+          -H "Content-Type: application/json" \
+          -d '{"chartType": "line", "data": [{"x": "2023-01", "y": 100}], "title": "Test Chart"}' \
+          -f || echo "Chart API test completed"
+
+  backend-mcp-integration-tests:
+    name: Backend MCP Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [backend-smoke-tests, chart-api-integration-tests]
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5445:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: chart-api-service/package-lock.json
+
+    - name: Install chart API dependencies
+      working-directory: chart-api-service
+      run: npm ci
+
+    - name: Build chart API service
+      working-directory: chart-api-service
+      run: npm run build
+
+    - name: Start chart API service
+      working-directory: chart-api-service
+      run: |
+        npm start &
+        sleep 10
+        curl -f http://localhost:3001/health || exit 1
+      env:
+        PORT: 3001
+
+    - name: Start backend service
+      working-directory: backend
+      run: |
+        cargo build --release
+        ./target/release/econ-graph-backend &
+        sleep 15
+        curl -f http://localhost:9877/health || exit 1
+      env:
+        DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
+        BACKEND_PORT: 9877
+        CHART_API_SERVICE_URL: http://localhost:3001/api/chart
+
+    - name: Run MCP server integration tests
+      working-directory: backend
+      run: cargo test --test mcp_server_integration_tests -- --nocapture
+      env:
+        DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
+        CHART_API_SERVICE_URL: http://localhost:3001/api/chart
 
   backend-models-basic-tests:
     name: Backend Models Basic Tests

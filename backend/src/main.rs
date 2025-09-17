@@ -375,11 +375,19 @@ async fn main() -> AppResult<()> {
     // MCP Server routes
     let mcp_server = Arc::new(mcp_server::EconGraphMcpServer::new(Arc::new(pool.clone())));
 
+    // Create a simple MCP handler that doesn't rely on complex filter chaining
+    let mcp_handler = {
+        let server = mcp_server.clone();
+        move |body: warp::hyper::body::Bytes| {
+            let server = server.clone();
+            async move { mcp_server::mcp_handler(body, server).await }
+        }
+    };
+
     let mcp_filter = warp::path("mcp")
         .and(warp::post())
         .and(warp::body::bytes())
-        .and(warp::any().map(move || mcp_server.clone()))
-        .and_then(mcp_server::mcp_handler);
+        .and_then(mcp_handler);
 
     // Combine all routes
     let routes = root_filter

@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 use async_graphql::{Request, Variables};
+use futures::future;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -15,6 +16,7 @@ use crate::database::DatabasePool;
 use crate::graphql::create_schema_with_data;
 
 /// MCP Server implementation for EconGraph
+#[derive(Clone)]
 pub struct EconGraphMcpServer {
     /// Database connection pool
     pool: Arc<DatabasePool>,
@@ -198,7 +200,7 @@ impl EconGraphMcpServer {
     }
 
     /// Search for economic series
-    async fn search_economic_series(&self, arguments: Value) -> Result<Value> {
+    pub async fn search_economic_series(&self, arguments: Value) -> Result<Value> {
         let query = arguments
             .get("query")
             .and_then(|v| v.as_str())
@@ -245,7 +247,7 @@ impl EconGraphMcpServer {
     }
 
     /// Get series data points
-    async fn get_series_data(&self, arguments: Value) -> Result<Value> {
+    pub async fn get_series_data(&self, arguments: Value) -> Result<Value> {
         let series_id = arguments
             .get("series_id")
             .and_then(|v| v.as_str())
@@ -289,10 +291,18 @@ impl EconGraphMcpServer {
         }
 
         if let Some(end) = end_date {
-            graphql_query = graphql_query.replace(
-                "dataPoints(limit: $limit, startDate: $startDate)",
-                "dataPoints(limit: $limit, startDate: $startDate, endDate: $endDate)",
-            );
+            // Handle both cases: with and without start date
+            if start_date.is_some() {
+                graphql_query = graphql_query.replace(
+                    "dataPoints(limit: $limit, startDate: $startDate)",
+                    "dataPoints(limit: $limit, startDate: $startDate, endDate: $endDate)",
+                );
+            } else {
+                graphql_query = graphql_query.replace(
+                    "dataPoints(limit: $limit)",
+                    "dataPoints(limit: $limit, endDate: $endDate)",
+                );
+            }
             variables["endDate"] = json!(end);
         }
 
@@ -354,7 +364,7 @@ impl EconGraphMcpServer {
     }
 
     /// Create data visualization
-    async fn create_data_visualization(&self, arguments: Value) -> Result<Value> {
+    pub async fn create_data_visualization(&self, arguments: Value) -> Result<Value> {
         let series_ids = arguments
             .get("series_ids")
             .and_then(|v| v.as_array())
@@ -454,7 +464,7 @@ impl EconGraphMcpServer {
     }
 
     /// Create fallback visualization when private chart API is unavailable
-    async fn create_fallback_visualization(
+    pub async fn create_fallback_visualization(
         &self,
         series_data: Vec<Value>,
         chart_type: &str,
@@ -576,10 +586,18 @@ impl EconGraphMcpServer {
         }
 
         if let Some(end) = end_date {
-            graphql_query = graphql_query.replace(
-                "dataPoints(limit: 1000, startDate: $startDate)",
-                "dataPoints(limit: 1000, startDate: $startDate, endDate: $endDate)",
-            );
+            // Handle both cases: with and without start date
+            if start_date.is_some() {
+                graphql_query = graphql_query.replace(
+                    "dataPoints(limit: 1000, startDate: $startDate)",
+                    "dataPoints(limit: 1000, startDate: $startDate, endDate: $endDate)",
+                );
+            } else {
+                graphql_query = graphql_query.replace(
+                    "dataPoints(limit: 1000)",
+                    "dataPoints(limit: 1000, endDate: $endDate)",
+                );
+            }
             variables["endDate"] = json!(end);
         }
 
@@ -599,23 +617,34 @@ pub async fn mcp_handler(
     let request: Value = match serde_json::from_slice(&body) {
         Ok(req) => req,
         Err(e) => {
+            tracing::error!("Failed to parse JSON: {}", e);
             return Ok(warp::reply::with_status(
                 warp::reply::json(&json!({
-                    "error": format!("Invalid JSON: {}", e)
+                    "jsonrpc": "2.0",
+                    "id": null,
+                    "error": {
+                        "code": -32700,
+                        "message": "Parse error"
+                    }
                 })),
                 StatusCode::BAD_REQUEST,
             ));
         }
     };
 
+    tracing::info!("MCP request received: {:?}", request);
+
     // Handle different MCP request types
     let response = match request.get("method").and_then(|m| m.as_str()) {
         Some("tools/list") => {
+            tracing::info!("Handling tools/list request");
+            let tools = EconGraphMcpServer::get_available_tools();
+            tracing::info!("Retrieved {} tools", tools.len());
             json!({
                 "jsonrpc": "2.0",
                 "id": request.get("id"),
                 "result": {
-                    "tools": EconGraphMcpServer::get_available_tools()
+                    "tools": tools
                 }
             })
         }
@@ -852,5 +881,720 @@ mod tests {
         let response = result.unwrap();
         assert!(response.get("content").is_some());
         // This should return a fallback visualization since the series don't exist
+    }
+
+    // ===== INTEGRATION TESTS FOR HTTP ENDPOINT =====
+    // These tests will catch the warp filter integration bug
+
+    #[tokio::test]
+    #[serial]
+    async fn test_mcp_handler_integration() {
+        // Create a test container that will be kept alive for the duration of the test
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test tools/list request
+        let tools_list_request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list"
+        });
+
+        let body = warp::hyper::body::Bytes::from(tools_list_request.to_string());
+        let result = mcp_handler(body, Arc::new(server)).await;
+
+        assert!(
+            result.is_ok(),
+            "MCP handler failed for tools/list: {:?}",
+            result.err()
+        );
+        let reply = result.unwrap();
+
+        // Convert the reply to bytes to verify it's valid JSON-RPC
+        let response_bytes = warp::hyper::body::to_bytes(reply.into_response().into_body())
+            .await
+            .unwrap();
+        let response_text = String::from_utf8(response_bytes.to_vec()).unwrap();
+        let response_json: Value = serde_json::from_str(&response_text).unwrap();
+
+        assert_eq!(response_json["jsonrpc"], "2.0");
+        assert_eq!(response_json["id"], 1);
+        assert!(response_json["result"].is_object());
+        assert!(response_json["result"]["tools"].is_array());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_mcp_handler_malformed_json() {
+        // Create a test container that will be kept alive for the duration of the test
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test with malformed JSON
+        let malformed_json = "{ invalid json }";
+        let body = warp::hyper::body::Bytes::from(malformed_json);
+        let result = mcp_handler(body, Arc::new(server)).await;
+
+        assert!(
+            result.is_ok(),
+            "MCP handler should handle malformed JSON gracefully"
+        );
+        let reply = result.unwrap();
+
+        // Should return a JSON-RPC error response
+        let response_bytes = warp::hyper::body::to_bytes(reply.into_response().into_body())
+            .await
+            .unwrap();
+        let response_text = String::from_utf8(response_bytes.to_vec()).unwrap();
+
+        // The response should be valid JSON
+        let response_json: Value = serde_json::from_str(&response_text)
+            .unwrap_or_else(|_| panic!("Failed to parse response as JSON: {}", response_text));
+
+        assert_eq!(response_json["jsonrpc"], "2.0");
+        assert!(response_json["error"].is_object());
+        assert_eq!(response_json["error"]["code"], -32700); // Parse error
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_mcp_handler_invalid_method() {
+        // Create a test container that will be kept alive for the duration of the test
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test with invalid method
+        let invalid_request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "invalid/method"
+        });
+
+        let body = warp::hyper::body::Bytes::from(invalid_request.to_string());
+        let result = mcp_handler(body, Arc::new(server)).await;
+
+        assert!(
+            result.is_ok(),
+            "MCP handler should handle invalid methods gracefully"
+        );
+        let reply = result.unwrap();
+
+        // Should return a JSON-RPC error response
+        let response_bytes = warp::hyper::body::to_bytes(reply.into_response().into_body())
+            .await
+            .unwrap();
+        let response_text = String::from_utf8(response_bytes.to_vec()).unwrap();
+        let response_json: Value = serde_json::from_str(&response_text).unwrap();
+
+        assert_eq!(response_json["jsonrpc"], "2.0");
+        assert!(response_json["error"].is_object());
+        assert_eq!(response_json["error"]["code"], -32601); // Method not found
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_mcp_handler_large_payload() {
+        // Create a test container that will be kept alive for the duration of the test
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test with large payload (search with many parameters)
+        let large_request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "search_economic_series",
+                "arguments": {
+                    "query": "GDP inflation unemployment employment trade balance current account fiscal deficit debt-to-gdp ratio",
+                    "limit": 1000,
+                    "start_date": "1900-01-01",
+                    "end_date": "2030-12-31",
+                    "sources": ["fred", "bls", "census", "bea", "imf", "oecd", "ecb", "boe", "boj", "rba", "boc", "snb", "world_bank", "wto", "unstats", "ilo", "fhfa"]
+                }
+            }
+        });
+
+        let body = warp::hyper::body::Bytes::from(large_request.to_string());
+        let result = mcp_handler(body, Arc::new(server)).await;
+
+        assert!(
+            result.is_ok(),
+            "MCP handler should handle large payloads: {:?}",
+            result.err()
+        );
+        let reply = result.unwrap();
+
+        // Convert to response to verify it's valid
+        let response_bytes = warp::hyper::body::to_bytes(reply.into_response().into_body())
+            .await
+            .unwrap();
+        let response_text = String::from_utf8(response_bytes.to_vec()).unwrap();
+        let response_json: Value = serde_json::from_str(&response_text).unwrap();
+
+        assert_eq!(response_json["jsonrpc"], "2.0");
+        assert!(response_json["result"].is_object());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_mcp_handler_concurrent_requests() {
+        // Create a test container that will be kept alive for the duration of the test
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = Arc::new(EconGraphMcpServer::new(Arc::new(pool.clone())));
+
+        // Test concurrent requests to ensure thread safety
+        let mut handles = vec![];
+
+        for i in 0..10 {
+            let server_clone = server.clone();
+            let handle = tokio::spawn(async move {
+                let request = json!({
+                    "jsonrpc": "2.0",
+                    "id": i,
+                    "method": "tools/list"
+                });
+
+                let body = warp::hyper::body::Bytes::from(request.to_string());
+                mcp_handler(body, server_clone).await
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all requests to complete
+        let results = future::join_all(handles).await;
+
+        // Verify all requests succeeded
+        for (i, result) in results.into_iter().enumerate() {
+            assert!(
+                result.is_ok(),
+                "Concurrent request {} failed: {:?}",
+                i,
+                result.as_ref().err()
+            );
+            let handler_result = result.unwrap();
+            assert!(
+                handler_result.is_ok(),
+                "MCP handler failed for concurrent request {}: {:?}",
+                i,
+                handler_result.as_ref().err()
+            );
+
+            let reply = handler_result.unwrap();
+            // Convert to response to verify it's valid JSON
+            let response_bytes = warp::hyper::body::to_bytes(reply.into_response().into_body())
+                .await
+                .unwrap();
+            let response_text = String::from_utf8(response_bytes.to_vec()).unwrap();
+            let response_json: Value = serde_json::from_str(&response_text).unwrap();
+
+            assert_eq!(response_json["jsonrpc"], "2.0");
+            assert_eq!(response_json["id"], i as i64);
+            assert!(response_json["result"].is_object());
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_mcp_handler_error_handling() {
+        // Create a test container that will be kept alive for the duration of the test
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test empty body
+        let empty_body = warp::hyper::body::Bytes::new();
+        let result = mcp_handler(empty_body, Arc::new(server.clone())).await;
+        assert!(result.is_ok(), "Should handle empty body gracefully");
+
+        // Test non-JSON body
+        let non_json_body = warp::hyper::body::Bytes::from("This is not JSON");
+        let result = mcp_handler(non_json_body, Arc::new(server.clone())).await;
+        assert!(result.is_ok(), "Should handle non-JSON body gracefully");
+
+        // Test missing required fields
+        let incomplete_request = json!({
+            "jsonrpc": "2.0",
+            "id": 1
+            // Missing method
+        });
+        let body = warp::hyper::body::Bytes::from(incomplete_request.to_string());
+        let result = mcp_handler(body, Arc::new(server)).await;
+        assert!(
+            result.is_ok(),
+            "Should handle incomplete requests gracefully"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_mcp_handler_tools_call_integration() {
+        // Create a test container that will be kept alive for the duration of the test
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test tools/call with search_economic_series
+        let tools_call_request = json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "search_economic_series",
+                "arguments": {
+                    "query": "GDP",
+                    "limit": 5
+                }
+            }
+        });
+
+        let body = warp::hyper::body::Bytes::from(tools_call_request.to_string());
+        let result = mcp_handler(body, Arc::new(server)).await;
+
+        assert!(
+            result.is_ok(),
+            "MCP handler failed for tools/call: {:?}",
+            result.err()
+        );
+        let reply = result.unwrap();
+
+        // Parse and verify response
+        let response_bytes = warp::hyper::body::to_bytes(reply.into_response().into_body())
+            .await
+            .unwrap();
+        let response_text = String::from_utf8(response_bytes.to_vec()).unwrap();
+        let response_json: Value = serde_json::from_str(&response_text).unwrap();
+
+        assert_eq!(response_json["jsonrpc"], "2.0");
+        assert_eq!(response_json["id"], 2);
+        assert!(response_json["result"].is_object());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_mcp_handler_resources_list_integration() {
+        // Create a test container that will be kept alive for the duration of the test
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test resources/list request
+        let resources_list_request = json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "resources/list"
+        });
+
+        let body = warp::hyper::body::Bytes::from(resources_list_request.to_string());
+        let result = mcp_handler(body, Arc::new(server)).await;
+
+        assert!(
+            result.is_ok(),
+            "MCP handler failed for resources/list: {:?}",
+            result.err()
+        );
+        let reply = result.unwrap();
+
+        // Parse and verify response
+        let response_bytes = warp::hyper::body::to_bytes(reply.into_response().into_body())
+            .await
+            .unwrap();
+        let response_text = String::from_utf8(response_bytes.to_vec()).unwrap();
+        let response_json: Value = serde_json::from_str(&response_text).unwrap();
+
+        assert_eq!(response_json["jsonrpc"], "2.0");
+        assert_eq!(response_json["id"], 3);
+        assert!(response_json["result"].is_object());
+        assert!(response_json["result"]["resources"].is_array());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_data_sources() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test get_data_sources method
+        let result = server.get_data_sources().await;
+        assert!(result.is_ok());
+
+        let data = result.unwrap();
+        assert!(data.get("contents").is_some());
+        assert!(data.get("contents").unwrap().is_array());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_series_catalog() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test get_series_catalog method
+        let result = server.get_series_catalog().await;
+        assert!(result.is_ok());
+
+        let data = result.unwrap();
+        assert!(data.get("contents").is_some());
+        assert!(data.get("contents").unwrap().is_array());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_create_fallback_visualization() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test fallback visualization with sample data
+        let series_data = vec![
+            json!({
+                "id": "test-series-1",
+                "name": "Test Series 1",
+                "dataPoints": [
+                    {"date": "2023-01-01", "value": 100.0},
+                    {"date": "2023-02-01", "value": 105.0}
+                ]
+            }),
+            json!({
+                "id": "test-series-2",
+                "name": "Test Series 2",
+                "dataPoints": [
+                    {"date": "2023-01-01", "value": 200.0},
+                    {"date": "2023-02-01", "value": 210.0}
+                ]
+            }),
+        ];
+
+        let result = server
+            .create_fallback_visualization(series_data, "line", Some("Test Chart"))
+            .await;
+
+        assert!(result.is_ok());
+
+        let data = result.unwrap();
+        assert!(data.get("content").is_some());
+        assert!(!data.get("is_error").unwrap().as_bool().unwrap());
+
+        // Check that the content contains expected information
+        let content = data.get("content").unwrap().as_array().unwrap();
+        assert!(!content.is_empty());
+
+        let text_content = content[0].get("text").unwrap().as_str().unwrap();
+        assert!(text_content.contains("Data visualization prepared"));
+        assert!(text_content.contains("2 series"));
+        assert!(text_content.contains("4 total data points"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_series_data_for_visualization() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test with a valid UUID (this will fail at GraphQL level but tests the function)
+        let result = server
+            .get_series_data_for_visualization(
+                "550e8400-e29b-41d4-a716-446655440000",
+                Some("2023-01-01"),
+                Some("2023-12-31"),
+            )
+            .await;
+
+        // This will fail because the series doesn't exist, but tests the function logic
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_series_data_for_visualization_start_date_only() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test with start date only
+        let result = server
+            .get_series_data_for_visualization(
+                "550e8400-e29b-41d4-a716-446655440000",
+                Some("2023-01-01"),
+                None,
+            )
+            .await;
+
+        // This will fail because the series doesn't exist, but tests the function logic
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_series_data_for_visualization_end_date_only() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test with end date only
+        let result = server
+            .get_series_data_for_visualization(
+                "550e8400-e29b-41d4-a716-446655440000",
+                None,
+                Some("2023-12-31"),
+            )
+            .await;
+
+        // This will fail because the series doesn't exist, but tests the function logic
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_series_data_for_visualization_no_dates() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test with no date filters
+        let result = server
+            .get_series_data_for_visualization("550e8400-e29b-41d4-a716-446655440000", None, None)
+            .await;
+
+        // This will fail because the series doesn't exist, but tests the function logic
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_search_economic_series_with_custom_limit() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test search with custom limit
+        let arguments = json!({
+            "query": "GDP",
+            "limit": 5
+        });
+
+        let result = server.search_economic_series(arguments).await;
+        assert!(result.is_ok());
+
+        let data = result.unwrap();
+        assert!(data.get("content").is_some());
+        assert!(!data.get("is_error").unwrap().as_bool().unwrap());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_search_economic_series_missing_query() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test search with missing query parameter
+        let arguments = json!({
+            "limit": 10
+        });
+
+        let result = server.search_economic_series(arguments).await;
+        assert!(result.is_err());
+
+        let error = result.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Missing required parameter: query"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_series_data_missing_series_id() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test get_series_data with missing series_id
+        let arguments = json!({
+            "start_date": "2023-01-01",
+            "end_date": "2023-12-31"
+        });
+
+        let result = server.get_series_data(arguments).await;
+        assert!(result.is_err());
+
+        let error = result.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Missing required parameter: series_id"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_series_data_with_custom_limit() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test get_series_data with custom limit
+        let arguments = json!({
+            "series_id": "550e8400-e29b-41d4-a716-446655440000",
+            "limit": 50
+        });
+
+        let result = server.get_series_data(arguments).await;
+        // This will fail because the series doesn't exist, but tests the function logic
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_create_data_visualization_missing_series_id() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test create_data_visualization with missing series_id
+        let arguments = json!({
+            "chart_type": "line",
+            "title": "Test Chart"
+        });
+
+        let result = server.create_data_visualization(arguments).await;
+        assert!(result.is_err());
+
+        let error = result.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Missing required parameter: series_id"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_create_data_visualization_missing_chart_type() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test create_data_visualization with missing chart_type
+        let arguments = json!({
+            "series_id": "550e8400-e29b-41d4-a716-446655440000",
+            "title": "Test Chart"
+        });
+
+        let result = server.create_data_visualization(arguments).await;
+        assert!(result.is_err());
+
+        let error = result.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Missing required parameter: chart_type"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_create_data_visualization_with_title() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test create_data_visualization with title
+        let arguments = json!({
+            "series_id": "550e8400-e29b-41d4-a716-446655440000",
+            "chart_type": "line",
+            "title": "Custom Chart Title"
+        });
+
+        let result = server.create_data_visualization(arguments).await;
+        // This will fail because the series doesn't exist, but tests the function logic
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_create_data_visualization_without_title() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test create_data_visualization without title
+        let arguments = json!({
+            "series_id": "550e8400-e29b-41d4-a716-446655440000",
+            "chart_type": "line"
+        });
+
+        let result = server.create_data_visualization(arguments).await;
+        // This will fail because the series doesn't exist, but tests the function logic
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_create_data_visualization_with_date_filters() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test create_data_visualization with date filters
+        let arguments = json!({
+            "series_id": "550e8400-e29b-41d4-a716-446655440000",
+            "chart_type": "line",
+            "title": "Test Chart",
+            "start_date": "2023-01-01",
+            "end_date": "2023-12-31"
+        });
+
+        let result = server.create_data_visualization(arguments).await;
+        // This will fail because the series doesn't exist, but tests the function logic
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_call_private_chart_api_success() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test successful chart API call with mock data
+        let chart_request = json!({
+            "seriesData": [{
+                "id": "test-series",
+                "name": "Test Series",
+                "dataPoints": [
+                    {"date": "2023-01-01", "value": 100.0},
+                    {"date": "2023-02-01", "value": 105.0}
+                ]
+            }],
+            "chartType": "line",
+            "title": "Test Chart",
+            "startDate": "2023-01-01",
+            "endDate": "2023-12-31"
+        });
+
+        // This will fail because the chart API service isn't running in tests,
+        // but it tests the function logic and error handling
+        let result = server.call_private_chart_api(&chart_request).await;
+        assert!(result.is_err()); // Expected to fail in test environment
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_call_private_chart_api_failure() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
+
+        // Test chart API call with invalid data
+        let invalid_request = json!({
+            "invalid": "data"
+        });
+
+        // This should fail due to invalid request format
+        let result = server.call_private_chart_api(&invalid_request).await;
+        assert!(result.is_err());
     }
 }

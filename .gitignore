@@ -3,6 +3,7 @@
 /backend/Cargo.lock
 **/*.rs.bk
 *.pdb
+*.profraw
 
 # Node.js - ignore all node_modules directories
 node_modules/
