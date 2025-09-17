@@ -509,7 +509,7 @@ Enhanced caching for system packages and Rust toolchain:
 
 The visual charts in this document are generated automatically from Mermaid diagrams:
 
-1. **Mermaid Source**: `ci/docs/diagrams/*.mmd` - Text-based diagram definitions
+1. **Mermaid Source**: `ci/diagrams/*.mmd` - Text-based diagram definitions
 2. **Visual Generation**: `ci/scripts/generate-visual-charts.sh` - Converts to PNG/SVG
 3. **Documentation Embedding**: `ci/scripts/embed-charts-in-markdown.sh` - Embeds in markdown
 
@@ -527,4 +527,4 @@ This ensures that documentation stays up-to-date with the actual CI/CD implement
 - `.github/workflows/ci-core.yml` - Current CI configuration
 - `backend/Cargo.toml` - Rust dependencies
 - `frontend/package.json` - Node.js dependencies
-- `ci/docs/CI_OPTIMIZATION_NOTES.md` - Detailed optimization strategies
+- `docs/development/CI_OPTIMIZATION_NOTES.md` - Detailed optimization strategies

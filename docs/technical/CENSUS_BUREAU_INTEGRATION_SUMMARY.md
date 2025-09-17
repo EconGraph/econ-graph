@@ -211,7 +211,7 @@ backend/src/services/series_discovery/census/
 ├── integration_tests.rs             # Live API integration tests
 └── tests.rs                        # Unit tests
 
-backend/docs/
+docs/technical/
 ├── CENSUS_BDS_INTEGRATION.md        # Technical documentation
 ├── CRAWLER_DEPLOYMENT_GUIDE.md      # Deployment guide
 └── CENSUS_BUREAU_INTEGRATION_SUMMARY.md  # This file

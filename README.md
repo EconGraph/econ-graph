@@ -294,6 +294,15 @@ cd demo-tools
 
 ```
 econ-graph/
+├── 📚 docs/                 # Comprehensive documentation
+│   ├── business/            # Business docs (investor pitch, roadmap)
+│   ├── technical/           # Technical architecture and implementation
+│   ├── deployment/          # Deployment and infrastructure guides
+│   ├── development/         # Development workflow and CI/CD
+│   ├── api/                 # API documentation and references
+│   ├── testing/             # Testing strategies and reports
+│   └── monitoring/          # Monitoring and observability setup
+│
 ├── 🦀 backend/              # Rust backend with Axum + PostgreSQL
 │   ├── src/
 │   │   ├── graphql/         # GraphQL schema and resolvers
@@ -329,6 +338,13 @@ econ-graph/
     ├── create-honest-pitch-video.sh
     └── README.md           # Complete demo tools documentation
 ```
+
+### 📚 **Documentation**
+- **[📖 Complete Documentation Index](./docs/README.md)** - Comprehensive documentation guide
+- **[🏢 Business Documentation](./docs/business/)** - Investor pitch, roadmap, privacy policy
+- **[🔧 Technical Documentation](./docs/technical/)** - Architecture, implementation, APIs
+- **[🚀 Deployment Guide](./docs/deployment/)** - Infrastructure and deployment procedures
+- **[💻 Development Guide](./docs/development/)** - Setup, workflow, and CI/CD
 
 ---
 
