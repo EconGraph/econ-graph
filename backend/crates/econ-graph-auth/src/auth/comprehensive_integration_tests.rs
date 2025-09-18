@@ -37,6 +37,12 @@ mod tests {
             return;
         }
 
+        // Clean database before test to ensure isolation
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database");
+
         let auth_service = AuthService::new(container.pool().clone());
 
         // Simulate Google OAuth token verification
@@ -160,10 +166,13 @@ mod tests {
             return;
         }
 
+        // Clean database before test to ensure isolation
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database");
+
         let auth_service = AuthService::new(container.pool().clone());
-        let container = create_test_pool().await;
-        let pool = container.pool();
-        let auth_service = AuthService::new(pool.clone());
 
         let facebook_user_info = FacebookUserInfo {
             id: "facebook-987654321".to_string(),

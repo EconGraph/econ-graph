@@ -100,6 +100,12 @@ mod tests {
             return;
         }
 
+        // Clean database before test to ensure isolation
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database");
+
         let auth_service = AuthService::new(container.pool().clone());
 
         // Note: In a real test, you would mock the HTTP client
@@ -143,6 +149,12 @@ mod tests {
         if skip_if_no_database(&container).await {
             return;
         }
+
+        // Clean database before test to ensure isolation
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database");
 
         let auth_service = AuthService::new(container.pool().clone());
 
@@ -190,10 +202,16 @@ mod tests {
             return;
         }
 
+        // Clean database before test to ensure isolation
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database");
+
         let auth_service = AuthService::new(container.pool().clone());
 
-        // Test user creation
-        let email = "newuser@econgraph.com".to_string();
+        // Test user creation with unique email
+        let email = format!("newuser-{}@econgraph.com", uuid::Uuid::new_v4());
         let password = "securepassword123".to_string();
         let name = "New User".to_string();
 
@@ -207,10 +225,11 @@ mod tests {
         assert_eq!(user.provider, AuthProvider::Email);
         assert!(user.is_active);
 
-        // Create demo user first
+        // Create demo user first with unique email
+        let demo_email = format!("demo-{}@econgraph.com", uuid::Uuid::new_v4());
         let demo_user_created = auth_service
             .create_email_user(
-                "demo@econgraph.com".to_string(),
+                demo_email.clone(),
                 "demo123456".to_string(),
                 "Demo User".to_string(),
             )
@@ -219,11 +238,11 @@ mod tests {
 
         // Test authentication with demo credentials
         let demo_user = auth_service
-            .authenticate_email_user("demo@econgraph.com".to_string(), "demo123456".to_string())
+            .authenticate_email_user(demo_email.clone(), "demo123456".to_string())
             .await
             .expect("Should authenticate demo user successfully");
 
-        assert_eq!(demo_user.email, "demo@econgraph.com");
+        assert_eq!(demo_user.email, demo_email);
         assert_eq!(demo_user.name, "Demo User");
         assert_eq!(demo_user.role, UserRole::Viewer); // Default role for new users
     }
