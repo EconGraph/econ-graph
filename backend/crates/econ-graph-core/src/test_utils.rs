@@ -132,7 +132,7 @@ impl TestContainer {
         // Clean all tables in the correct order (respecting foreign key constraints)
         let tables = vec![
             "crawl_attempts",
-            "crawl_queue_items",
+            "crawl_queue",
             "data_points",
             "economic_series",
             "data_sources",
