@@ -16,6 +16,10 @@ Welcome to the comprehensive documentation for EconGraph - the economic data vis
 - **[MCP Server](./technical/MCP_SERVER.md)** - Model Context Protocol server documentation
 - **[MCP Server Analysis](./technical/MCP_SERVER_ANALYSIS.md)** - Detailed MCP server analysis
 - **[MCP CI Pipeline](./technical/MCP_CI_PIPELINE.md)** - CI/CD pipeline for MCP server
+- **[Global Analysis Architecture](./technical/GLOBAL_ANALYSIS_ARCHITECTURE.md)** - Technical architecture for global analysis features
+- **[Global Analysis Features](./technical/GLOBAL_ANALYSIS_FEATURES.md)** - Comprehensive feature documentation for global analysis
+- **[Global Analysis API](./technical/GLOBAL_ANALYSIS_API.md)** - API documentation for global analysis endpoints
+- **[Global Analysis Summary](./technical/GLOBAL_ANALYSIS_SUMMARY.md)** - Complete feature overview and implementation status
 
 #### Backend Technical Docs
 - **[BLS API Experimental Findings](./technical/BLS_API_EXPERIMENTAL_FINDINGS.md)** - Bureau of Labor Statistics API research
@@ -57,6 +61,9 @@ Welcome to the comprehensive documentation for EconGraph - the economic data vis
 - **[Monitoring README](./monitoring/README.md)** - Monitoring setup and configuration
 - **[Grafana Dashboards](./monitoring/README.md)** - Grafana dashboard documentation
 
+### 👥 [User Guides](./user-guides/)
+- **[Global Analysis User Guide](./user-guides/GLOBAL_ANALYSIS_USER_GUIDE.md)** - Comprehensive user guide for global analysis features
+
 ## 🎯 Quick Navigation
 
 ### For Developers
@@ -74,6 +81,11 @@ Welcome to the comprehensive documentation for EconGraph - the economic data vis
 
 ### For API Users
 - See [API Documentation](./api/) for GraphQL API reference
+- Check [Global Analysis API](./technical/GLOBAL_ANALYSIS_API.md) for global analysis endpoints
+
+### For End Users
+- Start with [User Guides](./user-guides/) for feature usage
+- Check [Global Analysis User Guide](./user-guides/GLOBAL_ANALYSIS_USER_GUIDE.md) for interactive map features
 
 ## 📝 Contributing to Documentation
 

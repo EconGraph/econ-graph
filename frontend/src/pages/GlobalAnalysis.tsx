@@ -17,7 +17,7 @@ import { Public, Timeline, CompareArrows, Assessment, Home } from '@mui/icons-ma
 import { Link as RouterLink } from 'react-router-dom';
 
 // Import our new global analysis components
-import GlobalEconomicNetworkMap from '../components/global/GlobalEconomicNetworkMap';
+import GlobalAnalysisDemo from './GlobalAnalysisDemo';
 import MultiCountryDashboard from '../components/global/MultiCountryDashboard';
 import GlobalEventsExplorer from '../components/global/GlobalEventsExplorer';
 
@@ -167,7 +167,7 @@ const GlobalAnalysis: React.FC = () => {
             correlation strength between countries.
           </Typography>
         </Box>
-        <GlobalEconomicNetworkMap />
+        <GlobalAnalysisDemo />
       </TabPanel>
 
       <TabPanel value={activeTab} index={1}>
