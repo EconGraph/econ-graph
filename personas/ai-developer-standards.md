@@ -58,3 +58,34 @@ This avoids multiple agents checking out main from different git worktrees at th
   * Compilation errors: Usually missing dependencies or syntax issues
   * Test failures: Check if tests are properly isolated and cleaned up
 * Always fix the root cause, not just the symptoms. For example, if you see database constraint violations, fix the test isolation rather than just changing the test data.
+
+## Pull Request Management and Single Concern Principle
+
+* **Create Small, Focused PRs**: When working on larger projects or fixing multiple issues, always break down your work into small, focused PRs that address a single concern. This makes code review easier, reduces risk, and allows for independent testing and merging.
+* **Independent Fixes Require Separate Branches**: If you identify multiple independent issues while working on a task, create separate branches for each fix:
+  * Each branch should be created from `main` (not from your working branch)
+  * Each branch should contain only the changes related to one specific issue
+  * This allows each fix to be reviewed, tested, and merged independently
+* **Logical Separation Examples**:
+  * **Bug fixes** should be separate from **feature additions**
+  * **Code quality improvements** (warnings, formatting) should be separate from **functional changes**
+  * **Test reorganization** should be separate from **test fixes**
+  * **Configuration changes** should be separate from **code changes**
+* **PR Creation Process**:
+  * Create each PR with a clear, descriptive title that summarizes the single concern
+  * Write detailed descriptions explaining the problem, solution, and impact
+  * Include specific file changes and reasoning
+  * Suggest merge order if PRs have dependencies
+* **Benefits of Single Concern PRs**:
+  * **Easier code review** - Reviewers can focus on one specific change
+  * **Reduced risk** - Smaller changes are less likely to introduce new bugs
+  * **Better testing** - Each change can be tested independently
+  * **Cleaner git history** - Each commit/PR has a clear, single purpose
+  * **Faster CI** - Smaller changes run faster and are less likely to fail
+* **When to Combine Changes**: Only combine changes in a single PR when they are:
+  * Tightly coupled and cannot be separated
+  * Part of the same logical feature
+  * Required to work together to achieve a single goal
+* **Example of Good Separation**:
+  * ❌ **Bad**: "Fix CI failures and improve test organization" (two concerns)
+  * ✅ **Good**: "Fix database cleanup table name bug" + "Move MCP tests to integration tests" (two separate PRs)
