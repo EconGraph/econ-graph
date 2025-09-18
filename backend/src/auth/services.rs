@@ -12,9 +12,18 @@ use reqwest::Client;
 use std::env;
 use uuid::Uuid;
 
-/// JWT secret key from environment
-fn get_jwt_secret() -> String {
-    env::var("JWT_SECRET").unwrap_or_else(|_| "your-secret-key-change-in-production".to_string())
+/// JWT secret key from environment with validation
+fn get_jwt_secret() -> AppResult<String> {
+    let secret = env::var("JWT_SECRET")
+        .map_err(|_| AppError::ConfigurationError("JWT_SECRET environment variable not set".to_string()))?;
+
+    if secret.len() < 32 {
+        return Err(AppError::ConfigurationError(
+            "JWT_SECRET must be at least 32 characters long for security".to_string()
+        ));
+    }
+
+    Ok(secret)
 }
 
 /// JWT issuer
@@ -34,18 +43,18 @@ pub struct AuthService {
 
 impl AuthService {
     /// Create new authentication service
-    pub fn new(db_pool: DatabasePool) -> Self {
-        let google_client_id =
-            env::var("GOOGLE_CLIENT_ID").unwrap_or_else(|_| "your-google-client-id".to_string());
-        let facebook_app_id =
-            env::var("FACEBOOK_APP_ID").unwrap_or_else(|_| "your-facebook-app-id".to_string());
+    pub fn new(db_pool: DatabasePool) -> AppResult<Self> {
+        let google_client_id = env::var("GOOGLE_CLIENT_ID")
+            .map_err(|_| AppError::ConfigurationError("GOOGLE_CLIENT_ID environment variable not set".to_string()))?;
+        let facebook_app_id = env::var("FACEBOOK_APP_ID")
+            .map_err(|_| AppError::ConfigurationError("FACEBOOK_APP_ID environment variable not set".to_string()))?;
 
-        AuthService {
+        Ok(AuthService {
             db_pool,
             http_client: Client::new(),
             google_client_id,
             facebook_app_id,
-        }
+        })
     }
 
     /// Generate JWT token for user
@@ -63,10 +72,11 @@ impl AuthService {
             iss: JWT_ISSUER.to_string(),
         };
 
+        let jwt_secret = get_jwt_secret()?;
         let token = encode(
             &Header::default(),
             &claims,
-            &EncodingKey::from_secret(get_jwt_secret().as_ref()),
+            &EncodingKey::from_secret(jwt_secret.as_ref()),
         )
         .map_err(|e| AppError::AuthenticationError(format!("Failed to generate token: {}", e)))?;
 
@@ -78,9 +88,10 @@ impl AuthService {
         let mut validation = Validation::default();
         validation.set_issuer(&[JWT_ISSUER]);
 
+        let jwt_secret = get_jwt_secret()?;
         let token_data = decode::<Claims>(
             token,
-            &DecodingKey::from_secret(get_jwt_secret().as_ref()),
+            &DecodingKey::from_secret(jwt_secret.as_ref()),
             &validation,
         )
         .map_err(|e| AppError::AuthenticationError(format!("Invalid token: {}", e)))?;

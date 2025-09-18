@@ -109,7 +109,7 @@ impl Config {
                 facebook_app_secret: env::var("FACEBOOK_APP_SECRET").ok(),
                 facebook_access_token: env::var("FACEBOOK_ACCESS_TOKEN").ok(),
                 jwt_secret: env::var("JWT_SECRET")
-                    .unwrap_or_else(|_| "your-jwt-secret-key-change-in-production".to_string()),
+                    .map_err(|_| "JWT_SECRET environment variable not set".to_string())?,
             },
         })
     }

@@ -259,7 +259,11 @@ async fn main() -> AppResult<()> {
     info!("🎯 GraphQL schema created");
 
     // Create authentication service
-    let auth_service = AuthService::new(pool.clone());
+    let auth_service = AuthService::new(pool.clone())
+        .map_err(|e| {
+            error!("Failed to create authentication service: {}", e);
+            e
+        })?;
     info!("🔐 Authentication service created");
 
     // Initialize metrics
@@ -289,9 +293,9 @@ async fn main() -> AppResult<()> {
     // }
     info!("⚠️  Background crawler startup temporarily disabled");
 
-    // Create Warp filters
+    // Create Warp filters with configured CORS origins
     let cors = warp::cors()
-        .allow_any_origin()
+        .allow_origins(config.cors.allowed_origins.clone())
         .allow_headers(vec!["content-type", "authorization"])
         .allow_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"]);
 
@@ -318,9 +322,18 @@ async fn main() -> AppResult<()> {
                             if auth_str.starts_with("Bearer ") {
                                 let token = auth_str.trim_start_matches("Bearer ");
                                 // Validate token and get user
-                                let auth_service = crate::auth::services::AuthService::new(
+                                let auth_service = match crate::auth::services::AuthService::new(
                                     pool_for_graphql.clone(),
-                                );
+                                ) {
+                                    Ok(service) => service,
+                                    Err(e) => {
+                                        error!("Failed to create auth service for GraphQL: {}", e);
+                                        return Ok(Response::builder()
+                                            .status(500)
+                                            .body("Internal server error".into())
+                                            .unwrap());
+                                    }
+                                };
                                 match auth_service.verify_token(token) {
                                     Ok(claims) => crate::models::User::get_by_id(
                                         &pool_for_graphql,

@@ -32,8 +32,8 @@ RUN cargo build --release --bin econ-graph-backend
 # Runtime stage
 FROM debian:bookworm-slim
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+# Install runtime dependencies and update packages to fix zlib vulnerability
+RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     ca-certificates \
     libssl3 \
     libpq5 \
