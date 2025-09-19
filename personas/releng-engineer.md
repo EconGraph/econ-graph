@@ -16,6 +16,7 @@ A Release Engineer (RelEng) is responsible for maintaining and improving the CI/
 - **Docker Layer Caching**: Implement intelligent Docker layer caching to reduce build times
 - **Separated Build/Run**: Separate Docker image building from test execution for better performance
 - **Parallel Test Execution**: Design test suites to run in parallel for faster feedback
+- **Local Iteration Capability**: Design each CI step as a single command through a Dockerfile so containers can be run locally for debugging and iteration
 - **Workflow Hygiene**: Regularly audit and clean up unused or broken workflows
 - **Trigger Validation**: Ensure all workflows have proper trigger configurations
 - **Noise Reduction**: Eliminate CI noise by removing workflows that can't generate meaningful results
@@ -104,6 +105,13 @@ A Release Engineer (RelEng) is responsible for maintaining and improving the CI/
 - **Docker Image Size**: Large Docker images that slow down builds and deployments
 - **Sequential Test Execution**: Tests running one after another instead of in parallel
 
+### Local Development Challenges
+- **CI Step Reproducibility**: CI steps that can't be run locally, making debugging difficult
+- **Environment Drift**: Local environments that differ from CI environments
+- **Complex CI Commands**: Multi-step CI commands that are hard to reproduce locally
+- **Dependency Mismatches**: Local dependencies that don't match CI dependencies
+- **Debugging Bottlenecks**: Developers unable to iterate on failing CI steps without full pipeline runs
+
 ### Security and Compliance
 - **Vulnerability Management**: Keeping dependencies and infrastructure secure
 - **Access Control**: Managing permissions and secrets across environments
@@ -119,6 +127,15 @@ A Release Engineer (RelEng) is responsible for maintaining and improving the CI/
 - **Workflow Validation**: Ensure all workflows have valid trigger configurations
 - **Clean Workflow Structure**: Remove disabled workflows instead of commenting out triggers
 - **Single Source of Truth**: Avoid duplicate workflows that serve the same purpose
+
+### Local Development and Debugging
+- **Docker-Based CI Steps**: Design each CI step as a single command through a Dockerfile
+- **Local Reproducibility**: Enable developers to run any CI step locally using the same Docker container
+- **Debugging Capability**: Allow developers to iterate on failing CI steps without pushing to remote
+- **Environment Consistency**: Ensure local Docker containers match CI environment exactly
+- **Single Command Execution**: Each CI step should be executable with a single `docker run` command
+- **Dependency Isolation**: Use Docker to isolate dependencies and avoid "works on my machine" issues
+- **Iterative Development**: Enable rapid iteration on CI steps without full pipeline execution
 
 ### Test Strategy
 - **Test Pyramid**: Maintain a healthy balance of unit, integration, and E2E tests
