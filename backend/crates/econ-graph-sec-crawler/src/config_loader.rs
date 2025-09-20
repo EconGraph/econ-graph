@@ -253,8 +253,7 @@ mod tests {
         let result = FinancialAnalysisConfig::load_from_dir(&config_dir);
 
         // This test will only pass if the config files exist
-        if result.is_ok() {
-            let config = result.unwrap();
+        if let Ok(config) = result {
             assert!(!config.concept_mappings.us_gaap.is_empty());
             assert!(!config.ratio_benchmarks.industries.is_empty());
             assert!(!config.ratio_interpretations.interpretations.is_empty());

@@ -841,8 +841,16 @@ mod tests {
     fn test_ratio_calculator_creation() {
         if let Ok(calculator) = FinancialRatioCalculator::new() {
             // Test that the calculator was created successfully
-            assert!(calculator.analysis_config.concept_mappings.us_gaap.len() > 0);
-            assert!(calculator.analysis_config.ratio_benchmarks.industries.len() > 0);
+            assert!(!calculator
+                .analysis_config
+                .concept_mappings
+                .us_gaap
+                .is_empty());
+            assert!(!calculator
+                .analysis_config
+                .ratio_benchmarks
+                .industries
+                .is_empty());
         }
         // If config files don't exist, that's okay for the test
     }

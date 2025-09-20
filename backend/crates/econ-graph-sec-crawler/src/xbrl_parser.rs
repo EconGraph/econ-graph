@@ -627,11 +627,14 @@ pub struct XbrlCache {
 }
 
 impl XbrlCache {
-    fn new(cache_dir: PathBuf) -> Self {
+    pub fn new(cache_dir: PathBuf) -> Self {
         Self { cache_dir }
     }
 
-    async fn get_parsed_result(&self, xbrl_file: &Path) -> Result<Option<Vec<FinancialStatement>>> {
+    pub async fn get_parsed_result(
+        &self,
+        xbrl_file: &Path,
+    ) -> Result<Option<Vec<FinancialStatement>>> {
         let cache_file = self.get_cache_file_path(xbrl_file);
 
         if !cache_file.exists() {
@@ -643,7 +646,7 @@ impl XbrlCache {
         Ok(Some(result))
     }
 
-    async fn store_parsed_result(
+    pub async fn store_parsed_result(
         &self,
         xbrl_file: &Path,
         result: &[FinancialStatement],
@@ -700,8 +703,8 @@ pub struct XbrlContext {
 /// XBRL entity information.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct XbrlEntity {
-    identifier: String,
-    scheme: String,
+    pub identifier: String,
+    pub scheme: String,
 }
 
 /// **XBRL Period**
@@ -709,9 +712,9 @@ pub struct XbrlEntity {
 /// XBRL period information.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct XbrlPeriod {
-    start_date: Option<String>,
-    end_date: Option<String>,
-    instant: Option<String>,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub instant: Option<String>,
 }
 
 /// **XBRL Scenario**
@@ -727,8 +730,8 @@ pub struct XbrlScenario {
 /// XBRL unit information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct XbrlUnit {
-    id: String,
-    measure: String,
+    pub id: String,
+    pub measure: String,
 }
 
 /// **Validation Report**
@@ -825,19 +828,25 @@ pub struct TaxonomyCache {
     relationships: HashMap<String, Vec<TaxonomyRelationship>>,
 }
 
+impl Default for TaxonomyCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TaxonomyCache {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             concepts: HashMap::new(),
             relationships: HashMap::new(),
         }
     }
 
-    fn get_concept(&self, name: &str) -> Option<&TaxonomyConcept> {
+    pub fn get_concept(&self, name: &str) -> Option<&TaxonomyConcept> {
         self.concepts.get(name)
     }
 
-    fn add_concept(&mut self, concept: TaxonomyConcept) {
+    pub fn add_concept(&mut self, concept: TaxonomyConcept) {
         self.concepts.insert(concept.name.clone(), concept);
     }
 }

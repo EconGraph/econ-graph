@@ -1,4 +1,8 @@
 use super::*;
+use crate::xbrl_parser::{
+    ProcessingMetadata, TaxonomyCache, XbrlCache, XbrlContext, XbrlEntity, XbrlFact, XbrlPeriod,
+    XbrlUnit,
+};
 use econ_graph_core::{
     enums::{CompressionType, ProcessingStatus},
     FinancialStatement,
@@ -138,6 +142,7 @@ fn test_xbrl_context_creation() {
             instant: None,
         },
         scenario: None,
+        entity_identifier: Some("0001234567".to_string()),
     };
 
     assert_eq!(context.id, "c1");
