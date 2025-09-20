@@ -53,6 +53,14 @@ tempfile = "3.8"
 # XML parsing for XBRL
 quick-xml = "0.36"
 roxmltree = "0.20"
+xml = "1.0"
+
+# Database
+diesel = { version = "2.2", features = ["postgres", "chrono", "uuid", "numeric"] }
+diesel-async = { version = "=0.5.2", features = ["postgres", "bb8"] }
+
+# Regular expressions
+regex = "1.10"
 
 # Rate limiting
 governor = "0.6"

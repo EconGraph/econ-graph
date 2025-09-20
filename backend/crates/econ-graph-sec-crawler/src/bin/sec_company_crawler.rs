@@ -1,9 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
-use econ_graph_sec_crawler::{SecEdgarCrawler, CrawlConfig};
+use econ_graph_sec_crawler::{CrawlConfig, SecEdgarCrawler};
 use econ_graph_services::database::DatabasePool;
 use std::collections::HashMap;
-use tracing::{info, error, warn};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// **SEC Company Crawler**
@@ -70,7 +70,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Parse CIKs
-    let ciks: Vec<String> = cli.ciks
+    let ciks: Vec<String> = cli
+        .ciks
         .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -83,7 +84,8 @@ async fn main() -> Result<()> {
     info!("Starting batch crawl for {} companies", ciks.len());
 
     // Parse form types
-    let form_types: Vec<String> = cli.form_types
+    let form_types: Vec<String> = cli
+        .form_types
         .split(',')
         .map(|s| s.trim().to_string())
         .collect();
@@ -157,8 +159,10 @@ async fn batch_crawl_companies(
 
             match crawler.crawl_company_filings(&cik).await {
                 Ok(result) => {
-                    info!("Completed crawl for CIK {}: {} downloaded, {} failed",
-                        cik, result.filings_downloaded, result.filings_failed);
+                    info!(
+                        "Completed crawl for CIK {}: {} downloaded, {} failed",
+                        cik, result.filings_downloaded, result.filings_failed
+                    );
                     Ok((cik, result))
                 }
                 Err(e) => {
@@ -231,8 +235,10 @@ fn print_summary(results: &HashMap<String, econ_graph_sec_crawler::CrawlResult>)
 
     println!("\n=== COMPANY DETAILS ===");
     for (cik, result) in results {
-        println!("CIK {}: {} found, {} downloaded, {} failed",
-            cik, result.total_filings_found, result.filings_downloaded, result.filings_failed);
+        println!(
+            "CIK {}: {} found, {} downloaded, {} failed",
+            cik, result.total_filings_found, result.filings_downloaded, result.filings_failed
+        );
     }
 }
 

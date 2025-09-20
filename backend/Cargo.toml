@@ -5,6 +5,7 @@ members = [
     "crates/econ-graph-auth",
     "crates/econ-graph-graphql",
     "crates/econ-graph-crawler",
+    "crates/econ-graph-sec-crawler",
     "crates/econ-graph-mcp",
     "crates/econ-graph-backend",
 ]

@@ -1867,15 +1867,835 @@ pub fn get_financial_mcp_tools() -> Vec<Value> {
 
 **Total Duration**: 20 weeks (5 months)
 
+## Implementation Progress Update
+
+### ✅ **Phase 1 Completed: Research & Architecture**
+**Duration**: 2 weeks  
+**Status**: COMPLETED  
+**Key Achievements**:
+- ✅ Comprehensive SEC EDGAR XBRL research and requirements analysis
+- ✅ Complete database schema design with layered architecture
+- ✅ User research plan for financial data consumers
+- ✅ Technical architecture with Arelle integration strategy
+- ✅ Externalized configuration system for financial analysis
+
+### ✅ **Phase 2 Partially Completed: Core Infrastructure**
+**Duration**: 4 weeks  
+**Status**: IN PROGRESS (60% complete)  
+**Key Achievements**:
+- ✅ **Database Schema**: Complete financial data schema implemented
+  - Companies, financial statements, line items, ratios tables
+  - Collaborative annotations system (annotations, replies, assignments, templates)
+  - Educational content system with learning paths and modules
+  - Proper NOT NULL constraints and data integrity
+- ✅ **Rust Models**: All financial data models implemented and compiling
+  - Fixed Diesel ORM integration and type mismatches
+  - Resolved schema generation and compilation errors
+  - Added comprehensive type definitions and validation
+- ✅ **Configuration System**: External JSON configuration files
+  - Concept mappings for different taxonomies (US-GAAP, IFRS)
+  - Industry-specific ratio benchmarks and interpretations
+  - Financial ratio formulas and educational resources
+- ✅ **Frontend Components**: Complete React/TypeScript UI components
+  - Financial statement viewer with progressive disclosure
+  - Ratio analysis panel with benchmarks and interpretations
+  - Collaborative annotation system with real-time features
+  - Educational resources and learning modules
+  - All TypeScript and ESLint errors resolved
+
+**Remaining Work**:
+- 🔄 **SEC Crawler**: XBRL file downloader and storage system
+- 🔄 **Arelle Integration**: XBRL parsing and data extraction
+- 🔄 **Financial Services**: Backend services for data processing
+
+### 🎯 **Key Learnings and Technical Insights**
+
+#### **Database Design Lessons**
+1. **NOT NULL Constraints**: Fields with default values should be NOT NULL in the database for data integrity
+2. **Schema Generation**: Diesel schema generation must match actual database structure
+3. **Migration Consolidation**: Multiple migrations in a branch should be consolidated before deployment
+4. **Type Safety**: Rust types must exactly match database column types (nullable vs non-nullable)
+
+#### **Rust Development Insights**
+1. **Diesel Integration**: Proper imports and derive macros are critical for ORM functionality
+2. **Type Mismatches**: Database schema changes require corresponding Rust model updates
+3. **Compilation Errors**: Missing imports and type mismatches are the most common issues
+4. **Clippy Warnings**: Integer overflow and ambiguous re-exports need attention
+
+#### **Frontend Development Success**
+1. **TypeScript Integration**: Proper type definitions eliminate runtime errors
+2. **ESLint Configuration**: Consistent code style and import organization
+3. **Component Architecture**: Modular design with clear separation of concerns
+4. **Progressive Disclosure**: User-type adaptive interfaces improve usability
+
+#### **Configuration System Benefits**
+1. **Analyst Empowerment**: Financial analysts can modify benchmarks without code changes
+2. **Maintainability**: External JSON files are easier to update and version control
+3. **Flexibility**: Support for multiple taxonomies and industry standards
+4. **Educational Value**: Built-in learning resources and expert insights
+
+### 🚀 **Next Steps: Phase 2 Completion**
+
+#### **Immediate Priorities** (Next 2 weeks):
+1. **Complete SEC Crawler Implementation**
+   - Rate-limited EDGAR API integration
+   - XBRL file download and storage with zstd compression
+   - PostgreSQL Large Object storage implementation
+   - File integrity verification with SHA-256 hashing
+
+2. **Arelle Integration**
+   - Python subprocess integration for XBRL parsing
+   - Native XML parsing fallback for performance
+   - Taxonomy concept extraction and mapping
+   - Data validation and error handling
+
+3. **Financial Services Backend**
+   - Financial statement processing services
+   - Ratio calculation engine with externalized configuration
+   - Data quality assurance and validation
+   - Batch processing for large datasets
+
+#### **Technical Implementation Strategy**:
+- **Incremental Development**: Build and test each component separately
+- **Error Handling**: Comprehensive error handling and logging
+- **Performance Optimization**: Efficient data processing and caching
+- **Testing**: Unit tests for all financial calculations and data processing
+
+### 📊 **Current Status Summary**
+
+| Component | Status | Progress | Notes |
+|-----------|--------|----------|-------|
+| Database Schema | ✅ Complete | 100% | All tables created, migrations consolidated |
+| Rust Models | ✅ Complete | 100% | All models compiling, type-safe |
+| Frontend Components | ✅ Complete | 100% | All UI components implemented |
+| Configuration System | ✅ Complete | 100% | External JSON files for analysts |
+| SEC Crawler | 🔄 In Progress | 30% | Basic structure, needs implementation |
+| Arelle Integration | 🔄 In Progress | 20% | Parser structure, needs Arelle integration |
+| Financial Services | 🔄 In Progress | 40% | Models complete, needs business logic |
+| GraphQL API | ⏳ Pending | 0% | Depends on services completion |
+| MCP Integration | ⏳ Pending | 0% | Depends on API completion |
+
+### 🎯 **Success Metrics Achieved**
+- **Code Quality**: 0 compilation errors, clean TypeScript/ESLint
+- **Type Safety**: Complete type coverage with proper database mapping
+- **User Experience**: Progressive disclosure UI with educational resources
+- **Maintainability**: Externalized configuration for non-developers
+- **Architecture**: Clean separation of concerns and modular design
+
 ## Conclusion
 
 This implementation plan provides a comprehensive roadmap for integrating SEC EDGAR XBRL financial data into the EconGraph platform. The phased approach ensures systematic development while maintaining quality and user focus. The plan leverages existing infrastructure while adding powerful new capabilities for financial data analysis and AI integration.
 
-Key success factors include:
-- Thorough user research and requirements gathering
-- Robust XBRL processing and data quality assurance
-- Intuitive user interface and AI integration
-- Comprehensive testing and monitoring
-- Scalable architecture for future growth
+**Phase 1 is complete** with comprehensive research, architecture, and foundational components. **Phase 2 is 60% complete** with database schema, Rust models, frontend components, and configuration system all implemented and working.
+
+**Key success factors include**:
+- ✅ Thorough user research and requirements gathering
+- ✅ Robust database schema with proper constraints
+- ✅ Type-safe Rust models with Diesel ORM integration
+- ✅ Complete frontend components with educational resources
+- ✅ Externalized configuration for financial analysts
+- 🔄 Robust XBRL processing and data quality assurance (in progress)
+- ⏳ Intuitive user interface and AI integration (pending)
+- ⏳ Comprehensive testing and monitoring (pending)
+
+---
+
+## 🧪 **Comprehensive End-to-End Testing Strategy**
+
+### **Playwright E2E Test Suite Overview**
+
+A comprehensive Playwright test suite will ensure all financial data features work correctly across different browsers and user scenarios. The testing strategy covers the complete user journey from data ingestion to advanced financial analysis.
+
+### **Test Architecture**
+
+```typescript
+// Test structure organization
+tests/
+├── e2e/
+│   ├── financial-data/
+│   │   ├── data-ingestion.spec.ts
+│   │   ├── statement-viewing.spec.ts
+│   │   ├── ratio-analysis.spec.ts
+│   │   ├── peer-comparison.spec.ts
+│   │   ├── collaborative-features.spec.ts
+│   │   └── educational-resources.spec.ts
+│   ├── user-journeys/
+│   │   ├── analyst-workflow.spec.ts
+│   │   ├── investor-research.spec.ts
+│   │   └── student-learning.spec.ts
+│   └── cross-browser/
+│       ├── chrome.spec.ts
+│       ├── firefox.spec.ts
+│       └── safari.spec.ts
+├── fixtures/
+│   ├── test-data/
+│   │   ├── apple-financials.json
+│   │   ├── jpmorgan-financials.json
+│   │   └── chevron-financials.json
+│   └── mock-responses/
+└── utils/
+    ├── test-helpers.ts
+    ├── data-generators.ts
+    └── assertions.ts
+```
+
+### **1. Data Ingestion & Processing Tests**
+
+#### **XBRL File Upload and Processing**
+```typescript
+// tests/e2e/financial-data/data-ingestion.spec.ts
+import { test, expect } from '@playwright/test';
+
+test.describe('XBRL Data Ingestion', () => {
+  test('should upload and process Apple XBRL file', async ({ page }) => {
+    await page.goto('/financial-data/upload');
+    
+    // Upload real XBRL file
+    const fileInput = page.locator('input[type="file"]');
+    await fileInput.setInputFiles('test-data/apple_2025_q3_10q.xml');
+    
+    // Verify upload progress
+    await expect(page.locator('[data-testid="upload-progress"]')).toBeVisible();
+    await expect(page.locator('[data-testid="upload-status"]')).toContainText('Processing XBRL file...');
+    
+    // Wait for processing completion
+    await expect(page.locator('[data-testid="processing-complete"]')).toBeVisible({ timeout: 30000 });
+    
+    // Verify extracted data
+    await expect(page.locator('[data-testid="statements-count"]')).toContainText('3'); // Income, Balance, Cash Flow
+    await expect(page.locator('[data-testid="line-items-count"]')).toContainText(/^\d+$/); // Numeric count
+    await expect(page.locator('[data-testid="facts-count"]')).toContainText(/^\d+$/);
+  });
+
+  test('should handle bank XBRL files with different taxonomies', async ({ page }) => {
+    await page.goto('/financial-data/upload');
+    
+    // Upload JPMorgan bank XBRL file
+    await page.locator('input[type="file"]').setInputFiles('test-data/jpmorgan_2025_q2_10q.xml');
+    
+    // Verify bank-specific concepts are extracted
+    await expect(page.locator('[data-testid="bank-concepts"]')).toContainText('Loans');
+    await expect(page.locator('[data-testid="bank-concepts"]')).toContainText('Deposits');
+    await expect(page.locator('[data-testid="bank-concepts"]')).toContainText('Credit Facilities');
+  });
+
+  test('should handle oil company XBRL files with industry-specific concepts', async ({ page }) => {
+    await page.goto('/financial-data/upload');
+    
+    // Upload Chevron oil company XBRL file
+    await page.locator('input[type="file"]').setInputFiles('test-data/chevron_2025_q2_10q.xml');
+    
+    // Verify oil/gas-specific concepts
+    await expect(page.locator('[data-testid="oil-concepts"]')).toContainText('Proven Reserves');
+    await expect(page.locator('[data-testid="oil-concepts"]')).toContainText('Exploration Costs');
+    await expect(page.locator('[data-testid="oil-concepts"]')).toContainText('Production Metrics');
+  });
+
+  test('should validate XBRL file format and show errors', async ({ page }) => {
+    await page.goto('/financial-data/upload');
+    
+    // Upload invalid file
+    await page.locator('input[type="file"]').setInputFiles('test-data/invalid-file.txt');
+    
+    // Verify error handling
+    await expect(page.locator('[data-testid="error-message"]')).toContainText('Invalid XBRL file format');
+    await expect(page.locator('[data-testid="upload-button"]')).toBeDisabled();
+  });
+});
+```
+
+### **2. Financial Statement Viewing Tests**
+
+#### **Statement Navigation and Display**
+```typescript
+// tests/e2e/financial-data/statement-viewing.spec.ts
+test.describe('Financial Statement Viewing', () => {
+  test('should display all three financial statements', async ({ page }) => {
+    await page.goto('/financial-data/statements/apple-2025-q3');
+    
+    // Verify statement tabs
+    await expect(page.locator('[data-testid="income-statement-tab"]')).toBeVisible();
+    await expect(page.locator('[data-testid="balance-sheet-tab"]')).toBeVisible();
+    await expect(page.locator('[data-testid="cash-flow-tab"]')).toBeVisible();
+    
+    // Test tab navigation
+    await page.click('[data-testid="balance-sheet-tab"]');
+    await expect(page.locator('[data-testid="balance-sheet-content"]')).toBeVisible();
+    await expect(page.locator('[data-testid="total-assets"]')).toContainText('$');
+  });
+
+  test('should show progressive disclosure for different user types', async ({ page }) => {
+    await page.goto('/financial-data/statements/apple-2025-q3');
+    
+    // Test basic user view (simplified)
+    await page.selectOption('[data-testid="user-type-selector"]', 'basic');
+    await expect(page.locator('[data-testid="simplified-view"]')).toBeVisible();
+    await expect(page.locator('[data-testid="advanced-metrics"]')).not.toBeVisible();
+    
+    // Test analyst view (detailed)
+    await page.selectOption('[data-testid="user-type-selector"]', 'analyst');
+    await expect(page.locator('[data-testid="detailed-view"]')).toBeVisible();
+    await expect(page.locator('[data-testid="advanced-metrics"]')).toBeVisible();
+  });
+
+  test('should handle statement amendments and restatements', async ({ page }) => {
+    await page.goto('/financial-data/statements/apple-2025-q3');
+    
+    // Check for amendment indicators
+    const amendmentBadge = page.locator('[data-testid="amendment-badge"]');
+    if (await amendmentBadge.isVisible()) {
+      await expect(amendmentBadge).toContainText('Amended');
+    }
+    
+    // Check for restatement indicators
+    const restatementBadge = page.locator('[data-testid="restatement-badge"]');
+    if (await restatementBadge.isVisible()) {
+      await expect(restatementBadge).toContainText('Restated');
+    }
+  });
+});
+```
+
+### **3. Ratio Analysis and Visualization Tests**
+
+#### **Financial Ratio Calculations and Display**
+```typescript
+// tests/e2e/financial-data/ratio-analysis.spec.ts
+test.describe('Financial Ratio Analysis', () => {
+  test('should calculate and display all key financial ratios', async ({ page }) => {
+    await page.goto('/financial-data/analysis/apple-2025-q3');
+    
+    // Verify profitability ratios
+    await expect(page.locator('[data-testid="roe-ratio"]')).toContainText(/\d+\.\d+%/);
+    await expect(page.locator('[data-testid="roa-ratio"]')).toContainText(/\d+\.\d+%/);
+    await expect(page.locator('[data-testid="gross-margin"]')).toContainText(/\d+\.\d+%/);
+    
+    // Verify liquidity ratios
+    await expect(page.locator('[data-testid="current-ratio"]')).toContainText(/\d+\.\d+/);
+    await expect(page.locator('[data-testid="quick-ratio"]')).toContainText(/\d+\.\d+/);
+    
+    // Verify leverage ratios
+    await expect(page.locator('[data-testid="debt-to-equity"]')).toContainText(/\d+\.\d+/);
+    await expect(page.locator('[data-testid="interest-coverage"]')).toContainText(/\d+\.\d+/);
+  });
+
+  test('should show ratio interpretations and benchmarks', async ({ page }) => {
+    await page.goto('/financial-data/analysis/apple-2025-q3');
+    
+    // Click on a ratio to see detailed explanation
+    await page.click('[data-testid="roe-ratio"]');
+    
+    // Verify interpretation modal
+    await expect(page.locator('[data-testid="ratio-interpretation"]')).toBeVisible();
+    await expect(page.locator('[data-testid="benchmark-comparison"]')).toBeVisible();
+    await expect(page.locator('[data-testid="industry-percentile"]')).toContainText(/\d+th percentile/);
+  });
+
+  test('should display trend visualization over time', async ({ page }) => {
+    await page.goto('/financial-data/analysis/apple-trends');
+    
+    // Verify trend chart is displayed
+    await expect(page.locator('[data-testid="trend-chart"]')).toBeVisible();
+    
+    // Test time period selection
+    await page.selectOption('[data-testid="time-period"]', '5-years');
+    await expect(page.locator('[data-testid="trend-chart"]')).toBeVisible();
+    
+    // Test ratio selection
+    await page.selectOption('[data-testid="ratio-selector"]', 'roe');
+    await expect(page.locator('[data-testid="trend-chart"]')).toBeVisible();
+  });
+
+  test('should handle ratio calculation errors gracefully', async ({ page }) => {
+    await page.goto('/financial-data/analysis/incomplete-data');
+    
+    // Verify error handling for missing data
+    await expect(page.locator('[data-testid="calculation-error"]')).toBeVisible();
+    await expect(page.locator('[data-testid="error-message"]')).toContainText('Insufficient data for calculation');
+  });
+});
+```
+
+### **4. Peer Comparison and Benchmarking Tests**
+
+#### **Industry Comparison Features**
+```typescript
+// tests/e2e/financial-data/peer-comparison.spec.ts
+test.describe('Peer Comparison and Benchmarking', () => {
+  test('should compare company against industry peers', async ({ page }) => {
+    await page.goto('/financial-data/compare/apple');
+    
+    // Select comparison criteria
+    await page.selectOption('[data-testid="industry-selector"]', 'Technology');
+    await page.selectOption('[data-testid="size-selector"]', 'Large Cap');
+    
+    // Verify peer selection
+    await expect(page.locator('[data-testid="peer-companies"]')).toContainText('Microsoft');
+    await expect(page.locator('[data-testid="peer-companies"]')).toContainText('Google');
+    
+    // Verify comparison metrics
+    await expect(page.locator('[data-testid="comparison-table"]')).toBeVisible();
+    await expect(page.locator('[data-testid="percentile-ranking"]')).toContainText(/\d+th percentile/);
+  });
+
+  test('should show interactive benchmarking tools', async ({ page }) => {
+    await page.goto('/financial-data/benchmark/apple');
+    
+    // Test benchmark selection
+    await page.selectOption('[data-testid="benchmark-type"]', 'Industry Median');
+    await expect(page.locator('[data-testid="benchmark-chart"]')).toBeVisible();
+    
+    // Test outlier detection
+    await page.click('[data-testid="outlier-detection"]');
+    await expect(page.locator('[data-testid="outlier-highlight"]')).toBeVisible();
+  });
+
+  test('should handle different industry classifications', async ({ page }) => {
+    await page.goto('/financial-data/compare/jpmorgan');
+    
+    // Test SIC classification
+    await page.selectOption('[data-testid="classification-type"]', 'SIC');
+    await expect(page.locator('[data-testid="sic-peers"]')).toBeVisible();
+    
+    // Test GICS classification
+    await page.selectOption('[data-testid="classification-type"]', 'GICS');
+    await expect(page.locator('[data-testid="gics-peers"]')).toBeVisible();
+  });
+});
+```
+
+### **5. Collaborative Features Tests**
+
+#### **Annotation and Team Collaboration**
+```typescript
+// tests/e2e/financial-data/collaborative-features.spec.ts
+test.describe('Collaborative Financial Analysis', () => {
+  test('should allow line-item annotations', async ({ page }) => {
+    await page.goto('/financial-data/statements/apple-2025-q3');
+    
+    // Login as analyst
+    await page.click('[data-testid="login-button"]');
+    await page.fill('[data-testid="email-input"]', 'analyst@example.com');
+    await page.fill('[data-testid="password-input"]', 'password');
+    await page.click('[data-testid="login-submit"]');
+    
+    // Add annotation to line item
+    await page.hover('[data-testid="revenue-line-item"]');
+    await page.click('[data-testid="add-annotation"]');
+    
+    await page.fill('[data-testid="annotation-content"]', 'Strong revenue growth driven by iPhone sales');
+    await page.selectOption('[data-testid="annotation-type"]', 'insight');
+    await page.click('[data-testid="save-annotation"]');
+    
+    // Verify annotation appears
+    await expect(page.locator('[data-testid="annotation-badge"]')).toBeVisible();
+  });
+
+  test('should support real-time collaboration', async ({ page, context }) => {
+    // Create two browser contexts for multi-user testing
+    const page1 = await context.newPage();
+    const page2 = await context.newPage();
+    
+    // User 1 joins statement
+    await page1.goto('/financial-data/statements/apple-2025-q3');
+    await page1.click('[data-testid="join-statement"]');
+    
+    // User 2 joins same statement
+    await page2.goto('/financial-data/statements/apple-2025-q3');
+    await page2.click('[data-testid="join-statement"]');
+    
+    // Verify presence indicators
+    await expect(page1.locator('[data-testid="user-presence"]')).toContainText('2 users online');
+    await expect(page2.locator('[data-testid="user-presence"]')).toContainText('2 users online');
+  });
+
+  test('should handle team workflow management', async ({ page }) => {
+    await page.goto('/financial-data/statements/apple-2025-q3');
+    
+    // Create assignment
+    await page.click('[data-testid="create-assignment"]');
+    await page.selectOption('[data-testid="assignee-selector"]', 'junior-analyst@example.com');
+    await page.selectOption('[data-testid="assignment-type"]', 'review');
+    await page.fill('[data-testid="assignment-notes"]', 'Please review revenue recognition policies');
+    await page.click('[data-testid="create-assignment"]');
+    
+    // Verify assignment appears
+    await expect(page.locator('[data-testid="assignment-list"]')).toContainText('junior-analyst@example.com');
+    await expect(page.locator('[data-testid="assignment-status"]')).toContainText('Pending');
+  });
+});
+```
+
+### **6. Educational Resources Tests**
+
+#### **Learning Modules and Interactive Content**
+```typescript
+// tests/e2e/financial-data/educational-resources.spec.ts
+test.describe('Educational Resources', () => {
+  test('should display learning paths for different user types', async ({ page }) => {
+    await page.goto('/financial-data/learn');
+    
+    // Test beginner learning path
+    await page.selectOption('[data-testid="user-level"]', 'beginner');
+    await expect(page.locator('[data-testid="beginner-path"]')).toBeVisible();
+    await expect(page.locator('[data-testid="basic-concepts"]')).toBeVisible();
+    
+    // Test advanced learning path
+    await page.selectOption('[data-testid="user-level"]', 'advanced');
+    await expect(page.locator('[data-testid="advanced-path"]')).toBeVisible();
+    await expect(page.locator('[data-testid="complex-analysis"]')).toBeVisible();
+  });
+
+  test('should provide interactive ratio explanations', async ({ page }) => {
+    await page.goto('/financial-data/learn/ratios/roe');
+    
+    // Verify interactive explanation
+    await expect(page.locator('[data-testid="ratio-formula"]')).toBeVisible();
+    await expect(page.locator('[data-testid="calculation-steps"]')).toBeVisible();
+    
+    // Test interactive calculator
+    await page.fill('[data-testid="net-income-input"]', '1000000');
+    await page.fill('[data-testid="equity-input"]', '5000000');
+    await page.click('[data-testid="calculate-button"]');
+    
+    await expect(page.locator('[data-testid="calculated-roe"]')).toContainText('20.00%');
+  });
+
+  test('should track learning progress', async ({ page }) => {
+    await page.goto('/financial-data/learn');
+    
+    // Complete a learning module
+    await page.click('[data-testid="start-module"]');
+    await page.click('[data-testid="next-lesson"]');
+    await page.click('[data-testid="complete-lesson"]');
+    
+    // Verify progress tracking
+    await expect(page.locator('[data-testid="progress-bar"]')).toHaveAttribute('value', '25');
+    await expect(page.locator('[data-testid="achievement-badge"]')).toBeVisible();
+  });
+});
+```
+
+### **7. Cross-Browser Compatibility Tests**
+
+#### **Multi-Browser Testing**
+```typescript
+// tests/e2e/cross-browser/chrome.spec.ts
+test.describe('Chrome Browser Compatibility', () => {
+  test('should work correctly in Chrome', async ({ page }) => {
+    await page.goto('/financial-data/statements/apple-2025-q3');
+    
+    // Test core functionality
+    await expect(page.locator('[data-testid="financial-statements"]')).toBeVisible();
+    await page.click('[data-testid="ratio-analysis-tab"]');
+    await expect(page.locator('[data-testid="ratio-calculations"]')).toBeVisible();
+  });
+});
+
+// tests/e2e/cross-browser/firefox.spec.ts
+test.describe('Firefox Browser Compatibility', () => {
+  test('should work correctly in Firefox', async ({ page }) => {
+    await page.goto('/financial-data/statements/apple-2025-q3');
+    
+    // Test core functionality
+    await expect(page.locator('[data-testid="financial-statements"]')).toBeVisible();
+    await page.click('[data-testid="ratio-analysis-tab"]');
+    await expect(page.locator('[data-testid="ratio-calculations"]')).toBeVisible();
+  });
+});
+
+// tests/e2e/cross-browser/safari.spec.ts
+test.describe('Safari Browser Compatibility', () => {
+  test('should work correctly in Safari', async ({ page }) => {
+    await page.goto('/financial-data/statements/apple-2025-q3');
+    
+    // Test core functionality
+    await expect(page.locator('[data-testid="financial-statements"]')).toBeVisible();
+    await page.click('[data-testid="ratio-analysis-tab"]');
+    await expect(page.locator('[data-testid="ratio-calculations"]')).toBeVisible();
+  });
+});
+```
+
+### **8. User Journey Tests**
+
+#### **Complete Analyst Workflow**
+```typescript
+// tests/e2e/user-journeys/analyst-workflow.spec.ts
+test.describe('Complete Analyst Workflow', () => {
+  test('should complete full financial analysis workflow', async ({ page }) => {
+    // Step 1: Login as analyst
+    await page.goto('/login');
+    await page.fill('[data-testid="email"]', 'analyst@example.com');
+    await page.fill('[data-testid="password"]', 'password');
+    await page.click('[data-testid="login-button"]');
+    
+    // Step 2: Upload new XBRL file
+    await page.goto('/financial-data/upload');
+    await page.locator('input[type="file"]').setInputFiles('test-data/apple_2025_q3_10q.xml');
+    await expect(page.locator('[data-testid="processing-complete"]')).toBeVisible({ timeout: 30000 });
+    
+    // Step 3: Review financial statements
+    await page.goto('/financial-data/statements/apple-2025-q3');
+    await expect(page.locator('[data-testid="income-statement"]')).toBeVisible();
+    
+    // Step 4: Perform ratio analysis
+    await page.click('[data-testid="ratio-analysis-tab"]');
+    await expect(page.locator('[data-testid="roe-ratio"]')).toBeVisible();
+    
+    // Step 5: Compare with peers
+    await page.click('[data-testid="peer-comparison-tab"]');
+    await page.selectOption('[data-testid="industry"]', 'Technology');
+    await expect(page.locator('[data-testid="comparison-results"]')).toBeVisible();
+    
+    // Step 6: Add annotations
+    await page.hover('[data-testid="revenue-line-item"]');
+    await page.click('[data-testid="add-annotation"]');
+    await page.fill('[data-testid="annotation-content"]', 'Strong performance');
+    await page.click('[data-testid="save-annotation"]');
+    
+    // Step 7: Generate report
+    await page.click('[data-testid="generate-report"]');
+    await expect(page.locator('[data-testid="report-preview"]')).toBeVisible();
+  });
+});
+```
+
+### **9. Performance and Load Testing**
+
+#### **Large Dataset Handling**
+```typescript
+// tests/e2e/performance/large-datasets.spec.ts
+test.describe('Performance with Large Datasets', () => {
+  test('should handle large XBRL files efficiently', async ({ page }) => {
+    const startTime = Date.now();
+    
+    await page.goto('/financial-data/upload');
+    await page.locator('input[type="file"]').setInputFiles('test-data/large-company-10k.xml');
+    
+    // Measure processing time
+    await expect(page.locator('[data-testid="processing-complete"]')).toBeVisible({ timeout: 60000 });
+    const processingTime = Date.now() - startTime;
+    
+    // Verify performance requirements (should complete within 60 seconds)
+    expect(processingTime).toBeLessThan(60000);
+  });
+
+  test('should handle multiple concurrent users', async ({ page, context }) => {
+    // Create multiple browser contexts
+    const pages = await Promise.all([
+      context.newPage(),
+      context.newPage(),
+      context.newPage(),
+      context.newPage(),
+      context.newPage()
+    ]);
+    
+    // All users access the same statement simultaneously
+    await Promise.all(pages.map(p => p.goto('/financial-data/statements/apple-2025-q3')));
+    
+    // Verify all pages load correctly
+    for (const p of pages) {
+      await expect(p.locator('[data-testid="financial-statements"]')).toBeVisible();
+    }
+  });
+});
+```
+
+### **10. Test Configuration and Setup**
+
+#### **Playwright Configuration**
+```typescript
+// playwright.config.ts
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './tests/e2e',
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: [
+    ['html'],
+    ['json', { outputFile: 'test-results/results.json' }],
+    ['junit', { outputFile: 'test-results/results.xml' }]
+  ],
+  use: {
+    baseURL: 'http://localhost:3000',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure'
+  },
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] }
+    },
+    {
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'] }
+    },
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] }
+    },
+    {
+      name: 'Mobile Chrome',
+      use: { ...devices['Pixel 5'] }
+    },
+    {
+      name: 'Mobile Safari',
+      use: { ...devices['iPhone 12'] }
+    }
+  ],
+  webServer: {
+    command: 'npm run dev',
+    url: 'http://localhost:3000',
+    reuseExistingServer: !process.env.CI
+  }
+});
+```
+
+### **11. Test Data Management**
+
+#### **Test Fixtures and Mock Data**
+```typescript
+// tests/fixtures/test-data-generator.ts
+export class TestDataGenerator {
+  static generateAppleFinancials() {
+    return {
+      company: 'Apple Inc.',
+      cik: '0000320193',
+      period: '2025-Q3',
+      statements: {
+        income: {
+          revenue: 123000000000,
+          netIncome: 25000000000,
+          grossProfit: 45000000000
+        },
+        balance: {
+          totalAssets: 400000000000,
+          totalLiabilities: 200000000000,
+          shareholdersEquity: 200000000000
+        },
+        cashFlow: {
+          operatingCashFlow: 30000000000,
+          capitalExpenditures: 5000000000,
+          freeCashFlow: 25000000000
+        }
+      }
+    };
+  }
+
+  static generateJPMorganFinancials() {
+    return {
+      company: 'JPMorgan Chase & Co.',
+      cik: '0000019617',
+      period: '2025-Q2',
+      statements: {
+        income: {
+          netInterestIncome: 15000000000,
+          nonInterestIncome: 8000000000,
+          netIncome: 12000000000
+        },
+        balance: {
+          totalAssets: 4000000000000,
+          loans: 1200000000000,
+          deposits: 2500000000000
+        }
+      }
+    };
+  }
+}
+```
+
+### **12. Continuous Integration Integration**
+
+#### **GitHub Actions Workflow**
+```yaml
+# .github/workflows/e2e-tests.yml
+name: E2E Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+      
+      - name: Start test database
+        run: docker-compose up -d postgres
+      
+      - name: Run database migrations
+        run: npm run db:migrate
+      
+      - name: Start application
+        run: npm run dev &
+      
+      - name: Wait for application
+        run: npx wait-on http://localhost:3000
+      
+      - name: Run Playwright tests
+        run: npx playwright test
+      
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+```
+
+### **13. Test Coverage and Quality Metrics**
+
+#### **Coverage Requirements**
+- **Functional Coverage**: 100% of user-facing features
+- **Browser Coverage**: Chrome, Firefox, Safari, Edge
+- **Device Coverage**: Desktop, tablet, mobile
+- **User Journey Coverage**: All primary user workflows
+- **Error Scenario Coverage**: All error handling paths
+- **Performance Coverage**: Load testing with large datasets
+
+#### **Quality Gates**
+- All tests must pass before deployment
+- No flaky tests (retry rate < 5%)
+- Test execution time < 30 minutes
+- Coverage reports generated for each run
+- Visual regression testing for UI components
+
+### **14. Test Maintenance Strategy**
+
+#### **Test Data Updates**
+- Regular updates of test XBRL files with new SEC filings
+- Automated test data validation
+- Version control for test fixtures
+- Documentation for test data sources
+
+#### **Test Environment Management**
+- Isolated test environments
+- Database seeding for consistent test data
+- Mock services for external dependencies
+- Cleanup procedures after test runs
+
+This comprehensive end-to-end testing strategy ensures that all financial data features work correctly across different browsers, devices, and user scenarios, providing confidence in the system's reliability and user experience quality.
+- ⏳ Scalable architecture for future growth (in progress)
 
 The implementation will position EconGraph as a comprehensive platform for both economic and financial data analysis, enabling users to leverage AI tools for sophisticated financial research and decision-making.

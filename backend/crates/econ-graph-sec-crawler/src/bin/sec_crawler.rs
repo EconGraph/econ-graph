@@ -1,9 +1,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use econ_graph_sec_crawler::{SecEdgarCrawler, CrawlConfig};
+use econ_graph_sec_crawler::{CrawlConfig, SecEdgarCrawler};
 use econ_graph_services::database::DatabasePool;
 use std::path::PathBuf;
-use tracing::{info, error};
+use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// **SEC EDGAR Crawler CLI**
@@ -119,7 +119,8 @@ async fn main() -> Result<()> {
                 end_date,
                 exclude_amended,
                 exclude_restated,
-            ).await?;
+            )
+            .await?;
         }
 
         Commands::Stats => {
@@ -177,7 +178,11 @@ async fn crawl_company_command(
         max_file_size_bytes: max_file_size,
         start_date: start_date_parsed,
         end_date: end_date_parsed,
-        form_types: if form_types_vec.is_empty() { None } else { Some(form_types_vec) },
+        form_types: if form_types_vec.is_empty() {
+            None
+        } else {
+            Some(form_types_vec)
+        },
         exclude_amended,
         exclude_restated,
         user_agent: "EconGraph-SEC-Crawler/1.0".to_string(),
@@ -199,7 +204,10 @@ async fn crawl_company_command(
     println!("  Total filings found: {}", result.total_filings_found);
     println!("  Filings downloaded: {}", result.filings_downloaded);
     println!("  Filings failed: {}", result.filings_failed);
-    println!("  Total bytes downloaded: {}", result.total_bytes_downloaded);
+    println!(
+        "  Total bytes downloaded: {}",
+        result.total_bytes_downloaded
+    );
     println!("  Success: {}", result.success);
 
     if !result.errors.is_empty() {

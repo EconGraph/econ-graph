@@ -1,13 +1,14 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc, NaiveDate};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use econ_graph_core::models::{FinancialStatement, FinancialLineItem, FinancialRatios};
 use crate::config_loader::{FinancialAnalysisConfig, RatioBenchmark};
+use econ_graph_core::models::{FinancialLineItem, FinancialRatios, FinancialStatement};
+use bigdecimal::{BigDecimal, ToPrimitive};
 
 /// **Financial Ratio Calculator**
 ///
@@ -111,7 +112,10 @@ impl FinancialRatioCalculator {
         statements: &[FinancialStatement],
         line_items: &[FinancialLineItem],
     ) -> Result<Vec<CalculatedRatio>> {
-        info!("Calculating financial ratios for {} statements", statements.len());
+        info!(
+            "Calculating financial ratios for {} statements",
+            statements.len()
+        );
 
         if statements.is_empty() {
             return Ok(Vec::new());
@@ -124,7 +128,8 @@ impl FinancialRatioCalculator {
 
         for statement in statements {
             if let Some(statement_line_items) = line_items_by_statement.get(&statement.id) {
-                let statement_ratios = self.calculate_statement_ratios(statement, statement_line_items)?;
+                let statement_ratios =
+                    self.calculate_statement_ratios(statement, statement_line_items)?;
                 ratios.extend(statement_ratios);
             }
         }
@@ -150,7 +155,7 @@ impl FinancialRatioCalculator {
         // Create a lookup map for line items
         let line_item_map: HashMap<String, &FinancialLineItem> = line_items
             .iter()
-            .map(|item| (item.taxonomy_concept.clone().unwrap_or_default(), item))
+            .map(|item| (item.taxonomy_concept.clone(), item))
             .collect();
 
         // Profitability Ratios
@@ -234,7 +239,9 @@ impl FinancialRatioCalculator {
                 ratios.push(ev_sales);
             }
 
-            if let Some(ev_fcf) = self.calculate_enterprise_value_to_free_cash_flow(&line_item_map)? {
+            if let Some(ev_fcf) =
+                self.calculate_enterprise_value_to_free_cash_flow(&line_item_map)?
+            {
                 ratios.push(ev_fcf);
             }
         }
@@ -296,31 +303,39 @@ impl FinancialRatioCalculator {
             ) {
                 let current_map: HashMap<String, &FinancialLineItem> = current_items
                     .iter()
-                    .map(|item| (item.taxonomy_concept.clone().unwrap_or_default(), item))
+                    .map(|item| (item.taxonomy_concept.clone(), item))
                     .collect();
 
                 let previous_map: HashMap<String, &FinancialLineItem> = previous_items
                     .iter()
-                    .map(|item| (item.taxonomy_concept.clone().unwrap_or_default(), item))
+                    .map(|item| (item.taxonomy_concept.clone(), item))
                     .collect();
 
                 // Revenue Growth Rate
-                if let Some(revenue_growth) = self.calculate_revenue_growth_rate(&current_map, &previous_map)? {
+                if let Some(revenue_growth) =
+                    self.calculate_revenue_growth_rate(&current_map, &previous_map)?
+                {
                     trend_ratios.push(revenue_growth);
                 }
 
                 // Earnings Growth Rate
-                if let Some(earnings_growth) = self.calculate_earnings_growth_rate(&current_map, &previous_map)? {
+                if let Some(earnings_growth) =
+                    self.calculate_earnings_growth_rate(&current_map, &previous_map)?
+                {
                     trend_ratios.push(earnings_growth);
                 }
 
                 // Free Cash Flow Growth Rate
-                if let Some(fcf_growth) = self.calculate_free_cash_flow_growth_rate(&current_map, &previous_map)? {
+                if let Some(fcf_growth) =
+                    self.calculate_free_cash_flow_growth_rate(&current_map, &previous_map)?
+                {
                     trend_ratios.push(fcf_growth);
                 }
 
                 // Book Value Growth Rate
-                if let Some(bv_growth) = self.calculate_book_value_growth_rate(&current_map, &previous_map)? {
+                if let Some(bv_growth) =
+                    self.calculate_book_value_growth_rate(&current_map, &previous_map)?
+                {
                     trend_ratios.push(bv_growth);
                 }
             }
@@ -334,9 +349,13 @@ impl FinancialRatioCalculator {
     // ============================================================================
 
     /// Calculate Return on Equity (ROE)
-    fn calculate_return_on_equity(&self, line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_return_on_equity(
+        &self,
+        line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         let net_income = self.get_numeric_value(line_items, "us-gaap:NetIncomeLoss")?;
-        let shareholders_equity = self.get_numeric_value(line_items, "us-gaap:StockholdersEquity")?;
+        let shareholders_equity =
+            self.get_numeric_value(line_items, "us-gaap:StockholdersEquity")?;
 
         if let (Some(ni), Some(se)) = (net_income, shareholders_equity) {
             if se != 0.0 {
@@ -349,7 +368,9 @@ impl FinancialRatioCalculator {
                     value: roe,
                     category: "profitability".to_string(),
                     formula: "Net Income / Shareholders' Equity".to_string(),
-                    interpretation: self.analysis_config.get_ratio_interpretation("return_on_equity", roe)
+                    interpretation: self
+                        .analysis_config
+                        .get_ratio_interpretation("return_on_equity", roe)
                         .unwrap_or_else(|| "Unable to interpret ratio".to_string()),
                     benchmark_percentile: None,
                     period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
@@ -365,7 +386,10 @@ impl FinancialRatioCalculator {
     }
 
     /// Calculate Return on Assets (ROA)
-    fn calculate_return_on_assets(&self, line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_return_on_assets(
+        &self,
+        line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         let net_income = self.get_numeric_value(line_items, "us-gaap:NetIncomeLoss")?;
         let total_assets = self.get_numeric_value(line_items, "us-gaap:Assets")?;
 
@@ -380,7 +404,9 @@ impl FinancialRatioCalculator {
                     value: roa,
                     category: "profitability".to_string(),
                     formula: "Net Income / Total Assets".to_string(),
-                    interpretation: self.analysis_config.get_ratio_interpretation("return_on_assets", roa)
+                    interpretation: self
+                        .analysis_config
+                        .get_ratio_interpretation("return_on_assets", roa)
                         .unwrap_or_else(|| "Unable to interpret ratio".to_string()),
                     benchmark_percentile: None,
                     period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
@@ -396,19 +422,27 @@ impl FinancialRatioCalculator {
     }
 
     /// Calculate Return on Invested Capital (ROIC)
-    fn calculate_return_on_invested_capital(&self, line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_return_on_invested_capital(
+        &self,
+        line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         let net_income = self.get_numeric_value(line_items, "us-gaap:NetIncomeLoss")?;
         let interest_expense = self.get_numeric_value(line_items, "us-gaap:InterestExpense")?;
         let tax_rate = self.estimate_tax_rate(line_items)?;
 
-        let total_debt = self.get_numeric_value(line_items, "us-gaap:LongTermDebt")?
-            .unwrap_or(0.0) + self.get_numeric_value(line_items, "us-gaap:ShortTermDebt")?
-            .unwrap_or(0.0);
+        let total_debt = self
+            .get_numeric_value(line_items, "us-gaap:LongTermDebt")?
+            .unwrap_or(0.0)
+            + self
+                .get_numeric_value(line_items, "us-gaap:ShortTermDebt")?
+                .unwrap_or(0.0);
 
-        let shareholders_equity = self.get_numeric_value(line_items, "us-gaap:StockholdersEquity")?;
+        let shareholders_equity =
+            self.get_numeric_value(line_items, "us-gaap:StockholdersEquity")?;
 
-        if let (Some(ni), Some(ie), Some(se)) = (net_income, interest_expense, shareholders_equity) {
-            let nopat = ni + (ie * (1.0 - tax_rate));
+        if let (Some(ni), Some(ie), Some(se)) = (net_income, interest_expense, shareholders_equity)
+        {
+            let nopat = ni + (ie * (1.0 - tax_rate.unwrap_or(0.25)));
             let invested_capital = total_debt + se;
 
             if invested_capital != 0.0 {
@@ -421,7 +455,9 @@ impl FinancialRatioCalculator {
                     value: roic,
                     category: "profitability".to_string(),
                     formula: "NOPAT / Invested Capital".to_string(),
-                    interpretation: self.analysis_config.get_ratio_interpretation("return_on_invested_capital", roic)
+                    interpretation: self
+                        .analysis_config
+                        .get_ratio_interpretation("return_on_invested_capital", roic)
                         .unwrap_or_else(|| "Unable to interpret ratio".to_string()),
                     benchmark_percentile: None,
                     period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
@@ -437,9 +473,13 @@ impl FinancialRatioCalculator {
     }
 
     /// Calculate Current Ratio
-    fn calculate_current_ratio(&self, line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_current_ratio(
+        &self,
+        line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         let current_assets = self.get_numeric_value(line_items, "us-gaap:AssetsCurrent")?;
-        let current_liabilities = self.get_numeric_value(line_items, "us-gaap:LiabilitiesCurrent")?;
+        let current_liabilities =
+            self.get_numeric_value(line_items, "us-gaap:LiabilitiesCurrent")?;
 
         if let (Some(ca), Some(cl)) = (current_assets, current_liabilities) {
             if cl != 0.0 {
@@ -452,7 +492,9 @@ impl FinancialRatioCalculator {
                     value: current_ratio,
                     category: "liquidity".to_string(),
                     formula: "Current Assets / Current Liabilities".to_string(),
-                    interpretation: self.analysis_config.get_ratio_interpretation("current_ratio", current_ratio)
+                    interpretation: self
+                        .analysis_config
+                        .get_ratio_interpretation("current_ratio", current_ratio)
                         .unwrap_or_else(|| "Unable to interpret ratio".to_string()),
                     benchmark_percentile: None,
                     period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
@@ -468,12 +510,19 @@ impl FinancialRatioCalculator {
     }
 
     /// Calculate Debt-to-Equity Ratio
-    fn calculate_debt_to_equity(&self, line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
-        let total_debt = self.get_numeric_value(line_items, "us-gaap:LongTermDebt")?
-            .unwrap_or(0.0) + self.get_numeric_value(line_items, "us-gaap:ShortTermDebt")?
-            .unwrap_or(0.0);
+    fn calculate_debt_to_equity(
+        &self,
+        line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
+        let total_debt = self
+            .get_numeric_value(line_items, "us-gaap:LongTermDebt")?
+            .unwrap_or(0.0)
+            + self
+                .get_numeric_value(line_items, "us-gaap:ShortTermDebt")?
+                .unwrap_or(0.0);
 
-        let shareholders_equity = self.get_numeric_value(line_items, "us-gaap:StockholdersEquity")?;
+        let shareholders_equity =
+            self.get_numeric_value(line_items, "us-gaap:StockholdersEquity")?;
 
         if let Some(se) = shareholders_equity {
             if se != 0.0 {
@@ -486,7 +535,9 @@ impl FinancialRatioCalculator {
                     value: debt_to_equity,
                     category: "leverage".to_string(),
                     formula: "Total Debt / Shareholders' Equity".to_string(),
-                    interpretation: self.analysis_config.get_ratio_interpretation("debt_to_equity", debt_to_equity)
+                    interpretation: self
+                        .analysis_config
+                        .get_ratio_interpretation("debt_to_equity", debt_to_equity)
                         .unwrap_or_else(|| "Unable to interpret ratio".to_string()),
                     benchmark_percentile: None,
                     period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
@@ -506,21 +557,29 @@ impl FinancialRatioCalculator {
     // ============================================================================
 
     /// Get numeric value from line items by concept name
-    fn get_numeric_value(&self, line_items: &HashMap<String, &FinancialLineItem>, concept: &str) -> Result<Option<f64>> {
+    fn get_numeric_value(
+        &self,
+        line_items: &HashMap<String, &FinancialLineItem>,
+        concept: &str,
+    ) -> Result<Option<f64>> {
         if let Some(line_item) = line_items.get(concept) {
             if let Some(value) = line_item.value {
-                return Ok(Some(value as f64));
+                return Ok(Some(value.to_f64().unwrap_or(0.0)));
             }
         }
         Ok(None)
     }
 
     /// Group line items by statement ID
-    fn group_line_items_by_statement(&self, line_items: &[FinancialLineItem]) -> HashMap<Uuid, Vec<FinancialLineItem>> {
+    fn group_line_items_by_statement(
+        &self,
+        line_items: &[FinancialLineItem],
+    ) -> HashMap<Uuid, Vec<FinancialLineItem>> {
         let mut grouped = HashMap::new();
 
         for item in line_items {
-            grouped.entry(item.statement_id)
+            grouped
+                .entry(item.statement_id)
                 .or_insert_with(Vec::new)
                 .push(item.clone());
         }
@@ -534,7 +593,10 @@ impl FinancialRatioCalculator {
     }
 
     /// Estimate tax rate from financial data
-    fn estimate_tax_rate(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<f64>> {
+    fn estimate_tax_rate(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<f64>> {
         // This would calculate actual tax rate from income tax expense and pre-tax income
         // For now, return a reasonable default
         Ok(Some(0.25)) // 25% corporate tax rate
@@ -558,117 +620,190 @@ impl FinancialRatioCalculator {
     // STUB METHODS FOR ADDITIONAL RATIOS
     // ============================================================================
 
-    fn calculate_gross_profit_margin(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_gross_profit_margin(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_operating_profit_margin(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_operating_profit_margin(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_net_profit_margin(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_net_profit_margin(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_ebitda_margin(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_ebitda_margin(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_free_cash_flow_margin(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_free_cash_flow_margin(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_quick_ratio(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_quick_ratio(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_cash_ratio(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_cash_ratio(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_operating_cash_flow_ratio(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_operating_cash_flow_ratio(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_debt_to_assets(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_debt_to_assets(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_interest_coverage(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_interest_coverage(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_debt_service_coverage(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_debt_service_coverage(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_equity_multiplier(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_equity_multiplier(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_enterprise_value_to_ebitda(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_enterprise_value_to_ebitda(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_enterprise_value_to_sales(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_enterprise_value_to_sales(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_enterprise_value_to_free_cash_flow(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_enterprise_value_to_free_cash_flow(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_free_cash_flow(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_free_cash_flow(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_free_cash_flow_per_share(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_free_cash_flow_per_share(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_free_cash_flow_yield(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_free_cash_flow_yield(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_cash_flow_return_on_investment(&self, _line_items: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_cash_flow_return_on_investment(
+        &self,
+        _line_items: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_revenue_growth_rate(&self, _current: &HashMap<String, &FinancialLineItem>, _previous: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_revenue_growth_rate(
+        &self,
+        _current: &HashMap<String, &FinancialLineItem>,
+        _previous: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_earnings_growth_rate(&self, _current: &HashMap<String, &FinancialLineItem>, _previous: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_earnings_growth_rate(
+        &self,
+        _current: &HashMap<String, &FinancialLineItem>,
+        _previous: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_free_cash_flow_growth_rate(&self, _current: &HashMap<String, &FinancialLineItem>, _previous: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_free_cash_flow_growth_rate(
+        &self,
+        _current: &HashMap<String, &FinancialLineItem>,
+        _previous: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
 
-    fn calculate_book_value_growth_rate(&self, _current: &HashMap<String, &FinancialLineItem>, _previous: &HashMap<String, &FinancialLineItem>) -> Result<Option<CalculatedRatio>> {
+    fn calculate_book_value_growth_rate(
+        &self,
+        _current: &HashMap<String, &FinancialLineItem>,
+        _previous: &HashMap<String, &FinancialLineItem>,
+    ) -> Result<Option<CalculatedRatio>> {
         // Implementation would go here
         Ok(None)
     }
@@ -698,8 +833,8 @@ pub struct CalculatedRatio {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use econ_graph_core::models::{FinancialStatement, FinancialLineItem};
     use chrono::NaiveDate;
+    use econ_graph_core::models::{FinancialLineItem, FinancialStatement};
 
     #[test]
     fn test_ratio_calculator_creation() {
@@ -766,11 +901,15 @@ mod tests {
     #[test]
     fn test_interpretation_methods() {
         if let Ok(calculator) = FinancialRatioCalculator::new() {
-            let roe_interpretation = calculator.analysis_config.get_ratio_interpretation("return_on_equity", 0.20);
+            let roe_interpretation = calculator
+                .analysis_config
+                .get_ratio_interpretation("return_on_equity", 0.20);
             assert!(roe_interpretation.is_some());
             assert!(roe_interpretation.unwrap().contains("Excellent"));
 
-            let roa_interpretation = calculator.analysis_config.get_ratio_interpretation("return_on_assets", 0.10);
+            let roa_interpretation = calculator
+                .analysis_config
+                .get_ratio_interpretation("return_on_assets", 0.10);
             assert!(roa_interpretation.is_some());
             assert!(roa_interpretation.unwrap().contains("Excellent"));
         }
@@ -783,7 +922,10 @@ mod tests {
             assert_eq!(calculator.calculate_data_quality_score(&all_non_zero), 1.0);
 
             let some_zero = vec![100.0, 0.0, 300.0];
-            assert_eq!(calculator.calculate_data_quality_score(&some_zero), 2.0 / 3.0);
+            assert_eq!(
+                calculator.calculate_data_quality_score(&some_zero),
+                2.0 / 3.0
+            );
 
             let all_zero = vec![0.0, 0.0, 0.0];
             assert_eq!(calculator.calculate_data_quality_score(&all_zero), 0.0);
@@ -799,7 +941,10 @@ mod tests {
             let statements = vec![];
             let line_items = vec![];
 
-            let ratios = calculator.calculate_ratios(&statements, &line_items).await.expect("Failed to calculate ratios");
+            let ratios = calculator
+                .calculate_ratios(&statements, &line_items)
+                .await
+                .expect("Failed to calculate ratios");
             assert!(ratios.is_empty());
         }
     }
@@ -807,79 +952,79 @@ mod tests {
     #[tokio::test]
     async fn test_calculate_ratios_single_statement() {
         if let Ok(calculator) = FinancialRatioCalculator::new() {
-
-        let statement = FinancialStatement {
-            id: Uuid::new_v4(),
-            company_id: Uuid::new_v4(),
-            filing_type: "10-K".to_string(),
-            form_type: "10-K".to_string(),
-            accession_number: "0001234567-23-000001".to_string(),
-            filing_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
-            period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
-            fiscal_year: 2023,
-            fiscal_quarter: Some(4),
-            document_type: "XBRL".to_string(),
-            document_url: "http://example.com/filing.xbrl".to_string(),
-            xbrl_file_oid: None,
-            xbrl_file_content: None,
-            xbrl_file_size_bytes: None,
-            xbrl_file_compressed: None,
-            xbrl_file_compression_type: None,
-            xbrl_file_hash: None,
-            xbrl_processing_status: "completed".to_string(),
-            xbrl_processing_error: None,
-            xbrl_processing_started_at: None,
-            xbrl_processing_completed_at: Some(Utc::now()),
-            is_amended: false,
-            amendment_type: None,
-            original_filing_date: None,
-            is_restated: false,
-            restatement_reason: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-
-        let line_items = vec![
-            FinancialLineItem {
+            let statement = FinancialStatement {
                 id: Uuid::new_v4(),
-                statement_id: statement.id,
-                taxonomy_concept: Some("us-gaap:NetIncomeLoss".to_string()),
-                standard_label: Some("Net Income".to_string()),
-                value: Some(1000000),
-                unit: "USD".to_string(),
-                context_ref: "c1".to_string(),
-                statement_type: "income_statement".to_string(),
-                statement_section: "net_income".to_string(),
-                is_calculated: false,
-                calculation_weight: None,
-                parent_concept: None,
+                company_id: Uuid::new_v4(),
+                filing_type: "10-K".to_string(),
+                form_type: "10-K".to_string(),
+                accession_number: "0001234567-23-000001".to_string(),
+                filing_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
+                period_end_date: NaiveDate::from_ymd_opt(2023, 12, 31).unwrap(),
+                fiscal_year: 2023,
+                fiscal_quarter: Some(4),
+                document_type: "XBRL".to_string(),
+                document_url: "http://example.com/filing.xbrl".to_string(),
+                xbrl_file_oid: None,
+                xbrl_file_content: None,
+                xbrl_file_size_bytes: None,
+                xbrl_file_compressed: None,
+                xbrl_file_compression_type: None,
+                xbrl_file_hash: None,
+                xbrl_processing_status: Some("completed".to_string()),
+                xbrl_processing_error: None,
+                xbrl_processing_started_at: None,
+                xbrl_processing_completed_at: Some(Utc::now()),
+                is_amended: false,
+                amendment_type: None,
+                original_filing_date: None,
+                is_restated: false,
+                restatement_reason: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
-            },
-            FinancialLineItem {
-                id: Uuid::new_v4(),
-                statement_id: statement.id,
-                taxonomy_concept: Some("us-gaap:StockholdersEquity".to_string()),
-                standard_label: Some("Stockholders' Equity".to_string()),
-                value: Some(5000000),
-                unit: "USD".to_string(),
-                context_ref: "c1".to_string(),
-                statement_type: "balance_sheet".to_string(),
-                statement_section: "equity".to_string(),
-                is_calculated: false,
-                calculation_weight: None,
-                parent_concept: None,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            },
-        ];
+            };
 
-        let ratios = calculator.calculate_ratios(&[statement], &line_items).await.expect("Failed to calculate ratios");
+            let line_items = vec![
+                FinancialLineItem {
+                    id: Uuid::new_v4(),
+                    statement_id: statement.id,
+                    taxonomy_concept: "us-gaap:NetIncomeLoss".to_string(),
+                    standard_label: Some("Net Income".to_string()),
+                    value: Some(BigDecimal::from(1000000)),
+                    unit: "USD".to_string(),
+                    context_ref: "c1".to_string(),
+                    statement_type: "income_statement".to_string(),
+                    statement_section: "net_income".to_string(),
+                    is_calculated: false,
+                    parent_concept: None,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                },
+                FinancialLineItem {
+                    id: Uuid::new_v4(),
+                    statement_id: statement.id,
+                    taxonomy_concept: "us-gaap:StockholdersEquity".to_string(),
+                    standard_label: Some("Stockholders' Equity".to_string()),
+                    value: Some(BigDecimal::from(5000000)),
+                    unit: "USD".to_string(),
+                    context_ref: "c1".to_string(),
+                    statement_type: "balance_sheet".to_string(),
+                    statement_section: "equity".to_string(),
+                    is_calculated: false,
+                    parent_concept: None,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                },
+            ];
 
-        // Should calculate at least ROE
-        assert!(!ratios.is_empty());
-        let roe_ratio = ratios.iter().find(|r| r.ratio_name == "return_on_equity");
-        assert!(roe_ratio.is_some());
+            let ratios = calculator
+                .calculate_ratios(&[statement], &line_items)
+                .await
+                .expect("Failed to calculate ratios");
+
+            // Should calculate at least ROE
+            assert!(!ratios.is_empty());
+            let roe_ratio = ratios.iter().find(|r| r.ratio_name == "return_on_equity");
+            assert!(roe_ratio.is_some());
 
             if let Some(roe) = roe_ratio {
                 assert_eq!(roe.value, 0.2); // 1,000,000 / 5,000,000

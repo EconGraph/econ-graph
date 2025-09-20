@@ -1,21 +1,24 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::{DateTime, NaiveDate, Utc};
-use reqwest::{Client, header::{HeaderMap, HeaderValue, USER_AGENT}};
+use chrono::{DateTime, NaiveDate, Utc, Datelike};
+use reqwest::{
+    header::{HeaderMap, HeaderValue, USER_AGENT},
+    Client,
+};
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::models::{
-    CrawlConfig, CrawlProgress, CrawlResult, SecCompany, SecFiling,
-    CompanySubmissionsResponse, FilingInfo, StoredXbrlDocument
+    CompanySubmissionsResponse, CrawlConfig, CrawlProgress, CrawlResult, FilingInfo, SecCompany,
+    SecFiling, StoredXbrlDocument,
 };
-use crate::rate_limiter::RateLimiter;
+use crate::rate_limiter::SecRateLimiter;
 use crate::storage::{XbrlStorage, XbrlStorageConfig};
-use crate::utils::{build_xbrl_url, build_submissions_url, parse_sec_date, get_fiscal_quarter};
+use crate::utils::{build_submissions_url, build_xbrl_url, get_fiscal_quarter, parse_sec_date};
 use econ_graph_core::models::{Company, FinancialStatement};
-use econ_graph_services::database::DatabasePool;
+use econ_graph_core::database::DatabasePool;
 
 /// **SEC EDGAR Crawler**
 ///
@@ -32,7 +35,7 @@ use econ_graph_services::database::DatabasePool;
 /// # Examples
 /// ```rust,no_run
 /// use econ_graph_sec_crawler::SecEdgarCrawler;
-/// use econ_graph_services::database::DatabasePool;
+/// use econ_graph_core::database::DatabasePool;
 /// use uuid::Uuid;
 ///
 /// # async fn example() -> anyhow::Result<()> {
@@ -47,7 +50,7 @@ use econ_graph_services::database::DatabasePool;
 /// ```
 pub struct SecEdgarCrawler {
     client: Client,
-    rate_limiter: RateLimiter,
+    rate_limiter: SecRateLimiter,
     storage: XbrlStorage,
     config: CrawlConfig,
     pool: DatabasePool,
@@ -63,7 +66,7 @@ impl SecEdgarCrawler {
     pub async fn with_config(pool: DatabasePool, config: CrawlConfig) -> Result<Self> {
         // Create HTTP client with proper headers
         let mut headers = HeaderMap::new();
-        headers.insert(USER_AGENT, HeaderValue::from_static(&config.user_agent));
+        headers.insert(USER_AGENT, HeaderValue::from_str(&config.user_agent)?);
 
         let client = Client::builder()
             .default_headers(headers)
@@ -72,7 +75,7 @@ impl SecEdgarCrawler {
             .context("Failed to create HTTP client")?;
 
         // Create rate limiter
-        let rate_limiter = RateLimiter::new(config.max_requests_per_second);
+        let rate_limiter = SecRateLimiter::new(config.max_requests_per_second, Duration::from_secs(1));
 
         // Create XBRL storage with default configuration
         let storage_config = XbrlStorageConfig::default();
@@ -123,12 +126,17 @@ impl SecEdgarCrawler {
                 Ok(bytes_downloaded) => {
                     result.filings_downloaded += 1;
                     result.total_bytes_downloaded += bytes_downloaded;
-                    debug!("Successfully downloaded filing: {}", filing_info.accession_number[0]);
+                    debug!(
+                        "Successfully downloaded filing: {}",
+                        filing_info.accession_number[0]
+                    );
                 }
                 Err(e) => {
                     result.filings_failed += 1;
-                    let error_msg = format!("Failed to download filing {}: {}",
-                        filing_info.accession_number[0], e);
+                    let error_msg = format!(
+                        "Failed to download filing {}: {}",
+                        filing_info.accession_number[0], e
+                    );
                     error!("{}", error_msg);
                     result.errors.push(error_msg);
                 }
@@ -138,8 +146,10 @@ impl SecEdgarCrawler {
         result.end_time = Some(Utc::now());
         result.success = result.filings_failed == 0;
 
-        info!("Crawl completed for CIK {}: {} downloaded, {} failed",
-            cik, result.filings_downloaded, result.filings_failed);
+        info!(
+            "Crawl completed for CIK {}: {} downloaded, {} failed",
+            cik, result.filings_downloaded, result.filings_failed
+        );
 
         Ok(result)
     }
@@ -148,9 +158,10 @@ impl SecEdgarCrawler {
     async fn get_company_info(&self, cik: &str) -> Result<SecCompany> {
         let url = build_submissions_url(cik);
 
-        self.rate_limiter.wait().await;
+        self.rate_limiter.wait_for_permit().await;
 
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .send()
             .await
@@ -174,7 +185,7 @@ impl SecEdgarCrawler {
             sic_code: Some(submissions.sic),
             sic_description: Some(submissions.sic_description),
             state_of_incorporation: None, // Not available in submissions API
-            fiscal_year_end: None, // Not available in submissions API
+            fiscal_year_end: None,        // Not available in submissions API
             entity_type: Some(submissions.entity_type),
             entity_size: None, // Not available in submissions API
             business_address: None,
@@ -191,9 +202,10 @@ impl SecEdgarCrawler {
     async fn get_company_submissions(&self, cik: &str) -> Result<CompanySubmissionsResponse> {
         let url = build_submissions_url(cik);
 
-        self.rate_limiter.wait().await;
+        self.rate_limiter.wait_for_permit().await;
 
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .send()
             .await
@@ -245,8 +257,10 @@ impl SecEdgarCrawler {
 
             // Check file size limit
             if !filing.size.is_empty() && filing.size[0] > self.config.max_file_size_bytes {
-                warn!("Skipping filing {}: size {} exceeds limit {}",
-                    filing.accession_number[0], filing.size[0], self.config.max_file_size_bytes);
+                warn!(
+                    "Skipping filing {}: size {} exceeds limit {}",
+                    filing.accession_number[0], filing.size[0], self.config.max_file_size_bytes
+                );
                 continue;
             }
 
@@ -260,7 +274,7 @@ impl SecEdgarCrawler {
     async fn download_filing_xbrl(
         &self,
         company: &SecCompany,
-        filing_info: &FilingInfo
+        filing_info: &FilingInfo,
     ) -> Result<u64> {
         let accession_number = &filing_info.accession_number[0];
         let filing_date = parse_sec_date(&filing_info.filing_date[0])?;
@@ -271,36 +285,49 @@ impl SecEdgarCrawler {
 
         debug!("Downloading XBRL from: {}", xbrl_url);
 
-        self.rate_limiter.wait().await;
+        self.rate_limiter.wait_for_permit().await;
 
-        let response = self.client
+        let response = self
+            .client
             .get(&xbrl_url)
             .send()
             .await
             .context("Failed to download XBRL file")?;
 
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("HTTP error downloading XBRL: {}", response.status()));
+            return Err(anyhow::anyhow!(
+                "HTTP error downloading XBRL: {}",
+                response.status()
+            ));
         }
 
-        let content = response.bytes().await.context("Failed to read response body")?;
+        let content = response
+            .bytes()
+            .await
+            .context("Failed to read response body")?;
         let file_size = content.len() as u64;
 
         // Store the XBRL file in the database
-        let stored_doc = self.storage.store_xbrl_file(
-            accession_number,
-            &content,
-            company.id,
-            DateTime::from_utc(filing_date.and_hms_opt(0, 0, 0).unwrap(), Utc),
-            DateTime::from_utc(report_date.and_hms_opt(0, 0, 0).unwrap(), Utc),
-            report_date.year(),
-            get_fiscal_quarter(&report_date),
-            Some(&filing_info.form[0]),
-            Some(&xbrl_url),
-        ).await.context("Failed to store XBRL file")?;
+        let stored_doc = self
+            .storage
+            .store_xbrl_file(
+                accession_number,
+                &content,
+                company.id,
+                DateTime::from_utc(filing_date.and_hms_opt(0, 0, 0).unwrap(), Utc),
+                DateTime::from_utc(report_date.and_hms_opt(0, 0, 0).unwrap(), Utc),
+                report_date.year(),
+                Some(get_fiscal_quarter(&report_date)),
+                Some(&filing_info.form[0]),
+                Some(&xbrl_url),
+            )
+            .await
+            .context("Failed to store XBRL file")?;
 
-        info!("Stored XBRL file: {} ({} bytes, compressed: {})",
-            accession_number, file_size, stored_doc.compressed_size);
+        info!(
+            "Stored XBRL file: {} ({} bytes, compressed: {})",
+            accession_number, file_size, stored_doc.compressed_size
+        );
 
         Ok(file_size)
     }
@@ -321,9 +348,9 @@ impl SecEdgarCrawler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use testcontainers::{clients, Container, images::postgres::Postgres};
     use testcontainers::core::WaitFor;
     use testcontainers::images::generic::GenericImage;
+    use testcontainers::{clients, images::postgres::Postgres, Container};
 
     #[tokio::test]
     async fn test_crawler_creation() {
@@ -332,7 +359,9 @@ mod tests {
         let postgres_image = GenericImage::new("postgres", "15")
             .with_env_var("POSTGRES_PASSWORD", "password")
             .with_env_var("POSTGRES_DB", "test")
-            .with_wait_for(WaitFor::message_on_stderr("database system is ready to accept connections"));
+            .with_wait_for(WaitFor::message_on_stderr(
+                "database system is ready to accept connections",
+            ));
 
         let container = docker.run(postgres_image);
         let connection_string = format!(

@@ -140,11 +140,14 @@ impl FinancialAnalysisConfig {
     /// Load ratio interpretations from JSON file
     fn load_ratio_interpretations(config_dir: &Path) -> Result<RatioInterpretationsConfig> {
         let file_path = config_dir.join("ratio_interpretations.json");
-        let content = fs::read_to_string(&file_path)
-            .with_context(|| format!("Failed to read ratio interpretations from {:?}", file_path))?;
+        let content = fs::read_to_string(&file_path).with_context(|| {
+            format!("Failed to read ratio interpretations from {:?}", file_path)
+        })?;
 
-        let config: RatioInterpretationsConfig = serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse ratio interpretations from {:?}", file_path))?;
+        let config: RatioInterpretationsConfig =
+            serde_json::from_str(&content).with_context(|| {
+                format!("Failed to parse ratio interpretations from {:?}", file_path)
+            })?;
 
         Ok(config)
     }
@@ -171,7 +174,11 @@ impl FinancialAnalysisConfig {
     }
 
     /// Get industry benchmark for a given industry code and ratio
-    pub fn get_industry_benchmark(&self, industry_code: &str, ratio_name: &str) -> Option<&RatioBenchmark> {
+    pub fn get_industry_benchmark(
+        &self,
+        industry_code: &str,
+        ratio_name: &str,
+    ) -> Option<&RatioBenchmark> {
         self.ratio_benchmarks
             .industries
             .get(industry_code)?
@@ -223,7 +230,12 @@ impl FinancialAnalysisConfig {
             "leverage" => self.ratio_formulas.leverage.keys().cloned().collect(),
             "efficiency" => self.ratio_formulas.efficiency.keys().cloned().collect(),
             "valuation" => self.ratio_formulas.valuation.keys().cloned().collect(),
-            "warren_buffett_favorites" => self.ratio_formulas.warren_buffett_favorites.keys().cloned().collect(),
+            "warren_buffett_favorites" => self
+                .ratio_formulas
+                .warren_buffett_favorites
+                .keys()
+                .cloned()
+                .collect(),
             "growth" => self.ratio_formulas.growth.keys().cloned().collect(),
             _ => Vec::new(),
         }
@@ -275,7 +287,10 @@ mod tests {
         if let Ok(config) = FinancialAnalysisConfig::load_from_dir(&config_dir) {
             let formula = config.get_ratio_formula("return_on_equity");
             assert!(formula.is_some());
-            assert_eq!(formula.unwrap().formula, "Net Income / Shareholders' Equity");
+            assert_eq!(
+                formula.unwrap().formula,
+                "Net Income / Shareholders' Equity"
+            );
         }
     }
 }

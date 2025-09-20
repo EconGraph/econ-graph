@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{NaiveDate, Utc};
+use chrono::{NaiveDate, Utc, Datelike};
 use std::str::FromStr;
 
 /// **Date Utilities**
@@ -10,10 +10,10 @@ use std::str::FromStr;
 pub fn parse_sec_date(date_str: &str) -> Result<NaiveDate> {
     // Try common SEC date formats
     let formats = [
-        "%Y-%m-%d",     // 2023-12-31
-        "%Y%m%d",       // 20231231
-        "%m/%d/%Y",     // 12/31/2023
-        "%m-%d-%Y",     // 12-31-2023
+        "%Y-%m-%d", // 2023-12-31
+        "%Y%m%d",   // 20231231
+        "%m/%d/%Y", // 12/31/2023
+        "%m-%d-%Y", // 12-31-2023
     ];
 
     for format in &formats {
@@ -59,7 +59,10 @@ pub fn parse_accession_number(accession: &str) -> Result<AccessionComponents> {
     let parts: Vec<&str> = accession.split('-').collect();
 
     if parts.len() != 3 {
-        return Err(anyhow::anyhow!("Invalid accession number format: {}", accession));
+        return Err(anyhow::anyhow!(
+            "Invalid accession number format: {}",
+            accession
+        ));
     }
 
     let cik = parts[0].to_string();
@@ -101,7 +104,10 @@ pub fn build_submissions_url(cik: &str) -> String {
 
 /// Build company facts URL from CIK
 pub fn build_company_facts_url(cik: &str) -> String {
-    format!("https://data.sec.gov/api/xbrl/companyfacts/CIK{}.json", pad_cik(cik))
+    format!(
+        "https://data.sec.gov/api/xbrl/companyfacts/CIK{}.json",
+        pad_cik(cik)
+    )
 }
 
 /// **File Size Utilities**
@@ -138,7 +144,8 @@ pub fn parse_file_size(size_str: &str) -> Result<u64> {
 
     if size_str.ends_with("B") {
         let number_part = &size_str[..size_str.len() - 1];
-        let number: f64 = number_part.parse()
+        let number: f64 = number_part
+            .parse()
             .map_err(|_| anyhow::anyhow!("Invalid file size format: {}", size_str))?;
 
         if size_str.ends_with("TB") {
@@ -154,7 +161,8 @@ pub fn parse_file_size(size_str: &str) -> Result<u64> {
         }
     } else {
         // Assume bytes if no unit specified
-        Ok(size_str.parse()
+        Ok(size_str
+            .parse()
             .map_err(|_| anyhow::anyhow!("Invalid file size format: {}", size_str))?)
     }
 }
@@ -177,9 +185,9 @@ pub fn calculate_backoff_delay(attempt: u32, base_delay: u64) -> u64 {
 /// Validate SEC form type
 pub fn is_valid_form_type(form_type: &str) -> bool {
     const VALID_FORMS: &[&str] = &[
-        "10-K", "10-Q", "8-K", "20-F", "6-K", "11-K", "DEF 14A", "PRE 14A",
-        "4", "3", "5", "144", "S-1", "S-3", "S-4", "S-8", "F-1", "F-3", "F-4",
-        "POS AM", "POS EX", "POS PRE", "POS UPD", "POS ASR", "POS COR",
+        "10-K", "10-Q", "8-K", "20-F", "6-K", "11-K", "DEF 14A", "PRE 14A", "4", "3", "5", "144",
+        "S-1", "S-3", "S-4", "S-8", "F-1", "F-3", "F-4", "POS AM", "POS EX", "POS PRE", "POS UPD",
+        "POS ASR", "POS COR",
     ];
 
     VALID_FORMS.contains(&form_type)
@@ -193,6 +201,17 @@ pub fn is_valid_fiscal_year(year: i32) -> bool {
 /// Validate fiscal quarter
 pub fn is_valid_fiscal_quarter(quarter: i32) -> bool {
     quarter >= 1 && quarter <= 4
+}
+
+/// Get fiscal quarter from date
+pub fn get_fiscal_quarter(date: &NaiveDate) -> i32 {
+    match date.month() {
+        1..=3 => 1,
+        4..=6 => 2,
+        7..=9 => 3,
+        10..=12 => 4,
+        _ => 1, // Should never happen
+    }
 }
 
 /// **Data Structures**

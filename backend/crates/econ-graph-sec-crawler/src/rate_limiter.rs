@@ -1,6 +1,5 @@
 use anyhow::Result;
-use governor::{Quota, RateLimiter};
-use nonzero_ext::nonzero;
+use governor::{Quota, RateLimiter as GovernorRateLimiter};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,9 +32,15 @@ use tracing::{debug, warn};
 /// // Make HTTP request here
 /// ```
 #[derive(Debug, Clone)]
-pub struct RateLimiter {
+pub struct SecRateLimiter {
     /// Internal rate limiter from governor crate
-    limiter: Arc<governor::RateLimiter<governor::state::direct::NotKeyed, governor::state::InMemoryState, governor::clock::DefaultClock>>,
+    limiter: Arc<
+        GovernorRateLimiter<
+            governor::state::direct::NotKeyed,
+            governor::state::InMemoryState,
+            governor::clock::DefaultClock,
+        >,
+    >,
 
     /// Maximum requests per second
     max_requests_per_second: u32,
@@ -44,7 +49,7 @@ pub struct RateLimiter {
     time_window: Duration,
 }
 
-impl RateLimiter {
+impl SecRateLimiter {
     /// Create a new rate limiter with specified parameters
     ///
     /// # Arguments
@@ -60,8 +65,8 @@ impl RateLimiter {
     /// let rate_limiter = RateLimiter::new(10, Duration::from_secs(1));
     /// ```
     pub fn new(max_requests_per_second: u32, time_window: Duration) -> Self {
-        let quota = Quota::per_second(nonzero!(max_requests_per_second));
-        let limiter = Arc::new(governor::RateLimiter::direct(quota));
+        let quota = Quota::per_second(NonZeroU32::new(max_requests_per_second).unwrap());
+        let limiter = Arc::new(GovernorRateLimiter::direct(quota));
 
         Self {
             limiter,
@@ -147,16 +152,10 @@ impl RateLimiter {
                     debug!("Rate limit permit granted");
                     return Ok(());
                 }
-                Err(governor::error::RateLimitError::TooSoon { next_allowed, .. }) => {
-                    let wait_time = next_allowed.duration_since(std::time::Instant::now());
-                    if wait_time > Duration::from_secs(0) {
-                        debug!("Rate limit exceeded, waiting {:?}", wait_time);
-                        sleep(wait_time).await;
-                    }
-                }
                 Err(e) => {
+                    debug!("Rate limit exceeded, waiting 100ms");
+                    sleep(Duration::from_millis(100)).await;
                     warn!("Rate limiter error: {:?}", e);
-                    return Err(anyhow::anyhow!("Rate limiter error: {:?}", e));
                 }
             }
         }
@@ -193,13 +192,10 @@ impl RateLimiter {
                 debug!("Rate limit permit granted (non-blocking)");
                 Ok(())
             }
-            Err(governor::error::RateLimitError::TooSoon { .. }) => {
-                debug!("Rate limit exceeded (non-blocking)");
-                Err(anyhow::anyhow!("Rate limit exceeded"))
-            }
             Err(e) => {
+                debug!("Rate limit exceeded (non-blocking)");
                 warn!("Rate limiter error: {:?}", e);
-                Err(anyhow::anyhow!("Rate limiter error: {:?}", e))
+                Err(anyhow::anyhow!("Rate limit exceeded"))
             }
         }
     }
@@ -263,15 +259,9 @@ impl RateLimiter {
     pub fn time_until_next_permit(&self) -> Option<Duration> {
         match self.limiter.check() {
             Ok(_) => None,
-            Err(governor::error::RateLimitError::TooSoon { next_allowed, .. }) => {
-                let wait_time = next_allowed.duration_since(std::time::Instant::now());
-                if wait_time > Duration::from_secs(0) {
-                    Some(wait_time)
-                } else {
-                    None
-                }
+            Err(_) => {
+                Some(Duration::from_millis(100))
             }
-            Err(_) => None,
         }
     }
 

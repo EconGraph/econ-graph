@@ -1,21 +1,23 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc, NaiveDate};
+use chrono::{DateTime, NaiveDate, Utc, Datelike};
+use std::path::PathBuf;
+use quick_xml::events::Event;
+use quick_xml::Reader;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::Path;
 use std::process::{Command, Stdio};
-use std::collections::{HashMap, HashSet, BTreeMap};
 use tokio::fs;
 use tokio::process::Command as AsyncCommand;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use regex::Regex;
 use xml::reader::{EventReader, XmlEvent};
-use quick_xml::Reader;
-use quick_xml::events::Event;
 
 use crate::models::{StoredXbrlDocument, XbrlStorageStats};
-use econ_graph_core::models::{FinancialStatement, FinancialLineItem, Company};
+use econ_graph_core::models::{Company, FinancialLineItem, FinancialStatement};
+use bigdecimal::BigDecimal;
 
 /// **XBRL Parser Configuration**
 ///
@@ -45,6 +47,9 @@ pub struct XbrlParserConfig {
 
     /// Whether to calculate financial ratios
     pub calculate_ratios: bool,
+
+    /// Whether to use Arelle for parsing (false = native XML parsing)
+    pub use_arelle: bool,
 }
 
 impl Default for XbrlParserConfig {
@@ -54,10 +59,11 @@ impl Default for XbrlParserConfig {
             python_env: None,
             cache_dir: PathBuf::from("/tmp/arelle_cache"),
             max_file_size: 100 * 1024 * 1024, // 100MB
-            parse_timeout: 300, // 5 minutes
+            parse_timeout: 300,               // 5 minutes
             validate_xbrl: true,
             extract_taxonomy: true,
             calculate_ratios: true,
+            use_arelle: true,
         }
     }
 }
@@ -111,7 +117,8 @@ impl XbrlParser {
     /// Create a new XBRL parser instance with custom configuration
     pub async fn with_config(config: XbrlParserConfig) -> Result<Self> {
         // Ensure cache directory exists
-        fs::create_dir_all(&config.cache_dir).await
+        fs::create_dir_all(&config.cache_dir)
+            .await
             .context("Failed to create cache directory")?;
 
         // Verify Arelle is available
@@ -190,7 +197,9 @@ impl XbrlParser {
         };
 
         // Cache the result
-        self.cache.store_parsed_result(xbrl_file, &parse_result).await?;
+        self.cache
+            .store_parsed_result(xbrl_file, &parse_result)
+            .await?;
 
         Ok(parse_result)
     }
@@ -218,7 +227,10 @@ impl XbrlParser {
             match self.parse_with_arelle(xbrl_file).await {
                 Ok(result) => return Ok(result),
                 Err(e) => {
-                    warn!("Arelle parsing failed, falling back to native parser: {}", e);
+                    warn!(
+                        "Arelle parsing failed, falling back to native parser: {}",
+                        e
+                    );
                 }
             }
         }
@@ -242,7 +254,9 @@ impl XbrlParser {
         let units = self.extract_units(&content)?;
 
         // Build comprehensive result
-        let statements = self.statement_mapper.map_facts_to_statements(&facts, &contexts)?;
+        let statements = self
+            .statement_mapper
+            .map_facts_to_statements(&facts, &contexts)?;
         let taxonomy_concepts = self.extract_taxonomy_concepts_from_content(&content)?;
 
         Ok(XbrlParseResult {
@@ -298,7 +312,9 @@ impl XbrlParser {
         let units = self.extract_units_from_xml(&xml_result)?;
 
         // Map to financial statements
-        let statements = self.statement_mapper.map_facts_to_statements(&facts, &contexts)?;
+        let statements = self
+            .statement_mapper
+            .map_facts_to_statements(&facts, &contexts)?;
         let line_items = self.extract_line_items_from_facts(&facts, &contexts)?;
 
         // Extract taxonomy information
@@ -329,7 +345,10 @@ impl XbrlParser {
 
     /// Parse XBRL document using Arelle
     async fn parse_with_arelle(&self, xbrl_file: &Path) -> Result<Vec<FinancialStatement>> {
-        let temp_output = self.config.cache_dir.join(format!("output_{}.json", Uuid::new_v4()));
+        let temp_output = self
+            .config
+            .cache_dir
+            .join(format!("output_{}.json", Uuid::new_v4()));
 
         let mut cmd = if let Some(ref python_env) = self.config.python_env {
             let mut cmd = AsyncCommand::new(python_env);
@@ -362,8 +381,9 @@ impl XbrlParser {
 
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(self.config.parse_timeout),
-            cmd.output()
-        ).await
+            cmd.output(),
+        )
+        .await
         .context("Arelle parsing timed out")?
         .context("Failed to execute Arelle command")?;
 
@@ -373,15 +393,16 @@ impl XbrlParser {
         }
 
         // Read and parse the output
-        let output_content = fs::read_to_string(&temp_output).await
+        let output_content = fs::read_to_string(&temp_output)
+            .await
             .context("Failed to read Arelle output")?;
 
         // Clean up temporary file
         let _ = fs::remove_file(&temp_output).await;
 
         // Parse the JSON output
-        let arelle_result: ArelleParseResult = serde_json::from_str(&output_content)
-            .context("Failed to parse Arelle JSON output")?;
+        let arelle_result: ArelleParseResult =
+            serde_json::from_str(&output_content).context("Failed to parse Arelle JSON output")?;
 
         // Convert to our financial statement format
         self.convert_arelle_result(arelle_result)
@@ -392,15 +413,21 @@ impl XbrlParser {
         let mut statements = Vec::new();
 
         // Group facts by context to create financial statements
-        let mut contexts: std::collections::HashMap<String, Vec<XbrlFact>> = std::collections::HashMap::new();
+        let mut contexts: std::collections::HashMap<String, Vec<XbrlFact>> =
+            std::collections::HashMap::new();
 
         for fact in result.facts {
             let context_id = fact.context_ref.clone();
-            contexts.entry(context_id).or_insert_with(Vec::new).push(fact);
+            contexts
+                .entry(context_id)
+                .or_insert_with(Vec::new)
+                .push(fact);
         }
 
         for (context_id, facts) in contexts {
-            if let Some(statement) = self.create_financial_statement_from_facts(&context_id, facts)? {
+            if let Some(statement) =
+                self.create_financial_statement_from_facts(&context_id, facts)?
+            {
                 statements.push(statement);
             }
         }
@@ -447,7 +474,7 @@ impl XbrlParser {
             xbrl_file_compressed: None,
             xbrl_file_compression_type: None,
             xbrl_file_hash: None,
-            xbrl_processing_status: "completed".to_string(),
+            xbrl_processing_status: Some("completed".to_string()),
             xbrl_processing_error: None,
             xbrl_processing_started_at: None,
             xbrl_processing_completed_at: Some(Utc::now()),
@@ -506,11 +533,11 @@ impl XbrlParser {
             AsyncCommand::new(&self.config.arelle_path)
         };
 
-        cmd.arg("--file")
-            .arg(xbrl_file)
-            .arg("--validate");
+        cmd.arg("--file").arg(xbrl_file).arg("--validate");
 
-        let output = cmd.output().await
+        let output = cmd
+            .output()
+            .await
             .context("Failed to execute Arelle validation")?;
 
         let is_valid = output.status.success();
@@ -528,14 +555,20 @@ impl XbrlParser {
     }
 
     /// Extract taxonomy concepts from XBRL document
-    pub async fn extract_taxonomy_concepts(&self, xbrl_file: &Path) -> Result<Vec<TaxonomyConcept>> {
+    pub async fn extract_taxonomy_concepts(
+        &self,
+        xbrl_file: &Path,
+    ) -> Result<Vec<TaxonomyConcept>> {
         // This would use Arelle to extract taxonomy concepts
         // For now, return empty vector
         Ok(Vec::new())
     }
 
     /// Calculate financial ratios from parsed statements
-    pub async fn calculate_financial_ratios(&self, statements: &[FinancialStatement]) -> Result<Vec<FinancialRatio>> {
+    pub async fn calculate_financial_ratios(
+        &self,
+        statements: &[FinancialStatement],
+    ) -> Result<Vec<FinancialRatio>> {
         // This would calculate common financial ratios
         // For now, return empty vector
         Ok(Vec::new())
@@ -567,7 +600,11 @@ impl XbrlCache {
         Ok(Some(result))
     }
 
-    async fn store_parsed_result(&self, xbrl_file: &Path, result: &[FinancialStatement]) -> Result<()> {
+    async fn store_parsed_result(
+        &self,
+        xbrl_file: &Path,
+        result: &[FinancialStatement],
+    ) -> Result<()> {
         let cache_file = self.get_cache_file_path(xbrl_file);
         let content = serde_json::to_string_pretty(result)?;
         fs::write(&cache_file, content).await?;
@@ -593,7 +630,7 @@ struct ArelleParseResult {
 /// **XBRL Fact**
 ///
 /// Individual XBRL fact from Arelle output.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct XbrlFact {
     concept: String,
     value: Option<String>,
@@ -606,12 +643,13 @@ struct XbrlFact {
 /// **XBRL Context**
 ///
 /// XBRL context from Arelle output.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct XbrlContext {
     id: String,
     entity: XbrlEntity,
     period: XbrlPeriod,
     scenario: Option<XbrlScenario>,
+    entity_identifier: Option<String>,
 }
 
 /// **XBRL Entity**
@@ -644,7 +682,7 @@ struct XbrlScenario {
 /// **XBRL Unit**
 ///
 /// XBRL unit information.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct XbrlUnit {
     id: String,
     measure: String,
@@ -663,7 +701,7 @@ pub struct ValidationReport {
 /// **Taxonomy Concept**
 ///
 /// XBRL taxonomy concept information.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaxonomyConcept {
     pub name: String,
     pub label: String,
@@ -783,7 +821,11 @@ impl StatementMapper {
         // This would contain comprehensive mapping rules for different taxonomies
     }
 
-    fn map_facts_to_statements(&self, facts: &[XbrlFact], contexts: &[XbrlContext]) -> Result<Vec<FinancialStatement>> {
+    fn map_facts_to_statements(
+        &self,
+        facts: &[XbrlFact],
+        contexts: &[XbrlContext],
+    ) -> Result<Vec<FinancialStatement>> {
         // Group facts by context and map to financial statements
         let mut statements = Vec::new();
 
@@ -935,10 +977,22 @@ impl XbrlXmlParser {
 
     /// Check if element is a standard XBRL element
     fn is_standard_xbrl_element(&self, name: &[u8]) -> bool {
-        matches!(name,
-            b"xbrl" | b"context" | b"entity" | b"identifier" | b"period" |
-            b"startDate" | b"endDate" | b"instant" | b"unit" | b"measure" |
-            b"linkbaseRef" | b"schemaRef" | b"roleRef" | b"arcroleRef"
+        matches!(
+            name,
+            b"xbrl"
+                | b"context"
+                | b"entity"
+                | b"identifier"
+                | b"period"
+                | b"startDate"
+                | b"endDate"
+                | b"instant"
+                | b"unit"
+                | b"measure"
+                | b"linkbaseRef"
+                | b"schemaRef"
+                | b"roleRef"
+                | b"arcroleRef"
         )
     }
 
@@ -964,8 +1018,12 @@ impl XbrlXmlParser {
         for attr in element.attributes() {
             let attr = attr?;
             match attr.key.as_ref() {
-                b"contextRef" => fact.context_ref = String::from_utf8_lossy(&attr.value).to_string(),
-                b"unitRef" => fact.unit_ref = Some(String::from_utf8_lossy(&attr.value).to_string()),
+                b"contextRef" => {
+                    fact.context_ref = String::from_utf8_lossy(&attr.value).to_string()
+                }
+                b"unitRef" => {
+                    fact.unit_ref = Some(String::from_utf8_lossy(&attr.value).to_string())
+                }
                 b"decimals" => {
                     if let Ok(decimals_str) = String::from_utf8(attr.value.to_vec()) {
                         fact.decimals = decimals_str.parse().ok();
@@ -1040,21 +1098,19 @@ impl XbrlXmlParser {
         let mut buf = Vec::new();
         loop {
             match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(ref e)) => {
-                    match e.name().as_ref() {
-                        b"entity" => {
-                            if let Some(entity) = self.parse_entity_element(e, reader)? {
-                                context.entity = entity;
-                            }
+                Ok(quick_xml::events::Event::Start(ref e)) => match e.name().as_ref() {
+                    b"entity" => {
+                        if let Some(entity) = self.parse_entity_element(e, reader)? {
+                            context.entity = entity;
                         }
-                        b"period" => {
-                            if let Some(period) = self.parse_period_element(e, reader)? {
-                                context.period = period;
-                            }
-                        }
-                        _ => {}
                     }
-                }
+                    b"period" => {
+                        if let Some(period) = self.parse_period_element(e, reader)? {
+                            context.period = period;
+                        }
+                    }
+                    _ => {}
+                },
                 Ok(quick_xml::events::Event::End(ref e)) => {
                     if e.name().as_ref() == b"context" {
                         break;
@@ -1127,29 +1183,34 @@ impl XbrlXmlParser {
         let mut buf = Vec::new();
         loop {
             match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(ref e)) => {
-                    match e.name().as_ref() {
-                        b"startDate" => {
-                            let mut buf2 = Vec::new();
-                            if let Ok(quick_xml::events::Event::Text(e)) = reader.read_event_into(&mut buf2) {
-                                period.start_date = Some(String::from_utf8_lossy(e.as_ref()).to_string());
-                            }
+                Ok(quick_xml::events::Event::Start(ref e)) => match e.name().as_ref() {
+                    b"startDate" => {
+                        let mut buf2 = Vec::new();
+                        if let Ok(quick_xml::events::Event::Text(e)) =
+                            reader.read_event_into(&mut buf2)
+                        {
+                            period.start_date =
+                                Some(String::from_utf8_lossy(e.as_ref()).to_string());
                         }
-                        b"endDate" => {
-                            let mut buf2 = Vec::new();
-                            if let Ok(quick_xml::events::Event::Text(e)) = reader.read_event_into(&mut buf2) {
-                                period.end_date = Some(String::from_utf8_lossy(e.as_ref()).to_string());
-                            }
-                        }
-                        b"instant" => {
-                            let mut buf2 = Vec::new();
-                            if let Ok(quick_xml::events::Event::Text(e)) = reader.read_event_into(&mut buf2) {
-                                period.instant = Some(String::from_utf8_lossy(e.as_ref()).to_string());
-                            }
-                        }
-                        _ => {}
                     }
-                }
+                    b"endDate" => {
+                        let mut buf2 = Vec::new();
+                        if let Ok(quick_xml::events::Event::Text(e)) =
+                            reader.read_event_into(&mut buf2)
+                        {
+                            period.end_date = Some(String::from_utf8_lossy(e.as_ref()).to_string());
+                        }
+                    }
+                    b"instant" => {
+                        let mut buf2 = Vec::new();
+                        if let Ok(quick_xml::events::Event::Text(e)) =
+                            reader.read_event_into(&mut buf2)
+                        {
+                            period.instant = Some(String::from_utf8_lossy(e.as_ref()).to_string());
+                        }
+                    }
+                    _ => {}
+                },
                 Ok(quick_xml::events::Event::End(ref e)) => {
                     if e.name().as_ref() == b"period" {
                         break;
@@ -1196,7 +1257,9 @@ impl XbrlXmlParser {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
                     if e.name().as_ref() == b"measure" {
                         let mut buf2 = Vec::new();
-                        if let Ok(quick_xml::events::Event::Text(e)) = reader.read_event_into(&mut buf2) {
+                        if let Ok(quick_xml::events::Event::Text(e)) =
+                            reader.read_event_into(&mut buf2)
+                        {
                             unit.measure = String::from_utf8_lossy(e.as_ref()).to_string();
                         }
                     }
@@ -1217,7 +1280,10 @@ impl XbrlXmlParser {
     }
 
     /// Parse a linkbase element
-    fn parse_linkbase_element(&self, element: &quick_xml::events::BytesStart) -> Result<Option<Linkbase>> {
+    fn parse_linkbase_element(
+        &self,
+        element: &quick_xml::events::BytesStart,
+    ) -> Result<Option<Linkbase>> {
         let mut linkbase = Linkbase {
             role: String::new(),
             href: String::new(),
@@ -1230,7 +1296,9 @@ impl XbrlXmlParser {
             match attr.key.as_ref() {
                 b"role" => linkbase.role = String::from_utf8_lossy(&attr.value).to_string(),
                 b"href" => linkbase.href = String::from_utf8_lossy(&attr.value).to_string(),
-                b"arcrole" => linkbase.arcrole = Some(String::from_utf8_lossy(&attr.value).to_string()),
+                b"arcrole" => {
+                    linkbase.arcrole = Some(String::from_utf8_lossy(&attr.value).to_string())
+                }
                 _ => {}
             }
         }
@@ -1299,7 +1367,9 @@ impl XbrlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == b"ix:nonNumeric" || e.name().as_ref() == b"ix:nonFraction" {
+                    if e.name().as_ref() == b"ix:nonNumeric"
+                        || e.name().as_ref() == b"ix:nonFraction"
+                    {
                         if let Some(fact) = self.parse_ixbrl_fact_element(e, &mut reader)? {
                             facts.push(fact);
                         }
@@ -1335,8 +1405,12 @@ impl XbrlParser {
             let attr = attr?;
             match attr.key.as_ref() {
                 b"name" => fact.concept = String::from_utf8_lossy(&attr.value).to_string(),
-                b"contextRef" => fact.context_ref = String::from_utf8_lossy(&attr.value).to_string(),
-                b"unitRef" => fact.unit_ref = Some(String::from_utf8_lossy(&attr.value).to_string()),
+                b"contextRef" => {
+                    fact.context_ref = String::from_utf8_lossy(&attr.value).to_string()
+                }
+                b"unitRef" => {
+                    fact.unit_ref = Some(String::from_utf8_lossy(&attr.value).to_string())
+                }
                 b"decimals" => {
                     if let Ok(decimals_str) = String::from_utf8(attr.value.to_vec()) {
                         fact.decimals = decimals_str.parse().ok();
@@ -1437,21 +1511,19 @@ impl XbrlParser {
         let mut buf = Vec::new();
         loop {
             match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(ref e)) => {
-                    match e.name().as_ref() {
-                        b"entity" => {
-                            if let Some(entity) = self.parse_entity_element(e, reader)? {
-                                context.entity = entity;
-                            }
+                Ok(quick_xml::events::Event::Start(ref e)) => match e.name().as_ref() {
+                    b"entity" => {
+                        if let Some(entity) = self.parse_entity_element(e, reader)? {
+                            context.entity = entity;
                         }
-                        b"period" => {
-                            if let Some(period) = self.parse_period_element(e, reader)? {
-                                context.period = period;
-                            }
-                        }
-                        _ => {}
                     }
-                }
+                    b"period" => {
+                        if let Some(period) = self.parse_period_element(e, reader)? {
+                            context.period = period;
+                        }
+                    }
+                    _ => {}
+                },
                 Ok(quick_xml::events::Event::End(ref e)) => {
                     if e.name().as_ref() == b"context" {
                         break;
@@ -1524,29 +1596,34 @@ impl XbrlParser {
         let mut buf = Vec::new();
         loop {
             match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(ref e)) => {
-                    match e.name().as_ref() {
-                        b"startDate" => {
-                            let mut buf2 = Vec::new();
-                            if let Ok(quick_xml::events::Event::Text(e)) = reader.read_event_into(&mut buf2) {
-                                period.start_date = Some(String::from_utf8_lossy(e.as_ref()).to_string());
-                            }
+                Ok(quick_xml::events::Event::Start(ref e)) => match e.name().as_ref() {
+                    b"startDate" => {
+                        let mut buf2 = Vec::new();
+                        if let Ok(quick_xml::events::Event::Text(e)) =
+                            reader.read_event_into(&mut buf2)
+                        {
+                            period.start_date =
+                                Some(String::from_utf8_lossy(e.as_ref()).to_string());
                         }
-                        b"endDate" => {
-                            let mut buf2 = Vec::new();
-                            if let Ok(quick_xml::events::Event::Text(e)) = reader.read_event_into(&mut buf2) {
-                                period.end_date = Some(String::from_utf8_lossy(e.as_ref()).to_string());
-                            }
-                        }
-                        b"instant" => {
-                            let mut buf2 = Vec::new();
-                            if let Ok(quick_xml::events::Event::Text(e)) = reader.read_event_into(&mut buf2) {
-                                period.instant = Some(String::from_utf8_lossy(e.as_ref()).to_string());
-                            }
-                        }
-                        _ => {}
                     }
-                }
+                    b"endDate" => {
+                        let mut buf2 = Vec::new();
+                        if let Ok(quick_xml::events::Event::Text(e)) =
+                            reader.read_event_into(&mut buf2)
+                        {
+                            period.end_date = Some(String::from_utf8_lossy(e.as_ref()).to_string());
+                        }
+                    }
+                    b"instant" => {
+                        let mut buf2 = Vec::new();
+                        if let Ok(quick_xml::events::Event::Text(e)) =
+                            reader.read_event_into(&mut buf2)
+                        {
+                            period.instant = Some(String::from_utf8_lossy(e.as_ref()).to_string());
+                        }
+                    }
+                    _ => {}
+                },
                 Ok(quick_xml::events::Event::End(ref e)) => {
                     if e.name().as_ref() == b"period" {
                         break;
@@ -1619,7 +1696,9 @@ impl XbrlParser {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
                     if e.name().as_ref() == b"measure" {
                         let mut buf2 = Vec::new();
-                        if let Ok(quick_xml::events::Event::Text(e)) = reader.read_event_into(&mut buf2) {
+                        if let Ok(quick_xml::events::Event::Text(e)) =
+                            reader.read_event_into(&mut buf2)
+                        {
                             unit.measure = String::from_utf8_lossy(e.as_ref()).to_string();
                         }
                     }
@@ -1674,24 +1753,27 @@ impl XbrlParser {
     }
 
     /// Extract line items from facts
-    fn extract_line_items_from_facts(&self, facts: &[XbrlFact], contexts: &[XbrlContext]) -> Result<Vec<FinancialLineItem>> {
+    fn extract_line_items_from_facts(
+        &self,
+        facts: &[XbrlFact],
+        contexts: &[XbrlContext],
+    ) -> Result<Vec<FinancialLineItem>> {
         let mut line_items = Vec::new();
 
         for fact in facts {
             if let Some(value_str) = &fact.value {
-                if let Ok(value) = value_str.parse::<i64>() {
+                if let Ok(value) = value_str.parse::<BigDecimal>() {
                     let line_item = FinancialLineItem {
                         id: Uuid::new_v4(),
                         statement_id: Uuid::new_v4(), // This should be determined from context
-                        taxonomy_concept: Some(fact.concept.clone()),
+                        taxonomy_concept: fact.concept.clone(),
                         standard_label: Some(self.map_concept_to_label(&fact.concept)),
                         value: Some(value),
-                        unit: self.extract_unit_from_fact(fact, contexts),
+                        unit: self.extract_unit_from_fact(fact, contexts).unwrap_or_else(|| "USD".to_string()),
                         context_ref: fact.context_ref.clone(),
                         statement_type: self.determine_statement_type(&fact.concept),
                         statement_section: self.determine_statement_section(&fact.concept),
                         is_calculated: false,
-                        calculation_weight: None,
                         parent_concept: None,
                         created_at: Utc::now(),
                         updated_at: Utc::now(),
@@ -1733,9 +1815,15 @@ impl XbrlParser {
 
     /// Determine statement type from concept
     fn determine_statement_type(&self, concept: &str) -> String {
-        if concept.contains("Assets") || concept.contains("Liabilities") || concept.contains("StockholdersEquity") {
+        if concept.contains("Assets")
+            || concept.contains("Liabilities")
+            || concept.contains("StockholdersEquity")
+        {
             "balance_sheet".to_string()
-        } else if concept.contains("NetIncomeLoss") || concept.contains("Revenues") || concept.contains("Expenses") {
+        } else if concept.contains("NetIncomeLoss")
+            || concept.contains("Revenues")
+            || concept.contains("Expenses")
+        {
             "income_statement".to_string()
         } else if concept.contains("Cash") && concept.contains("Activities") {
             "cash_flow_statement".to_string()
@@ -1764,7 +1852,10 @@ impl XbrlParser {
     }
 
     /// Extract taxonomy concepts from content
-    fn extract_taxonomy_concepts_from_content(&self, content: &str) -> Result<Vec<TaxonomyConcept>> {
+    fn extract_taxonomy_concepts_from_content(
+        &self,
+        content: &str,
+    ) -> Result<Vec<TaxonomyConcept>> {
         let mut concepts = Vec::new();
 
         // Extract concept names from facts
@@ -1786,7 +1877,10 @@ impl XbrlParser {
     }
 
     /// Extract taxonomy concepts from XML result
-    fn extract_taxonomy_concepts_from_xml(&self, xml_result: &XbrlXmlResult) -> Result<Vec<TaxonomyConcept>> {
+    fn extract_taxonomy_concepts_from_xml(
+        &self,
+        xml_result: &XbrlXmlResult,
+    ) -> Result<Vec<TaxonomyConcept>> {
         let mut concepts = Vec::new();
 
         for fact in &xml_result.facts {
@@ -1805,7 +1899,10 @@ impl XbrlParser {
 
     /// Infer data type from concept name
     fn infer_data_type(&self, concept: &str) -> String {
-        if concept.contains("Assets") || concept.contains("Liabilities") || concept.contains("Equity") {
+        if concept.contains("Assets")
+            || concept.contains("Liabilities")
+            || concept.contains("Equity")
+        {
             "monetaryItemType".to_string()
         } else if concept.contains("Shares") || concept.contains("Units") {
             "sharesItemType".to_string()
@@ -1818,7 +1915,10 @@ impl XbrlParser {
 
     /// Infer period type from concept name
     fn infer_period_type(&self, concept: &str) -> String {
-        if concept.contains("Assets") || concept.contains("Liabilities") || concept.contains("Equity") {
+        if concept.contains("Assets")
+            || concept.contains("Liabilities")
+            || concept.contains("Equity")
+        {
             "instant".to_string()
         } else {
             "duration".to_string()
@@ -1829,7 +1929,10 @@ impl XbrlParser {
     fn infer_balance_type(&self, concept: &str) -> Option<String> {
         if concept.contains("Assets") || concept.contains("Expenses") {
             Some("debit".to_string())
-        } else if concept.contains("Liabilities") || concept.contains("Equity") || concept.contains("Revenues") {
+        } else if concept.contains("Liabilities")
+            || concept.contains("Equity")
+            || concept.contains("Revenues")
+        {
             Some("credit".to_string())
         } else {
             None
@@ -1869,7 +1972,10 @@ mod tests {
         // Test XBRL detection
         assert!(matches!(DocumentType::Xbrl, DocumentType::Xbrl));
         assert!(matches!(DocumentType::Ixbrl, DocumentType::Ixbrl));
-        assert!(matches!(DocumentType::HtmlEmbedded, DocumentType::HtmlEmbedded));
+        assert!(matches!(
+            DocumentType::HtmlEmbedded,
+            DocumentType::HtmlEmbedded
+        ));
     }
 
     #[test]

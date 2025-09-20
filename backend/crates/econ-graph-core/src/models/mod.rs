@@ -27,7 +27,11 @@ pub use crawl_queue::*;
 pub use data_point::*;
 pub use data_source::*;
 pub use economic_series::*;
-pub use educational_content::{EducationalModule, EducationalResource, ResourceType, LearningDifficulty, LearningCategory, ContentSection, InteractiveExercise, AssessmentQuestion, LearningPath, LearningProgress, LearningAchievement, ExpertInsight};
+pub use educational_content::{
+    AssessmentQuestion, ContentSection, EducationalModule, EducationalResource, ExpertInsight,
+    InteractiveExercise, LearningAchievement, LearningCategory, LearningDifficulty, LearningPath,
+    LearningProgress, ResourceType,
+};
 pub use financial_annotation::*;
 pub use financial_line_item::*;
 pub use financial_ratios::*;
