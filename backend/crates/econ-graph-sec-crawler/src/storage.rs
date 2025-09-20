@@ -294,7 +294,8 @@ impl XbrlStorage {
 
         let content = if let Some(oid) = statement.xbrl_file_oid {
             // Retrieve from Large Object
-            self.retrieve_from_large_object(&mut conn, oid as i32).await?
+            self.retrieve_from_large_object(&mut conn, oid as i32)
+                .await?
         } else if let Some(content) = statement.xbrl_file_content {
             // Retrieve from bytea column
             content
@@ -305,9 +306,7 @@ impl XbrlStorage {
         // Decompress if necessary
         if statement.xbrl_file_compressed {
             match statement.xbrl_file_compression_type.as_str() {
-                "zstd" => {
-                    Ok(decode_all(&content[..]).context("Failed to decompress XBRL file")?)
-                }
+                "zstd" => Ok(decode_all(&content[..]).context("Failed to decompress XBRL file")?),
                 _ => Ok(content), // Unknown compression type, return as-is
             }
         } else {

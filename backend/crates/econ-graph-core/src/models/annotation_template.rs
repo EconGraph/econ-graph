@@ -3,6 +3,7 @@ use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::enums::AnnotationType;
 use crate::schema::annotation_templates;
 
 /// Template for reusable annotation patterns
@@ -13,7 +14,7 @@ pub struct AnnotationTemplate {
     pub name: String,
     pub description: Option<String>,
     pub template_content: String,
-    pub annotation_type: String,
+    pub annotation_type: AnnotationType,
     pub tags: Vec<String>,
     pub is_public: bool,
     pub created_by: Uuid,
@@ -29,7 +30,7 @@ pub struct NewAnnotationTemplate {
     pub name: String,
     pub description: Option<String>,
     pub template_content: String,
-    pub annotation_type: String,
+    pub annotation_type: AnnotationType,
     pub tags: Vec<String>,
     pub is_public: bool,
     pub created_by: Uuid,
@@ -47,7 +48,7 @@ impl NewAnnotationTemplate {
             name,
             description: None,
             template_content,
-            annotation_type: annotation_type.to_string(),
+            annotation_type,
             tags: Vec::new(),
             is_public: false,
             created_by,
@@ -171,6 +172,3 @@ impl Default for AnnotationTemplateFilter {
         }
     }
 }
-
-// Re-export AnnotationType from financial_annotation module
-use crate::models::financial_annotation::AnnotationType;

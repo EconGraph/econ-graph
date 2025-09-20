@@ -1,5 +1,7 @@
 // @generated automatically by Diesel CLI.
 
+use diesel::sql_types::*;
+
 diesel::table! {
     annotation_assignments (id) {
         id -> Uuid,
@@ -7,9 +9,9 @@ diesel::table! {
         line_item_id -> Nullable<Uuid>,
         assignee_id -> Uuid,
         assigner_id -> Uuid,
-        assignment_type -> AssignmentType,
+        assignment_type -> crate::enums::AssignmentTypeSqlType,
         due_date -> Nullable<Timestamptz>,
-        status -> AssignmentStatus,
+        status -> crate::enums::AssignmentStatusSqlType,
         notes -> Nullable<Text>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
@@ -47,7 +49,7 @@ diesel::table! {
         name -> Varchar,
         description -> Nullable<Text>,
         template_content -> Text,
-        annotation_type -> AnnotationType,
+        annotation_type -> crate::enums::AnnotationTypeSqlType,
         tags -> Nullable<Array<Nullable<Text>>>,
         is_public -> Nullable<Bool>,
         created_by -> Uuid,
@@ -359,12 +361,12 @@ diesel::table! {
         line_item_id -> Nullable<Uuid>,
         author_id -> Uuid,
         content -> Text,
-        annotation_type -> AnnotationType,
+        annotation_type -> crate::enums::AnnotationTypeSqlType,
         tags -> Nullable<Array<Nullable<Text>>>,
         highlights -> Nullable<Jsonb>,
         mentions -> Nullable<Array<Nullable<Uuid>>>,
         parent_annotation_id -> Nullable<Uuid>,
-        status -> AnnotationStatus,
+        status -> crate::enums::AnnotationStatusSqlType,
         is_private -> Nullable<Bool>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
@@ -394,8 +396,8 @@ diesel::table! {
         decimals -> Nullable<Int4>,
         is_credit -> Nullable<Bool>,
         is_debit -> Nullable<Bool>,
-        statement_type -> StatementType,
-        statement_section -> StatementSection,
+        statement_type -> crate::enums::StatementTypeSqlType,
+        statement_section -> crate::enums::StatementSectionSqlType,
         #[max_length = 255]
         parent_concept -> Nullable<Varchar>,
         level -> Int4,
@@ -452,10 +454,10 @@ diesel::table! {
         xbrl_file_content -> Nullable<Bytea>,
         xbrl_file_size_bytes -> Nullable<Int8>,
         xbrl_file_compressed -> Bool,
-        xbrl_file_compression_type -> CompressionType,
+        xbrl_file_compression_type -> crate::enums::CompressionTypeSqlType,
         #[max_length = 64]
         xbrl_file_hash -> Nullable<Varchar>,
-        xbrl_processing_status -> ProcessingStatus,
+        xbrl_processing_status -> crate::enums::ProcessingStatusSqlType,
         xbrl_processing_error -> Nullable<Text>,
         xbrl_processing_started_at -> Nullable<Timestamptz>,
         xbrl_processing_completed_at -> Nullable<Timestamptz>,
@@ -663,8 +665,8 @@ diesel::table! {
     xbrl_processing_logs (id) {
         id -> Uuid,
         statement_id -> Uuid,
-        processing_step -> ProcessingStep,
-        status -> ProcessingStatus,
+        processing_step -> Text,
+        status -> crate::enums::ProcessingStatusSqlType,
         error_message -> Nullable<Text>,
         processing_time_ms -> Nullable<Int4>,
         records_processed -> Nullable<Int4>,

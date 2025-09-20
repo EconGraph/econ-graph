@@ -261,7 +261,7 @@ impl XbrlParser {
 
         let validation_report = self.fact_validator.validate_facts(&facts)?;
         let line_items = self.extract_line_items_from_facts(&facts, &contexts)?;
-        
+
         Ok(XbrlParseResult {
             statements,
             line_items,
@@ -1777,8 +1777,7 @@ impl XbrlParser {
                         standard_label: Some(self.map_concept_to_label(&fact.concept)),
                         custom_label: None,
                         value: Some(value),
-                        unit: self
-                            .extract_unit_from_fact(fact, contexts),
+                        unit: self.extract_unit_from_fact(fact, contexts),
                         context_ref: fact.context_ref.clone(),
                         segment_ref: None,
                         scenario_ref: None,

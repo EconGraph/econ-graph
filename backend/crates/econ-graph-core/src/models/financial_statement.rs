@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::schema::financial_statements;
 use crate::enums::{CompressionType, ProcessingStatus};
+use crate::schema::financial_statements;
 
 /// **FinancialStatement Model**
 ///

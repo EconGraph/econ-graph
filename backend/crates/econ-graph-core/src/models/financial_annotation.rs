@@ -3,6 +3,7 @@ use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::enums::{AnnotationStatus, AnnotationType};
 use crate::schema::financial_annotations;
 
 /// Financial annotation for collaborative analysis
@@ -14,12 +15,12 @@ pub struct FinancialAnnotation {
     pub line_item_id: Option<Uuid>,
     pub author_id: Uuid,
     pub content: String,
-    pub annotation_type: String,
+    pub annotation_type: AnnotationType,
     pub tags: Vec<String>,
     pub highlights: serde_json::Value,
     pub mentions: Vec<Uuid>,
     pub parent_annotation_id: Option<Uuid>,
-    pub status: String,
+    pub status: AnnotationStatus,
     pub is_private: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -33,12 +34,12 @@ pub struct NewFinancialAnnotation {
     pub line_item_id: Option<Uuid>,
     pub author_id: Uuid,
     pub content: String,
-    pub annotation_type: String,
+    pub annotation_type: AnnotationType,
     pub tags: Vec<String>,
     pub highlights: serde_json::Value,
     pub mentions: Vec<Uuid>,
     pub parent_annotation_id: Option<Uuid>,
-    pub status: String,
+    pub status: AnnotationStatus,
     pub is_private: bool,
 }
 
@@ -55,12 +56,12 @@ impl NewFinancialAnnotation {
             line_item_id: None,
             author_id,
             content,
-            annotation_type: annotation_type.to_string(),
+            annotation_type,
             tags: Vec::new(),
             highlights: serde_json::Value::Null,
             mentions: Vec::new(),
             parent_annotation_id: None,
-            status: "active".to_string(),
+            status: AnnotationStatus::Active,
             is_private: false,
         }
     }
@@ -78,12 +79,12 @@ impl NewFinancialAnnotation {
             line_item_id: Some(line_item_id),
             author_id,
             content,
-            annotation_type: annotation_type.to_string(),
+            annotation_type,
             tags: Vec::new(),
             highlights: serde_json::Value::Null,
             mentions: Vec::new(),
             parent_annotation_id: None,
-            status: "active".to_string(),
+            status: AnnotationStatus::Active,
             is_private: false,
         }
     }
@@ -116,96 +117,6 @@ impl NewFinancialAnnotation {
     pub fn as_private(mut self) -> Self {
         self.is_private = true;
         self
-    }
-}
-
-/// Annotation types for categorization
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AnnotationType {
-    Comment,
-    Question,
-    Concern,
-    Insight,
-    Risk,
-    Opportunity,
-    OneTimeItem,
-    IndustryContext,
-    RevenueGrowth,
-    CostConcern,
-    CashFlow,
-    BalanceSheet,
-    RatioAnalysis,
-    PeerComparison,
-    TrendAnalysis,
-}
-
-impl AnnotationType {
-    pub fn to_string(&self) -> String {
-        match self {
-            AnnotationType::Comment => "comment".to_string(),
-            AnnotationType::Question => "question".to_string(),
-            AnnotationType::Concern => "concern".to_string(),
-            AnnotationType::Insight => "insight".to_string(),
-            AnnotationType::Risk => "risk".to_string(),
-            AnnotationType::Opportunity => "opportunity".to_string(),
-            AnnotationType::OneTimeItem => "one_time_item".to_string(),
-            AnnotationType::IndustryContext => "industry_context".to_string(),
-            AnnotationType::RevenueGrowth => "revenue_growth".to_string(),
-            AnnotationType::CostConcern => "cost_concern".to_string(),
-            AnnotationType::CashFlow => "cash_flow".to_string(),
-            AnnotationType::BalanceSheet => "balance_sheet".to_string(),
-            AnnotationType::RatioAnalysis => "ratio_analysis".to_string(),
-            AnnotationType::PeerComparison => "peer_comparison".to_string(),
-            AnnotationType::TrendAnalysis => "trend_analysis".to_string(),
-        }
-    }
-
-    pub fn from_string(s: &str) -> Option<Self> {
-        match s {
-            "comment" => Some(AnnotationType::Comment),
-            "question" => Some(AnnotationType::Question),
-            "concern" => Some(AnnotationType::Concern),
-            "insight" => Some(AnnotationType::Insight),
-            "risk" => Some(AnnotationType::Risk),
-            "opportunity" => Some(AnnotationType::Opportunity),
-            "one_time_item" => Some(AnnotationType::OneTimeItem),
-            "industry_context" => Some(AnnotationType::IndustryContext),
-            "revenue_growth" => Some(AnnotationType::RevenueGrowth),
-            "cost_concern" => Some(AnnotationType::CostConcern),
-            "cash_flow" => Some(AnnotationType::CashFlow),
-            "balance_sheet" => Some(AnnotationType::BalanceSheet),
-            "ratio_analysis" => Some(AnnotationType::RatioAnalysis),
-            "peer_comparison" => Some(AnnotationType::PeerComparison),
-            "trend_analysis" => Some(AnnotationType::TrendAnalysis),
-            _ => None,
-        }
-    }
-}
-
-/// Annotation status
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AnnotationStatus {
-    Active,
-    Resolved,
-    Archived,
-}
-
-impl AnnotationStatus {
-    pub fn to_string(&self) -> String {
-        match self {
-            AnnotationStatus::Active => "active".to_string(),
-            AnnotationStatus::Resolved => "resolved".to_string(),
-            AnnotationStatus::Archived => "archived".to_string(),
-        }
-    }
-
-    pub fn from_string(s: &str) -> Option<Self> {
-        match s {
-            "active" => Some(AnnotationStatus::Active),
-            "resolved" => Some(AnnotationStatus::Resolved),
-            "archived" => Some(AnnotationStatus::Archived),
-            _ => None,
-        }
     }
 }
 

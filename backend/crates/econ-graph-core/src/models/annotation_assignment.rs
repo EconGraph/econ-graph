@@ -3,6 +3,7 @@ use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::enums::{AssignmentStatus, AssignmentType};
 use crate::schema::annotation_assignments;
 
 /// Assignment for team workflow management
@@ -14,9 +15,9 @@ pub struct AnnotationAssignment {
     pub line_item_id: Option<Uuid>,
     pub assignee_id: Uuid,
     pub assigner_id: Uuid,
-    pub assignment_type: String,
+    pub assignment_type: AssignmentType,
     pub due_date: Option<DateTime<Utc>>,
-    pub status: String,
+    pub status: AssignmentStatus,
     pub notes: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -30,9 +31,9 @@ pub struct NewAnnotationAssignment {
     pub line_item_id: Option<Uuid>,
     pub assignee_id: Uuid,
     pub assigner_id: Uuid,
-    pub assignment_type: String,
+    pub assignment_type: AssignmentType,
     pub due_date: Option<DateTime<Utc>>,
-    pub status: String,
+    pub status: AssignmentStatus,
     pub notes: Option<String>,
 }
 
@@ -49,9 +50,9 @@ impl NewAnnotationAssignment {
             line_item_id: None,
             assignee_id,
             assigner_id,
-            assignment_type: assignment_type.to_string(),
+            assignment_type,
             due_date: None,
-            status: "pending".to_string(),
+            status: AssignmentStatus::Pending,
             notes: None,
         }
     }
@@ -69,9 +70,9 @@ impl NewAnnotationAssignment {
             line_item_id: Some(line_item_id),
             assignee_id,
             assigner_id,
-            assignment_type: assignment_type.to_string(),
+            assignment_type,
             due_date: None,
-            status: "pending".to_string(),
+            status: AssignmentStatus::Pending,
             notes: None,
         }
     }
@@ -86,93 +87,6 @@ impl NewAnnotationAssignment {
     pub fn with_notes(mut self, notes: String) -> Self {
         self.notes = Some(notes);
         self
-    }
-}
-
-/// Assignment types for different workflow tasks
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AssignmentType {
-    Review,
-    Analyze,
-    Verify,
-    Comment,
-    Approve,
-    Investigate,
-    Compare,
-    Benchmark,
-    RiskAssessment,
-    TrendAnalysis,
-    RatioAnalysis,
-    PeerComparison,
-}
-
-impl AssignmentType {
-    pub fn to_string(&self) -> String {
-        match self {
-            AssignmentType::Review => "review".to_string(),
-            AssignmentType::Analyze => "analyze".to_string(),
-            AssignmentType::Verify => "verify".to_string(),
-            AssignmentType::Comment => "comment".to_string(),
-            AssignmentType::Approve => "approve".to_string(),
-            AssignmentType::Investigate => "investigate".to_string(),
-            AssignmentType::Compare => "compare".to_string(),
-            AssignmentType::Benchmark => "benchmark".to_string(),
-            AssignmentType::RiskAssessment => "risk_assessment".to_string(),
-            AssignmentType::TrendAnalysis => "trend_analysis".to_string(),
-            AssignmentType::RatioAnalysis => "ratio_analysis".to_string(),
-            AssignmentType::PeerComparison => "peer_comparison".to_string(),
-        }
-    }
-
-    pub fn from_string(s: &str) -> Option<Self> {
-        match s {
-            "review" => Some(AssignmentType::Review),
-            "analyze" => Some(AssignmentType::Analyze),
-            "verify" => Some(AssignmentType::Verify),
-            "comment" => Some(AssignmentType::Comment),
-            "approve" => Some(AssignmentType::Approve),
-            "investigate" => Some(AssignmentType::Investigate),
-            "compare" => Some(AssignmentType::Compare),
-            "benchmark" => Some(AssignmentType::Benchmark),
-            "risk_assessment" => Some(AssignmentType::RiskAssessment),
-            "trend_analysis" => Some(AssignmentType::TrendAnalysis),
-            "ratio_analysis" => Some(AssignmentType::RatioAnalysis),
-            "peer_comparison" => Some(AssignmentType::PeerComparison),
-            _ => None,
-        }
-    }
-}
-
-/// Assignment status
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AssignmentStatus {
-    Pending,
-    InProgress,
-    Completed,
-    Overdue,
-    Cancelled,
-}
-
-impl AssignmentStatus {
-    pub fn to_string(&self) -> String {
-        match self {
-            AssignmentStatus::Pending => "pending".to_string(),
-            AssignmentStatus::InProgress => "in_progress".to_string(),
-            AssignmentStatus::Completed => "completed".to_string(),
-            AssignmentStatus::Overdue => "overdue".to_string(),
-            AssignmentStatus::Cancelled => "cancelled".to_string(),
-        }
-    }
-
-    pub fn from_string(s: &str) -> Option<Self> {
-        match s {
-            "pending" => Some(AssignmentStatus::Pending),
-            "in_progress" => Some(AssignmentStatus::InProgress),
-            "completed" => Some(AssignmentStatus::Completed),
-            "overdue" => Some(AssignmentStatus::Overdue),
-            "cancelled" => Some(AssignmentStatus::Cancelled),
-            _ => None,
-        }
     }
 }
 

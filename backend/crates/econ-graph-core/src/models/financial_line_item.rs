@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
+use crate::enums::{StatementSection, StatementType};
 use crate::schema::financial_line_items;
-use crate::enums::{StatementType, StatementSection};
 
 /// **FinancialLineItem Model**
 ///
@@ -448,4 +448,3 @@ pub struct FinancialLineItemSummary {
     /// Number of unique concepts
     pub concept_coverage: i32,
 }
-

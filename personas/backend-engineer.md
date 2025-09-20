@@ -299,7 +299,113 @@ ALTER TABLE financial_statements DROP COLUMN old_status_column;
 - **URLs and paths**: `document_url`, `file_path`
 - **Codes that change frequently**: `sic_code`, `industry_code`
 
-##### 8. Data Integrity Validation
+##### 8. Diesel-Derive-Enum Integration (CRITICAL)
+
+**⚠️ WARNING: diesel-derive-enum is tricky and has specific requirements. Follow these steps exactly to avoid compilation errors.**
+
+**Step 1: Create PostgreSQL Enum Types in Migration**
+```sql
+-- Create enum types FIRST in migration
+CREATE TYPE compression_type AS ENUM ('zstd', 'lz4', 'gzip', 'none');
+CREATE TYPE processing_status AS ENUM ('pending', 'processing', 'completed', 'failed');
+CREATE TYPE statement_type AS ENUM ('income_statement', 'balance_sheet', 'cash_flow', 'equity');
+```
+
+**Step 2: Use Correct DieselType Attribute**
+```rust
+// ✅ CORRECT: Use the EXACT snake_case name from PostgreSQL
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel_derive_enum::DbEnum)]
+#[DieselType = "compression_type"]  // Must match CREATE TYPE name exactly
+pub enum CompressionType {
+    #[db_rename = "zstd"]
+    Zstd,
+    #[db_rename = "lz4"]
+    Lz4,
+    #[db_rename = "gzip"]
+    Gzip,
+    #[db_rename = "none"]
+    None,
+}
+```
+
+**❌ COMMON MISTAKES TO AVOID:**
+```rust
+// ❌ WRONG: Using PascalCase (will cause name conflicts)
+#[DieselType = "CompressionType"]
+
+// ❌ WRONG: Using generic types (won't work with PostgreSQL enums)
+#[DieselType = "Text"]
+#[DieselType = "VarChar"]
+
+// ❌ WRONG: Mismatched enum name (must match CREATE TYPE exactly)
+CREATE TYPE compression_type AS ENUM (...);
+#[DieselType = "compressionType"]  // Wrong case!
+```
+
+**Step 3: Update Schema.rs to Use Enum Types**
+```rust
+// In schema.rs, use the actual enum type, not Text
+diesel::table! {
+    financial_statements (id) {
+        // ...
+        xbrl_file_compression_type -> CompressionType,  // Not Text!
+        xbrl_processing_status -> ProcessingStatus,     // Not Text!
+        // ...
+    }
+}
+```
+
+**Step 4: Update Rust Models**
+```rust
+// In your Rust models, use the enum types directly
+pub struct FinancialStatement {
+    pub xbrl_file_compression_type: CompressionType,  // Not String!
+    pub xbrl_processing_status: ProcessingStatus,     // Not String!
+    // ...
+}
+```
+
+**Step 5: Add diesel-derive-enum Dependency**
+```toml
+# In Cargo.toml
+[dependencies]
+diesel-derive-enum = { version = "2.1", features = ["postgres"] }
+```
+
+**Troubleshooting Common Issues:**
+
+1. **Name Collision Errors**: If you see "the name `CompressionType` is defined multiple times", check that your `#[DieselType]` attribute uses the exact snake_case name from the PostgreSQL migration.
+
+2. **Trait Bound Errors**: If you see `AsExpression` or `FromSqlRow` errors, ensure you're using the correct `#[DieselType]` attribute and that the enum is properly derived.
+
+3. **Schema Mismatch**: If Diesel schema shows `Text` but you want enums, you need to run `diesel print-schema` after creating the enum types in the database.
+
+4. **Version Compatibility**: Ensure diesel-derive-enum version is compatible with your Diesel version. Check the crate documentation for version compatibility.
+
+**Complete Working Example:**
+```rust
+// 1. Migration creates: CREATE TYPE user_role AS ENUM ('admin', 'user');
+// 2. Rust enum:
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel_derive_enum::DbEnum)]
+#[DieselType = "user_role"]  // Exact match to CREATE TYPE name
+pub enum UserRole {
+    #[db_rename = "admin"]
+    Admin,
+    #[db_rename = "user"]
+    User,
+}
+// 3. Schema.rs: role -> UserRole,
+// 4. Model: pub role: UserRole,
+```
+
+**Key Success Factors:**
+- ✅ PostgreSQL enum name (snake_case) must exactly match `#[DieselType]` attribute
+- ✅ Enum variants must use `#[db_rename]` to match PostgreSQL enum values
+- ✅ Schema.rs must reference the Rust enum type, not Text
+- ✅ Rust models must use the enum type, not String
+- ✅ All required traits must be derived (Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, DbEnum)
+
+##### 9. Data Integrity Validation
 
 **Before committing schema changes:**
 1. **Verify logical consistency**: Every field should have a clear purpose
