@@ -1505,7 +1505,7 @@ jobs:
   e2e-container-build:
     name: Build E2E Test Containers
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     needs: [frontend-integration-tests]
 
     steps:
