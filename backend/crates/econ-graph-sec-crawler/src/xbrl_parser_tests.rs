@@ -234,6 +234,7 @@ fn test_xbrl_parser_config_custom() {
         validate_xbrl: false,
         extract_taxonomy: false,
         calculate_ratios: false,
+        use_arelle: false,
     };
 
     assert_eq!(config.arelle_path, PathBuf::from("/custom/arelle"));
@@ -649,18 +650,23 @@ async fn test_parse_real_jpmorgan_bank_xbrl_file() {
     let parser = XbrlParser::with_config(XbrlParserConfig {
         use_arelle: false, // Use native parsing for testing
         ..Default::default()
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 
     let file_path = get_test_data_path("jpmorgan_2025_q2_10q.xml");
-    
+
     // Check if the file exists
     if !file_path.exists() {
-        println!("Skipping test - JPMorgan XBRL file not found at {:?}", file_path);
+        println!(
+            "Skipping test - JPMorgan XBRL file not found at {:?}",
+            file_path
+        );
         return;
     }
 
     let result = parser.parse_xbrl_document(&file_path).await;
-    
+
     match result {
         Ok(parse_result) => {
             println!("Successfully parsed JPMorgan bank XBRL file:");
@@ -669,25 +675,38 @@ async fn test_parse_real_jpmorgan_bank_xbrl_file() {
             println!("  - Facts: {}", parse_result.facts.len());
             println!("  - Contexts: {}", parse_result.contexts.len());
             println!("  - Units: {}", parse_result.units.len());
-            println!("  - Taxonomy concepts: {}", parse_result.taxonomy_concepts.len());
-            
+            println!(
+                "  - Taxonomy concepts: {}",
+                parse_result.taxonomy_concepts.len()
+            );
+
             // Verify we extracted some financial data
             assert!(!parse_result.facts.is_empty(), "Should extract XBRL facts");
             assert!(!parse_result.contexts.is_empty(), "Should extract contexts");
             assert!(!parse_result.units.is_empty(), "Should extract units");
-            
+
             // Check for JPMorgan-specific data
-            let has_jpmorgan_context = parse_result.contexts.iter()
-                .any(|ctx| ctx.entity_identifier.as_ref().map_or(false, |id| id.contains("0000019617")));
-            assert!(has_jpmorgan_context, "Should contain JPMorgan's CIK in contexts");
-            
+            let has_jpmorgan_context = parse_result.contexts.iter().any(|ctx| {
+                ctx.entity_identifier
+                    .as_ref()
+                    .map_or(false, |id| id.contains("0000019617"))
+            });
+            assert!(
+                has_jpmorgan_context,
+                "Should contain JPMorgan's CIK in contexts"
+            );
+
             // Check for bank-specific concepts (loans, deposits, etc.)
-            let has_loan_concepts = parse_result.facts.iter()
-                .any(|fact| fact.concept.to_lowercase().contains("loan") || 
-                           fact.concept.to_lowercase().contains("deposit") ||
-                           fact.concept.to_lowercase().contains("credit"));
-            assert!(has_loan_concepts, "Should contain bank-specific financial concepts");
-            
+            let has_loan_concepts = parse_result.facts.iter().any(|fact| {
+                fact.concept.to_lowercase().contains("loan")
+                    || fact.concept.to_lowercase().contains("deposit")
+                    || fact.concept.to_lowercase().contains("credit")
+            });
+            assert!(
+                has_loan_concepts,
+                "Should contain bank-specific financial concepts"
+            );
+
             println!("✅ Real bank XBRL file parsing test passed");
         }
         Err(e) => {
@@ -703,18 +722,23 @@ async fn test_parse_real_chevron_oil_company_xbrl_file() {
     let parser = XbrlParser::with_config(XbrlParserConfig {
         use_arelle: false, // Use native parsing for testing
         ..Default::default()
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 
     let file_path = get_test_data_path("chevron_2025_q2_10q.xml");
-    
+
     // Check if the file exists
     if !file_path.exists() {
-        println!("Skipping test - Chevron XBRL file not found at {:?}", file_path);
+        println!(
+            "Skipping test - Chevron XBRL file not found at {:?}",
+            file_path
+        );
         return;
     }
 
     let result = parser.parse_xbrl_document(&file_path).await;
-    
+
     match result {
         Ok(parse_result) => {
             println!("Successfully parsed Chevron oil company XBRL file:");
@@ -723,28 +747,41 @@ async fn test_parse_real_chevron_oil_company_xbrl_file() {
             println!("  - Facts: {}", parse_result.facts.len());
             println!("  - Contexts: {}", parse_result.contexts.len());
             println!("  - Units: {}", parse_result.units.len());
-            println!("  - Taxonomy concepts: {}", parse_result.taxonomy_concepts.len());
-            
+            println!(
+                "  - Taxonomy concepts: {}",
+                parse_result.taxonomy_concepts.len()
+            );
+
             // Verify we extracted some financial data
             assert!(!parse_result.facts.is_empty(), "Should extract XBRL facts");
             assert!(!parse_result.contexts.is_empty(), "Should extract contexts");
             assert!(!parse_result.units.is_empty(), "Should extract units");
-            
+
             // Check for Chevron-specific data
-            let has_chevron_context = parse_result.contexts.iter()
-                .any(|ctx| ctx.entity_identifier.as_ref().map_or(false, |id| id.contains("0000093410")));
-            assert!(has_chevron_context, "Should contain Chevron's CIK in contexts");
-            
+            let has_chevron_context = parse_result.contexts.iter().any(|ctx| {
+                ctx.entity_identifier
+                    .as_ref()
+                    .map_or(false, |id| id.contains("0000093410"))
+            });
+            assert!(
+                has_chevron_context,
+                "Should contain Chevron's CIK in contexts"
+            );
+
             // Check for oil/gas industry-specific concepts
-            let has_oil_concepts = parse_result.facts.iter()
-                .any(|fact| fact.concept.to_lowercase().contains("oil") || 
-                           fact.concept.to_lowercase().contains("gas") ||
-                           fact.concept.to_lowercase().contains("reserve") ||
-                           fact.concept.to_lowercase().contains("exploration") ||
-                           fact.concept.to_lowercase().contains("production") ||
-                           fact.concept.to_lowercase().contains("crude"));
-            assert!(has_oil_concepts, "Should contain oil/gas industry-specific financial concepts");
-            
+            let has_oil_concepts = parse_result.facts.iter().any(|fact| {
+                fact.concept.to_lowercase().contains("oil")
+                    || fact.concept.to_lowercase().contains("gas")
+                    || fact.concept.to_lowercase().contains("reserve")
+                    || fact.concept.to_lowercase().contains("exploration")
+                    || fact.concept.to_lowercase().contains("production")
+                    || fact.concept.to_lowercase().contains("crude")
+            });
+            assert!(
+                has_oil_concepts,
+                "Should contain oil/gas industry-specific financial concepts"
+            );
+
             println!("✅ Real oil company XBRL file parsing test passed");
         }
         Err(e) => {

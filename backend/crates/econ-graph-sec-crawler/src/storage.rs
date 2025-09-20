@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use diesel::expression_methods::ExpressionMethods;
 use diesel::prelude::*;
 use diesel::query_dsl::QueryDsl;
-use diesel::expression_methods::ExpressionMethods;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use sha2::{Digest, Sha256};
 use std::io::{Cursor, Read};
@@ -12,8 +12,8 @@ use uuid::Uuid;
 use zstd::stream::{decode_all, encode_all};
 
 use crate::models::{StoredXbrlDocument, XbrlStorageStats};
-use econ_graph_core::models::{Company, FinancialStatement};
 use econ_graph_core::database::DatabasePool;
+use econ_graph_core::models::{Company, FinancialStatement};
 
 /// Configuration for XBRL file storage
 #[derive(Debug, Clone)]

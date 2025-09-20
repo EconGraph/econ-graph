@@ -259,9 +259,7 @@ impl SecRateLimiter {
     pub fn time_until_next_permit(&self) -> Option<Duration> {
         match self.limiter.check() {
             Ok(_) => None,
-            Err(_) => {
-                Some(Duration::from_millis(100))
-            }
+            Err(_) => Some(Duration::from_millis(100)),
         }
     }
 

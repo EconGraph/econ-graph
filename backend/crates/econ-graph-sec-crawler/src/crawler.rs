@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::{DateTime, NaiveDate, Utc, Datelike};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use reqwest::{
     header::{HeaderMap, HeaderValue, USER_AGENT},
     Client,
@@ -17,8 +17,8 @@ use crate::models::{
 use crate::rate_limiter::SecRateLimiter;
 use crate::storage::{XbrlStorage, XbrlStorageConfig};
 use crate::utils::{build_submissions_url, build_xbrl_url, get_fiscal_quarter, parse_sec_date};
-use econ_graph_core::models::{Company, FinancialStatement};
 use econ_graph_core::database::DatabasePool;
+use econ_graph_core::models::{Company, FinancialStatement};
 
 /// **SEC EDGAR Crawler**
 ///
@@ -75,7 +75,8 @@ impl SecEdgarCrawler {
             .context("Failed to create HTTP client")?;
 
         // Create rate limiter
-        let rate_limiter = SecRateLimiter::new(config.max_requests_per_second, Duration::from_secs(1));
+        let rate_limiter =
+            SecRateLimiter::new(config.max_requests_per_second, Duration::from_secs(1));
 
         // Create XBRL storage with default configuration
         let storage_config = XbrlStorageConfig::default();
@@ -314,8 +315,8 @@ impl SecEdgarCrawler {
                 accession_number,
                 &content,
                 company.id,
-                DateTime::from_utc(filing_date.and_hms_opt(0, 0, 0).unwrap(), Utc),
-                DateTime::from_utc(report_date.and_hms_opt(0, 0, 0).unwrap(), Utc),
+                Utc.from_utc_datetime(&filing_date.and_hms_opt(0, 0, 0).unwrap()),
+                Utc.from_utc_datetime(&report_date.and_hms_opt(0, 0, 0).unwrap()),
                 report_date.year(),
                 Some(get_fiscal_quarter(&report_date)),
                 Some(&filing_info.form[0]),

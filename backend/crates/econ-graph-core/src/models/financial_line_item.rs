@@ -58,7 +58,7 @@ use crate::schema::financial_line_items;
 ///     updated_at: Utc::now(),
 /// };
 /// ```
-#[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
+#[derive(Debug, Clone, Queryable, Selectable, Insertable, Serialize, Deserialize)]
 #[diesel(table_name = financial_line_items)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct FinancialLineItem {

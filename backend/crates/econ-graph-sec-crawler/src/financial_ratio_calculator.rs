@@ -7,8 +7,8 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::config_loader::{FinancialAnalysisConfig, RatioBenchmark};
-use econ_graph_core::models::{FinancialLineItem, FinancialRatios, FinancialStatement};
 use bigdecimal::{BigDecimal, ToPrimitive};
+use econ_graph_core::models::{FinancialLineItem, FinancialRatios, FinancialStatement};
 
 /// **Financial Ratio Calculator**
 ///

@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::{DateTime, NaiveDate, Utc, Datelike};
-use std::path::PathBuf;
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use tokio::fs;
 use tokio::process::Command as AsyncCommand;
@@ -16,8 +16,8 @@ use uuid::Uuid;
 use xml::reader::{EventReader, XmlEvent};
 
 use crate::models::{StoredXbrlDocument, XbrlStorageStats};
-use econ_graph_core::models::{Company, FinancialLineItem, FinancialStatement};
 use bigdecimal::BigDecimal;
+use econ_graph_core::models::{Company, FinancialLineItem, FinancialStatement};
 
 /// **XBRL Parser Configuration**
 ///
@@ -205,7 +205,7 @@ impl XbrlParser {
     }
 
     /// Detect the type of XBRL document
-    async fn detect_document_type(&self, file_path: &Path) -> Result<DocumentType> {
+    pub async fn detect_document_type(&self, file_path: &Path) -> Result<DocumentType> {
         let content = fs::read_to_string(file_path).await?;
 
         if content.contains("<xbrl") || content.contains("<xbrli:xbrl") {
@@ -578,7 +578,7 @@ impl XbrlParser {
 /// **XBRL Cache**
 ///
 /// Cache for parsed XBRL results to avoid re-parsing.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct XbrlCache {
     cache_dir: PathBuf,
 }
@@ -620,7 +620,7 @@ impl XbrlCache {
 /// **Arelle Parse Result**
 ///
 /// Structure for Arelle JSON output.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct ArelleParseResult {
     facts: Vec<XbrlFact>,
     contexts: Vec<XbrlContext>,
@@ -632,12 +632,12 @@ struct ArelleParseResult {
 /// Individual XBRL fact from Arelle output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct XbrlFact {
-    concept: String,
-    value: Option<String>,
-    context_ref: String,
-    unit_ref: Option<String>,
-    decimals: Option<i32>,
-    precision: Option<i32>,
+    pub concept: String,
+    pub value: Option<String>,
+    pub context_ref: String,
+    pub unit_ref: Option<String>,
+    pub decimals: Option<i32>,
+    pub precision: Option<i32>,
 }
 
 /// **XBRL Context**
@@ -645,17 +645,17 @@ struct XbrlFact {
 /// XBRL context from Arelle output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct XbrlContext {
-    id: String,
-    entity: XbrlEntity,
-    period: XbrlPeriod,
-    scenario: Option<XbrlScenario>,
-    entity_identifier: Option<String>,
+    pub id: String,
+    pub entity: XbrlEntity,
+    pub period: XbrlPeriod,
+    pub scenario: Option<XbrlScenario>,
+    pub entity_identifier: Option<String>,
 }
 
 /// **XBRL Entity**
 ///
 /// XBRL entity information.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct XbrlEntity {
     identifier: String,
     scheme: String,
@@ -664,7 +664,7 @@ struct XbrlEntity {
 /// **XBRL Period**
 ///
 /// XBRL period information.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct XbrlPeriod {
     start_date: Option<String>,
     end_date: Option<String>,
@@ -674,7 +674,7 @@ struct XbrlPeriod {
 /// **XBRL Scenario**
 ///
 /// XBRL scenario information.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct XbrlScenario {
     // Scenario details would go here
 }
@@ -691,7 +691,7 @@ struct XbrlUnit {
 /// **Validation Report**
 ///
 /// Result of XBRL document validation.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ValidationReport {
     pub is_valid: bool,
     pub errors: Vec<String>,
@@ -776,7 +776,7 @@ pub struct ProcessingMetadata {
 /// **Taxonomy Cache**
 ///
 /// Cache for taxonomy concepts and relationships.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TaxonomyCache {
     concepts: HashMap<String, TaxonomyConcept>,
     relationships: HashMap<String, Vec<TaxonomyRelationship>>,
@@ -802,7 +802,7 @@ impl TaxonomyCache {
 /// **Statement Mapper**
 ///
 /// Maps XBRL facts to standardized financial statements.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct StatementMapper {
     mapping_rules: HashMap<String, StatementMappingRule>,
 }
@@ -839,7 +839,7 @@ impl StatementMapper {
 /// **Statement Mapping Rule**
 ///
 /// Rule for mapping XBRL concepts to financial statement line items.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct StatementMappingRule {
     concept_name: String,
     statement_type: String,
@@ -850,7 +850,7 @@ struct StatementMappingRule {
 /// **Fact Validator**
 ///
 /// Validates XBRL facts for consistency and correctness.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct FactValidator {
     validation_rules: Vec<ValidationRule>,
 }
@@ -895,13 +895,13 @@ impl FactValidator {
 /// **Validation Rule**
 ///
 /// Rule for validating XBRL facts.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ValidationRule {
     rule_type: ValidationRuleType,
     description: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum ValidationRuleType {
     RequiredContext,
     ValidUnit,
@@ -1079,6 +1079,7 @@ impl XbrlXmlParser {
                 instant: None,
             },
             scenario: None,
+            entity_identifier: None,
         };
 
         // Get context ID
@@ -1492,6 +1493,7 @@ impl XbrlParser {
                 instant: None,
             },
             scenario: None,
+            entity_identifier: None,
         };
 
         // Get context ID
@@ -1768,13 +1770,24 @@ impl XbrlParser {
                         statement_id: Uuid::new_v4(), // This should be determined from context
                         taxonomy_concept: fact.concept.clone(),
                         standard_label: Some(self.map_concept_to_label(&fact.concept)),
+                        custom_label: None,
                         value: Some(value),
-                        unit: self.extract_unit_from_fact(fact, contexts).unwrap_or_else(|| "USD".to_string()),
+                        unit: self
+                            .extract_unit_from_fact(fact, contexts),
                         context_ref: fact.context_ref.clone(),
+                        segment_ref: None,
+                        scenario_ref: None,
+                        precision: None,
+                        decimals: None,
+                        is_credit: None,
+                        is_debit: None,
                         statement_type: self.determine_statement_type(&fact.concept),
                         statement_section: self.determine_statement_section(&fact.concept),
-                        is_calculated: false,
                         parent_concept: None,
+                        level: None,
+                        order_index: None,
+                        is_calculated: false,
+                        calculation_formula: None,
                         created_at: Utc::now(),
                         updated_at: Utc::now(),
                     };

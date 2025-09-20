@@ -62,7 +62,7 @@ use crate::schema::financial_statements;
 ///     updated_at: Utc::now(),
 /// };
 /// ```
-#[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
+#[derive(Debug, Clone, Queryable, Selectable, Insertable, Serialize, Deserialize)]
 #[diesel(table_name = financial_statements)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct FinancialStatement {

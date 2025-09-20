@@ -54,7 +54,7 @@ use crate::schema::companies;
 ///     updated_at: Utc::now(),
 /// };
 /// ```
-#[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
+#[derive(Debug, Clone, Queryable, Selectable, Insertable, Serialize, Deserialize)]
 #[diesel(table_name = companies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Company {
