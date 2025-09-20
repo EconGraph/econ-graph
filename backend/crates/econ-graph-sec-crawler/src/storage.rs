@@ -342,7 +342,7 @@ impl XbrlStorage {
             .context("Failed to count total files")?;
 
         // Calculate total size
-        let total_size: Option<i64> = financial_statements
+        let total_size: Option<bigdecimal::BigDecimal> = financial_statements
             .select(diesel::dsl::sum(xbrl_file_size_bytes))
             .first(&mut conn)
             .await

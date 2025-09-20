@@ -7,11 +7,9 @@ diesel::table! {
         line_item_id -> Nullable<Uuid>,
         assignee_id -> Uuid,
         assigner_id -> Uuid,
-        #[max_length = 50]
-        assignment_type -> Varchar,
+        assignment_type -> AssignmentType,
         due_date -> Nullable<Timestamptz>,
-        #[max_length = 20]
-        status -> Nullable<Varchar>,
+        status -> AssignmentStatus,
         notes -> Nullable<Text>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
@@ -49,8 +47,7 @@ diesel::table! {
         name -> Varchar,
         description -> Nullable<Text>,
         template_content -> Text,
-        #[max_length = 50]
-        annotation_type -> Varchar,
+        annotation_type -> AnnotationType,
         tags -> Nullable<Array<Nullable<Text>>>,
         is_public -> Nullable<Bool>,
         created_by -> Uuid,
@@ -163,8 +160,7 @@ diesel::table! {
         id -> Uuid,
         company_id -> Uuid,
         peer_company_id -> Uuid,
-        #[max_length = 50]
-        comparison_type -> Varchar,
+        comparison_type -> Text,
         comparison_metrics -> Nullable<Jsonb>,
         comparison_period_start -> Date,
         comparison_period_end -> Date,
@@ -363,14 +359,12 @@ diesel::table! {
         line_item_id -> Nullable<Uuid>,
         author_id -> Uuid,
         content -> Text,
-        #[max_length = 50]
-        annotation_type -> Varchar,
+        annotation_type -> AnnotationType,
         tags -> Nullable<Array<Nullable<Text>>>,
         highlights -> Nullable<Jsonb>,
         mentions -> Nullable<Array<Nullable<Uuid>>>,
         parent_annotation_id -> Nullable<Uuid>,
-        #[max_length = 20]
-        status -> Nullable<Varchar>,
+        status -> AnnotationStatus,
         is_private -> Nullable<Bool>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
@@ -400,10 +394,8 @@ diesel::table! {
         decimals -> Nullable<Int4>,
         is_credit -> Nullable<Bool>,
         is_debit -> Nullable<Bool>,
-        #[max_length = 20]
-        statement_type -> Varchar,
-        #[max_length = 50]
-        statement_section -> Varchar,
+        statement_type -> StatementType,
+        statement_section -> StatementSection,
         #[max_length = 255]
         parent_concept -> Nullable<Varchar>,
         level -> Int4,
@@ -419,8 +411,7 @@ diesel::table! {
     financial_ratios (id) {
         id -> Uuid,
         statement_id -> Uuid,
-        #[max_length = 50]
-        ratio_category -> Varchar,
+        ratio_category -> Text,
         #[max_length = 100]
         ratio_name -> Varchar,
         ratio_value -> Nullable<Numeric>,
@@ -431,8 +422,7 @@ diesel::table! {
         numerator_concept -> Nullable<Varchar>,
         #[max_length = 255]
         denominator_concept -> Nullable<Varchar>,
-        #[max_length = 50]
-        calculation_method -> Nullable<Varchar>,
+        calculation_method -> Nullable<Text>,
         is_industry_standard -> Nullable<Bool>,
         benchmark_value -> Nullable<Numeric>,
         benchmark_percentile -> Nullable<Int4>,
@@ -462,12 +452,10 @@ diesel::table! {
         xbrl_file_content -> Nullable<Bytea>,
         xbrl_file_size_bytes -> Nullable<Int8>,
         xbrl_file_compressed -> Bool,
-        #[max_length = 10]
-        xbrl_file_compression_type -> Varchar,
+        xbrl_file_compression_type -> CompressionType,
         #[max_length = 64]
         xbrl_file_hash -> Nullable<Varchar>,
-        #[max_length = 20]
-        xbrl_processing_status -> Varchar,
+        xbrl_processing_status -> ProcessingStatus,
         xbrl_processing_error -> Nullable<Text>,
         xbrl_processing_started_at -> Nullable<Timestamptz>,
         xbrl_processing_completed_at -> Nullable<Timestamptz>,
@@ -675,10 +663,8 @@ diesel::table! {
     xbrl_processing_logs (id) {
         id -> Uuid,
         statement_id -> Uuid,
-        #[max_length = 50]
-        processing_step -> Varchar,
-        #[max_length = 20]
-        status -> Varchar,
+        processing_step -> ProcessingStep,
+        status -> ProcessingStatus,
         error_message -> Nullable<Text>,
         processing_time_ms -> Nullable<Int4>,
         records_processed -> Nullable<Int4>,
@@ -697,14 +683,10 @@ diesel::table! {
         standard_label -> Nullable<Varchar>,
         #[max_length = 1000]
         documentation -> Nullable<Varchar>,
-        #[max_length = 50]
-        data_type -> Nullable<Varchar>,
-        #[max_length = 20]
-        period_type -> Nullable<Varchar>,
-        #[max_length = 20]
-        balance_type -> Nullable<Varchar>,
-        #[max_length = 50]
-        substitution_group -> Nullable<Varchar>,
+        data_type -> Nullable<Text>,
+        period_type -> Nullable<Text>,
+        balance_type -> Nullable<Text>,
+        substitution_group -> Nullable<Text>,
         #[sql_name = "abstract"]
         abstract_ -> Nullable<Bool>,
         nillable -> Nullable<Bool>,

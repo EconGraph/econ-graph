@@ -211,7 +211,95 @@ ALTER COLUMN level SET NOT NULL;
 - **Type safety**: Compile-time guarantees about data presence
 - **Cleaner code**: No need for `.unwrap_or()` or null checks
 
-##### 7. Data Integrity Validation
+##### 7. Using Enums in Database Schemas
+
+**✅ PREFERRED**: Use PostgreSQL enums for fields with a fixed set of values
+
+**Benefits of PostgreSQL enums:**
+- **Type safety**: Database enforces valid values at the schema level
+- **Performance**: More efficient than VARCHAR with CHECK constraints
+- **Clarity**: Self-documenting schema with explicit value sets
+- **Consistency**: Prevents typos and invalid values
+- **Query optimization**: Better index performance and query planning
+
+**When to use enums:**
+- **Status fields**: `processing_status`, `annotation_status`, `assignment_status`
+- **Type fields**: `statement_type`, `annotation_type`, `assignment_type`
+- **Category fields**: `ratio_category`, `comparison_type`
+- **Configuration fields**: `compression_type`, `calculation_method`
+
+**❌ WRONG**: Using VARCHAR for fields with fixed value sets
+```sql
+-- BAD: No type safety, allows invalid values
+xbrl_processing_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+statement_type VARCHAR(50) NOT NULL,
+annotation_type VARCHAR(30) NOT NULL,
+```
+
+**✅ CORRECT**: Using PostgreSQL enums
+```sql
+-- GOOD: Type-safe, self-documenting, performant
+CREATE TYPE processing_status AS ENUM ('pending', 'processing', 'completed', 'failed');
+CREATE TYPE statement_type AS ENUM ('income_statement', 'balance_sheet', 'cash_flow', 'equity');
+CREATE TYPE annotation_type AS ENUM ('comment', 'question', 'concern', 'insight', 'risk', 'opportunity', 'highlight');
+
+-- Use in tables
+xbrl_processing_status processing_status NOT NULL DEFAULT 'pending',
+statement_type statement_type NOT NULL,
+annotation_type annotation_type NOT NULL,
+```
+
+**Rust Integration with diesel-derive-enum:**
+
+**✅ CORRECT**: Using diesel-derive-enum for seamless integration
+```rust
+use diesel_derive_enum::DbEnum;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, DbEnum)]
+#[DieselType = "ProcessingStatus"]
+pub enum ProcessingStatus {
+    #[db_rename = "pending"]
+    Pending,
+    #[db_rename = "processing"]
+    Processing,
+    #[db_rename = "completed"]
+    Completed,
+    #[db_rename = "failed"]
+    Failed,
+}
+
+// Use in models
+pub struct FinancialStatement {
+    pub xbrl_processing_status: ProcessingStatus,
+    // ...
+}
+```
+
+**Migration pattern for enums:**
+```sql
+-- 1. Create enum type
+CREATE TYPE processing_status AS ENUM ('pending', 'processing', 'completed', 'failed');
+
+-- 2. Add column with enum type
+ALTER TABLE financial_statements 
+ADD COLUMN xbrl_processing_status processing_status NOT NULL DEFAULT 'pending';
+
+-- 3. Update existing data if needed
+UPDATE financial_statements 
+SET xbrl_processing_status = 'pending' 
+WHERE xbrl_processing_status IS NULL;
+
+-- 4. Drop old column if replacing
+ALTER TABLE financial_statements DROP COLUMN old_status_column;
+```
+
+**Fields that should remain VARCHAR (not enums):**
+- **External identifiers**: `filing_type`, `form_type`, `amendment_type` (controlled by SEC)
+- **User-generated content**: `name`, `description`, `notes`
+- **URLs and paths**: `document_url`, `file_path`
+- **Codes that change frequently**: `sic_code`, `industry_code`
+
+##### 8. Data Integrity Validation
 
 **Before committing schema changes:**
 1. **Verify logical consistency**: Every field should have a clear purpose
@@ -219,16 +307,21 @@ ALTER COLUMN level SET NOT NULL;
 3. **Validate constraints**: Foreign keys, check constraints, unique constraints
 4. **Test migrations**: Run migrations on test data to verify correctness
 5. **Update documentation**: Comment fields with their business purpose
+6. **Consider enum usage**: Evaluate if fields with fixed values should be enums
 
-**Example of well-documented schema:**
+**Example of well-documented schema with enums:**
 ```sql
 -- Financial statement processing status - Always known, defaults to pending
--- Values: pending, processing, completed, failed
-xbrl_processing_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+-- Enum values: pending, processing, completed, failed
+xbrl_processing_status processing_status NOT NULL DEFAULT 'pending',
 
 -- File compression state - Always known, defaults to compressed for efficiency  
 -- True if file is compressed using zstd or other compression
 xbrl_file_compressed BOOLEAN NOT NULL DEFAULT TRUE,
+
+-- Statement type - Always known, enum ensures type safety
+-- Enum values: income_statement, balance_sheet, cash_flow, equity
+statement_type statement_type NOT NULL,
 
 -- Hierarchy level within financial statement - Always known, defaults to top level
 -- 0 = top level, 1 = first level of detail, etc.

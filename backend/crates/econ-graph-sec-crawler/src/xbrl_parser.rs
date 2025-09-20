@@ -325,6 +325,8 @@ impl XbrlParser {
 
         // Validate facts
         let validation_report = self.fact_validator.validate_facts(&facts)?;
+        let validation_errors = validation_report.errors.clone();
+        let validation_warnings = validation_report.warnings.clone();
 
         let processing_time = start_time.elapsed();
 
@@ -340,8 +342,8 @@ impl XbrlParser {
                 document_type: DocumentType::Xbrl,
                 file_size: content.len() as u64,
                 processing_time,
-                errors: validation_report.errors.clone(),
-                warnings: validation_report.warnings.clone(),
+                errors: validation_errors,
+                warnings: validation_warnings,
             },
         })
     }
@@ -517,7 +519,7 @@ impl XbrlParser {
         let statements = self.parse_xbrl_document(xbrl_file).await?;
         let mut line_items = Vec::new();
 
-        for statement in statements.financial_statements {
+        for statement in statements.statements {
             // This is a simplified implementation
             // In practice, you'd extract line items from the XBRL facts
             // and map them to standardized financial statement line items

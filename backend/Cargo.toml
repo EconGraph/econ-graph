@@ -34,6 +34,7 @@ once_cell = "1.19"
 # Database
 diesel = { version = "=2.2.12", features = ["postgres", "chrono", "uuid", "numeric", "serde_json"] }
 diesel-async = { version = "=0.5.2", features = ["postgres", "bb8"] }
+diesel-derive-enum = { version = "2.1", features = ["postgres"] }
 bb8 = "=0.8.6"
 diesel_migrations = "=2.2.0"
 

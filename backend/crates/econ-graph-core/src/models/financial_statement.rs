@@ -6,6 +6,7 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::schema::financial_statements;
+use crate::enums::{CompressionType, ProcessingStatus};
 
 /// **FinancialStatement Model**
 ///
@@ -128,9 +129,9 @@ pub struct FinancialStatement {
     /// True if file is compressed using zstd or other compression
     pub xbrl_file_compressed: bool,
 
-    /// Compression type used - Nullable, file may not be downloaded yet
-    /// Values: "zstd", "lz4", "none"
-    pub xbrl_file_compression_type: String,
+    /// Compression type used - Always known, defaults to zstd
+    /// Values: zstd, lz4, gzip, none
+    pub xbrl_file_compression_type: CompressionType,
 
     /// SHA-256 hash of the XBRL file - Nullable, file may not be downloaded yet
     /// Used for integrity verification and duplicate detection
@@ -138,7 +139,7 @@ pub struct FinancialStatement {
 
     /// Current status of XBRL processing
     /// Values: pending, processing, completed, failed
-    pub xbrl_processing_status: String,
+    pub xbrl_processing_status: ProcessingStatus,
 
     /// Error message if XBRL processing failed
     /// Detailed error information for debugging and monitoring
@@ -272,18 +273,17 @@ pub struct NewFinancialStatement {
     #[validate(range(min = 0))]
     pub xbrl_file_size_bytes: Option<i64>,
 
-    /// Whether the XBRL file is compressed - Nullable, file may not be downloaded yet
-    pub xbrl_file_compressed: Option<bool>,
+    /// Whether the XBRL file is compressed - Always known, defaults to true
+    pub xbrl_file_compressed: bool,
 
-    /// Compression type used - Nullable, file may not be downloaded yet
-    pub xbrl_file_compression_type: String,
+    /// Compression type used - Always known, defaults to zstd
+    pub xbrl_file_compression_type: CompressionType,
 
     /// SHA-256 hash of the XBRL file - Nullable, file may not be downloaded yet
     pub xbrl_file_hash: Option<String>,
 
     /// XBRL processing status
-    #[validate(length(min = 1, max = 20))]
-    pub xbrl_processing_status: String,
+    pub xbrl_processing_status: ProcessingStatus,
 
     /// XBRL processing error
     pub xbrl_processing_error: Option<String>,

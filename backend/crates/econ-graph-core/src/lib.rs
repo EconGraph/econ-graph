@@ -10,6 +10,7 @@
 pub mod auth_models;
 pub mod config;
 pub mod database;
+pub mod enums;
 pub mod error;
 pub mod models;
 pub mod schema;

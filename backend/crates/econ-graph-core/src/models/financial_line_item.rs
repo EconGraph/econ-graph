@@ -6,6 +6,7 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::schema::financial_line_items;
+use crate::enums::{StatementType, StatementSection};
 
 /// **FinancialLineItem Model**
 ///
@@ -120,11 +121,11 @@ pub struct FinancialLineItem {
 
     /// Type of financial statement
     /// Values: income_statement, balance_sheet, cash_flow, equity
-    pub statement_type: String,
+    pub statement_type: StatementType,
 
     /// Section within the financial statement
     /// Values: revenue, expenses, assets, liabilities, equity, operating, investing, financing
-    pub statement_section: String,
+    pub statement_section: StatementSection,
 
     /// Parent concept in the hierarchy
     /// Reference to the parent line item for hierarchical organization
@@ -243,12 +244,10 @@ pub struct NewFinancialLineItem {
     pub is_debit: Option<bool>,
 
     /// Statement type
-    #[validate(length(min = 1, max = 20))]
-    pub statement_type: String,
+    pub statement_type: StatementType,
 
     /// Statement section
-    #[validate(length(min = 1, max = 50))]
-    pub statement_section: String,
+    pub statement_section: StatementSection,
 
     /// Parent concept
     pub parent_concept: Option<String>,
@@ -450,144 +449,3 @@ pub struct FinancialLineItemSummary {
     pub concept_coverage: i32,
 }
 
-/// **StatementType Enum**
-///
-/// Enumeration of financial statement types.
-/// Used for type safety and statement classification.
-///
-/// # Statement Types
-/// - `IncomeStatement`: Revenue, expenses, and profit/loss
-/// - `BalanceSheet`: Assets, liabilities, and equity
-/// - `CashFlow`: Operating, investing, and financing cash flows
-/// - `Equity`: Changes in shareholders' equity
-///
-/// # Examples
-/// ```rust,no_run
-/// use econ_graph_core::models::StatementType;
-///
-/// // Check statement type
-/// let statement_type = StatementType::IncomeStatement;
-/// match statement_type {
-///     StatementType::IncomeStatement => println!("Revenue and expenses"),
-///     StatementType::BalanceSheet => println!("Assets and liabilities"),
-///     StatementType::CashFlow => println!("Cash movements"),
-///     StatementType::Equity => println!("Equity changes"),
-/// }
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum StatementType {
-    /// Income statement (P&L)
-    IncomeStatement,
-    /// Balance sheet
-    BalanceSheet,
-    /// Cash flow statement
-    CashFlow,
-    /// Statement of equity
-    Equity,
-}
-
-impl std::fmt::Display for StatementType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StatementType::IncomeStatement => write!(f, "income_statement"),
-            StatementType::BalanceSheet => write!(f, "balance_sheet"),
-            StatementType::CashFlow => write!(f, "cash_flow"),
-            StatementType::Equity => write!(f, "equity"),
-        }
-    }
-}
-
-impl std::str::FromStr for StatementType {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "income_statement" => Ok(StatementType::IncomeStatement),
-            "balance_sheet" => Ok(StatementType::BalanceSheet),
-            "cash_flow" => Ok(StatementType::CashFlow),
-            "equity" => Ok(StatementType::Equity),
-            _ => Err(format!("Invalid statement type: {}", s)),
-        }
-    }
-}
-
-/// **StatementSection Enum**
-///
-/// Enumeration of financial statement sections.
-/// Used for organizing line items within statements.
-///
-/// # Statement Sections
-/// - `Revenue`: Revenue and sales items
-/// - `Expenses`: Operating and non-operating expenses
-/// - `Assets`: Current and non-current assets
-/// - `Liabilities`: Current and non-current liabilities
-/// - `Equity`: Shareholders' equity items
-/// - `Operating`: Operating cash flows
-/// - `Investing`: Investing cash flows
-/// - `Financing`: Financing cash flows
-///
-/// # Examples
-/// ```rust,no_run
-/// use econ_graph_core::models::StatementSection;
-///
-/// // Check statement section
-/// let section = StatementSection::Revenue;
-/// match section {
-///     StatementSection::Revenue => println!("Revenue items"),
-///     StatementSection::Expenses => println!("Expense items"),
-///     StatementSection::Assets => println!("Asset items"),
-///     _ => println!("Other items"),
-/// }
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum StatementSection {
-    /// Revenue and sales
-    Revenue,
-    /// Operating and non-operating expenses
-    Expenses,
-    /// Current and non-current assets
-    Assets,
-    /// Current and non-current liabilities
-    Liabilities,
-    /// Shareholders' equity
-    Equity,
-    /// Operating cash flows
-    Operating,
-    /// Investing cash flows
-    Investing,
-    /// Financing cash flows
-    Financing,
-}
-
-impl std::fmt::Display for StatementSection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StatementSection::Revenue => write!(f, "revenue"),
-            StatementSection::Expenses => write!(f, "expenses"),
-            StatementSection::Assets => write!(f, "assets"),
-            StatementSection::Liabilities => write!(f, "liabilities"),
-            StatementSection::Equity => write!(f, "equity"),
-            StatementSection::Operating => write!(f, "operating"),
-            StatementSection::Investing => write!(f, "investing"),
-            StatementSection::Financing => write!(f, "financing"),
-        }
-    }
-}
-
-impl std::str::FromStr for StatementSection {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "revenue" => Ok(StatementSection::Revenue),
-            "expenses" => Ok(StatementSection::Expenses),
-            "assets" => Ok(StatementSection::Assets),
-            "liabilities" => Ok(StatementSection::Liabilities),
-            "equity" => Ok(StatementSection::Equity),
-            "operating" => Ok(StatementSection::Operating),
-            "investing" => Ok(StatementSection::Investing),
-            "financing" => Ok(StatementSection::Financing),
-            _ => Err(format!("Invalid statement section: {}", s)),
-        }
-    }
-}
