@@ -498,12 +498,12 @@ impl EducationalContentLibrary {
                 exercise_type: ExerciseType::RatioCalculation,
                 instructions: "Given Apple's market cap, debt, cash, and EBITDA, calculate the EV/EBITDA ratio. Consider why this metric is preferred by analysts over P/E ratios.".to_string(),
                 data: serde_json::json!({
-                    "market_capitalization": 3000000000000,
-                    "total_debt": 120000000000,
-                    "cash_and_equivalents": 200000000000,
-                    "ebitda": 120000000000,
-                    "net_income": 100000000000,
-                    "shares_outstanding": 15000000000
+                    "market_capitalization": 3000000000000i64,
+                    "total_debt": 120000000000i64,
+                    "cash_and_equivalents": 200000000000i64,
+                    "ebitda": 120000000000i64,
+                    "net_income": 100000000000i64,
+                    "shares_outstanding": 15000000000i64
                 }),
                 expected_calculations: vec![
                     ExpectedCalculation {
@@ -527,7 +527,7 @@ impl EducationalContentLibrary {
                     "Compare the result to Apple's historical EV/EBITDA range of 15-25x".to_string(),
                 ],
                 solution: serde_json::json!({
-                    "enterprise_value": 2920000000000,
+                    "enterprise_value": 2920000000000i64,
                     "ev_ebitda": 24.33,
                     "interpretation": "Apple's EV/EBITDA of 24.33x is within its historical range, reflecting strong cash generation and growth prospects"
                 }),
