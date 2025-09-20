@@ -43,5 +43,5 @@ export default defineConfig({
   ],
 
   /* Don't start a web server - CI will start it */
-  webServer: undefined,
+  // webServer: undefined,
 });
