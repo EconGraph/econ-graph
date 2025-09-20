@@ -241,6 +241,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -347,6 +353,12 @@ jobs:
         which diesel || echo "diesel not in PATH"
         echo "=== END DEBUGGING ==="
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -412,6 +424,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -471,6 +489,12 @@ jobs:
         key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
 
     - name: Setup database
       run: |
@@ -532,6 +556,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -591,6 +621,12 @@ jobs:
         key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
 
     - name: Setup database
       run: |
@@ -652,6 +688,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -711,6 +753,12 @@ jobs:
         key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
 
     - name: Setup database
       run: |
@@ -772,6 +820,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -831,6 +885,12 @@ jobs:
         key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
 
     - name: Setup database
       run: |
@@ -892,6 +952,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -951,6 +1017,12 @@ jobs:
         key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
 
     - name: Setup database
       run: |
@@ -1012,6 +1084,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -1071,6 +1149,12 @@ jobs:
         key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
 
     - name: Setup database
       run: |
@@ -1360,6 +1444,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -1628,6 +1718,12 @@ jobs:
         key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
 
     - name: Setup database
       run: |
