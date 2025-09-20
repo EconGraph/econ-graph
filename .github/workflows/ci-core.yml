@@ -1517,25 +1517,6 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
-    - name: Start backend service
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        ./target/release/econ-graph-backend &
-        echo $! > backend.pid
-
-        # Wait for backend to be ready
-        for i in {1..60}; do
-          if curl -f http://localhost:8080/health 2>/dev/null; then
-            echo "Backend is ready!"
-            break
-          fi
-          echo "Waiting for backend... ($i/60)"
-          sleep 2
-        done
-      working-directory: backend
-      env:
-        DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
-
     - name: Download E2E containers
       uses: actions/download-artifact@v4
       with:
@@ -1546,15 +1527,21 @@ jobs:
         docker load < e2e-container.tar.gz
         docker load < e2e-mobile-container.tar.gz
 
+    - name: Build backend for E2E tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo build --release --bin econ-graph-backend
+      working-directory: backend
+
     - name: Start backend service
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo run --bin econ-graph-backend &
+        ./target/release/econ-graph-backend &
         echo $! > backend.pid
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:8080/health 2>/dev/null; then
+          if curl -f http://localhost:9876/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
@@ -1712,15 +1699,21 @@ jobs:
         docker load < e2e-container.tar.gz
         docker load < e2e-mobile-container.tar.gz
 
+    - name: Build backend for E2E tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo build --release --bin econ-graph-backend
+      working-directory: backend
+
     - name: Start backend service
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo run --bin econ-graph-backend &
+        ./target/release/econ-graph-backend &
         echo $! > backend.pid
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:8080/health 2>/dev/null; then
+          if curl -f http://localhost:9876/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
@@ -1884,6 +1877,12 @@ jobs:
       run: |
         docker load < e2e-container.tar.gz
         docker load < e2e-mobile-container.tar.gz
+
+    - name: Build backend for E2E tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo build --release --bin econ-graph-backend
+      working-directory: backend
 
     - name: Start frontend service
       run: |

@@ -5,7 +5,7 @@ import { defineConfig, devices } from '@playwright/test';
  * Tests basic functionality and core features
  */
 export default defineConfig({
-  testDir: './tests/e2e',
+  testDir: './tests/e2e/core',
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
