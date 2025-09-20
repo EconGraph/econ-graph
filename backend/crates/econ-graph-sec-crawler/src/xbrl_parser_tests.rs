@@ -1,5 +1,8 @@
 use super::*;
-use econ_graph_core::{FinancialStatement, enums::{CompressionType, ProcessingStatus}};
+use econ_graph_core::{
+    enums::{CompressionType, ProcessingStatus},
+    FinancialStatement,
+};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use tokio::fs;
