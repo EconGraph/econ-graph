@@ -304,8 +304,8 @@ impl XbrlStorage {
 
         // Decompress if necessary
         if statement.xbrl_file_compressed {
-            match statement.xbrl_file_compression_type.as_deref() {
-                Some("zstd") => {
+            match statement.xbrl_file_compression_type.as_str() {
+                "zstd" => {
                     Ok(decode_all(&content[..]).context("Failed to decompress XBRL file")?)
                 }
                 _ => Ok(content), // Unknown compression type, return as-is

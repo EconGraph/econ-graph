@@ -406,7 +406,7 @@ diesel::table! {
         statement_section -> Varchar,
         #[max_length = 255]
         parent_concept -> Nullable<Varchar>,
-        level -> Nullable<Int4>,
+        level -> Int4,
         order_index -> Nullable<Int4>,
         is_calculated -> Bool,
         calculation_formula -> Nullable<Text>,
@@ -461,13 +461,13 @@ diesel::table! {
         xbrl_file_oid -> Nullable<Oid>,
         xbrl_file_content -> Nullable<Bytea>,
         xbrl_file_size_bytes -> Nullable<Int8>,
-        xbrl_file_compressed -> Nullable<Bool>,
+        xbrl_file_compressed -> Bool,
         #[max_length = 10]
-        xbrl_file_compression_type -> Nullable<Varchar>,
+        xbrl_file_compression_type -> Varchar,
         #[max_length = 64]
         xbrl_file_hash -> Nullable<Varchar>,
         #[max_length = 20]
-        xbrl_processing_status -> Nullable<Varchar>,
+        xbrl_processing_status -> Varchar,
         xbrl_processing_error -> Nullable<Text>,
         xbrl_processing_started_at -> Nullable<Timestamptz>,
         xbrl_processing_completed_at -> Nullable<Timestamptz>,

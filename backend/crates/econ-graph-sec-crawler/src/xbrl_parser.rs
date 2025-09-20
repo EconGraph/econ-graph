@@ -259,14 +259,17 @@ impl XbrlParser {
             .map_facts_to_statements(&facts, &contexts)?;
         let taxonomy_concepts = self.extract_taxonomy_concepts_from_content(&content)?;
 
+        let validation_report = self.fact_validator.validate_facts(&facts)?;
+        let line_items = self.extract_line_items_from_facts(&facts, &contexts)?;
+        
         Ok(XbrlParseResult {
             statements,
-            line_items: self.extract_line_items_from_facts(&facts, &contexts)?,
+            line_items,
             taxonomy_concepts,
             contexts,
             units,
             facts,
-            validation_report: self.fact_validator.validate_facts(&facts)?,
+            validation_report,
             processing_metadata: ProcessingMetadata {
                 document_type: DocumentType::Ixbrl,
                 file_size: fs::metadata(ixbrl_file).await?.len(),
@@ -451,7 +454,7 @@ impl XbrlParser {
 
         // Extract period information from context
         let first_fact = &facts[0];
-        let period_end_date = self.extract_period_end_date(&first_fact.context)?;
+        let period_end_date = self.extract_period_end_date(&first_fact.context_ref)?;
         let fiscal_year = period_end_date.year();
         let fiscal_quarter = self.get_fiscal_quarter(&period_end_date);
 
@@ -514,7 +517,7 @@ impl XbrlParser {
         let statements = self.parse_xbrl_document(xbrl_file).await?;
         let mut line_items = Vec::new();
 
-        for statement in statements {
+        for statement in statements.financial_statements {
             // This is a simplified implementation
             // In practice, you'd extract line items from the XBRL facts
             // and map them to standardized financial statement line items
