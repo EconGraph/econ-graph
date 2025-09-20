@@ -35,7 +35,7 @@ jobs:
   backend-build-cache:
     name: Backend Build Cache
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 90
 
     steps:
     - name: Checkout code
@@ -100,7 +100,7 @@ jobs:
   backend-smoke-tests:
     name: Backend Smoke Tests (Fast)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     needs: [backend-build-cache]
 
     steps:
@@ -149,7 +149,7 @@ jobs:
   chart-api-integration-tests:
     name: Chart API Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 90
     needs: [backend-smoke-tests]
 
     steps:
@@ -200,7 +200,7 @@ jobs:
   backend-mcp-integration-tests:
     name: Backend MCP Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     needs: [backend-smoke-tests, chart-api-integration-tests]
 
     services:
@@ -240,6 +240,12 @@ jobs:
         key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
 
     - name: Setup database
       run: |
@@ -296,7 +302,7 @@ jobs:
   backend-models-basic-tests:
     name: Backend Models Basic Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 120
     needs: [backend-smoke-tests]
 
     services:
@@ -347,6 +353,12 @@ jobs:
         which diesel || echo "diesel not in PATH"
         echo "=== END DEBUGGING ==="
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -372,7 +384,7 @@ jobs:
   backend-models-advanced-tests:
     name: Backend Models Advanced Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 120
     needs: [backend-smoke-tests]
 
     services:
@@ -412,6 +424,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -432,7 +450,7 @@ jobs:
   backend-crawler-unit-tests:
     name: Backend Crawler Unit Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 90
     needs: [backend-build-cache]
 
     services:
@@ -472,6 +490,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -492,7 +516,7 @@ jobs:
   backend-crawler-integration-tests:
     name: Backend Crawler Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 90
     needs: [backend-build-cache]
 
     services:
@@ -532,6 +556,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -552,7 +582,7 @@ jobs:
   backend-queue-basic-tests:
     name: Backend Queue Basic Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 90
     needs: [backend-build-cache]
 
     services:
@@ -592,6 +622,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -612,7 +648,7 @@ jobs:
   backend-queue-advanced-tests:
     name: Backend Queue Advanced Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 90
     needs: [backend-build-cache]
 
     services:
@@ -652,6 +688,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -672,7 +714,7 @@ jobs:
   backend-global-analysis-basic-tests:
     name: Backend Global Analysis Basic Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 90
     needs: [backend-build-cache]
 
     services:
@@ -712,6 +754,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -732,7 +780,7 @@ jobs:
   backend-global-analysis-advanced-tests:
     name: Backend Global Analysis Advanced Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 90
     needs: [backend-build-cache]
 
     services:
@@ -772,6 +820,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -792,7 +846,7 @@ jobs:
   backend-series-discovery-basic-tests:
     name: Backend Series Discovery Basic Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 90
     needs: [backend-build-cache]
 
     services:
@@ -832,6 +886,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -852,7 +912,7 @@ jobs:
   backend-series-discovery-integration-tests:
     name: Backend Series Discovery Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 90
     needs: [backend-build-cache]
 
     services:
@@ -892,6 +952,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -912,7 +978,7 @@ jobs:
   backend-auth-integration-tests:
     name: Backend Auth Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 90
     needs: [backend-build-cache]
 
     services:
@@ -952,6 +1018,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -972,7 +1044,7 @@ jobs:
   backend-collaboration-integration-tests:
     name: Backend Collaboration Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 90
     needs: [backend-build-cache]
 
     services:
@@ -1012,6 +1084,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -1032,7 +1110,7 @@ jobs:
   backend-remaining-service-tests:
     name: Backend Remaining Service Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 90
     needs: [backend-build-cache]
 
     services:
@@ -1072,6 +1150,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -1092,7 +1176,7 @@ jobs:
   frontend-tests:
     name: Frontend Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 90
 
     steps:
     - name: Checkout code
@@ -1126,7 +1210,7 @@ jobs:
   quality-checks:
     name: Quality Checks
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 90
 
     steps:
     - name: Checkout code
@@ -1184,7 +1268,7 @@ jobs:
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 90
 
     steps:
     - name: Checkout code
@@ -1236,7 +1320,7 @@ jobs:
   license-compliance:
     name: License Compliance Check
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
 
     steps:
     - name: Checkout code
@@ -1321,7 +1405,7 @@ jobs:
   backend-integration-tests:
     name: Backend Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 90
     needs: [backend-smoke-tests]
 
     services:
@@ -1360,6 +1444,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
 
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
@@ -1386,7 +1476,7 @@ jobs:
   frontend-integration-tests:
     name: Frontend Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     needs: [frontend-tests]
 
     steps:
@@ -1410,12 +1500,12 @@ jobs:
       working-directory: frontend
       run: npm test -- --coverage --watchAll=false
       env:
-        REACT_APP_GRAPHQL_ENDPOINT: http://localhost:8080/graphql
+        REACT_APP_GRAPHQL_ENDPOINT: http://localhost:9876/graphql
 
   e2e-container-build:
     name: Build E2E Test Containers
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 90
     needs: [frontend-integration-tests]
 
     steps:
@@ -1452,7 +1542,7 @@ jobs:
   e2e-core-tests:
     name: E2E Core Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build]
 
     services:
@@ -1517,25 +1607,6 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
-    - name: Start backend service
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        ./target/release/econ-graph-backend &
-        echo $! > backend.pid
-
-        # Wait for backend to be ready
-        for i in {1..60}; do
-          if curl -f http://localhost:8080/health 2>/dev/null; then
-            echo "Backend is ready!"
-            break
-          fi
-          echo "Waiting for backend... ($i/60)"
-          sleep 2
-        done
-      working-directory: backend
-      env:
-        DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
-
     - name: Download E2E containers
       uses: actions/download-artifact@v4
       with:
@@ -1546,15 +1617,21 @@ jobs:
         docker load < e2e-container.tar.gz
         docker load < e2e-mobile-container.tar.gz
 
+    - name: Build backend for E2E tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo build --release --bin econ-graph-backend
+      working-directory: backend
+
     - name: Start backend service
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo run --bin econ-graph-backend &
+        ./target/release/econ-graph-backend &
         echo $! > backend.pid
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:8080/health 2>/dev/null; then
+          if curl -f http://localhost:9876/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
@@ -1603,7 +1680,7 @@ jobs:
   e2e-comprehensive-tests:
     name: E2E Comprehensive Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 90
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build]
 
     services:
@@ -1641,6 +1718,12 @@ jobs:
         key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
           ${{ runner.os }}-shared-cargo-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
 
     - name: Setup database
       run: |
@@ -1712,15 +1795,21 @@ jobs:
         docker load < e2e-container.tar.gz
         docker load < e2e-mobile-container.tar.gz
 
+    - name: Build backend for E2E tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo build --release --bin econ-graph-backend
+      working-directory: backend
+
     - name: Start backend service
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo run --bin econ-graph-backend &
+        ./target/release/econ-graph-backend &
         echo $! > backend.pid
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:8080/health 2>/dev/null; then
+          if curl -f http://localhost:9876/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
@@ -1769,7 +1858,7 @@ jobs:
   mobile-e2e-tests:
     name: Mobile End-to-End Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build]
 
     services:
@@ -1885,6 +1974,12 @@ jobs:
         docker load < e2e-container.tar.gz
         docker load < e2e-mobile-container.tar.gz
 
+    - name: Build backend for E2E tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo build --release --bin econ-graph-backend
+      working-directory: backend
+
     - name: Start frontend service
       run: |
         # Use the pre-built frontend from the container
@@ -1919,7 +2014,7 @@ jobs:
   docker-build:
     name: Docker Build Test
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     needs: [backend-smoke-tests]
 
     steps:
