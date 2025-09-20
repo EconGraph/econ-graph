@@ -11,8 +11,8 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::models::{
-    CompanySubmissionsResponse, CrawlConfig, CrawlProgress, CrawlResult, FilingInfo, SecCompany,
-    SecFiling, StoredXbrlDocument,
+    CompanySubmissionsResponse, CrawlConfig, CrawlProgress, CrawlResult, DtsReference, FilingInfo,
+    SecCompany, SecFiling, StoredXbrlDocument,
 };
 use crate::rate_limiter::SecRateLimiter;
 use crate::storage::{XbrlStorage, XbrlStorageConfig};
@@ -330,7 +330,179 @@ impl SecEdgarCrawler {
             accession_number, file_size, stored_doc.compressed_size
         );
 
+        // Discover and download DTS components
+        if let Err(e) = self
+            .download_dts_components(&content, &xbrl_url, &stored_doc.id)
+            .await
+        {
+            warn!(
+                "Failed to download DTS components for {}: {}",
+                accession_number, e
+            );
+            // Don't fail the entire process if DTS download fails
+        }
+
         Ok(file_size)
+    }
+
+    /// Download DTS (Discoverable Taxonomy Set) components for an XBRL instance
+    async fn download_dts_components(
+        &self,
+        xbrl_content: &[u8],
+        xbrl_url: &str,
+        statement_id: &Uuid,
+    ) -> Result<()> {
+        debug!("Discovering DTS components for XBRL file");
+
+        // Parse XBRL content to find schema references
+        let dts_references = self.discover_dts_references(xbrl_content)?;
+
+        info!("Found {} DTS references in XBRL file", dts_references.len());
+
+        // Download each referenced taxonomy component
+        for reference in dts_references {
+            if let Err(e) = self
+                .download_taxonomy_component(&reference, xbrl_url, statement_id)
+                .await
+            {
+                warn!(
+                    "Failed to download taxonomy component {}: {}",
+                    reference.reference_href, e
+                );
+                // Continue with other components
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Discover DTS references in XBRL content
+    fn discover_dts_references(&self, xbrl_content: &[u8]) -> Result<Vec<DtsReference>> {
+        use quick_xml::events::Event;
+        use quick_xml::Reader;
+        use std::io::Cursor;
+
+        let mut reader = Reader::from_reader(Cursor::new(xbrl_content));
+        reader.config_mut().trim_text(true);
+
+        let mut references = Vec::new();
+        let mut buf = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) => {
+                    if e.name().as_ref() == b"schemaRef" || e.name().as_ref() == b"linkbaseRef" {
+                        let mut href = None;
+                        let mut role = None;
+                        let mut arcrole = None;
+
+                        for attr in e.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"href" => {
+                                    if let Ok(value) = std::str::from_utf8(&attr.value) {
+                                        href = Some(value.to_string());
+                                    }
+                                }
+                                b"role" => {
+                                    if let Ok(value) = std::str::from_utf8(&attr.value) {
+                                        role = Some(value.to_string());
+                                    }
+                                }
+                                b"arcrole" => {
+                                    if let Ok(value) = std::str::from_utf8(&attr.value) {
+                                        arcrole = Some(value.to_string());
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        if let Some(href) = href {
+                            let reference_type = if e.name().as_ref() == b"schemaRef" {
+                                "schemaRef"
+                            } else {
+                                "linkbaseRef"
+                            };
+
+                            references.push(DtsReference {
+                                reference_type: reference_type.to_string(),
+                                reference_role: role,
+                                reference_href: href,
+                                reference_arcrole: arcrole,
+                            });
+                        }
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(anyhow::anyhow!(
+                        "Failed to parse XBRL for DTS discovery: {}",
+                        e
+                    ));
+                }
+            }
+            buf.clear();
+        }
+
+        Ok(references)
+    }
+
+    /// Download a single taxonomy component
+    async fn download_taxonomy_component(
+        &self,
+        reference: &DtsReference,
+        base_url: &str,
+        statement_id: &Uuid,
+    ) -> Result<()> {
+        // Construct the full URL for the taxonomy component
+        let taxonomy_url = if reference.reference_href.starts_with("http") {
+            reference.reference_href.clone()
+        } else {
+            // Relative URL - construct from base URL
+            let base_path = std::path::Path::new(base_url)
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("/"));
+            base_path
+                .join(&reference.reference_href)
+                .to_string_lossy()
+                .to_string()
+        };
+
+        debug!("Downloading taxonomy component from: {}", taxonomy_url);
+
+        self.rate_limiter.wait_for_permit().await;
+
+        let response = self
+            .client
+            .get(&taxonomy_url)
+            .send()
+            .await
+            .context("Failed to download taxonomy component")?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "HTTP error downloading taxonomy component: {}",
+                response.status()
+            ));
+        }
+
+        let content = response
+            .bytes()
+            .await
+            .context("Failed to read taxonomy component response")?;
+
+        // Store the taxonomy component
+        self.storage
+            .store_taxonomy_component(reference, &content, &taxonomy_url, statement_id)
+            .await?;
+
+        info!(
+            "Downloaded and stored taxonomy component: {}",
+            reference.reference_href
+        );
+
+        Ok(())
     }
 
     /// Get crawl progress for a running operation

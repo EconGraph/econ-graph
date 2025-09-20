@@ -396,29 +396,11 @@ impl XbrlParser {
             .cache_dir
             .join(format!("output_{}.json", Uuid::new_v4()));
 
-        let mut cmd = if let Some(ref python_env) = self.config.python_env {
-            let mut cmd = AsyncCommand::new(python_env);
-            cmd.arg(&self.config.arelle_path);
-            cmd
-        } else {
-            AsyncCommand::new(&self.config.arelle_path)
-        };
-
-        // Build Arelle command
-        cmd.arg("--file")
+        // Use Python to run our custom Arelle script
+        let mut cmd = AsyncCommand::new("python3");
+        cmd.arg("/Users/josephmalicki/src/econ-graph/test_arelle.py")
             .arg(xbrl_file)
-            .arg("--output")
-            .arg(&temp_output)
-            .arg("--format")
-            .arg("json");
-
-        if self.config.validate_xbrl {
-            cmd.arg("--validate");
-        }
-
-        if self.config.extract_taxonomy {
-            cmd.arg("--extract-taxonomy");
-        }
+            .arg(&temp_output);
 
         // Set timeout
         cmd.kill_on_drop(true);

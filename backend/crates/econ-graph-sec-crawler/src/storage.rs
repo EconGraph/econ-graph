@@ -439,6 +439,152 @@ impl XbrlStorage {
 
         Ok(())
     }
+
+    /// Store a taxonomy component (schema or linkbase) in the database
+    pub async fn store_taxonomy_component(
+        &self,
+        reference: &crate::models::DtsReference,
+        content: &[u8],
+        download_url: &str,
+        statement_id: &Uuid,
+    ) -> Result<()> {
+        use econ_graph_core::enums::{TaxonomyFileType, TaxonomySourceType};
+        use econ_graph_core::models::XbrlTaxonomySchema;
+        use sha2::{Digest, Sha256};
+
+        let mut conn = self.pool.get().await?;
+
+        // Calculate file hash
+        let mut hasher = Sha256::new();
+        hasher.update(content);
+        let file_hash = format!("sha256:{:x}", hasher.finalize());
+
+        // Determine file type and source type
+        let file_type = if reference.reference_type == "schemaRef" {
+            TaxonomyFileType::Schema
+        } else {
+            // Determine linkbase type from role or filename
+            TaxonomyFileType::LabelLinkbase // Default, could be enhanced
+        };
+
+        let source_type = self.determine_taxonomy_source_type(&reference.reference_href);
+
+        // Extract namespace and filename from href
+        let (schema_namespace, schema_filename) =
+            self.extract_taxonomy_info(&reference.reference_href);
+
+        // Create taxonomy schema record
+        let taxonomy_schema = XbrlTaxonomySchema {
+            id: Uuid::new_v4(),
+            schema_namespace,
+            schema_filename,
+            schema_version: None,
+            schema_date: None,
+            file_type,
+            source_type,
+            file_content: Some(content.to_vec()),
+            file_oid: None,
+            file_size_bytes: content.len() as i64,
+            file_hash,
+            is_compressed: false, // Store uncompressed for taxonomy files
+            compression_type: econ_graph_core::enums::CompressionType::None,
+            source_url: Some(download_url.to_string()),
+            download_url: Some(download_url.to_string()),
+            original_filename: None,
+            processing_status: econ_graph_core::enums::ProcessingStatus::Downloaded,
+            processing_error: None,
+            processing_started_at: None,
+            processing_completed_at: None,
+            concepts_extracted: 0,
+            relationships_extracted: 0,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        // Insert the taxonomy schema
+        diesel::insert_into(econ_graph_core::schema::xbrl_taxonomy_schemas::table)
+            .values(&taxonomy_schema)
+            .execute(&mut conn)
+            .await
+            .context("Failed to insert taxonomy schema")?;
+
+        // Store DTS reference
+        self.store_dts_reference(reference, statement_id, &taxonomy_schema.id, download_url)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Store DTS reference in the database
+    async fn store_dts_reference(
+        &self,
+        reference: &crate::models::DtsReference,
+        statement_id: &Uuid,
+        resolved_schema_id: &Uuid,
+        download_url: &str,
+    ) -> Result<()> {
+        use econ_graph_core::schema::xbrl_instance_dts_references;
+
+        let mut conn = self.pool.get().await?;
+
+        let dts_reference = (
+            xbrl_instance_dts_references::statement_id.eq(statement_id),
+            xbrl_instance_dts_references::reference_type.eq(&reference.reference_type),
+            xbrl_instance_dts_references::reference_role.eq(reference.reference_role.as_deref()),
+            xbrl_instance_dts_references::reference_href.eq(&reference.reference_href),
+            xbrl_instance_dts_references::reference_arcrole
+                .eq(reference.reference_arcrole.as_deref()),
+            xbrl_instance_dts_references::resolved_schema_id.eq(resolved_schema_id),
+            xbrl_instance_dts_references::is_resolved.eq(true),
+            xbrl_instance_dts_references::created_at.eq(Utc::now()),
+        );
+
+        diesel::insert_into(xbrl_instance_dts_references::table)
+            .values(dts_reference)
+            .execute(&mut conn)
+            .await
+            .context("Failed to insert DTS reference")?;
+
+        Ok(())
+    }
+
+    /// Determine taxonomy source type from href
+    fn determine_taxonomy_source_type(
+        &self,
+        href: &str,
+    ) -> econ_graph_core::enums::TaxonomySourceType {
+        use econ_graph_core::enums::TaxonomySourceType;
+
+        if href.contains("us-gaap") {
+            TaxonomySourceType::UsGaap
+        } else if href.contains("dei") {
+            TaxonomySourceType::SecDei
+        } else if href.contains("srt") {
+            TaxonomySourceType::FasbSrt
+        } else if href.contains("ifrs") {
+            TaxonomySourceType::Ifrs
+        } else {
+            TaxonomySourceType::CompanySpecific
+        }
+    }
+
+    /// Extract namespace and filename from taxonomy href
+    fn extract_taxonomy_info(&self, href: &str) -> (String, String) {
+        // Extract filename from URL
+        let filename = std::path::Path::new(href)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        // For now, use the filename as namespace (could be enhanced to parse actual namespace)
+        let namespace = format!(
+            "http://taxonomy.{}",
+            filename.replace(".xsd", "").replace(".xml", "")
+        );
+
+        (namespace, filename)
+    }
 }
 
 #[cfg(test)]

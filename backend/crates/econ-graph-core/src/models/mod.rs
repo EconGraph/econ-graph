@@ -17,6 +17,7 @@ pub mod global_analysis;
 pub mod search;
 pub mod series_metadata;
 pub mod user;
+pub mod xbrl_taxonomy_schema;
 
 pub use annotation_assignment::*;
 pub use annotation_reply::*;
@@ -40,3 +41,4 @@ pub use global_analysis::*;
 pub use search::*;
 pub use series_metadata::*;
 pub use user::{AnnotationComment, ChartAnnotation, ChartCollaborator, NewUser, User, UserSession};
+pub use xbrl_taxonomy_schema::*;

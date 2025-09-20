@@ -64,6 +64,9 @@ clap = { version = "4.0", features = ["derive"] }
 # Random
 rand = "0.8"
 
+# Hashing
+sha2 = "0.10"
+
 # Metrics
 prometheus = "0.14"
 

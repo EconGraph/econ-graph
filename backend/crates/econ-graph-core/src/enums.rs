@@ -68,6 +68,7 @@ impl CompressionType {
 #[diesel(sql_type = Text)]
 pub enum ProcessingStatus {
     Pending,
+    Downloaded,
     Processing,
     Completed,
     Failed,
@@ -77,6 +78,7 @@ impl ToSql<Text, Pg> for ProcessingStatus {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
         let value = match self {
             ProcessingStatus::Pending => "pending",
+            ProcessingStatus::Downloaded => "downloaded",
             ProcessingStatus::Processing => "processing",
             ProcessingStatus::Completed => "completed",
             ProcessingStatus::Failed => "failed",
@@ -90,6 +92,7 @@ impl FromSql<Text, Pg> for ProcessingStatus {
         let value = <String as FromSql<Text, Pg>>::from_sql(bytes)?;
         match value.as_str() {
             "pending" => Ok(ProcessingStatus::Pending),
+            "downloaded" => Ok(ProcessingStatus::Downloaded),
             "processing" => Ok(ProcessingStatus::Processing),
             "completed" => Ok(ProcessingStatus::Completed),
             "failed" => Ok(ProcessingStatus::Failed),
@@ -441,6 +444,108 @@ impl FromSql<Text, Pg> for ProcessingStep {
 }
 
 impl diesel::Queryable<Text, Pg> for ProcessingStep {
+    type Row = Self;
+    fn build(row: Self::Row) -> deserialize::Result<Self> {
+        Ok(row)
+    }
+}
+
+/// Taxonomy file types for XBRL DTS components
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
+#[diesel(sql_type = Text)]
+pub enum TaxonomyFileType {
+    Schema,
+    LabelLinkbase,
+    PresentationLinkbase,
+    CalculationLinkbase,
+    DefinitionLinkbase,
+    ReferenceLinkbase,
+    FormulaLinkbase,
+}
+
+impl ToSql<Text, Pg> for TaxonomyFileType {
+    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
+        let value = match self {
+            TaxonomyFileType::Schema => "schema",
+            TaxonomyFileType::LabelLinkbase => "label_linkbase",
+            TaxonomyFileType::PresentationLinkbase => "presentation_linkbase",
+            TaxonomyFileType::CalculationLinkbase => "calculation_linkbase",
+            TaxonomyFileType::DefinitionLinkbase => "definition_linkbase",
+            TaxonomyFileType::ReferenceLinkbase => "reference_linkbase",
+            TaxonomyFileType::FormulaLinkbase => "formula_linkbase",
+        };
+        <str as ToSql<Text, Pg>>::to_sql(value, out)
+    }
+}
+
+impl FromSql<Text, Pg> for TaxonomyFileType {
+    fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
+        let value = <String as FromSql<Text, Pg>>::from_sql(bytes)?;
+        match value.as_str() {
+            "schema" => Ok(TaxonomyFileType::Schema),
+            "label_linkbase" => Ok(TaxonomyFileType::LabelLinkbase),
+            "presentation_linkbase" => Ok(TaxonomyFileType::PresentationLinkbase),
+            "calculation_linkbase" => Ok(TaxonomyFileType::CalculationLinkbase),
+            "definition_linkbase" => Ok(TaxonomyFileType::DefinitionLinkbase),
+            "reference_linkbase" => Ok(TaxonomyFileType::ReferenceLinkbase),
+            "formula_linkbase" => Ok(TaxonomyFileType::FormulaLinkbase),
+            _ => Err(format!("Unknown taxonomy_file_type value: {}", value).into()),
+        }
+    }
+}
+
+impl diesel::Queryable<Text, Pg> for TaxonomyFileType {
+    type Row = Self;
+    fn build(row: Self::Row) -> deserialize::Result<Self> {
+        Ok(row)
+    }
+}
+
+/// Taxonomy source types for XBRL taxonomy classification
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
+#[diesel(sql_type = Text)]
+pub enum TaxonomySourceType {
+    CompanySpecific,
+    UsGaap,
+    SecDei,
+    FasbSrt,
+    Ifrs,
+    OtherStandard,
+    Custom,
+}
+
+impl ToSql<Text, Pg> for TaxonomySourceType {
+    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
+        let value = match self {
+            TaxonomySourceType::CompanySpecific => "company_specific",
+            TaxonomySourceType::UsGaap => "us_gaap",
+            TaxonomySourceType::SecDei => "sec_dei",
+            TaxonomySourceType::FasbSrt => "fasb_srt",
+            TaxonomySourceType::Ifrs => "ifrs",
+            TaxonomySourceType::OtherStandard => "other_standard",
+            TaxonomySourceType::Custom => "custom",
+        };
+        <str as ToSql<Text, Pg>>::to_sql(value, out)
+    }
+}
+
+impl FromSql<Text, Pg> for TaxonomySourceType {
+    fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
+        let value = <String as FromSql<Text, Pg>>::from_sql(bytes)?;
+        match value.as_str() {
+            "company_specific" => Ok(TaxonomySourceType::CompanySpecific),
+            "us_gaap" => Ok(TaxonomySourceType::UsGaap),
+            "sec_dei" => Ok(TaxonomySourceType::SecDei),
+            "fasb_srt" => Ok(TaxonomySourceType::FasbSrt),
+            "ifrs" => Ok(TaxonomySourceType::Ifrs),
+            "other_standard" => Ok(TaxonomySourceType::OtherStandard),
+            "custom" => Ok(TaxonomySourceType::Custom),
+            _ => Err(format!("Unknown taxonomy_source_type value: {}", value).into()),
+        }
+    }
+}
+
+impl diesel::Queryable<Text, Pg> for TaxonomySourceType {
     type Row = Self;
     fn build(row: Self::Row) -> deserialize::Result<Self> {
         Ok(row)

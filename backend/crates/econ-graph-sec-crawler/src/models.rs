@@ -744,3 +744,49 @@ pub struct XbrlStorageStats {
     /// Number of uncompressed files
     pub uncompressed_files: u64,
 }
+
+/// **DTS Reference Model**
+///
+/// Represents a DTS (Discoverable Taxonomy Set) reference found in XBRL instance files.
+/// These references point to taxonomy schemas and linkbases that are required for proper XBRL parsing.
+///
+/// # Use Cases
+/// - Parsing XBRL instance files to discover taxonomy dependencies
+/// - Downloading and storing taxonomy components
+/// - Tracking DTS resolution status
+/// - Supporting proper XBRL parsing with complete taxonomies
+///
+/// # Examples
+/// ```rust
+/// use econ_graph_sec_crawler::models::DtsReference;
+///
+/// // US-GAAP schema reference
+/// let schema_ref = DtsReference {
+///     reference_type: "schemaRef".to_string(),
+///     reference_role: None,
+///     reference_href: "us-gaap/2024/entire/us-gaap-2024.xsd".to_string(),
+///     reference_arcrole: None,
+/// };
+///
+/// // Label linkbase reference
+/// let linkbase_ref = DtsReference {
+///     reference_type: "linkbaseRef".to_string(),
+///     reference_role: Some("http://www.xbrl.org/2003/role/labelLinkbaseRef".to_string()),
+///     reference_href: "us-gaap/2024/entire/us-gaap-2024_lab.xml".to_string(),
+///     reference_arcrole: Some("http://www.w3.org/1999/xlink/properties/linkbase".to_string()),
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DtsReference {
+    /// Type of reference: "schemaRef" or "linkbaseRef"
+    pub reference_type: String,
+
+    /// Optional role attribute (for linkbase references)
+    pub reference_role: Option<String>,
+
+    /// URL or relative path to the taxonomy component
+    pub reference_href: String,
+
+    /// Optional arcrole attribute (for linkbase references)
+    pub reference_arcrole: Option<String>,
+}

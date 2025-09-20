@@ -702,6 +702,92 @@ diesel::table! {
 }
 
 diesel::joinable!(annotation_assignments -> financial_line_items (line_item_id));
+diesel::table! {
+    xbrl_taxonomy_schemas (id) {
+        id -> Uuid,
+        schema_namespace -> Varchar,
+        schema_filename -> Varchar,
+        schema_version -> Nullable<Varchar>,
+        schema_date -> Nullable<Date>,
+        file_type -> Text,
+        source_type -> Text,
+        file_content -> Nullable<Bytea>,
+        file_oid -> Nullable<Integer>,
+        file_size_bytes -> Bigint,
+        file_hash -> Varchar,
+        is_compressed -> Bool,
+        compression_type -> Varchar,
+        source_url -> Nullable<Text>,
+        download_url -> Nullable<Text>,
+        original_filename -> Nullable<Varchar>,
+        processing_status -> Text,
+        processing_error -> Nullable<Text>,
+        processing_started_at -> Nullable<Timestamptz>,
+        processing_completed_at -> Nullable<Timestamptz>,
+        concepts_extracted -> Integer,
+        relationships_extracted -> Integer,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    xbrl_taxonomy_linkbases (id) {
+        id -> Uuid,
+        linkbase_filename -> Varchar,
+        linkbase_type -> Text,
+        target_namespace -> Nullable<Varchar>,
+        schema_id -> Nullable<Uuid>,
+        file_content -> Nullable<Bytea>,
+        file_oid -> Nullable<Integer>,
+        file_size_bytes -> Bigint,
+        file_hash -> Varchar,
+        is_compressed -> Bool,
+        compression_type -> Varchar,
+        source_url -> Nullable<Text>,
+        download_url -> Nullable<Text>,
+        original_filename -> Nullable<Varchar>,
+        processing_status -> Text,
+        processing_error -> Nullable<Text>,
+        processing_started_at -> Nullable<Timestamptz>,
+        processing_completed_at -> Nullable<Timestamptz>,
+        relationships_extracted -> Integer,
+        labels_extracted -> Integer,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    xbrl_dts_dependencies (id) {
+        id -> Uuid,
+        parent_schema_id -> Uuid,
+        child_schema_id -> Nullable<Uuid>,
+        child_namespace -> Varchar,
+        dependency_type -> Varchar,
+        dependency_location -> Nullable<Text>,
+        is_resolved -> Bool,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    xbrl_instance_dts_references (id) {
+        id -> Uuid,
+        statement_id -> Uuid,
+        reference_type -> Varchar,
+        reference_role -> Nullable<Varchar>,
+        reference_href -> Text,
+        reference_arcrole -> Nullable<Varchar>,
+        resolved_schema_id -> Nullable<Uuid>,
+        resolved_linkbase_id -> Nullable<Uuid>,
+        is_resolved -> Bool,
+        resolution_error -> Nullable<Text>,
+        created_at -> Timestamptz,
+        resolved_at -> Nullable<Timestamptz>,
+    }
+}
+
 diesel::joinable!(annotation_assignments -> financial_statements (statement_id));
 diesel::joinable!(annotation_comments -> chart_annotations (annotation_id));
 diesel::joinable!(annotation_comments -> users (user_id));
@@ -761,4 +847,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     users,
     xbrl_processing_logs,
     xbrl_taxonomy_concepts,
+    xbrl_taxonomy_schemas,
+    xbrl_taxonomy_linkbases,
+    xbrl_dts_dependencies,
+    xbrl_instance_dts_references,
 );
