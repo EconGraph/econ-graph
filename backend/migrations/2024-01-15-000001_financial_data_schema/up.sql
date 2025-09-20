@@ -50,10 +50,10 @@ CREATE TABLE financial_statements (
     xbrl_file_oid OID, -- PostgreSQL Large Object OID for XBRL file (nullable - file may not be downloaded yet)
     xbrl_file_content BYTEA, -- Alternative: store as bytea for smaller files (nullable - file may not be downloaded yet)
     xbrl_file_size_bytes BIGINT, -- Size of XBRL file (nullable - file may not be downloaded yet)
-    xbrl_file_compressed BOOLEAN DEFAULT TRUE, -- Whether file is compressed (nullable - file may not be downloaded yet)
-    xbrl_file_compression_type VARCHAR(10) DEFAULT 'zstd', -- zstd, lz4, or none (nullable - file may not be downloaded yet)
+    xbrl_file_compressed BOOLEAN NOT NULL DEFAULT TRUE, -- Whether file is compressed (always known)
+    xbrl_file_compression_type VARCHAR(10) NOT NULL DEFAULT 'zstd', -- zstd, lz4, or none (always known)
     xbrl_file_hash VARCHAR(64), -- SHA-256 hash for integrity verification (nullable - file may not be downloaded yet)
-    xbrl_processing_status VARCHAR(20) DEFAULT 'pending', -- pending, processing, completed, failed
+    xbrl_processing_status VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending, processing, completed, failed
     xbrl_processing_error TEXT, -- Error message if processing failed (nullable - only present on failure)
     xbrl_processing_started_at TIMESTAMPTZ, -- When processing started (nullable - not started yet)
     xbrl_processing_completed_at TIMESTAMPTZ, -- When processing completed (nullable - not completed yet)
@@ -95,7 +95,7 @@ CREATE TABLE financial_line_items (
     statement_type VARCHAR(20) NOT NULL, -- income_statement, balance_sheet, cash_flow, equity (required - must be categorized)
     statement_section VARCHAR(50) NOT NULL, -- revenue, expenses, assets, liabilities, etc. (required - must be categorized)
     parent_concept VARCHAR(255), -- Parent concept in hierarchy (nullable - top-level items don't have parents)
-    level INTEGER DEFAULT 0, -- Hierarchy level (0 = top level)
+    level INTEGER NOT NULL DEFAULT 0, -- Hierarchy level (0 = top level)
     order_index INTEGER, -- Display order within statement (nullable - may not be specified)
     is_calculated BOOLEAN NOT NULL DEFAULT FALSE, -- True if this is a calculated value
     calculation_formula TEXT, -- Formula used for calculation (nullable - only present for calculated items)

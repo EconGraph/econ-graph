@@ -104,6 +104,137 @@ CrawlAttempt       // Data acquisition tracking
 - **Migration Testing**: All migrations tested in CI/CD pipeline
 - **Data Integrity**: Comprehensive foreign key and constraint validation
 
+#### Database Schema Design Standards
+
+**CRITICAL**: Follow these schema design principles to avoid data integrity issues and compilation errors:
+
+##### 1. Nullable vs Non-Nullable Field Design
+
+**❌ WRONG**: Using `Option<T>` for fields that should always have values
+```sql
+-- BAD: Creates unnecessary complexity and data integrity issues
+xbrl_file_compressed BOOLEAN DEFAULT TRUE,  -- Nullable but has default
+xbrl_processing_status VARCHAR(20) DEFAULT 'pending',  -- Nullable but has default
+level INTEGER DEFAULT 0,  -- Nullable but has default
+```
+
+**✅ CORRECT**: Use `NOT NULL` for fields that logically must have values
+```sql
+-- GOOD: Clear, unambiguous, and performant
+xbrl_file_compressed BOOLEAN NOT NULL DEFAULT TRUE,  -- Always known
+xbrl_processing_status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- Always known
+level INTEGER NOT NULL DEFAULT 0,  -- Always known
+```
+
+##### 2. When to Use Nullable Fields
+
+**Use `NULL` only when:**
+- **Optional data**: Fields that may not exist (e.g., `amendment_type` only exists if `is_amended = true`)
+- **Not yet available**: Fields that will be populated later (e.g., `xbrl_file_content` before download)
+- **Conditional data**: Fields that depend on other conditions (e.g., `restatement_reason` only if `is_restated = true`)
+
+**Never use `NULL` for:**
+- **State fields**: Fields that represent a known state (compressed, processing status, hierarchy level)
+- **Boolean flags**: Fields that are either true or false (no "unknown" state)
+- **Default values**: Fields with meaningful defaults (compression type, processing status)
+
+##### 3. Schema Design Anti-Patterns to Avoid
+
+**❌ Anti-Pattern 1**: `Option<bool>` for state fields
+```rust
+// BAD: Creates confusion and requires unwrap_or() everywhere
+pub xbrl_file_compressed: Option<bool>,  // Is it compressed or not?
+```
+
+**✅ Correct**: `bool` for state fields
+```rust
+// GOOD: Clear and unambiguous
+pub xbrl_file_compressed: bool,  // Always known, defaults to true
+```
+
+**❌ Anti-Pattern 2**: Nullable fields with defaults
+```sql
+-- BAD: Creates ambiguity - is NULL different from DEFAULT?
+processing_status VARCHAR(20) DEFAULT 'pending',  -- Nullable with default
+```
+
+**✅ Correct**: Non-nullable fields with defaults
+```sql
+-- GOOD: Clear semantics - always has a value
+processing_status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- Always known
+```
+
+##### 4. Rust Model Alignment
+
+**Critical**: Rust models must exactly match database schema nullability:
+
+```rust
+// Database: xbrl_file_compressed BOOLEAN NOT NULL DEFAULT TRUE
+// Rust model must be:
+pub xbrl_file_compressed: bool,  // NOT Option<bool>
+
+// Database: xbrl_processing_status VARCHAR(20) NOT NULL DEFAULT 'pending'  
+// Rust model must be:
+pub xbrl_processing_status: String,  // NOT Option<String>
+
+// Database: level INTEGER NOT NULL DEFAULT 0
+// Rust model must be:
+pub level: i32,  // NOT Option<i32>
+```
+
+##### 5. Migration Best Practices
+
+**When changing nullability:**
+1. **Add NOT NULL constraint**: Use `ALTER COLUMN field_name SET NOT NULL`
+2. **Update existing data**: Ensure all existing rows have valid values
+3. **Regenerate schema**: Run `diesel print-schema` to update Rust models
+4. **Update Rust code**: Remove `Option<>` wrappers and `.unwrap_or()` calls
+
+**Example migration:**
+```sql
+-- Fix nullable field with default
+ALTER TABLE financial_statements 
+ALTER COLUMN xbrl_file_compressed SET NOT NULL;
+
+ALTER TABLE financial_statements 
+ALTER COLUMN xbrl_processing_status SET NOT NULL;
+
+ALTER TABLE financial_line_items 
+ALTER COLUMN level SET NOT NULL;
+```
+
+##### 6. Performance and Query Benefits
+
+**Non-nullable fields provide:**
+- **Better indexing**: NULL values can't be efficiently indexed
+- **Simpler queries**: No need for `IS NULL` checks
+- **Type safety**: Compile-time guarantees about data presence
+- **Cleaner code**: No need for `.unwrap_or()` or null checks
+
+##### 7. Data Integrity Validation
+
+**Before committing schema changes:**
+1. **Verify logical consistency**: Every field should have a clear purpose
+2. **Check default values**: Ensure defaults make business sense
+3. **Validate constraints**: Foreign keys, check constraints, unique constraints
+4. **Test migrations**: Run migrations on test data to verify correctness
+5. **Update documentation**: Comment fields with their business purpose
+
+**Example of well-documented schema:**
+```sql
+-- Financial statement processing status - Always known, defaults to pending
+-- Values: pending, processing, completed, failed
+xbrl_processing_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+
+-- File compression state - Always known, defaults to compressed for efficiency  
+-- True if file is compressed using zstd or other compression
+xbrl_file_compressed BOOLEAN NOT NULL DEFAULT TRUE,
+
+-- Hierarchy level within financial statement - Always known, defaults to top level
+-- 0 = top level, 1 = first level of detail, etc.
+level INTEGER NOT NULL DEFAULT 0,
+```
+
 ### GraphQL API Architecture
 
 #### Schema Design

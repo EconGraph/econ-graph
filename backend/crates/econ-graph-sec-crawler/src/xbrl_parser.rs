@@ -1784,7 +1784,7 @@ impl XbrlParser {
                         statement_type: self.determine_statement_type(&fact.concept),
                         statement_section: self.determine_statement_section(&fact.concept),
                         parent_concept: None,
-                        level: None,
+                        level: 0,
                         order_index: None,
                         is_calculated: false,
                         calculation_formula: None,

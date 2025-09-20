@@ -54,15 +54,15 @@ impl XbrlStorage {
     /// Store an XBRL file in the database
     pub async fn store_xbrl_file(
         &self,
-        accession_number: &str,
+        acc_num: &str,
         content: &[u8],
-        company_id: Uuid,
-        filing_date: DateTime<Utc>,
-        period_end_date: DateTime<Utc>,
-        fiscal_year: i32,
-        fiscal_quarter: Option<i32>,
-        form_type: Option<&str>,
-        document_url: Option<&str>,
+        comp_id: Uuid,
+        filing_dt: DateTime<Utc>,
+        period_end_dt: DateTime<Utc>,
+        fiscal_yr: i32,
+        fiscal_qtr: Option<i32>,
+        form_typ: Option<&str>,
+        doc_url: Option<&str>,
     ) -> Result<StoredXbrlDocument> {
         let mut conn = self.pool.get().await?;
 
@@ -89,15 +89,15 @@ impl XbrlStorage {
         if use_lob {
             self.store_as_large_object(
                 &mut conn,
-                accession_number,
+                acc_num,
                 &compressed_content,
-                company_id,
-                filing_date,
-                period_end_date,
-                fiscal_year,
-                fiscal_quarter,
-                form_type,
-                document_url,
+                comp_id,
+                filing_dt,
+                period_end_dt,
+                fiscal_yr,
+                fiscal_qtr,
+                form_typ,
+                doc_url,
                 file_size,
                 &file_hash,
                 compression_type,
@@ -106,15 +106,15 @@ impl XbrlStorage {
         } else {
             self.store_as_bytea(
                 &mut conn,
-                accession_number,
+                acc_num,
                 &compressed_content,
-                company_id,
-                filing_date,
-                period_end_date,
-                fiscal_year,
-                fiscal_quarter,
-                form_type,
-                document_url,
+                comp_id,
+                filing_dt,
+                period_end_dt,
+                fiscal_yr,
+                fiscal_qtr,
+                form_typ,
+                doc_url,
                 file_size,
                 &file_hash,
                 compression_type,
@@ -127,15 +127,15 @@ impl XbrlStorage {
     async fn store_as_large_object(
         &self,
         conn: &mut AsyncPgConnection,
-        accession_number: &str,
+        acc_num: &str,
         content: &[u8],
-        company_id: Uuid,
-        filing_date: DateTime<Utc>,
-        period_end_date: DateTime<Utc>,
-        fiscal_year: i32,
-        fiscal_quarter: Option<i32>,
-        form_type: Option<&str>,
-        document_url: Option<&str>,
+        comp_id: Uuid,
+        filing_dt: DateTime<Utc>,
+        period_end_dt: DateTime<Utc>,
+        fiscal_yr: i32,
+        fiscal_qtr: Option<i32>,
+        form_typ: Option<&str>,
+        doc_url: Option<&str>,
         original_size: usize,
         file_hash: &str,
         compression_type: &str,
@@ -152,23 +152,23 @@ impl XbrlStorage {
         // Insert financial statement record
         let new_statement = FinancialStatement {
             id: Uuid::new_v4(),
-            company_id,
+            company_id: comp_id,
             filing_type: "10-K".to_string(), // Default, should be determined from filing
-            form_type: form_type.unwrap_or("10-K").to_string(),
-            accession_number: accession_number.to_string(),
-            filing_date: filing_date.date_naive(),
-            period_end_date: period_end_date.date_naive(),
-            fiscal_year,
-            fiscal_quarter,
+            form_type: form_typ.unwrap_or("10-K").to_string(),
+            accession_number: acc_num.to_string(),
+            filing_date: filing_dt.date_naive(),
+            period_end_date: period_end_dt.date_naive(),
+            fiscal_year: fiscal_yr,
+            fiscal_quarter: fiscal_qtr,
             document_type: "XBRL".to_string(),
-            document_url: document_url.unwrap_or("").to_string(),
+            document_url: doc_url.unwrap_or("").to_string(),
             xbrl_file_oid: Some(lob_oid.0 as u32),
             xbrl_file_content: None,
             xbrl_file_size_bytes: Some(original_size as i64),
-            xbrl_file_compressed: Some(self.config.compression_enabled),
-            xbrl_file_compression_type: Some(compression_type.to_string()),
+            xbrl_file_compressed: self.config.compression_enabled,
+            xbrl_file_compression_type: compression_type.to_string(),
             xbrl_file_hash: Some(file_hash.to_string()),
-            xbrl_processing_status: Some("pending".to_string()),
+            xbrl_processing_status: "pending".to_string(),
             xbrl_processing_error: None,
             xbrl_processing_started_at: None,
             xbrl_processing_completed_at: None,
@@ -189,12 +189,12 @@ impl XbrlStorage {
 
         Ok(StoredXbrlDocument {
             id: new_statement.id,
-            accession_number: accession_number.to_string(),
-            company_id,
-            filing_date,
-            period_end_date,
-            fiscal_year,
-            fiscal_quarter,
+            accession_number: acc_num.to_string(),
+            company_id: comp_id,
+            filing_date: filing_dt,
+            period_end_date: period_end_dt,
+            fiscal_year: fiscal_yr,
+            fiscal_quarter: fiscal_qtr,
             file_size: original_size,
             compressed_size: content.len(),
             compression_type: compression_type.to_string(),
@@ -208,15 +208,15 @@ impl XbrlStorage {
     async fn store_as_bytea(
         &self,
         conn: &mut AsyncPgConnection,
-        accession_number: &str,
+        acc_num: &str,
         content: &[u8],
-        company_id: Uuid,
-        filing_date: DateTime<Utc>,
-        period_end_date: DateTime<Utc>,
-        fiscal_year: i32,
-        fiscal_quarter: Option<i32>,
-        form_type: Option<&str>,
-        document_url: Option<&str>,
+        comp_id: Uuid,
+        filing_dt: DateTime<Utc>,
+        period_end_dt: DateTime<Utc>,
+        fiscal_yr: i32,
+        fiscal_qtr: Option<i32>,
+        form_typ: Option<&str>,
+        doc_url: Option<&str>,
         original_size: usize,
         file_hash: &str,
         compression_type: &str,
@@ -226,23 +226,23 @@ impl XbrlStorage {
         // Insert financial statement record with bytea content
         let new_statement = FinancialStatement {
             id: Uuid::new_v4(),
-            company_id,
+            company_id: comp_id,
             filing_type: "10-K".to_string(), // Default, should be determined from filing
-            form_type: form_type.unwrap_or("10-K").to_string(),
-            accession_number: accession_number.to_string(),
-            filing_date: filing_date.date_naive(),
-            period_end_date: period_end_date.date_naive(),
-            fiscal_year,
-            fiscal_quarter,
+            form_type: form_typ.unwrap_or("10-K").to_string(),
+            accession_number: acc_num.to_string(),
+            filing_date: filing_dt.date_naive(),
+            period_end_date: period_end_dt.date_naive(),
+            fiscal_year: fiscal_yr,
+            fiscal_quarter: fiscal_qtr,
             document_type: "XBRL".to_string(),
-            document_url: document_url.unwrap_or("").to_string(),
+            document_url: doc_url.unwrap_or("").to_string(),
             xbrl_file_oid: None,
             xbrl_file_content: Some(content.to_vec()),
             xbrl_file_size_bytes: Some(original_size as i64),
-            xbrl_file_compressed: Some(self.config.compression_enabled),
-            xbrl_file_compression_type: Some(compression_type.to_string()),
+            xbrl_file_compressed: self.config.compression_enabled,
+            xbrl_file_compression_type: compression_type.to_string(),
             xbrl_file_hash: Some(file_hash.to_string()),
-            xbrl_processing_status: Some("pending".to_string()),
+            xbrl_processing_status: "pending".to_string(),
             xbrl_processing_error: None,
             xbrl_processing_started_at: None,
             xbrl_processing_completed_at: None,
@@ -263,12 +263,12 @@ impl XbrlStorage {
 
         Ok(StoredXbrlDocument {
             id: new_statement.id,
-            accession_number: accession_number.to_string(),
-            company_id,
-            filing_date,
-            period_end_date,
-            fiscal_year,
-            fiscal_quarter,
+            accession_number: acc_num.to_string(),
+            company_id: comp_id,
+            filing_date: filing_dt,
+            period_end_date: period_end_dt,
+            fiscal_year: fiscal_yr,
+            fiscal_quarter: fiscal_qtr,
             file_size: original_size,
             compressed_size: content.len(),
             compression_type: compression_type.to_string(),
@@ -279,22 +279,22 @@ impl XbrlStorage {
     }
 
     /// Retrieve an XBRL file from the database
-    pub async fn retrieve_xbrl_file(&self, accession_number: &str) -> Result<Vec<u8>> {
+    pub async fn retrieve_xbrl_file(&self, acc_num: &str) -> Result<Vec<u8>> {
         use econ_graph_core::schema::financial_statements::dsl::*;
 
         let mut conn = self.pool.get().await?;
 
         let statement = financial_statements
-            .filter(accession_number.eq(accession_number))
+            .filter(accession_number.eq(acc_num))
             .first::<FinancialStatement>(&mut conn)
             .await
             .optional()
             .context("Failed to query financial statement")?
-            .ok_or_else(|| anyhow::anyhow!("XBRL file not found: {}", accession_number))?;
+            .ok_or_else(|| anyhow::anyhow!("XBRL file not found: {}", acc_num))?;
 
         let content = if let Some(oid) = statement.xbrl_file_oid {
             // Retrieve from Large Object
-            self.retrieve_from_large_object(&mut conn, oid).await?
+            self.retrieve_from_large_object(&mut conn, oid as i32).await?
         } else if let Some(content) = statement.xbrl_file_content {
             // Retrieve from bytea column
             content
@@ -306,12 +306,12 @@ impl XbrlStorage {
         if statement.xbrl_file_compressed {
             match statement.xbrl_file_compression_type.as_deref() {
                 Some("zstd") => {
-                    decode_all(&content[..]).context("Failed to decompress XBRL file")?
+                    Ok(decode_all(&content[..]).context("Failed to decompress XBRL file")?)
                 }
-                _ => content, // Unknown compression type, return as-is
+                _ => Ok(content), // Unknown compression type, return as-is
             }
         } else {
-            content
+            Ok(content)
         }
     }
 

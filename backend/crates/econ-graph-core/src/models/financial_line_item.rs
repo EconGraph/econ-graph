@@ -132,7 +132,7 @@ pub struct FinancialLineItem {
 
     /// Hierarchy level within the statement
     /// 0 = top level, 1 = first level of detail, etc.
-    pub level: Option<i32>,
+    pub level: i32,
 
     /// Display order within the statement
     /// Used for maintaining proper statement presentation order
@@ -255,7 +255,7 @@ pub struct NewFinancialLineItem {
 
     /// Hierarchy level
     #[validate(range(min = 0, max = 10))]
-    pub level: Option<i32>,
+    pub level: i32,
 
     /// Order index
     #[validate(range(min = 0))]

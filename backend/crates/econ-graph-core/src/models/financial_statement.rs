@@ -124,13 +124,13 @@ pub struct FinancialStatement {
     /// Used for monitoring storage usage and processing time
     pub xbrl_file_size_bytes: Option<i64>,
 
-    /// Whether the XBRL file is compressed - Nullable, file may not be downloaded yet
+    /// Whether the XBRL file is compressed - Always known, defaults to true
     /// True if file is compressed using zstd or other compression
-    pub xbrl_file_compressed: Option<bool>,
+    pub xbrl_file_compressed: bool,
 
     /// Compression type used - Nullable, file may not be downloaded yet
     /// Values: "zstd", "lz4", "none"
-    pub xbrl_file_compression_type: Option<String>,
+    pub xbrl_file_compression_type: String,
 
     /// SHA-256 hash of the XBRL file - Nullable, file may not be downloaded yet
     /// Used for integrity verification and duplicate detection
@@ -138,7 +138,7 @@ pub struct FinancialStatement {
 
     /// Current status of XBRL processing
     /// Values: pending, processing, completed, failed
-    pub xbrl_processing_status: Option<String>,
+    pub xbrl_processing_status: String,
 
     /// Error message if XBRL processing failed
     /// Detailed error information for debugging and monitoring
@@ -276,14 +276,14 @@ pub struct NewFinancialStatement {
     pub xbrl_file_compressed: Option<bool>,
 
     /// Compression type used - Nullable, file may not be downloaded yet
-    pub xbrl_file_compression_type: Option<String>,
+    pub xbrl_file_compression_type: String,
 
     /// SHA-256 hash of the XBRL file - Nullable, file may not be downloaded yet
     pub xbrl_file_hash: Option<String>,
 
     /// XBRL processing status
     #[validate(length(min = 1, max = 20))]
-    pub xbrl_processing_status: Option<String>,
+    pub xbrl_processing_status: String,
 
     /// XBRL processing error
     pub xbrl_processing_error: Option<String>,
