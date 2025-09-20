@@ -184,6 +184,219 @@ impl MetricsService {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::TestContainer;
+    use serial_test::serial;
+    use std::time::Duration;
+
+    #[tokio::test]
+    #[serial]
+    async fn test_metrics_service_creation() {
+        // Test that metrics service can be created without errors
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+
+        let service = MetricsService::new(pool);
+        assert_eq!(service.update_interval, Duration::from_secs(60));
+
+        let custom_interval = Duration::from_secs(30);
+        let service_custom = MetricsService::with_interval(pool, custom_interval);
+        assert_eq!(service_custom.update_interval, custom_interval);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_update_metrics_with_empty_database() {
+        // Test that metrics update works with empty database
+        let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
+        let pool = container.pool();
+
+        let service = MetricsService::new(pool);
+
+        // Should not panic even with empty database
+        let result = service.update_metrics().await;
+        assert!(result.is_ok(), "Metrics update should succeed even with empty database");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_update_metrics_with_sample_data() {
+        // Test that metrics update works with sample data
+        let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
+        let pool = container.pool();
+
+        // Add some sample data to test metrics collection
+        use crate::models::{DataSource, EconomicSeries, NewEconomicSeries};
+        use crate::models::NewDataSource;
+
+        // Create a data source
+        let source = NewDataSource {
+            name: "Test Source".to_string(),
+            base_url: "https://test.example.com".to_string(),
+            api_key: Some("test-key".to_string()),
+            rate_limit: Some(100),
+            description: Some("Test data source".to_string()),
+        };
+        let data_source = DataSource::create(pool.clone(), &source).await.unwrap();
+
+        // Create some economic series
+        for i in 0..5 {
+            let series = NewEconomicSeries {
+                source_id: data_source.id,
+                series_id: format!("TEST{}", i),
+                title: format!("Test Series {}", i),
+                description: Some(format!("Test description {}", i)),
+                frequency: Some("Monthly".to_string()),
+                units: Some("Index".to_string()),
+                seasonal_adjustment: Some("Seasonally Adjusted".to_string()),
+                last_updated: Some(chrono::Utc::now()),
+            };
+            EconomicSeries::create(pool.clone(), &series).await.unwrap();
+        }
+
+        let service = MetricsService::new(pool);
+
+        // Update metrics and verify it works
+        let result = service.update_metrics().await;
+        assert!(result.is_ok(), "Metrics update should succeed with sample data");
+
+        // Verify that metrics were actually updated by checking the output
+        let metrics_output = crate::metrics_enhanced::generate_metrics().unwrap();
+        assert!(metrics_output.contains("economic_series_total"));
+        assert!(metrics_output.contains("data_points_total"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_metrics_service_error_handling() {
+        // Test that metrics service handles errors gracefully
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+
+        let service = MetricsService::new(pool);
+
+        // Test with invalid database connection (by dropping the container)
+        drop(container);
+
+        // This should handle the error gracefully
+        let result = service.update_metrics().await;
+        // The service should handle database errors without panicking
+        // (exact error handling depends on implementation)
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_metrics_service_interval_configuration() {
+        // Test different interval configurations
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+
+        // Test default interval
+        let service_default = MetricsService::new(pool.clone());
+        assert_eq!(service_default.update_interval, Duration::from_secs(60));
+
+        // Test custom interval
+        let custom_interval = Duration::from_secs(30);
+        let service_custom = MetricsService::with_interval(pool, custom_interval);
+        assert_eq!(service_custom.update_interval, custom_interval);
+
+        // Test very short interval for testing
+        let test_interval = Duration::from_millis(100);
+        let service_test = MetricsService::with_interval(
+            service_custom.pool.clone(),
+            test_interval
+        );
+        assert_eq!(service_test.update_interval, test_interval);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_metrics_collection_completeness() {
+        // Test that all expected metrics are collected
+        let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
+        let pool = container.pool();
+
+        // Add comprehensive test data
+        use crate::models::{DataSource, EconomicSeries, DataPoint, NewDataSource, NewEconomicSeries, NewDataPoint};
+        use chrono::{Utc, NaiveDate};
+
+        // Create data source
+        let source = NewDataSource {
+            name: "Comprehensive Test Source".to_string(),
+            base_url: "https://comprehensive.test.com".to_string(),
+            api_key: Some("comprehensive-key".to_string()),
+            rate_limit: Some(1000),
+            description: Some("Comprehensive test data source".to_string()),
+        };
+        let data_source = DataSource::create(pool.clone(), &source).await.unwrap();
+
+        // Create multiple series
+        for i in 0..10 {
+            let series = NewEconomicSeries {
+                source_id: data_source.id,
+                series_id: format!("COMPREHENSIVE{}", i),
+                title: format!("Comprehensive Test Series {}", i),
+                description: Some(format!("Comprehensive test description {}", i)),
+                frequency: Some("Monthly".to_string()),
+                units: Some("Index".to_string()),
+                seasonal_adjustment: Some("Seasonally Adjusted".to_string()),
+                last_updated: Some(Utc::now()),
+            };
+            let created_series = EconomicSeries::create(pool.clone(), &series).await.unwrap();
+
+            // Add data points for each series
+            for j in 0..20 {
+                let data_point = NewDataPoint {
+                    series_id: created_series.id,
+                    date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap() + chrono::Duration::days(j as i64 * 30),
+                    value: Some(rust_decimal::Decimal::from(j * 10)),
+                    metadata: Some(serde_json::json!({"test": true})),
+                };
+                DataPoint::create(pool.clone(), &data_point).await.unwrap();
+            }
+        }
+
+        let service = MetricsService::new(pool);
+
+        // Update metrics
+        let result = service.update_metrics().await;
+        assert!(result.is_ok(), "Metrics update should succeed with comprehensive data");
+
+        // Verify comprehensive metrics output
+        let metrics_output = crate::metrics_enhanced::generate_metrics().unwrap();
+
+        // Check that all expected metric types are present
+        let expected_metrics = [
+            "economic_series_total",
+            "data_points_total",
+            "data_sources_total",
+            "application_uptime_seconds",
+            "memory_usage_bytes",
+            "db_connections_active",
+            "db_connections_idle",
+            "db_connections_total",
+        ];
+
+        for metric in expected_metrics {
+            assert!(
+                metrics_output.contains(metric),
+                "Metrics output should contain {} metric",
+                metric
+            );
+        }
+
+        // Verify that the counts are reasonable
+        assert!(metrics_output.contains("economic_series_total 10"));
+        assert!(metrics_output.contains("data_points_total 200")); // 10 series * 20 points each
+        assert!(metrics_output.contains("data_sources_total 1"));
+    }
+}
+
 /// Start the metrics service in a background task
 pub async fn start_metrics_service(pool: Arc<DatabasePool>) -> AppResult<()> {
     let metrics_service = MetricsService::new(pool);

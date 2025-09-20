@@ -938,4 +938,249 @@ mod tests {
         // but we can verify it doesn't panic
         assert!(response.into_response().status().is_success());
     }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_individual_metric_functions() {
+        // Test each individual metric recording function
+
+        // HTTP metrics
+        record_http_request("GET", "/api/test", 200, 0.1);
+        record_http_request("POST", "/api/create", 201, 0.2);
+        record_http_request("GET", "/api/error", 404, 0.05);
+
+        // GraphQL metrics
+        record_graphql_query("query", "getSeries", 0.1, 5.0);
+        record_graphql_query("mutation", "createSeries", 0.2, 10.0);
+
+        // Database metrics
+        record_db_query("SELECT", "economic_series", 0.05);
+        record_db_query("INSERT", "data_points", 0.1);
+
+        // Auth metrics
+        record_auth_attempt("google", "oauth");
+        record_auth_attempt("email", "password");
+        record_auth_success("google", "oauth");
+        record_auth_success("email", "password");
+
+        // Crawler metrics
+        record_crawler_request("fred", "success", 1.0);
+        record_crawler_request("bls", "error", 0.0);
+        record_crawler_data_points(100);
+        record_crawler_data_points(50);
+
+        // Error metrics
+        record_error("validation", "auth");
+        record_error("database", "connection");
+
+        // Gauge updates
+        update_db_pool_metrics(5, 10, 15);
+        update_http_connections(3);
+        update_memory_usage(1024 * 1024);
+        increment_uptime(60);
+
+        // Application-specific metrics
+        update_economic_series_count(1000);
+        update_data_points_count(50000);
+        update_active_users_count(25);
+        update_chart_annotations_count(150);
+
+        // Search metrics
+        record_search_query("series", "0-10", 0.1);
+        record_search_query("data", "10-50", 0.2);
+
+        // Data source health
+        update_data_source_health(true);
+        update_data_source_health(false);
+
+        // Queue and cache metrics
+        record_queue_processing_rate(5.5);
+        record_cache_hit_ratio(0.85);
+
+        // API rate limiting
+        record_api_rate_limit_hit("fred", "/series");
+        record_api_rate_limit_hit("bls", "/data");
+
+        // Data quality
+        record_data_quality_score(0.92);
+
+        // User sessions
+        update_user_sessions_active(12);
+
+        // Chart rendering
+        record_chart_rendering_time("line", "100-1000", 0.05);
+        record_chart_rendering_time("bar", "0-100", 0.03);
+
+        // Verify all metrics were recorded by checking output
+        let metrics_output = generate_metrics().expect("Should generate metrics");
+
+        // Check for specific metric types
+        assert!(metrics_output.contains("http_requests_total"));
+        assert!(metrics_output.contains("graphql_queries_total"));
+        assert!(metrics_output.contains("db_queries_total"));
+        assert!(metrics_output.contains("auth_attempts_total"));
+        assert!(metrics_output.contains("auth_successes_total"));
+        assert!(metrics_output.contains("crawler_requests_total"));
+        assert!(metrics_output.contains("crawler_data_points_total"));
+        assert!(metrics_output.contains("errors_total"));
+        assert!(metrics_output.contains("economic_series_total"));
+        assert!(metrics_output.contains("data_points_total"));
+        assert!(metrics_output.contains("active_users_total"));
+        assert!(metrics_output.contains("chart_annotations_total"));
+        assert!(metrics_output.contains("search_queries_total"));
+        assert!(metrics_output.contains("data_source_health"));
+        assert!(metrics_output.contains("queue_processing_rate"));
+        assert!(metrics_output.contains("cache_hit_ratio"));
+        assert!(metrics_output.contains("api_rate_limit_hits"));
+        assert!(metrics_output.contains("data_quality_score"));
+        assert!(metrics_output.contains("user_sessions_active"));
+        assert!(metrics_output.contains("chart_rendering_time_seconds"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_metrics_with_different_values() {
+        // Test metrics with various value ranges to ensure they handle edge cases
+
+        // Test with zero values
+        record_http_request("GET", "/api/zero", 200, 0.0);
+        record_crawler_data_points(0);
+        update_memory_usage(0);
+
+        // Test with large values
+        record_http_request("GET", "/api/large", 200, 10.0);
+        record_crawler_data_points(1000000);
+        update_memory_usage(u64::MAX);
+
+        // Test with negative values (should be handled gracefully)
+        record_http_request("GET", "/api/negative", 200, -0.1);
+
+        // Test with very small values
+        record_http_request("GET", "/api/small", 200, 0.0001);
+
+        // Verify metrics are still generated correctly
+        let metrics_output = generate_metrics().expect("Should generate metrics");
+        assert!(!metrics_output.is_empty());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_metrics_label_variations() {
+        // Test metrics with different label combinations
+
+        // HTTP methods
+        for method in ["GET", "POST", "PUT", "DELETE", "PATCH"] {
+            record_http_request(method, "/api/test", 200, 0.1);
+        }
+
+        // HTTP status codes
+        for status in [200, 201, 400, 401, 403, 404, 500, 502, 503] {
+            record_http_request("GET", "/api/test", status, 0.1);
+        }
+
+        // GraphQL operation types
+        for op_type in ["query", "mutation", "subscription"] {
+            record_graphql_query(op_type, "testOperation", 0.1, 5.0);
+        }
+
+        // Auth providers
+        for provider in ["google", "github", "email", "ldap"] {
+            record_auth_attempt(provider, "oauth");
+            record_auth_success(provider, "oauth");
+        }
+
+        // Crawler sources
+        for source in ["fred", "bls", "census", "worldbank"] {
+            record_crawler_request(source, "success", 1.0);
+        }
+
+        // Error types
+        for error_type in ["validation", "database", "network", "auth", "rate_limit"] {
+            record_error(error_type, "test");
+        }
+
+        // Verify all variations are captured
+        let metrics_output = generate_metrics().expect("Should generate metrics");
+        assert!(metrics_output.contains("method=\"GET\""));
+        assert!(metrics_output.contains("method=\"POST\""));
+        assert!(metrics_output.contains("status_code=\"200\""));
+        assert!(metrics_output.contains("status_code=\"404\""));
+        assert!(metrics_output.contains("operation_type=\"query\""));
+        assert!(metrics_output.contains("operation_type=\"mutation\""));
+        assert!(metrics_output.contains("provider=\"google\""));
+        assert!(metrics_output.contains("provider=\"email\""));
+        assert!(metrics_output.contains("source=\"fred\""));
+        assert!(metrics_output.contains("source=\"bls\""));
+        assert!(metrics_output.contains("error_type=\"validation\""));
+        assert!(metrics_output.contains("error_type=\"database\""));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_metrics_concurrent_access() {
+        // Test that metrics can be safely accessed from multiple threads
+        use std::sync::Arc;
+        use tokio::task;
+
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                task::spawn(async move {
+                    // Each task records different metrics
+                    record_http_request("GET", &format!("/api/test{}", i), 200, 0.1);
+                    record_graphql_query("query", &format!("testQuery{}", i), 0.1, 5.0);
+                    record_db_query("SELECT", &format!("table{}", i), 0.05);
+                    record_auth_attempt("google", "oauth");
+                    record_crawler_request("fred", "success", 1.0);
+                    record_error("test", &format!("error{}", i));
+
+                    // Update gauges
+                    update_db_pool_metrics(i, i * 2, i * 3);
+                    update_http_connections(i);
+                    update_memory_usage(1024 * 1024 * i);
+                    increment_uptime(60);
+                    update_economic_series_count(i * 100);
+                    update_data_points_count(i * 1000);
+                })
+            })
+            .collect();
+
+        // Wait for all tasks to complete
+        for handle in handles {
+            handle.await.expect("Task should complete successfully");
+        }
+
+        // Verify metrics were recorded correctly
+        let metrics_output = generate_metrics().expect("Should generate metrics");
+        assert!(!metrics_output.is_empty());
+        assert!(metrics_output.contains("http_requests_total"));
+        assert!(metrics_output.contains("graphql_queries_total"));
+        assert!(metrics_output.contains("db_queries_total"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_metrics_prometheus_format() {
+        // Test that generated metrics are in valid Prometheus format
+        record_http_request("GET", "/api/test", 200, 0.1);
+        record_graphql_query("query", "testQuery", 0.1, 5.0);
+        update_economic_series_count(1000);
+        update_data_points_count(50000);
+
+        let metrics_output = generate_metrics().expect("Should generate metrics");
+
+        // Check for Prometheus format elements
+        assert!(metrics_output.contains("# HELP"));
+        assert!(metrics_output.contains("# TYPE"));
+
+        // Check for proper metric format
+        let lines: Vec<&str> = metrics_output.lines().collect();
+        for line in lines {
+            if line.starts_with("http_requests_total") && !line.starts_with("#") {
+                // Should be in format: metric_name{labels} value
+                assert!(line.contains("{"));
+                assert!(line.contains("}"));
+                assert!(line.contains(" "));
+            }
+        }
+    }
 }
