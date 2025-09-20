@@ -10,6 +10,7 @@ mod tests {
     use crate::auth::services::AuthService;
     use econ_graph_core::test_utils::TestContainer;
     use serde_json::json;
+    use serial_test::serial;
     use std::collections::HashMap;
     use uuid::Uuid;
     // use warp::test; // Temporarily disabled - not needed for current tests
@@ -91,29 +92,25 @@ mod tests {
 
     /// Test Google OAuth token verification (mocked)
     #[tokio::test]
-
+    #[serial]
     async fn test_google_oauth_flow() {
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
 
         // Skip test if database is not available
         if skip_if_no_database(&container).await {
             return;
         }
 
-        // Clean database before test to ensure isolation
-        container
-            .clean_database()
-            .await
-            .expect("Failed to clean database");
-
         let auth_service = AuthService::new(container.pool().clone());
 
         // Note: In a real test, you would mock the HTTP client
         // For now, we'll test the user creation flow
 
+        let email = format!("googleuser-{}@gmail.com", uuid::Uuid::new_v4());
         let google_user_info = GoogleUserInfo {
-            id: "google-123456789".to_string(),
-            email: "googleuser@gmail.com".to_string(),
+            id: format!("google-{}", uuid::Uuid::new_v4()),
+            email: email.clone(),
             name: "Google User".to_string(),
             avatar: Some("https://lh3.googleusercontent.com/avatar.jpg".to_string()),
             verified_email: true,
@@ -159,8 +156,8 @@ mod tests {
         let auth_service = AuthService::new(container.pool().clone());
 
         let facebook_user_info = FacebookUserInfo {
-            id: "facebook-987654321".to_string(),
-            email: Some("fbuser@facebook.com".to_string()),
+            id: format!("facebook-{}", uuid::Uuid::new_v4()),
+            email: Some(format!("fbuser-{}@facebook.com", uuid::Uuid::new_v4())),
             name: "Facebook User".to_string(),
             picture: Some(FacebookPicture {
                 data: FacebookPictureData {
@@ -194,6 +191,7 @@ mod tests {
 
     /// Test email/password authentication
     #[tokio::test]
+    #[serial]
     async fn test_email_password_auth() {
         let container = TestContainer::new().await;
 
@@ -275,9 +273,10 @@ mod tests {
 
     /// Test profile update functionality
     #[tokio::test]
-
+    #[serial]
     async fn test_profile_update() {
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
 
         // Skip test if database is not available
         if skip_if_no_database(&container).await {
@@ -286,13 +285,10 @@ mod tests {
 
         let auth_service = AuthService::new(container.pool().clone());
 
-        // First create a user
+        // First create a user with unique email
+        let email = format!("test-{}@example.com", uuid::Uuid::new_v4());
         let user = auth_service
-            .create_email_user(
-                "test@example.com".to_string(),
-                "Test User".to_string(),
-                "password123".to_string(),
-            )
+            .create_email_user(email, "Test User".to_string(), "password123".to_string())
             .await
             .expect("Should create user successfully");
 

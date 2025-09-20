@@ -11,7 +11,7 @@ use testcontainers::{runners::AsyncRunner, ContainerAsync};
 use testcontainers_modules::postgres::Postgres;
 
 // Embed migrations at compile time
-pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations/");
+pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("../../migrations/");
 
 /// Test that validates schema compatibility between migrations and schema.rs
 ///

@@ -43,3 +43,8 @@ diesel-async.workspace = true
 [dev-dependencies]
 serial_test.workspace = true
 tokio-test.workspace = true
+testcontainers.workspace = true
+testcontainers-modules.workspace = true
+diesel.workspace = true
+diesel_migrations.workspace = true
+bb8.workspace = true

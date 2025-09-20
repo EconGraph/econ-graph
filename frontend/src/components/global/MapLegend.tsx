@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { Box, Typography, Paper, Slider } from '@mui/material';
+import { Box, Typography, Paper } from '@mui/material';
 import * as d3 from 'd3';
 import { EconomicIndicator } from '../../types/globalAnalysis';
 

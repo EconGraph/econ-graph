@@ -5,7 +5,7 @@
  * with all its features and controls.
  */
 
-import React, { useState, useCallback } from 'react';
+import React from 'react';
 import * as d3 from 'd3';
 import {
   Box,
@@ -23,7 +23,7 @@ import {
 import { GlobalAnalysisProvider, useGlobalAnalysis } from '../contexts/GlobalAnalysisContext';
 import InteractiveWorldMap from '../components/global/InteractiveWorldMap';
 import WorldMapControls from '../components/global/WorldMapControls';
-import CountryTooltip from '../components/global/CountryTooltip';
+// Note: CountryTooltip is imported for future use but not currently used in this component
 import MapLegend from '../components/global/MapLegend';
 import { sampleCountryData } from '../data/sampleCountryData';
 import { CountryData, EconomicIndicator } from '../types/globalAnalysis';

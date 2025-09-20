@@ -438,7 +438,7 @@ impl EconGraphMcpServer {
     }
 
     /// Call private frontend chart API to generate chart configuration
-    async fn call_private_chart_api(&self, chart_request: &Value) -> Result<Value> {
+    pub async fn call_private_chart_api(&self, chart_request: &Value) -> Result<Value> {
         let url = format!("{}/generate", self.frontend_chart_api_url);
 
         let response = self
@@ -854,34 +854,8 @@ mod tests {
         // Note: This might return an error if the series doesn't exist, which is expected
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_create_data_visualization_tool() {
-        // Create a test container that will be kept alive for the duration of the test
-        let container = TestContainer::new().await;
-        let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
-
-        // Test the visualization tool with mock data
-        let viz_args = json!({
-            "series_ids": ["test-series-1", "test-series-2"],
-            "chart_type": "line",
-            "title": "Test Chart",
-            "start_date": "2020-01-01",
-            "end_date": "2023-12-31"
-        });
-
-        let result = server.create_data_visualization(viz_args).await;
-        assert!(
-            result.is_ok(),
-            "Visualization tool failed: {:?}",
-            result.err()
-        );
-
-        let response = result.unwrap();
-        assert!(response.get("content").is_some());
-        // This should return a fallback visualization since the series don't exist
-    }
+    // test_create_data_visualization_tool moved to integration tests
+    // because it requires the chart API service to be running
 
     // ===== INTEGRATION TESTS FOR HTTP ENDPOINT =====
     // These tests will catch the warp filter integration bug
@@ -1552,49 +1526,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_call_private_chart_api_success() {
-        let container = TestContainer::new().await;
-        let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
-
-        // Test successful chart API call with mock data
-        let chart_request = json!({
-            "seriesData": [{
-                "id": "test-series",
-                "name": "Test Series",
-                "dataPoints": [
-                    {"date": "2023-01-01", "value": 100.0},
-                    {"date": "2023-02-01", "value": 105.0}
-                ]
-            }],
-            "chartType": "line",
-            "title": "Test Chart",
-            "startDate": "2023-01-01",
-            "endDate": "2023-12-31"
-        });
-
-        // This will fail because the chart API service isn't running in tests,
-        // but it tests the function logic and error handling
-        let result = server.call_private_chart_api(&chart_request).await;
-        assert!(result.is_err()); // Expected to fail in test environment
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn test_call_private_chart_api_failure() {
-        let container = TestContainer::new().await;
-        let pool = container.pool();
-        let server = EconGraphMcpServer::new(Arc::new(pool.clone()));
-
-        // Test chart API call with invalid data
-        let invalid_request = json!({
-            "invalid": "data"
-        });
-
-        // This should fail due to invalid request format
-        let result = server.call_private_chart_api(&invalid_request).await;
-        assert!(result.is_err());
-    }
+    // test_call_private_chart_api_* tests moved to integration tests
+    // because they require the chart API service to be running
 }

@@ -1,0 +1,26 @@
+# Mobile E2E Test Container with Pre-installed Mobile Browsers
+# This container extends the standard E2E container with mobile-specific dependencies
+
+FROM econ-graph-e2e:latest
+
+# Switch to root user to install system packages
+USER root
+
+# Install additional mobile-specific system dependencies
+RUN apt-get update && apt-get install -y \
+    # Mobile testing specific dependencies
+    xvfb \
+    x11vnc \
+    fluxbox \
+    # Clean up
+    && rm -rf /var/lib/apt/lists/*
+
+# Install additional mobile browsers and dependencies
+RUN npx playwright install chromium webkit
+RUN npx playwright install-deps
+
+# Switch back to playwright user for security
+USER playwright
+
+# Default command (can be overridden)
+CMD ["npx", "playwright", "test", "--help"]

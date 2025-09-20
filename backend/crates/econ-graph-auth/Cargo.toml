@@ -44,3 +44,10 @@ validator.workspace = true
 
 # HTTP client
 reqwest.workspace = true
+
+# Test dependencies
+[dev-dependencies]
+serial_test.workspace = true
+tokio-test.workspace = true
+testcontainers.workspace = true
+testcontainers-modules.workspace = true

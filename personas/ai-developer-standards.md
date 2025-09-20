@@ -248,6 +248,26 @@ BACKEND_INTEGRATION_DB_PORT=5447
 * **Provide Evidence**: Reference specific error messages and explain how your fix addresses them
 * **Set Expectations**: "This should fix the Docker build issue, but there may be other failures"
 
+### Process Output and Buffering Issues
+**CRITICAL: Use PTY (pseudo-terminal) for long-running processes to avoid output buffering.**
+
+* **The Problem**: Long-running processes (like Docker builds, npm installs, etc.) often buffer their output when run in pipes or background processes
+* **The Solution**: Use `script` or `unbuffer` to create a PTY for unbuffered output
+* **Examples**:
+  * ❌ **Bad**: `docker build . &` (output may be buffered)
+  * ✅ **Good**: `script -q /dev/null docker build . &` (unbuffered output)
+  * ❌ **Bad**: `npm install | head -20` (may show no output)
+  * ✅ **Good**: `script -q /dev/null npm install | head -20` (shows real-time output)
+* **When to Use PTY**:
+  * Any long-running process where you need to see progress
+  * Docker builds, npm installs, cargo builds
+  * Any process that might buffer output in pipes
+  * Background processes where you want to monitor progress
+* **Alternative Tools**:
+  * `unbuffer` (from expect package) - `unbuffer docker build .`
+  * `stdbuf` - `stdbuf -oL -eL docker build .`
+  * `script` - `script -q /dev/null docker build .`
+
 ### When You're Wrong (And You Will Be)
 * **Acknowledge Mistakes Immediately**: Don't double down on incorrect assumptions
 * **Learn from Each Failure**: Each failed fix teaches you something about the system

@@ -88,7 +88,7 @@
     "test:e2e:mobile:report": "playwright show-report --config=playwright.mobile.config.ts",
     "test:e2e:core": "playwright test --config=ci/configs/playwright-core.config.ts",
     "test:e2e:analysis": "playwright test --config=ci/configs/playwright-analysis.config.ts",
-    "test:e2e:comprehensive": "playwright test tests/e2e/complete-workflow.spec.ts",
+    "test:e2e:comprehensive": "playwright test --config=ci/configs/playwright-comprehensive.config.ts",
     "test:e2e:mobile:core": "playwright test --config=ci/configs/playwright-mobile-core.config.ts",
     "test:e2e:mobile:analysis": "playwright test --config=ci/configs/playwright-mobile-analysis.config.ts",
     "test:e2e:mobile:comprehensive": "playwright test --config=ci/configs/playwright-mobile-comprehensive.config.ts"

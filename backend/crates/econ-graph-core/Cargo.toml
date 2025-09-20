@@ -64,3 +64,4 @@ serial_test.workspace = true
 tokio-test.workspace = true
 testcontainers.workspace = true
 testcontainers-modules.workspace = true
+imara-diff.workspace = true

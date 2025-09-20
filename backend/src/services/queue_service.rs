@@ -371,6 +371,7 @@ mod tests {
         // This ensures monitoring dashboards can track queue health
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         let stats = get_queue_statistics(&pool).await.unwrap();
@@ -395,6 +396,7 @@ mod tests {
         use crate::test_utils::TestContainer;
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         // Create a test queue item
@@ -424,6 +426,7 @@ mod tests {
         // This prevents multiple workers from processing the same item
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         // Create a test queue item
@@ -468,6 +471,7 @@ mod tests {
         // This ensures queue progress can be tracked and reported
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         // Create a test queue item
@@ -516,6 +520,7 @@ mod tests {
         // This ensures resilient data collection from external APIs
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         // Create a test queue item with low max retries
@@ -555,6 +560,7 @@ mod tests {
         // This ensures efficient worker processing without race conditions
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         // Create multiple test queue items with different priorities
@@ -607,6 +613,7 @@ mod tests {
         // This ensures long-running systems don't accumulate unlimited queue history
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         // Create and complete a test item
@@ -648,6 +655,7 @@ mod tests {
         // This ensures failed items are properly tracked for debugging
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         // Create a test queue item
@@ -685,6 +693,7 @@ mod tests {
         // This ensures recovery from crashed workers
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         // Create a test queue item
@@ -723,6 +732,7 @@ mod tests {
         // This ensures automatic recovery from worker failures
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         // Create multiple test queue items
@@ -775,6 +785,7 @@ mod tests {
         // This ensures monitoring can track performance metrics
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         // Create and process a test item to generate processing time data
@@ -820,6 +831,7 @@ mod tests {
         // This enables delayed processing and rate limiting
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         // Create an item scheduled for the future
@@ -866,6 +878,7 @@ mod tests {
         // This ensures system resilience
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         // Test operations on non-existent item
@@ -906,6 +919,7 @@ mod tests {
         // This ensures multiple workers can operate safely
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         // Create multiple items
