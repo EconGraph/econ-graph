@@ -373,6 +373,9 @@ mod tests {
         let container = TestContainer::new().await;
         let pool = container.pool();
 
+        // Clean database to ensure test isolation
+        container.clean_database().await.unwrap();
+
         let stats = get_queue_statistics(&pool).await.unwrap();
 
         assert_eq!(stats.total_items, 0);
@@ -396,6 +399,9 @@ mod tests {
 
         let container = TestContainer::new().await;
         let pool = container.pool();
+
+        // Clean database to ensure test isolation
+        container.clean_database().await.unwrap();
 
         // Create a test queue item
         let new_item = NewCrawlQueueItem {
@@ -425,6 +431,9 @@ mod tests {
 
         let container = TestContainer::new().await;
         let pool = container.pool();
+
+        // Clean database to ensure test isolation
+        container.clean_database().await.unwrap();
 
         // Create a test queue item
         let new_item = NewCrawlQueueItem {
@@ -469,6 +478,9 @@ mod tests {
 
         let container = TestContainer::new().await;
         let pool = container.pool();
+
+        // Clean database to ensure test isolation
+        container.clean_database().await.unwrap();
 
         // Create a test queue item
         let new_item = NewCrawlQueueItem {
@@ -518,6 +530,9 @@ mod tests {
         let container = TestContainer::new().await;
         let pool = container.pool();
 
+        // Clean database to ensure test isolation
+        container.clean_database().await.unwrap();
+
         // Create a test queue item with low max retries
         let new_item = NewCrawlQueueItem {
             source: "BLS".to_string(),
@@ -555,6 +570,7 @@ mod tests {
         // This ensures efficient worker processing without race conditions
 
         let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
         let pool = container.pool();
 
         // Create multiple test queue items with different priorities
@@ -609,6 +625,9 @@ mod tests {
         let container = TestContainer::new().await;
         let pool = container.pool();
 
+        // Clean database to ensure test isolation
+        container.clean_database().await.unwrap();
+
         // Create and complete a test item
         let new_item = NewCrawlQueueItem {
             source: "FRED".to_string(),
@@ -649,6 +668,9 @@ mod tests {
 
         let container = TestContainer::new().await;
         let pool = container.pool();
+
+        // Clean database to ensure test isolation
+        container.clean_database().await.unwrap();
 
         // Create a test queue item
         let new_item = NewCrawlQueueItem {
@@ -725,6 +747,9 @@ mod tests {
         let container = TestContainer::new().await;
         let pool = container.pool();
 
+        // Clean database to ensure test isolation
+        container.clean_database().await.unwrap();
+
         // Create multiple test queue items
         let new_item1 = NewCrawlQueueItem {
             source: "FRED".to_string(),
@@ -777,6 +802,9 @@ mod tests {
         let container = TestContainer::new().await;
         let pool = container.pool();
 
+        // Clean database to ensure test isolation
+        container.clean_database().await.unwrap();
+
         // Create and process a test item to generate processing time data
         let new_item = NewCrawlQueueItem {
             source: "FRED".to_string(),
@@ -821,6 +849,9 @@ mod tests {
 
         let container = TestContainer::new().await;
         let pool = container.pool();
+
+        // Clean database to ensure test isolation
+        container.clean_database().await.unwrap();
 
         // Create an item scheduled for the future
         let future_time = Utc::now() + chrono::Duration::hours(1);

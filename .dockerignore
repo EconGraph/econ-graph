@@ -1,0 +1,80 @@
+# Docker ignore file to reduce build context and improve performance
+
+# Git and version control
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+docs/
+README.md
+
+# CI/CD
+.github/
+ci/
+scripts/
+
+# Test files and coverage
+coverage/
+test-results/
+playwright-report/
+*.log
+
+# Node modules (will be installed via package.json)
+node_modules/
+frontend/node_modules/
+admin-frontend/node_modules/
+chart-api-service/node_modules/
+
+# Build artifacts
+build/
+dist/
+target/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+secrets.env
+ports.env
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Large directories that aren't needed for Docker builds
+demo-tools/
+demo-videos/
+progress-reports/
+projects/
+personas/
+terraform/
+k8s/
+grafana-dashboards/
+
+# Backend specific (not needed for frontend E2E containers)
+backend/
+migrations/
+*.rs
+Cargo.toml
+Cargo.lock
+rust-toolchain.toml
+
+# Chart API service (not needed for frontend E2E containers)
+chart-api-service/
+
+# Admin frontend (not needed for main frontend E2E containers)
+admin-frontend/

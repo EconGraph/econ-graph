@@ -119,8 +119,14 @@ confidence-threshold = 0.8
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
 # aren't accepted for every possible crate as with the normal allow list
 exceptions = [
-    # Allow MS-PL for our own project only
+    # Allow MS-PL for all workspace crates
     { allow = ["MS-PL"], crate = "econ-graph-backend" },
+    { allow = ["MS-PL"], crate = "econ-graph-auth" },
+    { allow = ["MS-PL"], crate = "econ-graph-core" },
+    { allow = ["MS-PL"], crate = "econ-graph-crawler" },
+    { allow = ["MS-PL"], crate = "econ-graph-graphql" },
+    { allow = ["MS-PL"], crate = "econ-graph-mcp" },
+    { allow = ["MS-PL"], crate = "econ-graph-services" },
     # Each entry is the crate and version constraint, and its specific allow
     # list
     #{ allow = ["Zlib"], crate = "adler32" },

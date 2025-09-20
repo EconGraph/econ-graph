@@ -8,14 +8,10 @@ use econ_graph_core::test_utils::TestContainer;
 use reqwest::Client;
 use serial_test::serial;
 
-/// Test World Bank data source configuration
-#[tokio::test]
-#[serial]
-async fn test_world_bank_data_source_config() -> Result<(), Box<dyn std::error::Error>> {
-    let container = TestContainer::new().await;
-    let pool = container.pool().clone();
-
-    let world_bank_source = DataSource::get_or_create(&pool, DataSource::world_bank()).await?;
+/// Test World Bank data source configuration (unit test - no database)
+#[test]
+fn test_world_bank_data_source_config() {
+    let world_bank_source = DataSource::world_bank();
 
     // Verify World Bank data source configuration
     assert_eq!(world_bank_source.name, "World Bank Open Data");
@@ -27,8 +23,6 @@ async fn test_world_bank_data_source_config() -> Result<(), Box<dyn std::error::
         .description
         .unwrap()
         .contains("Global economic"));
-
-    Ok(())
 }
 
 /// Test economic indicator filtering logic

@@ -17,6 +17,7 @@ use econ_graph_core::{create_pool, AppError, AppResult, Config, DatabasePool};
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
 use econ_graph_mcp::mcp_server::{mcp_handler, EconGraphMcpServer};
 
+mod integration_tests;
 mod metrics;
 // use services::crawler::start_crawler; // TODO: Implement start_crawler function
 

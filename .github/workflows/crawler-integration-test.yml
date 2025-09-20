@@ -263,3 +263,5 @@ jobs:
         echo "  1. Download artifacts to review generated migration"
         echo "  2. Test migration on development database"
         echo "  3. Integrate into main migration sequence if approved"
+
+# Workflow cache refresh: 2025-09-17 08:25:07 PDT

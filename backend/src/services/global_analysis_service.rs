@@ -827,7 +827,10 @@ mod tests {
     #[serial]
     async fn test_get_countries_with_economic_data() {
         let container = TestContainer::new().await;
-        container.clean_database().await; // Clean database to avoid test pollution
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database"); // Clean database to avoid test pollution
         let pool = container.pool();
 
         // Setup test data
@@ -869,7 +872,10 @@ mod tests {
     #[serial]
     async fn test_calculate_country_correlations() {
         let container = TestContainer::new().await;
-        container.clean_database().await; // Clean database to avoid test pollution
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database"); // Clean database to avoid test pollution
         let pool = container.pool();
 
         // Setup test data
@@ -908,7 +914,10 @@ mod tests {
     #[serial]
     async fn test_get_correlation_network() {
         let container = TestContainer::new().await;
-        container.clean_database().await; // Clean database to avoid test pollution
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database"); // Clean database to avoid test pollution
         let pool = container.pool();
 
         // Setup test data
@@ -988,7 +997,10 @@ mod tests {
     #[serial]
     async fn test_get_global_events_with_impacts() {
         let container = TestContainer::new().await;
-        container.clean_database().await; // Clean database to avoid test pollution
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database"); // Clean database to avoid test pollution
         let pool = container.pool();
 
         // Setup test data
@@ -1038,7 +1050,10 @@ mod tests {
     #[serial]
     async fn test_event_insertion_only() {
         let container = TestContainer::new().await;
-        container.clean_database().await; // Clean database to avoid test pollution
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database"); // Clean database to avoid test pollution
         let pool = container.pool();
         let mut conn = pool.get().await.expect("Failed to get connection");
 
@@ -1073,7 +1088,10 @@ mod tests {
     #[serial]
     async fn test_direct_event_query() {
         let container = TestContainer::new().await;
-        container.clean_database().await; // Clean database to avoid test pollution
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database"); // Clean database to avoid test pollution
         let pool = container.pool();
         let mut conn = pool.get().await.expect("Failed to get connection");
 
@@ -1100,7 +1118,10 @@ mod tests {
     #[serial]
     async fn test_get_global_events_with_filters() {
         let container = TestContainer::new().await;
-        container.clean_database().await; // Clean database to avoid test pollution
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database"); // Clean database to avoid test pollution
         let pool = container.pool();
 
         // Setup test data
@@ -1146,7 +1167,10 @@ mod tests {
     #[serial]
     async fn test_calculate_economic_health_score() {
         let container = TestContainer::new().await;
-        container.clean_database().await; // Clean database to avoid test pollution
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database"); // Clean database to avoid test pollution
         let pool = container.pool();
 
         // Setup test data
@@ -1178,7 +1202,10 @@ mod tests {
     #[serial]
     async fn test_trade_partners_retrieval() {
         let container = TestContainer::new().await;
-        container.clean_database().await; // Clean database to avoid test pollution
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database"); // Clean database to avoid test pollution
         let pool = container.pool();
 
         // Setup test data
@@ -1222,7 +1249,10 @@ mod tests {
         // For now, we'll test with invalid parameters that should cause errors
 
         let container = TestContainer::new().await;
-        container.clean_database().await; // Clean database to avoid test pollution
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database"); // Clean database to avoid test pollution
         let pool = container.pool();
 
         // Test with invalid date range (end before start)
@@ -1249,7 +1279,10 @@ mod tests {
     #[serial]
     async fn test_correlation_network_centrality_calculation() {
         let container = TestContainer::new().await;
-        container.clean_database().await; // Clean database to avoid test pollution
+        container
+            .clean_database()
+            .await
+            .expect("Failed to clean database"); // Clean database to avoid test pollution
         let pool = container.pool();
 
         // Setup test data

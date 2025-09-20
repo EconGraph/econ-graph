@@ -118,8 +118,42 @@ impl TestContainer {
 
     /// Clean the database for testing
     pub async fn clean_database(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // This is a placeholder implementation
-        // In a real implementation, you would truncate or delete test data
+        use diesel::prelude::*;
+        use diesel_async::AsyncPgConnection;
+        use diesel_async::RunQueryDsl;
+
+        let mut conn = self.pool.get().await?;
+
+        // Disable foreign key checks temporarily
+        diesel::sql_query("SET session_replication_role = replica;")
+            .execute(&mut conn)
+            .await?;
+
+        // Clean all tables in the correct order (respecting foreign key constraints)
+        let tables = vec![
+            "crawl_attempts",
+            "crawl_queue",
+            "data_points",
+            "economic_series",
+            "data_sources",
+            "users",
+            "global_events",
+            "countries",
+            "series_metadata",
+        ];
+
+        for table in tables {
+            diesel::sql_query(format!("TRUNCATE TABLE {} CASCADE;", table))
+                .execute(&mut conn)
+                .await
+                .unwrap_or(0);
+        }
+
+        // Re-enable foreign key checks
+        diesel::sql_query("SET session_replication_role = DEFAULT;")
+            .execute(&mut conn)
+            .await?;
+
         Ok(())
     }
 }
