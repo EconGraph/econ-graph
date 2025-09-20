@@ -2,6 +2,33 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Educational resource (link, document, video, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EducationalResource {
+    pub id: Uuid,
+    pub title: String,
+    pub description: String,
+    pub resource_type: ResourceType,
+    pub url: Option<String>,
+    pub content: Option<String>,
+    pub duration_minutes: Option<i32>,
+    pub difficulty: LearningDifficulty,
+    pub tags: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Type of educational resource
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ResourceType {
+    Article,
+    Video,
+    Interactive,
+    Document,
+    ExternalLink,
+    PracticeExercise,
+}
+
 /// Educational content for financial analysis learning
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EducationalModule {

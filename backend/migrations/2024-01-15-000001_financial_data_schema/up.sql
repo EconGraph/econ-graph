@@ -57,10 +57,10 @@ CREATE TABLE financial_statements (
     xbrl_processing_error TEXT, -- Error message if processing failed (nullable - only present on failure)
     xbrl_processing_started_at TIMESTAMPTZ, -- When processing started (nullable - not started yet)
     xbrl_processing_completed_at TIMESTAMPTZ, -- When processing completed (nullable - not completed yet)
-    is_amended BOOLEAN DEFAULT FALSE, -- True if this is an amended filing
+    is_amended BOOLEAN NOT NULL DEFAULT FALSE, -- True if this is an amended filing
     amendment_type VARCHAR(20), -- Type of amendment if applicable (nullable - only present if amended)
     original_filing_date DATE, -- Original filing date if amended (nullable - only present if amended)
-    is_restated BOOLEAN DEFAULT FALSE, -- True if this filing contains restatements
+    is_restated BOOLEAN NOT NULL DEFAULT FALSE, -- True if this filing contains restatements
     restatement_reason TEXT, -- Reason for restatement (nullable - only present if restated)
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -97,7 +97,7 @@ CREATE TABLE financial_line_items (
     parent_concept VARCHAR(255), -- Parent concept in hierarchy (nullable - top-level items don't have parents)
     level INTEGER DEFAULT 0, -- Hierarchy level (0 = top level)
     order_index INTEGER, -- Display order within statement (nullable - may not be specified)
-    is_calculated BOOLEAN DEFAULT FALSE, -- True if this is a calculated value
+    is_calculated BOOLEAN NOT NULL DEFAULT FALSE, -- True if this is a calculated value
     calculation_formula TEXT, -- Formula used for calculation (nullable - only present for calculated items)
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

@@ -1,6 +1,9 @@
 use chrono::{DateTime, Utc};
+use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::schema::financial_annotations;
 
 /// Financial annotation for collaborative analysis
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Insertable)]

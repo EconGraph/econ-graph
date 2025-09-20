@@ -88,11 +88,11 @@ pub struct FinancialLineItem {
 
     /// Unit of measurement
     /// Currency or unit (USD, shares, etc.)
-    pub unit: Option<String>,
+    pub unit: String,
 
     /// XBRL context reference
     /// Reference to the context that defines the reporting period and entity
-    pub context_ref: Option<String>,
+    pub context_ref: String,
 
     /// XBRL segment reference
     /// Reference to dimensional data (business segment, geographic region, etc.)
@@ -132,7 +132,7 @@ pub struct FinancialLineItem {
 
     /// Hierarchy level within the statement
     /// 0 = top level, 1 = first level of detail, etc.
-    pub level: i32,
+    pub level: Option<i32>,
 
     /// Display order within the statement
     /// Used for maintaining proper statement presentation order
@@ -217,10 +217,10 @@ pub struct NewFinancialLineItem {
     pub value: Option<BigDecimal>,
 
     /// Unit of measurement
-    pub unit: Option<String>,
+    pub unit: String,
 
     /// Context reference
-    pub context_ref: Option<String>,
+    pub context_ref: String,
 
     /// Segment reference
     pub segment_ref: Option<String>,
@@ -255,7 +255,7 @@ pub struct NewFinancialLineItem {
 
     /// Hierarchy level
     #[validate(range(min = 0, max = 10))]
-    pub level: i32,
+    pub level: Option<i32>,
 
     /// Order index
     #[validate(range(min = 0))]
@@ -377,7 +377,7 @@ pub struct FinancialLineItemQueryParams {
     pub value_max: Option<BigDecimal>,
 
     /// Calculation status filter
-    pub is_calculated: Option<bool>,
+    pub is_calculated: bool,
 
     /// Fiscal year filter
     pub fiscal_year: Option<i32>,

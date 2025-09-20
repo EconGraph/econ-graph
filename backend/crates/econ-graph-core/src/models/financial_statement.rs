@@ -114,7 +114,7 @@ pub struct FinancialStatement {
 
     /// PostgreSQL Large Object OID for XBRL file - Nullable, file may not be downloaded yet
     /// Used for storing large XBRL files as PostgreSQL Large Objects
-    pub xbrl_file_oid: Option<i32>,
+    pub xbrl_file_oid: Option<u32>,
 
     /// XBRL file content stored as bytea - Nullable, file may not be downloaded yet
     /// Alternative storage method for smaller XBRL files
@@ -138,7 +138,7 @@ pub struct FinancialStatement {
 
     /// Current status of XBRL processing
     /// Values: pending, processing, completed, failed
-    pub xbrl_processing_status: String,
+    pub xbrl_processing_status: Option<String>,
 
     /// Error message if XBRL processing failed
     /// Detailed error information for debugging and monitoring
@@ -263,7 +263,7 @@ pub struct NewFinancialStatement {
     pub document_url: String,
 
     /// PostgreSQL Large Object OID for XBRL file - Nullable, file may not be downloaded yet
-    pub xbrl_file_oid: Option<i32>,
+    pub xbrl_file_oid: Option<u32>,
 
     /// XBRL file content stored as bytea - Nullable, file may not be downloaded yet
     pub xbrl_file_content: Option<Vec<u8>>,
@@ -283,7 +283,7 @@ pub struct NewFinancialStatement {
 
     /// XBRL processing status
     #[validate(length(min = 1, max = 20))]
-    pub xbrl_processing_status: String,
+    pub xbrl_processing_status: Option<String>,
 
     /// XBRL processing error
     pub xbrl_processing_error: Option<String>,
