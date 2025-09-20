@@ -293,7 +293,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rate_limiter_creation() {
-        let rate_limiter = RateLimiter::new(10, Duration::from_secs(1));
+        let rate_limiter = SecRateLimiter::new(10, Duration::from_secs(1));
         let (max_requests, time_window) = rate_limiter.get_config();
 
         assert_eq!(max_requests, 10);
@@ -302,7 +302,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sec_edgar_rate_limiter() {
-        let rate_limiter = RateLimiter::sec_edgar();
+        let rate_limiter = SecRateLimiter::sec_edgar();
         let (max_requests, time_window) = rate_limiter.get_config();
 
         assert_eq!(max_requests, 10);
@@ -311,7 +311,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_conservative_rate_limiter() {
-        let rate_limiter = RateLimiter::conservative();
+        let rate_limiter = SecRateLimiter::conservative();
         let (max_requests, time_window) = rate_limiter.get_config();
 
         assert_eq!(max_requests, 5);
@@ -320,7 +320,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_aggressive_rate_limiter() {
-        let rate_limiter = RateLimiter::aggressive();
+        let rate_limiter = SecRateLimiter::aggressive();
         let (max_requests, time_window) = rate_limiter.get_config();
 
         assert_eq!(max_requests, 20);
@@ -329,7 +329,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_wait_for_permit() {
-        let rate_limiter = RateLimiter::new(2, Duration::from_secs(1));
+        let rate_limiter = SecRateLimiter::new(2, Duration::from_secs(1));
 
         // First permit should be available immediately
         let start = Instant::now();
@@ -352,7 +352,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_permit() {
-        let rate_limiter = RateLimiter::new(1, Duration::from_secs(1));
+        let rate_limiter = SecRateLimiter::new(1, Duration::from_secs(1));
 
         // First permit should succeed
         assert!(rate_limiter.try_permit().is_ok());
@@ -363,7 +363,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_rate_limited() {
-        let rate_limiter = RateLimiter::new(1, Duration::from_secs(1));
+        let rate_limiter = SecRateLimiter::new(1, Duration::from_secs(1));
 
         // Should not be rate limited initially
         assert!(!rate_limiter.is_rate_limited());
@@ -377,7 +377,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_time_until_next_permit() {
-        let rate_limiter = RateLimiter::new(1, Duration::from_secs(1));
+        let rate_limiter = SecRateLimiter::new(1, Duration::from_secs(1));
 
         // Should return None initially
         assert!(rate_limiter.time_until_next_permit().is_none());
@@ -393,7 +393,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rate_limiter_performance() {
-        let rate_limiter = RateLimiter::new(100, Duration::from_secs(1));
+        let rate_limiter = SecRateLimiter::new(100, Duration::from_secs(1));
 
         let start = Instant::now();
 
@@ -411,7 +411,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_concurrent_rate_limiting() {
-        let rate_limiter = Arc::new(RateLimiter::new(5, Duration::from_secs(1)));
+        let rate_limiter = Arc::new(SecRateLimiter::new(5, Duration::from_secs(1)));
 
         let start = Instant::now();
 
@@ -440,7 +440,7 @@ mod tests {
     #[tokio::test]
     async fn test_rate_limiter_with_different_limits() {
         // Test with very low limit
-        let low_limit = RateLimiter::new(1, Duration::from_secs(1));
+        let low_limit = SecRateLimiter::new(1, Duration::from_secs(1));
         let start = Instant::now();
         low_limit.wait_for_permit().await.unwrap();
         low_limit.wait_for_permit().await.unwrap();
@@ -448,7 +448,7 @@ mod tests {
         assert!(low_duration >= Duration::from_millis(900));
 
         // Test with high limit
-        let high_limit = RateLimiter::new(100, Duration::from_secs(1));
+        let high_limit = SecRateLimiter::new(100, Duration::from_secs(1));
         let start = Instant::now();
         high_limit.wait_for_permit().await.unwrap();
         high_limit.wait_for_permit().await.unwrap();

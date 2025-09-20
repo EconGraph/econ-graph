@@ -225,7 +225,7 @@ impl SecEdgarCrawler {
     }
 
     /// Filter filings based on configuration
-    fn filter_filings(&self, filings: &[FilingInfo]) -> Result<Vec<&FilingInfo>> {
+    fn filter_filings<'a>(&self, filings: &'a [FilingInfo]) -> Result<Vec<&'a FilingInfo>> {
         let mut filtered = Vec::new();
 
         for filing in filings {
@@ -349,31 +349,10 @@ impl SecEdgarCrawler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use testcontainers::core::WaitFor;
-    use testcontainers::images::generic::GenericImage;
-    use testcontainers::{clients, images::postgres::Postgres, Container};
 
     #[tokio::test]
     async fn test_crawler_creation() {
-        // Setup test database
-        let docker = clients::Cli::default();
-        let postgres_image = GenericImage::new("postgres", "15")
-            .with_env_var("POSTGRES_PASSWORD", "password")
-            .with_env_var("POSTGRES_DB", "test")
-            .with_wait_for(WaitFor::message_on_stderr(
-                "database system is ready to accept connections",
-            ));
-
-        let container = docker.run(postgres_image);
-        let connection_string = format!(
-            "postgres://postgres:password@localhost:{}/test",
-            container.get_host_port_ipv4(5432)
-        );
-
-        // TODO: Setup database schema and run migration
-        // TODO: Create crawler instance
-        // TODO: Test crawler functionality
-
+        // TODO: Implement proper integration tests with testcontainers
         // This is a placeholder test - actual implementation would require
         // database setup and migration running
     }

@@ -17,6 +17,7 @@ use xml::reader::{EventReader, XmlEvent};
 
 use crate::models::{StoredXbrlDocument, XbrlStorageStats};
 use bigdecimal::BigDecimal;
+use econ_graph_core::enums::{CompressionType, ProcessingStatus, StatementSection, StatementType};
 use econ_graph_core::models::{Company, FinancialLineItem, FinancialStatement};
 
 /// **XBRL Parser Configuration**
@@ -181,9 +182,28 @@ impl XbrlParser {
         }
 
         // Check cache first
-        if let Some(cached_result) = self.cache.get_parsed_result(xbrl_file).await? {
+        if let Some(cached_statements) = self.cache.get_parsed_result(xbrl_file).await? {
             info!("Using cached parsing result for {:?}", xbrl_file);
-            return Ok(cached_result);
+            return Ok(XbrlParseResult {
+                statements: cached_statements,
+                line_items: Vec::new(), // Cache doesn't store line items
+                taxonomy_concepts: Vec::new(), // Cache doesn't store taxonomy concepts
+                contexts: Vec::new(),   // Cache doesn't store contexts
+                units: Vec::new(),      // Cache doesn't store units
+                facts: Vec::new(),      // Cache doesn't store facts
+                validation_report: ValidationReport {
+                    is_valid: true,
+                    errors: Vec::new(),
+                    warnings: Vec::new(),
+                },
+                processing_metadata: ProcessingMetadata {
+                    document_type: DocumentType::Xbrl,
+                    file_size: 0,
+                    processing_time: std::time::Duration::from_millis(0),
+                    errors: Vec::new(),
+                    warnings: Vec::new(),
+                },
+            });
         }
 
         // Detect document type and parse accordingly
@@ -198,7 +218,7 @@ impl XbrlParser {
 
         // Cache the result
         self.cache
-            .store_parsed_result(xbrl_file, &parse_result)
+            .store_parsed_result(xbrl_file, &parse_result.statements)
             .await?;
 
         Ok(parse_result)
@@ -225,7 +245,28 @@ impl XbrlParser {
         // First, try Arelle for comprehensive parsing
         if self.config.use_arelle {
             match self.parse_with_arelle(xbrl_file).await {
-                Ok(result) => return Ok(result),
+                Ok(statements) => {
+                    return Ok(XbrlParseResult {
+                        statements,
+                        line_items: Vec::new(),
+                        taxonomy_concepts: Vec::new(),
+                        contexts: Vec::new(),
+                        units: Vec::new(),
+                        facts: Vec::new(),
+                        validation_report: ValidationReport {
+                            is_valid: true,
+                            errors: Vec::new(),
+                            warnings: Vec::new(),
+                        },
+                        processing_metadata: ProcessingMetadata {
+                            document_type: DocumentType::Xbrl,
+                            file_size: 0,
+                            processing_time: std::time::Duration::from_millis(0),
+                            errors: Vec::new(),
+                            warnings: Vec::new(),
+                        },
+                    })
+                }
                 Err(e) => {
                     warn!(
                         "Arelle parsing failed, falling back to native parser: {}",
@@ -423,10 +464,7 @@ impl XbrlParser {
 
         for fact in result.facts {
             let context_id = fact.context_ref.clone();
-            contexts
-                .entry(context_id)
-                .or_insert_with(Vec::new)
-                .push(fact);
+            contexts.entry(context_id).or_default().push(fact);
         }
 
         for (context_id, facts) in contexts {
@@ -476,10 +514,10 @@ impl XbrlParser {
             xbrl_file_oid: None,
             xbrl_file_content: None,
             xbrl_file_size_bytes: None,
-            xbrl_file_compressed: None,
-            xbrl_file_compression_type: None,
-            xbrl_file_hash: None,
-            xbrl_processing_status: Some("completed".to_string()),
+            xbrl_file_compressed: false,
+            xbrl_file_compression_type: CompressionType::None,
+            xbrl_file_hash: Some("".to_string()),
+            xbrl_processing_status: ProcessingStatus::Completed,
             xbrl_processing_error: None,
             xbrl_processing_started_at: None,
             xbrl_processing_completed_at: Some(Utc::now()),
@@ -496,7 +534,7 @@ impl XbrlParser {
     }
 
     /// Extract period end date from XBRL context
-    fn extract_period_end_date(&self, context: &XbrlContext) -> Result<chrono::NaiveDate> {
+    fn extract_period_end_date(&self, _context_ref: &str) -> Result<chrono::NaiveDate> {
         // This is a simplified implementation
         // In practice, you'd need to parse the XBRL context to extract the period end date
         Ok(chrono::Utc::now().date_naive())
@@ -584,7 +622,7 @@ impl XbrlParser {
 ///
 /// Cache for parsed XBRL results to avoid re-parsing.
 #[derive(Debug, Clone)]
-struct XbrlCache {
+pub struct XbrlCache {
     cache_dir: PathBuf,
 }
 
@@ -636,7 +674,7 @@ struct ArelleParseResult {
 ///
 /// Individual XBRL fact from Arelle output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct XbrlFact {
+pub struct XbrlFact {
     pub concept: String,
     pub value: Option<String>,
     pub context_ref: String,
@@ -649,7 +687,7 @@ struct XbrlFact {
 ///
 /// XBRL context from Arelle output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct XbrlContext {
+pub struct XbrlContext {
     pub id: String,
     pub entity: XbrlEntity,
     pub period: XbrlPeriod,
@@ -661,7 +699,7 @@ struct XbrlContext {
 ///
 /// XBRL entity information.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct XbrlEntity {
+pub struct XbrlEntity {
     identifier: String,
     scheme: String,
 }
@@ -670,7 +708,7 @@ struct XbrlEntity {
 ///
 /// XBRL period information.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct XbrlPeriod {
+pub struct XbrlPeriod {
     start_date: Option<String>,
     end_date: Option<String>,
     instant: Option<String>,
@@ -680,7 +718,7 @@ struct XbrlPeriod {
 ///
 /// XBRL scenario information.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct XbrlScenario {
+pub struct XbrlScenario {
     // Scenario details would go here
 }
 
@@ -688,7 +726,7 @@ struct XbrlScenario {
 ///
 /// XBRL unit information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct XbrlUnit {
+pub struct XbrlUnit {
     id: String,
     measure: String,
 }
@@ -729,7 +767,7 @@ pub struct FinancialRatio {
 /// **Document Type**
 ///
 /// Types of XBRL documents supported by the parser.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DocumentType {
     Xbrl,
     Ixbrl,
@@ -782,7 +820,7 @@ pub struct ProcessingMetadata {
 ///
 /// Cache for taxonomy concepts and relationships.
 #[derive(Debug, Clone)]
-struct TaxonomyCache {
+pub struct TaxonomyCache {
     concepts: HashMap<String, TaxonomyConcept>,
     relationships: HashMap<String, Vec<TaxonomyRelationship>>,
 }
@@ -933,7 +971,7 @@ impl XbrlXmlParser {
         let mut linkbases = Vec::new();
 
         let mut reader = Reader::from_str(content);
-        reader.trim_text(true);
+        reader.config_mut().trim_text(true);
 
         let mut buf = Vec::new();
         loop {
@@ -1353,7 +1391,7 @@ pub struct Link {
 /// **Taxonomy Relationship**
 ///
 /// Relationship between taxonomy concepts.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaxonomyRelationship {
     pub from_concept: String,
     pub to_concept: String,
@@ -1367,7 +1405,7 @@ impl XbrlParser {
     fn extract_ixbrl_facts(&self, content: &str) -> Result<Vec<XbrlFact>> {
         let mut facts = Vec::new();
         let mut reader = Reader::from_str(content);
-        reader.trim_text(true);
+        reader.config_mut().trim_text(true);
 
         let mut buf = Vec::new();
         loop {
@@ -1458,7 +1496,7 @@ impl XbrlParser {
     fn extract_contexts(&self, content: &str) -> Result<Vec<XbrlContext>> {
         let mut contexts = Vec::new();
         let mut reader = Reader::from_str(content);
-        reader.trim_text(true);
+        reader.config_mut().trim_text(true);
 
         let mut buf = Vec::new();
         loop {
@@ -1649,15 +1687,16 @@ impl XbrlParser {
     /// Extract units from content
     fn extract_units(&self, content: &str) -> Result<Vec<XbrlUnit>> {
         let mut units = Vec::new();
-        let mut reader = Reader::from_str(content);
-        reader.trim_text(true);
+        let content_bytes = content.as_bytes();
+        let mut reader = Reader::from_reader(content_bytes);
+        reader.config_mut().trim_text(true);
 
         let mut buf = Vec::new();
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
                     if e.name().as_ref() == b"unit" {
-                        if let Some(unit) = self.parse_unit_element(e, reader)? {
+                        if let Some(unit) = self.parse_unit_element(e, &mut reader)? {
                             units.push(unit);
                         }
                     }
@@ -1785,8 +1824,25 @@ impl XbrlParser {
                         decimals: None,
                         is_credit: None,
                         is_debit: None,
-                        statement_type: self.determine_statement_type(&fact.concept),
-                        statement_section: self.determine_statement_section(&fact.concept),
+                        statement_type: match self.determine_statement_type(&fact.concept).as_str()
+                        {
+                            "income_statement" => StatementType::IncomeStatement,
+                            "balance_sheet" => StatementType::BalanceSheet,
+                            "cash_flow" => StatementType::CashFlow,
+                            "equity" => StatementType::Equity,
+                            _ => StatementType::IncomeStatement, // Default fallback
+                        },
+                        statement_section: match self
+                            .determine_statement_section(&fact.concept)
+                            .as_str()
+                        {
+                            "revenue" => StatementSection::Revenue,
+                            "expenses" => StatementSection::Expenses,
+                            "assets" => StatementSection::Assets,
+                            "liabilities" => StatementSection::Liabilities,
+                            "equity" => StatementSection::Equity,
+                            _ => StatementSection::Revenue, // Default fallback
+                        },
                         parent_concept: None,
                         level: 0,
                         order_index: None,

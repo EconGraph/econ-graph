@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::config_loader::{FinancialAnalysisConfig, RatioBenchmark};
 use bigdecimal::{BigDecimal, ToPrimitive};
+use econ_graph_core::enums::{CompressionType, ProcessingStatus, StatementSection, StatementType};
 use econ_graph_core::models::{FinancialLineItem, FinancialRatios, FinancialStatement};
 
 /// **Financial Ratio Calculator**
@@ -563,7 +564,7 @@ impl FinancialRatioCalculator {
         concept: &str,
     ) -> Result<Option<f64>> {
         if let Some(line_item) = line_items.get(concept) {
-            if let Some(value) = line_item.value {
+            if let Some(value) = &line_item.value {
                 return Ok(Some(value.to_f64().unwrap_or(0.0)));
             }
         }
@@ -967,10 +968,10 @@ mod tests {
                 xbrl_file_oid: None,
                 xbrl_file_content: None,
                 xbrl_file_size_bytes: None,
-                xbrl_file_compressed: None,
-                xbrl_file_compression_type: None,
-                xbrl_file_hash: None,
-                xbrl_processing_status: Some("completed".to_string()),
+                xbrl_file_compressed: false,
+                xbrl_file_compression_type: CompressionType::None,
+                xbrl_file_hash: Some("".to_string()),
+                xbrl_processing_status: ProcessingStatus::Completed,
                 xbrl_processing_error: None,
                 xbrl_processing_started_at: None,
                 xbrl_processing_completed_at: Some(Utc::now()),
@@ -989,13 +990,23 @@ mod tests {
                     statement_id: statement.id,
                     taxonomy_concept: "us-gaap:NetIncomeLoss".to_string(),
                     standard_label: Some("Net Income".to_string()),
+                    custom_label: None,
                     value: Some(BigDecimal::from(1000000)),
                     unit: "USD".to_string(),
                     context_ref: "c1".to_string(),
-                    statement_type: "income_statement".to_string(),
-                    statement_section: "net_income".to_string(),
-                    is_calculated: false,
+                    segment_ref: None,
+                    scenario_ref: None,
+                    precision: None,
+                    decimals: None,
+                    is_credit: None,
+                    is_debit: None,
+                    statement_type: StatementType::IncomeStatement,
+                    statement_section: StatementSection::Revenue,
                     parent_concept: None,
+                    level: 0,
+                    order_index: None,
+                    is_calculated: false,
+                    calculation_formula: None,
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
                 },
@@ -1004,13 +1015,23 @@ mod tests {
                     statement_id: statement.id,
                     taxonomy_concept: "us-gaap:StockholdersEquity".to_string(),
                     standard_label: Some("Stockholders' Equity".to_string()),
+                    custom_label: None,
                     value: Some(BigDecimal::from(5000000)),
                     unit: "USD".to_string(),
                     context_ref: "c1".to_string(),
-                    statement_type: "balance_sheet".to_string(),
-                    statement_section: "equity".to_string(),
-                    is_calculated: false,
+                    segment_ref: None,
+                    scenario_ref: None,
+                    precision: None,
+                    decimals: None,
+                    is_credit: None,
+                    is_debit: None,
+                    statement_type: StatementType::BalanceSheet,
+                    statement_section: StatementSection::Equity,
                     parent_concept: None,
+                    level: 0,
+                    order_index: None,
+                    is_calculated: false,
+                    calculation_formula: None,
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
                 },

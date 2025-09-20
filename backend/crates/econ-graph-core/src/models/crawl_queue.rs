@@ -190,7 +190,12 @@ impl CrawlQueueItem {
     ) -> crate::error::AppResult<Self> {
         use crate::schema::crawl_queue::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let item = diesel::insert_into(dsl::crawl_queue)
             .values(new_item)
@@ -207,7 +212,12 @@ impl CrawlQueueItem {
     ) -> crate::error::AppResult<Option<Self>> {
         use crate::schema::crawl_queue::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         // Use SKIP LOCKED to get the next available item for processing
         let item = dsl::crawl_queue
@@ -256,7 +266,12 @@ impl CrawlQueueItem {
     ) -> crate::error::AppResult<Self> {
         use crate::schema::crawl_queue::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let item = diesel::update(dsl::crawl_queue.filter(dsl::id.eq(id)))
             .set(update_data)

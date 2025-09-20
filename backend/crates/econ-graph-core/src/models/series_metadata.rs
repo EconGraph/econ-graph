@@ -107,7 +107,12 @@ impl SeriesMetadata {
     ) -> AppResult<Self> {
         use crate::schema::series_metadata::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         // Try to find existing metadata
         let existing = dsl::series_metadata
@@ -156,7 +161,12 @@ impl SeriesMetadata {
     ) -> AppResult<Option<Self>> {
         use crate::schema::series_metadata::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
         let metadata = dsl::series_metadata
             .filter(dsl::source_id.eq(source_id))
             .filter(dsl::external_id.eq(external_id))
@@ -171,7 +181,12 @@ impl SeriesMetadata {
     pub async fn find_by_source(pool: &DatabasePool, source_id: Uuid) -> AppResult<Vec<Self>> {
         use crate::schema::series_metadata::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
         let metadata = dsl::series_metadata
             .filter(dsl::source_id.eq(source_id))
             .filter(dsl::is_active.eq(true))
@@ -190,7 +205,12 @@ impl SeriesMetadata {
     ) -> AppResult<()> {
         use crate::schema::series_metadata::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
         diesel::update(
             dsl::series_metadata
                 .filter(dsl::source_id.eq(source_id))
@@ -207,7 +227,12 @@ impl SeriesMetadata {
     pub async fn find_recently_discovered(pool: &DatabasePool, hours: i32) -> AppResult<Vec<Self>> {
         use crate::schema::series_metadata::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
         let cutoff = Utc::now() - chrono::Duration::hours(hours as i64);
 
         let metadata = dsl::series_metadata
@@ -224,7 +249,12 @@ impl SeriesMetadata {
     pub async fn find_all(pool: &DatabasePool) -> AppResult<Vec<Self>> {
         use crate::schema::series_metadata::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let metadata = diesel_async::RunQueryDsl::load(dsl::series_metadata, &mut conn).await?;
 

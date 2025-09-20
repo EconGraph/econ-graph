@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
 use diesel::expression_methods::ExpressionMethods;
 use diesel::prelude::*;
@@ -13,6 +14,7 @@ use zstd::stream::{decode_all, encode_all};
 
 use crate::models::{StoredXbrlDocument, XbrlStorageStats};
 use econ_graph_core::database::DatabasePool;
+use econ_graph_core::enums::{CompressionType, ProcessingStatus};
 use econ_graph_core::models::{Company, FinancialStatement};
 
 /// Configuration for XBRL file storage
@@ -64,7 +66,11 @@ impl XbrlStorage {
         form_typ: Option<&str>,
         doc_url: Option<&str>,
     ) -> Result<StoredXbrlDocument> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to get database connection: {}", e))?;
 
         // Calculate file hash for integrity verification
         let mut hasher = Sha256::new();
@@ -72,13 +78,14 @@ impl XbrlStorage {
         let file_hash = hex::encode(hasher.finalize());
 
         // Compress content if enabled
-        let (compressed_content, compression_type) = if self.config.compression_enabled {
-            let compressed = encode_all(content, self.config.zstd_compression_level)
-                .context("Failed to compress XBRL file")?;
-            (compressed, "zstd")
-        } else {
-            (content.to_vec(), "none")
-        };
+        let (compressed_content, compression_type): (Vec<u8>, CompressionType) =
+            if self.config.compression_enabled {
+                let compressed = encode_all(content, self.config.zstd_compression_level)
+                    .context("Failed to compress XBRL file")?;
+                (compressed, CompressionType::Zstd)
+            } else {
+                (content.to_vec(), CompressionType::None)
+            };
 
         let file_size = content.len();
         let compressed_size = compressed_content.len();
@@ -86,9 +93,16 @@ impl XbrlStorage {
         // Determine storage method based on file size and configuration
         let use_lob = self.config.use_large_objects && compressed_size > self.config.max_bytea_size;
 
+        let compression_type_str = match compression_type {
+            CompressionType::Zstd => "zstd",
+            CompressionType::Lz4 => "lz4",
+            CompressionType::Gzip => "gzip",
+            CompressionType::None => "none",
+        };
+
         if use_lob {
             self.store_as_large_object(
-                &mut conn,
+                &mut *conn,
                 acc_num,
                 &compressed_content,
                 comp_id,
@@ -105,7 +119,7 @@ impl XbrlStorage {
             .await
         } else {
             self.store_as_bytea(
-                &mut conn,
+                &mut *conn,
                 acc_num,
                 &compressed_content,
                 comp_id,
@@ -138,7 +152,7 @@ impl XbrlStorage {
         doc_url: Option<&str>,
         original_size: usize,
         file_hash: &str,
-        compression_type: &str,
+        compression_type: CompressionType,
     ) -> Result<StoredXbrlDocument> {
         use econ_graph_core::schema::financial_statements::dsl::*;
 
@@ -166,9 +180,9 @@ impl XbrlStorage {
             xbrl_file_content: None,
             xbrl_file_size_bytes: Some(original_size as i64),
             xbrl_file_compressed: self.config.compression_enabled,
-            xbrl_file_compression_type: compression_type.to_string(),
+            xbrl_file_compression_type: compression_type,
             xbrl_file_hash: Some(file_hash.to_string()),
-            xbrl_processing_status: "pending".to_string(),
+            xbrl_processing_status: ProcessingStatus::Pending,
             xbrl_processing_error: None,
             xbrl_processing_started_at: None,
             xbrl_processing_completed_at: None,
@@ -197,7 +211,12 @@ impl XbrlStorage {
             fiscal_quarter: fiscal_qtr,
             file_size: original_size,
             compressed_size: content.len(),
-            compression_type: compression_type.to_string(),
+            compression_type: match compression_type {
+                CompressionType::Zstd => "zstd".to_string(),
+                CompressionType::Lz4 => "lz4".to_string(),
+                CompressionType::Gzip => "gzip".to_string(),
+                CompressionType::None => "none".to_string(),
+            },
             file_hash: file_hash.to_string(),
             storage_method: "large_object".to_string(),
             created_at: new_statement.created_at,
@@ -219,7 +238,7 @@ impl XbrlStorage {
         doc_url: Option<&str>,
         original_size: usize,
         file_hash: &str,
-        compression_type: &str,
+        compression_type: CompressionType,
     ) -> Result<StoredXbrlDocument> {
         use econ_graph_core::schema::financial_statements::dsl::*;
 
@@ -240,9 +259,9 @@ impl XbrlStorage {
             xbrl_file_content: Some(content.to_vec()),
             xbrl_file_size_bytes: Some(original_size as i64),
             xbrl_file_compressed: self.config.compression_enabled,
-            xbrl_file_compression_type: compression_type.to_string(),
+            xbrl_file_compression_type: compression_type,
             xbrl_file_hash: Some(file_hash.to_string()),
-            xbrl_processing_status: "pending".to_string(),
+            xbrl_processing_status: ProcessingStatus::Pending,
             xbrl_processing_error: None,
             xbrl_processing_started_at: None,
             xbrl_processing_completed_at: None,
@@ -271,7 +290,12 @@ impl XbrlStorage {
             fiscal_quarter: fiscal_qtr,
             file_size: original_size,
             compressed_size: content.len(),
-            compression_type: compression_type.to_string(),
+            compression_type: match compression_type {
+                CompressionType::Zstd => "zstd".to_string(),
+                CompressionType::Lz4 => "lz4".to_string(),
+                CompressionType::Gzip => "gzip".to_string(),
+                CompressionType::None => "none".to_string(),
+            },
             file_hash: file_hash.to_string(),
             storage_method: "bytea".to_string(),
             created_at: new_statement.created_at,
@@ -372,7 +396,11 @@ impl XbrlStorage {
 
         Ok(XbrlStorageStats {
             total_files: total_files as u64,
-            total_size_bytes: total_size.unwrap_or(0) as u64,
+            total_size_bytes: total_size
+                .unwrap_or(BigDecimal::from(0))
+                .to_string()
+                .parse::<u64>()
+                .unwrap_or(0),
             large_object_files: lob_count as u64,
             bytea_files: bytea_count as u64,
             compressed_files: compressed_count as u64,
@@ -416,31 +444,10 @@ impl XbrlStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use testcontainers::core::WaitFor;
-    use testcontainers::images::generic::GenericImage;
-    use testcontainers::{clients, images::postgres::Postgres, Container};
 
     #[tokio::test]
     async fn test_store_and_retrieve_xbrl_file() {
-        // Setup test database
-        let docker = clients::Cli::default();
-        let postgres_image = GenericImage::new("postgres", "15")
-            .with_env_var("POSTGRES_PASSWORD", "password")
-            .with_env_var("POSTGRES_DB", "test")
-            .with_wait_for(WaitFor::message_on_stderr(
-                "database system is ready to accept connections",
-            ));
-
-        let container = docker.run(postgres_image);
-        let connection_string = format!(
-            "postgres://postgres:password@localhost:{}/test",
-            container.get_host_port_ipv4(5432)
-        );
-
-        // TODO: Setup database schema and run migration
-        // TODO: Create XbrlStorage instance
-        // TODO: Test storing and retrieving XBRL file
-
+        // TODO: Implement proper integration tests with testcontainers
         // This is a placeholder test - actual implementation would require
         // database setup and migration running
     }

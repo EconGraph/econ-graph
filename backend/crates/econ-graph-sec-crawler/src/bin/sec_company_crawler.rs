@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
+use econ_graph_core::database::DatabasePool;
 use econ_graph_sec_crawler::{CrawlConfig, SecEdgarCrawler};
-use econ_graph_services::database::DatabasePool;
 use std::collections::HashMap;
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -121,7 +121,7 @@ async fn main() -> Result<()> {
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:password@localhost/econ_graph".to_string());
 
-    let pool = DatabasePool::new(&database_url).await?;
+    let pool = econ_graph_core::database::create_pool(&database_url).await?;
     let crawler = SecEdgarCrawler::with_config(pool, config).await?;
 
     // Execute batch crawl

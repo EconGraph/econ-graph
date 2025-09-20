@@ -57,7 +57,7 @@ xml = "1.0"
 
 # Database
 diesel = { version = "2.2", features = ["postgres", "chrono", "uuid", "numeric"] }
-diesel-async = { version = "=0.5.2", features = ["postgres", "bb8"] }
+diesel-async = { version = "=0.6.1", features = ["postgres", "bb8"] }
 
 # Regular expressions
 regex = "1.10"

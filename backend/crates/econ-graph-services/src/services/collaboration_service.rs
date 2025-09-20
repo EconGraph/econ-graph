@@ -95,7 +95,12 @@ impl CollaborationService {
         color: Option<String>,
         is_public: bool,
     ) -> AppResult<ChartAnnotation> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get().await.map_err(|e| {
+            econ_graph_core::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         // Check if user has permission to annotate this series
         if !self.check_annotation_permission(user_id, series_id).await? {
@@ -133,7 +138,12 @@ impl CollaborationService {
         series_id: &str,
         user_id: Option<Uuid>,
     ) -> AppResult<Vec<ChartAnnotation>> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get().await.map_err(|e| {
+            econ_graph_core::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let annotations = if let Some(uid) = user_id {
             chart_annotations::table
@@ -167,7 +177,12 @@ impl CollaborationService {
         annotation_id: Uuid,
         content: String,
     ) -> AppResult<AnnotationComment> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get().await.map_err(|e| {
+            econ_graph_core::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         // Check if annotation exists and user has permission to comment
         let annotation = chart_annotations::table
@@ -213,7 +228,12 @@ impl CollaborationService {
         &self,
         annotation_id: Uuid,
     ) -> AppResult<Vec<AnnotationComment>> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get().await.map_err(|e| {
+            econ_graph_core::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let comments = annotation_comments::table
             .filter(annotation_comments::annotation_id.eq(annotation_id))
@@ -234,7 +254,12 @@ impl CollaborationService {
         target_user_id: Uuid,
         permission_level: PermissionLevel,
     ) -> AppResult<ChartCollaborator> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get().await.map_err(|e| {
+            econ_graph_core::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         // Check if the owner has admin permission on this chart
         if !self.check_admin_permission(owner_user_id, chart_id).await? {
@@ -289,7 +314,12 @@ impl CollaborationService {
         &self,
         chart_id: Uuid,
     ) -> AppResult<Vec<(ChartCollaborator, User)>> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get().await.map_err(|e| {
+            econ_graph_core::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let collaborators = chart_collaborators::table
             .inner_join(users::table.on(chart_collaborators::user_id.eq(users::id)))
@@ -322,7 +352,12 @@ impl CollaborationService {
 
     /// Check if user has admin permission on a chart
     async fn check_admin_permission(&self, user_id: Uuid, chart_id: Uuid) -> AppResult<bool> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get().await.map_err(|e| {
+            econ_graph_core::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let permission = chart_collaborators::table
             .filter(chart_collaborators::chart_id.eq(chart_id))
@@ -345,7 +380,12 @@ impl CollaborationService {
 
     /// Delete an annotation (only by owner or admin)
     pub async fn delete_annotation(&self, annotation_id: Uuid, user_id: Uuid) -> AppResult<bool> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get().await.map_err(|e| {
+            econ_graph_core::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         // Get the annotation to check ownership
         let annotation = chart_annotations::table

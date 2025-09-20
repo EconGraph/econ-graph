@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use econ_graph_core::database::DatabasePool;
 use econ_graph_sec_crawler::{CrawlConfig, SecEdgarCrawler};
-use econ_graph_services::database::DatabasePool;
 use std::path::PathBuf;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -95,7 +95,7 @@ async fn main() -> Result<()> {
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:password@localhost/econ_graph".to_string());
 
-    let pool = DatabasePool::new(&database_url).await?;
+    let pool = econ_graph_core::database::create_pool(&database_url).await?;
     let crawler = SecEdgarCrawler::new(pool).await?;
 
     match cli.command {
@@ -153,7 +153,7 @@ async fn crawl_company_command(
     info!("Starting crawl for company CIK: {}", cik);
 
     // Parse form types
-    let form_types_vec = form_types
+    let form_types_vec: Vec<String> = form_types
         .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_default();
 
@@ -191,7 +191,7 @@ async fn crawl_company_command(
     // Create crawler with custom config
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:password@localhost/econ_graph".to_string());
-    let pool = DatabasePool::new(&database_url).await?;
+    let pool = econ_graph_core::database::create_pool(&database_url).await?;
     let crawler = SecEdgarCrawler::with_config(pool, config).await?;
 
     // Execute crawl
@@ -284,7 +284,7 @@ async fn parse_command(file: PathBuf, format: String) -> Result<()> {
         "csv" => {
             // Simple CSV output
             println!("id,company_id,filing_type,period_end_date,fiscal_year,fiscal_quarter");
-            for statement in &statements {
+            for statement in &statements.statements {
                 println!(
                     "{},{},{},{},{},{}",
                     statement.id,

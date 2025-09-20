@@ -200,7 +200,12 @@ impl ComprehensiveCrawler {
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::economic_series::dsl::*;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            econ_graph_core::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
         let series_list = economic_series
             .filter(is_active.eq(true))
             .select(econ_graph_core::models::EconomicSeries::as_select())

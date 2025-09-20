@@ -1,4 +1,5 @@
 use super::*;
+use econ_graph_core::{FinancialStatement, enums::{CompressionType, ProcessingStatus}};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use tokio::fs;
@@ -274,10 +275,10 @@ async fn test_xbrl_cache_operations() {
         xbrl_file_oid: None,
         xbrl_file_content: None,
         xbrl_file_size_bytes: None,
-        xbrl_file_compressed: None,
-        xbrl_file_compression_type: None,
-        xbrl_file_hash: None,
-        xbrl_processing_status: "completed".to_string(),
+        xbrl_file_compressed: false,
+        xbrl_file_compression_type: CompressionType::None,
+        xbrl_file_hash: Some("".to_string()),
+        xbrl_processing_status: ProcessingStatus::Completed,
         xbrl_processing_error: None,
         xbrl_processing_started_at: None,
         xbrl_processing_completed_at: Some(Utc::now()),
