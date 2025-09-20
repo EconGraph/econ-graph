@@ -1,0 +1,468 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--XBRL Document Created with the Workiva Platform-->
+<!--Copyright 2024 Workiva-->
+<!--r:230282e4-b1f9-4f76-9267-62b9eff2350d,g:4396d889-8759-4668-8856-81dccc377038-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:link="http://www.xbrl.org/2003/linkbase" xmlns:cvx="http://www.chevron.com/20240930" xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:dtr-types1="http://www.xbrl.org/dtr/type/2020-01-21" xmlns:xbrldt="http://xbrl.org/2005/xbrldt" xmlns:dtr-types="http://www.xbrl.org/dtr/type/2022-03-31" attributeFormDefault="unqualified" elementFormDefault="qualified" targetNamespace="http://www.chevron.com/20240930">
+  <xs:import namespace="http://fasb.org/srt/2024" schemaLocation="https://xbrl.fasb.org/srt/2024/elts/srt-2024.xsd"/>
+  <xs:import namespace="http://fasb.org/us-gaap/2024" schemaLocation="https://xbrl.fasb.org/us-gaap/2024/elts/us-gaap-2024.xsd"/>
+  <xs:import namespace="http://www.xbrl.org/2003/instance" schemaLocation="http://www.xbrl.org/2003/xbrl-instance-2003-12-31.xsd"/>
+  <xs:import namespace="http://www.xbrl.org/2003/linkbase" schemaLocation="http://www.xbrl.org/2003/xbrl-linkbase-2003-12-31.xsd"/>
+  <xs:import namespace="http://www.xbrl.org/dtr/type/2020-01-21" schemaLocation="https://www.xbrl.org/dtr/type/2020-01-21/types.xsd"/>
+  <xs:import namespace="http://www.xbrl.org/dtr/type/2022-03-31" schemaLocation="https://www.xbrl.org/dtr/type/2022-03-31/types.xsd"/>
+  <xs:import namespace="http://xbrl.org/2005/xbrldt" schemaLocation="http://www.xbrl.org/2005/xbrldt-2005.xsd"/>
+  <xs:import namespace="http://xbrl.sec.gov/country/2024" schemaLocation="https://xbrl.sec.gov/country/2024/country-2024.xsd"/>
+  <xs:import namespace="http://xbrl.sec.gov/dei/2024" schemaLocation="https://xbrl.sec.gov/dei/2024/dei-2024.xsd"/>
+  <xs:import namespace="http://xbrl.sec.gov/ecd/2024" schemaLocation="https://xbrl.sec.gov/ecd/2024/ecd-2024.xsd"/>
+  <xs:annotation>
+    <xs:appinfo>
+      <link:linkbaseRef xmlns:xlink="http://www.w3.org/1999/xlink" xlink:arcrole="http://www.w3.org/1999/xlink/properties/linkbase" xlink:href="cvx-20240930_pre.xml" xlink:role="http://www.xbrl.org/2003/role/presentationLinkbaseRef" xlink:type="simple"/>
+      <link:linkbaseRef xmlns:xlink="http://www.w3.org/1999/xlink" xlink:arcrole="http://www.w3.org/1999/xlink/properties/linkbase" xlink:href="cvx-20240930_def.xml" xlink:role="http://www.xbrl.org/2003/role/definitionLinkbaseRef" xlink:type="simple"/>
+      <link:linkbaseRef xmlns:xlink="http://www.w3.org/1999/xlink" xlink:arcrole="http://www.w3.org/1999/xlink/properties/linkbase" xlink:href="cvx-20240930_lab.xml" xlink:role="http://www.xbrl.org/2003/role/labelLinkbaseRef" xlink:type="simple"/>
+      <link:linkbaseRef xmlns:xlink="http://www.w3.org/1999/xlink" xlink:arcrole="http://www.w3.org/1999/xlink/properties/linkbase" xlink:href="cvx-20240930_cal.xml" xlink:role="http://www.xbrl.org/2003/role/calculationLinkbaseRef" xlink:type="simple"/>
+      <link:roleType id="CoverPage" roleURI="http://www.chevron.com/role/CoverPage">
+        <link:definition>0000001 - Document - Cover Page</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="CONSOLIDATEDSTATEMENTOFINCOMEUnaudited" roleURI="http://www.chevron.com/role/CONSOLIDATEDSTATEMENTOFINCOMEUnaudited">
+        <link:definition>9952151 - Statement - CONSOLIDATED STATEMENT OF INCOME (Unaudited)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="CONSOLIDATEDSTATEMENTOFCOMPREHENSIVEINCOMEUnaudited" roleURI="http://www.chevron.com/role/CONSOLIDATEDSTATEMENTOFCOMPREHENSIVEINCOMEUnaudited">
+        <link:definition>9952152 - Statement - CONSOLIDATED STATEMENT OF COMPREHENSIVE INCOME (Unaudited)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="CONSOLIDATEDBALANCESHEETUnaudited" roleURI="http://www.chevron.com/role/CONSOLIDATEDBALANCESHEETUnaudited">
+        <link:definition>9952153 - Statement - CONSOLIDATED BALANCE SHEET (Unaudited)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="CONSOLIDATEDBALANCESHEETUnauditedParenthetical" roleURI="http://www.chevron.com/role/CONSOLIDATEDBALANCESHEETUnauditedParenthetical">
+        <link:definition>9952154 - Statement - CONSOLIDATED BALANCE SHEET (Unaudited) (Parenthetical)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="CONSOLIDATEDSTATEMENTOFCASHFLOWSUnaudited" roleURI="http://www.chevron.com/role/CONSOLIDATEDSTATEMENTOFCASHFLOWSUnaudited">
+        <link:definition>9952155 - Statement - CONSOLIDATED STATEMENT OF CASH FLOWS (Unaudited)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="CONSOLIDATEDSTATEMENTOFEQUITYUnaudited" roleURI="http://www.chevron.com/role/CONSOLIDATEDSTATEMENTOFEQUITYUnaudited">
+        <link:definition>9952156 - Statement - CONSOLIDATED STATEMENT OF EQUITY (Unaudited)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="CONSOLIDATEDSTATEMENTOFEQUITYUnauditedParenthetical" roleURI="http://www.chevron.com/role/CONSOLIDATEDSTATEMENTOFEQUITYUnauditedParenthetical">
+        <link:definition>9952157 - Statement - CONSOLIDATED STATEMENT OF EQUITY (Unaudited) (Parenthetical)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="General" roleURI="http://www.chevron.com/role/General">
+        <link:definition>9952158 - Disclosure - General</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="ChangesinAccumulatedOtherComprehensiveLosses" roleURI="http://www.chevron.com/role/ChangesinAccumulatedOtherComprehensiveLosses">
+        <link:definition>9952159 - Disclosure - Changes in Accumulated Other Comprehensive Losses</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="InformationRelatingtotheConsolidatedStatementofCashFlows" roleURI="http://www.chevron.com/role/InformationRelatingtotheConsolidatedStatementofCashFlows">
+        <link:definition>9952160 - Disclosure - Information Relating to the Consolidated Statement of Cash Flows</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="NewAccountingStandards" roleURI="http://www.chevron.com/role/NewAccountingStandards">
+        <link:definition>9952161 - Disclosure - New Accounting Standards</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="SummarizedFinancialDataTengizchevroilLLP" roleURI="http://www.chevron.com/role/SummarizedFinancialDataTengizchevroilLLP">
+        <link:definition>9952162 - Disclosure - Summarized Financial Data - Tengizchevroil LLP</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="SummarizedFinancialDataChevronUSAInc" roleURI="http://www.chevron.com/role/SummarizedFinancialDataChevronUSAInc">
+        <link:definition>9952163 - Disclosure - Summarized Financial Data - Chevron U.S.A. Inc.</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="OperatingSegmentsandGeographicData" roleURI="http://www.chevron.com/role/OperatingSegmentsandGeographicData">
+        <link:definition>9952164 - Disclosure - Operating Segments and Geographic Data</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="EmployeeBenefits" roleURI="http://www.chevron.com/role/EmployeeBenefits">
+        <link:definition>9952165 - Disclosure - Employee Benefits</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="AssetsHeldForSale" roleURI="http://www.chevron.com/role/AssetsHeldForSale">
+        <link:definition>9952166 - Disclosure - Assets Held For Sale</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="IncomeTaxes" roleURI="http://www.chevron.com/role/IncomeTaxes">
+        <link:definition>9952167 - Disclosure - Income Taxes</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="Litigation" roleURI="http://www.chevron.com/role/Litigation">
+        <link:definition>9952168 - Disclosure - Litigation</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="OtherContingenciesandCommitments" roleURI="http://www.chevron.com/role/OtherContingenciesandCommitments">
+        <link:definition>9952169 - Disclosure - Other Contingencies and Commitments</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="FairValueMeasurements" roleURI="http://www.chevron.com/role/FairValueMeasurements">
+        <link:definition>9952170 - Disclosure - Fair Value Measurements</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="FinancialandDerivativeInstruments" roleURI="http://www.chevron.com/role/FinancialandDerivativeInstruments">
+        <link:definition>9952171 - Disclosure - Financial and Derivative Instruments</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="Revenue" roleURI="http://www.chevron.com/role/Revenue">
+        <link:definition>9952172 - Disclosure - Revenue</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="FinancialInstrumentsCreditLosses" roleURI="http://www.chevron.com/role/FinancialInstrumentsCreditLosses">
+        <link:definition>9952173 - Disclosure - Financial Instruments - Credit Losses</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="AgreementtoAcquireHessCorporation" roleURI="http://www.chevron.com/role/AgreementtoAcquireHessCorporation">
+        <link:definition>9952174 - Disclosure - Agreement to Acquire Hess Corporation</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="AssetRetirementObligations" roleURI="http://www.chevron.com/role/AssetRetirementObligations">
+        <link:definition>9952175 - Disclosure - Asset Retirement Obligations</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="GeneralPolicies" roleURI="http://www.chevron.com/role/GeneralPolicies">
+        <link:definition>9954471 - Disclosure - General (Policies)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="ChangesinAccumulatedOtherComprehensiveLossesTables" roleURI="http://www.chevron.com/role/ChangesinAccumulatedOtherComprehensiveLossesTables">
+        <link:definition>9954472 - Disclosure - Changes in Accumulated Other Comprehensive Losses (Tables)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="InformationRelatingtotheConsolidatedStatementofCashFlowsTables" roleURI="http://www.chevron.com/role/InformationRelatingtotheConsolidatedStatementofCashFlowsTables">
+        <link:definition>9954473 - Disclosure - Information Relating to the Consolidated Statement of Cash Flows (Tables)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="SummarizedFinancialDataTengizchevroilLLPTables" roleURI="http://www.chevron.com/role/SummarizedFinancialDataTengizchevroilLLPTables">
+        <link:definition>9954474 - Disclosure - Summarized Financial Data - Tengizchevroil LLP (Tables)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="SummarizedFinancialDataChevronUSAIncTables" roleURI="http://www.chevron.com/role/SummarizedFinancialDataChevronUSAIncTables">
+        <link:definition>9954475 - Disclosure - Summarized Financial Data - Chevron U.S.A. Inc. (Tables)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="OperatingSegmentsandGeographicDataTables" roleURI="http://www.chevron.com/role/OperatingSegmentsandGeographicDataTables">
+        <link:definition>9954476 - Disclosure - Operating Segments and Geographic Data (Tables)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="EmployeeBenefitsTables" roleURI="http://www.chevron.com/role/EmployeeBenefitsTables">
+        <link:definition>9954477 - Disclosure - Employee Benefits (Tables)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="FairValueMeasurementsTables" roleURI="http://www.chevron.com/role/FairValueMeasurementsTables">
+        <link:definition>9954478 - Disclosure - Fair Value Measurements (Tables)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="FinancialandDerivativeInstrumentsTables" roleURI="http://www.chevron.com/role/FinancialandDerivativeInstrumentsTables">
+        <link:definition>9954479 - Disclosure - Financial and Derivative Instruments (Tables)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="AssetRetirementObligationsTables" roleURI="http://www.chevron.com/role/AssetRetirementObligationsTables">
+        <link:definition>9954480 - Disclosure - Asset Retirement Obligations (Tables)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="ChangesinAccumulatedOtherComprehensiveLossesDetails" roleURI="http://www.chevron.com/role/ChangesinAccumulatedOtherComprehensiveLossesDetails">
+        <link:definition>9954481 - Disclosure - Changes in Accumulated Other Comprehensive Losses (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="InformationRelatingtotheConsolidatedStatementofCashFlowsSummaryofInformationDetails" roleURI="http://www.chevron.com/role/InformationRelatingtotheConsolidatedStatementofCashFlowsSummaryofInformationDetails">
+        <link:definition>9954482 - Disclosure - Information Relating to the Consolidated Statement of Cash Flows - Summary of Information (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="InformationRelatingtotheConsolidatedStatementofCashFlowsAdditionalInformationDetails" roleURI="http://www.chevron.com/role/InformationRelatingtotheConsolidatedStatementofCashFlowsAdditionalInformationDetails">
+        <link:definition>9954483 - Disclosure - Information Relating to the Consolidated Statement of Cash Flows - Additional Information (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="InformationRelatingtotheConsolidatedStatementofCashFlowsCashBalancesDetails" roleURI="http://www.chevron.com/role/InformationRelatingtotheConsolidatedStatementofCashFlowsCashBalancesDetails">
+        <link:definition>9954484 - Disclosure - Information Relating to the Consolidated Statement of Cash Flows - Cash Balances (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="SummarizedFinancialDataTengizchevroilLLPDetails" roleURI="http://www.chevron.com/role/SummarizedFinancialDataTengizchevroilLLPDetails">
+        <link:definition>9954485 - Disclosure - Summarized Financial Data - Tengizchevroil LLP (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="SummarizedFinancialDataChevronUSAIncIncomeStatementDetails" roleURI="http://www.chevron.com/role/SummarizedFinancialDataChevronUSAIncIncomeStatementDetails">
+        <link:definition>9954486 - Disclosure - Summarized Financial Data - Chevron U.S.A. Inc. - Income Statement (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="SummarizedFinancialDataChevronUSAIncBalanceSheetDetails" roleURI="http://www.chevron.com/role/SummarizedFinancialDataChevronUSAIncBalanceSheetDetails">
+        <link:definition>9954487 - Disclosure - Summarized Financial Data - Chevron U.S.A. Inc. - Balance Sheet (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="OperatingSegmentsandGeographicDataAdditionalInformationDetails" roleURI="http://www.chevron.com/role/OperatingSegmentsandGeographicDataAdditionalInformationDetails">
+        <link:definition>9954488 - Disclosure - Operating Segments and Geographic Data - Additional Information (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="OperatingSegmentsandGeographicDataEarningsbyMajorOperatingAreaDetails" roleURI="http://www.chevron.com/role/OperatingSegmentsandGeographicDataEarningsbyMajorOperatingAreaDetails">
+        <link:definition>9954489 - Disclosure - Operating Segments and Geographic Data - Earnings by Major Operating Area (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="OperatingSegmentsandGeographicDataSegmentAssetsDetails" roleURI="http://www.chevron.com/role/OperatingSegmentsandGeographicDataSegmentAssetsDetails">
+        <link:definition>9954490 - Disclosure - Operating Segments and Geographic Data - Segment Assets (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="OperatingSegmentsandGeographicDataSegmentRevenuesDetails" roleURI="http://www.chevron.com/role/OperatingSegmentsandGeographicDataSegmentRevenuesDetails">
+        <link:definition>9954491 - Disclosure - Operating Segments and Geographic Data - Segment Revenues (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="EmployeeBenefitsAdditionalInformationDetails" roleURI="http://www.chevron.com/role/EmployeeBenefitsAdditionalInformationDetails">
+        <link:definition>9954492 - Disclosure - Employee Benefits - Additional Information (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="EmployeeBenefitsCostsDetails" roleURI="http://www.chevron.com/role/EmployeeBenefitsCostsDetails">
+        <link:definition>9954493 - Disclosure - Employee Benefits - Costs (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="AssetsHeldForSaleDetails" roleURI="http://www.chevron.com/role/AssetsHeldForSaleDetails">
+        <link:definition>9954494 - Disclosure - Assets Held For Sale (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="IncomeTaxesDetails" roleURI="http://www.chevron.com/role/IncomeTaxesDetails">
+        <link:definition>9954495 - Disclosure - Income Taxes (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="LitigationDetails" roleURI="http://www.chevron.com/role/LitigationDetails">
+        <link:definition>9954496 - Disclosure - Litigation (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="FairValueMeasurementsAssetsandLiabilitiesatFairValueRecurringDetails" roleURI="http://www.chevron.com/role/FairValueMeasurementsAssetsandLiabilitiesatFairValueRecurringDetails">
+        <link:definition>9954497 - Disclosure - Fair Value Measurements - Assets and Liabilities at Fair Value, Recurring (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="FairValueMeasurementsAdditionalInformationDetails" roleURI="http://www.chevron.com/role/FairValueMeasurementsAdditionalInformationDetails">
+        <link:definition>9954498 - Disclosure - Fair Value Measurements - Additional Information (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="FairValueMeasurementsAssetsandLiabilitiesatFairValueNonrecurringDetails" roleURI="http://www.chevron.com/role/FairValueMeasurementsAssetsandLiabilitiesatFairValueNonrecurringDetails">
+        <link:definition>9954499 - Disclosure - Fair Value Measurements - Assets and Liabilities at Fair Value, Nonrecurring (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="FinancialandDerivativeInstrumentsFairValueofDerivativesDetails" roleURI="http://www.chevron.com/role/FinancialandDerivativeInstrumentsFairValueofDerivativesDetails">
+        <link:definition>9954500 - Disclosure - Financial and Derivative Instruments - Fair Value of Derivatives (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="FinancialandDerivativeInstrumentsAdditionalInformationDetails" roleURI="http://www.chevron.com/role/FinancialandDerivativeInstrumentsAdditionalInformationDetails">
+        <link:definition>9954501 - Disclosure - Financial and Derivative Instruments - Additional Information (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="FinancialandDerivativeInstrumentsEffectofDerivativesDetails" roleURI="http://www.chevron.com/role/FinancialandDerivativeInstrumentsEffectofDerivativesDetails">
+        <link:definition>9954502 - Disclosure - Financial and Derivative Instruments - Effect of Derivatives (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="FinancialandDerivativeInstrumentsEffectofNettingDerivativeAssetsandLiabilitiesDetails" roleURI="http://www.chevron.com/role/FinancialandDerivativeInstrumentsEffectofNettingDerivativeAssetsandLiabilitiesDetails">
+        <link:definition>9954503 - Disclosure - Financial and Derivative Instruments - Effect of Netting Derivative Assets and Liabilities (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="RevenueDetails" roleURI="http://www.chevron.com/role/RevenueDetails">
+        <link:definition>9954504 - Disclosure - Revenue (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="FinancialInstrumentsCreditLossesDetails" roleURI="http://www.chevron.com/role/FinancialInstrumentsCreditLossesDetails">
+        <link:definition>9954505 - Disclosure - Financial Instruments - Credit Losses (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="AgreementtoAcquireHessCorporationDetails" roleURI="http://www.chevron.com/role/AgreementtoAcquireHessCorporationDetails">
+        <link:definition>9954506 - Disclosure - Agreement to Acquire Hess Corporation (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="AssetRetirementObligationsChangeinAssetRetirementObligationDetails" roleURI="http://www.chevron.com/role/AssetRetirementObligationsChangeinAssetRetirementObligationDetails">
+        <link:definition>9954507 - Disclosure - Asset Retirement Obligations - Change in Asset Retirement Obligation (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+      <link:roleType id="AssetRetirementObligationsDetails" roleURI="http://www.chevron.com/role/AssetRetirementObligationsDetails">
+        <link:definition>9954508 - Disclosure - Asset Retirement Obligations (Details)</link:definition>
+        <link:usedOn>link:presentationLink</link:usedOn>
+        <link:usedOn>link:calculationLink</link:usedOn>
+        <link:usedOn>link:definitionLink</link:usedOn>
+      </link:roleType>
+    </xs:appinfo>
+  </xs:annotation>
+  <xs:element id="cvx_EquityMethodInvestmentIncome" abstract="false" name="EquityMethodInvestmentIncome" nillable="true" xbrli:periodType="duration" xbrli:balance="credit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_NonoperatingIncome" abstract="false" name="NonoperatingIncome" nillable="true" xbrli:periodType="duration" xbrli:balance="credit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_ActuarialLossAbstract" abstract="true" name="ActuarialLossAbstract" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="xbrli:stringItemType"/>
+  <xs:element id="cvx_DefinedBenefitPlansSponsoredByEquityAffiliatesCostBenefit" abstract="false" name="DefinedBenefitPlansSponsoredByEquityAffiliatesCostBenefit" nillable="true" xbrli:periodType="duration" xbrli:balance="credit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_CashAndCashEquivalentsExcludingTimeDeposits" abstract="false" name="CashAndCashEquivalentsExcludingTimeDeposits" nillable="true" xbrli:periodType="instant" xbrli:balance="debit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_ContractWithCustomerLiabilityAndOtherNoncurrentLiability" abstract="false" name="ContractWithCustomerLiabilityAndOtherNoncurrentLiability" nillable="true" xbrli:periodType="instant" xbrli:balance="credit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_DryHoleExpense" abstract="false" name="DryHoleExpense" nillable="true" xbrli:periodType="duration" xbrli:balance="debit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_IncreaseDecreaseInOperatingWorkingCapital" abstract="false" name="IncreaseDecreaseInOperatingWorkingCapital" nillable="true" xbrli:periodType="duration" xbrli:balance="credit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_IncreaseDecreaseInTimeDepositsInvestingActivities" abstract="false" name="IncreaseDecreaseInTimeDepositsInvestingActivities" nillable="true" xbrli:periodType="duration" xbrli:balance="debit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_AdjustmentsToAdditionalPaidInCapital" abstract="false" name="AdjustmentsToAdditionalPaidInCapital" nillable="true" xbrli:periodType="duration" xbrli:balance="credit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_DividendsValueCommonStockStock" abstract="false" name="DividendsValueCommonStockStock" nillable="true" xbrli:periodType="duration" xbrli:balance="debit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_SummarizedFinancialDataOfAffiliateAbstract" abstract="true" name="SummarizedFinancialDataOfAffiliateAbstract" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="xbrli:stringItemType"/>
+  <xs:element id="cvx_SummarizedFinancialDataOfAffiliateTextBlock" abstract="false" name="SummarizedFinancialDataOfAffiliateTextBlock" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:textBlockItemType"/>
+  <xs:element id="cvx_SummarizedFinancialDataOfSubsidiaryOneAbstract" abstract="true" name="SummarizedFinancialDataOfSubsidiaryOneAbstract" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="xbrli:stringItemType"/>
+  <xs:element id="cvx_SummarizedFinancialDataOfSubsidiaryTextBlock" abstract="false" name="SummarizedFinancialDataOfSubsidiaryTextBlock" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:textBlockItemType"/>
+  <xs:element id="cvx_AssetsHeldForSaleAbstract" abstract="true" name="AssetsHeldForSaleAbstract" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="xbrli:stringItemType"/>
+  <xs:element id="cvx_AssetsHeldForSaleDisclosureTextBlock" abstract="false" name="AssetsHeldForSaleDisclosureTextBlock" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:textBlockItemType"/>
+  <xs:element id="cvx_CapitalExpendituresTableTextBlock" abstract="false" name="CapitalExpendituresTableTextBlock" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:textBlockItemType"/>
+  <xs:element id="cvx_SummarizedFinancialDataAffiliateTableTextBlock" abstract="false" name="SummarizedFinancialDataAffiliateTableTextBlock" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:textBlockItemType"/>
+  <xs:element id="cvx_SummarizedFinancialDataSubsidiaryOneTableTextBlock" abstract="false" name="SummarizedFinancialDataSubsidiaryOneTableTextBlock" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:textBlockItemType"/>
+  <xs:element id="cvx_SummarizedFinancialDataSubsidiaryNetEquityOneTableTextBlock" abstract="false" name="SummarizedFinancialDataSubsidiaryNetEquityOneTableTextBlock" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:textBlockItemType"/>
+  <xs:element id="cvx_NetCashPaymentsForInterestOnDebtAndIncomeTaxesProvidedByOperatingActivitiesAbstract" abstract="true" name="NetCashPaymentsForInterestOnDebtAndIncomeTaxesProvidedByOperatingActivitiesAbstract" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="xbrli:stringItemType"/>
+  <xs:element id="cvx_ProceedsFromSaleOfProductiveAssetsAndEquityMethodInvestment" abstract="false" name="ProceedsFromSaleOfProductiveAssetsAndEquityMethodInvestment" nillable="true" xbrli:periodType="duration" xbrli:balance="debit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_MarketableSecuritiesSold" abstract="false" name="MarketableSecuritiesSold" nillable="true" xbrli:periodType="duration" xbrli:balance="debit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_TimeDepositsPurchased" abstract="false" name="TimeDepositsPurchased" nillable="true" xbrli:periodType="duration" xbrli:balance="credit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_TimeDepositsMatured" abstract="false" name="TimeDepositsMatured" nillable="true" xbrli:periodType="duration" xbrli:balance="debit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_CapitalAndExploratoryExpendituresIncludingEquityAffiliatesAbstract" abstract="true" name="CapitalAndExploratoryExpendituresIncludingEquityAffiliatesAbstract" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="xbrli:stringItemType"/>
+  <xs:element id="cvx_PaymentsToAcquireOtherProductiveAssetsLiabilities" abstract="false" name="PaymentsToAcquireOtherProductiveAssetsLiabilities" nillable="true" xbrli:periodType="duration" xbrli:balance="credit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_ScheduleOfAffiliateFinancialStatementsTable" abstract="true" name="ScheduleOfAffiliateFinancialStatementsTable" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrldt:hypercubeItem" type="xbrli:stringItemType"/>
+  <xs:element id="cvx_TengizchevroilLlpMember" abstract="true" name="TengizchevroilLlpMember" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:domainItemType"/>
+  <xs:element id="cvx_AffiliateStatementsCaptionsLineItems" abstract="true" name="AffiliateStatementsCaptionsLineItems" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="xbrli:stringItemType"/>
+  <xs:element id="cvx_PercentageOfAffiliateBySummarizedFinancialInformation" abstract="false" name="PercentageOfAffiliateBySummarizedFinancialInformation" nillable="true" xbrli:periodType="instant" substitutionGroup="xbrli:item" type="dtr-types1:percentItemType"/>
+  <xs:element id="cvx_ScheduleOfSubsidiaryFinancialStatementsTable" abstract="true" name="ScheduleOfSubsidiaryFinancialStatementsTable" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrldt:hypercubeItem" type="xbrli:stringItemType"/>
+  <xs:element id="cvx_ChevronUsaIncMember" abstract="true" name="ChevronUsaIncMember" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:domainItemType"/>
+  <xs:element id="cvx_SubsidiaryStatementsCaptionsLineItems" abstract="true" name="SubsidiaryStatementsCaptionsLineItems" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="xbrli:stringItemType"/>
+  <xs:element id="cvx_UpstreamMember" abstract="true" name="UpstreamMember" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:domainItemType"/>
+  <xs:element id="cvx_DownstreamMember" abstract="true" name="DownstreamMember" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:domainItemType"/>
+  <xs:element id="cvx_SegmentEarningsOtherIncomeExpense" abstract="false" name="SegmentEarningsOtherIncomeExpense" nillable="true" xbrli:periodType="duration" xbrli:balance="credit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_CorporateAndEliminationsMember" abstract="true" name="CorporateAndEliminationsMember" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:domainItemType"/>
+  <xs:element id="cvx_MaximumAnnualIncreasePercentageToCompanyContributionForRetireeMedicalCoverage" abstract="false" name="MaximumAnnualIncreasePercentageToCompanyContributionForRetireeMedicalCoverage" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:percentItemType"/>
+  <xs:element id="cvx_DefinedBenefitPlanNetPeriodicBenefitCostCreditIncreaseDecreaseForAcquisitionsAndDivestitures" abstract="false" name="DefinedBenefitPlanNetPeriodicBenefitCostCreditIncreaseDecreaseForAcquisitionsAndDivestitures" nillable="true" xbrli:periodType="duration" xbrli:balance="credit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_IncreaseDecreaseInIncomeTaxExpenseBenefit" abstract="false" name="IncreaseDecreaseInIncomeTaxExpenseBenefit" nillable="true" xbrli:periodType="duration" xbrli:balance="debit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_IncreaseDecreaseInIncomeLossFromContinuingOperationsBeforeEquityMethodInvestmentsIncomeTaxesNoncontrollingInterest" abstract="false" name="IncreaseDecreaseInIncomeLossFromContinuingOperationsBeforeEquityMethodInvestmentsIncomeTaxesNoncontrollingInterest" nillable="true" xbrli:periodType="duration" xbrli:balance="credit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_ClimateChangeMember" abstract="true" name="ClimateChangeMember" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:domainItemType"/>
+  <xs:element id="cvx_CoastalErosionMember" abstract="true" name="CoastalErosionMember" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:domainItemType"/>
+  <xs:element id="cvx_LossContingencyNumberOfDefendantsU.S.States" abstract="false" name="LossContingencyNumberOfDefendantsU.S.States" nillable="true" xbrli:periodType="instant" substitutionGroup="xbrli:item" type="xbrli:integerItemType"/>
+  <xs:element id="cvx_LossContingencyNumberOfDefendantsNativeAmericanTribes" abstract="false" name="LossContingencyNumberOfDefendantsNativeAmericanTribes" nillable="true" xbrli:periodType="instant" substitutionGroup="xbrli:item" type="xbrli:integerItemType"/>
+  <xs:element id="cvx_NumberOfParishes" abstract="false" name="NumberOfParishes" nillable="true" xbrli:periodType="instant" substitutionGroup="xbrli:item" type="xbrli:integerItemType"/>
+  <xs:element id="cvx_MaturityPeriodOfBankTimeDepositsClassifiedAsCashEquivalents" abstract="false" name="MaturityPeriodOfBankTimeDepositsClassifiedAsCashEquivalents" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="xbrli:durationItemType"/>
+  <xs:element id="cvx_AccountsAndNotesReceivableNetMember" abstract="true" name="AccountsAndNotesReceivableNetMember" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:domainItemType"/>
+  <xs:element id="cvx_LongTermReceivablesNetMember" abstract="true" name="LongTermReceivablesNetMember" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:domainItemType"/>
+  <xs:element id="cvx_DeferredCreditsAndOtherNoncurrentObligationsMember" abstract="true" name="DeferredCreditsAndOtherNoncurrentObligationsMember" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:domainItemType"/>
+  <xs:element id="cvx_DeferredGainsLossesInAccumulatedOtherComprehensiveLossesDueToOutstandingCrudeOilPriceHedgingContracts" abstract="false" name="DeferredGainsLossesInAccumulatedOtherComprehensiveLossesDueToOutstandingCrudeOilPriceHedgingContracts" nillable="true" xbrli:periodType="instant" xbrli:balance="debit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_PurchasedCrudeOilAndProductsMember" abstract="true" name="PurchasedCrudeOilAndProductsMember" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:domainItemType"/>
+  <xs:element id="cvx_InvestmentsInAndAdvanceToAffiliatesSubsidiariesAssociatesAndJointVenturesMember" abstract="true" name="InvestmentsInAndAdvanceToAffiliatesSubsidiariesAssociatesAndJointVenturesMember" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types1:domainItemType"/>
+  <xs:element id="cvx_HessCorporationMember" abstract="true" name="HessCorporationMember" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types:domainItemType"/>
+  <xs:element id="cvx_BusinessCombinationConsiderationTransferredEquityInterestsIssuedAndIssuablePerShare" abstract="false" name="BusinessCombinationConsiderationTransferredEquityInterestsIssuedAndIssuablePerShare" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types:perShareItemType"/>
+  <xs:element id="cvx_AssetRetirementObligationLiabilitiesAssumed" abstract="false" name="AssetRetirementObligationLiabilitiesAssumed" nillable="true" xbrli:periodType="duration" xbrli:balance="credit" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType"/>
+  <xs:element id="cvx_ANigelHearneMember" abstract="true" name="ANigelHearneMember" nillable="true" xbrli:periodType="duration" substitutionGroup="xbrli:item" type="dtr-types:domainItemType"/>
+</xs:schema>

@@ -113,11 +113,14 @@ fn test_financial_ratio_creation() {
 fn test_xbrl_fact_creation() {
     let fact = XbrlFact {
         concept: "us-gaap:Assets".to_string(),
+        namespace: Some("http://fasb.org/us-gaap/2024".to_string()),
+        local_name: Some("Assets".to_string()),
         value: Some("1000000".to_string()),
         context_ref: "c1".to_string(),
         unit_ref: Some("u1".to_string()),
         decimals: Some(0),
         precision: None,
+        fact_type: Some("monetaryItemType".to_string()),
     };
 
     assert_eq!(fact.concept, "us-gaap:Assets");
@@ -140,9 +143,11 @@ fn test_xbrl_context_creation() {
             start_date: Some("2023-01-01".to_string()),
             end_date: Some("2023-12-31".to_string()),
             instant: None,
+            period_type: Some("duration".to_string()),
         },
         scenario: None,
         entity_identifier: Some("0001234567".to_string()),
+        segment: None,
     };
 
     assert_eq!(context.id, "c1");
@@ -158,11 +163,14 @@ fn test_xbrl_context_creation() {
 fn test_xbrl_unit_creation() {
     let unit = XbrlUnit {
         id: "u1".to_string(),
-        measure: "USD".to_string(),
+        measure: Some("USD".to_string()),
+        measure_namespace: Some("http://www.xbrl.org/2003/instance".to_string()),
+        measure_local_name: Some("USD".to_string()),
+        unit_type: Some("simple".to_string()),
     };
 
     assert_eq!(unit.id, "u1");
-    assert_eq!(unit.measure, "USD");
+    assert_eq!(unit.measure, Some("USD".to_string()));
 }
 
 #[test]

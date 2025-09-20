@@ -327,7 +327,8 @@ impl Default for CrawlConfig {
             form_types: None,
             exclude_amended: false,
             exclude_restated: false,
-            user_agent: "EconGraph-SEC-Crawler/1.0".to_string(),
+            user_agent: "EconGraph Research Tool AdminContact@jmalicki+econgraph@gmail.com"
+                .to_string(),
         }
     }
 }

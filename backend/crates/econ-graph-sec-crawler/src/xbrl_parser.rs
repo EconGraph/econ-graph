@@ -17,6 +17,7 @@ use xml::reader::{EventReader, XmlEvent};
 
 use crate::models::{StoredXbrlDocument, XbrlStorageStats};
 use bigdecimal::BigDecimal;
+use econ_graph_core::database::DatabasePool;
 use econ_graph_core::enums::{CompressionType, ProcessingStatus, StatementSection, StatementType};
 use econ_graph_core::models::{Company, FinancialLineItem, FinancialStatement};
 
@@ -107,6 +108,7 @@ pub struct XbrlParser {
     taxonomy_cache: TaxonomyCache,
     statement_mapper: StatementMapper,
     fact_validator: FactValidator,
+    dts_manager: Option<crate::dts_manager::DtsManager>,
 }
 
 impl XbrlParser {
@@ -117,6 +119,14 @@ impl XbrlParser {
 
     /// Create a new XBRL parser instance with custom configuration
     pub async fn with_config(config: XbrlParserConfig) -> Result<Self> {
+        Self::with_config_and_database(config, None).await
+    }
+
+    /// Create a new XBRL parser instance with custom configuration and database pool
+    pub async fn with_config_and_database(
+        config: XbrlParserConfig,
+        pool: Option<DatabasePool>,
+    ) -> Result<Self> {
         // Ensure cache directory exists
         fs::create_dir_all(&config.cache_dir)
             .await
@@ -130,12 +140,27 @@ impl XbrlParser {
         let statement_mapper = StatementMapper::new();
         let fact_validator = FactValidator::new();
 
+        // Initialize DTS manager if database pool is provided
+        let dts_manager = if let Some(pool) = pool {
+            let taxonomy_cache_dir = config.cache_dir.join("taxonomies");
+            fs::create_dir_all(&taxonomy_cache_dir)
+                .await
+                .context("Failed to create taxonomy cache directory")?;
+            Some(crate::dts_manager::DtsManager::new(
+                pool,
+                taxonomy_cache_dir,
+            ))
+        } else {
+            None
+        };
+
         Ok(Self {
             config,
             cache,
             taxonomy_cache,
             statement_mapper,
             fact_validator,
+            dts_manager,
         })
     }
 
@@ -389,23 +414,38 @@ impl XbrlParser {
         })
     }
 
-    /// Parse XBRL document using Arelle
+    /// Parse XBRL document using Arelle with DTS support
     async fn parse_with_arelle(&self, xbrl_file: &Path) -> Result<Vec<FinancialStatement>> {
         let temp_output = self
             .config
             .cache_dir
             .join(format!("output_{}.json", Uuid::new_v4()));
 
-        // Use Python to run our custom Arelle script
+        // Determine which script to use based on DTS manager availability
+        let script_path = if self.dts_manager.is_some() {
+            // Use simplified script with DTS support
+            "/Users/josephmalicki/src/econ-graph/backend/crates/econ-graph-sec-crawler/scripts/simple_arelle_parser.py"
+        } else {
+            // Use basic script
+            "/Users/josephmalicki/src/econ-graph/test_arelle.py"
+        };
+
         let mut cmd = AsyncCommand::new("python3");
-        cmd.arg("/Users/josephmalicki/src/econ-graph/test_arelle.py")
-            .arg(xbrl_file)
-            .arg(&temp_output);
+        cmd.arg(script_path).arg(xbrl_file);
+
+        // Add taxonomy cache directory if using enhanced script
+        if self.dts_manager.is_some() {
+            if let Some(ref dts_manager) = self.dts_manager {
+                cmd.arg(dts_manager.get_cache_dir());
+            }
+        }
+
+        cmd.arg(&temp_output);
 
         // Set timeout
         cmd.kill_on_drop(true);
 
-        debug!("Executing Arelle command: {:?}", cmd);
+        debug!("Executing Arelle command with DTS support: {:?}", cmd);
 
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(self.config.parse_timeout),
@@ -653,6 +693,36 @@ struct ArelleParseResult {
     facts: Vec<XbrlFact>,
     contexts: Vec<XbrlContext>,
     units: Vec<XbrlUnit>,
+    taxonomy_concepts: Option<Vec<TaxonomyConcept>>,
+    dts_references: Option<Vec<DtsReference>>,
+    taxonomy_mapping: Option<HashMap<String, String>>,
+    success: Option<bool>,
+    metadata: Option<ArelleMetadata>,
+}
+
+/// **Arelle Metadata**
+///
+/// Metadata from Arelle parsing.
+#[derive(Debug, Clone, Deserialize)]
+struct ArelleMetadata {
+    instance_file: Option<String>,
+    temp_directory: Option<String>,
+    facts_count: Option<usize>,
+    contexts_count: Option<usize>,
+    units_count: Option<usize>,
+    concepts_count: Option<usize>,
+    dts_references_count: Option<usize>,
+}
+
+/// **DTS Reference**
+///
+/// DTS reference from Arelle output.
+#[derive(Debug, Clone, Deserialize)]
+struct DtsReference {
+    reference_type: String,
+    href: String,
+    role: Option<String>,
+    arcrole: Option<String>,
 }
 
 /// **XBRL Fact**
@@ -661,11 +731,14 @@ struct ArelleParseResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct XbrlFact {
     pub concept: String,
+    pub namespace: Option<String>,
+    pub local_name: Option<String>,
     pub value: Option<String>,
     pub context_ref: String,
     pub unit_ref: Option<String>,
     pub decimals: Option<i32>,
     pub precision: Option<i32>,
+    pub fact_type: Option<String>,
 }
 
 /// **XBRL Context**
@@ -678,6 +751,7 @@ pub struct XbrlContext {
     pub period: XbrlPeriod,
     pub scenario: Option<XbrlScenario>,
     pub entity_identifier: Option<String>,
+    pub segment: Option<serde_json::Value>,
 }
 
 /// **XBRL Entity**
@@ -697,6 +771,7 @@ pub struct XbrlPeriod {
     pub start_date: Option<String>,
     pub end_date: Option<String>,
     pub instant: Option<String>,
+    pub period_type: Option<String>,
 }
 
 /// **XBRL Scenario**
@@ -713,7 +788,10 @@ pub struct XbrlScenario {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct XbrlUnit {
     pub id: String,
-    pub measure: String,
+    pub measure: Option<String>,
+    pub measure_namespace: Option<String>,
+    pub measure_local_name: Option<String>,
+    pub unit_type: Option<String>,
 }
 
 /// **Validation Report**
@@ -1038,11 +1116,14 @@ impl XbrlXmlParser {
     ) -> Result<Option<XbrlFact>> {
         let mut fact = XbrlFact {
             concept: String::new(),
+            namespace: None,
+            local_name: None,
             value: None,
             context_ref: String::new(),
             unit_ref: None,
             decimals: None,
             precision: None,
+            fact_type: None,
         };
 
         // Get element name as concept
@@ -1111,9 +1192,11 @@ impl XbrlXmlParser {
                 start_date: None,
                 end_date: None,
                 instant: None,
+                period_type: None,
             },
             scenario: None,
             entity_identifier: None,
+            segment: None,
         };
 
         // Get context ID
@@ -1213,6 +1296,7 @@ impl XbrlXmlParser {
             start_date: None,
             end_date: None,
             instant: None,
+            period_type: None,
         };
 
         let mut buf = Vec::new();
@@ -1269,7 +1353,10 @@ impl XbrlXmlParser {
     ) -> Result<Option<XbrlUnit>> {
         let mut unit = XbrlUnit {
             id: String::new(),
-            measure: String::new(),
+            measure: Some(String::new()),
+            measure_namespace: None,
+            measure_local_name: None,
+            unit_type: None,
         };
 
         // Get unit ID
@@ -1295,7 +1382,7 @@ impl XbrlXmlParser {
                         if let Ok(quick_xml::events::Event::Text(e)) =
                             reader.read_event_into(&mut buf2)
                         {
-                            unit.measure = String::from_utf8_lossy(e.as_ref()).to_string();
+                            unit.measure = Some(String::from_utf8_lossy(e.as_ref()).to_string());
                         }
                     }
                 }
@@ -1428,11 +1515,14 @@ impl XbrlParser {
     ) -> Result<Option<XbrlFact>> {
         let mut fact = XbrlFact {
             concept: String::new(),
+            namespace: None,
+            local_name: None,
             value: None,
             context_ref: String::new(),
             unit_ref: None,
             decimals: None,
             precision: None,
+            fact_type: None,
         };
 
         // Parse attributes
@@ -1525,9 +1615,11 @@ impl XbrlParser {
                 start_date: None,
                 end_date: None,
                 instant: None,
+                period_type: None,
             },
             scenario: None,
             entity_identifier: None,
+            segment: None,
         };
 
         // Get context ID
@@ -1627,6 +1719,7 @@ impl XbrlParser {
             start_date: None,
             end_date: None,
             instant: None,
+            period_type: None,
         };
 
         let mut buf = Vec::new();
@@ -1710,7 +1803,10 @@ impl XbrlParser {
     ) -> Result<Option<XbrlUnit>> {
         let mut unit = XbrlUnit {
             id: String::new(),
-            measure: String::new(),
+            measure: Some(String::new()),
+            measure_namespace: None,
+            measure_local_name: None,
+            unit_type: None,
         };
 
         // Get unit ID
@@ -1736,7 +1832,7 @@ impl XbrlParser {
                         if let Ok(quick_xml::events::Event::Text(e)) =
                             reader.read_event_into(&mut buf2)
                         {
-                            unit.measure = String::from_utf8_lossy(e.as_ref()).to_string();
+                            unit.measure = Some(String::from_utf8_lossy(e.as_ref()).to_string());
                         }
                     }
                 }

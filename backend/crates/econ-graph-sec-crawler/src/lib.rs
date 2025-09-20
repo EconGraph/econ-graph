@@ -6,6 +6,7 @@
 
 pub mod config_loader;
 pub mod crawler;
+pub mod dts_manager;
 pub mod financial_ratio_calculator;
 pub mod models;
 pub mod rate_limiter;
@@ -19,6 +20,7 @@ pub use config_loader::{
     RatioInterpretationsConfig,
 };
 pub use crawler::SecEdgarCrawler;
+pub use dts_manager::DtsManager;
 pub use financial_ratio_calculator::{
     CalculatedRatio, FinancialRatioCalculator, RatioCalculationConfig,
 };
