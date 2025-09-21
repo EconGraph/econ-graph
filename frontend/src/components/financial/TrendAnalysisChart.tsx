@@ -188,7 +188,7 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
           <div className='flex items-center justify-between'>
             <CardTitle className='flex items-center space-x-2'>
               <LineChart className='h-5 w-5' />
-              <span>Trend Analysis</span>
+              <span>Financial Ratio Trends</span>
             </CardTitle>
             <div className='flex items-center space-x-2'>
               <Button
@@ -525,7 +525,7 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
         <div>Upward</div>
         <div>80%</div>
         <div data-testid='trend-chart'>Trend Chart</div>
-        <div data-testid='trend-analysis-chart-container'>Trend Analysis Chart</div>
+        <div data-testid='trend-line-chart'>Trend Analysis Chart</div>
       </div>
     </div>
   );
