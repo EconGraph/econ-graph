@@ -17,7 +17,6 @@ import {
   Share2,
   Eye,
 } from 'lucide-react';
-import { GET_FINANCIAL_STATEMENTS } from '@/graphql/financial';
 import { FinancialStatement, FinancialRatio, Company } from '@/types/financial';
 import { FinancialStatementViewer } from './FinancialStatementViewer';
 import { RatioAnalysisPanel } from './RatioAnalysisPanel';
@@ -152,13 +151,15 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   const [timeRange, setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
 
   // GraphQL queries - use default data as fallback for development
-  const { data, isLoading: loading, isError, error, refetch } = useQuery(
-    ['financial-statements', companyId],
-    () => Promise.resolve(defaultData),
-    {
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    }
-  );
+  const {
+    data,
+    isLoading: loading,
+    isError,
+    error,
+    refetch,
+  } = useQuery(['financial-statements', companyId], () => Promise.resolve(defaultData), {
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 
   const company: Company | undefined = data?.company;
   const statements: FinancialStatement[] = useMemo(
