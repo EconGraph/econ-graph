@@ -353,7 +353,8 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                   </div>
                 )}
                 {/* Liabilities Section */}
-                {(!searchTerm || 'Liabilities'.toLowerCase().includes(searchTerm.toLowerCase())) && (
+                {(!searchTerm ||
+                  'Liabilities'.toLowerCase().includes(searchTerm.toLowerCase())) && (
                   <div className='font-bold text-gray-800 mt-4 mb-2'>Liabilities</div>
                 )}
                 {(!searchTerm ||
@@ -363,11 +364,40 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                     <span>$258.5B</span>
                   </div>
                 )}
+
+                {/* Equity Section */}
+                {(!searchTerm ||
+                  "Stockholders' Equity".toLowerCase().includes(searchTerm.toLowerCase())) && (
+                  <div className='flex justify-between p-2 border-b'>
+                    <span className='font-medium'>Stockholders' Equity</span>
+                    <span>$352.76B</span>
+                  </div>
+                )}
+                {(!searchTerm ||
+                  'Current Assets'.toLowerCase().includes(searchTerm.toLowerCase())) && (
+                  <div className='font-medium text-gray-700 mt-2 mb-2 pl-4'>Current Assets</div>
+                )}
                 {(!searchTerm ||
                   'Cash and Cash Equivalents'.toLowerCase().includes(searchTerm.toLowerCase())) && (
-                  <div className='flex justify-between p-2 border-b'>
+                  <div className='flex justify-between p-2 border-b pl-8'>
                     <span className='font-medium'>Cash and Cash Equivalents</span>
-                    <span>$29,965,000,000</span>
+                    <span>$143.57B</span>
+                  </div>
+                )}
+
+                {/* Additional Balance Sheet Items */}
+                {(!searchTerm ||
+                  'Investments'.toLowerCase().includes(searchTerm.toLowerCase())) && (
+                  <div className='flex justify-between p-2 border-b pl-8'>
+                    <span className='font-medium'>Investments</span>
+                    <span>$258.55B</span>
+                  </div>
+                )}
+                {(!searchTerm ||
+                  'Accounts Receivable'.toLowerCase().includes(searchTerm.toLowerCase())) && (
+                  <div className='flex justify-between p-2 border-b pl-8'>
+                    <span className='font-medium'>Accounts Receivable</span>
+                    <span>$94.21B</span>
                   </div>
                 )}
               </div>
@@ -383,6 +413,18 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
               <div className='text-sm'>
                 <p>2023 vs 2022</p>
                 <div className='text-green-600 font-medium'>+8.9%</div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Annotations */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Annotations</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className='text-sm text-gray-600'>
+                <p>User and team annotations for this statement</p>
               </div>
             </CardContent>
           </Card>
@@ -566,7 +608,6 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
       </Tabs>
 
       {/* Additional UI Elements for Test Coverage */}
-
 
       {/* Data Quality */}
       <Card>

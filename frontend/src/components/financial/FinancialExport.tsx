@@ -429,6 +429,19 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                 </div>
               </div>
 
+              {/* File Naming */}
+              <div className='space-y-3'>
+                <h4 className='font-medium'>File Naming</h4>
+                <select
+                  value='company_date_format'
+                  defaultValue='company_date_format'
+                  className='w-full p-2 border rounded-md'
+                >
+                  <option value='company_date_format'>Company_Date_Format</option>
+                  <option value='custom'>Custom Name</option>
+                </select>
+              </div>
+
               {/* Export Preview */}
               <div className='space-y-3'>
                 <h4 className='font-medium'>Export Preview</h4>
@@ -464,21 +477,6 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                   <option value='Executive Summary'>Executive Summary</option>
                   <option value='Detailed Analysis'>Detailed Analysis</option>
                 </select>
-              </div>
-
-              {/* File Naming Section */}
-              <div className='space-y-2'>
-                <h4 className='text-sm font-medium'>File Naming</h4>
-                <select className='w-full p-2 border rounded-md' defaultValue='company_date_format'>
-                  <option value='company_date_format'>Company Date Format</option>
-                  <option value='custom'>Custom Naming</option>
-                </select>
-                <input
-                  type='text'
-                  placeholder='Custom file name...'
-                  className='w-full p-2 border rounded-md'
-                  aria-label='Custom export filename'
-                />
               </div>
 
               {/* Date Range Validation */}
