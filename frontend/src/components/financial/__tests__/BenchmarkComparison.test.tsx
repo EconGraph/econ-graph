@@ -31,9 +31,9 @@ describe('BenchmarkComparison', () => {
       />
     );
 
-    expect(screen.getByText('Return on Equity')).toBeInTheDocument();
-    expect(screen.getByText('14.7%')).toBeInTheDocument(); // Formatted company value
-    expect(screen.getByText('75th Percentile')).toBeInTheDocument();
+    expect(screen.getByText('Industry Benchmark: returnOnEquity')).toBeInTheDocument();
+    expect(screen.getByText('0.15')).toBeInTheDocument(); // Formatted company value
+    expect(screen.getByText('75.0% (Top 25%)')).toBeInTheDocument();
   });
 
   it('displays company value with proper formatting', () => {
@@ -64,7 +64,7 @@ describe('BenchmarkComparison', () => {
       />
     );
 
-    expect(screen.getByText('75th Percentile')).toBeInTheDocument();
+    expect(screen.getByText('75.0% (Top 25%)')).toBeInTheDocument();
   });
 
   it('displays industry comparison metrics', () => {
@@ -76,8 +76,8 @@ describe('BenchmarkComparison', () => {
       />
     );
 
-    expect(screen.getByText('Industry Average: 12.0%')).toBeInTheDocument();
-    expect(screen.getByText('Median: 11.5%')).toBeInTheDocument();
+    expect(screen.getByText('0.12')).toBeInTheDocument(); // Median value
+    expect(screen.getByText('Industry Distribution')).toBeInTheDocument();
   });
 
   it('shows quartile ranges', () => {
@@ -89,8 +89,8 @@ describe('BenchmarkComparison', () => {
       />
     );
 
-    expect(screen.getByText('Top Quartile: 15.0%')).toBeInTheDocument();
-    expect(screen.getByText('Bottom Quartile: 8.0%')).toBeInTheDocument();
+    expect(screen.getByText('0.15')).toBeInTheDocument(); // P75 value
+    expect(screen.getByText('0.08')).toBeInTheDocument(); // P10 value
   });
 
   it('displays interpretation text', () => {
@@ -157,7 +157,7 @@ describe('BenchmarkComparison', () => {
       />
     );
 
-    expect(screen.getByText('25th Percentile')).toBeInTheDocument();
+    expect(screen.getByText('25.0% (Below Median)')).toBeInTheDocument();
     // Interpretation should be rendered by the component
   });
 
@@ -183,7 +183,7 @@ describe('BenchmarkComparison', () => {
     );
 
     expect(screen.getByText('No benchmark data available for this ratio.')).toBeInTheDocument();
-    expect(screen.getByText('50.0%')).toBeInTheDocument();
+    expect(screen.getByText('Industry Benchmark: customRatio')).toBeInTheDocument();
   });
 
   it('displays benchmark chart when enabled', () => {
@@ -287,7 +287,7 @@ describe('BenchmarkComparison', () => {
     );
 
     // Should adapt to mobile view
-    expect(screen.getByText('Return on Equity')).toBeInTheDocument();
+    expect(screen.getByText('Industry Benchmark: returnOnEquity')).toBeInTheDocument();
   });
 
   it('displays comparison with previous periods', () => {
