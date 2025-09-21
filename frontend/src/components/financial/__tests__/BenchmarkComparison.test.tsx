@@ -32,8 +32,12 @@ describe('BenchmarkComparison', () => {
     );
 
     expect(screen.getByText('Industry Benchmark: returnOnEquity')).toBeInTheDocument();
-    expect(screen.getByText('0.15')).toBeInTheDocument(); // Formatted company value
+    expect(screen.getByText('Company Value:')).toBeInTheDocument();
     expect(screen.getByText('75.0% (Top 25%)')).toBeInTheDocument();
+    
+    // Check that the company value is displayed (should be 0.15 when formatted)
+    const companyValueElements = screen.getAllByText('0.15');
+    expect(companyValueElements.length).toBeGreaterThan(0);
   });
 
   it('displays company value with proper formatting', () => {
@@ -89,8 +93,13 @@ describe('BenchmarkComparison', () => {
       />
     );
 
-    expect(screen.getByText('0.15')).toBeInTheDocument(); // P75 value
+    // Check P75 value exists (could be multiple 0.15 values on page)
+    const elements015 = screen.getAllByText('0.15');
+    expect(elements015.length).toBeGreaterThan(0);
+    
     expect(screen.getByText('0.08')).toBeInTheDocument(); // P10 value
+    expect(screen.getByText('P75:')).toBeInTheDocument();
+    expect(screen.getByText('P10:')).toBeInTheDocument();
   });
 
   it('displays interpretation text', () => {
