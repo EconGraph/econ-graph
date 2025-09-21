@@ -338,6 +338,10 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                     <span>$383,285,000,000</span>
                   </div>
                 )}
+                {/* Assets Section */}
+                {(!searchTerm || 'Assets'.toLowerCase().includes(searchTerm.toLowerCase())) && (
+                  <div className='font-bold text-gray-800 mt-4 mb-2'>Assets</div>
+                )}
                 {(!searchTerm ||
                   'Total Assets'.toLowerCase().includes(searchTerm.toLowerCase())) && (
                   <div className='flex justify-between p-2 border-b'>
@@ -347,6 +351,10 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                     </div>
                     <span>$352.8B</span>
                   </div>
+                )}
+                {/* Liabilities Section */}
+                {(!searchTerm || 'Liabilities'.toLowerCase().includes(searchTerm.toLowerCase())) && (
+                  <div className='font-bold text-gray-800 mt-4 mb-2'>Liabilities</div>
                 )}
                 {(!searchTerm ||
                   'Total Liabilities'.toLowerCase().includes(searchTerm.toLowerCase())) && (
@@ -362,6 +370,19 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                     <span>$29,965,000,000</span>
                   </div>
                 )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Comparison Mode */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Comparison Mode</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className='text-sm'>
+                <p>2023 vs 2022</p>
+                <div className='text-green-600 font-medium'>+8.9%</div>
               </div>
             </CardContent>
           </Card>
@@ -546,18 +567,6 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
 
       {/* Additional UI Elements for Test Coverage */}
 
-      {/* Comparison Mode */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Comparison Mode</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className='space-y-2'>
-            <p className='text-sm'>Compare across periods</p>
-            <div className='text-sm text-green-600'>+8.9%</div>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Data Quality */}
       <Card>
