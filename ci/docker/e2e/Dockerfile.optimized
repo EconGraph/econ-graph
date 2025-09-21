@@ -16,7 +16,7 @@ WORKDIR /app/backend
 
 # Copy backend source code and rust toolchain
 COPY backend/ ./
-COPY rust-toolchain.toml /app/
+COPY rust-toolchain.toml ./
 
 # Install diesel CLI (required for backend build)
 RUN cargo install diesel_cli --no-default-features --features postgres --verbose --force
