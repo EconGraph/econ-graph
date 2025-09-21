@@ -364,6 +364,7 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         diesel setup
         diesel migration run
+      working-directory: backend
 
     - name: Run backend models basic tests
       run: |
@@ -1449,6 +1450,7 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         diesel setup
         diesel migration run
+      working-directory: backend
 
     - name: Build backend
       run: |
