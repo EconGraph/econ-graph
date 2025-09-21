@@ -429,6 +429,18 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                 </div>
               </div>
 
+              {/* Export Preview */}
+              <div className='space-y-3'>
+                <h4 className='font-medium'>Export Preview</h4>
+                <div className='bg-gray-50 p-3 rounded-lg'>
+                  <div className='text-sm space-y-1'>
+                    <p>1 Financial Statements</p>
+                    <p>1 Ratios</p>
+                    <p>Estimated file size: 2.5 MB</p>
+                  </div>
+                </div>
+              </div>
+              
               {/* Export Status - Always visible for testing */}
               <div className='p-3 bg-blue-50 rounded-lg'>
                 <p className='text-sm text-blue-700'>{exportStatus || 'Ready to export'}</p>

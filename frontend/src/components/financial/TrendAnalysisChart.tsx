@@ -34,7 +34,7 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
   statements,
   timeRange,
   onTimeRangeChange,
-  selectedRatios = [],
+  selectedRatios = ['returnOnEquity'],
   onRatioSelectionChange,
 }) => {
   const [chartType, setChartType] = useState<'line' | 'bar'>('line');
