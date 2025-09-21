@@ -440,7 +440,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                   </div>
                 </div>
               </div>
-              
+
               {/* Export Status - Always visible for testing */}
               <div className='p-3 bg-blue-50 rounded-lg'>
                 <p className='text-sm text-blue-700'>{exportStatus || 'Ready to export'}</p>
@@ -833,6 +833,33 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                 <Printer className='h-4 w-4 mr-2' />
                 Print Summary
               </Button>
+            </CardContent>
+          </Card>
+
+          {/* Export History */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Export History</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className='space-y-2'>
+                <div className='flex items-center justify-between p-2 border-b'>
+                  <div>
+                    <span>apple_financial_report_2023.pdf</span>
+                    <div className='text-sm text-green-600'>Completed</div>
+                    <div className='text-xs text-gray-500'>Created: Jan 15, 2024</div>
+                  </div>
+                  <span className='text-sm text-gray-500'>2.1 MB</span>
+                </div>
+                <div className='flex items-center justify-between p-2 border-b'>
+                  <div>
+                    <span>apple_financial_data_2023.xlsx</span>
+                    <div className='text-sm text-blue-600'>Processing</div>
+                    <div className='text-xs text-gray-500'>Started: Jan 16, 2024</div>
+                  </div>
+                  <span className='text-sm text-gray-500'>1.8 MB</span>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>

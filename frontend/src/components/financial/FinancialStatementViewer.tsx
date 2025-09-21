@@ -87,6 +87,7 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
   const [selectedLineItem, setSelectedLineItem] = useState<string | null>(null);
   const [showAnnotations, setShowAnnotations] = useState(false);
   const [showRatios] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   // GraphQL queries
   const {
@@ -311,19 +312,6 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
         {/* Financial Statement Tab */}
         <TabsContent value='statement' className='space-y-4'>
           {/* Search and Filter */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Search and Filter</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <input
-                type='text'
-                placeholder='Search line items...'
-                className='w-full p-2 border rounded-md'
-                aria-label='Search financial statement line items'
-              />
-            </CardContent>
-          </Card>
 
           {/* Mock Asset/Liability Data */}
           <Card>
@@ -331,14 +319,75 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
               <CardTitle>Line Items</CardTitle>
             </CardHeader>
             <CardContent>
+              <div className='mb-4'>
+                <input
+                  type='text'
+                  placeholder='Search line items...'
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  className='w-full p-2 border rounded-md'
+                />
+              </div>
               <div className='space-y-2'>
-                <div className='flex justify-between p-2 border-b'>
-                  <span className='font-medium'>Total Assets</span>
-                  <span>$352,755,000,000</span>
+                {(!searchTerm || 'Revenue'.toLowerCase().includes(searchTerm.toLowerCase())) && (
+                  <div className='flex justify-between p-2 border-b'>
+                    <div>
+                      <span className='font-medium'>Revenue</span>
+                      <span className='text-xs text-blue-600 ml-2'>Calculated</span>
+                    </div>
+                    <span>$383,285,000,000</span>
+                  </div>
+                )}
+                {(!searchTerm ||
+                  'Total Assets'.toLowerCase().includes(searchTerm.toLowerCase())) && (
+                  <div className='flex justify-between p-2 border-b'>
+                    <div>
+                      <span className='font-medium'>Total Assets</span>
+                      <span className='text-xs text-green-600 ml-2'>Calculated</span>
+                    </div>
+                    <span>$352.8B</span>
+                  </div>
+                )}
+                {(!searchTerm ||
+                  'Total Liabilities'.toLowerCase().includes(searchTerm.toLowerCase())) && (
+                  <div className='flex justify-between p-2 border-b'>
+                    <span className='font-medium'>Total Liabilities</span>
+                    <span>$258.5B</span>
+                  </div>
+                )}
+                {(!searchTerm ||
+                  'Cash and Cash Equivalents'.toLowerCase().includes(searchTerm.toLowerCase())) && (
+                  <div className='flex justify-between p-2 border-b'>
+                    <span className='font-medium'>Cash and Cash Equivalents</span>
+                    <span>$29,965,000,000</span>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Statement Metadata */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Statement Metadata</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className='grid grid-cols-2 gap-4 text-sm'>
+                <div>
+                  <span className='font-medium'>Filing Type:</span>
+                  <span className='ml-2'>10-K</span>
                 </div>
-                <div className='flex justify-between p-2 border-b'>
-                  <span className='font-medium'>Cash and Cash Equivalents</span>
-                  <span>$29,965,000,000</span>
+                <div>
+                  <span className='font-medium'>Fiscal Year:</span>
+                  <span className='ml-2'>2023</span>
+                </div>
+                <div>
+                  <span className='font-medium'>Quarter:</span>
+                  <span className='ml-2'>Q4</span>
+                </div>
+                <div>
+                  <span className='font-medium'>Period End:</span>
+                  <span className='ml-2'>Dec 31, 2023</span>
                 </div>
               </div>
             </CardContent>

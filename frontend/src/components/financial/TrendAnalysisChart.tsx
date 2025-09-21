@@ -211,63 +211,54 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
           </div>
         </CardHeader>
         <CardContent>
-          <div className='flex items-center space-x-4'>
-            <div className='flex items-center space-x-2'>
-              <Calendar className='h-4 w-4' />
-              <span className='text-sm font-medium'>Time Range:</span>
-              <Select value={timeRange} onValueChange={onTimeRangeChange}>
-                <SelectTrigger className='w-24'>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value='1Y'>1 Year</SelectItem>
-                  <SelectItem value='3Y'>3 Years</SelectItem>
-                  <SelectItem value='5Y'>5 Years</SelectItem>
-                  <SelectItem value='10Y'>10 Years</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
+          <div className='space-y-4'>
             <div className='flex items-center space-x-2'>
               <Filter className='h-4 w-4' />
               <label className='text-sm font-medium' htmlFor='ratio-analyzer'>
-                Select Ratio to Analyze:
+                Select Ratio to Analyze
               </label>
-              <Select
-                value={selectedRatios.length > 0 ? selectedRatios.join(',') : 'all'}
-                onValueChange={(value: string) => {
-                  if (value === 'all') {
-                    onRatioSelectionChange?.([]);
-                  } else {
-                    onRatioSelectionChange?.(value.split(','));
-                  }
+              <select
+                value='returnOnEquity'
+                defaultValue='returnOnEquity'
+                onChange={e => {
+                  onRatioSelectionChange?.([e.target.value]);
                 }}
+                className='w-48 p-2 border rounded-md'
+                id='ratio-analyzer'
+                aria-label='Select financial ratio to analyze'
               >
-                <SelectTrigger
-                  className='w-48'
-                  id='ratio-analyzer'
-                  aria-label='Select financial ratio to analyze'
-                >
-                  <SelectValue placeholder='Select ratios' />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value='all'>All Ratios</SelectItem>
-                  {availableRatios.map(ratio => (
-                    <SelectItem key={ratio.name} value={ratio.name}>
-                      {ratio.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <option value='all'>All Ratios</option>
+                <option value='returnOnEquity'>Return on Equity</option>
+                <option value='currentRatio'>Current Ratio</option>
+                <option value='debtToEquity'>Debt to Equity</option>
+              </select>
             </div>
 
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={() => setShowProjections(!showProjections)}
-            >
-              {showProjections ? 'Hide' : 'Show'} Projections
-            </Button>
+            <div className='flex items-center space-x-4'>
+              <div className='flex items-center space-x-2'>
+                <Calendar className='h-4 w-4' />
+                <span className='text-sm font-medium'>Time Range:</span>
+                <Select value={timeRange} onValueChange={onTimeRangeChange}>
+                  <SelectTrigger className='w-24'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='1Y'>1 Year</SelectItem>
+                    <SelectItem value='3Y'>3 Years</SelectItem>
+                    <SelectItem value='5Y'>5 Years</SelectItem>
+                    <SelectItem value='10Y'>10 Years</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => setShowProjections(!showProjections)}
+              >
+                {showProjections ? 'Hide' : 'Show'} Projections
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
