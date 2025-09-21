@@ -5,14 +5,14 @@ import { defineConfig, devices } from '@playwright/test';
  * Tests basic functionality: navigation, authentication, dashboard, about
  */
 export default defineConfig({
-  testDir: './tests/e2e/core',
+  testDir: '../../tests/e2e/core',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 2 : undefined, // Allow 2 workers for core tests
   reporter: [['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://localhost:18473',
+    baseURL: process.env.BASE_URL || 'http://localhost:3000',
     headless: true,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
@@ -32,10 +32,4 @@ export default defineConfig({
       use: { ...devices['Desktop Safari'] },
     },
   ],
-  webServer: {
-    command: 'cd dev-server && npm start',
-    url: 'http://localhost:18473',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
-  },
 });
