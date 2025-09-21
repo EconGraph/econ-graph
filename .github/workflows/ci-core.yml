@@ -375,6 +375,7 @@ jobs:
         cc --version || echo "cc command failed"
         echo "=== END RUST ENVIRONMENT DEBUGGING ==="
         cargo test --lib -- --test-threads=2 --nocapture models::data_source::tests::simple_tests models::economic_series::tests::simple_tests models::data_point::tests::simple_tests models::crawl_queue::tests::simple_tests models::search::tests::simple_tests
+      working-directory: backend
 
   backend-models-advanced-tests:
     name: Backend Models Advanced Tests
