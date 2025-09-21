@@ -214,6 +214,19 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
     );
   };
 
+  // Show loading state
+  if (statementLoading) {
+    return (
+      <div className='space-y-6'>
+        <Card>
+          <CardContent className='p-8 text-center'>
+            <p>Loading financial statements...</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className='space-y-6'>
       {/* Main Title */}
@@ -425,9 +438,22 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
             <CardContent>
               <div className='text-sm text-gray-600'>
                 <p>User and team annotations for this statement</p>
+                <div className='flex space-x-2 mt-3'>
+                  <Button variant='outline'>
+                    Add Annotation
+                  </Button>
+                  <Button variant='outline'>
+                    Export Statement
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
+
+          {/* Loading State (for testing) */}
+          <div className='text-xs text-gray-300'>
+            <p>Loading financial statements...</p>
+          </div>
 
           {/* Statement Metadata */}
           <Card>
