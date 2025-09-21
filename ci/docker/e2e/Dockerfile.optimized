@@ -1,0 +1,116 @@
+# Optimized E2E Test Container with Pre-built Backend and Frontend
+# This container builds both backend and frontend in parallel for faster startup times
+
+# Stage 1: Build Backend Binary
+FROM rust:1.89.0-bullseye AS backend-builder
+
+# Install system dependencies for Rust compilation
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app/backend
+
+# Copy backend source code and rust toolchain
+COPY backend/ ./
+COPY rust-toolchain.toml ./
+
+# Install diesel CLI (required for backend build)
+RUN cargo install diesel_cli --no-default-features --features postgres --verbose --force
+
+# Build backend binary in release mode
+RUN cargo build --release --bin econ-graph-backend
+
+# Stage 2: Build Frontend
+FROM node:18-bullseye AS frontend-builder
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY frontend/package*.json ./
+
+# Install npm dependencies
+RUN npm ci
+
+# Copy frontend source code
+COPY frontend/ ./
+
+# Build frontend
+RUN npm run build
+
+# Install dev-server dependencies (needed for some E2E tests)
+WORKDIR /app/dev-server
+COPY frontend/dev-server/package*.json ./
+RUN npm ci
+WORKDIR /app
+
+# Stage 3: Final E2E Container
+FROM node:18-bullseye
+
+# Install system dependencies for Playwright
+RUN apt-get update && apt-get install -y \
+    # Playwright system dependencies
+    libnss3 \
+    libnspr4 \
+    libatk-bridge2.0-0 \
+    libdrm2 \
+    libxkbcommon0 \
+    libgtk-3-0 \
+    libgbm1 \
+    libasound2 \
+    # Additional dependencies for better browser support
+    libxss1 \
+    libgconf-2-4 \
+    libxtst6 \
+    libxrandr2 \
+    libasound2 \
+    libpangocairo-1.0-0 \
+    libatk1.0-0 \
+    libcairo-gobject2 \
+    libgtk-3-0 \
+    libgdk-pixbuf2.0-0 \
+    # Backend runtime dependencies
+    libssl1.1 \
+    libpq5 \
+    # Clean up
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy built frontend from frontend-builder stage
+COPY --from=frontend-builder /app/build ./build
+COPY --from=frontend-builder /app/package*.json ./
+COPY --from=frontend-builder /app/node_modules ./node_modules
+COPY --from=frontend-builder /app/dev-server ./dev-server
+
+# Copy built backend binary from backend-builder stage
+COPY --from=backend-builder /app/backend/target/release/econ-graph-backend ./backend/econ-graph-backend
+
+# Create a non-root user for security
+RUN groupadd -r playwright && useradd -r -g playwright -G audio,video playwright \
+    && mkdir -p /home/playwright/Downloads \
+    && chown -R playwright:playwright /home/playwright \
+    && chown -R playwright:playwright /app
+
+# Install Playwright system dependencies as root first
+RUN npx playwright install-deps
+
+# Switch to non-root user
+USER playwright
+
+# Set environment variables for Playwright
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/playwright/.cache/ms-playwright
+
+# Install Playwright browsers as the playwright user (without --with-deps since deps are already installed)
+RUN npx playwright install
+
+# Install additional mobile browsers for mobile E2E tests
+RUN npx playwright install chromium webkit
+
+# Default command (can be overridden)
+CMD ["npx", "playwright", "test", "--help"]
