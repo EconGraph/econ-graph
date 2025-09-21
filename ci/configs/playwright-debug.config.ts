@@ -5,14 +5,15 @@ import { defineConfig, devices } from '@playwright/test';
  * Tests debugging and visual features
  */
 export default defineConfig({
-  testDir: './tests/e2e/debug',
+  testDir: '../../tests/e2e',
+  testMatch: ['**/*debug*.spec.ts'],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0, // Fewer retries for debug tests
   workers: process.env.CI ? 2 : undefined,
   reporter: [['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://localhost:18473',
+    baseURL: process.env.BASE_URL || 'http://localhost:3000',
     headless: true,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
@@ -25,10 +26,4 @@ export default defineConfig({
     },
     // Debug tests only need Chrome for consistency
   ],
-  webServer: {
-    command: 'cd dev-server && npm start',
-    url: 'http://localhost:18473',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
-  },
 });
