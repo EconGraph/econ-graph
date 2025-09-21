@@ -314,6 +314,16 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
               <CardTitle>Export Format</CardTitle>
             </CardHeader>
             <CardContent>
+              <select
+                value={exportOptions.format.toUpperCase()}
+                onChange={e => handleFormatChange(e.target.value.toLowerCase())}
+                className='w-full p-2 border rounded-md mb-4'
+              >
+                <option value='PDF'>PDF</option>
+                <option value='EXCEL'>Excel</option>
+                <option value='CSV'>CSV</option>
+                <option value='JSON'>JSON</option>
+              </select>
               <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
                 {exportFormats.map(format => (
                   <div

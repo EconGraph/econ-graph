@@ -57,6 +57,8 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [deviceType, setDeviceType] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
   const [isOffline] = useState(true);
+  const [showSearch, setShowSearch] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Detect device type and orientation
   useEffect(() => {
@@ -145,10 +147,19 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
               <div>
                 <h1 className='font-semibold text-lg'>{company.name}</h1>
                 <p className='text-sm text-gray-500'>{company.ticker}</p>
-                <p className='text-xs text-gray-400'>Financial Analysis</p>
+                <p className='text-xs text-gray-400'>Technology Hardware & Equipment</p>
               </div>
             </div>
             <div className='flex items-center space-x-2'>
+              <Button
+                variant='ghost'
+                size='sm'
+                aria-label='Search'
+                onClick={() => setShowSearch(!showSearch)}
+              >
+                <FileText className='h-4 w-4' />
+                <span className='sr-only'>Search</span>
+              </Button>
               <Button variant='ghost' size='sm'>
                 <Share2 className='h-4 w-4 mr-1' />
                 Share
@@ -163,8 +174,9 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
               </div>
               <Sheet open={isMenuOpen} onOpenChange={setIsMenuOpen}>
                 <SheetTrigger asChild>
-                  <Button variant='ghost' size='sm'>
+                  <Button variant='ghost' size='sm' aria-label='Menu'>
                     <Menu className='h-5 w-5' />
+                    <span className='sr-only'>Menu</span>
                   </Button>
                 </SheetTrigger>
                 <SheetContent side='right' className='w-80'>
@@ -176,11 +188,11 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
                       <h3 className='font-medium'>Quick Actions</h3>
                       <Button variant='outline' className='w-full justify-start'>
                         <Download className='h-4 w-4 mr-2' />
-                        Export Data
+                        Export
                       </Button>
                       <Button variant='outline' className='w-full justify-start'>
-                        <Share2 className='h-4 w-4 mr-2' />
-                        Share Analysis
+                        <Menu className='h-4 w-4 mr-2' />
+                        Settings
                       </Button>
                     </div>
                     <div className='space-y-2'>
@@ -215,11 +227,54 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
           </div>
         )}
 
+        {/* Search Interface */}
+        {showSearch && (
+          <div className='bg-white border-b p-4'>
+            <input
+              type='text'
+              placeholder='Search ratios...'
+              className='w-full p-2 border rounded-md'
+            />
+          </div>
+        )}
+
         {/* Mobile Content */}
         <div className='p-4 space-y-4'>
+          {/* Loading State */}
+          {isLoading && (
+            <div className='text-center p-8'>
+              <p>Loading...</p>
+            </div>
+          )}
+
           {/* Key Metrics Cards */}
           {activeTab === 'overview' && (
-            <div data-testid='mobile-dashboard'>
+            <div
+              data-testid='mobile-dashboard'
+              onTouchStart={e => {
+                const touch = e.touches[0];
+                const startX = touch.clientX;
+
+                const handleTouchEnd = (endEvent: TouchEvent) => {
+                  const endTouch = endEvent.changedTouches[0];
+                  const deltaX = startX - endTouch.clientX;
+
+                  if (Math.abs(deltaX) > 50) {
+                    // Minimum swipe distance
+                    if (deltaX > 0) {
+                      // Swipe left - next tab
+                      const currentIndex = mobileTabs.findIndex(tab => tab.id === activeTab);
+                      const nextIndex = (currentIndex + 1) % mobileTabs.length;
+                      setActiveTab(mobileTabs[nextIndex].id);
+                    }
+                  }
+
+                  document.removeEventListener('touchend', handleTouchEnd);
+                };
+
+                document.addEventListener('touchend', handleTouchEnd);
+              }}
+            >
               <div className='space-y-3'>
                 {keyMetrics.map((metric, index) => (
                   <Card key={index}>
@@ -360,12 +415,14 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
 
           {/* Trends Tab */}
           {activeTab === 'trends' && (
-            <TrendAnalysisChart
-              ratios={ratios}
-              statements={statements}
-              timeRange='3Y'
-              onTimeRangeChange={() => {}}
-            />
+            <div data-testid='mobile-trend-chart'>
+              <TrendAnalysisChart
+                ratios={ratios}
+                statements={statements}
+                timeRange='3Y'
+                onTimeRangeChange={() => {}}
+              />
+            </div>
           )}
 
           {/* Comparison Tab */}
