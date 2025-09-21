@@ -15,12 +15,12 @@ RUN apt-get update && apt-get install -y \
     # Clean up
     && rm -rf /var/lib/apt/lists/*
 
-# Install additional mobile browsers and dependencies
-RUN npx playwright install chromium webkit
-RUN npx playwright install-deps
-
 # Switch back to playwright user for security
 USER playwright
+
+# Install additional mobile browsers and dependencies as the playwright user
+RUN npx playwright install chromium webkit
+RUN npx playwright install-deps
 
 # Default command (can be overridden)
 CMD ["npx", "playwright", "test", "--help"]
