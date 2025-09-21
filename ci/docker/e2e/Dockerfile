@@ -55,14 +55,17 @@ RUN groupadd -r playwright && useradd -r -g playwright -G audio,video playwright
     && chown -R playwright:playwright /home/playwright \
     && chown -R playwright:playwright /app
 
+# Install Playwright system dependencies as root first
+RUN npx playwright install-deps
+
 # Switch to non-root user
 USER playwright
 
 # Set environment variables for Playwright
 ENV PLAYWRIGHT_BROWSERS_PATH=/home/playwright/.cache/ms-playwright
 
-# Install Playwright browsers with all dependencies as the playwright user
-RUN npx playwright install --with-deps
+# Install Playwright browsers as the playwright user (without --with-deps since deps are already installed)
+RUN npx playwright install
 
 # Install additional mobile browsers for mobile E2E tests
 RUN npx playwright install chromium webkit

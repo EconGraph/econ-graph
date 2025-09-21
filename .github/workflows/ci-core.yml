@@ -1633,6 +1633,7 @@ jobs:
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         diesel migration run
+      working-directory: backend
 
     - name: Download optimized E2E containers
       uses: actions/download-artifact@v4
@@ -1751,6 +1752,7 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         diesel setup
         diesel migration run
+      working-directory: backend
 
     - name: Wait for PostgreSQL to be ready
       run: |
@@ -1918,6 +1920,7 @@ jobs:
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         diesel migration run
+      working-directory: backend
 
     - name: Wait for PostgreSQL to be ready
       run: |
