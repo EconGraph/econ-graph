@@ -49,12 +49,6 @@ COPY frontend/dev-server/package*.json ./
 RUN npm ci
 WORKDIR /app
 
-# Install Playwright browsers with all dependencies
-RUN npx playwright install --with-deps
-
-# Install additional mobile browsers for mobile E2E tests
-RUN npx playwright install chromium webkit
-
 # Create a non-root user for security
 RUN groupadd -r playwright && useradd -r -g playwright -G audio,video playwright \
     && mkdir -p /home/playwright/Downloads \
@@ -66,7 +60,12 @@ USER playwright
 
 # Set environment variables for Playwright
 ENV PLAYWRIGHT_BROWSERS_PATH=/home/playwright/.cache/ms-playwright
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+# Install Playwright browsers with all dependencies as the playwright user
+RUN npx playwright install --with-deps
+
+# Install additional mobile browsers for mobile E2E tests
+RUN npx playwright install chromium webkit
 
 # Default command (can be overridden)
 CMD ["npx", "playwright", "test", "--help"]

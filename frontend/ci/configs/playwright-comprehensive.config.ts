@@ -19,7 +19,7 @@ export default defineConfig({
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: 'http://localhost:3000',
+    baseURL: process.env.BASE_URL || 'http://localhost:3000',
 
     /* Run in headless mode by default */
     headless: true,
@@ -32,6 +32,10 @@ export default defineConfig({
 
     /* Record video on failure */
     video: 'retain-on-failure',
+
+    /* Add timeout settings for more robust testing */
+    actionTimeout: 30000,
+    navigationTimeout: 30000,
   },
 
   /* Configure projects for major browsers */
@@ -43,5 +47,5 @@ export default defineConfig({
   ],
 
   /* Don't start a web server - CI will start it */
-  webServer: undefined,
+  // webServer: undefined,
 });
