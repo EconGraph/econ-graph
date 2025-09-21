@@ -433,7 +433,6 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
               <div className='space-y-3'>
                 <h4 className='font-medium'>File Naming</h4>
                 <select
-                  value='company_date_format'
                   defaultValue='company_date_format'
                   className='w-full p-2 border rounded-md'
                 >
