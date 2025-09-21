@@ -5,7 +5,7 @@ import { defineConfig, devices } from '@playwright/test';
  * Tests basic functionality: navigation, authentication, dashboard, about
  */
 export default defineConfig({
-  testDir: './tests/e2e/core',
+  testDir: '../../tests/e2e/core',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

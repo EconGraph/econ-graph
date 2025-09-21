@@ -5,7 +5,8 @@ import { defineConfig, devices } from '@playwright/test';
  * Tests analysis features: professional analysis, global analysis, series explorer
  */
 export default defineConfig({
-  testDir: './tests/e2e/analysis',
+  testDir: '../../tests/e2e',
+  testMatch: ['**/*analysis*.spec.ts'],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

@@ -5,7 +5,8 @@ import { defineConfig, devices } from '@playwright/test';
  * Tests debugging and visual features
  */
 export default defineConfig({
-  testDir: './tests/e2e/debug',
+  testDir: '../../tests/e2e',
+  testMatch: ['**/*debug*.spec.ts'],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0, // Fewer retries for debug tests
