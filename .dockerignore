@@ -66,12 +66,11 @@ k8s/
 grafana-dashboards/
 
 # Backend specific (not needed for frontend E2E containers)
-backend/
+# Note: backend/ and rust-toolchain.toml are needed for optimized E2E containers
 migrations/
 *.rs
 Cargo.toml
 Cargo.lock
-rust-toolchain.toml
 
 # Chart API service (not needed for frontend E2E containers)
 chart-api-service/
