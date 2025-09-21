@@ -40,6 +40,9 @@ RUN npm ci
 # Copy frontend source code
 COPY frontend/ ./
 
+# Copy Playwright configuration files (needed for E2E test configs)
+COPY ci/ ./ci/
+
 # Build frontend (this is a significant setup step)
 RUN npm run build
 
