@@ -12,7 +12,9 @@ README.md
 
 # CI/CD
 .github/
-ci/
+ci/docker/
+ci/scripts/
+ci/README.md
 scripts/
 
 # Test files and coverage
