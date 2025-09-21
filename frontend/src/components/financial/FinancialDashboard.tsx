@@ -152,7 +152,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   const [timeRange, setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
 
   // GraphQL queries - use default data as fallback for development
-  const { data, loading, error, refetch } = useQuery(
+  const { data, isLoading: loading, isError, error, refetch } = useQuery(
     ['financial-statements', companyId],
     () => Promise.resolve(defaultData),
     {
@@ -227,7 +227,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     );
   }
 
-  if (error) {
+  if (isError || error) {
     return (
       <Alert variant='destructive'>
         <AlertDescription>Error loading financial data: {String(error)}</AlertDescription>

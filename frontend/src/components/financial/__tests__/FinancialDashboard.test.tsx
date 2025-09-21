@@ -159,7 +159,8 @@ describe('FinancialDashboard', () => {
     jest.clearAllMocks();
     mockUseQuery.mockReturnValue({
       data: mockQueryData,
-      loading: false,
+      isLoading: false,
+      isError: false,
       error: null,
       refetch: jest.fn(),
     });
@@ -184,7 +185,8 @@ describe('FinancialDashboard', () => {
   it('shows loading state when data is loading', () => {
     mockUseQuery.mockReturnValue({
       data: undefined,
-      loading: true,
+      isLoading: true,
+      isError: false,
       error: null,
       refetch: jest.fn(),
     });
@@ -197,7 +199,8 @@ describe('FinancialDashboard', () => {
   it('shows error state when data loading fails', () => {
     mockUseQuery.mockReturnValue({
       data: undefined,
-      loading: false,
+      isLoading: false,
+      isError: true,
       error: new Error('Failed to load data'),
       refetch: jest.fn(),
     });
@@ -260,7 +263,8 @@ describe('FinancialDashboard', () => {
     const mockRefetch = jest.fn().mockResolvedValue({});
     mockUseQuery.mockReturnValue({
       data: mockQueryData,
-      loading: false,
+      isLoading: false,
+      isError: false,
       error: null,
       refetch: mockRefetch,
     });
@@ -296,7 +300,8 @@ describe('FinancialDashboard', () => {
         ...mockQueryData,
         financialRatios: [],
       },
-      loading: false,
+      isLoading: false,
+      isError: false,
       error: null,
       refetch: jest.fn(),
     });
@@ -312,7 +317,8 @@ describe('FinancialDashboard', () => {
         ...mockQueryData,
         company: null,
       },
-      loading: false,
+      isLoading: false,
+      isError: false,
       error: null,
       refetch: jest.fn(),
     });
