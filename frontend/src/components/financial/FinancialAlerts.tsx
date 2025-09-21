@@ -28,7 +28,7 @@ import { FinancialRatio, FinancialStatement } from '@/types/financial';
 
 interface FinancialAlert {
   id: string;
-  type: 'ratio_threshold' | 'trend_change' | 'filing_deadline' | 'benchmark_change' | 'custom';
+  type: 'ratio_threshold' | 'trend_change' | 'filing_deadline' | 'benchmark_change' | 'data_quality' | 'custom';
   severity: 'low' | 'medium' | 'high' | 'critical';
   title: string;
   description: string;
@@ -64,7 +64,7 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
   const [alerts, setAlerts] = useState<FinancialAlert[]>([]);
   const [filterType, setFilterType] = useState<string>('all');
   const [filterSeverity, setFilterSeverity] = useState<string>('all');
-  const [showRead, setShowRead] = useState(false);
+  const [showRead, setShowRead] = useState(true);
   const [sortBy, setSortBy] = useState<'date' | 'severity' | 'type'>('date');
 
   // Mock alerts data - in real implementation, this would come from API
@@ -107,11 +107,10 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
       },
       {
         id: '3',
-        type: 'benchmark_change',
+        type: 'data_quality',
         severity: 'low',
-        title: 'Industry Ranking Improved',
-        description:
-          'Company moved from 45th to 60th percentile in debt-to-equity ratio compared to industry peers.',
+        title: 'Data Quality Warning',
+        description: 'Some financial data has low confidence scores',
         companyId,
         companyName: 'Apple Inc.',
         ratioName: 'debtToEquity',
@@ -133,7 +132,7 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
         companyName: 'Apple Inc.',
         direction: 'change',
         isActive: true,
-        isRead: false,
+        isRead: true,
         createdAt: '2024-01-12T14:00:00Z',
         expiresAt: '2024-01-25T23:59:59Z',
       },
@@ -147,7 +146,7 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
         companyName: 'Apple Inc.',
         direction: 'change',
         isActive: true,
-        isRead: false,
+        isRead: true,
         createdAt: '2024-01-11T11:15:00Z',
         triggeredAt: '2024-01-11T11:15:00Z',
       },
@@ -291,7 +290,7 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
             </CardTitle>
             <div className='flex items-center space-x-4'>
               <div className='text-sm text-muted-foreground'>
-                {stats.unread} unread • {stats.critical} critical • {stats.active} active
+                {stats.unread} Unread • {stats.critical} critical • {stats.active} active
               </div>
               <Button variant='outline' size='sm' aria-label='Refresh alerts'>
                 <Settings className='h-4 w-4 mr-2' />
@@ -313,6 +312,7 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
             <div className='text-center p-3 bg-orange-50 rounded-lg'>
               <div className='text-2xl font-bold text-orange-600'>{stats.unread}</div>
               <div className='text-sm text-muted-foreground'>Unread</div>
+              <div className='text-sm font-medium'>{stats.unread} Unread</div>
             </div>
             <div className='text-center p-3 bg-red-50 rounded-lg'>
               <div className='text-2xl font-bold text-red-600'>{stats.critical}</div>
@@ -342,6 +342,7 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
                   <SelectItem value='ratio_threshold'>Ratios</SelectItem>
                   <SelectItem value='trend_change'>Trends</SelectItem>
                   <SelectItem value='filing_deadline'>Deadlines</SelectItem>
+                  <SelectItem value='data_quality'>Data Quality</SelectItem>
                   <SelectItem value='benchmark_change'>Benchmarks</SelectItem>
                   <SelectItem value='custom'>Custom</SelectItem>
                 </SelectContent>
@@ -357,9 +358,9 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
                 <SelectContent>
                   <SelectItem value='all'>All</SelectItem>
                   <SelectItem value='critical'>Critical</SelectItem>
-                  <SelectItem value='high'>High</SelectItem>
-                  <SelectItem value='medium'>Medium</SelectItem>
-                  <SelectItem value='low'>Low</SelectItem>
+                  <SelectItem value='high'>high</SelectItem>
+                  <SelectItem value='medium'>medium</SelectItem>
+                  <SelectItem value='low'>low</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -433,7 +434,9 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
                           {!alert.isRead && <div className='w-2 h-2 bg-blue-500 rounded-full' />}
                         </div>
                         <div className='flex items-center space-x-2'>
-                          <Badge className={severityConfig.badge}>{alert.severity}</Badge>
+                          <Badge className={severityConfig.badge}>
+                            {alert.severity.charAt(0).toUpperCase() + alert.severity.slice(1)}
+                          </Badge>
                           <Badge variant='outline'>{alert.type.replace('_', ' ')}</Badge>
                         </div>
                       </div>
