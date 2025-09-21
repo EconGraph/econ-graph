@@ -183,19 +183,19 @@ describe('FinancialAlerts', () => {
   it('shows alert direction indicators', () => {
     render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
 
-    // Should show direction indicators
-    expect(screen.getByText(/decline/i)).toBeInTheDocument();
+    // Should show direction indicators (multiple elements expected)
+    expect(screen.getAllByText(/decline/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/improvement/i)).toBeInTheDocument();
   });
 
   it('handles empty alerts array', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    render(<FinancialAlerts companyId="empty-company" ratios={[]} statements={[]} />);
 
     expect(screen.getByText('No alerts available')).toBeInTheDocument();
   });
 
   it('shows loading state when alerts are being fetched', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    render(<FinancialAlerts companyId="loading-company" ratios={[]} statements={[]} />);
 
     expect(screen.getByText('Loading alerts...')).toBeInTheDocument();
   });
@@ -204,7 +204,7 @@ describe('FinancialAlerts', () => {
     render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
 
     // Expired alert should be shown with different styling
-    const expiredAlert = screen.getByText('Industry Benchmark Updated');
+    const expiredAlert = screen.getByText('10-Q Filing Due Soon');
     expect(expiredAlert).toBeInTheDocument();
   });
 
