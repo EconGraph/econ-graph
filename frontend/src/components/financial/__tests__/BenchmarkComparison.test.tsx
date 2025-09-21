@@ -31,11 +31,11 @@ describe('BenchmarkComparison', () => {
       />
     );
 
-    expect(screen.getByText('Industry Benchmark: returnOnEquity')).toBeInTheDocument();
-    expect(screen.getByText('Company Value:')).toBeInTheDocument();
-    expect(screen.getByText('75.0% (Top 25%)')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Industry benchmark data for returnOnEquity' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Company Value:')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Company ranks at 75.0 percentile/)).toBeInTheDocument();
     
-    // Check that the company value is displayed (should be 0.15 when formatted)
+    // Check that the company value is displayed using accessibility labels
     const companyValueElements = screen.getAllByText('0.15');
     expect(companyValueElements.length).toBeGreaterThan(0);
   });
@@ -80,8 +80,8 @@ describe('BenchmarkComparison', () => {
       />
     );
 
-    expect(screen.getByText('0.12')).toBeInTheDocument(); // Median value
-    expect(screen.getByText('Industry Distribution')).toBeInTheDocument();
+    expect(screen.getByLabelText('Median value: 0.12')).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Industry Distribution' })).toBeInTheDocument();
   });
 
   it('shows quartile ranges', () => {
@@ -93,13 +93,15 @@ describe('BenchmarkComparison', () => {
       />
     );
 
-    // Check P75 value exists (could be multiple 0.15 values on page)
-    const elements015 = screen.getAllByText('0.15');
-    expect(elements015.length).toBeGreaterThan(0);
+    // Use accessibility labels to check specific percentile values
+    expect(screen.getByLabelText('75th percentile value: 0.15')).toBeInTheDocument();
+    expect(screen.getByLabelText('10th percentile value: 0.08')).toBeInTheDocument();
+    expect(screen.getByLabelText('25th percentile value: 0.10')).toBeInTheDocument();
+    expect(screen.getByLabelText('90th percentile value: 0.18')).toBeInTheDocument();
     
-    expect(screen.getByText('0.08')).toBeInTheDocument(); // P10 value
-    expect(screen.getByText('P75:')).toBeInTheDocument();
-    expect(screen.getByText('P10:')).toBeInTheDocument();
+    // Check that headers exist
+    expect(screen.getByRole('rowheader', { name: 'P75:' })).toBeInTheDocument();
+    expect(screen.getByRole('rowheader', { name: 'P10:' })).toBeInTheDocument();
   });
 
   it('displays interpretation text', () => {
@@ -192,7 +194,8 @@ describe('BenchmarkComparison', () => {
     );
 
     expect(screen.getByText('No benchmark data available for this ratio.')).toBeInTheDocument();
-    expect(screen.getByText('Industry Benchmark: customRatio')).toBeInTheDocument();
+    // Should still have proper heading
+    expect(screen.getByRole('heading', { name: 'Industry Benchmark: customRatio' })).toBeInTheDocument();
   });
 
   it('displays benchmark chart when enabled', () => {

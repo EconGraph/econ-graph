@@ -45,44 +45,105 @@ export const BenchmarkComparison: React.FC<BenchmarkComparisonProps> = ({
   };
 
   return (
-    <div className='benchmark-comparison p-4 bg-gray-50 rounded-lg'>
-      <h4 className='text-sm font-medium text-gray-700 mb-3'>Industry Benchmark: {ratioName}</h4>
+    <div
+      className='benchmark-comparison p-4 bg-gray-50 rounded-lg'
+      role='region'
+      aria-label={`Industry benchmark data for ${ratioName}`}
+    >
+      <h4 className='text-sm font-medium text-gray-700 mb-3' id={`benchmark-title-${ratioName}`}>
+        Industry Benchmark: {ratioName}
+      </h4>
 
       <div className='space-y-3'>
         <div className='flex justify-between items-center'>
-          <span className='text-sm text-gray-600'>Company Value:</span>
-          <span className='font-medium'>{companyValue.toFixed(2)}</span>
+          <span className='text-sm text-gray-600' id={`company-value-label-${ratioName}`}>
+            Company Value:
+          </span>
+          <span className='font-medium' aria-labelledby={`company-value-label-${ratioName}`}>
+            {companyValue.toFixed(2)}
+          </span>
         </div>
 
         <div className='flex justify-between items-center'>
-          <span className='text-sm text-gray-600'>Industry Percentile:</span>
-          <span className={`font-medium ${getPercentileColor(benchmarkData.percentile)}`}>
+          <span className='text-sm text-gray-600' id={`percentile-label-${ratioName}`}>
+            Industry Percentile:
+          </span>
+          <span
+            className={`font-medium ${getPercentileColor(benchmarkData.percentile)}`}
+            aria-labelledby={`percentile-label-${ratioName}`}
+            aria-label={`Company ranks at ${benchmarkData.percentile.toFixed(1)} percentile, ${getPercentileLabel(benchmarkData.percentile)}`}
+          >
             {benchmarkData.percentile.toFixed(1)}% ({getPercentileLabel(benchmarkData.percentile)})
           </span>
         </div>
 
         <div className='border-t pt-3'>
-          <h5 className='text-xs font-medium text-gray-600 mb-2'>Industry Distribution</h5>
-          <div className='grid grid-cols-2 gap-2 text-xs'>
-            <div className='flex justify-between'>
-              <span className='text-gray-500'>P10:</span>
-              <span>{benchmarkData.industryP10.toFixed(2)}</span>
+          <h5
+            className='text-xs font-medium text-gray-600 mb-2'
+            id={`distribution-title-${ratioName}`}
+          >
+            Industry Distribution
+          </h5>
+          <div
+            className='grid grid-cols-2 gap-2 text-xs'
+            role='table'
+            aria-labelledby={`distribution-title-${ratioName}`}
+          >
+            <div className='flex justify-between' role='row'>
+              <span className='text-gray-500' role='rowheader'>
+                P10:
+              </span>
+              <span
+                role='cell'
+                aria-label={`10th percentile value: ${benchmarkData.industryP10.toFixed(2)}`}
+              >
+                {benchmarkData.industryP10.toFixed(2)}
+              </span>
             </div>
-            <div className='flex justify-between'>
-              <span className='text-gray-500'>P25:</span>
-              <span>{benchmarkData.industryP25.toFixed(2)}</span>
+            <div className='flex justify-between' role='row'>
+              <span className='text-gray-500' role='rowheader'>
+                P25:
+              </span>
+              <span
+                role='cell'
+                aria-label={`25th percentile value: ${benchmarkData.industryP25.toFixed(2)}`}
+              >
+                {benchmarkData.industryP25.toFixed(2)}
+              </span>
             </div>
-            <div className='flex justify-between'>
-              <span className='text-gray-500'>Median:</span>
-              <span className='font-medium'>{benchmarkData.industryMedian.toFixed(2)}</span>
+            <div className='flex justify-between' role='row'>
+              <span className='text-gray-500' role='rowheader'>
+                Median:
+              </span>
+              <span
+                className='font-medium'
+                role='cell'
+                aria-label={`Median value: ${benchmarkData.industryMedian.toFixed(2)}`}
+              >
+                {benchmarkData.industryMedian.toFixed(2)}
+              </span>
             </div>
-            <div className='flex justify-between'>
-              <span className='text-gray-500'>P75:</span>
-              <span>{benchmarkData.industryP75.toFixed(2)}</span>
+            <div className='flex justify-between' role='row'>
+              <span className='text-gray-500' role='rowheader'>
+                P75:
+              </span>
+              <span
+                role='cell'
+                aria-label={`75th percentile value: ${benchmarkData.industryP75.toFixed(2)}`}
+              >
+                {benchmarkData.industryP75.toFixed(2)}
+              </span>
             </div>
-            <div className='flex justify-between'>
-              <span className='text-gray-500'>P90:</span>
-              <span>{benchmarkData.industryP90.toFixed(2)}</span>
+            <div className='flex justify-between' role='row'>
+              <span className='text-gray-500' role='rowheader'>
+                P90:
+              </span>
+              <span
+                role='cell'
+                aria-label={`90th percentile value: ${benchmarkData.industryP90.toFixed(2)}`}
+              >
+                {benchmarkData.industryP90.toFixed(2)}
+              </span>
             </div>
           </div>
         </div>

@@ -1,7 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import './test-setup';
 import { FinancialMobile } from '../FinancialMobile';
 import { FinancialStatement, Company, FinancialRatio } from '../../../types/financial';
 

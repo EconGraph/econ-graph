@@ -267,6 +267,8 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
                 variant={viewMode === 'table' ? 'default' : 'outline'}
                 size='sm'
                 onClick={() => setViewMode('table')}
+                aria-label='Switch to table view'
+                aria-pressed={viewMode === 'table'}
               >
                 <Table className='h-4 w-4 mr-2' />
                 Table
@@ -275,6 +277,8 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
                 variant={viewMode === 'chart' ? 'default' : 'outline'}
                 size='sm'
                 onClick={() => setViewMode('chart')}
+                aria-label='Switch to chart view'
+                aria-pressed={viewMode === 'chart'}
               >
                 <BarChart3 className='h-4 w-4 mr-2' />
                 Chart
@@ -283,6 +287,8 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
                 variant={viewMode === 'radar' ? 'default' : 'outline'}
                 size='sm'
                 onClick={() => setViewMode('radar')}
+                aria-label='Switch to radar view'
+                aria-pressed={viewMode === 'radar'}
               >
                 <PieChart className='h-4 w-4 mr-2' />
                 Radar
@@ -290,7 +296,10 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
               <Button
                 variant='outline'
                 size='sm'
-                onClick={() => {/* Export functionality */}}
+                onClick={() => {
+                  /* Export functionality */
+                }}
+                aria-label='Export comparison data'
               >
                 Export Comparison
               </Button>
@@ -301,9 +310,15 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
           <div className='space-y-4'>
             {/* Ratio Selection */}
             <div className='flex items-center space-x-2'>
-              <span className='text-sm font-medium'>Select Ratio for Comparison:</span>
-              <Select defaultValue="returnOnEquity">
-                <SelectTrigger className='w-48'>
+              <label className='text-sm font-medium' htmlFor='ratio-selector'>
+                Select Ratio for Comparison:
+              </label>
+              <Select defaultValue='returnOnEquity'>
+                <SelectTrigger
+                  className='w-48'
+                  id='ratio-selector'
+                  aria-label='Select financial ratio for comparison'
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -313,25 +328,42 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
                 </SelectContent>
               </Select>
             </div>
-            
+
             {/* Company Selection Controls */}
             <div className='flex items-center space-x-4'>
-              <span className='text-sm font-medium'>Select Companies:</span>
-              <div className='flex items-center space-x-3'>
+              <span className='text-sm font-medium' id='company-selection-label'>
+                Select Companies:
+              </span>
+              <div
+                className='flex items-center space-x-3'
+                role='group'
+                aria-labelledby='company-selection-label'
+              >
                 {[...filteredCompanies, currentCompanyData].map(company => (
                   <label key={company.id} className='flex items-center space-x-1'>
-                    <input type='checkbox' defaultChecked className='rounded' />
+                    <input
+                      type='checkbox'
+                      defaultChecked
+                      className='rounded'
+                      aria-label={`Include ${company.name} in comparison`}
+                    />
                     <span className='text-sm'>{company.name}</span>
                   </label>
                 ))}
               </div>
             </div>
-            
+
             <div className='flex items-center space-x-4'>
               <div className='flex items-center space-x-2'>
-                <span className='text-sm font-medium'>Industry:</span>
+                <label className='text-sm font-medium' htmlFor='industry-filter'>
+                  Industry:
+                </label>
                 <Select value={industryFilter} onValueChange={setIndustryFilter}>
-                  <SelectTrigger className='w-32'>
+                  <SelectTrigger
+                    className='w-32'
+                    id='industry-filter'
+                    aria-label='Filter by industry'
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -344,14 +376,16 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
               </div>
 
               <div className='flex items-center space-x-2'>
-                <span className='text-sm font-medium'>Sort by:</span>
+                <label className='text-sm font-medium' htmlFor='sort-selector'>
+                  Sort by:
+                </label>
                 <Select
                   value={sortBy}
                   onValueChange={(value: string) =>
                     setSortBy(value as 'name' | 'performance' | 'marketCap')
                   }
                 >
-                  <SelectTrigger className='w-32'>
+                  <SelectTrigger className='w-32' id='sort-selector' aria-label='Sort companies by'>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -363,7 +397,9 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
               </div>
 
               <div className='flex items-center space-x-2'>
-                <span className='text-sm font-medium'>Ratios:</span>
+                <label className='text-sm font-medium' htmlFor='ratio-selection'>
+                  Ratios:
+                </label>
                 <Select
                   value={selectedRatios.length > 0 ? selectedRatios.join(',') : 'all'}
                   onValueChange={(value: string) => {
@@ -374,7 +410,11 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
                     }
                   }}
                 >
-                  <SelectTrigger className='w-48'>
+                  <SelectTrigger
+                    className='w-48'
+                    id='ratio-selection'
+                    aria-label='Select financial ratios to display'
+                  >
                     <SelectValue placeholder='Select ratios' />
                   </SelectTrigger>
                   <SelectContent>
@@ -531,21 +571,26 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
           </CardHeader>
           <CardContent>
             {/* Mock chart component for testing */}
-            <div 
-              data-testid="peer-comparison-bar-chart"
+            <div
+              data-testid='peer-comparison-bar-chart'
               className='h-96 bg-gray-50 rounded-lg flex items-center justify-center'
               data-chart-data={JSON.stringify({
                 labels: [...filteredCompanies, currentCompanyData].map(c => c.name),
-                datasets: [{
-                  data: [...filteredCompanies, currentCompanyData].map(c => calculatePerformanceScore(c))
-                }]
+                datasets: [
+                  {
+                    data: [...filteredCompanies, currentCompanyData].map(c =>
+                      calculatePerformanceScore(c)
+                    ),
+                  },
+                ],
               })}
             >
               <div className='text-center space-y-2'>
                 <BarChart3 className='h-12 w-12 text-gray-400 mx-auto' />
                 <p className='text-gray-600'>Interactive Comparison Chart</p>
                 <p className='text-sm text-gray-500'>
-                  Comparing performance scores across {[...filteredCompanies, currentCompanyData].length} companies
+                  Comparing performance scores across{' '}
+                  {[...filteredCompanies, currentCompanyData].length} companies
                 </p>
               </div>
             </div>
@@ -564,12 +609,13 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
               <div>
                 <h4 className='font-medium'>Apple Inc. compared to peers</h4>
                 <p className='text-sm text-muted-foreground'>
-                  Based on {ratios.length} financial ratios across {filteredCompanies.length + 1} companies
+                  Based on {ratios.length} financial ratios across {filteredCompanies.length + 1}{' '}
+                  companies
                 </p>
               </div>
               <Badge className='bg-green-100 text-green-800'>Above Average</Badge>
             </div>
-            
+
             <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
               <div className='text-center p-3 border rounded'>
                 <div className='text-2xl font-bold text-green-600'>75th percentile</div>
@@ -584,11 +630,12 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
                 <div className='text-sm text-muted-foreground'>Market Cap</div>
               </div>
             </div>
-            
+
             <div className='border-t pt-4'>
               <h5 className='font-medium mb-2'>Industry Benchmark Analysis</h5>
               <p className='text-sm text-muted-foreground'>
-                Company performance is compared against industry benchmark standards with high data quality indicators.
+                Company performance is compared against industry benchmark standards with high data
+                quality indicators.
               </p>
             </div>
           </div>

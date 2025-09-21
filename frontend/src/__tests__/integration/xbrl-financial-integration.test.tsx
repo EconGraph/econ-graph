@@ -445,11 +445,11 @@ describe('XBRL Financial Integration Tests', () => {
           </TestWrapper>
         );
 
-      // Verify benchmark data is displayed
-      expect(screen.getByText('Industry Benchmark: returnOnEquity')).toBeInTheDocument();
-      expect(screen.getByText('Company Value:')).toBeInTheDocument();
-      expect(screen.getByText('0.15')).toBeInTheDocument();
-      expect(screen.getByText('Industry Percentile:')).toBeInTheDocument();
+      // Verify benchmark data is displayed using accessibility labels
+      expect(screen.getByRole('region', { name: 'Industry benchmark data for returnOnEquity' })).toBeInTheDocument();
+      expect(screen.getByLabelText('Company Value:')).toBeInTheDocument();
+      expect(screen.getAllByText('0.15').length).toBeGreaterThan(0); // Multiple instances expected
+      expect(screen.getByLabelText('Industry Percentile:')).toBeInTheDocument();
       expect(screen.getByText('75.0%')).toBeInTheDocument();
       expect(screen.getByText('Above Average')).toBeInTheDocument();
     });
@@ -474,11 +474,11 @@ describe('XBRL Financial Integration Tests', () => {
       expect(screen.getByText('P25:')).toBeInTheDocument();
       expect(screen.getByText('0.10')).toBeInTheDocument();
       expect(screen.getByText('Median:')).toBeInTheDocument();
-      expect(screen.getByText('0.12')).toBeInTheDocument();
-      expect(screen.getByText('P75:')).toBeInTheDocument();
-      expect(screen.getByText('0.15')).toBeInTheDocument();
-      expect(screen.getByText('P90:')).toBeInTheDocument();
-      expect(screen.getByText('0.18')).toBeInTheDocument();
+      expect(screen.getByLabelText('Median value: 0.12')).toBeInTheDocument();
+      expect(screen.getByRole('rowheader', { name: 'P75:' })).toBeInTheDocument();
+      expect(screen.getAllByText('0.15').length).toBeGreaterThan(0); // Multiple instances expected
+      expect(screen.getByRole('rowheader', { name: 'P90:' })).toBeInTheDocument();
+      expect(screen.getByLabelText('90th percentile value: 0.18')).toBeInTheDocument();
     });
   });
 
@@ -523,11 +523,11 @@ describe('XBRL Financial Integration Tests', () => {
           </TestWrapper>
         );
 
-      // Verify trend indicators are displayed
-      expect(screen.getByText(/Trend:/)).toBeInTheDocument();
+      // Verify trend indicators are displayed (using getAllByText for multiple instances)
+      expect(screen.getAllByText(/Trend:/i).length).toBeGreaterThan(0);
       expect(screen.getByText(/Improving/)).toBeInTheDocument();
-      expect(screen.getByText(/Strength:/)).toBeInTheDocument();
-      expect(screen.getByText(/80%/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Strength:/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/80%/i).length).toBeGreaterThan(0);
     });
   });
 
