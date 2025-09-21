@@ -220,8 +220,8 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
         <CardHeader>
           <CardTitle className='flex items-center space-x-2'>
             <DollarSign className='h-5 w-5' />
-              <span>Financial Statements</span>
-              <span className='text-sm text-gray-500 ml-2'>Apple Inc.</span>
+            <span>Financial Statements</span>
+            <span className='text-sm text-gray-500 ml-2'>Apple Inc.</span>
           </CardTitle>
         </CardHeader>
       </Card>

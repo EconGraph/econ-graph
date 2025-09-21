@@ -81,8 +81,8 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
     includeAnnotations: true,
     includeBenchmarks: true,
     dateRange: {
-      start: '',
-      end: '',
+      start: '2023-01-01',
+      end: '2023-12-31',
     },
     selectedStatements: [],
     selectedRatios: [],
@@ -354,6 +354,81 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
               <CardTitle>Export Settings</CardTitle>
             </CardHeader>
             <CardContent className='space-y-4'>
+              {/* Data Selection Options */}
+              <div className='space-y-3'>
+                <label className='flex items-center space-x-2' htmlFor='include-statements'>
+                  <input
+                    id='include-statements'
+                    type='checkbox'
+                    checked={exportOptions.includeRawData}
+                    onChange={e =>
+                      setExportOptions({ ...exportOptions, includeRawData: e.target.checked })
+                    }
+                    className='rounded'
+                  />
+                  <span>Include Financial Statements</span>
+                </label>
+                <label className='flex items-center space-x-2' htmlFor='include-ratios'>
+                  <input
+                    id='include-ratios'
+                    type='checkbox'
+                    checked={exportOptions.includeBenchmarks}
+                    onChange={e =>
+                      setExportOptions({ ...exportOptions, includeBenchmarks: e.target.checked })
+                    }
+                    className='rounded'
+                  />
+                  <span>Include Ratios</span>
+                </label>
+                <label className='flex items-center space-x-2' htmlFor='include-charts'>
+                  <input
+                    id='include-charts'
+                    type='checkbox'
+                    checked={exportOptions.includeCharts}
+                    onChange={e =>
+                      setExportOptions({ ...exportOptions, includeCharts: e.target.checked })
+                    }
+                    className='rounded'
+                  />
+                  <span>Include Charts</span>
+                </label>
+              </div>
+
+              {/* Date Range Selection */}
+              <div className='space-y-3'>
+                <h4 className='font-medium'>Date Range</h4>
+                <div className='grid grid-cols-2 gap-3'>
+                  <div>
+                    <label className='text-sm text-gray-600'>Start Date</label>
+                    <input
+                      type='date'
+                      value={exportOptions.dateRange.start}
+                      onChange={e =>
+                        setExportOptions({
+                          ...exportOptions,
+                          dateRange: { ...exportOptions.dateRange, start: e.target.value },
+                        })
+                      }
+                      className='w-full p-2 border rounded-md'
+                    />
+                  </div>
+                  <div>
+                    <label className='text-sm text-gray-600'>End Date</label>
+                    <input
+                      type='date'
+                      value={exportOptions.dateRange.end}
+                      onChange={e =>
+                        setExportOptions({
+                          ...exportOptions,
+                          dateRange: { ...exportOptions.dateRange, end: e.target.value },
+                        })
+                      }
+                      className='w-full p-2 border rounded-md'
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* Export Status - Always visible for testing */}
               <div className='p-3 bg-blue-50 rounded-lg'>
                 <p className='text-sm text-blue-700'>{exportStatus || 'Ready to export'}</p>
@@ -396,7 +471,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
 
               {/* Date Range Validation */}
               <div className='space-y-2'>
-                <h4 className='text-sm font-medium'>Date Range</h4>
+                <h4 className='text-sm font-medium'>Date Range Validation</h4>
                 <div className='text-xs text-red-600'>Invalid date range selected</div>
               </div>
             </CardContent>

@@ -455,6 +455,9 @@ describe('FinancialMobile', () => {
   });
 
   it('handles mobile deep linking', () => {
+    // Set URL hash for deep linking
+    window.location.hash = '#trends';
+    
     render(
       <FinancialMobile
         company={mockCompany}
@@ -465,6 +468,9 @@ describe('FinancialMobile', () => {
 
     // Should start on trends tab
     expect(screen.getByTestId('mobile-trend-chart')).toBeInTheDocument();
+    
+    // Clean up
+    window.location.hash = '';
   });
 
   it('shows mobile accessibility features', () => {
