@@ -142,6 +142,12 @@ else
 
     echo -e "${GREEN}📚 Running doctests...${NC}"
     time cargo test --doc -- $TEST_ARGS
+
+    echo -e "${GREEN}🧪 Running XBRL financial integration tests...${NC}"
+    time cargo test --package econ-graph-sec-crawler --test "xbrl_financial_integration_tests" -- $TEST_ARGS
+
+    echo -e "${GREEN}🔗 Running other integration tests...${NC}"
+    time cargo test --workspace --test "integration_*" -- $TEST_ARGS
 fi
 
 echo ""

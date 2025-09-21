@@ -1,6 +1,6 @@
 /**
  * Global Setup for XBRL Financial Integration Tests
- * 
+ *
  * This setup ensures the test environment is properly configured for
  * XBRL financial statement integration testing, including mock data
  * setup and API endpoint configuration.
@@ -26,11 +26,13 @@ async function globalSetup(config: FullConfig) {
     // Verify the frontend application is accessible
     console.log('🌐 Verifying frontend application accessibility...');
     await page.goto('http://localhost:3000', { waitUntil: 'networkidle' });
-    
+
     // Check if XBRL features are enabled
     const xbrlFeaturesEnabled = await page.evaluate(() => {
-      return window.location.search.includes('enableXbrl=true') || 
-             localStorage.getItem('enableXbrlFeatures') === 'true';
+      return (
+        window.location.search.includes('enableXbrl=true') ||
+        localStorage.getItem('enableXbrlFeatures') === 'true'
+      );
     });
 
     if (!xbrlFeaturesEnabled) {
@@ -44,8 +46,10 @@ async function globalSetup(config: FullConfig) {
     // Verify financial components are loaded
     console.log('📊 Verifying financial components availability...');
     const hasFinancialComponents = await page.evaluate(() => {
-      return typeof window !== 'undefined' && 
-             window.document.querySelector('[data-testid="financial-dashboard"]') !== null;
+      return (
+        typeof window !== 'undefined' &&
+        window.document.querySelector('[data-testid="financial-dashboard"]') !== null
+      );
     });
 
     if (!hasFinancialComponents) {
@@ -55,7 +59,6 @@ async function globalSetup(config: FullConfig) {
     }
 
     console.log('✅ XBRL Financial Integration Test Environment Setup Complete');
-    
   } catch (error) {
     console.error('❌ Failed to setup XBRL Financial Integration Test Environment:', error);
     throw error;

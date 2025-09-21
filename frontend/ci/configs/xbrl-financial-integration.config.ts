@@ -1,6 +1,6 @@
 /**
  * XBRL Financial Integration Test Configuration
- * 
+ *
  * This configuration defines the test suite for XBRL financial statement
  * integration tests, ensuring proper setup and execution of financial
  * data processing and visualization components.
@@ -17,7 +17,7 @@ export default defineConfig({
   reporter: [
     ['html'],
     ['json', { outputFile: 'test-results/xbrl-financial-integration-results.json' }],
-    ['junit', { outputFile: 'test-results/xbrl-financial-integration-results.xml' }]
+    ['junit', { outputFile: 'test-results/xbrl-financial-integration-results.xml' }],
   ],
   use: {
     baseURL: 'http://localhost:3000',
@@ -38,13 +38,13 @@ export default defineConfig({
           args: [
             '--enable-features=VizDisplayCompositor',
             '--disable-web-security',
-            '--disable-features=VizDisplayCompositor'
-          ]
-        }
+            '--disable-features=VizDisplayCompositor',
+          ],
+        },
       },
     },
   ],
-  
+
   // Test timeout configuration
   timeout: 30000,
   expect: {

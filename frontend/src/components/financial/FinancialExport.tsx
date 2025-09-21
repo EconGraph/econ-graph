@@ -3,7 +3,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
@@ -12,9 +11,6 @@ import {
   FileSpreadsheet,
   File,
   Image,
-  Calendar,
-  Filter,
-  Settings,
   CheckCircle,
   Clock,
   AlertCircle,
@@ -22,7 +18,6 @@ import {
   Mail,
   Printer,
   Database,
-  BarChart3,
 } from 'lucide-react';
 import { FinancialStatement, FinancialRatio, Company } from '@/types/financial';
 
@@ -102,7 +97,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
       id: 'pdf',
       name: 'PDF Report',
       extension: 'pdf',
-      icon: <File className="h-5 w-5" />,
+      icon: <File className='h-5 w-5' />,
       description: 'Professional PDF report with charts and analysis',
       supportsCharts: true,
       supportsFilters: true,
@@ -111,7 +106,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
       id: 'excel',
       name: 'Excel Workbook',
       extension: 'xlsx',
-      icon: <FileSpreadsheet className="h-5 w-5" />,
+      icon: <FileSpreadsheet className='h-5 w-5' />,
       description: 'Excel file with multiple sheets and raw data',
       supportsCharts: true,
       supportsFilters: true,
@@ -120,7 +115,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
       id: 'csv',
       name: 'CSV Data',
       extension: 'csv',
-      icon: <FileText className="h-5 w-5" />,
+      icon: <FileText className='h-5 w-5' />,
       description: 'Raw data in CSV format for analysis',
       supportsCharts: false,
       supportsFilters: false,
@@ -129,7 +124,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
       id: 'json',
       name: 'JSON Data',
       extension: 'json',
-      icon: <Database className="h-5 w-5" />,
+      icon: <Database className='h-5 w-5' />,
       description: 'Structured JSON data with metadata',
       supportsCharts: false,
       supportsFilters: false,
@@ -138,7 +133,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
       id: 'png',
       name: 'Chart Images',
       extension: 'png',
-      icon: <Image className="h-5 w-5" />,
+      icon: <Image className='h-5 w-5' />,
       description: 'High-resolution chart images',
       supportsCharts: true,
       supportsFilters: false,
@@ -205,7 +200,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
 
   const startExport = async () => {
     setIsExporting(true);
-    
+
     const job: ExportJob = {
       id: `export-${Date.now()}`,
       status: 'processing',
@@ -219,23 +214,25 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
 
     // Simulate export process
     const interval = setInterval(() => {
-      setExportJobs(prev => prev.map(j => {
-        if (j.id === job.id) {
-          const newProgress = Math.min(j.progress + Math.random() * 20, 100);
-          if (newProgress >= 100) {
-            clearInterval(interval);
-            return {
-              ...j,
-              status: 'completed',
-              progress: 100,
-              completedAt: new Date().toISOString(),
-              downloadUrl: `/downloads/${job.fileName}`,
-            };
+      setExportJobs(prev =>
+        prev.map(j => {
+          if (j.id === job.id) {
+            const newProgress = Math.min(j.progress + Math.random() * 20, 100);
+            if (newProgress >= 100) {
+              clearInterval(interval);
+              return {
+                ...j,
+                status: 'completed',
+                progress: 100,
+                completedAt: new Date().toISOString(),
+                downloadUrl: `/downloads/${job.fileName}`,
+              };
+            }
+            return { ...j, progress: newProgress };
           }
-          return { ...j, progress: newProgress };
-        }
-        return j;
-      }));
+          return j;
+        })
+      );
     }, 500);
 
     setTimeout(() => {
@@ -253,13 +250,13 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
-        return <CheckCircle className="h-4 w-4 text-green-600" />;
+        return <CheckCircle className='h-4 w-4 text-green-600' />;
       case 'processing':
-        return <Clock className="h-4 w-4 text-blue-600" />;
+        return <Clock className='h-4 w-4 text-blue-600' />;
       case 'failed':
-        return <AlertCircle className="h-4 w-4 text-red-600" />;
+        return <AlertCircle className='h-4 w-4 text-red-600' />;
       default:
-        return <Clock className="h-4 w-4 text-gray-600" />;
+        return <Clock className='h-4 w-4 text-gray-600' />;
     }
   };
 
@@ -277,31 +274,31 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className='space-y-6'>
       {/* Header */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <Download className="h-5 w-5" />
+          <CardTitle className='flex items-center space-x-2'>
+            <Download className='h-5 w-5' />
             <span>Export Financial Data</span>
           </CardTitle>
-          <p className="text-sm text-muted-foreground">
+          <p className='text-sm text-muted-foreground'>
             Export financial statements, ratios, and analysis in various formats
           </p>
         </CardHeader>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className='grid grid-cols-1 lg:grid-cols-3 gap-6'>
         {/* Export Options */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className='lg:col-span-2 space-y-6'>
           {/* Format Selection */}
           <Card>
             <CardHeader>
               <CardTitle>Export Format</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {exportFormats.map((format) => (
+              <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
+                {exportFormats.map(format => (
                   <div
                     key={format.id}
                     className={`p-4 border rounded-lg cursor-pointer transition-colors ${
@@ -311,13 +308,11 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                     }`}
                     onClick={() => handleFormatChange(format.id)}
                   >
-                    <div className="flex items-center space-x-3">
-                      <div className="text-blue-600">{format.icon}</div>
-                      <div className="flex-1">
-                        <h3 className="font-medium">{format.name}</h3>
-                        <p className="text-sm text-muted-foreground">
-                          {format.description}
-                        </p>
+                    <div className='flex items-center space-x-3'>
+                      <div className='text-blue-600'>{format.icon}</div>
+                      <div className='flex-1'>
+                        <h3 className='font-medium'>{format.name}</h3>
+                        <p className='text-sm text-muted-foreground'>{format.description}</p>
                       </div>
                     </div>
                   </div>
@@ -331,55 +326,55 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
             <CardHeader>
               <CardTitle>Content Options</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center space-x-2">
+            <CardContent className='space-y-4'>
+              <div className='flex items-center space-x-2'>
                 <Checkbox
-                  id="includeCharts"
+                  id='includeCharts'
                   checked={exportOptions.includeCharts}
                   onCheckedChange={(checked: boolean) =>
                     setExportOptions(prev => ({ ...prev, includeCharts: !!checked }))
                   }
                 />
-                <label htmlFor="includeCharts" className="text-sm">
+                <label htmlFor='includeCharts' className='text-sm'>
                   Include charts and visualizations
                 </label>
               </div>
 
-              <div className="flex items-center space-x-2">
+              <div className='flex items-center space-x-2'>
                 <Checkbox
-                  id="includeRawData"
+                  id='includeRawData'
                   checked={exportOptions.includeRawData}
                   onCheckedChange={(checked: boolean) =>
                     setExportOptions(prev => ({ ...prev, includeRawData: !!checked }))
                   }
                 />
-                <label htmlFor="includeRawData" className="text-sm">
+                <label htmlFor='includeRawData' className='text-sm'>
                   Include raw financial data
                 </label>
               </div>
 
-              <div className="flex items-center space-x-2">
+              <div className='flex items-center space-x-2'>
                 <Checkbox
-                  id="includeAnnotations"
+                  id='includeAnnotations'
                   checked={exportOptions.includeAnnotations}
                   onCheckedChange={(checked: boolean) =>
                     setExportOptions(prev => ({ ...prev, includeAnnotations: !!checked }))
                   }
                 />
-                <label htmlFor="includeAnnotations" className="text-sm">
+                <label htmlFor='includeAnnotations' className='text-sm'>
                   Include annotations and comments
                 </label>
               </div>
 
-              <div className="flex items-center space-x-2">
+              <div className='flex items-center space-x-2'>
                 <Checkbox
-                  id="includeBenchmarks"
+                  id='includeBenchmarks'
                   checked={exportOptions.includeBenchmarks}
                   onCheckedChange={(checked: boolean) =>
                     setExportOptions(prev => ({ ...prev, includeBenchmarks: !!checked }))
                   }
                 />
-                <label htmlFor="includeBenchmarks" className="text-sm">
+                <label htmlFor='includeBenchmarks' className='text-sm'>
                   Include industry benchmarks
                 </label>
               </div>
@@ -393,9 +388,9 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                 <CardTitle>Chart Types</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {chartTypes.map((chartType) => (
-                    <div key={chartType.id} className="flex items-center space-x-2">
+                <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
+                  {chartTypes.map(chartType => (
+                    <div key={chartType.id} className='flex items-center space-x-2'>
                       <Checkbox
                         id={chartType.id}
                         checked={exportOptions.chartTypes.includes(chartType.id)}
@@ -403,9 +398,9 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                           handleChartTypeToggle(chartType.id, !!checked)
                         }
                       />
-                      <label htmlFor={chartType.id} className="text-sm">
-                        <div className="font-medium">{chartType.name}</div>
-                        <div className="text-muted-foreground">{chartType.description}</div>
+                      <label htmlFor={chartType.id} className='text-sm'>
+                        <div className='font-medium'>{chartType.name}</div>
+                        <div className='text-muted-foreground'>{chartType.description}</div>
                       </label>
                     </div>
                   ))}
@@ -419,25 +414,25 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
             <CardHeader>
               <CardTitle>Data Selection</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className='space-y-4'>
               {/* Statements */}
               <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-medium">Financial Statements</h3>
-                  <div className="flex items-center space-x-2">
+                <div className='flex items-center justify-between mb-3'>
+                  <h3 className='font-medium'>Financial Statements</h3>
+                  <div className='flex items-center space-x-2'>
                     <Checkbox
-                      id="selectAllStatements"
+                      id='selectAllStatements'
                       checked={exportOptions.selectedStatements.length === statements.length}
                       onCheckedChange={handleSelectAllStatements}
                     />
-                    <label htmlFor="selectAllStatements" className="text-sm">
+                    <label htmlFor='selectAllStatements' className='text-sm'>
                       Select All
                     </label>
                   </div>
                 </div>
-                <div className="space-y-2 max-h-32 overflow-y-auto">
-                  {statements.map((statement) => (
-                    <div key={statement.id} className="flex items-center space-x-2">
+                <div className='space-y-2 max-h-32 overflow-y-auto'>
+                  {statements.map(statement => (
+                    <div key={statement.id} className='flex items-center space-x-2'>
                       <Checkbox
                         id={`statement-${statement.id}`}
                         checked={exportOptions.selectedStatements.includes(statement.id)}
@@ -445,10 +440,11 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                           handleStatementSelection(statement.id, !!checked)
                         }
                       />
-                      <label htmlFor={`statement-${statement.id}`} className="text-sm">
-                        <div className="font-medium">{statement.formType}</div>
-                        <div className="text-muted-foreground">
-                          FY {statement.fiscalYear} Q{statement.fiscalQuarter} - {statement.periodEndDate}
+                      <label htmlFor={`statement-${statement.id}`} className='text-sm'>
+                        <div className='font-medium'>{statement.formType}</div>
+                        <div className='text-muted-foreground'>
+                          FY {statement.fiscalYear} Q{statement.fiscalQuarter} -{' '}
+                          {statement.periodEndDate}
                         </div>
                       </label>
                     </div>
@@ -458,22 +454,22 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
 
               {/* Ratios */}
               <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-medium">Financial Ratios</h3>
-                  <div className="flex items-center space-x-2">
+                <div className='flex items-center justify-between mb-3'>
+                  <h3 className='font-medium'>Financial Ratios</h3>
+                  <div className='flex items-center space-x-2'>
                     <Checkbox
-                      id="selectAllRatios"
+                      id='selectAllRatios'
                       checked={exportOptions.selectedRatios.length === ratios.length}
                       onCheckedChange={handleSelectAllRatios}
                     />
-                    <label htmlFor="selectAllRatios" className="text-sm">
+                    <label htmlFor='selectAllRatios' className='text-sm'>
                       Select All
                     </label>
                   </div>
                 </div>
-                <div className="space-y-2 max-h-32 overflow-y-auto">
-                  {ratios.map((ratio) => (
-                    <div key={ratio.id} className="flex items-center space-x-2">
+                <div className='space-y-2 max-h-32 overflow-y-auto'>
+                  {ratios.map(ratio => (
+                    <div key={ratio.id} className='flex items-center space-x-2'>
                       <Checkbox
                         id={`ratio-${ratio.id}`}
                         checked={exportOptions.selectedRatios.includes(ratio.id)}
@@ -481,9 +477,9 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                           handleRatioSelection(ratio.id, !!checked)
                         }
                       />
-                      <label htmlFor={`ratio-${ratio.id}`} className="text-sm">
-                        <div className="font-medium">{ratio.ratioDisplayName}</div>
-                        <div className="text-muted-foreground">{ratio.category}</div>
+                      <label htmlFor={`ratio-${ratio.id}`} className='text-sm'>
+                        <div className='font-medium'>{ratio.ratioDisplayName}</div>
+                        <div className='text-muted-foreground'>{ratio.category}</div>
                       </label>
                     </div>
                   ))}
@@ -494,14 +490,9 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
 
           {/* Export Button */}
           <Card>
-            <CardContent className="p-6">
-              <Button
-                onClick={startExport}
-                disabled={isExporting}
-                className="w-full"
-                size="lg"
-              >
-                <Download className="h-5 w-5 mr-2" />
+            <CardContent className='p-6'>
+              <Button onClick={startExport} disabled={isExporting} className='w-full' size='lg'>
+                <Download className='h-5 w-5 mr-2' />
                 {isExporting ? 'Exporting...' : 'Start Export'}
               </Button>
             </CardContent>
@@ -509,37 +500,33 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
         </div>
 
         {/* Export Jobs */}
-        <div className="space-y-6">
+        <div className='space-y-6'>
           <Card>
             <CardHeader>
               <CardTitle>Export Jobs</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
+              <div className='space-y-3'>
                 {exportJobs.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Download className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <div className='text-center py-8 text-muted-foreground'>
+                    <Download className='h-8 w-8 mx-auto mb-2 opacity-50' />
                     <p>No export jobs yet</p>
                   </div>
                 ) : (
-                  exportJobs.map((job) => (
-                    <div key={job.id} className="p-3 border rounded-lg">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center space-x-2">
+                  exportJobs.map(job => (
+                    <div key={job.id} className='p-3 border rounded-lg'>
+                      <div className='flex items-center justify-between mb-2'>
+                        <div className='flex items-center space-x-2'>
                           {getStatusIcon(job.status)}
-                          <span className="font-medium text-sm truncate">
-                            {job.fileName}
-                          </span>
+                          <span className='font-medium text-sm truncate'>{job.fileName}</span>
                         </div>
-                        <Badge className={getStatusColor(job.status)}>
-                          {job.status}
-                        </Badge>
+                        <Badge className={getStatusColor(job.status)}>{job.status}</Badge>
                       </div>
 
                       {job.status === 'processing' && (
-                        <div className="space-y-2">
-                          <Progress value={job.progress} className="h-2" />
-                          <p className="text-xs text-muted-foreground">
+                        <div className='space-y-2'>
+                          <Progress value={job.progress} className='h-2' />
+                          <p className='text-xs text-muted-foreground'>
                             {job.progress.toFixed(0)}% complete
                           </p>
                         </div>
@@ -547,24 +534,24 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
 
                       {job.status === 'completed' && job.downloadUrl && (
                         <Button
-                          size="sm"
+                          size='sm'
                           onClick={() => downloadExport(job)}
-                          className="w-full mt-2"
+                          className='w-full mt-2'
                         >
-                          <Download className="h-4 w-4 mr-2" />
+                          <Download className='h-4 w-4 mr-2' />
                           Download
                         </Button>
                       )}
 
                       {job.status === 'failed' && job.errorMessage && (
-                        <Alert variant="destructive" className="mt-2">
-                          <AlertDescription className="text-xs">
+                        <Alert variant='destructive' className='mt-2'>
+                          <AlertDescription className='text-xs'>
                             {job.errorMessage}
                           </AlertDescription>
                         </Alert>
                       )}
 
-                      <p className="text-xs text-muted-foreground mt-2">
+                      <p className='text-xs text-muted-foreground mt-2'>
                         Created: {new Date(job.createdAt).toLocaleString()}
                       </p>
                     </div>
@@ -579,17 +566,17 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
             <CardHeader>
               <CardTitle>Quick Actions</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2">
-              <Button variant="outline" size="sm" className="w-full">
-                <Share2 className="h-4 w-4 mr-2" />
+            <CardContent className='space-y-2'>
+              <Button variant='outline' size='sm' className='w-full'>
+                <Share2 className='h-4 w-4 mr-2' />
                 Share Analysis
               </Button>
-              <Button variant="outline" size="sm" className="w-full">
-                <Mail className="h-4 w-4 mr-2" />
+              <Button variant='outline' size='sm' className='w-full'>
+                <Mail className='h-4 w-4 mr-2' />
                 Email Report
               </Button>
-              <Button variant="outline" size="sm" className="w-full">
-                <Printer className="h-4 w-4 mr-2" />
+              <Button variant='outline' size='sm' className='w-full'>
+                <Printer className='h-4 w-4 mr-2' />
                 Print Summary
               </Button>
             </CardContent>

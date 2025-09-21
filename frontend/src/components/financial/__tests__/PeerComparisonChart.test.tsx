@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import './test-setup';
 import { PeerComparisonChart } from '../PeerComparisonChart';
@@ -8,7 +8,7 @@ import { FinancialRatio } from '../../../types/financial';
 // Mock Chart.js
 jest.mock('react-chartjs-2', () => ({
   Bar: ({ data, options, ...props }: any) => (
-    <div 
+    <div
       data-testid="peer-comparison-bar-chart"
       data-chart-data={JSON.stringify(data)}
       data-chart-options={JSON.stringify(options)}
@@ -54,38 +54,39 @@ const mockRatios: FinancialRatio[] = [
   },
 ];
 
-const mockPeerCompanies = [
-  {
-    id: 'peer-1',
-    name: 'Microsoft Corporation',
-    ticker: 'MSFT',
-    marketCap: 3000000000000,
-    ratios: [
-      { ratioName: 'returnOnEquity', value: 0.142, benchmarkPercentile: 70 },
-      { ratioName: 'currentRatio', value: 1.15, benchmarkPercentile: 55 },
-    ],
+const mockCompany = {
+  id: 'test-company-1',
+  cik: '0000320193',
+  name: 'Apple Inc.',
+  ticker: 'AAPL',
+  sic: '3571',
+  sicDescription: 'Electronic Computers',
+  gics: '452020',
+  gicsDescription: 'Technology Hardware & Equipment',
+  businessAddress: {
+    street1: 'One Apple Park Way',
+    city: 'Cupertino',
+    state: 'CA',
+    zip: '95014',
+    country: 'US',
   },
-  {
-    id: 'peer-2',
-    name: 'Google (Alphabet)',
-    ticker: 'GOOGL',
-    marketCap: 1800000000000,
-    ratios: [
-      { ratioName: 'returnOnEquity', value: 0.158, benchmarkPercentile: 80 },
-      { ratioName: 'currentRatio', value: 0.98, benchmarkPercentile: 40 },
-    ],
+  mailingAddress: {
+    street1: 'One Apple Park Way',
+    city: 'Cupertino',
+    state: 'CA',
+    zip: '95014',
+    country: 'US',
   },
-  {
-    id: 'peer-3',
-    name: 'Amazon.com',
-    ticker: 'AMZN',
-    marketCap: 1500000000000,
-    ratios: [
-      { ratioName: 'returnOnEquity', value: 0.135, benchmarkPercentile: 65 },
-      { ratioName: 'currentRatio', value: 1.22, benchmarkPercentile: 60 },
-    ],
-  },
-];
+  phone: '(408) 996-1010',
+  website: 'https://www.apple.com',
+  stateOfIncorporation: 'CA',
+  stateOfIncorporationDescription: 'California',
+  fiscalYearEnd: '09-30',
+  businessStatus: 'Active',
+  createdAt: '2023-01-01T00:00:00Z',
+  updatedAt: '2023-12-31T00:00:00Z',
+};
+
 
 describe('PeerComparisonChart', () => {
   beforeEach(() => {
@@ -94,55 +95,51 @@ describe('PeerComparisonChart', () => {
 
   it('renders the peer comparison chart', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     expect(screen.getByTestId('peer-comparison-bar-chart')).toBeInTheDocument();
     expect(screen.getByText('Peer Company Comparison')).toBeInTheDocument();
   });
 
   it('displays ratio selection dropdown', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     expect(screen.getByText('Select Ratio for Comparison')).toBeInTheDocument();
     expect(screen.getByDisplayValue('returnOnEquity')).toBeInTheDocument();
   });
 
   it('handles ratio selection change', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     const ratioSelect = screen.getByDisplayValue('returnOnEquity');
     fireEvent.click(ratioSelect);
-    
+
     // Should show available ratios for selection
     expect(screen.getByText('currentRatio')).toBeInTheDocument();
   });
 
   it('displays peer companies in the chart', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     // Should show peer company names
     expect(screen.getByText('Microsoft Corporation')).toBeInTheDocument();
     expect(screen.getByText('Google (Alphabet)')).toBeInTheDocument();
@@ -151,29 +148,27 @@ describe('PeerComparisonChart', () => {
 
   it('shows company ranking and percentile', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     // Should show ranking information
     expect(screen.getByText(/75th percentile/i)).toBeInTheDocument();
   });
 
   it('handles sorting by different criteria', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     const sortSelect = screen.getByDisplayValue('performance');
     fireEvent.click(sortSelect);
-    
+
     // Should show sorting options
     expect(screen.getByText('name')).toBeInTheDocument();
     expect(screen.getByText('marketCap')).toBeInTheDocument();
@@ -181,13 +176,12 @@ describe('PeerComparisonChart', () => {
 
   it('displays market cap information', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     // Should show market cap for each peer
     expect(screen.getByText('$3.0T')).toBeInTheDocument(); // Microsoft
     expect(screen.getByText('$1.8T')).toBeInTheDocument(); // Google
@@ -196,106 +190,98 @@ describe('PeerComparisonChart', () => {
 
   it('handles empty peer companies array', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={[]}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     expect(screen.getByText('No peer companies available for comparison')).toBeInTheDocument();
   });
 
   it('shows loading state when peer data is being fetched', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={undefined}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     expect(screen.getByText('Loading peer company data...')).toBeInTheDocument();
   });
 
   it('displays industry classification', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     expect(screen.getByText(/technology/i)).toBeInTheDocument();
   });
 
   it('shows company performance indicators', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     // Should show performance indicators (above/below average)
     expect(screen.getByText(/above average/i)).toBeInTheDocument();
   });
 
   it('handles chart interaction events', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     const chart = screen.getByTestId('peer-comparison-bar-chart');
     fireEvent.mouseOver(chart);
-    
+
     // Should handle hover events
     expect(chart).toBeInTheDocument();
   });
 
   it('displays export functionality', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     expect(screen.getByText('Export Comparison')).toBeInTheDocument();
   });
 
   it('handles export button click', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     const exportButton = screen.getByText('Export Comparison');
     fireEvent.click(exportButton);
-    
+
     // Should trigger export functionality
     expect(exportButton).toBeInTheDocument();
   });
 
   it('shows data quality indicators', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     // Should show data quality information
     expect(screen.getByText(/data quality/i)).toBeInTheDocument();
   });
@@ -309,75 +295,70 @@ describe('PeerComparisonChart', () => {
     });
 
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     // Should adapt to mobile view
     expect(screen.getByTestId('peer-comparison-bar-chart')).toBeInTheDocument();
   });
 
   it('displays benchmark comparison when available', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     // Should show benchmark information
     expect(screen.getByText(/industry benchmark/i)).toBeInTheDocument();
   });
 
   it('shows company selection controls', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     // Should show controls to select/deselect peer companies
     expect(screen.getByText('Select Companies')).toBeInTheDocument();
   });
 
   it('handles company selection changes', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     // Test selecting/deselecting companies
     const companyCheckboxes = screen.getAllByRole('checkbox');
     expect(companyCheckboxes.length).toBeGreaterThan(0);
-    
+
     // Click first checkbox
     fireEvent.click(companyCheckboxes[0]);
-    
+
     // Chart should update
     expect(screen.getByTestId('peer-comparison-bar-chart')).toBeInTheDocument();
   });
 
   it('displays ratio values in chart format', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     const chartData = screen.getByTestId('peer-comparison-bar-chart');
     const dataAttr = chartData.getAttribute('data-chart-data');
-    
+
     if (dataAttr) {
       const data = JSON.parse(dataAttr);
       expect(data).toBeTruthy();
@@ -387,34 +368,25 @@ describe('PeerComparisonChart', () => {
 
   it('shows comparison summary', () => {
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={mockPeerCompanies}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     // Should show summary of how company compares to peers
     expect(screen.getByText(/compared to peers/i)).toBeInTheDocument();
   });
 
   it('handles missing ratio data for peers', () => {
-    const peersWithMissingData = [
-      {
-        ...mockPeerCompanies[0],
-        ratios: [], // No ratio data
-      },
-      ...mockPeerCompanies.slice(1),
-    ];
 
     render(
-      <PeerComparisonChart 
-        ratios={mockRatios} 
-        companyId="test-company"
-        peerCompanies={peersWithMissingData}
+      <PeerComparisonChart
+        ratios={mockRatios}
+        company={mockCompany}
       />
     );
-    
+
     // Should handle missing data gracefully
     expect(screen.getByTestId('peer-comparison-bar-chart')).toBeInTheDocument();
   });

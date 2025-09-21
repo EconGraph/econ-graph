@@ -30,7 +30,7 @@ while [[ $# -gt 0 ]]; do
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
-            echo "  --group <group>     Test group to run (core|analysis|debug|comprehensive|mobile-core|mobile-analysis|mobile-comprehensive|all)"
+            echo "  --group <group>     Test group to run (core|analysis|debug|comprehensive|mobile-core|mobile-analysis|mobile-comprehensive|xbrl-financial|all)"
             echo "  --no-cleanup        Don't cleanup containers after tests"
             echo "  --no-build          Don't rebuild images"
             echo "  --help              Show this help message"
@@ -54,7 +54,7 @@ if [ "$BUILD_IMAGES" = true ]; then
 fi
 
 # Create test results directory
-mkdir -p test-results/{core,analysis,debug,comprehensive,mobile-core,mobile-analysis,mobile-comprehensive}
+mkdir -p test-results/{core,analysis,debug,comprehensive,mobile-core,mobile-analysis,mobile-comprehensive,xbrl-financial}
 
 # Function to run specific test group
 run_test_group() {
@@ -65,7 +65,8 @@ run_test_group() {
         # Run all test groups in parallel
         docker-compose -f docker-compose.best-practice.yml up \
             test-core test-analysis test-debug test-comprehensive \
-            test-mobile-core test-mobile-analysis test-mobile-comprehensive
+            test-mobile-core test-mobile-analysis test-mobile-comprehensive \
+            test-xbrl-financial
     else
         # Run specific test group
         docker-compose -f docker-compose.best-practice.yml up "test-$group"

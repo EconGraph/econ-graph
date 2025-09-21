@@ -168,7 +168,7 @@ describe('FinancialDashboard', () => {
 
   it('renders the dashboard with company information', () => {
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
     expect(screen.getByText('AAPL')).toBeInTheDocument();
     expect(screen.getByText('Technology Hardware & Equipment')).toBeInTheDocument();
@@ -176,7 +176,7 @@ describe('FinancialDashboard', () => {
 
   it('displays financial statements in tabs', () => {
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     // Check if tabs are rendered
     expect(screen.getByText('10-K (2023)')).toBeInTheDocument();
     expect(screen.getByText('10-Q (Q3 2023)')).toBeInTheDocument();
@@ -191,7 +191,7 @@ describe('FinancialDashboard', () => {
     });
 
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     expect(screen.getByText('Loading financial data...')).toBeInTheDocument();
   });
 
@@ -204,52 +204,52 @@ describe('FinancialDashboard', () => {
     });
 
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     expect(screen.getByText('Error loading financial data')).toBeInTheDocument();
     expect(screen.getByText('Failed to load data')).toBeInTheDocument();
   });
 
   it('renders benchmark comparisons for key ratios', () => {
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     expect(screen.getByTestId('benchmark-returnOnEquity')).toBeInTheDocument();
     expect(screen.getByTestId('benchmark-currentRatio')).toBeInTheDocument();
   });
 
   it('renders trend analysis chart', () => {
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     expect(screen.getByTestId('trend-analysis-chart')).toBeInTheDocument();
   });
 
   it('renders peer comparison chart', () => {
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     expect(screen.getByTestId('peer-comparison-chart')).toBeInTheDocument();
   });
 
   it('renders financial alerts', () => {
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     expect(screen.getByTestId('financial-alerts')).toBeInTheDocument();
   });
 
   it('renders export functionality', () => {
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     expect(screen.getByTestId('financial-export')).toBeInTheDocument();
   });
 
   it('switches between statement tabs', () => {
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     // Initially should show 10-K data
     expect(screen.getByText('10-K (2023)')).toBeInTheDocument();
-    
+
     // Click on 10-Q tab
     const q3Tab = screen.getByText('10-Q (Q3 2023)');
     fireEvent.click(q3Tab);
-    
+
     // Should now show Q3 data
     expect(screen.getByText('Q3 2023')).toBeInTheDocument();
   });
@@ -264,10 +264,10 @@ describe('FinancialDashboard', () => {
     });
 
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     const refreshButton = screen.getByRole('button', { name: /refresh/i });
     fireEvent.click(refreshButton);
-    
+
     await waitFor(() => {
       expect(mockRefetch).toHaveBeenCalledTimes(1);
     });
@@ -275,7 +275,7 @@ describe('FinancialDashboard', () => {
 
   it('displays ratio cards with correct values', () => {
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     // Check if ratio values are displayed
     expect(screen.getByText('14.7%')).toBeInTheDocument(); // ROE formatted as percentage
     expect(screen.getByText('1.04')).toBeInTheDocument(); // Current ratio
@@ -283,7 +283,7 @@ describe('FinancialDashboard', () => {
 
   it('shows ratio interpretations', () => {
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     expect(screen.getByText('Strong profitability, above industry average')).toBeInTheDocument();
     expect(screen.getByText('Adequate liquidity position')).toBeInTheDocument();
   });
@@ -300,7 +300,7 @@ describe('FinancialDashboard', () => {
     });
 
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     expect(screen.getByText('No financial ratios available')).toBeInTheDocument();
   });
 
@@ -316,13 +316,13 @@ describe('FinancialDashboard', () => {
     });
 
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     expect(screen.getByText('Company information not available')).toBeInTheDocument();
   });
 
   it('displays data quality indicators', () => {
     render(<FinancialDashboard companyId="mock-company-id" />);
-    
+
     // Check for data quality scores (should be displayed somewhere in the UI)
     // This would depend on the actual implementation
     expect(screen.getByText('95%')).toBeInTheDocument(); // Data quality score

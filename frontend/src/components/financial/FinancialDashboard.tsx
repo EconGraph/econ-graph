@@ -1,13 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge, Button, Progress, Alert, AlertDescription } from '@/components/ui';
 import {
   TrendingUp,
-  TrendingDown,
-  DollarSign,
   Building2,
-  Calendar,
   FileText,
   BarChart3,
   PieChart,
@@ -18,16 +15,9 @@ import {
   RefreshCw,
   Download,
   Share2,
-  Star,
   Eye,
-  Filter,
-  Search,
 } from 'lucide-react';
-import {
-  GET_FINANCIAL_STATEMENTS,
-  GET_FINANCIAL_RATIOS,
-  GET_COMPANY_INFO,
-} from '@/graphql/financial';
+import { GET_FINANCIAL_STATEMENTS } from '@/graphql/financial';
 import { FinancialStatement, FinancialRatio, Company } from '@/types/financial';
 import { FinancialStatementViewer } from './FinancialStatementViewer';
 import { RatioAnalysisPanel } from './RatioAnalysisPanel';
@@ -162,21 +152,18 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedStatement, setSelectedStatement] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
-  const [refreshKey, setRefreshKey] = useState(0);
 
   // GraphQL queries
-  const {
-    data,
-    loading,
-    error,
-    refetch,
-  } = useQuery(GET_FINANCIAL_STATEMENTS, {
+  const { data, loading, error, refetch } = useQuery(GET_FINANCIAL_STATEMENTS, {
     variables: { companyId, limit: 10 },
     fetchPolicy: 'cache-and-network',
   });
 
   const company: Company | undefined = data?.company;
-  const statements: FinancialStatement[] = data?.financialStatements || [];
+  const statements: FinancialStatement[] = useMemo(
+    () => data?.financialStatements || [],
+    [data?.financialStatements]
+  );
   const ratios: FinancialRatio[] = data?.financialRatios || [];
 
   // Auto-select the most recent statement
@@ -187,7 +174,6 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   }, [statements, selectedStatement]);
 
   const handleRefresh = async () => {
-    setRefreshKey(prev => prev + 1);
     await refetch();
   };
 
@@ -217,23 +203,14 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   const getStatusIcon = (status: string) => {
     switch (status.toLowerCase()) {
       case 'completed':
-        return <CheckCircle className="h-4 w-4" />;
+        return <CheckCircle className='h-4 w-4' />;
       case 'processing':
-        return <RefreshCw className="h-4 w-4 animate-spin" />;
+        return <RefreshCw className='h-4 w-4 animate-spin' />;
       case 'failed':
-        return <XCircle className="h-4 w-4" />;
+        return <XCircle className='h-4 w-4' />;
       default:
-        return <AlertTriangle className="h-4 w-4" />;
+        return <AlertTriangle className='h-4 w-4' />;
     }
-  };
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
   };
 
   const formatPercent = (value: number) => {
@@ -242,19 +219,17 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center p-8">
-        <Progress value={33} className="w-full max-w-md" />
-        <span className="ml-4">Loading financial dashboard...</span>
+      <div className='flex items-center justify-center p-8'>
+        <Progress value={33} className='w-full max-w-md' />
+        <span className='ml-4'>Loading financial dashboard...</span>
       </div>
     );
   }
 
   if (error) {
     return (
-      <Alert variant="destructive">
-        <AlertDescription>
-          Error loading financial data: {String(error)}
-        </AlertDescription>
+      <Alert variant='destructive'>
+        <AlertDescription>Error loading financial data: {String(error)}</AlertDescription>
       </Alert>
     );
   }
@@ -268,27 +243,27 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   }
 
   return (
-    <div className="space-y-6">
+    <div className='space-y-6'>
       {/* Header */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <Building2 className="h-6 w-6 text-blue-600" />
+          <div className='flex items-center justify-between'>
+            <div className='flex items-center space-x-4'>
+              <div className='p-2 bg-blue-100 rounded-lg'>
+                <Building2 className='h-6 w-6 text-blue-600' />
               </div>
               <div>
-                <CardTitle className="text-2xl">{company.name}</CardTitle>
-                <div className="flex items-center space-x-4 text-sm text-muted-foreground">
-                  <span className="flex items-center space-x-1">
+                <CardTitle className='text-2xl'>{company.name}</CardTitle>
+                <div className='flex items-center space-x-4 text-sm text-muted-foreground'>
+                  <span className='flex items-center space-x-1'>
                     <span>Ticker:</span>
-                    <Badge variant="outline">{company.ticker}</Badge>
+                    <Badge variant='outline'>{company.ticker}</Badge>
                   </span>
-                  <span className="flex items-center space-x-1">
+                  <span className='flex items-center space-x-1'>
                     <span>CIK:</span>
-                    <span className="font-mono">{company.cik}</span>
+                    <span className='font-mono'>{company.cik}</span>
                   </span>
-                  <span className="flex items-center space-x-1">
+                  <span className='flex items-center space-x-1'>
                     <span>Industry:</span>
                     <span>{company.gicsDescription}</span>
                   </span>
@@ -296,17 +271,17 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <Button variant="outline" size="sm" onClick={handleRefresh}>
-                <RefreshCw className="h-4 w-4 mr-2" />
+            <div className='flex items-center space-x-2'>
+              <Button variant='outline' size='sm' onClick={handleRefresh}>
+                <RefreshCw className='h-4 w-4 mr-2' />
                 Refresh
               </Button>
-              <Button variant="outline" size="sm" onClick={handleExportData}>
-                <Download className="h-4 w-4 mr-2" />
+              <Button variant='outline' size='sm' onClick={handleExportData}>
+                <Download className='h-4 w-4 mr-2' />
                 Export
               </Button>
-              <Button variant="outline" size="sm" onClick={handleShareAnalysis}>
-                <Share2 className="h-4 w-4 mr-2" />
+              <Button variant='outline' size='sm' onClick={handleShareAnalysis}>
+                <Share2 className='h-4 w-4 mr-2' />
                 Share
               </Button>
             </div>
@@ -315,19 +290,17 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
       </Card>
 
       {/* Key Metrics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
+          <CardContent className='p-6'>
+            <div className='flex items-center justify-between'>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Latest Filing</p>
-                <p className="text-2xl font-bold">
-                  {statements[0]?.formType || '-'}
-                </p>
+                <p className='text-sm font-medium text-muted-foreground'>Latest Filing</p>
+                <p className='text-2xl font-bold'>{statements[0]?.formType || '-'}</p>
               </div>
-              <FileText className="h-8 w-8 text-blue-600" />
+              <FileText className='h-8 w-8 text-blue-600' />
             </div>
-            <div className="flex items-center space-x-2 mt-2">
+            <div className='flex items-center space-x-2 mt-2'>
               {statements[0] && (
                 <>
                   {getStatusIcon(statements[0].xbrlProcessingStatus)}
@@ -341,19 +314,19 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         </Card>
 
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
+          <CardContent className='p-6'>
+            <div className='flex items-center justify-between'>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">ROE</p>
-                <p className="text-2xl font-bold text-green-600">
+                <p className='text-sm font-medium text-muted-foreground'>ROE</p>
+                <p className='text-2xl font-bold text-green-600'>
                   {ratios.find(r => r.ratioName === 'returnOnEquity')?.value
                     ? formatPercent(ratios.find(r => r.ratioName === 'returnOnEquity')!.value)
                     : '-'}
                 </p>
               </div>
-              <TrendingUp className="h-8 w-8 text-green-600" />
+              <TrendingUp className='h-8 w-8 text-green-600' />
             </div>
-            <p className="text-sm text-muted-foreground mt-2">
+            <p className='text-sm text-muted-foreground mt-2'>
               {ratios.find(r => r.ratioName === 'returnOnEquity')?.benchmarkPercentile
                 ? `${ratios.find(r => r.ratioName === 'returnOnEquity')!.benchmarkPercentile}th percentile`
                 : 'Return on Equity'}
@@ -362,19 +335,19 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         </Card>
 
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
+          <CardContent className='p-6'>
+            <div className='flex items-center justify-between'>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Current Ratio</p>
-                <p className="text-2xl font-bold text-blue-600">
+                <p className='text-sm font-medium text-muted-foreground'>Current Ratio</p>
+                <p className='text-2xl font-bold text-blue-600'>
                   {ratios.find(r => r.ratioName === 'currentRatio')?.value
                     ? ratios.find(r => r.ratioName === 'currentRatio')!.value.toFixed(2)
                     : '-'}
                 </p>
               </div>
-              <Activity className="h-8 w-8 text-blue-600" />
+              <Activity className='h-8 w-8 text-blue-600' />
             </div>
-            <p className="text-sm text-muted-foreground mt-2">
+            <p className='text-sm text-muted-foreground mt-2'>
               {ratios.find(r => r.ratioName === 'currentRatio')?.benchmarkPercentile
                 ? `${ratios.find(r => r.ratioName === 'currentRatio')!.benchmarkPercentile}th percentile`
                 : 'Liquidity Position'}
@@ -383,19 +356,19 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         </Card>
 
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
+          <CardContent className='p-6'>
+            <div className='flex items-center justify-between'>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Debt/Equity</p>
-                <p className="text-2xl font-bold text-purple-600">
+                <p className='text-sm font-medium text-muted-foreground'>Debt/Equity</p>
+                <p className='text-2xl font-bold text-purple-600'>
                   {ratios.find(r => r.ratioName === 'debtToEquity')?.value
                     ? ratios.find(r => r.ratioName === 'debtToEquity')!.value.toFixed(2)
                     : '-'}
                 </p>
               </div>
-              <BarChart3 className="h-8 w-8 text-purple-600" />
+              <BarChart3 className='h-8 w-8 text-purple-600' />
             </div>
-            <p className="text-sm text-muted-foreground mt-2">
+            <p className='text-sm text-muted-foreground mt-2'>
               {ratios.find(r => r.ratioName === 'debtToEquity')?.benchmarkPercentile
                 ? `${ratios.find(r => r.ratioName === 'debtToEquity')!.benchmarkPercentile}th percentile`
                 : 'Leverage Ratio'}
@@ -405,63 +378,63 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
       </div>
 
       {/* Main Content Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-6">
-          <TabsTrigger value="overview" className="flex items-center space-x-2">
-            <Eye className="h-4 w-4" />
+      <Tabs value={activeTab} onValueChange={setActiveTab} className='space-y-4'>
+        <TabsList className='grid w-full grid-cols-6'>
+          <TabsTrigger value='overview' className='flex items-center space-x-2'>
+            <Eye className='h-4 w-4' />
             <span>Overview</span>
           </TabsTrigger>
-          <TabsTrigger value="statements" className="flex items-center space-x-2">
-            <FileText className="h-4 w-4" />
+          <TabsTrigger value='statements' className='flex items-center space-x-2'>
+            <FileText className='h-4 w-4' />
             <span>Statements</span>
           </TabsTrigger>
-          <TabsTrigger value="ratios" className="flex items-center space-x-2">
-            <BarChart3 className="h-4 w-4" />
+          <TabsTrigger value='ratios' className='flex items-center space-x-2'>
+            <BarChart3 className='h-4 w-4' />
             <span>Ratios</span>
           </TabsTrigger>
-          <TabsTrigger value="trends" className="flex items-center space-x-2">
-            <TrendingUp className="h-4 w-4" />
+          <TabsTrigger value='trends' className='flex items-center space-x-2'>
+            <TrendingUp className='h-4 w-4' />
             <span>Trends</span>
           </TabsTrigger>
-          <TabsTrigger value="comparison" className="flex items-center space-x-2">
-            <PieChart className="h-4 w-4" />
+          <TabsTrigger value='comparison' className='flex items-center space-x-2'>
+            <PieChart className='h-4 w-4' />
             <span>Compare</span>
           </TabsTrigger>
-          <TabsTrigger value="analysis" className="flex items-center space-x-2">
-            <Activity className="h-4 w-4" />
+          <TabsTrigger value='analysis' className='flex items-center space-x-2'>
+            <Activity className='h-4 w-4' />
             <span>Analysis</span>
           </TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
-        <TabsContent value="overview" className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <TabsContent value='overview' className='space-y-4'>
+          <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
             <Card>
               <CardHeader>
                 <CardTitle>Recent Filings</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {statements.slice(0, 5).map((statement) => (
+                <div className='space-y-3'>
+                  {statements.slice(0, 5).map(statement => (
                     <div
                       key={statement.id}
-                      className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted/50"
+                      className='flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted/50'
                       onClick={() => setSelectedStatement(statement.id)}
                     >
-                      <div className="flex items-center space-x-3">
-                        <div className="p-2 bg-blue-100 rounded">
-                          <FileText className="h-4 w-4 text-blue-600" />
+                      <div className='flex items-center space-x-3'>
+                        <div className='p-2 bg-blue-100 rounded'>
+                          <FileText className='h-4 w-4 text-blue-600' />
                         </div>
                         <div>
-                          <p className="font-medium">{statement.formType}</p>
-                          <p className="text-sm text-muted-foreground">
+                          <p className='font-medium'>{statement.formType}</p>
+                          <p className='text-sm text-muted-foreground'>
                             FY {statement.fiscalYear} Q{statement.fiscalQuarter}
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center space-x-2">
+                      <div className='flex items-center space-x-2'>
                         {getStatusIcon(statement.xbrlProcessingStatus)}
-                        <span className="text-sm">{statement.periodEndDate}</span>
+                        <span className='text-sm'>{statement.periodEndDate}</span>
                       </div>
                     </div>
                   ))}
@@ -474,19 +447,19 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                 <CardTitle>Key Financial Metrics</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {ratios.slice(0, 6).map((ratio) => (
-                    <div key={ratio.id} className="flex items-center justify-between">
+                <div className='space-y-4'>
+                  {ratios.slice(0, 6).map(ratio => (
+                    <div key={ratio.id} className='flex items-center justify-between'>
                       <div>
-                        <p className="font-medium">{ratio.ratioDisplayName}</p>
-                        <p className="text-sm text-muted-foreground">{ratio.category}</p>
+                        <p className='font-medium'>{ratio.ratioDisplayName}</p>
+                        <p className='text-sm text-muted-foreground'>{ratio.category}</p>
                       </div>
-                      <div className="text-right">
-                        <p className="font-bold">
+                      <div className='text-right'>
+                        <p className='font-bold'>
                           {ratio.value ? formatPercent(ratio.value) : '-'}
                         </p>
                         {ratio.benchmarkPercentile && (
-                          <Badge variant="outline" className="text-xs">
+                          <Badge variant='outline' className='text-xs'>
                             {ratio.benchmarkPercentile}th percentile
                           </Badge>
                         )}
@@ -500,7 +473,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         </TabsContent>
 
         {/* Statements Tab */}
-        <TabsContent value="statements" className="space-y-4">
+        <TabsContent value='statements' className='space-y-4'>
           {selectedStatement ? (
             <FinancialStatementViewer
               statementId={selectedStatement}
@@ -519,7 +492,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         </TabsContent>
 
         {/* Ratios Tab */}
-        <TabsContent value="ratios">
+        <TabsContent value='ratios'>
           <RatioAnalysisPanel
             ratios={ratios}
             loading={false}
@@ -529,7 +502,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         </TabsContent>
 
         {/* Trends Tab */}
-        <TabsContent value="trends">
+        <TabsContent value='trends'>
           <TrendAnalysisChart
             ratios={ratios}
             statements={statements}
@@ -539,23 +512,19 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         </TabsContent>
 
         {/* Comparison Tab */}
-        <TabsContent value="comparison">
-          <PeerComparisonChart
-            ratios={ratios}
-            company={company}
-            userType={userType}
-          />
+        <TabsContent value='comparison'>
+          <PeerComparisonChart ratios={ratios} company={company} userType={userType} />
         </TabsContent>
 
         {/* Analysis Tab */}
-        <TabsContent value="analysis">
+        <TabsContent value='analysis'>
           <Card>
             <CardHeader>
               <CardTitle>Benchmark Analysis</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {ratios.slice(0, 3).map((ratio) => (
+              <div className='space-y-4'>
+                {ratios.slice(0, 3).map(ratio => (
                   <BenchmarkComparison
                     key={ratio.id}
                     ratioName={ratio.ratioDisplayName}

@@ -1,6 +1,6 @@
 /**
  * Global Teardown for XBRL Financial Integration Tests
- * 
+ *
  * This teardown cleans up the test environment after XBRL financial
  * integration tests are complete, ensuring proper cleanup of resources
  * and test data.
@@ -57,7 +57,6 @@ async function globalTeardown(config: FullConfig) {
     await browser.close();
 
     console.log('✅ XBRL Financial Integration Test Environment Cleanup Complete');
-
   } catch (error) {
     console.error('❌ Failed to cleanup XBRL Financial Integration Test Environment:', error);
     // Don't throw error during teardown to avoid masking test failures
