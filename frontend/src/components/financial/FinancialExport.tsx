@@ -440,6 +440,11 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                   <option value='company_date_format'>Company_Date_Format</option>
                   <option value='custom'>Custom Name</option>
                 </select>
+                <input
+                  type='text'
+                  placeholder='Custom file name...'
+                  className='w-full p-2 border rounded-md'
+                />
               </div>
 
               {/* Export Preview */}

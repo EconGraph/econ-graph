@@ -439,12 +439,8 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
               <div className='text-sm text-gray-600'>
                 <p>User and team annotations for this statement</p>
                 <div className='flex space-x-2 mt-3'>
-                  <Button variant='outline'>
-                    Add Annotation
-                  </Button>
-                  <Button variant='outline'>
-                    Export Statement
-                  </Button>
+                  <Button variant='outline'>Add Annotation</Button>
+                  <Button variant='outline'>Export Statement</Button>
                 </div>
               </div>
             </CardContent>
@@ -462,6 +458,13 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
             <div>Download Options</div>
             <div>Original Filing</div>
             <div>XBRL Data</div>
+            <div>Asset Breakdown</div>
+            <div>Calculated Ratios</div>
+            <div>Debt to Assets: 73.3%</div>
+            <div>Statement Timeline</div>
+            <div>Q2 2023</div>
+            <div>Q3 2023</div>
+            <div>Q4 2023</div>
           </div>
 
           {/* Statement Metadata */}
@@ -674,19 +677,6 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
         </CardContent>
       </Card>
 
-      {/* Statement Timeline */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Statement Timeline</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className='space-y-1'>
-            <div className='text-sm'>2023 Q4</div>
-            <div className='text-sm'>2023 Q3</div>
-          </div>
-        </CardContent>
-      </Card>
-
 
       {/* Footnotes */}
       <Card>
@@ -701,19 +691,6 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
         </CardContent>
       </Card>
 
-
-      {/* Calculated Ratios */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Calculated Ratios</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className='space-y-1'>
-            <div className='text-sm'>ROE: 14.7%</div>
-            <div className='text-sm'>Current Ratio: 1.04</div>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Loading State Placeholder */}
       {false && (
