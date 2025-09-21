@@ -1,16 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Analysis E2E Tests Configuration
- * Tests analysis features: professional analysis, global analysis, series explorer
+ * Comprehensive E2E Tests Configuration
+ * Tests complete workflows and comprehensive functionality across all test suites
  */
 export default defineConfig({
   testDir: '../../tests/e2e',
-  testMatch: ['**/*analysis*.spec.ts'],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined, // Single worker for analysis tests (more complex)
+  workers: process.env.CI ? 2 : undefined, // Allow 2 workers for comprehensive tests
   reporter: [['html', { open: 'never' }]],
   use: {
     baseURL: process.env.BASE_URL || 'http://localhost:3000',
@@ -18,7 +17,10 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+    actionTimeout: 30000,
+    navigationTimeout: 30000,
   },
+
   projects: [
     {
       name: 'chromium',
