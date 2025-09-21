@@ -1462,6 +1462,7 @@ jobs:
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         cargo test --package econ-graph-backend --bin econ-graph-backend -- --test-threads=2 --nocapture integration_tests
+      working-directory: backend
 
   frontend-integration-tests:
     name: Frontend Integration Tests
