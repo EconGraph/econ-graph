@@ -1525,7 +1525,7 @@ jobs:
     - name: Upload E2E containers
       uses: actions/upload-artifact@v4
       with:
-        name: e2e-containers-optimized
+        name: e2e-containers-standard
         path: |
           e2e-container.tar.gz
           e2e-mobile-container.tar.gz
@@ -1563,7 +1563,7 @@ jobs:
     - name: Upload optimized E2E containers
       uses: actions/upload-artifact@v4
       with:
-        name: e2e-containers-optimized-optimized
+        name: e2e-containers-optimized
         path: |
           e2e-container-optimized.tar.gz
           e2e-mobile-container-optimized.tar.gz
@@ -1671,7 +1671,7 @@ jobs:
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
           -p 3000:3000 \
-          econ-graph-e2e:latest \
+          econ-graph-e2e-optimized:latest \
           npx serve -s build -l 3000
 
         # Wait for frontend to be ready
@@ -1838,7 +1838,7 @@ jobs:
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
           -p 3000:3000 \
-          econ-graph-e2e:latest \
+          econ-graph-e2e-optimized:latest \
           npx serve -s build -l 3000
 
         # Wait for frontend to be ready
@@ -1987,7 +1987,7 @@ jobs:
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
           -p 3000:3000 \
-          econ-graph-e2e-mobile:latest \
+          econ-graph-e2e-mobile-optimized:latest \
           npx serve -s build -l 3000
 
         # Wait for frontend to be ready
