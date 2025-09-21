@@ -12,7 +12,7 @@ export default defineConfig({
   workers: process.env.CI ? 2 : undefined,
   reporter: [['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://localhost:18473',
+    baseURL: process.env.BASE_URL || 'http://localhost:3000',
     headless: true,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
@@ -25,10 +25,4 @@ export default defineConfig({
     },
     // Debug tests only need Chrome for consistency
   ],
-  webServer: {
-    command: 'cd dev-server && npm start',
-    url: 'http://localhost:18473',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
-  },
 });
