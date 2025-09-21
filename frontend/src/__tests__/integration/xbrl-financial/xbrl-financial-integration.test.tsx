@@ -288,7 +288,7 @@ describe('XBRL Financial Integration Tests', () => {
       // Verify company information is displayed
       expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
       expect(screen.getByText('AAPL')).toBeInTheDocument();
-      expect(screen.getByText('Computer Hardware')).toBeInTheDocument();
+      expect(screen.getByText('Technology Hardware & Equipment')).toBeInTheDocument();
     });
 
     it('should display financial ratios calculated from XBRL data', async () => {

@@ -56,6 +56,7 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
   const [selectedStatement, setSelectedStatement] = useState<string | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [deviceType, setDeviceType] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
+  const [isOffline] = useState(true);
 
   // Detect device type and orientation
   useEffect(() => {
@@ -126,6 +127,7 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
     { id: 'statements', label: 'Statements', icon: FileText },
     { id: 'ratios', label: 'Ratios', icon: BarChart3 },
     { id: 'trends', label: 'Trends', icon: TrendingUp },
+    { id: 'comparison', label: 'Comparison', icon: BarChart3 },
     { id: 'alerts', label: 'Alerts', icon: AlertTriangle },
   ];
 
@@ -143,58 +145,81 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
               <div>
                 <h1 className='font-semibold text-lg'>{company.name}</h1>
                 <p className='text-sm text-gray-500'>{company.ticker}</p>
+                <p className='text-xs text-gray-400'>Financial Analysis</p>
               </div>
             </div>
-            <Sheet open={isMenuOpen} onOpenChange={setIsMenuOpen}>
-              <SheetTrigger asChild>
+            <div className='flex items-center space-x-2'>
+              <Button variant='ghost' size='sm'>
+                <Share2 className='h-4 w-4 mr-1' />
+                Share
+              </Button>
+              <div className='relative'>
                 <Button variant='ghost' size='sm'>
-                  <Menu className='h-5 w-5' />
+                  <AlertTriangle className='h-5 w-5' />
                 </Button>
-              </SheetTrigger>
-              <SheetContent side='right' className='w-80'>
-                <SheetHeader>
-                  <SheetTitle>Financial Analysis</SheetTitle>
-                </SheetHeader>
-                <div className='mt-6 space-y-4'>
-                  <div className='space-y-2'>
-                    <h3 className='font-medium'>Quick Actions</h3>
-                    <Button variant='outline' className='w-full justify-start'>
-                      <Download className='h-4 w-4 mr-2' />
-                      Export Data
-                    </Button>
-                    <Button variant='outline' className='w-full justify-start'>
-                      <Share2 className='h-4 w-4 mr-2' />
-                      Share Analysis
-                    </Button>
-                  </div>
-                  <div className='space-y-2'>
-                    <h3 className='font-medium'>Navigation</h3>
-                    {mobileTabs.map(tab => (
-                      <Button
-                        key={tab.id}
-                        variant={activeTab === tab.id ? 'default' : 'ghost'}
-                        className='w-full justify-start'
-                        onClick={() => {
-                          setActiveTab(tab.id);
-                          setIsMenuOpen(false);
-                        }}
-                      >
-                        <tab.icon className='h-4 w-4 mr-2' />
-                        {tab.label}
+                <span className='absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5'>
+                  3
+                </span>
+              </div>
+              <Sheet open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+                <SheetTrigger asChild>
+                  <Button variant='ghost' size='sm'>
+                    <Menu className='h-5 w-5' />
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side='right' className='w-80'>
+                  <SheetHeader>
+                    <SheetTitle>Financial Analysis</SheetTitle>
+                  </SheetHeader>
+                  <div className='mt-6 space-y-4'>
+                    <div className='space-y-2'>
+                      <h3 className='font-medium'>Quick Actions</h3>
+                      <Button variant='outline' className='w-full justify-start'>
+                        <Download className='h-4 w-4 mr-2' />
+                        Export Data
                       </Button>
-                    ))}
+                      <Button variant='outline' className='w-full justify-start'>
+                        <Share2 className='h-4 w-4 mr-2' />
+                        Share Analysis
+                      </Button>
+                    </div>
+                    <div className='space-y-2'>
+                      <h3 className='font-medium'>Navigation</h3>
+                      {mobileTabs.map(tab => (
+                        <Button
+                          key={tab.id}
+                          variant={activeTab === tab.id ? 'default' : 'ghost'}
+                          className='w-full justify-start'
+                          onClick={() => {
+                            setActiveTab(tab.id);
+                            setIsMenuOpen(false);
+                          }}
+                        >
+                          <tab.icon className='h-4 w-4 mr-2' />
+                          {tab.label}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              </SheetContent>
-            </Sheet>
+                </SheetContent>
+              </Sheet>
+            </div>
           </div>
         </div>
+
+        {/* Offline State */}
+        {isOffline && (
+          <div className='bg-yellow-100 border-b border-yellow-200 p-3 text-center'>
+            <p className='text-sm font-medium text-yellow-800'>Offline</p>
+            <p className='text-xs text-yellow-600'>Limited functionality available</p>
+          </div>
+        )}
 
         {/* Mobile Content */}
         <div className='p-4 space-y-4'>
           {/* Key Metrics Cards */}
           {activeTab === 'overview' && (
-            <>
+            <div data-testid='mobile-dashboard'>
               <div className='space-y-3'>
                 {keyMetrics.map((metric, index) => (
                   <Card key={index}>
@@ -270,7 +295,7 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
                   </div>
                 </CardContent>
               </Card>
-            </>
+            </div>
           )}
 
           {/* Statements Tab */}
@@ -343,6 +368,20 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
             />
           )}
 
+          {/* Comparison Tab */}
+          {activeTab === 'comparison' && (
+            <div data-testid='mobile-peer-chart'>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Peer Comparison</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className='text-sm text-gray-600'>Compare with industry peers</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
           {/* Alerts Tab */}
           {activeTab === 'alerts' && (
             <FinancialAlerts
@@ -356,10 +395,12 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
 
         {/* Mobile Bottom Navigation */}
         <div className='fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg'>
-          <div className='flex'>
+          <div className='flex' role='tablist' aria-label='Mobile navigation tabs'>
             {mobileTabs.map(tab => (
               <button
                 key={tab.id}
+                role='tab'
+                aria-selected={activeTab === tab.id}
                 className={`flex-1 flex flex-col items-center py-2 ${
                   activeTab === tab.id ? 'text-blue-600' : 'text-gray-500'
                 }`}

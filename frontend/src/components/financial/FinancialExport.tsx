@@ -300,7 +300,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
             <span>Export Financial Data</span>
           </CardTitle>
           <p className='text-sm text-muted-foreground'>
-            Export financial statements, ratios, and analysis in various formats
+            Export financial statements, ratios, and analysis for {company.name} in various formats
           </p>
         </CardHeader>
       </Card>

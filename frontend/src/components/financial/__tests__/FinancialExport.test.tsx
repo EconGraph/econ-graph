@@ -76,7 +76,7 @@ describe('FinancialExport', () => {
     );
 
     expect(screen.getByText('Export Financial Data')).toBeInTheDocument();
-    expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
+    expect(screen.getByText(/Apple Inc\./i)).toBeInTheDocument();
   });
 
   it('displays export format options', () => {
