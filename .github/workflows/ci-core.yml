@@ -1525,7 +1525,7 @@ jobs:
     - name: Upload E2E containers
       uses: actions/upload-artifact@v4
       with:
-        name: e2e-containers-optimized
+        name: e2e-containers-standard
         path: |
           e2e-container.tar.gz
           e2e-mobile-container.tar.gz
@@ -1563,7 +1563,7 @@ jobs:
     - name: Upload optimized E2E containers
       uses: actions/upload-artifact@v4
       with:
-        name: e2e-containers-optimized-optimized
+        name: e2e-containers-optimized
         path: |
           e2e-container-optimized.tar.gz
           e2e-mobile-container-optimized.tar.gz
@@ -1633,6 +1633,7 @@ jobs:
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         diesel migration run
+      working-directory: backend
 
     - name: Download optimized E2E containers
       uses: actions/download-artifact@v4
@@ -1670,7 +1671,7 @@ jobs:
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
           -p 3000:3000 \
-          econ-graph-e2e:latest \
+          econ-graph-e2e-optimized:latest \
           npx serve -s build -l 3000
 
         # Wait for frontend to be ready
@@ -1751,6 +1752,7 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         diesel setup
         diesel migration run
+      working-directory: backend
 
     - name: Wait for PostgreSQL to be ready
       run: |
@@ -1771,34 +1773,6 @@ jobs:
           exit 1
         }
         echo "✅ PostgreSQL is fully functional!"
-
-    - name: Build and start backend
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo build --release --bin econ-graph-backend
-        echo "🚀 Starting backend server..."
-        # Use pre-built binary directly to avoid recompiling dependencies
-        ./target/release/econ-graph-backend &
-        BACKEND_PID=$!
-        echo "Backend PID: $BACKEND_PID"
-
-        # Wait for backend to be ready
-        echo "🔍 Waiting for backend to be ready..."
-        for i in {1..30}; do
-          if curl -f http://localhost:9876/health > /dev/null 2>&1; then
-            echo "✅ Backend is ready!"
-            break
-          fi
-          echo "⏳ Attempt $i/30: Backend not ready yet, waiting 2 seconds..."
-          sleep 2
-        done
-
-        # Verify backend is responding
-        curl -f http://localhost:9876/health || {
-          echo "❌ Backend health check failed"
-          exit 1
-        }
-        echo "✅ Backend is fully functional!"
 
     - name: Download optimized E2E containers
       uses: actions/download-artifact@v4
@@ -1836,7 +1810,7 @@ jobs:
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
           -p 3000:3000 \
-          econ-graph-e2e:latest \
+          econ-graph-e2e-optimized:latest \
           npx serve -s build -l 3000
 
         # Wait for frontend to be ready
@@ -1918,6 +1892,7 @@ jobs:
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         diesel migration run
+      working-directory: backend
 
     - name: Wait for PostgreSQL to be ready
       run: |
@@ -1939,34 +1914,6 @@ jobs:
         }
         echo "✅ PostgreSQL is fully functional!"
 
-    - name: Build and start backend
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo build --release --bin econ-graph-backend
-        echo "🚀 Starting backend server..."
-        # Use pre-built binary directly to avoid recompiling dependencies
-        ./target/release/econ-graph-backend &
-        BACKEND_PID=$!
-        echo "Backend PID: $BACKEND_PID"
-
-        # Wait for backend to be ready
-        echo "🔍 Waiting for backend to be ready..."
-        for i in {1..30}; do
-          if curl -f http://localhost:9876/health > /dev/null 2>&1; then
-            echo "✅ Backend is ready!"
-            break
-          fi
-          echo "⏳ Attempt $i/30: Backend not ready yet, waiting 2 seconds..."
-          sleep 2
-        done
-
-        # Verify backend is responding
-        curl -f http://localhost:9876/health || {
-          echo "❌ Backend health check failed"
-          exit 1
-        }
-        echo "✅ Backend is fully functional!"
-
     - name: Download optimized E2E containers
       uses: actions/download-artifact@v4
       with:
@@ -1979,12 +1926,31 @@ jobs:
 
     # Backend is already built in the optimized container, no need to build it again
 
+    - name: Start backend service
+      run: |
+        # Use the pre-built backend binary from the optimized container
+        docker run --rm -d --name backend-server \
+          -p 9876:9876 \
+          -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          econ-graph-e2e-optimized:latest \
+          ./backend/econ-graph-backend
+
+        # Wait for backend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:9876/health 2>/dev/null; then
+            echo "Backend is ready!"
+            break
+          fi
+          echo "Waiting for backend... ($i/30)"
+          sleep 2
+        done
+
     - name: Start frontend service
       run: |
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
           -p 3000:3000 \
-          econ-graph-e2e-mobile:latest \
+          econ-graph-e2e-mobile-optimized:latest \
           npx serve -s build -l 3000
 
         # Wait for frontend to be ready
@@ -2008,6 +1974,7 @@ jobs:
     - name: Stop services
       if: always()
       run: |
+        docker stop backend-server || true
         docker stop frontend-server || true
 
   docker-build:
