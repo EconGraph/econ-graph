@@ -65,6 +65,7 @@ rand = "0.8"
 
 # Metrics
 prometheus = "0.14"
+sysinfo = "0.30"
 
 # Logging
 tracing = "0.1"
