@@ -18,6 +18,9 @@ WORKDIR /app/backend
 COPY backend/ ./
 COPY rust-toolchain.toml /app/
 
+# Install diesel CLI (required for backend build)
+RUN cargo install diesel_cli --no-default-features --features postgres --verbose --force
+
 # Build backend binary in release mode
 RUN cargo build --release --bin econ-graph-backend
 
