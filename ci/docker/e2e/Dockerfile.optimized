@@ -14,8 +14,9 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app/backend
 
-# Copy backend source code
+# Copy backend source code and rust toolchain
 COPY backend/ ./
+COPY rust-toolchain.toml /app/
 
 # Build backend binary in release mode
 RUN cargo build --release --bin econ-graph-backend
