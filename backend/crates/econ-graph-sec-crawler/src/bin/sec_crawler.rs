@@ -186,6 +186,7 @@ async fn crawl_company_command(
         exclude_amended,
         exclude_restated,
         user_agent: "EconGraph-SEC-Crawler/1.0".to_string(),
+        max_concurrent_requests: Some(3),
     };
 
     // Create crawler with custom config

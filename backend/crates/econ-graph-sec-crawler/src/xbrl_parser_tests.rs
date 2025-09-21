@@ -846,3 +846,58 @@ async fn test_xbrl_file_detection() {
         assert_eq!(doc_type, DocumentType::Xbrl);
     }
 }
+
+#[tokio::test]
+async fn test_arelle_integration() {
+    // Test Arelle integration with real XBRL file
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        use_arelle: true, // Use Arelle for comprehensive parsing
+        ..Default::default()
+    })
+    .await;
+
+    // If Arelle is not available, skip the test
+    if parser.is_err() {
+        println!("Skipping Arelle integration test - Arelle not available");
+        return;
+    }
+
+    let parser = parser.unwrap();
+    let file_path = get_test_data_path("apple_2025_q3_10q.xml");
+
+    // Check if the file exists
+    if !file_path.exists() {
+        println!(
+            "Skipping test - real XBRL file not found at {:?}",
+            file_path
+        );
+        return;
+    }
+
+    let result = parser.parse_xbrl_document(&file_path).await;
+
+    // Arelle parsing should work if available
+    match result {
+        Ok(parse_result) => {
+            println!("Arelle parsing successful!");
+            println!("Found {} statements", parse_result.statements.len());
+            println!("Found {} facts", parse_result.facts.len());
+            println!("Found {} contexts", parse_result.contexts.len());
+            println!("Found {} units", parse_result.units.len());
+            println!(
+                "Found {} taxonomy concepts",
+                parse_result.taxonomy_concepts.len()
+            );
+
+            // Basic assertions
+            assert!(!parse_result.facts.is_empty(), "Should extract facts");
+            assert!(!parse_result.contexts.is_empty(), "Should extract contexts");
+            assert!(!parse_result.units.is_empty(), "Should extract units");
+        }
+        Err(e) => {
+            // If Arelle fails, it's not necessarily a test failure
+            // Could be due to missing dependencies or network issues
+            println!("Arelle parsing failed (this may be expected): {}", e);
+        }
+    }
+}

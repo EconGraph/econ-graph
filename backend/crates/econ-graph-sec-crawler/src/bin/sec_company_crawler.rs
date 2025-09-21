@@ -115,6 +115,7 @@ async fn main() -> Result<()> {
         exclude_amended: cli.exclude_amended,
         exclude_restated: cli.exclude_restated,
         user_agent: "EconGraph-SEC-Company-Crawler/1.0".to_string(),
+        max_concurrent_requests: Some(cli.max_concurrent),
     };
 
     // Initialize database connection

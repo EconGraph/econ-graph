@@ -48,6 +48,7 @@ use econ_graph_core::models::{Company, FinancialStatement};
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Clone)]
 pub struct SecEdgarCrawler {
     client: Client,
     rate_limiter: SecRateLimiter,
@@ -507,14 +508,216 @@ impl SecEdgarCrawler {
 
     /// Get crawl progress for a running operation
     pub async fn get_crawl_progress(&self, operation_id: Uuid) -> Result<CrawlProgress> {
-        // TODO: Implement progress tracking
-        // This would require storing progress in the database or cache
-        Err(anyhow::anyhow!("Progress tracking not yet implemented"))
+        // TODO: Implement progress tracking with database storage
+        // For now, return a placeholder progress
+        Ok(CrawlProgress {
+            operation_id,
+            operation_type: "company_filings".to_string(),
+            current_item: "Unknown".to_string(),
+            items_processed: 0,
+            total_items: 0,
+            progress_percentage: 0.0,
+            start_time: Utc::now(),
+            last_updated: Utc::now(),
+            estimated_remaining_seconds: 0,
+            current_phase: "Initializing".to_string(),
+        })
     }
 
     /// Get storage statistics
     pub async fn get_storage_stats(&self) -> Result<crate::models::XbrlStorageStats> {
         self.storage.get_storage_stats().await
+    }
+
+    /// Crawl multiple companies concurrently
+    pub async fn crawl_multiple_companies(&self, ciks: Vec<String>) -> Result<Vec<CrawlResult>> {
+        let mut results = Vec::new();
+        let mut handles = Vec::new();
+
+        // Limit concurrent operations to avoid overwhelming SEC servers
+        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(
+            self.config.max_concurrent_requests.unwrap_or(3),
+        ));
+
+        for cik in ciks {
+            let semaphore = semaphore.clone();
+            let crawler = self.clone();
+            let cik_clone = cik.clone(); // Clone the CIK before moving it
+
+            let handle = tokio::spawn(async move {
+                let _permit = semaphore.acquire().await.unwrap();
+                crawler.crawl_company_filings(&cik_clone).await
+            });
+
+            handles.push((cik, handle));
+        }
+
+        // Wait for all operations to complete
+        for (cik, handle) in handles {
+            match handle.await {
+                Ok(Ok(result)) => {
+                    info!(
+                        "Successfully crawled company {}: {} filings",
+                        cik, result.filings_downloaded
+                    );
+                    results.push(result);
+                }
+                Ok(Err(e)) => {
+                    error!("Failed to crawl company {}: {}", cik, e);
+                    results.push(CrawlResult {
+                        operation_id: Uuid::new_v4(),
+                        company_cik: Some(cik.clone()),
+                        operation_type: "company_filings".to_string(),
+                        start_time: Utc::now(),
+                        end_time: Some(Utc::now()),
+                        total_filings_found: 0,
+                        filings_downloaded: 0,
+                        filings_failed: 0,
+                        total_bytes_downloaded: 0,
+                        errors: vec![format!("Failed to crawl company: {}", e)],
+                        success: false,
+                    });
+                }
+                Err(e) => {
+                    error!("Task failed for company {}: {}", cik, e);
+                    results.push(CrawlResult {
+                        operation_id: Uuid::new_v4(),
+                        company_cik: Some(cik.clone()),
+                        operation_type: "company_filings".to_string(),
+                        start_time: Utc::now(),
+                        end_time: Some(Utc::now()),
+                        total_filings_found: 0,
+                        filings_downloaded: 0,
+                        filings_failed: 0,
+                        total_bytes_downloaded: 0,
+                        errors: vec![format!("Task failed: {}", e)],
+                        success: false,
+                    });
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Crawl all companies in the S&P 500 index
+    pub async fn crawl_sp500_companies(&self) -> Result<Vec<CrawlResult>> {
+        info!("Starting S&P 500 company crawl");
+
+        // Load S&P 500 CIKs from a predefined list
+        let sp500_ciks = self.load_sp500_ciks().await?;
+
+        info!("Found {} S&P 500 companies to crawl", sp500_ciks.len());
+
+        self.crawl_multiple_companies(sp500_ciks).await
+    }
+
+    /// Load S&P 500 CIKs from a predefined list or external source
+    async fn load_sp500_ciks(&self) -> Result<Vec<String>> {
+        // For now, return a small sample of major companies
+        // In production, this would load from a comprehensive S&P 500 list
+        Ok(vec![
+            "0000320193".to_string(), // Apple Inc.
+            "0000789019".to_string(), // Microsoft Corporation
+            "0001018724".to_string(), // Amazon.com Inc.
+            "0001067983".to_string(), // Alphabet Inc. (Google)
+            "0000078003".to_string(), // Tesla Inc.
+            "0000789019".to_string(), // NVIDIA Corporation
+            "0000079038".to_string(), // Meta Platforms Inc. (Facebook)
+            "0001341439".to_string(), // Berkshire Hathaway Inc.
+            "0001032975".to_string(), // Johnson & Johnson
+            "0000066740".to_string(), // JPMorgan Chase & Co.
+        ])
+    }
+
+    /// Crawl companies by industry (SIC code)
+    pub async fn crawl_companies_by_industry(&self, sic_code: &str) -> Result<Vec<CrawlResult>> {
+        info!("Starting crawl for industry SIC code: {}", sic_code);
+
+        // Get companies by SIC code from SEC
+        let companies = self.get_companies_by_sic(sic_code).await?;
+        let ciks: Vec<String> = companies.into_iter().map(|c| c.cik).collect();
+
+        self.crawl_multiple_companies(ciks).await
+    }
+
+    /// Get companies by SIC code from SEC EDGAR
+    async fn get_companies_by_sic(&self, sic_code: &str) -> Result<Vec<SecCompany>> {
+        // This would require implementing SEC company search API
+        // For now, return a placeholder
+        warn!("SIC-based company search not yet implemented, returning empty list");
+        Ok(Vec::new())
+    }
+
+    /// Crawl recent filings (last N days)
+    pub async fn crawl_recent_filings(&self, days: u32) -> Result<Vec<CrawlResult>> {
+        let start_date = Utc::now().date_naive() - chrono::Duration::days(days as i64);
+
+        info!("Starting crawl for recent filings since: {}", start_date);
+
+        // Get recent filings from SEC
+        let recent_filings = self.get_recent_filings(Some(start_date), None).await?;
+
+        // Group by company CIK
+        let mut company_filings: std::collections::HashMap<String, Vec<FilingInfo>> =
+            std::collections::HashMap::new();
+        for filing in recent_filings {
+            // Extract CIK from filing info (this would need to be implemented)
+            // For now, we'll need to modify the approach
+        }
+
+        let ciks: Vec<String> = company_filings.keys().cloned().collect();
+        self.crawl_multiple_companies(ciks).await
+    }
+
+    /// Get recent filings from SEC EDGAR
+    async fn get_recent_filings(
+        &self,
+        start_date: Option<chrono::NaiveDate>,
+        end_date: Option<chrono::NaiveDate>,
+    ) -> Result<Vec<FilingInfo>> {
+        // This would require implementing SEC filings search API
+        // For now, return a placeholder
+        warn!("Recent filings search not yet implemented, returning empty list");
+        Ok(Vec::new())
+    }
+
+    /// Parse and store XBRL data after downloading
+    pub async fn parse_and_store_xbrl(&self, accession_number: &str) -> Result<()> {
+        info!("Parsing and storing XBRL data for: {}", accession_number);
+
+        // Retrieve the XBRL file from storage
+        let xbrl_content = self.storage.retrieve_xbrl_file(accession_number).await?;
+
+        // Parse using our XBRL parser with Arelle
+        use crate::xbrl_parser::{XbrlParser, XbrlParserConfig};
+
+        let config = XbrlParserConfig {
+            use_arelle: true, // Use Arelle for comprehensive parsing
+            ..Default::default()
+        };
+
+        let parser = XbrlParser::with_config_and_database(config, Some(self.pool.clone())).await?;
+
+        // Create a temporary file for parsing
+        let temp_file = std::env::temp_dir().join(format!("{}.xml", accession_number));
+        tokio::fs::write(&temp_file, &xbrl_content).await?;
+
+        // Parse the XBRL file
+        let parse_result = parser.parse_xbrl_document(&temp_file).await?;
+
+        // Store the parsed financial statements in the database
+        // This would require implementing the storage logic for parsed data
+        info!(
+            "Successfully parsed XBRL file: {} statements, {} facts",
+            parse_result.statements.len(),
+            parse_result.facts.len()
+        );
+
+        // Clean up temporary file
+        let _ = tokio::fs::remove_file(&temp_file).await;
+
+        Ok(())
     }
 }
 

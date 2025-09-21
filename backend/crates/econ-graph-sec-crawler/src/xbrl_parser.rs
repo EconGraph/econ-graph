@@ -132,8 +132,10 @@ impl XbrlParser {
             .await
             .context("Failed to create cache directory")?;
 
-        // Verify Arelle is available
-        Self::verify_arelle_installation(&config).await?;
+        // Verify Arelle is available only if using Arelle
+        if config.use_arelle {
+            Self::verify_arelle_installation(&config).await?;
+        }
 
         let cache = XbrlCache::new(config.cache_dir.clone());
         let taxonomy_cache = TaxonomyCache::new();
@@ -424,10 +426,15 @@ impl XbrlParser {
         // Determine which script to use based on DTS manager availability
         let script_path = if self.dts_manager.is_some() {
             // Use simplified script with DTS support
-            "/Users/josephmalicki/src/econ-graph/backend/crates/econ-graph-sec-crawler/scripts/simple_arelle_parser.py"
+            let mut script_path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            script_path
+                .push("backend/crates/econ-graph-sec-crawler/scripts/simple_arelle_parser.py");
+            script_path
         } else {
-            // Use basic script
-            "/Users/josephmalicki/src/econ-graph/test_arelle.py"
+            // Use basic script (fallback)
+            let mut script_path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            script_path.push("test_arelle.py");
+            script_path
         };
 
         let mut cmd = AsyncCommand::new("python3");

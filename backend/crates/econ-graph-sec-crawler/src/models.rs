@@ -313,6 +313,9 @@ pub struct CrawlConfig {
 
     /// User agent string for HTTP requests
     pub user_agent: String,
+
+    /// Maximum number of concurrent requests
+    pub max_concurrent_requests: Option<usize>,
 }
 
 impl Default for CrawlConfig {
@@ -329,6 +332,7 @@ impl Default for CrawlConfig {
             exclude_restated: false,
             user_agent: "EconGraph Research Tool AdminContact@jmalicki+econgraph@gmail.com"
                 .to_string(),
+            max_concurrent_requests: Some(3),
         }
     }
 }

@@ -42,6 +42,7 @@ impl Default for XbrlStorageConfig {
 }
 
 /// XBRL file storage implementation using PostgreSQL
+#[derive(Clone)]
 pub struct XbrlStorage {
     pool: DatabasePool,
     config: XbrlStorageConfig,
