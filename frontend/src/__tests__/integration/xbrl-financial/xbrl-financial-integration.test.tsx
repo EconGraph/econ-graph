@@ -1,0 +1,767 @@
+/**
+ * Integration tests for XBRL financial statement features
+ * 
+ * These tests verify the complete flow from XBRL data through financial analysis
+ * and ensure proper integration between frontend components and backend APIs.
+ */
+
+import React from 'react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import '@testing-library/jest-dom';
+import { QueryClient, QueryClientProvider } from 'react-query';
+import { BrowserRouter } from 'react-router-dom';
+
+// Import the components we're testing
+import { FinancialDashboard } from '../../../components/financial/FinancialDashboard';
+import { FinancialStatementViewer } from '../../../components/financial/FinancialStatementViewer';
+import { BenchmarkComparison } from '../../../components/financial/BenchmarkComparison';
+import { TrendAnalysisChart } from '../../../components/financial/TrendAnalysisChart';
+
+// Mock the API calls
+const mockFetch = jest.fn();
+global.fetch = mockFetch;
+
+// Mock financial data
+const mockCompany = {
+  id: 'test-company-1',
+  cik: '0000320193',
+  name: 'Apple Inc.',
+  ticker: 'AAPL',
+  industry: 'Computer Hardware',
+  sector: 'Technology'
+};
+
+const mockFinancialStatements = [
+  {
+    id: 'statement-1',
+    companyId: 'test-company-1',
+    statementType: 'balanceSheet',
+    periodStart: null,
+    periodEnd: '2023-12-30',
+    filingDate: '2024-01-15',
+    sourceInstanceId: 'instance-1',
+    lineItems: [
+      {
+        id: 'item-1',
+        statementId: 'statement-1',
+        conceptName: 'Assets',
+        displayName: 'Total Assets',
+        value: 352755000000,
+        unit: 'USD',
+        decimals: -6,
+        isInstant: true,
+        isDuration: false,
+        parentConcept: null,
+        level: 0
+      },
+      {
+        id: 'item-2',
+        statementId: 'statement-1',
+        conceptName: 'AssetsCurrent',
+        displayName: 'Current Assets',
+        value: 143566000000,
+        unit: 'USD',
+        decimals: -6,
+        isInstant: true,
+        isDuration: false,
+        parentConcept: 'Assets',
+        level: 1
+      },
+      {
+        id: 'item-3',
+        statementId: 'statement-1',
+        conceptName: 'Liabilities',
+        displayName: 'Total Liabilities',
+        value: 258549000000,
+        unit: 'USD',
+        decimals: -6,
+        isInstant: true,
+        isDuration: false,
+        parentConcept: null,
+        level: 0
+      },
+      {
+        id: 'item-4',
+        statementId: 'statement-1',
+        conceptName: 'StockholdersEquity',
+        displayName: "Stockholders' Equity",
+        value: 94206000000,
+        unit: 'USD',
+        decimals: -6,
+        isInstant: true,
+        isDuration: false,
+        parentConcept: null,
+        level: 0
+      }
+    ]
+  },
+  {
+    id: 'statement-2',
+    companyId: 'test-company-1',
+    statementType: 'incomeStatement',
+    periodStart: '2023-01-01',
+    periodEnd: '2023-12-30',
+    filingDate: '2024-01-15',
+    sourceInstanceId: 'instance-2',
+    lineItems: [
+      {
+        id: 'item-5',
+        statementId: 'statement-2',
+        conceptName: 'Revenues',
+        displayName: 'Net Sales',
+        value: 383285000000,
+        unit: 'USD',
+        decimals: -6,
+        isInstant: false,
+        isDuration: true,
+        parentConcept: null,
+        level: 0
+      },
+      {
+        id: 'item-6',
+        statementId: 'statement-2',
+        conceptName: 'NetIncomeLoss',
+        displayName: 'Net Income',
+        value: 96995000000,
+        unit: 'USD',
+        decimals: -6,
+        isInstant: false,
+        isDuration: true,
+        parentConcept: null,
+        level: 0
+      }
+    ]
+  }
+];
+
+const mockFinancialRatios = [
+  {
+    id: 'ratio-1',
+    companyId: 'test-company-1',
+    ratioName: 'returnOnEquity',
+    ratioDisplayName: 'Return on Equity',
+    value: 0.147,
+    periodStart: '2023-01-01',
+    periodEnd: '2023-12-30',
+    calculationMethod: 'Net Income / Average Stockholders Equity',
+    industryBenchmark: 0.12,
+    percentileRank: 75
+  },
+  {
+    id: 'ratio-2',
+    companyId: 'test-company-1',
+    ratioName: 'netProfitMargin',
+    ratioDisplayName: 'Net Profit Margin',
+    value: 0.253,
+    periodStart: '2023-01-01',
+    periodEnd: '2023-12-30',
+    calculationMethod: 'Net Income / Revenue',
+    industryBenchmark: 0.12,
+    percentileRank: 95
+  }
+];
+
+const mockBenchmarkData = {
+  ratioName: 'returnOnEquity',
+  ratioDisplayName: 'Return on Equity',
+  companyValue: 0.147,
+  industryP10: 0.08,
+  industryP25: 0.10,
+  industryMedian: 0.12,
+  industryP75: 0.15,
+  industryP90: 0.18,
+  percentile: 75.0,
+  performance: 'Above Average',
+  lastUpdated: '2024-01-15T10:30:00Z'
+};
+
+// Helper function to create a test wrapper with providers
+const createTestWrapper = () => {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
+  return ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        {children}
+      </BrowserRouter>
+    </QueryClientProvider>
+  );
+};
+
+describe('XBRL Financial Integration Tests', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    
+    // Mock successful API responses
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/companies/')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockCompany)
+        });
+      }
+      if (url.includes('/api/financial-statements')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockFinancialStatements)
+        });
+      }
+      if (url.includes('/api/financial-ratios')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockFinancialRatios)
+        });
+      }
+      if (url.includes('/api/benchmark-data')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockBenchmarkData)
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404
+      });
+    });
+  });
+
+  describe('Financial Dashboard Integration', () => {
+    it('should load and display company financial data from XBRL sources', async () => {
+      const TestWrapper = createTestWrapper();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <FinancialDashboard 
+              companyId="test-company-1" 
+              userType="intermediate" 
+              showEducationalContent={true} 
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Wait for data to load
+      await waitFor(() => {
+        expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
+      });
+
+      // Verify company information is displayed
+      expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
+      expect(screen.getByText('AAPL')).toBeInTheDocument();
+      expect(screen.getByText('Computer Hardware')).toBeInTheDocument();
+    });
+
+    it('should display financial ratios calculated from XBRL data', async () => {
+      const TestWrapper = createTestWrapper();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <FinancialDashboard 
+              companyId="test-company-1" 
+              userType="intermediate" 
+              showEducationalContent={false} 
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Wait for ratios to load
+      await waitFor(() => {
+        expect(screen.getByText('Return on Equity')).toBeInTheDocument();
+      });
+
+      // Verify key ratios are displayed
+      expect(screen.getByText('Return on Equity')).toBeInTheDocument();
+      expect(screen.getByText('Net Profit Margin')).toBeInTheDocument();
+      expect(screen.getByText('14.7%')).toBeInTheDocument();
+      expect(screen.getByText('25.3%')).toBeInTheDocument();
+    });
+
+    it('should show benchmark comparisons with industry data', async () => {
+      const TestWrapper = createTestWrapper();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <FinancialDashboard 
+              companyId="test-company-1" 
+              userType="advanced" 
+              showEducationalContent={false} 
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Wait for benchmark data to load
+      await waitFor(() => {
+        expect(screen.getByText(/Industry Benchmark/)).toBeInTheDocument();
+      });
+
+      // Verify benchmark information is displayed
+      expect(screen.getByText(/Industry Benchmark/)).toBeInTheDocument();
+      expect(screen.getByText('75.0%')).toBeInTheDocument();
+      expect(screen.getByText('Above Average')).toBeInTheDocument();
+    });
+  });
+
+  describe('Financial Statement Viewer Integration', () => {
+    it('should display balance sheet data from XBRL parsing', async () => {
+      const TestWrapper = createTestWrapper();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <FinancialStatementViewer 
+              companyId="test-company-1"
+              statementType="balanceSheet"
+              periodEnd="2023-12-30"
+              showEducationalContent={false}
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Wait for statement data to load
+      await waitFor(() => {
+        expect(screen.getByText('Total Assets')).toBeInTheDocument();
+      });
+
+      // Verify balance sheet line items are displayed
+      expect(screen.getByText('Total Assets')).toBeInTheDocument();
+      expect(screen.getByText('Current Assets')).toBeInTheDocument();
+      expect(screen.getByText('Total Liabilities')).toBeInTheDocument();
+      expect(screen.getByText("Stockholders' Equity")).toBeInTheDocument();
+
+      // Verify values are formatted correctly
+      expect(screen.getByText('$352.76B')).toBeInTheDocument();
+      expect(screen.getByText('$143.57B')).toBeInTheDocument();
+      expect(screen.getByText('$258.55B')).toBeInTheDocument();
+      expect(screen.getByText('$94.21B')).toBeInTheDocument();
+    });
+
+    it('should display income statement data from XBRL parsing', async () => {
+      const TestWrapper = createTestWrapper();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <FinancialStatementViewer 
+              companyId="test-company-1"
+              statementType="incomeStatement"
+              periodEnd="2023-12-30"
+              showEducationalContent={false}
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Wait for statement data to load
+      await waitFor(() => {
+        expect(screen.getByText('Net Sales')).toBeInTheDocument();
+      });
+
+      // Verify income statement line items are displayed
+      expect(screen.getByText('Net Sales')).toBeInTheDocument();
+      expect(screen.getByText('Net Income')).toBeInTheDocument();
+
+      // Verify values are formatted correctly
+      expect(screen.getByText('$383.29B')).toBeInTheDocument();
+      expect(screen.getByText('$96.99B')).toBeInTheDocument();
+    });
+
+    it('should handle hierarchical line item display', async () => {
+      const TestWrapper = createTestWrapper();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <FinancialStatementViewer 
+              companyId="test-company-1"
+              statementType="balanceSheet"
+              periodEnd="2023-12-30"
+              showEducationalContent={false}
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Wait for statement data to load
+      await waitFor(() => {
+        expect(screen.getByText('Total Assets')).toBeInTheDocument();
+      });
+
+      // Verify hierarchical structure is displayed
+      const totalAssetsRow = screen.getByText('Total Assets').closest('tr');
+      const currentAssetsRow = screen.getByText('Current Assets').closest('tr');
+      
+      expect(totalAssetsRow).toBeInTheDocument();
+      expect(currentAssetsRow).toBeInTheDocument();
+      
+      // Current Assets should be indented under Total Assets
+      const currentAssetsCell = currentAssetsRow?.querySelector('td:first-child');
+      expect(currentAssetsCell).toHaveClass('pl-4'); // Indentation class
+    });
+  });
+
+  describe('Benchmark Comparison Integration', () => {
+    it('should display industry benchmark data for XBRL-derived ratios', async () => {
+      const TestWrapper = createTestWrapper();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <BenchmarkComparison
+              ratioName="returnOnEquity"
+              ratioDisplayName="Return on Equity"
+              companyValue={0.147}
+              benchmarkData={mockBenchmarkData}
+              showDetailedBreakdown={true}
+              showTrendIndicators={false}
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Verify benchmark data is displayed
+      expect(screen.getByText('Industry Benchmark: returnOnEquity')).toBeInTheDocument();
+      expect(screen.getByText('Company Value:')).toBeInTheDocument();
+      expect(screen.getByText('0.15')).toBeInTheDocument();
+      expect(screen.getByText('Industry Percentile:')).toBeInTheDocument();
+      expect(screen.getByText('75.0%')).toBeInTheDocument();
+      expect(screen.getByText('Above Average')).toBeInTheDocument();
+    });
+
+    it('should show industry distribution percentiles', async () => {
+      const TestWrapper = createTestWrapper();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <BenchmarkComparison
+              ratioName="returnOnEquity"
+              ratioDisplayName="Return on Equity"
+              companyValue={0.147}
+              benchmarkData={mockBenchmarkData}
+              showDetailedBreakdown={true}
+              showTrendIndicators={false}
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Verify industry distribution is displayed
+      expect(screen.getByText('Industry Distribution')).toBeInTheDocument();
+      expect(screen.getByText('P10:')).toBeInTheDocument();
+      expect(screen.getByText('0.08')).toBeInTheDocument();
+      expect(screen.getByText('P25:')).toBeInTheDocument();
+      expect(screen.getByText('0.10')).toBeInTheDocument();
+      expect(screen.getByText('Median:')).toBeInTheDocument();
+      expect(screen.getByText('0.12')).toBeInTheDocument();
+      expect(screen.getByText('P75:')).toBeInTheDocument();
+      expect(screen.getByText('0.15')).toBeInTheDocument();
+      expect(screen.getByText('P90:')).toBeInTheDocument();
+      expect(screen.getByText('0.18')).toBeInTheDocument();
+    });
+  });
+
+  describe('Trend Analysis Integration', () => {
+    const mockTrendData = {
+      ratioName: 'returnOnEquity',
+      ratioDisplayName: 'Return on Equity',
+      periods: [
+        { period: '2021-12-31', value: 0.135, percentile: 65 },
+        { period: '2022-12-31', value: 0.141, percentile: 70 },
+        { period: '2023-12-31', value: 0.147, percentile: 75 }
+      ],
+      trend: 'improving' as const,
+      trendStrength: 0.8
+    };
+
+    it('should display trend analysis for XBRL-derived financial ratios', async () => {
+      const TestWrapper = createTestWrapper();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <TrendAnalysisChart
+              data={mockTrendData}
+              showPercentileRank={true}
+              showTrendIndicators={true}
+              userType="intermediate"
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Verify trend data is displayed
+      expect(screen.getByText('Return on Equity Trend Analysis')).toBeInTheDocument();
+      expect(screen.getByText('2021')).toBeInTheDocument();
+      expect(screen.getByText('2022')).toBeInTheDocument();
+      expect(screen.getByText('2023')).toBeInTheDocument();
+    });
+
+    it('should show trend direction and strength', async () => {
+      const TestWrapper = createTestWrapper();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <TrendAnalysisChart
+              data={mockTrendData}
+              showPercentileRank={true}
+              showTrendIndicators={true}
+              userType="advanced"
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Verify trend indicators are displayed
+      expect(screen.getByText(/Trend:/)).toBeInTheDocument();
+      expect(screen.getByText(/Improving/)).toBeInTheDocument();
+      expect(screen.getByText(/Strength:/)).toBeInTheDocument();
+      expect(screen.getByText(/80%/)).toBeInTheDocument();
+    });
+  });
+
+  describe('XBRL Data Processing Integration', () => {
+    it('should handle XBRL instance document processing status', async () => {
+      // Mock XBRL processing status
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/api/xbrl-instances/')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+              id: 'instance-1',
+              companyId: 'test-company-1',
+              accessionNumber: '0000320193-24-000006',
+              processingStatus: 'processed',
+              factsCount: 1250,
+              processedAt: '2024-01-15T10:30:00Z'
+            })
+          });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+
+      const TestWrapper = createTestWrapper();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <FinancialDashboard 
+              companyId="test-company-1" 
+              userType="intermediate" 
+              showEducationalContent={false} 
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Wait for processing status to load
+      await waitFor(() => {
+        expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
+      });
+
+      // Verify that processed data is displayed
+      expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
+    });
+
+    it('should handle XBRL taxonomy schema references', async () => {
+      // Mock taxonomy schema data
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/api/xbrl-taxonomies/')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve([
+              {
+                id: 'taxonomy-1',
+                namespace: 'http://fasb.org/us-gaap/2023',
+                prefix: 'us-gaap',
+                version: '2023',
+                fileType: 'schema',
+                sourceType: 'standard'
+              }
+            ])
+          });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+
+      const TestWrapper = createTestWrapper();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <FinancialStatementViewer 
+              companyId="test-company-1"
+              statementType="balanceSheet"
+              periodEnd="2023-12-30"
+              showEducationalContent={true}
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Wait for taxonomy data to load
+      await waitFor(() => {
+        expect(screen.getByText('Total Assets')).toBeInTheDocument();
+      });
+
+      // Verify that data is displayed using correct taxonomy concepts
+      expect(screen.getByText('Total Assets')).toBeInTheDocument();
+      expect(screen.getByText('Current Assets')).toBeInTheDocument();
+    });
+  });
+
+  describe('Error Handling Integration', () => {
+    it('should handle XBRL parsing errors gracefully', async () => {
+      // Mock XBRL parsing error
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/api/financial-statements')) {
+          return Promise.resolve({
+            ok: false,
+            status: 500,
+            json: () => Promise.resolve({
+              error: 'XBRL parsing failed',
+              details: 'Invalid XML structure'
+            })
+          });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+
+      const TestWrapper = createTestWrapper();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <FinancialStatementViewer 
+              companyId="test-company-1"
+              statementType="balanceSheet"
+              periodEnd="2023-12-30"
+              showEducationalContent={false}
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Wait for error to be handled
+      await waitFor(() => {
+        expect(screen.getByText(/Error loading financial data/)).toBeInTheDocument();
+      });
+
+      // Verify error message is displayed
+      expect(screen.getByText(/Error loading financial data/)).toBeInTheDocument();
+    });
+
+    it('should handle missing XBRL taxonomy schemas', async () => {
+      // Mock missing taxonomy error
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/api/xbrl-taxonomies/')) {
+          return Promise.resolve({
+            ok: false,
+            status: 404,
+            json: () => Promise.resolve({
+              error: 'Taxonomy schema not found',
+              details: 'Required US-GAAP taxonomy not available'
+            })
+          });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+
+      const TestWrapper = createTestWrapper();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <FinancialDashboard 
+              companyId="test-company-1" 
+              userType="intermediate" 
+              showEducationalContent={false} 
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Wait for error to be handled
+      await waitFor(() => {
+        expect(screen.getByText(/Taxonomy schema not found/)).toBeInTheDocument();
+      });
+
+      // Verify error message is displayed
+      expect(screen.getByText(/Taxonomy schema not found/)).toBeInTheDocument();
+    });
+  });
+
+  describe('Performance Integration', () => {
+    it('should handle large XBRL datasets efficiently', async () => {
+      // Mock large dataset
+      const largeDataset = Array.from({ length: 1000 }, (_, i) => ({
+        id: `item-${i}`,
+        statementId: 'statement-1',
+        conceptName: `Concept${i}`,
+        displayName: `Concept ${i}`,
+        value: Math.random() * 1000000,
+        unit: 'USD',
+        decimals: -6,
+        isInstant: true,
+        isDuration: false,
+        parentConcept: i > 0 ? `Concept${i-1}` : null,
+        level: Math.floor(i / 100)
+      }));
+
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/api/financial-statements')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve([{
+              ...mockFinancialStatements[0],
+              lineItems: largeDataset
+            }])
+          });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+
+      const TestWrapper = createTestWrapper();
+      const startTime = performance.now();
+      
+      await act(async () => {
+        render(
+          <TestWrapper>
+            <FinancialStatementViewer 
+              companyId="test-company-1"
+              statementType="balanceSheet"
+              periodEnd="2023-12-30"
+              showEducationalContent={false}
+            />
+          </TestWrapper>
+        );
+      });
+
+      // Wait for large dataset to load
+      await waitFor(() => {
+        expect(screen.getByText('Total Assets')).toBeInTheDocument();
+      });
+
+      const endTime = performance.now();
+      const loadTime = endTime - startTime;
+
+      // Verify performance is acceptable (should load within 2 seconds)
+      expect(loadTime).toBeLessThan(2000);
+      
+      // Verify data is displayed
+      expect(screen.getByText('Total Assets')).toBeInTheDocument();
+    });
+  });
+});

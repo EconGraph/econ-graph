@@ -1,0 +1,396 @@
+import React, { useState, useMemo } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  TrendingUp,
+  TrendingDown,
+  BarChart3,
+  LineChart,
+  Calendar,
+  Filter,
+  Download,
+  RefreshCw,
+} from 'lucide-react';
+import { FinancialStatement, FinancialRatio } from '@/types/financial';
+
+interface TrendAnalysisChartProps {
+  ratios: FinancialRatio[];
+  statements: FinancialStatement[];
+  timeRange: '1Y' | '3Y' | '5Y' | '10Y';
+  onTimeRangeChange: (range: '1Y' | '3Y' | '5Y' | '10Y') => void;
+  selectedRatios?: string[];
+  onRatioSelectionChange?: (ratios: string[]) => void;
+}
+
+export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
+  ratios,
+  statements,
+  timeRange,
+  onTimeRangeChange,
+  selectedRatios = [],
+  onRatioSelectionChange,
+}) => {
+  const [chartType, setChartType] = useState<'line' | 'bar'>('line');
+  const [showProjections, setShowProjections] = useState(false);
+
+  // Group ratios by name and sort by period
+  const ratioTrends = useMemo(() => {
+    const grouped = ratios.reduce((acc, ratio) => {
+      if (!acc[ratio.ratioName]) {
+        acc[ratio.ratioName] = [];
+      }
+      acc[ratio.ratioName].push({
+        ...ratio,
+        periodDate: new Date(ratio.periodEndDate),
+      });
+      return acc;
+    }, {} as Record<string, (FinancialRatio & { periodDate: Date })[]>);
+
+    // Sort each ratio group by date
+    Object.keys(grouped).forEach(ratioName => {
+      grouped[ratioName].sort((a, b) => a.periodDate.getTime() - b.periodDate.getTime());
+    });
+
+    return grouped;
+  }, [ratios]);
+
+  // Get available ratios for selection
+  const availableRatios = useMemo(() => {
+    return Object.keys(ratioTrends).map(ratioName => {
+      const firstRatio = ratioTrends[ratioName][0];
+      return {
+        name: ratioName,
+        displayName: firstRatio?.ratioDisplayName || ratioName,
+        category: firstRatio?.category || 'other',
+      };
+    });
+  }, [ratioTrends]);
+
+  // Filter ratios based on time range
+  const filteredRatioTrends = useMemo(() => {
+    const cutoffDate = new Date();
+    switch (timeRange) {
+      case '1Y':
+        cutoffDate.setFullYear(cutoffDate.getFullYear() - 1);
+        break;
+      case '3Y':
+        cutoffDate.setFullYear(cutoffDate.getFullYear() - 3);
+        break;
+      case '5Y':
+        cutoffDate.setFullYear(cutoffDate.getFullYear() - 5);
+        break;
+      case '10Y':
+        cutoffDate.setFullYear(cutoffDate.getFullYear() - 10);
+        break;
+    }
+
+    const filtered: typeof ratioTrends = {};
+    Object.keys(ratioTrends).forEach(ratioName => {
+      const filteredData = ratioTrends[ratioName].filter(
+        ratio => ratio.periodDate >= cutoffDate
+      );
+      if (filteredData.length > 0) {
+        filtered[ratioName] = filteredData;
+      }
+    });
+
+    return filtered;
+  }, [ratioTrends, timeRange]);
+
+  // Calculate trend direction and strength
+  const calculateTrend = (ratioData: (FinancialRatio & { periodDate: Date })[]): { direction: 'up' | 'down' | 'stable'; strength: number } => {
+    if (ratioData.length < 2) return { direction: 'stable', strength: 0 };
+
+    const first = ratioData[0].value;
+    const last = ratioData[ratioData.length - 1].value;
+    const change = last - first;
+    const changePercent = (change / first) * 100;
+
+    let direction: 'up' | 'down' | 'stable' = 'stable';
+    let strength = Math.abs(changePercent);
+
+    if (changePercent > 5) direction = 'up';
+    else if (changePercent < -5) direction = 'down';
+
+    return { direction, strength };
+  };
+
+  // Generate projection data (mock implementation)
+  const generateProjections = (ratioData: (FinancialRatio & { periodDate: Date })[]) => {
+    if (ratioData.length < 2) return [];
+
+    const lastTwo = ratioData.slice(-2);
+    const trend = lastTwo[1].value - lastTwo[0].value;
+    const projections = [];
+
+    for (let i = 1; i <= 4; i++) {
+      const projectedDate = new Date(lastTwo[1].periodDate);
+      projectedDate.setMonth(projectedDate.getMonth() + i * 3); // Quarterly projections
+
+      const projectedValue = lastTwo[1].value + (trend * i);
+      projections.push({
+        periodDate: projectedDate,
+        value: projectedValue,
+        isProjection: true,
+      });
+    }
+
+    return projections;
+  };
+
+  const formatValue = (value: number, ratioName: string) => {
+    // Determine if this is a percentage ratio
+    const percentageRatios = ['returnOnEquity', 'returnOnAssets', 'grossMargin', 'netMargin'];
+    if (percentageRatios.includes(ratioName)) {
+      return `${(value * 100).toFixed(1)}%`;
+    }
+    return value.toFixed(2);
+  };
+
+  const getTrendIcon = (direction: 'up' | 'down' | 'stable') => {
+    switch (direction) {
+      case 'up':
+        return <TrendingUp className="h-4 w-4 text-green-600" />;
+      case 'down':
+        return <TrendingDown className="h-4 w-4 text-red-600" />;
+      default:
+        return <div className="h-4 w-4 bg-gray-400 rounded-full" />;
+    }
+  };
+
+  const getTrendColor = (direction: 'up' | 'down' | 'stable') => {
+    switch (direction) {
+      case 'up':
+        return 'text-green-600';
+      case 'down':
+        return 'text-red-600';
+      default:
+        return 'text-gray-600';
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Controls */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center space-x-2">
+              <LineChart className="h-5 w-5" />
+              <span>Trend Analysis</span>
+            </CardTitle>
+            <div className="flex items-center space-x-2">
+              <Button
+                variant={chartType === 'line' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setChartType('line')}
+              >
+                <LineChart className="h-4 w-4 mr-2" />
+                Line
+              </Button>
+              <Button
+                variant={chartType === 'bar' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setChartType('bar')}
+              >
+                <BarChart3 className="h-4 w-4 mr-2" />
+                Bar
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <Calendar className="h-4 w-4" />
+              <span className="text-sm font-medium">Time Range:</span>
+              <Select value={timeRange} onValueChange={onTimeRangeChange}>
+                <SelectTrigger className="w-24">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1Y">1 Year</SelectItem>
+                  <SelectItem value="3Y">3 Years</SelectItem>
+                  <SelectItem value="5Y">5 Years</SelectItem>
+                  <SelectItem value="10Y">10 Years</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Filter className="h-4 w-4" />
+              <span className="text-sm font-medium">Ratios:</span>
+              <Select
+                value={selectedRatios.length > 0 ? selectedRatios.join(',') : 'all'}
+                onValueChange={(value: string) => {
+                  if (value === 'all') {
+                    onRatioSelectionChange?.([]);
+                  } else {
+                    onRatioSelectionChange?.(value.split(','));
+                  }
+                }}
+              >
+                <SelectTrigger className="w-48">
+                  <SelectValue placeholder="Select ratios" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Ratios</SelectItem>
+                  {availableRatios.map((ratio) => (
+                    <SelectItem key={ratio.name} value={ratio.name}>
+                      {ratio.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowProjections(!showProjections)}
+            >
+              {showProjections ? 'Hide' : 'Show'} Projections
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Ratio Trend Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {Object.entries(filteredRatioTrends).map(([ratioName, ratioData]) => {
+          const trend = calculateTrend(ratioData);
+          const latestValue = ratioData[ratioData.length - 1]?.value;
+          const firstValue = ratioData[0]?.value;
+          const change = latestValue - firstValue;
+          const changePercent = firstValue ? (change / firstValue) * 100 : 0;
+
+          return (
+            <Card key={ratioName} className="hover:shadow-md transition-shadow">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg">
+                    {ratioData[0]?.ratioDisplayName || ratioName}
+                  </CardTitle>
+                  <div className="flex items-center space-x-1">
+                    {getTrendIcon(trend.direction)}
+                    <Badge variant="outline" className="text-xs">
+                      {ratioData[0]?.category}
+                    </Badge>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xl font-bold">
+                      {latestValue ? formatValue(latestValue, ratioName) : '-'}
+                    </span>
+                    <span className={`text-sm ${getTrendColor(trend.direction)}`}>
+                      {changePercent > 0 ? '+' : ''}{changePercent.toFixed(1)}%
+                    </span>
+                  </div>
+
+                  {/* Simple trend visualization */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Trend:</span>
+                      <span className={getTrendColor(trend.direction)}>
+                        {trend.direction === 'up' ? 'Improving' : 
+                         trend.direction === 'down' ? 'Declining' : 'Stable'}
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center space-x-2">
+                      <div className="flex-1 bg-gray-200 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full ${
+                            trend.direction === 'up' ? 'bg-green-500' :
+                            trend.direction === 'down' ? 'bg-red-500' : 'bg-gray-400'
+                          }`}
+                          style={{ width: `${Math.min(trend.strength * 2, 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {trend.strength.toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Data points */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Data Points:</span>
+                      <span>{ratioData.length}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Latest:</span>
+                      <span>{ratioData[ratioData.length - 1]?.periodEndDate}</span>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Chart Visualization Placeholder */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Trend Visualization</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-96 bg-gray-50 rounded-lg flex items-center justify-center">
+            <div className="text-center space-y-2">
+              <BarChart3 className="h-12 w-12 text-gray-400 mx-auto" />
+              <p className="text-gray-600">Interactive Chart Coming Soon</p>
+              <p className="text-sm text-gray-500">
+                This will show {chartType} charts with trend lines and projections
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Projections Section */}
+      {showProjections && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Forward-Looking Projections</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {Object.entries(filteredRatioTrends).slice(0, 3).map(([ratioName, ratioData]) => {
+                const projections = generateProjections(ratioData);
+                const latestValue = ratioData[ratioData.length - 1]?.value;
+
+                return (
+                  <div key={ratioName} className="p-4 border rounded-lg">
+                    <h4 className="font-medium mb-2">
+                      {ratioData[0]?.ratioDisplayName || ratioName}
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {projections.map((projection, index) => (
+                        <div key={index} className="text-center">
+                          <p className="text-sm text-muted-foreground">
+                            Q{Math.floor(projection.periodDate.getMonth() / 3) + 1} {projection.periodDate.getFullYear()}
+                          </p>
+                          <p className="font-bold text-lg">
+                            {formatValue(projection.value, ratioName)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">Projected</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+};
