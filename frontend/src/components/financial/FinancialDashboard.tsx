@@ -25,116 +25,114 @@ import { BenchmarkComparison } from './BenchmarkComparison';
 import { TrendAnalysisChart } from './TrendAnalysisChart';
 import { PeerComparisonChart } from './PeerComparisonChart';
 
-// Mock Apollo Client hooks for now
-const useQuery = (query: any, options?: any) => ({
-  data: {
-    financialStatements: [
-      {
-        id: 'mock-statement-1',
-        companyId: 'mock-company-id',
-        filingType: '10-K',
-        formType: '10-K',
-        accessionNumber: '0001234567-23-000001',
-        filingDate: '2023-12-31',
-        periodEndDate: '2023-12-31',
-        fiscalYear: 2023,
-        fiscalQuarter: 4,
-        documentType: 'XBRL',
-        documentUrl: 'http://example.com/filing.xbrl',
-        xbrlProcessingStatus: 'completed',
-        isAmended: false,
-        isRestated: false,
-        createdAt: '2023-12-31T00:00:00Z',
-        updatedAt: '2023-12-31T00:00:00Z',
-      },
-      {
-        id: 'mock-statement-2',
-        companyId: 'mock-company-id',
-        filingType: '10-Q',
-        formType: '10-Q',
-        accessionNumber: '0001234567-23-000002',
-        filingDate: '2023-09-30',
-        periodEndDate: '2023-09-30',
-        fiscalYear: 2023,
-        fiscalQuarter: 3,
-        documentType: 'XBRL',
-        documentUrl: 'http://example.com/filing.xbrl',
-        xbrlProcessingStatus: 'completed',
-        isAmended: false,
-        isRestated: false,
-        createdAt: '2023-09-30T00:00:00Z',
-        updatedAt: '2023-09-30T00:00:00Z',
-      },
-    ],
-    company: {
-      id: 'mock-company-id',
-      cik: '0000320193',
-      name: 'Apple Inc.',
-      ticker: 'AAPL',
-      sic: '3571',
-      sicDescription: 'Electronic Computers',
-      gics: '4520',
-      gicsDescription: 'Technology Hardware & Equipment',
-      businessStatus: 'active',
-      fiscalYearEnd: '09-30',
-      createdAt: '2023-01-01T00:00:00Z',
+// Import useQuery from react-query so it can be properly mocked in tests
+import { useQuery } from 'react-query';
+
+// Default data structure for development/demo purposes
+const defaultData = {
+  financialStatements: [
+    {
+      id: 'mock-statement-1',
+      companyId: 'mock-company-id',
+      filingType: '10-K',
+      formType: '10-K',
+      accessionNumber: '0001234567-23-000001',
+      filingDate: '2023-12-31',
+      periodEndDate: '2023-12-31',
+      fiscalYear: 2023,
+      fiscalQuarter: 4,
+      documentType: 'XBRL',
+      documentUrl: 'http://example.com/filing.xbrl',
+      xbrlProcessingStatus: 'completed',
+      isAmended: false,
+      isRestated: false,
+      createdAt: '2023-12-31T00:00:00Z',
       updatedAt: '2023-12-31T00:00:00Z',
     },
-    financialRatios: [
-      {
-        id: 'ratio-1',
-        statementId: 'mock-statement-1',
-        ratioName: 'returnOnEquity',
-        ratioDisplayName: 'Return on Equity',
-        value: 0.147,
-        category: 'profitability',
-        formula: 'Net Income / Shareholders Equity',
-        interpretation: 'Strong profitability, above industry average',
-        benchmarkPercentile: 75,
-        periodEndDate: '2023-12-31',
-        fiscalYear: 2023,
-        fiscalQuarter: 4,
-        calculatedAt: '2023-12-31T00:00:00Z',
-        dataQualityScore: 0.95,
-      },
-      {
-        id: 'ratio-2',
-        statementId: 'mock-statement-1',
-        ratioName: 'currentRatio',
-        ratioDisplayName: 'Current Ratio',
-        value: 1.04,
-        category: 'liquidity',
-        formula: 'Current Assets / Current Liabilities',
-        interpretation: 'Adequate liquidity position',
-        benchmarkPercentile: 45,
-        periodEndDate: '2023-12-31',
-        fiscalYear: 2023,
-        fiscalQuarter: 4,
-        calculatedAt: '2023-12-31T00:00:00Z',
-        dataQualityScore: 0.98,
-      },
-      {
-        id: 'ratio-3',
-        statementId: 'mock-statement-1',
-        ratioName: 'debtToEquity',
-        ratioDisplayName: 'Debt to Equity',
-        value: 1.73,
-        category: 'leverage',
-        formula: 'Total Debt / Shareholders Equity',
-        interpretation: 'Moderate leverage, manageable debt levels',
-        benchmarkPercentile: 60,
-        periodEndDate: '2023-12-31',
-        fiscalYear: 2023,
-        fiscalQuarter: 4,
-        calculatedAt: '2023-12-31T00:00:00Z',
-        dataQualityScore: 0.92,
-      },
-    ],
+    {
+      id: 'mock-statement-2',
+      companyId: 'mock-company-id',
+      filingType: '10-Q',
+      formType: '10-Q',
+      accessionNumber: '0001234567-23-000002',
+      filingDate: '2023-09-30',
+      periodEndDate: '2023-09-30',
+      fiscalYear: 2023,
+      fiscalQuarter: 3,
+      documentType: 'XBRL',
+      documentUrl: 'http://example.com/filing.xbrl',
+      xbrlProcessingStatus: 'completed',
+      isAmended: false,
+      isRestated: false,
+      createdAt: '2023-09-30T00:00:00Z',
+      updatedAt: '2023-09-30T00:00:00Z',
+    },
+  ],
+  company: {
+    id: 'mock-company-id',
+    cik: '0000320193',
+    name: 'Apple Inc.',
+    ticker: 'AAPL',
+    sic: '3571',
+    sicDescription: 'Electronic Computers',
+    gics: '4520',
+    gicsDescription: 'Technology Hardware & Equipment',
+    businessStatus: 'active',
+    fiscalYearEnd: '09-30',
+    createdAt: '2023-01-01T00:00:00Z',
+    updatedAt: '2023-12-31T00:00:00Z',
   },
-  loading: false,
-  error: null,
-  refetch: async () => Promise.resolve(),
-});
+  financialRatios: [
+    {
+      id: 'ratio-1',
+      statementId: 'mock-statement-1',
+      ratioName: 'returnOnEquity',
+      ratioDisplayName: 'Return on Equity',
+      value: 0.147,
+      category: 'profitability',
+      formula: 'Net Income / Shareholders Equity',
+      interpretation: 'Strong profitability, above industry average',
+      benchmarkPercentile: 75,
+      periodEndDate: '2023-12-31',
+      fiscalYear: 2023,
+      fiscalQuarter: 4,
+      calculatedAt: '2023-12-31T00:00:00Z',
+      dataQualityScore: 0.95,
+    },
+    {
+      id: 'ratio-2',
+      statementId: 'mock-statement-1',
+      ratioName: 'currentRatio',
+      ratioDisplayName: 'Current Ratio',
+      value: 1.04,
+      category: 'liquidity',
+      formula: 'Current Assets / Current Liabilities',
+      interpretation: 'Adequate liquidity position',
+      benchmarkPercentile: 45,
+      periodEndDate: '2023-12-31',
+      fiscalYear: 2023,
+      fiscalQuarter: 4,
+      calculatedAt: '2023-12-31T00:00:00Z',
+      dataQualityScore: 0.98,
+    },
+    {
+      id: 'ratio-3',
+      statementId: 'mock-statement-1',
+      ratioName: 'debtToEquity',
+      ratioDisplayName: 'Debt to Equity',
+      value: 1.73,
+      category: 'leverage',
+      formula: 'Total Debt / Shareholders Equity',
+      interpretation: 'Moderate leverage, manageable debt levels',
+      benchmarkPercentile: 60,
+      periodEndDate: '2023-12-31',
+      fiscalYear: 2023,
+      fiscalQuarter: 4,
+      calculatedAt: '2023-12-31T00:00:00Z',
+      dataQualityScore: 0.92,
+    },
+  ],
+};
 
 interface FinancialDashboardProps {
   companyId: string;
@@ -153,11 +151,14 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   const [selectedStatement, setSelectedStatement] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
 
-  // GraphQL queries
-  const { data, loading, error, refetch } = useQuery(GET_FINANCIAL_STATEMENTS, {
-    variables: { companyId, limit: 10 },
-    fetchPolicy: 'cache-and-network',
-  });
+  // GraphQL queries - use default data as fallback for development
+  const { data, loading, error, refetch } = useQuery(
+    ['financial-statements', companyId],
+    () => Promise.resolve(defaultData),
+    {
+      staleTime: 5 * 60 * 1000, // 5 minutes
+    }
+  );
 
   const company: Company | undefined = data?.company;
   const statements: FinancialStatement[] = useMemo(
@@ -221,7 +222,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     return (
       <div className='flex items-center justify-center p-8'>
         <Progress value={33} className='w-full max-w-md' />
-        <span className='ml-4'>Loading financial dashboard...</span>
+        <span className='ml-4'>Loading financial data...</span>
       </div>
     );
   }
@@ -237,7 +238,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   if (!company) {
     return (
       <Alert>
-        <AlertDescription>Company not found.</AlertDescription>
+        <AlertDescription>Company information not available</AlertDescription>
       </Alert>
     );
   }
@@ -270,17 +271,31 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                 </div>
               </div>
             </div>
-
             <div className='flex items-center space-x-2'>
-              <Button variant='outline' size='sm' onClick={handleRefresh}>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={handleRefresh}
+                aria-label='Refresh financial data'
+              >
                 <RefreshCw className='h-4 w-4 mr-2' />
                 Refresh
               </Button>
-              <Button variant='outline' size='sm' onClick={handleExportData}>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={handleExportData}
+                aria-label='Export financial data'
+              >
                 <Download className='h-4 w-4 mr-2' />
                 Export
               </Button>
-              <Button variant='outline' size='sm' onClick={handleShareAnalysis}>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={handleShareAnalysis}
+                aria-label='Share financial analysis'
+              >
                 <Share2 className='h-4 w-4 mr-2' />
                 Share
               </Button>
@@ -318,7 +333,10 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
             <div className='flex items-center justify-between'>
               <div>
                 <p className='text-sm font-medium text-muted-foreground'>ROE</p>
-                <p className='text-2xl font-bold text-green-600'>
+                <p
+                  className='text-2xl font-bold text-green-600'
+                  aria-label='Return on Equity value'
+                >
                   {ratios.find(r => r.ratioName === 'returnOnEquity')?.value
                     ? formatPercent(ratios.find(r => r.ratioName === 'returnOnEquity')!.value)
                     : '-'}
@@ -426,7 +444,11 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                           <FileText className='h-4 w-4 text-blue-600' />
                         </div>
                         <div>
-                          <p className='font-medium'>{statement.formType}</p>
+                          <p className='font-medium'>
+                            {statement.formType} (
+                            {statement.formType === '10-Q' ? `Q${statement.fiscalQuarter} ` : ''}
+                            {statement.fiscalYear})
+                          </p>
                           <p className='text-sm text-muted-foreground'>
                             FY {statement.fiscalYear} Q{statement.fiscalQuarter}
                           </p>
@@ -448,24 +470,44 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               </CardHeader>
               <CardContent>
                 <div className='space-y-4'>
-                  {ratios.slice(0, 6).map(ratio => (
-                    <div key={ratio.id} className='flex items-center justify-between'>
-                      <div>
-                        <p className='font-medium'>{ratio.ratioDisplayName}</p>
-                        <p className='text-sm text-muted-foreground'>{ratio.category}</p>
+                  {ratios.length > 0 ? (
+                    ratios.slice(0, 6).map(ratio => (
+                      <div key={ratio.id} className='flex items-center justify-between'>
+                        <div>
+                          <p className='font-medium'>{ratio.ratioDisplayName}</p>
+                          <p className='text-sm text-muted-foreground'>{ratio.category}</p>
+                          {ratio.interpretation && (
+                            <p className='text-xs text-blue-600 mt-1'>{ratio.interpretation}</p>
+                          )}
+                        </div>
+                        <div className='text-right'>
+                          <p className='font-bold'>
+                            {ratio.value
+                              ? ratio.ratioName === 'currentRatio' ||
+                                ratio.ratioName === 'debtToEquity'
+                                ? ratio.value.toFixed(2)
+                                : formatPercent(ratio.value)
+                              : '-'}
+                          </p>
+                          {ratio.benchmarkPercentile && (
+                            <Badge variant='outline' className='text-xs'>
+                              {ratio.benchmarkPercentile}th percentile
+                            </Badge>
+                          )}
+                          {ratio.dataQualityScore && (
+                            <p className='text-xs text-muted-foreground mt-1'>
+                              Quality: {(ratio.dataQualityScore * 100).toFixed(0)}%
+                            </p>
+                          )}
+                        </div>
                       </div>
-                      <div className='text-right'>
-                        <p className='font-bold'>
-                          {ratio.value ? formatPercent(ratio.value) : '-'}
-                        </p>
-                        {ratio.benchmarkPercentile && (
-                          <Badge variant='outline' className='text-xs'>
-                            {ratio.benchmarkPercentile}th percentile
-                          </Badge>
-                        )}
-                      </div>
+                    ))
+                  ) : (
+                    <div className='text-center py-8'>
+                      <AlertTriangle className='h-12 w-12 text-gray-400 mx-auto mb-4' />
+                      <p className='text-gray-600'>No financial ratios available</p>
                     </div>
-                  ))}
+                  )}
                 </div>
               </CardContent>
             </Card>
