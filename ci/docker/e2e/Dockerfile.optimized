@@ -88,6 +88,7 @@ COPY --from=frontend-builder /app/package*.json ./
 COPY --from=frontend-builder /app/node_modules ./node_modules
 COPY --from=frontend-builder /app/dev-server ./dev-server
 COPY --from=frontend-builder /app/tests ./tests
+COPY --from=frontend-builder /app/playwright.mobile.config.ts ./playwright.mobile.config.ts
 
 # Copy built backend binary from backend-builder stage
 COPY --from=backend-builder /app/backend/target/release/econ-graph-backend ./backend/econ-graph-backend
