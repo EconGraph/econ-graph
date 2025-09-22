@@ -559,6 +559,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
               onChange={e => setAnnotationForm(prev => ({ ...prev, title: e.target.value }))}
               required
               fullWidth
+              aria-label='Annotation title'
             />
 
             <TextField
@@ -569,6 +570,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
               rows={3}
               required
               fullWidth
+              aria-label='Annotation content'
             />
 
             <TextField
@@ -581,6 +583,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
               required
               InputLabelProps={{ shrink: true }}
               fullWidth
+              aria-label='Annotation date'
             />
 
             <TextField
@@ -591,6 +594,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                 setAnnotationForm(prev => ({ ...prev, annotationValue: e.target.value }))
               }
               fullWidth
+              aria-label='Annotation value (optional)'
             />
 
             <FormControl fullWidth>
@@ -601,6 +605,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                   setAnnotationForm(prev => ({ ...prev, annotationType: e.target.value }))
                 }
                 label='Annotation Type'
+                aria-label='Annotation type selection'
               >
                 {ANNOTATION_TYPES.map(type => (
                   <MenuItem key={type.value} value={type.value}>

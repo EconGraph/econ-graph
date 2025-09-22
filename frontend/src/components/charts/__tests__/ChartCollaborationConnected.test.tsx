@@ -363,9 +363,9 @@ describe('ChartCollaborationConnected', () => {
       await user.click(addButton);
 
       expect(screen.getByText('Add Chart Annotation')).toBeInTheDocument();
-      expect(screen.getByLabelText('Title')).toBeInTheDocument();
-      expect(screen.getByLabelText('Content')).toBeInTheDocument();
-      expect(screen.getByLabelText('Date')).toBeInTheDocument();
+      expect(screen.getByLabelText('Annotation title')).toBeInTheDocument();
+      expect(screen.getByLabelText('Annotation content')).toBeInTheDocument();
+      expect(screen.getByLabelText('Annotation date')).toBeInTheDocument();
     });
 
     it('should create annotation with valid data', async () => {
@@ -377,15 +377,22 @@ describe('ChartCollaborationConnected', () => {
       await user.click(addButton);
 
       // Fill form
-      await user.type(screen.getByLabelText('Title'), 'New Analysis');
-      await user.type(screen.getByLabelText('Content'), 'This is a new analysis');
-      await user.type(screen.getByLabelText('Date'), '2024-01-20');
-      await user.type(screen.getByLabelText('Value (optional)'), '110.5');
+      await user.type(screen.getByLabelText('Annotation title'), 'New Analysis');
+      await user.type(screen.getByLabelText('Annotation content'), 'This is a new analysis');
+      await user.type(screen.getByLabelText('Annotation date'), '2024-01-20');
+      await user.type(screen.getByLabelText('Annotation value (optional)'), '110.5');
 
       // Select annotation type
-      const typeSelect = screen.getByLabelText('Annotation Type');
+      const typeSelect = screen.getByLabelText('Annotation type selection');
       await user.click(typeSelect);
-      await user.click(screen.getByText('📊 Analysis'));
+
+      // Wait for dropdown to open and select Analysis option
+      await waitFor(() => {
+        const analysisOption = screen.getByRole('option', { name: /analysis/i });
+        expect(analysisOption).toBeInTheDocument();
+      });
+      const analysisOption = screen.getByRole('option', { name: /analysis/i });
+      await user.click(analysisOption);
 
       // Submit
       const submitButton = screen.getByText('Add Annotation');
