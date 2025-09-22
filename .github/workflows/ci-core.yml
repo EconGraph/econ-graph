@@ -1688,7 +1688,7 @@ jobs:
       run: |
         docker run --rm \
           --network host \
-          -w /app \
+          -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:core
@@ -1825,7 +1825,7 @@ jobs:
       run: |
         docker run --rm \
           --network host \
-          -w /app \
+          -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:global-analysis
@@ -1962,7 +1962,7 @@ jobs:
       run: |
         docker run --rm \
           --network host \
-          -w /app \
+          -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:professional-analysis
@@ -2101,7 +2101,7 @@ jobs:
       run: |
         docker run --rm \
           --network host \
-          -w /app \
+          -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:comprehensive
@@ -2239,6 +2239,7 @@ jobs:
       run: |
         docker run --rm \
           --network host \
+          -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-mobile-optimized:latest \
           npm run test:e2e:mobile:global-analysis
@@ -2376,6 +2377,7 @@ jobs:
       run: |
         docker run --rm \
           --network host \
+          -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-mobile-optimized:latest \
           npm run test:e2e:mobile:professional-analysis
@@ -2515,6 +2517,7 @@ jobs:
       run: |
         docker run --rm \
           --network host \
+          -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-mobile-optimized:latest \
           npm run test:e2e:mobile
