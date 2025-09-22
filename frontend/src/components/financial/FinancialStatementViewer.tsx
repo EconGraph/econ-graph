@@ -351,35 +351,23 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                     <span>$383,285,000,000</span>
                   </div>
                 )}
-                {/* Hierarchical Table Structure for Integration Tests */}
-                <table className='w-full'>
-                  <tbody>
-                    <tr>
-                      <td className='font-medium py-2'>Total Assets</td>
-                      <td className='text-right py-2'>$352.8B</td>
-                    </tr>
-                    <tr>
-                      <td className='font-medium py-2 pl-4'>Current Assets</td>
-                      <td className='text-right py-2'>$143.6B</td>
-                    </tr>
-                    <tr>
-                      <td className='font-medium py-2'>Total Liabilities</td>
-                      <td className='text-right py-2'>$258.5B</td>
-                    </tr>
-                    <tr>
-                      <td className='font-medium py-2'>Net Sales</td>
-                      <td className='text-right py-2'>$383.29B</td>
-                    </tr>
-                    <tr>
-                      <td className='font-medium py-2'>Operating Income</td>
-                      <td className='text-right py-2'>$114.3B</td>
-                    </tr>
-                    <tr>
-                      <td className='font-medium py-2'>Net Income</td>
-                      <td className='text-right py-2'>$96.99B</td>
-                    </tr>
-                  </tbody>
-                </table>
+                {/* Hierarchical Table Structure from Mock Data */}
+                {statement?.lineItems && statement.lineItems.length > 0 && (
+                  <table className='w-full border-collapse'>
+                    <tbody>
+                      {statement.lineItems.map((item, index) => (
+                        <tr key={`table-${item.id || index}`} className='border-b'>
+                          <td className={`font-medium py-2 ${item.hierarchyLevel > 0 ? 'pl-4' : ''}`}>
+                            {item.label}
+                          </td>
+                          <td className='text-right py-2'>
+                            {item.value ? `$${(item.value / 1000000000).toFixed(2)}B` : '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
 
                 {/* Assets Section */}
                 {(!searchTerm || 'Assets'.toLowerCase().includes(searchTerm.toLowerCase())) && (
