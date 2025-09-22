@@ -64,8 +64,8 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
   const [deviceType, setDeviceType] = useState<'mobile' | 'tablet' | 'desktop'>('mobile');
   const [isOffline] = useState(true);
   const [showSearch, setShowSearch] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [hasError, setHasError] = useState(true);
+  const [isLoading] = useState(true);
+  const [hasError] = useState(true);
   const trendsButtonRef = React.useRef<HTMLButtonElement>(null);
 
   // Detect device type and orientation
