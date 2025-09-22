@@ -331,11 +331,11 @@ describe('XBRL Financial Integration Tests', () => {
 
       // Wait for benchmark data to load
       await waitFor(() => {
-        expect(screen.getByText(/Industry Benchmark/)).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: /industry benchmark/i })).toBeInTheDocument();
       });
 
       // Verify benchmark information is displayed
-      expect(screen.getByText(/Industry Benchmark/)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /industry benchmark/i })).toBeInTheDocument();
       expect(screen.getByText('75.0%')).toBeInTheDocument();
       expect(screen.getByText('Above Average')).toBeInTheDocument();
     });
