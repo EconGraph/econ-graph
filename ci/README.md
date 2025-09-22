@@ -6,6 +6,14 @@ This directory contains CI/CD related scripts, configurations, and tools for the
 
 ```
 ci/
+├── configs/                    # Playwright test configurations
+├── docker/                     # Docker configurations for CI
+├── docs/                       # CI/CD documentation
+│   ├── README.md              # CI documentation index
+│   ├── CI_FAILURE_ANALYSIS_AND_FIXES.md
+│   ├── CI_FAILURE_TROUBLESHOOTING.md
+│   ├── E2E_TEST_FAILURE_ANALYSIS.md
+│   └── workflow-status-report.md
 ├── scripts/                    # CI/CD automation scripts
 │   └── validate-ci-workflows.sh  # GitHub Actions workflow validation
 └── README.md                   # This file
@@ -43,8 +51,21 @@ This directory follows the project's modular codebase organization principles:
 - **Maintainable**: Easy to find and maintain CI/CD specific tooling
 - **Consistent**: Follows established patterns for domain-specific directories
 
-## Related Documentation
+## Documentation
 
-- [GitHub Actions Workflows](../.github/workflows/README.md) - Workflow documentation
-- [RelEng Persona](../personas/releng-engineer.md) - Release engineering practices
-- [AI Developer Standards](../personas/ai-developer-standards.md) - Development guidelines
+- **[CI Documentation](docs/README.md)** - Comprehensive CI/CD documentation and troubleshooting guides
+- **[GitHub Actions Workflows](../.github/workflows/README.md)** - Workflow documentation
+- **[RelEng Persona](../personas/releng-engineer.md)** - Release engineering practices
+- **[AI Developer Standards](../personas/ai-developer-standards.md)** - Development guidelines
+
+## Test Suite Organization
+
+The CI pipeline includes multiple specialized test suites that run in parallel:
+
+- **Core Tests**: Basic functionality (navigation, authentication, dashboard)
+- **Global Analysis Tests**: World map, country selection, economic indicators (162 tests)
+- **Professional Analysis Tests**: Advanced charting, technical indicators (39 tests)
+- **Mobile Tests**: Mobile versions of all test suites
+- **Comprehensive Tests**: Integration/workflow tests (excludes specialized suites)
+
+For detailed information about test organization and troubleshooting, see the [CI Documentation](docs/README.md).

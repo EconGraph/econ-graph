@@ -94,7 +94,7 @@ COPY --from=frontend-builder /app/playwright.mobile.config.ts ./playwright.mobil
 COPY --from=backend-builder /app/backend/target/release/econ-graph-backend ./backend/econ-graph-backend
 
 # Copy Playwright configuration files (needed for E2E test configs)
-COPY ci/ ./ci/
+COPY frontend/ci/ ./ci/
 
 # Create a non-root user for security
 RUN groupadd -r playwright && useradd -r -g playwright -G audio,video playwright \

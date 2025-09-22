@@ -1688,10 +1688,284 @@ jobs:
       run: |
         docker run --rm \
           --network host \
-          -w /app \
+          -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:core
+
+    - name: Stop services
+      if: always()
+      run: |
+        docker stop backend-server || true
+        docker stop frontend-server || true
+
+  e2e-global-analysis-tests:
+    name: E2E Global Analysis Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+
+    - name: Wait for PostgreSQL to be ready
+      run: |
+        echo "🔍 Waiting for PostgreSQL to be ready..."
+        for i in {1..30}; do
+          if pg_isready -h localhost -p 5432 -U postgres; then
+            echo "✅ PostgreSQL is ready!"
+            break
+          fi
+          echo "⏳ Attempt $i/30: PostgreSQL not ready yet, waiting 2 seconds..."
+          sleep 2
+        done
+
+        # Additional verification with a simple query
+        echo "🔍 Verifying PostgreSQL is fully functional..."
+        PGPASSWORD=password psql -h localhost -p 5432 -U postgres -d econ_graph_test -c "SELECT 1;" || {
+          echo "❌ PostgreSQL health check failed"
+          exit 1
+        }
+        echo "✅ PostgreSQL is fully functional!"
+
+    - name: Download optimized E2E containers
+      uses: actions/download-artifact@v4
+      with:
+        name: e2e-containers-optimized
+
+    - name: Load optimized E2E containers
+      run: |
+        docker load < e2e-container-optimized.tar.gz
+        docker load < e2e-mobile-container-optimized.tar.gz
+
+    - name: Start backend service
+      run: |
+        # Use the pre-built backend binary from the optimized container
+        docker run --rm -d --name backend-server \
+          -p 9876:9876 \
+          -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          econ-graph-e2e-optimized:latest \
+          ./backend/econ-graph-backend
+
+        # Wait for backend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:9876/health 2>/dev/null; then
+            echo "Backend is ready!"
+            break
+          fi
+          echo "Waiting for backend... ($i/30)"
+          sleep 2
+        done
+
+    - name: Start frontend service
+      run: |
+        # Use the pre-built frontend from the container
+        docker run --rm -d --name frontend-server \
+          -p 3000:3000 \
+          econ-graph-e2e-optimized:latest \
+          npx serve -s build -l 3000
+
+        # Wait for frontend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:3000 2>/dev/null; then
+            echo "Frontend is ready!"
+            break
+          fi
+          echo "Waiting for frontend... ($i/30)"
+          sleep 2
+        done
+
+    - name: Run Global Analysis E2E Tests
+      run: |
+        docker run --rm \
+          --network host \
+          -w /app/frontend \
+          -e BASE_URL=http://localhost:3000 \
+          econ-graph-e2e-optimized:latest \
+          npm run test:e2e:global-analysis
+
+    - name: Stop services
+      if: always()
+      run: |
+        docker stop backend-server || true
+        docker stop frontend-server || true
+
+  e2e-professional-analysis-tests:
+    name: E2E Professional Analysis Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+
+    - name: Wait for PostgreSQL to be ready
+      run: |
+        echo "🔍 Waiting for PostgreSQL to be ready..."
+        for i in {1..30}; do
+          if pg_isready -h localhost -p 5432 -U postgres; then
+            echo "✅ PostgreSQL is ready!"
+            break
+          fi
+          echo "⏳ Attempt $i/30: PostgreSQL not ready yet, waiting 2 seconds..."
+          sleep 2
+        done
+
+        # Additional verification with a simple query
+        echo "🔍 Verifying PostgreSQL is fully functional..."
+        PGPASSWORD=password psql -h localhost -p 5432 -U postgres -d econ_graph_test -c "SELECT 1;" || {
+          echo "❌ PostgreSQL health check failed"
+          exit 1
+        }
+        echo "✅ PostgreSQL is fully functional!"
+
+    - name: Download optimized E2E containers
+      uses: actions/download-artifact@v4
+      with:
+        name: e2e-containers-optimized
+
+    - name: Load optimized E2E containers
+      run: |
+        docker load < e2e-container-optimized.tar.gz
+        docker load < e2e-mobile-container-optimized.tar.gz
+
+    - name: Start backend service
+      run: |
+        # Use the pre-built backend binary from the optimized container
+        docker run --rm -d --name backend-server \
+          -p 9876:9876 \
+          -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          econ-graph-e2e-optimized:latest \
+          ./backend/econ-graph-backend
+
+        # Wait for backend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:9876/health 2>/dev/null; then
+            echo "Backend is ready!"
+            break
+          fi
+          echo "Waiting for backend... ($i/30)"
+          sleep 2
+        done
+
+    - name: Start frontend service
+      run: |
+        # Use the pre-built frontend from the container
+        docker run --rm -d --name frontend-server \
+          -p 3000:3000 \
+          econ-graph-e2e-optimized:latest \
+          npx serve -s build -l 3000
+
+        # Wait for frontend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:3000 2>/dev/null; then
+            echo "Frontend is ready!"
+            break
+          fi
+          echo "Waiting for frontend... ($i/30)"
+          sleep 2
+        done
+
+    - name: Run Professional Analysis E2E Tests
+      run: |
+        docker run --rm \
+          --network host \
+          -w /app/frontend \
+          -e BASE_URL=http://localhost:3000 \
+          econ-graph-e2e-optimized:latest \
+          npm run test:e2e:professional-analysis
 
     - name: Stop services
       if: always()
@@ -1827,10 +2101,286 @@ jobs:
       run: |
         docker run --rm \
           --network host \
-          -w /app \
+          -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:comprehensive
+
+    - name: Stop services
+      if: always()
+      run: |
+        docker stop backend-server || true
+        docker stop frontend-server || true
+
+  mobile-e2e-global-analysis-tests:
+    name: Mobile Global Analysis E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-mobile-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-mobile-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel migration run
+      working-directory: backend
+
+    - name: Wait for PostgreSQL to be ready
+      run: |
+        echo "🔍 Waiting for PostgreSQL to be ready..."
+        for i in {1..30}; do
+          if pg_isready -h localhost -p 5432 -U postgres; then
+            echo "✅ PostgreSQL is ready!"
+            break
+          fi
+          echo "⏳ Attempt $i/30: PostgreSQL not ready yet, waiting 2 seconds..."
+          sleep 2
+        done
+
+        # Additional verification with a simple query
+        echo "🔍 Verifying PostgreSQL is fully functional..."
+        PGPASSWORD=password psql -h localhost -p 5432 -U postgres -d econ_graph_test -c "SELECT 1;" || {
+          echo "❌ PostgreSQL health check failed"
+          exit 1
+        }
+        echo "✅ PostgreSQL is fully functional!"
+
+    - name: Download optimized E2E containers
+      uses: actions/download-artifact@v4
+      with:
+        name: e2e-containers-optimized
+
+    - name: Load optimized E2E containers
+      run: |
+        docker load < e2e-container-optimized.tar.gz
+        docker load < e2e-mobile-container-optimized.tar.gz
+
+    - name: Start backend service
+      run: |
+        # Use the pre-built backend binary from the optimized container
+        docker run --rm -d --name backend-server \
+          -p 9876:9876 \
+          -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          econ-graph-e2e-optimized:latest \
+          ./backend/econ-graph-backend
+
+        # Wait for backend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:9876/health 2>/dev/null; then
+            echo "Backend is ready!"
+            break
+          fi
+          echo "Waiting for backend... ($i/30)"
+          sleep 2
+        done
+
+    - name: Start frontend service
+      run: |
+        # Use the pre-built frontend from the container
+        docker run --rm -d --name frontend-server \
+          -p 3000:3000 \
+          econ-graph-e2e-mobile-optimized:latest \
+          npx serve -s build -l 3000
+
+        # Wait for frontend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:3000 2>/dev/null; then
+            echo "Frontend is ready!"
+            break
+          fi
+          echo "Waiting for frontend... ($i/30)"
+          sleep 2
+        done
+
+    - name: Run Mobile Global Analysis E2E Tests
+      run: |
+        docker run --rm \
+          --network host \
+          -w /app/frontend \
+          -e BASE_URL=http://localhost:3000 \
+          econ-graph-e2e-mobile-optimized:latest \
+          npm run test:e2e:mobile:global-analysis
+
+    - name: Stop services
+      if: always()
+      run: |
+        docker stop backend-server || true
+        docker stop frontend-server || true
+
+  mobile-e2e-professional-analysis-tests:
+    name: Mobile Professional Analysis E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-mobile-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-mobile-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel migration run
+      working-directory: backend
+
+    - name: Wait for PostgreSQL to be ready
+      run: |
+        echo "🔍 Waiting for PostgreSQL to be ready..."
+        for i in {1..30}; do
+          if pg_isready -h localhost -p 5432 -U postgres; then
+            echo "✅ PostgreSQL is ready!"
+            break
+          fi
+          echo "⏳ Attempt $i/30: PostgreSQL not ready yet, waiting 2 seconds..."
+          sleep 2
+        done
+
+        # Additional verification with a simple query
+        echo "🔍 Verifying PostgreSQL is fully functional..."
+        PGPASSWORD=password psql -h localhost -p 5432 -U postgres -d econ_graph_test -c "SELECT 1;" || {
+          echo "❌ PostgreSQL health check failed"
+          exit 1
+        }
+        echo "✅ PostgreSQL is fully functional!"
+
+    - name: Download optimized E2E containers
+      uses: actions/download-artifact@v4
+      with:
+        name: e2e-containers-optimized
+
+    - name: Load optimized E2E containers
+      run: |
+        docker load < e2e-container-optimized.tar.gz
+        docker load < e2e-mobile-container-optimized.tar.gz
+
+    - name: Start backend service
+      run: |
+        # Use the pre-built backend binary from the optimized container
+        docker run --rm -d --name backend-server \
+          -p 9876:9876 \
+          -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          econ-graph-e2e-optimized:latest \
+          ./backend/econ-graph-backend
+
+        # Wait for backend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:9876/health 2>/dev/null; then
+            echo "Backend is ready!"
+            break
+          fi
+          echo "Waiting for backend... ($i/30)"
+          sleep 2
+        done
+
+    - name: Start frontend service
+      run: |
+        # Use the pre-built frontend from the container
+        docker run --rm -d --name frontend-server \
+          -p 3000:3000 \
+          econ-graph-e2e-mobile-optimized:latest \
+          npx serve -s build -l 3000
+
+        # Wait for frontend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:3000 2>/dev/null; then
+            echo "Frontend is ready!"
+            break
+          fi
+          echo "Waiting for frontend... ($i/30)"
+          sleep 2
+        done
+
+    - name: Run Mobile Professional Analysis E2E Tests
+      run: |
+        docker run --rm \
+          --network host \
+          -w /app/frontend \
+          -e BASE_URL=http://localhost:3000 \
+          econ-graph-e2e-mobile-optimized:latest \
+          npm run test:e2e:mobile:professional-analysis
 
     - name: Stop services
       if: always()
@@ -1967,6 +2517,7 @@ jobs:
       run: |
         docker run --rm \
           --network host \
+          -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-mobile-optimized:latest \
           npm run test:e2e:mobile

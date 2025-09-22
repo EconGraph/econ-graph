@@ -4602,3 +4602,53 @@ RUST_LOG = "warn"         # Reduce verbosity
 
 **Branch**: `feature/admin-ui-implementation`
 **Status**: Implementation complete, tested, documented, committed with GraphQL and database support
+
+---
+
+## E2E Test Suite Reorganization
+
+### Previous Session: E2E Test Suite Organization and CI Pipeline Optimization
+**Date**: January 17, 2025  
+**Focus**: ✅ Reorganize e2e tests into specialized suites with parallel CI execution
+
+**Problem**: E2E tests were running on main but some were failing, and the test organization needed improvement for better parallel execution and test isolation.
+
+**Issues Discovered and Fixed**:
+- ✅ **Test Suite Separation**: Split global analysis and professional analysis tests into dedicated suites
+- ✅ **Directory Organization**: Created separate directories for specialized test categories
+- ✅ **CI Pipeline Optimization**: Added parallel execution for specialized test suites
+- ✅ **Configuration Updates**: Created dedicated Playwright configs for each test suite
+- ✅ **Comprehensive Test Exclusion**: Fixed comprehensive tests to exclude specialized suites
+
+**Technical Achievement**:
+- **Test Organization**: Separated tests into focused, maintainable suites:
+  - Core tests: Basic functionality (navigation, authentication, dashboard)
+  - Global Analysis tests: World map, country selection, economic indicators (162 tests)
+  - Professional Analysis tests: Advanced charting, technical indicators (39 tests)
+  - Mobile versions: Separate mobile test suites for each category
+  - Comprehensive tests: Integration/workflow tests (now properly focused)
+- **Parallel CI Execution**: All test suites now run in parallel for faster feedback
+- **Test Isolation**: Each suite can be run independently for faster debugging
+- **Configuration Consistency**: All configs follow the same patterns as existing core configs
+
+**Test Suite Structure**:
+```
+frontend/tests/e2e/
+├── core/                    # Basic functionality tests
+├── global-analysis/         # Global analysis features (5 files, 162 tests)
+├── professional-analysis/   # Professional analysis features (1 file, 39 tests)
+├── comprehensive/           # Integration/workflow tests (empty, focused)
+└── [other test files]      # Individual test files
+```
+
+**CI Pipeline Jobs**:
+- `e2e-core-tests`: Basic functionality tests
+- `e2e-global-analysis-tests`: Global analysis features
+- `e2e-professional-analysis-tests`: Professional analysis features
+- `e2e-comprehensive-tests`: Integration tests (excludes specialized suites)
+- `mobile-e2e-*`: Mobile versions of all test suites
+
+**Business Impact**: Improved CI pipeline efficiency with parallel test execution, better test isolation for faster debugging, and clear separation of concerns between different test categories. This enables faster development cycles and more reliable test execution.
+
+**Branch**: `reorganize-e2e-tests`
+**Status**: ✅ Complete - All test suites properly organized and running in parallel
