@@ -34,7 +34,7 @@ echo "✅ Workflow files updated with cache refresh timestamps"
 echo ""
 echo "📊 Step 2: Generating workflow status report..."
 
-cat > workflow-status-report.md << EOF
+cat > ci/docs/workflow-status-report.md << EOF
 # GitHub Actions Workflow Status Report
 
 Generated: $TIMESTAMP
@@ -59,21 +59,21 @@ EXISTING_WORKFLOWS=$(ls .github/workflows/*.yml 2>/dev/null | xargs -n 1 basenam
 # Add orphaned workflows to report
 for workflow in $ACTIVE_WORKFLOWS; do
     if ! echo "$EXISTING_WORKFLOWS" | grep -q "^$workflow$"; then
-        echo "- ❌ $workflow (orphaned)" >> workflow-status-report.md
+        echo "- ❌ $workflow (orphaned)" >> ci/docs/workflow-status-report.md
     fi
 done
 
-cat >> workflow-status-report.md << EOF
+cat >> ci/docs/workflow-status-report.md << EOF
 
 ## Existing Workflows (valid)
 EOF
 
 # Add existing workflows to report
 for workflow in $EXISTING_WORKFLOWS; do
-    echo "- ✅ $workflow.yml" >> workflow-status-report.md
+        echo "- ✅ $workflow.yml" >> ci/docs/workflow-status-report.md
 done
 
-cat >> workflow-status-report.md << EOF
+cat >> ci/docs/workflow-status-report.md << EOF
 
 ## Solution Applied
 1. **Cache Refresh**: Added timestamps to all workflow files to force GitHub to refresh its cache
@@ -91,7 +91,7 @@ cat >> workflow-status-report.md << EOF
 - Regularly audit workflow status using \`gh workflow list --all\`
 EOF
 
-echo "✅ Workflow status report generated: workflow-status-report.md"
+echo "✅ Workflow status report generated: ci/docs/workflow-status-report.md"
 
 # Step 3: Validate all workflows
 echo ""
