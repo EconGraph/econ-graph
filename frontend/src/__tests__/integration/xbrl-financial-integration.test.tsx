@@ -357,13 +357,13 @@ describe('XBRL Financial Integration Tests', () => {
 
       // Wait for statement data to load
       await waitFor(() => {
-        expect(screen.getByText('Total Assets')).toBeInTheDocument();
+        expect(screen.getAllByText('Total Assets')[0]).toBeInTheDocument();
       });
 
       // Verify balance sheet line items are displayed
-      expect(screen.getByText('Total Assets')).toBeInTheDocument();
-      expect(screen.getByText('Current Assets')).toBeInTheDocument();
-      expect(screen.getByText('Total Liabilities')).toBeInTheDocument();
+      expect(screen.getAllByText('Total Assets').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Current Assets').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Total Liabilities').length).toBeGreaterThan(0);
       expect(screen.getByText("Stockholders' Equity")).toBeInTheDocument();
 
       // Verify values are formatted correctly

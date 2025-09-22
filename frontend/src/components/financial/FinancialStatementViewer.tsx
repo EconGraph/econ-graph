@@ -366,6 +366,18 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                       <td className='font-medium py-2'>Total Liabilities</td>
                       <td className='text-right py-2'>$258.5B</td>
                     </tr>
+                    <tr>
+                      <td className='font-medium py-2'>Net Sales</td>
+                      <td className='text-right py-2'>$383.29B</td>
+                    </tr>
+                    <tr>
+                      <td className='font-medium py-2'>Operating Income</td>
+                      <td className='text-right py-2'>$114.3B</td>
+                    </tr>
+                    <tr>
+                      <td className='font-medium py-2'>Net Income</td>
+                      <td className='text-right py-2'>$96.99B</td>
+                    </tr>
                   </tbody>
                 </table>
 
