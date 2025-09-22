@@ -5,7 +5,8 @@
  * used by the MCP server for professional chart creation.
  */
 
-import { generateChartConfig, validateChartRequest, generateChartImage, ChartRequest } from '../chartApi';
+import { generateChartConfig, validateChartRequest, ChartRequest } from '../chartApi';
+// import { generateChartImage } from '../chartApi';
 
 describe('Chart API', () => {
   const mockSeriesData = [

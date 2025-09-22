@@ -5,7 +5,8 @@
  * It provides chart generation capabilities using the existing frontend charting components.
  */
 
-import { Chart as ChartJS, ChartConfiguration, ChartData } from 'chart.js';
+import { ChartConfiguration, ChartData } from 'chart.js';
+// import { Chart as ChartJS } from 'chart.js';
 
 export interface ChartSeriesData {
   id: string;
