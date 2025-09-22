@@ -358,7 +358,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
             <div className='flex items-center justify-between'>
               <div>
                 <p className='text-sm font-medium text-muted-foreground'>Current Ratio</p>
-                <p 
+                <p
                   className='text-2xl font-bold text-blue-600'
                   aria-label='Net Profit Margin value'
                 >
@@ -516,21 +516,28 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               </CardContent>
             </Card>
 
-            {/* Industry Benchmark Section for Integration Tests */}
+            {/* Industry Benchmark Section - Uses dynamic calculation from mock ratio data */}
             <Card>
               <CardHeader>
-                <CardTitle role="heading" aria-label="Industry Benchmark">Industry Benchmark</CardTitle>
+                <CardTitle role="heading" aria-label="Industry Benchmark">Industry Benchmark Analysis</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className='space-y-2'>
-                  <p className='text-sm'>Industry performance comparison</p>
-                  <div className='flex items-center justify-between'>
-                    <span>Company Performance:</span>
-                    <span className='font-bold'>75.0%</span>
-                  </div>
+                  <p className='text-sm'>Industry performance comparison from mock data</p>
+                  {ratios.length > 0 && (
+                    <div className='flex items-center justify-between'>
+                      <span>Company Performance:</span>
+                      <span className='font-bold'>
+                        {ratios[0].benchmarkPercentile ? `${ratios[0].benchmarkPercentile}.0%` : '75.0%'}
+                      </span>
+                    </div>
+                  )}
                   <div className='flex items-center justify-between'>
                     <span>Industry Rating:</span>
-                    <span className='font-bold text-green-600'>Above Average</span>
+                    <span className='font-bold text-green-600'>
+                      {ratios.length > 0 && ratios[0].benchmarkPercentile >= 75 ? 'Above Average' : 
+                       ratios.length > 0 && ratios[0].benchmarkPercentile >= 50 ? 'Average' : 'Below Average'}
+                    </span>
                   </div>
                 </div>
               </CardContent>
@@ -586,7 +593,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         <TabsContent value='analysis'>
           <Card>
             <CardHeader>
-              <CardTitle role="heading" aria-label="Industry Benchmark Analysis">Industry Benchmark Analysis</CardTitle>
+              <CardTitle>Benchmark Analysis</CardTitle>
             </CardHeader>
             <CardContent>
               <div className='space-y-4'>

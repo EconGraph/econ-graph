@@ -147,10 +147,24 @@ export const BenchmarkComparison: React.FC<BenchmarkComparisonProps> = ({
             </div>
           </div>
         </div>
-        
-        {/* Performance Rating */}
+
+        {/* Performance Rating - Dynamic based on percentile */}
         <div className='mt-3 text-center'>
-          <span className='text-sm font-medium text-green-600'>Above Average</span>
+          <span
+            className={`text-sm font-medium ${
+              benchmarkData.percentile >= 75
+                ? 'text-green-600'
+                : benchmarkData.percentile >= 50
+                  ? 'text-blue-600'
+                  : 'text-red-600'
+            }`}
+          >
+            {benchmarkData.percentile >= 75
+              ? 'Above Average'
+              : benchmarkData.percentile >= 50
+                ? 'Average'
+                : 'Below Average'}
+          </span>
         </div>
       </div>
     </div>
