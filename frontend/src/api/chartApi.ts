@@ -6,7 +6,6 @@
  */
 
 import { ChartConfiguration, ChartData } from 'chart.js';
-// import { Chart as ChartJS } from 'chart.js';
 
 export interface ChartSeriesData {
   id: string;

@@ -1,0 +1,266 @@
+{
+  "return_on_equity": {
+    "excellent": {
+      "threshold": 0.20,
+      "description": "Excellent - Strong profitability and efficient use of shareholder capital"
+    },
+    "good": {
+      "threshold": 0.15,
+      "description": "Good - Above average profitability"
+    },
+    "average": {
+      "threshold": 0.10,
+      "description": "Average - Moderate profitability"
+    },
+    "below_average": {
+      "threshold": 0.05,
+      "description": "Below average - Weak profitability"
+    },
+    "poor": {
+      "threshold": 0.0,
+      "description": "Poor - Very weak profitability"
+    }
+  },
+  "return_on_assets": {
+    "excellent": {
+      "threshold": 0.10,
+      "description": "Excellent - Very efficient asset utilization"
+    },
+    "good": {
+      "threshold": 0.05,
+      "description": "Good - Efficient asset utilization"
+    },
+    "average": {
+      "threshold": 0.02,
+      "description": "Average - Moderate asset utilization"
+    },
+    "below_average": {
+      "threshold": 0.01,
+      "description": "Below average - Inefficient asset utilization"
+    },
+    "poor": {
+      "threshold": 0.0,
+      "description": "Poor - Very inefficient asset utilization"
+    }
+  },
+  "return_on_invested_capital": {
+    "excellent": {
+      "threshold": 0.15,
+      "description": "Excellent - Strong capital efficiency and competitive advantage"
+    },
+    "good": {
+      "threshold": 0.10,
+      "description": "Good - Above average capital efficiency"
+    },
+    "average": {
+      "threshold": 0.05,
+      "description": "Average - Moderate capital efficiency"
+    },
+    "below_average": {
+      "threshold": 0.02,
+      "description": "Below average - Weak capital efficiency"
+    },
+    "poor": {
+      "threshold": 0.0,
+      "description": "Poor - Very weak capital efficiency"
+    }
+  },
+  "current_ratio": {
+    "excellent": {
+      "threshold": 2.0,
+      "description": "Excellent - Strong liquidity position"
+    },
+    "good": {
+      "threshold": 1.5,
+      "description": "Good - Adequate liquidity"
+    },
+    "average": {
+      "threshold": 1.0,
+      "description": "Average - Marginal liquidity"
+    },
+    "below_average": {
+      "threshold": 0.5,
+      "description": "Below average - Weak liquidity"
+    },
+    "poor": {
+      "threshold": 0.0,
+      "description": "Poor - Very weak liquidity"
+    }
+  },
+  "quick_ratio": {
+    "excellent": {
+      "threshold": 1.5,
+      "description": "Excellent - Strong short-term liquidity"
+    },
+    "good": {
+      "threshold": 1.0,
+      "description": "Good - Adequate short-term liquidity"
+    },
+    "average": {
+      "threshold": 0.8,
+      "description": "Average - Marginal short-term liquidity"
+    },
+    "below_average": {
+      "threshold": 0.5,
+      "description": "Below average - Weak short-term liquidity"
+    },
+    "poor": {
+      "threshold": 0.0,
+      "description": "Poor - Very weak short-term liquidity"
+    }
+  },
+  "debt_to_equity": {
+    "excellent": {
+      "threshold": 0.3,
+      "description": "Excellent - Conservative leverage"
+    },
+    "good": {
+      "threshold": 0.5,
+      "description": "Good - Moderate leverage"
+    },
+    "average": {
+      "threshold": 1.0,
+      "description": "Average - Balanced leverage"
+    },
+    "below_average": {
+      "threshold": 2.0,
+      "description": "Below average - High leverage"
+    },
+    "poor": {
+      "threshold": 999.0,
+      "description": "Poor - Very high leverage"
+    }
+  },
+  "interest_coverage": {
+    "excellent": {
+      "threshold": 10.0,
+      "description": "Excellent - Very strong ability to service debt"
+    },
+    "good": {
+      "threshold": 5.0,
+      "description": "Good - Strong ability to service debt"
+    },
+    "average": {
+      "threshold": 2.5,
+      "description": "Average - Adequate ability to service debt"
+    },
+    "below_average": {
+      "threshold": 1.5,
+      "description": "Below average - Weak ability to service debt"
+    },
+    "poor": {
+      "threshold": 0.0,
+      "description": "Poor - Very weak ability to service debt"
+    }
+  },
+  "gross_profit_margin": {
+    "excellent": {
+      "threshold": 0.50,
+      "description": "Excellent - Very strong pricing power and cost control"
+    },
+    "good": {
+      "threshold": 0.30,
+      "description": "Good - Strong pricing power"
+    },
+    "average": {
+      "threshold": 0.20,
+      "description": "Average - Moderate pricing power"
+    },
+    "below_average": {
+      "threshold": 0.10,
+      "description": "Below average - Weak pricing power"
+    },
+    "poor": {
+      "threshold": 0.0,
+      "description": "Poor - Very weak pricing power"
+    }
+  },
+  "operating_margin": {
+    "excellent": {
+      "threshold": 0.20,
+      "description": "Excellent - Very efficient operations"
+    },
+    "good": {
+      "threshold": 0.15,
+      "description": "Good - Efficient operations"
+    },
+    "average": {
+      "threshold": 0.10,
+      "description": "Average - Moderate operational efficiency"
+    },
+    "below_average": {
+      "threshold": 0.05,
+      "description": "Below average - Inefficient operations"
+    },
+    "poor": {
+      "threshold": 0.0,
+      "description": "Poor - Very inefficient operations"
+    }
+  },
+  "net_margin": {
+    "excellent": {
+      "threshold": 0.15,
+      "description": "Excellent - Very profitable business model"
+    },
+    "good": {
+      "threshold": 0.10,
+      "description": "Good - Profitable business model"
+    },
+    "average": {
+      "threshold": 0.05,
+      "description": "Average - Moderately profitable"
+    },
+    "below_average": {
+      "threshold": 0.02,
+      "description": "Below average - Weak profitability"
+    },
+    "poor": {
+      "threshold": 0.0,
+      "description": "Poor - Very weak profitability"
+    }
+  },
+  "ev_ebitda": {
+    "excellent": {
+      "threshold": 8.0,
+      "description": "Excellent - Attractive valuation relative to cash generation"
+    },
+    "good": {
+      "threshold": 12.0,
+      "description": "Good - Reasonable valuation"
+    },
+    "average": {
+      "threshold": 16.0,
+      "description": "Average - Fair valuation"
+    },
+    "below_average": {
+      "threshold": 20.0,
+      "description": "Below average - Expensive valuation"
+    },
+    "poor": {
+      "threshold": 999.0,
+      "description": "Poor - Very expensive valuation"
+    }
+  },
+  "free_cash_flow_yield": {
+    "excellent": {
+      "threshold": 0.08,
+      "description": "Excellent - Very attractive cash flow yield"
+    },
+    "good": {
+      "threshold": 0.05,
+      "description": "Good - Attractive cash flow yield"
+    },
+    "average": {
+      "threshold": 0.03,
+      "description": "Average - Moderate cash flow yield"
+    },
+    "below_average": {
+      "threshold": 0.01,
+      "description": "Below average - Low cash flow yield"
+    },
+    "poor": {
+      "threshold": 0.0,
+      "description": "Poor - Very low or negative cash flow yield"
+    }
+  }
+}

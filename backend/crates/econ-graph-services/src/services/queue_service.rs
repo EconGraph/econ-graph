@@ -18,7 +18,12 @@ pub async fn get_next_queue_items(
 ) -> AppResult<Vec<CrawlQueueItem>> {
     use crawl_queue::dsl;
 
-    let mut conn = pool.get().await?;
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {}",
+            e
+        ))
+    })?;
 
     // Use SKIP LOCKED to get available items without blocking
     let items = dsl::crawl_queue
@@ -44,7 +49,12 @@ pub async fn get_next_queue_items(
 pub async fn lock_queue_item(pool: &DatabasePool, item_id: Uuid, worker_id: &str) -> AppResult<()> {
     use crawl_queue::dsl;
 
-    let mut conn = pool.get().await?;
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {}",
+            e
+        ))
+    })?;
 
     let update = UpdateCrawlQueueItem {
         status: Some("processing".to_string()),
@@ -71,7 +81,12 @@ pub async fn update_queue_item_status(
 ) -> AppResult<()> {
     use crawl_queue::dsl;
 
-    let mut conn = pool.get().await?;
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {}",
+            e
+        ))
+    })?;
 
     let update = UpdateCrawlQueueItem {
         status: Some(status.to_string()),
@@ -106,7 +121,12 @@ pub async fn update_queue_item_for_retry(
 ) -> AppResult<()> {
     use crawl_queue::dsl;
 
-    let mut conn = pool.get().await?;
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {}",
+            e
+        ))
+    })?;
 
     // Get current item to check retry count
     let current_item = dsl::crawl_queue
@@ -151,7 +171,12 @@ pub async fn update_queue_item_for_retry(
 pub async fn unlock_queue_item(pool: &DatabasePool, item_id: Uuid) -> AppResult<()> {
     use crawl_queue::dsl;
 
-    let mut conn = pool.get().await?;
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {}",
+            e
+        ))
+    })?;
 
     let update = UpdateCrawlQueueItem {
         status: Some("pending".to_string()), // Reset to pending
@@ -174,7 +199,12 @@ pub async fn get_queue_statistics(pool: &DatabasePool) -> AppResult<QueueStatist
     use crawl_queue::dsl;
     use diesel::dsl::{count, min};
 
-    let mut conn = pool.get().await?;
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {}",
+            e
+        ))
+    })?;
 
     // Get total count
     let total_items: i64 = dsl::crawl_queue
@@ -281,7 +311,12 @@ pub async fn cleanup_old_queue_items_with_retention(
 ) -> AppResult<i64> {
     use crawl_queue::dsl;
 
-    let mut conn = pool.get().await?;
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {}",
+            e
+        ))
+    })?;
 
     let cutoff_date = Utc::now() - Duration::days(retention_days);
 
@@ -330,7 +365,12 @@ pub async fn get_stuck_items(
 ) -> AppResult<Vec<CrawlQueueItem>> {
     use crawl_queue::dsl;
 
-    let mut conn = pool.get().await?;
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {}",
+            e
+        ))
+    })?;
     let timeout = Utc::now() - Duration::minutes(timeout_minutes);
 
     let stuck_items = dsl::crawl_queue

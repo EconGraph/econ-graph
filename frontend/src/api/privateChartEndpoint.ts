@@ -7,7 +7,6 @@
 
 import { Request, Response } from 'express';
 import { generateChartConfig, validateChartRequest } from './chartApi';
-// import { ChartRequest, ChartResponse } from './chartApi';
 
 /**
  * Private chart generation endpoint

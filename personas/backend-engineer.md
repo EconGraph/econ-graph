@@ -104,6 +104,336 @@ CrawlAttempt       // Data acquisition tracking
 - **Migration Testing**: All migrations tested in CI/CD pipeline
 - **Data Integrity**: Comprehensive foreign key and constraint validation
 
+#### Database Schema Design Standards
+
+**CRITICAL**: Follow these schema design principles to avoid data integrity issues and compilation errors:
+
+##### 1. Nullable vs Non-Nullable Field Design
+
+**❌ WRONG**: Using `Option<T>` for fields that should always have values
+```sql
+-- BAD: Creates unnecessary complexity and data integrity issues
+xbrl_file_compressed BOOLEAN DEFAULT TRUE,  -- Nullable but has default
+xbrl_processing_status VARCHAR(20) DEFAULT 'pending',  -- Nullable but has default
+level INTEGER DEFAULT 0,  -- Nullable but has default
+```
+
+**✅ CORRECT**: Use `NOT NULL` for fields that logically must have values
+```sql
+-- GOOD: Clear, unambiguous, and performant
+xbrl_file_compressed BOOLEAN NOT NULL DEFAULT TRUE,  -- Always known
+xbrl_processing_status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- Always known
+level INTEGER NOT NULL DEFAULT 0,  -- Always known
+```
+
+##### 2. When to Use Nullable Fields
+
+**Use `NULL` only when:**
+- **Optional data**: Fields that may not exist (e.g., `amendment_type` only exists if `is_amended = true`)
+- **Not yet available**: Fields that will be populated later (e.g., `xbrl_file_content` before download)
+- **Conditional data**: Fields that depend on other conditions (e.g., `restatement_reason` only if `is_restated = true`)
+
+**Never use `NULL` for:**
+- **State fields**: Fields that represent a known state (compressed, processing status, hierarchy level)
+- **Boolean flags**: Fields that are either true or false (no "unknown" state)
+- **Default values**: Fields with meaningful defaults (compression type, processing status)
+
+##### 3. Schema Design Anti-Patterns to Avoid
+
+**❌ Anti-Pattern 1**: `Option<bool>` for state fields
+```rust
+// BAD: Creates confusion and requires unwrap_or() everywhere
+pub xbrl_file_compressed: Option<bool>,  // Is it compressed or not?
+```
+
+**✅ Correct**: `bool` for state fields
+```rust
+// GOOD: Clear and unambiguous
+pub xbrl_file_compressed: bool,  // Always known, defaults to true
+```
+
+**❌ Anti-Pattern 2**: Nullable fields with defaults
+```sql
+-- BAD: Creates ambiguity - is NULL different from DEFAULT?
+processing_status VARCHAR(20) DEFAULT 'pending',  -- Nullable with default
+```
+
+**✅ Correct**: Non-nullable fields with defaults
+```sql
+-- GOOD: Clear semantics - always has a value
+processing_status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- Always known
+```
+
+##### 4. Rust Model Alignment
+
+**Critical**: Rust models must exactly match database schema nullability:
+
+```rust
+// Database: xbrl_file_compressed BOOLEAN NOT NULL DEFAULT TRUE
+// Rust model must be:
+pub xbrl_file_compressed: bool,  // NOT Option<bool>
+
+// Database: xbrl_processing_status VARCHAR(20) NOT NULL DEFAULT 'pending'  
+// Rust model must be:
+pub xbrl_processing_status: String,  // NOT Option<String>
+
+// Database: level INTEGER NOT NULL DEFAULT 0
+// Rust model must be:
+pub level: i32,  // NOT Option<i32>
+```
+
+##### 5. Migration Best Practices
+
+**When changing nullability:**
+1. **Add NOT NULL constraint**: Use `ALTER COLUMN field_name SET NOT NULL`
+2. **Update existing data**: Ensure all existing rows have valid values
+3. **Regenerate schema**: Run `diesel print-schema` to update Rust models
+4. **Update Rust code**: Remove `Option<>` wrappers and `.unwrap_or()` calls
+
+**Example migration:**
+```sql
+-- Fix nullable field with default
+ALTER TABLE financial_statements 
+ALTER COLUMN xbrl_file_compressed SET NOT NULL;
+
+ALTER TABLE financial_statements 
+ALTER COLUMN xbrl_processing_status SET NOT NULL;
+
+ALTER TABLE financial_line_items 
+ALTER COLUMN level SET NOT NULL;
+```
+
+##### 6. Performance and Query Benefits
+
+**Non-nullable fields provide:**
+- **Better indexing**: NULL values can't be efficiently indexed
+- **Simpler queries**: No need for `IS NULL` checks
+- **Type safety**: Compile-time guarantees about data presence
+- **Cleaner code**: No need for `.unwrap_or()` or null checks
+
+##### 7. Using Enums in Database Schemas
+
+**✅ PREFERRED**: Use PostgreSQL enums for fields with a fixed set of values
+
+**Benefits of PostgreSQL enums:**
+- **Type safety**: Database enforces valid values at the schema level
+- **Performance**: More efficient than VARCHAR with CHECK constraints
+- **Clarity**: Self-documenting schema with explicit value sets
+- **Consistency**: Prevents typos and invalid values
+- **Query optimization**: Better index performance and query planning
+
+**When to use enums:**
+- **Status fields**: `processing_status`, `annotation_status`, `assignment_status`
+- **Type fields**: `statement_type`, `annotation_type`, `assignment_type`
+- **Category fields**: `ratio_category`, `comparison_type`
+- **Configuration fields**: `compression_type`, `calculation_method`
+
+**❌ WRONG**: Using VARCHAR for fields with fixed value sets
+```sql
+-- BAD: No type safety, allows invalid values
+xbrl_processing_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+statement_type VARCHAR(50) NOT NULL,
+annotation_type VARCHAR(30) NOT NULL,
+```
+
+**✅ CORRECT**: Using PostgreSQL enums
+```sql
+-- GOOD: Type-safe, self-documenting, performant
+CREATE TYPE processing_status AS ENUM ('pending', 'processing', 'completed', 'failed');
+CREATE TYPE statement_type AS ENUM ('income_statement', 'balance_sheet', 'cash_flow', 'equity');
+CREATE TYPE annotation_type AS ENUM ('comment', 'question', 'concern', 'insight', 'risk', 'opportunity', 'highlight');
+
+-- Use in tables
+xbrl_processing_status processing_status NOT NULL DEFAULT 'pending',
+statement_type statement_type NOT NULL,
+annotation_type annotation_type NOT NULL,
+```
+
+**Rust Integration with diesel-derive-enum:**
+
+**✅ CORRECT**: Using diesel-derive-enum for seamless integration
+```rust
+use diesel_derive_enum::DbEnum;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, DbEnum)]
+#[DieselType = "ProcessingStatus"]
+pub enum ProcessingStatus {
+    #[db_rename = "pending"]
+    Pending,
+    #[db_rename = "processing"]
+    Processing,
+    #[db_rename = "completed"]
+    Completed,
+    #[db_rename = "failed"]
+    Failed,
+}
+
+// Use in models
+pub struct FinancialStatement {
+    pub xbrl_processing_status: ProcessingStatus,
+    // ...
+}
+```
+
+**Migration pattern for enums:**
+```sql
+-- 1. Create enum type
+CREATE TYPE processing_status AS ENUM ('pending', 'processing', 'completed', 'failed');
+
+-- 2. Add column with enum type
+ALTER TABLE financial_statements 
+ADD COLUMN xbrl_processing_status processing_status NOT NULL DEFAULT 'pending';
+
+-- 3. Update existing data if needed
+UPDATE financial_statements 
+SET xbrl_processing_status = 'pending' 
+WHERE xbrl_processing_status IS NULL;
+
+-- 4. Drop old column if replacing
+ALTER TABLE financial_statements DROP COLUMN old_status_column;
+```
+
+**Fields that should remain VARCHAR (not enums):**
+- **External identifiers**: `filing_type`, `form_type`, `amendment_type` (controlled by SEC)
+- **User-generated content**: `name`, `description`, `notes`
+- **URLs and paths**: `document_url`, `file_path`
+- **Codes that change frequently**: `sic_code`, `industry_code`
+
+##### 8. Diesel-Derive-Enum Integration (CRITICAL)
+
+**⚠️ WARNING: diesel-derive-enum is tricky and has specific requirements. Follow these steps exactly to avoid compilation errors.**
+
+**Step 1: Create PostgreSQL Enum Types in Migration**
+```sql
+-- Create enum types FIRST in migration
+CREATE TYPE compression_type AS ENUM ('zstd', 'lz4', 'gzip', 'none');
+CREATE TYPE processing_status AS ENUM ('pending', 'processing', 'completed', 'failed');
+CREATE TYPE statement_type AS ENUM ('income_statement', 'balance_sheet', 'cash_flow', 'equity');
+```
+
+**Step 2: Use Correct DieselType Attribute**
+```rust
+// ✅ CORRECT: Use the EXACT snake_case name from PostgreSQL
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel_derive_enum::DbEnum)]
+#[DieselType = "compression_type"]  // Must match CREATE TYPE name exactly
+pub enum CompressionType {
+    #[db_rename = "zstd"]
+    Zstd,
+    #[db_rename = "lz4"]
+    Lz4,
+    #[db_rename = "gzip"]
+    Gzip,
+    #[db_rename = "none"]
+    None,
+}
+```
+
+**❌ COMMON MISTAKES TO AVOID:**
+```rust
+// ❌ WRONG: Using PascalCase (will cause name conflicts)
+#[DieselType = "CompressionType"]
+
+// ❌ WRONG: Using generic types (won't work with PostgreSQL enums)
+#[DieselType = "Text"]
+#[DieselType = "VarChar"]
+
+// ❌ WRONG: Mismatched enum name (must match CREATE TYPE exactly)
+CREATE TYPE compression_type AS ENUM (...);
+#[DieselType = "compressionType"]  // Wrong case!
+```
+
+**Step 3: Update Schema.rs to Use Enum Types**
+```rust
+// In schema.rs, use the actual enum type, not Text
+diesel::table! {
+    financial_statements (id) {
+        // ...
+        xbrl_file_compression_type -> CompressionType,  // Not Text!
+        xbrl_processing_status -> ProcessingStatus,     // Not Text!
+        // ...
+    }
+}
+```
+
+**Step 4: Update Rust Models**
+```rust
+// In your Rust models, use the enum types directly
+pub struct FinancialStatement {
+    pub xbrl_file_compression_type: CompressionType,  // Not String!
+    pub xbrl_processing_status: ProcessingStatus,     // Not String!
+    // ...
+}
+```
+
+**Step 5: Add diesel-derive-enum Dependency**
+```toml
+# In Cargo.toml
+[dependencies]
+diesel-derive-enum = { version = "2.1", features = ["postgres"] }
+```
+
+**Troubleshooting Common Issues:**
+
+1. **Name Collision Errors**: If you see "the name `CompressionType` is defined multiple times", check that your `#[DieselType]` attribute uses the exact snake_case name from the PostgreSQL migration.
+
+2. **Trait Bound Errors**: If you see `AsExpression` or `FromSqlRow` errors, ensure you're using the correct `#[DieselType]` attribute and that the enum is properly derived.
+
+3. **Schema Mismatch**: If Diesel schema shows `Text` but you want enums, you need to run `diesel print-schema` after creating the enum types in the database.
+
+4. **Version Compatibility**: Ensure diesel-derive-enum version is compatible with your Diesel version. Check the crate documentation for version compatibility.
+
+**Complete Working Example:**
+```rust
+// 1. Migration creates: CREATE TYPE user_role AS ENUM ('admin', 'user');
+// 2. Rust enum:
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel_derive_enum::DbEnum)]
+#[DieselType = "user_role"]  // Exact match to CREATE TYPE name
+pub enum UserRole {
+    #[db_rename = "admin"]
+    Admin,
+    #[db_rename = "user"]
+    User,
+}
+// 3. Schema.rs: role -> UserRole,
+// 4. Model: pub role: UserRole,
+```
+
+**Key Success Factors:**
+- ✅ PostgreSQL enum name (snake_case) must exactly match `#[DieselType]` attribute
+- ✅ Enum variants must use `#[db_rename]` to match PostgreSQL enum values
+- ✅ Schema.rs must reference the Rust enum type, not Text
+- ✅ Rust models must use the enum type, not String
+- ✅ All required traits must be derived (Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, DbEnum)
+
+##### 9. Data Integrity Validation
+
+**Before committing schema changes:**
+1. **Verify logical consistency**: Every field should have a clear purpose
+2. **Check default values**: Ensure defaults make business sense
+3. **Validate constraints**: Foreign keys, check constraints, unique constraints
+4. **Test migrations**: Run migrations on test data to verify correctness
+5. **Update documentation**: Comment fields with their business purpose
+6. **Consider enum usage**: Evaluate if fields with fixed values should be enums
+
+**Example of well-documented schema with enums:**
+```sql
+-- Financial statement processing status - Always known, defaults to pending
+-- Enum values: pending, processing, completed, failed
+xbrl_processing_status processing_status NOT NULL DEFAULT 'pending',
+
+-- File compression state - Always known, defaults to compressed for efficiency  
+-- True if file is compressed using zstd or other compression
+xbrl_file_compressed BOOLEAN NOT NULL DEFAULT TRUE,
+
+-- Statement type - Always known, enum ensures type safety
+-- Enum values: income_statement, balance_sheet, cash_flow, equity
+statement_type statement_type NOT NULL,
+
+-- Hierarchy level within financial statement - Always known, defaults to top level
+-- 0 = top level, 1 = first level of detail, etc.
+level INTEGER NOT NULL DEFAULT 0,
+```
+
 ### GraphQL API Architecture
 
 #### Schema Design

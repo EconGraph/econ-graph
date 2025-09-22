@@ -1,5 +1,23 @@
 // @generated automatically by Diesel CLI.
 
+use diesel::sql_types::*;
+
+diesel::table! {
+    annotation_assignments (id) {
+        id -> Uuid,
+        statement_id -> Uuid,
+        line_item_id -> Nullable<Uuid>,
+        assignee_id -> Uuid,
+        assigner_id -> Uuid,
+        assignment_type -> Text,
+        due_date -> Nullable<Timestamptz>,
+        status -> Text,
+        notes -> Nullable<Text>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
 diesel::table! {
     annotation_comments (id) {
         id -> Uuid,
@@ -9,6 +27,35 @@ diesel::table! {
         is_resolved -> Nullable<Bool>,
         created_at -> Nullable<Timestamptz>,
         updated_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    annotation_replies (id) {
+        id -> Uuid,
+        annotation_id -> Uuid,
+        author_id -> Uuid,
+        content -> Text,
+        mentions -> Nullable<Array<Nullable<Uuid>>>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    annotation_templates (id) {
+        id -> Uuid,
+        #[max_length = 255]
+        name -> Varchar,
+        description -> Nullable<Text>,
+        template_content -> Text,
+        annotation_type -> Text,
+        tags -> Nullable<Array<Nullable<Text>>>,
+        is_public -> Nullable<Bool>,
+        created_by -> Uuid,
+        usage_count -> Nullable<Int4>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
     }
 }
 
@@ -66,6 +113,62 @@ diesel::table! {
         permissions -> Nullable<Jsonb>,
         created_at -> Nullable<Timestamptz>,
         last_accessed_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    companies (id) {
+        id -> Uuid,
+        #[max_length = 10]
+        cik -> Varchar,
+        #[max_length = 10]
+        ticker -> Nullable<Varchar>,
+        #[max_length = 255]
+        name -> Varchar,
+        #[max_length = 500]
+        legal_name -> Nullable<Varchar>,
+        #[max_length = 4]
+        sic_code -> Nullable<Varchar>,
+        #[max_length = 255]
+        sic_description -> Nullable<Varchar>,
+        #[max_length = 100]
+        industry -> Nullable<Varchar>,
+        #[max_length = 100]
+        sector -> Nullable<Varchar>,
+        business_address -> Nullable<Jsonb>,
+        mailing_address -> Nullable<Jsonb>,
+        #[max_length = 50]
+        phone -> Nullable<Varchar>,
+        #[max_length = 255]
+        website -> Nullable<Varchar>,
+        #[max_length = 2]
+        state_of_incorporation -> Nullable<Varchar>,
+        #[max_length = 100]
+        state_of_incorporation_description -> Nullable<Varchar>,
+        #[max_length = 4]
+        fiscal_year_end -> Nullable<Varchar>,
+        #[max_length = 50]
+        entity_type -> Nullable<Varchar>,
+        #[max_length = 20]
+        entity_size -> Nullable<Varchar>,
+        is_active -> Bool,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    company_comparisons (id) {
+        id -> Uuid,
+        company_id -> Uuid,
+        peer_company_id -> Uuid,
+        comparison_type -> Text,
+        comparison_metrics -> Nullable<Jsonb>,
+        comparison_period_start -> Date,
+        comparison_period_end -> Date,
+        similarity_score -> Nullable<Numeric>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
     }
 }
 
@@ -248,6 +351,124 @@ diesel::table! {
         recovery_time_days -> Nullable<Int4>,
         confidence_score -> Nullable<Numeric>,
         created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    financial_annotations (id) {
+        id -> Uuid,
+        statement_id -> Uuid,
+        line_item_id -> Nullable<Uuid>,
+        author_id -> Uuid,
+        content -> Text,
+        annotation_type -> Text,
+        tags -> Nullable<Array<Nullable<Text>>>,
+        highlights -> Nullable<Jsonb>,
+        mentions -> Nullable<Array<Nullable<Uuid>>>,
+        parent_annotation_id -> Nullable<Uuid>,
+        status -> Text,
+        is_private -> Nullable<Bool>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    financial_line_items (id) {
+        id -> Uuid,
+        statement_id -> Uuid,
+        #[max_length = 255]
+        taxonomy_concept -> Varchar,
+        #[max_length = 255]
+        standard_label -> Nullable<Varchar>,
+        #[max_length = 255]
+        custom_label -> Nullable<Varchar>,
+        value -> Nullable<Numeric>,
+        #[max_length = 50]
+        unit -> Varchar,
+        #[max_length = 255]
+        context_ref -> Varchar,
+        #[max_length = 255]
+        segment_ref -> Nullable<Varchar>,
+        #[max_length = 255]
+        scenario_ref -> Nullable<Varchar>,
+        precision -> Nullable<Int4>,
+        decimals -> Nullable<Int4>,
+        is_credit -> Nullable<Bool>,
+        is_debit -> Nullable<Bool>,
+        statement_type -> Text,
+        statement_section -> Text,
+        #[max_length = 255]
+        parent_concept -> Nullable<Varchar>,
+        level -> Int4,
+        order_index -> Nullable<Int4>,
+        is_calculated -> Bool,
+        calculation_formula -> Nullable<Text>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    financial_ratios (id) {
+        id -> Uuid,
+        statement_id -> Uuid,
+        ratio_category -> Text,
+        #[max_length = 100]
+        ratio_name -> Varchar,
+        ratio_value -> Nullable<Numeric>,
+        ratio_formula -> Nullable<Text>,
+        numerator_value -> Nullable<Numeric>,
+        denominator_value -> Nullable<Numeric>,
+        #[max_length = 255]
+        numerator_concept -> Nullable<Varchar>,
+        #[max_length = 255]
+        denominator_concept -> Nullable<Varchar>,
+        calculation_method -> Nullable<Text>,
+        is_industry_standard -> Nullable<Bool>,
+        benchmark_value -> Nullable<Numeric>,
+        benchmark_percentile -> Nullable<Int4>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    financial_statements (id) {
+        id -> Uuid,
+        company_id -> Uuid,
+        #[max_length = 10]
+        filing_type -> Varchar,
+        #[max_length = 20]
+        form_type -> Varchar,
+        #[max_length = 20]
+        accession_number -> Varchar,
+        filing_date -> Date,
+        period_end_date -> Date,
+        fiscal_year -> Int4,
+        fiscal_quarter -> Nullable<Int4>,
+        #[max_length = 50]
+        document_type -> Varchar,
+        document_url -> Text,
+        xbrl_file_oid -> Nullable<Oid>,
+        xbrl_file_content -> Nullable<Bytea>,
+        xbrl_file_size_bytes -> Nullable<Int8>,
+        xbrl_file_compressed -> Bool,
+        xbrl_file_compression_type -> Text,
+        #[max_length = 64]
+        xbrl_file_hash -> Nullable<Varchar>,
+        xbrl_processing_status -> Text,
+        xbrl_processing_error -> Nullable<Text>,
+        xbrl_processing_started_at -> Nullable<Timestamptz>,
+        xbrl_processing_completed_at -> Nullable<Timestamptz>,
+        is_amended -> Bool,
+        #[max_length = 20]
+        amendment_type -> Nullable<Varchar>,
+        original_filing_date -> Nullable<Date>,
+        is_restated -> Bool,
+        restatement_reason -> Nullable<Text>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
     }
 }
 
@@ -440,8 +661,137 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    xbrl_processing_logs (id) {
+        id -> Uuid,
+        statement_id -> Uuid,
+        processing_step -> Text,
+        status -> Text,
+        error_message -> Nullable<Text>,
+        processing_time_ms -> Nullable<Int4>,
+        records_processed -> Nullable<Int4>,
+        records_failed -> Nullable<Int4>,
+        metadata -> Nullable<Jsonb>,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    xbrl_taxonomy_concepts (id) {
+        id -> Uuid,
+        #[max_length = 255]
+        concept_name -> Varchar,
+        #[max_length = 255]
+        standard_label -> Nullable<Varchar>,
+        #[max_length = 1000]
+        documentation -> Nullable<Varchar>,
+        data_type -> Nullable<Text>,
+        period_type -> Nullable<Text>,
+        balance_type -> Nullable<Text>,
+        substitution_group -> Nullable<Text>,
+        #[sql_name = "abstract"]
+        abstract_ -> Nullable<Bool>,
+        nillable -> Nullable<Bool>,
+        #[max_length = 50]
+        taxonomy_version -> Nullable<Varchar>,
+        namespace_uri -> Nullable<Text>,
+        is_active -> Nullable<Bool>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::joinable!(annotation_assignments -> financial_line_items (line_item_id));
+diesel::table! {
+    xbrl_taxonomy_schemas (id) {
+        id -> Uuid,
+        schema_namespace -> Varchar,
+        schema_filename -> Varchar,
+        schema_version -> Nullable<Varchar>,
+        schema_date -> Nullable<Date>,
+        file_type -> Text,
+        source_type -> Text,
+        file_content -> Nullable<Bytea>,
+        file_oid -> Nullable<Integer>,
+        file_size_bytes -> Bigint,
+        file_hash -> Varchar,
+        is_compressed -> Bool,
+        compression_type -> Varchar,
+        source_url -> Nullable<Text>,
+        download_url -> Nullable<Text>,
+        original_filename -> Nullable<Varchar>,
+        processing_status -> Text,
+        processing_error -> Nullable<Text>,
+        processing_started_at -> Nullable<Timestamptz>,
+        processing_completed_at -> Nullable<Timestamptz>,
+        concepts_extracted -> Integer,
+        relationships_extracted -> Integer,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    xbrl_taxonomy_linkbases (id) {
+        id -> Uuid,
+        linkbase_filename -> Varchar,
+        linkbase_type -> Text,
+        target_namespace -> Nullable<Varchar>,
+        schema_id -> Nullable<Uuid>,
+        file_content -> Nullable<Bytea>,
+        file_oid -> Nullable<Integer>,
+        file_size_bytes -> Bigint,
+        file_hash -> Varchar,
+        is_compressed -> Bool,
+        compression_type -> Varchar,
+        source_url -> Nullable<Text>,
+        download_url -> Nullable<Text>,
+        original_filename -> Nullable<Varchar>,
+        processing_status -> Text,
+        processing_error -> Nullable<Text>,
+        processing_started_at -> Nullable<Timestamptz>,
+        processing_completed_at -> Nullable<Timestamptz>,
+        relationships_extracted -> Integer,
+        labels_extracted -> Integer,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    xbrl_dts_dependencies (id) {
+        id -> Uuid,
+        parent_schema_id -> Uuid,
+        child_schema_id -> Nullable<Uuid>,
+        child_namespace -> Varchar,
+        dependency_type -> Varchar,
+        dependency_location -> Nullable<Text>,
+        is_resolved -> Bool,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    xbrl_instance_dts_references (id) {
+        id -> Uuid,
+        statement_id -> Uuid,
+        reference_type -> Varchar,
+        reference_role -> Nullable<Varchar>,
+        reference_href -> Text,
+        reference_arcrole -> Nullable<Varchar>,
+        resolved_schema_id -> Nullable<Uuid>,
+        resolved_linkbase_id -> Nullable<Uuid>,
+        is_resolved -> Bool,
+        resolution_error -> Nullable<Text>,
+        created_at -> Timestamptz,
+        resolved_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::joinable!(annotation_assignments -> financial_statements (statement_id));
 diesel::joinable!(annotation_comments -> chart_annotations (annotation_id));
 diesel::joinable!(annotation_comments -> users (user_id));
+diesel::joinable!(annotation_replies -> financial_annotations (annotation_id));
 diesel::joinable!(audit_logs -> users (user_id));
 diesel::joinable!(chart_annotations -> users (user_id));
 diesel::joinable!(crawl_attempts -> economic_series (series_id));
@@ -449,6 +799,11 @@ diesel::joinable!(data_points -> economic_series (series_id));
 diesel::joinable!(economic_series -> data_sources (source_id));
 diesel::joinable!(event_country_impacts -> countries (country_id));
 diesel::joinable!(event_country_impacts -> global_economic_events (event_id));
+diesel::joinable!(financial_annotations -> financial_line_items (line_item_id));
+diesel::joinable!(financial_annotations -> financial_statements (statement_id));
+diesel::joinable!(financial_line_items -> financial_statements (statement_id));
+diesel::joinable!(financial_ratios -> financial_statements (statement_id));
+diesel::joinable!(financial_statements -> companies (company_id));
 diesel::joinable!(global_economic_events -> countries (primary_country_id));
 diesel::joinable!(global_economic_indicators -> countries (country_id));
 diesel::joinable!(global_indicator_data -> global_economic_indicators (indicator_id));
@@ -456,12 +811,18 @@ diesel::joinable!(series_metadata -> data_sources (source_id));
 diesel::joinable!(user_data_source_preferences -> data_sources (data_source_id));
 diesel::joinable!(user_data_source_preferences -> users (user_id));
 diesel::joinable!(user_sessions -> users (user_id));
+diesel::joinable!(xbrl_processing_logs -> financial_statements (statement_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    annotation_assignments,
     annotation_comments,
+    annotation_replies,
+    annotation_templates,
     audit_logs,
     chart_annotations,
     chart_collaborators,
+    companies,
+    company_comparisons,
     countries,
     country_correlations,
     crawl_attempts,
@@ -470,6 +831,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     data_sources,
     economic_series,
     event_country_impacts,
+    financial_annotations,
+    financial_line_items,
+    financial_ratios,
+    financial_statements,
     global_economic_events,
     global_economic_indicators,
     global_indicator_data,
@@ -480,4 +845,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     user_data_source_preferences,
     user_sessions,
     users,
+    xbrl_processing_logs,
+    xbrl_taxonomy_concepts,
+    xbrl_taxonomy_schemas,
+    xbrl_taxonomy_linkbases,
+    xbrl_dts_dependencies,
+    xbrl_instance_dts_references,
 );
