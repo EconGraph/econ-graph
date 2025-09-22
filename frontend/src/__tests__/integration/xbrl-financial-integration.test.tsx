@@ -391,13 +391,13 @@ describe('XBRL Financial Integration Tests', () => {
         expect(screen.getByText('Financial Statements')).toBeInTheDocument();
       });
 
-      // Verify income statement structure is displayed
-      expect(screen.getByText('Financial Statements')).toBeInTheDocument();
-      expect(screen.getByText('Income Statement')).toBeInTheDocument();
+      // Verify income statement mock data is rendered correctly
+      expect(screen.getAllByText('Net Sales').length).toBeGreaterThan(0); // From mock lineItems
+      expect(screen.getAllByText('Net Income').length).toBeGreaterThan(0); // From mock lineItems
 
-      // Verify statement metadata
-      expect(screen.getByText('10-K')).toBeInTheDocument();
-      expect(screen.getByText('2023')).toBeInTheDocument();
+      // Verify calculated values from mock backend data
+      expect(screen.getAllByText('$383.29B').length).toBeGreaterThan(0); // Net Sales: 383285000000 / 1B
+      expect(screen.getAllByText('$96.99B').length).toBeGreaterThan(0); // Net Income: 96995000000 / 1B
     });
 
     it('should handle hierarchical line item display', async () => {
@@ -422,9 +422,9 @@ describe('XBRL Financial Integration Tests', () => {
       expect(screen.getAllByText('Total Assets').length).toBeGreaterThan(0);
       expect(screen.getAllByText('Current Assets').length).toBeGreaterThan(0);
 
-      // Verify the structured data is present
-      expect(screen.getAllByText('$352.76B').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('$143.57B').length).toBeGreaterThan(0);
+      // Verify the mock data is rendered correctly (values calculated from mock backend data)
+      expect(screen.getAllByText('$352.76B').length).toBeGreaterThan(0); // Total Assets: 352755000000 / 1B
+      expect(screen.getAllByText('$143.57B').length).toBeGreaterThan(0); // Current Assets: 143566000000 / 1B
     });
   });
 

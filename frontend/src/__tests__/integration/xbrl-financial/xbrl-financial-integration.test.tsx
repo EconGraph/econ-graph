@@ -391,13 +391,13 @@ describe('XBRL Financial Integration Tests', () => {
         expect(screen.getByText('Financial Statements')).toBeInTheDocument();
       });
 
-      // Verify income statement structure is displayed
-      expect(screen.getByText('Financial Statements')).toBeInTheDocument();
-      expect(screen.getByText('Income Statement')).toBeInTheDocument();
+      // Verify income statement mock data is rendered correctly
+      expect(screen.getAllByText('Net Sales').length).toBeGreaterThan(0); // From mock lineItems
+      expect(screen.getAllByText('Net Income').length).toBeGreaterThan(0); // From mock lineItems
 
-      // Verify statement metadata
-      expect(screen.getByText('10-K')).toBeInTheDocument();
-      expect(screen.getByText('2023')).toBeInTheDocument();
+      // Verify calculated values from mock backend data
+      expect(screen.getAllByText('$383.29B').length).toBeGreaterThan(0); // Net Sales: 383285000000 / 1B
+      expect(screen.getAllByText('$96.99B').length).toBeGreaterThan(0); // Net Income: 96995000000 / 1B
     });
 
     it('should handle hierarchical line item display', async () => {
