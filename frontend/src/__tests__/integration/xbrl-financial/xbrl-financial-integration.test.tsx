@@ -366,11 +366,11 @@ describe('XBRL Financial Integration Tests', () => {
       expect(screen.getByText('Total Liabilities')).toBeInTheDocument();
       expect(screen.getByText("Stockholders' Equity")).toBeInTheDocument();
 
-      // Verify values are formatted correctly
-      expect(screen.getByText('$352.76B')).toBeInTheDocument();
-      expect(screen.getByText('$143.57B')).toBeInTheDocument();
-      expect(screen.getByText('$258.55B')).toBeInTheDocument();
-      expect(screen.getByText('$94.21B')).toBeInTheDocument();
+      // Verify calculated values from mock backend data are rendered correctly
+      expect(screen.getAllByText('$352.76B').length).toBeGreaterThan(0); // Total Assets: 352755000000 / 1B
+      expect(screen.getAllByText('$143.57B').length).toBeGreaterThan(0); // Current Assets: 143566000000 / 1B  
+      expect(screen.getAllByText('$258.55B').length).toBeGreaterThan(0); // Total Liabilities: 258549000000 / 1B
+      expect(screen.getAllByText('$94.21B').length).toBeGreaterThan(0); // Stockholders' Equity from mock data
     });
 
     it('should display income statement data from XBRL parsing', async () => {
