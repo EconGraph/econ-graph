@@ -466,7 +466,7 @@ describe('LoginDialog', () => {
     expect(mockOnSuccess).toHaveBeenCalled();
   });
 
-  it('should clear error when dialog opens', () => {
+  it('should clear error when dialog closes', () => {
     const mockClearError = jest.fn();
     mockAuthContext.clearError = mockClearError;
     mockAuthContext.error = 'Previous error';
@@ -477,7 +477,11 @@ describe('LoginDialog', () => {
       </TestWrapper>
     );
 
-    // Error should be cleared when dialog opens
+    // Close the dialog using the dialog header close button
+    const closeButton = screen.getByRole('button', { name: 'Close dialog' });
+    fireEvent.click(closeButton);
+
+    // Error should be cleared when dialog closes
     expect(mockClearError).toHaveBeenCalled();
   });
 
