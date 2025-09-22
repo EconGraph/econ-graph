@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { TrendAnalysisChart } from '../TrendAnalysisChart';
 import { FinancialRatio } from '../../../types/financial';
@@ -168,10 +168,12 @@ describe('TrendAnalysisChart', () => {
     expect(screen.getByText('Loading trend data...')).toBeInTheDocument();
   });
 
-  it('handles empty ratios array', () => {
+  it('handles empty ratios array', async () => {
     render(<TrendAnalysisChart ratios={[]} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
 
-    expect(screen.getByText('No ratio data available for trend analysis')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('No ratio data available for trend analysis')).toBeInTheDocument();
+    });
   });
 
   it('groups ratios by name for trend calculation', () => {
@@ -188,8 +190,8 @@ describe('TrendAnalysisChart', () => {
     render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
 
     // ROE trend: 0.142 -> 0.147 (improving)
-    // Should show upward trend
-    expect(screen.getByText(/upward/i)).toBeInTheDocument();
+    // Should show improving trend
+    expect(screen.getByText(/improving/i)).toBeInTheDocument();
   });
 
   it('displays time period controls', () => {
