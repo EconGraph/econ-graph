@@ -1,0 +1,191 @@
+{
+  "profitability": {
+    "return_on_equity": {
+      "formula": "Net Income / Shareholders' Equity",
+      "description": "Measures how efficiently a company uses shareholders' equity to generate profits",
+      "educational_link": "https://www.investopedia.com/terms/r/returnonequity.asp"
+    },
+    "return_on_assets": {
+      "formula": "Net Income / Total Assets",
+      "description": "Measures how efficiently a company uses its assets to generate profits",
+      "educational_link": "https://www.investopedia.com/terms/r/returnonassets.asp"
+    },
+    "return_on_invested_capital": {
+      "formula": "NOPAT / Invested Capital",
+      "description": "Measures how efficiently a company uses its invested capital to generate profits",
+      "educational_link": "https://www.investopedia.com/terms/r/returnoninvestmentcapital.asp"
+    },
+    "gross_profit_margin": {
+      "formula": "Gross Profit / Revenue",
+      "description": "Measures the percentage of revenue that exceeds the cost of goods sold",
+      "educational_link": "https://www.investopedia.com/terms/g/gross_profit_margin.asp"
+    },
+    "operating_margin": {
+      "formula": "Operating Income / Revenue",
+      "description": "Measures the percentage of revenue that remains after operating expenses",
+      "educational_link": "https://www.investopedia.com/terms/o/operatingmargin.asp"
+    },
+    "net_margin": {
+      "formula": "Net Income / Revenue",
+      "description": "Measures the percentage of revenue that remains as net income",
+      "educational_link": "https://www.investopedia.com/terms/p/profitmargin.asp"
+    },
+    "ebitda_margin": {
+      "formula": "EBITDA / Revenue",
+      "description": "Measures the percentage of revenue that remains as EBITDA",
+      "educational_link": "https://www.investopedia.com/terms/e/ebitda-margin.asp"
+    },
+    "free_cash_flow_margin": {
+      "formula": "Free Cash Flow / Revenue",
+      "description": "Measures the percentage of revenue converted to free cash flow",
+      "educational_link": "https://www.investopedia.com/terms/f/freecashflowmargin.asp"
+    }
+  },
+  "liquidity": {
+    "current_ratio": {
+      "formula": "Current Assets / Current Liabilities",
+      "description": "Measures a company's ability to pay short-term obligations",
+      "educational_link": "https://www.investopedia.com/terms/c/currentratio.asp"
+    },
+    "quick_ratio": {
+      "formula": "(Current Assets - Inventory) / Current Liabilities",
+      "description": "Measures a company's ability to pay short-term obligations without selling inventory",
+      "educational_link": "https://www.investopedia.com/terms/q/quickratio.asp"
+    },
+    "cash_ratio": {
+      "formula": "Cash and Cash Equivalents / Current Liabilities",
+      "description": "Measures a company's ability to pay short-term obligations with cash only",
+      "educational_link": "https://www.investopedia.com/terms/c/cash-ratio.asp"
+    },
+    "operating_cash_flow_ratio": {
+      "formula": "Operating Cash Flow / Current Liabilities",
+      "description": "Measures a company's ability to pay short-term obligations with operating cash flow",
+      "educational_link": "https://www.investopedia.com/terms/o/operating-cash-flow-ratio.asp"
+    }
+  },
+  "leverage": {
+    "debt_to_equity": {
+      "formula": "Total Debt / Shareholders' Equity",
+      "description": "Measures the relative proportion of debt and equity financing",
+      "educational_link": "https://www.investopedia.com/terms/d/debtequityratio.asp"
+    },
+    "debt_to_assets": {
+      "formula": "Total Debt / Total Assets",
+      "description": "Measures the percentage of assets financed by debt",
+      "educational_link": "https://www.investopedia.com/terms/d/debt-to-assets.asp"
+    },
+    "interest_coverage": {
+      "formula": "EBIT / Interest Expense",
+      "description": "Measures a company's ability to pay interest on outstanding debt",
+      "educational_link": "https://www.investopedia.com/terms/i/interestcoverageratio.asp"
+    },
+    "debt_service_coverage": {
+      "formula": "Operating Cash Flow / (Interest + Principal Payments)",
+      "description": "Measures a company's ability to service its debt obligations",
+      "educational_link": "https://www.investopedia.com/terms/d/dscr.asp"
+    },
+    "equity_multiplier": {
+      "formula": "Total Assets / Shareholders' Equity",
+      "description": "Measures the amount of a firm's assets that are financed by shareholders' equity",
+      "educational_link": "https://www.investopedia.com/terms/e/equitymultiplier.asp"
+    }
+  },
+  "efficiency": {
+    "asset_turnover": {
+      "formula": "Revenue / Total Assets",
+      "description": "Measures how efficiently a company uses its assets to generate revenue",
+      "educational_link": "https://www.investopedia.com/terms/a/assetturnover.asp"
+    },
+    "inventory_turnover": {
+      "formula": "Cost of Goods Sold / Average Inventory",
+      "description": "Measures how many times a company's inventory is sold and replaced over a period",
+      "educational_link": "https://www.investopedia.com/terms/i/inventoryturnover.asp"
+    },
+    "receivables_turnover": {
+      "formula": "Revenue / Average Accounts Receivable",
+      "description": "Measures how efficiently a company collects on its receivables",
+      "educational_link": "https://www.investopedia.com/terms/r/receivableturnoverratio.asp"
+    },
+    "payables_turnover": {
+      "formula": "Cost of Goods Sold / Average Accounts Payable",
+      "description": "Measures how quickly a company pays its suppliers",
+      "educational_link": "https://www.investopedia.com/terms/p/payableturnoverratio.asp"
+    }
+  },
+  "valuation": {
+    "price_to_earnings": {
+      "formula": "Market Price per Share / Earnings per Share",
+      "description": "Measures the price investors are willing to pay for each dollar of earnings",
+      "educational_link": "https://www.investopedia.com/terms/p/price-earningsratio.asp"
+    },
+    "price_to_sales": {
+      "formula": "Market Cap / Revenue",
+      "description": "Measures the price investors are willing to pay for each dollar of sales",
+      "educational_link": "https://www.investopedia.com/terms/p/price-to-salesratio.asp"
+    },
+    "price_to_book": {
+      "formula": "Market Price per Share / Book Value per Share",
+      "description": "Measures the price investors are willing to pay for each dollar of book value",
+      "educational_link": "https://www.investopedia.com/terms/p/price-to-bookratio.asp"
+    },
+    "ev_ebitda": {
+      "formula": "Enterprise Value / EBITDA",
+      "description": "Measures the value of a company relative to its EBITDA (preferred by analysts over P/E)",
+      "educational_link": "https://www.investopedia.com/terms/e/ev-ebitda.asp"
+    },
+    "ev_sales": {
+      "formula": "Enterprise Value / Revenue",
+      "description": "Measures the value of a company relative to its revenue",
+      "educational_link": "https://www.investopedia.com/terms/e/enterprisevalue.asp"
+    },
+    "ev_fcf": {
+      "formula": "Enterprise Value / Free Cash Flow",
+      "description": "Measures the value of a company relative to its free cash flow",
+      "educational_link": "https://www.investopedia.com/terms/e/enterprisevalue.asp"
+    }
+  },
+  "warren_buffett_favorites": {
+    "free_cash_flow": {
+      "formula": "Operating Cash Flow - Capital Expenditures",
+      "description": "The cash a company generates after accounting for capital expenditures (Warren Buffett's favorite metric)",
+      "educational_link": "https://www.investopedia.com/terms/f/freecashflow.asp"
+    },
+    "free_cash_flow_per_share": {
+      "formula": "Free Cash Flow / Shares Outstanding",
+      "description": "Free cash flow per share - shows cash generation per share",
+      "educational_link": "https://www.investopedia.com/terms/f/freecashflow.asp"
+    },
+    "free_cash_flow_yield": {
+      "formula": "Free Cash Flow / Market Cap",
+      "description": "The percentage of market cap that is free cash flow (like a dividend yield)",
+      "educational_link": "https://www.investopedia.com/terms/f/freecashflow.asp"
+    },
+    "cash_flow_return_on_investment": {
+      "formula": "Free Cash Flow / Invested Capital",
+      "description": "Measures cash flow return on invested capital",
+      "educational_link": "https://www.investopedia.com/terms/c/cfroi.asp"
+    }
+  },
+  "growth": {
+    "revenue_growth_rate": {
+      "formula": "(Current Revenue - Previous Revenue) / Previous Revenue",
+      "description": "Measures the rate of revenue growth over time",
+      "educational_link": "https://www.investopedia.com/terms/r/revenuegrowthrate.asp"
+    },
+    "earnings_growth_rate": {
+      "formula": "(Current Earnings - Previous Earnings) / Previous Earnings",
+      "description": "Measures the rate of earnings growth over time",
+      "educational_link": "https://www.investopedia.com/terms/e/earningsgrowthrate.asp"
+    },
+    "free_cash_flow_growth_rate": {
+      "formula": "(Current FCF - Previous FCF) / Previous FCF",
+      "description": "Measures the rate of free cash flow growth over time",
+      "educational_link": "https://www.investopedia.com/terms/f/freecashflow.asp"
+    },
+    "book_value_growth_rate": {
+      "formula": "(Current Book Value - Previous Book Value) / Previous Book Value",
+      "description": "Measures the rate of book value growth over time",
+      "educational_link": "https://www.investopedia.com/terms/b/bookvalue.asp"
+    }
+  }
+}

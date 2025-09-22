@@ -431,7 +431,12 @@ impl DataSource {
     ) -> crate::error::AppResult<Option<Self>> {
         use crate::schema::data_sources::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
         let name = name.to_string();
 
         let source = dsl::data_sources
@@ -449,7 +454,12 @@ impl DataSource {
     ) -> crate::error::AppResult<Vec<Self>> {
         use crate::schema::data_sources::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let sources = diesel_async::RunQueryDsl::load(dsl::data_sources, &mut conn).await?;
 
@@ -466,7 +476,12 @@ impl DataSource {
         // Validate the new data source
         new_source.validate()?;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let source = diesel_async::RunQueryDsl::get_result(
             diesel::insert_into(dsl::data_sources).values(&new_source),

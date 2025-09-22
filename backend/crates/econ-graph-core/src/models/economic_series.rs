@@ -176,7 +176,12 @@ impl EconomicSeries {
     ) -> crate::error::AppResult<Vec<Self>> {
         use crate::schema::economic_series::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let series = dsl::economic_series
             .select(Self::as_select())
@@ -194,7 +199,12 @@ impl EconomicSeries {
     ) -> crate::error::AppResult<Self> {
         use crate::schema::economic_series::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let series = dsl::economic_series
             .filter(dsl::external_id.eq(external_id))
@@ -216,7 +226,12 @@ impl EconomicSeries {
         // Validate the new series
         new_series.validate()?;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let series = diesel::insert_into(dsl::economic_series)
             .values(new_series)
@@ -235,7 +250,12 @@ impl EconomicSeries {
     ) -> crate::error::AppResult<Self> {
         use crate::schema::economic_series::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let series = diesel::update(dsl::economic_series.filter(dsl::id.eq(id)))
             .set(update_data)
@@ -271,7 +291,12 @@ impl EconomicSeries {
     ) -> crate::error::AppResult<Self> {
         use crate::schema::economic_series::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let update_data = UpdateEconomicSeries {
             start_date: Some(start_date),

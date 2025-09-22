@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { Routes, Route } from 'react-router-dom';
-import { handlePrivateChartRequest, handleChartHealthCheck } from '../api/privateChartEndpoint';
+// import { handlePrivateChartRequest, handleChartHealthCheck } from '../api/privateChartEndpoint';
 
 /**
  * Private API Routes Component

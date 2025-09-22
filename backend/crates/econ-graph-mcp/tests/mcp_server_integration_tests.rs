@@ -42,18 +42,10 @@ async fn create_test_database_pool() -> econ_graph_core::database::DatabasePool 
     conn.run_pending_migrations(MIGRATIONS)
         .expect("Failed to run migrations");
 
-    // Create connection pool using the same pattern as TestContainer
-    use bb8::Pool;
-    use diesel_async::pooled_connection::AsyncDieselConnectionManager;
-    use diesel_async::AsyncPgConnection;
-
-    let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(&database_url);
-    let pool = Pool::builder()
-        .build(manager)
+    // Use the core crate's database pool creation function
+    econ_graph_core::database::create_pool(&database_url)
         .await
-        .expect("Failed to create connection pool");
-
-    pool
+        .expect("Failed to create connection pool")
 }
 
 #[tokio::test]

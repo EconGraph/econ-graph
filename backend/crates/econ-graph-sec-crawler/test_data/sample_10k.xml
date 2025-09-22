@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xbrl xmlns="http://www.xbrl.org/2003/instance"
+      xmlns:us-gaap="http://fasb.org/us-gaap/2020-01-31"
+      xmlns:xbrli="http://www.xbrl.org/2003/instance"
+      xmlns:xlink="http://www.w3.org/1999/xlink"
+      xmlns:link="http://www.xbrl.org/2003/linkbase"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.xbrl.org/2003/instance http://www.xbrl.org/2003/xbrl-instance-2003-12-31.xsd">
+
+  <!-- Context for annual period ending 2023-12-31 -->
+  <xbrli:context id="c1">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.sec.gov/CIK">0000320193</xbrli:identifier>
+      <xbrli:segment>
+        <xbrli:explicitMember dimension="us-gaap:EntityAxis">us-gaap:AppleIncMember</xbrli:explicitMember>
+      </xbrli:segment>
+    </xbrli:entity>
+    <xbrli:period>
+      <xbrli:instant>2023-12-31</xbrli:instant>
+    </xbrli:period>
+  </xbrli:context>
+
+  <!-- Context for annual period ending 2022-12-31 -->
+  <xbrli:context id="c2">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.sec.gov/CIK">0000320193</xbrli:identifier>
+      <xbrli:segment>
+        <xbrli:explicitMember dimension="us-gaap:EntityAxis">us-gaap:AppleIncMember</xbrli:explicitMember>
+      </xbrli:segment>
+    </xbrli:entity>
+    <xbrli:period>
+      <xbrli:instant>2022-12-31</xbrli:instant>
+    </xbrli:period>
+  </xbrli:context>
+
+  <!-- Context for quarterly period ending 2023-12-31 -->
+  <xbrli:context id="c3">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.sec.gov/CIK">0000320193</xbrli:identifier>
+      <xbrli:segment>
+        <xbrli:explicitMember dimension="us-gaap:EntityAxis">us-gaap:AppleIncMember</xbrli:explicitMember>
+      </xbrli:segment>
+    </xbrli:entity>
+    <xbrli:period>
+      <xbrli:startDate>2023-10-01</xbrli:startDate>
+      <xbrli:endDate>2023-12-31</xbrli:endDate>
+    </xbrli:period>
+  </xbrli:context>
+
+  <!-- Units -->
+  <xbrli:unit id="u1">
+    <xbrli:measure>xbrli:USD</xbrli:measure>
+  </xbrli:unit>
+
+  <xbrli:unit id="u2">
+    <xbrli:measure>xbrli:shares</xbrli:measure>
+  </xbrli:unit>
+
+  <!-- Balance Sheet Items -->
+  <us-gaap:Assets contextRef="c1" unitRef="u1" decimals="-6">352755000000</us-gaap:Assets>
+  <us-gaap:Assets contextRef="c2" unitRef="u1" decimals="-6">323888000000</us-gaap:Assets>
+
+  <us-gaap:AssetsCurrent contextRef="c1" unitRef="u1" decimals="-6">143566000000</us-gaap:AssetsCurrent>
+  <us-gaap:AssetsCurrent contextRef="c2" unitRef="u1" decimals="-6">135405000000</us-gaap:AssetsCurrent>
+
+  <us-gaap:CashAndCashEquivalentsAtCarryingValue contextRef="c1" unitRef="u1" decimals="-6">29965000000</us-gaap:CashAndCashEquivalentsAtCarryingValue>
+  <us-gaap:CashAndCashEquivalentsAtCarryingValue contextRef="c2" unitRef="u1" decimals="-6">23646000000</us-gaap:CashAndCashEquivalentsAtCarryingValue>
+
+  <us-gaap:Liabilities contextRef="c1" unitRef="u1" decimals="-6">258549000000</us-gaap:Liabilities>
+  <us-gaap:Liabilities contextRef="c2" unitRef="u1" decimals="-6">258054000000</us-gaap:Liabilities>
+
+  <us-gaap:LiabilitiesCurrent contextRef="c1" unitRef="u1" decimals="-6">145308000000</us-gaap:LiabilitiesCurrent>
+  <us-gaap:LiabilitiesCurrent contextRef="c2" unitRef="u1" decimals="-6">153982000000</us-gaap:LiabilitiesCurrent>
+
+  <us-gaap:LongTermDebt contextRef="c1" unitRef="u1" decimals="-6">95028000000</us-gaap:LongTermDebt>
+  <us-gaap:LongTermDebt contextRef="c2" unitRef="u1" decimals="-6">98959000000</us-gaap:LongTermDebt>
+
+  <us-gaap:StockholdersEquity contextRef="c1" unitRef="u1" decimals="-6">62146000000</us-gaap:StockholdersEquity>
+  <us-gaap:StockholdersEquity contextRef="c2" unitRef="u1" decimals="-6">50672000000</us-gaap:StockholdersEquity>
+
+  <!-- Income Statement Items -->
+  <us-gaap:Revenues contextRef="c3" unitRef="u1" decimals="-6">119575000000</us-gaap:Revenues>
+  <us-gaap:Revenues contextRef="c2" unitRef="u1" decimals="-6">394328000000</us-gaap:Revenues>
+
+  <us-gaap:CostOfGoodsAndServicesSold contextRef="c3" unitRef="u1" decimals="-6">69600000000</us-gaap:CostOfGoodsAndServicesSold>
+  <us-gaap:CostOfGoodsAndServicesSold contextRef="c2" unitRef="u1" decimals="-6">223546000000</us-gaap:CostOfGoodsAndServicesSold>
+
+  <us-gaap:GrossProfit contextRef="c3" unitRef="u1" decimals="-6">49975000000</us-gaap:GrossProfit>
+  <us-gaap:GrossProfit contextRef="c2" unitRef="u1" decimals="-6">170782000000</us-gaap:GrossProfit>
+
+  <us-gaap:OperatingIncomeLoss contextRef="c3" unitRef="u1" decimals="-6">33840000000</us-gaap:OperatingIncomeLoss>
+  <us-gaap:OperatingIncomeLoss contextRef="c2" unitRef="u1" decimals="-6">114301000000</us-gaap:OperatingIncomeLoss>
+
+  <us-gaap:NetIncomeLoss contextRef="c3" unitRef="u1" decimals="-6">33916000000</us-gaap:NetIncomeLoss>
+  <us-gaap:NetIncomeLoss contextRef="c2" unitRef="u1" decimals="-6">99803000000</us-gaap:NetIncomeLoss>
+
+  <!-- Cash Flow Statement Items -->
+  <us-gaap:NetCashProvidedByUsedInOperatingActivities contextRef="c3" unitRef="u1" decimals="-6">39800000000</us-gaap:NetCashProvidedByUsedInOperatingActivities>
+  <us-gaap:NetCashProvidedByUsedInOperatingActivities contextRef="c2" unitRef="u1" decimals="-6">122151000000</us-gaap:NetCashProvidedByUsedInOperatingActivities>
+
+  <us-gaap:PaymentsToAcquirePropertyPlantAndEquipment contextRef="c3" unitRef="u1" decimals="-6">-7000000000</us-gaap:PaymentsToAcquirePropertyPlantAndEquipment>
+  <us-gaap:PaymentsToAcquirePropertyPlantAndEquipment contextRef="c2" unitRef="u1" decimals="-6">-11085000000</us-gaap:PaymentsToAcquirePropertyPlantAndEquipment>
+
+  <!-- Interest and Tax Items -->
+  <us-gaap:InterestExpense contextRef="c3" unitRef="u1" decimals="-6">1003000000</us-gaap:InterestExpense>
+  <us-gaap:InterestExpense contextRef="c2" unitRef="u1" decimals="-6">2931000000</us-gaap:InterestExpense>
+
+  <us-gaap:IncomeTaxExpenseBenefit contextRef="c3" unitRef="u1" decimals="-6">-2630000000</us-gaap:IncomeTaxExpenseBenefit>
+  <us-gaap:IncomeTaxExpenseBenefit contextRef="c2" unitRef="u1" decimals="-6">-16741000000</us-gaap:IncomeTaxExpenseBenefit>
+
+  <!-- Share Information -->
+  <us-gaap:WeightedAverageNumberOfSharesOutstandingBasic contextRef="c3" unitRef="u2" decimals="0">15550000000</us-gaap:WeightedAverageNumberOfSharesOutstandingBasic>
+  <us-gaap:WeightedAverageNumberOfSharesOutstandingBasic contextRef="c2" unitRef="u2" decimals="0">15812000000</us-gaap:WeightedAverageNumberOfSharesOutstandingBasic>
+
+</xbrl>
