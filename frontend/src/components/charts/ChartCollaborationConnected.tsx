@@ -266,10 +266,10 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
     }
   });
 
-  const totalComments = annotations.reduce(
-    (sum, annotation) => sum + (getCommentsForAnnotation(annotation.id).length || 0),
-    0
-  );
+  const totalComments = annotations.reduce((sum, annotation) => {
+    const comments = getCommentsForAnnotation(annotation.id);
+    return sum + (comments?.length || 0);
+  }, 0);
 
   const activeCollaborators = collaborators.filter(
     c => users[c.userId] && Date.now() - new Date(c.lastAccessedAt || 0).getTime() < 300000 // 5 minutes
@@ -421,7 +421,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                 const annotationType = ANNOTATION_TYPES.find(
                   t => t.value === annotation.annotationType
                 );
-                const commentCount = getCommentsForAnnotation(annotation.id).length;
+                const commentCount = getCommentsForAnnotation(annotation.id)?.length || 0;
 
                 return (
                   <ListItem
