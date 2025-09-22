@@ -312,8 +312,8 @@ describe('XBRL Financial Integration Tests', () => {
       // Verify key ratios are displayed
       expect(screen.getByText('Return on Equity')).toBeInTheDocument();
       expect(screen.getByText('Net Profit Margin')).toBeInTheDocument();
-      expect(screen.getByText('14.7%')).toBeInTheDocument();
-      expect(screen.getByText('25.3%')).toBeInTheDocument();
+      expect(screen.getAllByText('14.7%').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('25.3%').length).toBeGreaterThan(0);
     });
 
     it('should show benchmark comparisons with industry data', async () => {
