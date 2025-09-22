@@ -134,10 +134,104 @@ const useResponsive = () => {
 - **Accessibility Tests**: Test keyboard navigation, screen readers
 - **Performance Tests**: Test rendering performance, memory usage
 
+### **Material-UI Testing Best Practices**
+```typescript
+// Proper Material-UI test setup for dialogs and portals
+import { ThemeProvider, createTheme, StyledEngineProvider } from '@mui/material/styles';
+import { CssBaseline } from '@mui/material';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+
+const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <StyledEngineProvider injectFirst>
+    <ThemeProvider theme={theme}>
+      <LocalizationProvider dateAdapter={AdapterDateFns}>
+        <CssBaseline />
+        {children}
+      </LocalizationProvider>
+    </ThemeProvider>
+  </StyledEngineProvider>
+);
+
+// Custom render function for Material-UI components with portals
+const customRender = (ui: React.ReactElement, options = {}) => {
+  const portalContainer = document.createElement('div');
+  portalContainer.setAttribute('data-testid', 'portal-container');
+  document.body.appendChild(portalContainer);
+  
+  return render(ui, {
+    container: document.body,
+    ...options,
+  });
+};
+```
+
+### **ARIA Labels and Accessibility Testing**
+```typescript
+// Proper ARIA label usage in tests
+describe('Component with ARIA labels', () => {
+  it('should find elements by proper ARIA attributes', () => {
+    // Use aria-label for custom elements
+    expect(screen.getByLabelText('John Doe (editor)')).toBeInTheDocument();
+    
+    // Use role-based selectors for standard elements
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    
+    // Use combobox role for select elements
+    const filterSelect = screen.getByRole('combobox');
+    expect(filterSelect).toBeInTheDocument();
+    
+    // Wait for dynamic content with proper timing
+    await waitFor(() => {
+      expect(screen.getByText('Dialog Title')).toBeInTheDocument();
+    }, { timeout: 5000 });
+  });
+});
+```
+
+### **Dialog and Portal Testing**
+```typescript
+// Material-UI Dialog testing considerations
+describe('Material-UI Dialog Components', () => {
+  it('should handle dialog portals correctly', async () => {
+    const user = userEvent.setup();
+    render(<TestWrapper><DialogComponent /></TestWrapper>);
+    
+    // Click to open dialog
+    await user.click(screen.getByText('Open Dialog'));
+    
+    // Wait for dialog to appear (portal content)
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    }, { timeout: 5000 });
+    
+    // Dialog content may be in a different DOM tree due to portals
+    // Use proper selectors and timing
+    await waitFor(() => {
+      expect(screen.getByLabelText('Form Field')).toBeInTheDocument();
+    }, { timeout: 2000 });
+  });
+});
+```
+
 ### **Test Structure**
 ```typescript
-// Example test structure
+// Example test structure with Material-UI considerations
 describe('InteractiveWorldMap', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // Clean up portal containers for Material-UI components
+    const existingContainers = document.querySelectorAll('[data-testid="portal-container"]');
+    existingContainers.forEach(container => container.remove());
+  });
+
+  afterEach(() => {
+    // Clean up portal containers after each test
+    const containers = document.querySelectorAll('[data-testid="portal-container"]');
+    containers.forEach(container => container.remove());
+  });
+
   it('renders world map with countries', () => {
     // Test basic rendering
   });
@@ -151,7 +245,7 @@ describe('InteractiveWorldMap', () => {
   });
   
   it('is accessible via keyboard navigation', () => {
-    // Test accessibility
+    // Test accessibility with proper ARIA selectors
   });
 });
 ```
@@ -257,6 +351,14 @@ test: add unit tests for world map
 - **Error Handling**: Implement proper error boundaries
 - **Context Updates**: Split state into logical groups to prevent unnecessary re-renders
 
+### **Material-UI Testing Pitfalls**
+- **Dialog Portal Issues**: Material-UI Dialogs use portals - require special test setup
+- **Missing Providers**: Always include `StyledEngineProvider`, `ThemeProvider`, `LocalizationProvider`
+- **Portal Cleanup**: Clean up portal containers between tests to prevent DOM pollution
+- **ARIA Selector Mismatches**: Check actual component ARIA implementation before writing tests
+- **Timing Issues**: Use proper `waitFor` with appropriate timeouts for dialog content
+- **Test Environment**: Material-UI components behave differently in test vs production environments
+
 ### **UI/UX Issues**
 - **Loading States**: Always show loading indicators
 - **Error States**: Provide clear error messages
@@ -291,6 +393,37 @@ test: add unit tests for world map
    - **Discovery**: D3.js SVG elements need special handling with Material-UI
    - **Solution**: Use `Box` components as containers and proper event handling
    - **Impact**: Seamless integration with consistent design system
+
+### **Material-UI Testing Discoveries**
+1. **Dialog Portal Rendering Issues**
+   - **Issue**: Material-UI Dialogs render content via portals, causing test failures
+   - **Root Cause**: Dialog container opens but portal content doesn't render in test environment
+   - **Solution**: Use `StyledEngineProvider`, proper theme setup, and custom render functions
+   - **Impact**: Comprehensive dialog testing requires special setup and timing considerations
+
+2. **ARIA Label Testing Patterns**
+   - **Discovery**: Material-UI components use specific ARIA patterns that require proper test selectors
+   - **Solution**: Use `getByLabelText()` for `aria-label` attributes, `getByRole()` for standard roles
+   - **Best Practice**: Always check component's actual ARIA implementation before writing tests
+   - **Impact**: More reliable and accessible test suites that match real user interactions
+
+3. **Test Setup Requirements**
+   - **Discovery**: Material-UI components require comprehensive provider setup for testing
+   - **Solution**: Include `ThemeProvider`, `LocalizationProvider`, `StyledEngineProvider`, and `CssBaseline`
+   - **Best Practice**: Create reusable `TestWrapper` components for consistent test setup
+   - **Impact**: Consistent test environment that matches production component behavior
+
+4. **Portal Container Management**
+   - **Issue**: Material-UI portals create DOM elements that persist between tests
+   - **Solution**: Clean up portal containers in `beforeEach` and `afterEach` hooks
+   - **Best Practice**: Use `data-testid` attributes for reliable portal container identification
+   - **Impact**: Isolated tests without DOM pollution from previous test runs
+
+5. **Timing and Async Testing**
+   - **Discovery**: Material-UI dialogs have complex render timing that requires proper `waitFor` usage
+   - **Solution**: Use appropriate timeouts (5000ms for dialogs, 2000ms for content) and proper async/await patterns
+   - **Best Practice**: Always wait for dialog titles before checking dialog content
+   - **Impact**: Reliable test execution that accounts for Material-UI's render cycles
 
 ### **Testing Strategy Insights**
 1. **Mock Strategy**: Comprehensive D3.js mocking required for Jest compatibility

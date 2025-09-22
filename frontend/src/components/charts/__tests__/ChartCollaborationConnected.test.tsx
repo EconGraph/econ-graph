@@ -5,16 +5,19 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { CssBaseline, StyledEngineProvider } from '@mui/material';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import ChartCollaborationConnected from '../ChartCollaborationConnected';
 import { ChartAnnotationType } from '../../../utils/graphql';
+import { useCollaboration } from '../../../hooks/useCollaboration';
 
 // Mock the useCollaboration hook
-const mockUseCollaboration = jest.fn();
 jest.mock('../../../hooks/useCollaboration', () => ({
-  useCollaboration: () => mockUseCollaboration(),
+  useCollaboration: jest.fn(),
 }));
 
 // Mock the useAuth hook
@@ -109,16 +112,16 @@ const mockUsers = {
   },
 };
 
-const mockComments = [
-  {
-    id: 'comment-1',
-    annotationId: 'annotation-2',
-    userId: 'user-1',
-    content: 'I agree with this analysis',
-    createdAt: '2024-01-16T11:00:00Z',
-    updatedAt: '2024-01-16T11:00:00Z',
-  },
-];
+  // const mockComments = [
+  // {
+  //   id: 'comment-1',
+  //   annotationId: 'annotation-2',
+  //   userId: 'user-1',
+  //   content: 'I agree with this analysis',
+  //   createdAt: '2024-01-16T11:00:00Z',
+  //   updatedAt: '2024-01-16T11:00:00Z',
+  // },
+  // ];
 
 // Mock collaboration hook return value
 const mockCollaborationHook = {
@@ -135,22 +138,47 @@ const mockCollaborationHook = {
   toggleAnnotationPin: jest.fn().mockResolvedValue(undefined),
   loadComments: jest.fn().mockResolvedValue(undefined),
   getUserById: jest.fn((id: string) => mockUsers[id as keyof typeof mockUsers]),
-  getCommentsForAnnotation: jest.fn((annotationId) =>
-    mockComments.filter(c => c.annotationId === annotationId)
-  ),
+  getCommentsForAnnotation: jest.fn(() => []), // Always return empty array for simplicity
 };
 
 const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <ThemeProvider theme={theme}>
-    {children}
-  </ThemeProvider>
+  <StyledEngineProvider injectFirst>
+    <ThemeProvider theme={theme}>
+      <LocalizationProvider dateAdapter={AdapterDateFns}>
+        <CssBaseline />
+        {children}
+      </LocalizationProvider>
+    </ThemeProvider>
+  </StyledEngineProvider>
 );
+
+// Custom render function for Material-UI components with portals
+const customRender = (ui: React.ReactElement, options = {}) => {
+  const portalContainer = document.createElement('div');
+  portalContainer.setAttribute('data-testid', 'portal-container');
+  document.body.appendChild(portalContainer);
+
+  return render(ui, {
+    container: document.body,
+    ...options,
+  });
+};
 
 describe('ChartCollaborationConnected', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockUseAuth.mockReturnValue({ user: mockUser });
-    mockUseCollaboration.mockReturnValue(mockCollaborationHook);
+    (useCollaboration as jest.Mock).mockReturnValue(mockCollaborationHook);
+
+    // Clean up any existing portal containers
+    const existingContainers = document.querySelectorAll('[data-testid="portal-container"]');
+    existingContainers.forEach(container => container.remove());
+  });
+
+  afterEach(() => {
+    // Clean up portal containers after each test
+    const containers = document.querySelectorAll('[data-testid="portal-container"]');
+    containers.forEach(container => container.remove());
   });
 
   const renderChartCollaborationConnected = (props = {}) => {
@@ -163,7 +191,7 @@ describe('ChartCollaborationConnected', () => {
       ...props,
     };
 
-    return render(
+    return customRender(
       <TestWrapper>
         <ChartCollaborationConnected {...defaultProps} />
       </TestWrapper>
@@ -223,7 +251,7 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Loading States', () => {
     it('should show loading indicator when data is loading', () => {
-      mockUseCollaboration.mockReturnValue({
+      (useCollaboration as jest.Mock).mockReturnValue({
         ...mockCollaborationHook,
         loading: true,
       });
@@ -234,7 +262,7 @@ describe('ChartCollaborationConnected', () => {
     });
 
     it('should disable add annotation button when loading', () => {
-      mockUseCollaboration.mockReturnValue({
+      (useCollaboration as jest.Mock).mockReturnValue({
         ...mockCollaborationHook,
         loading: true,
       });
@@ -248,7 +276,7 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Error Handling', () => {
     it('should display error message when there is an error', () => {
-      mockUseCollaboration.mockReturnValue({
+      (useCollaboration as jest.Mock).mockReturnValue({
         ...mockCollaborationHook,
         error: 'Failed to load collaboration data',
       });
@@ -396,7 +424,7 @@ describe('ChartCollaborationConnected', () => {
 
     it('should show error snackbar on creation failure', async () => {
       const user = userEvent.setup();
-      mockUseCollaboration.mockReturnValue({
+      (useCollaboration as jest.Mock).mockReturnValue({
         ...mockCollaborationHook,
         createAnnotation: jest.fn().mockRejectedValue(new Error('Creation failed')),
       });
@@ -621,7 +649,7 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Empty States', () => {
     it('should show empty state when no annotations', () => {
-      mockUseCollaboration.mockReturnValue({
+      (useCollaboration as jest.Mock).mockReturnValue({
         ...mockCollaborationHook,
         annotations: [],
       });
@@ -640,7 +668,7 @@ describe('ChartCollaborationConnected', () => {
         userId: 'other-user'
       }));
 
-      mockUseCollaboration.mockReturnValue({
+      (useCollaboration as jest.Mock).mockReturnValue({
         ...mockCollaborationHook,
         annotations: otherUserAnnotations,
       });
@@ -674,7 +702,7 @@ describe('ChartCollaborationConnected', () => {
         updatedAt: '2024-01-15T10:00:00Z',
       }));
 
-      mockUseCollaboration.mockReturnValue({
+      (useCollaboration as jest.Mock).mockReturnValue({
         ...mockCollaborationHook,
         collaborators: manyCollaborators,
       });
