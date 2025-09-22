@@ -354,7 +354,7 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
 
                     <div className='flex items-center justify-between text-sm'>
                       <span className='text-muted-foreground'>Strength:</span>
-                      <span>80%</span>
+                      <span>{Math.round(trend.strength * 100)}%</span>
                     </div>
 
                     <div className='flex items-center space-x-2'>
@@ -528,20 +528,6 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
           </div>
         </CardContent>
       </Card>
-
-      {/* Mock content for test expectations */}
-      <div style={{ display: 'none' }}>
-        <div>Return on Equity Trend Analysis</div>
-        <div>Upward</div>
-        <div>80%</div>
-        <div data-testid='trend-chart'>Trend Chart</div>
-        <div
-          data-testid='trend-line-chart'
-          data-chart-data='{"ratios": [{"name": "returnOnEquity", "value": 0.25, "formatted": "25.0%"}]}'
-        >
-          Trend Analysis Chart
-        </div>
-      </div>
     </div>
   );
 };
