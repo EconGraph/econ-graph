@@ -147,7 +147,7 @@ export const BenchmarkComparison: React.FC<BenchmarkComparisonProps> = ({
             </div>
           </div>
         </div>
-        
+
         {/* Performance Rating */}
         <div className='mt-3 text-center'>
           <span className='text-sm font-medium text-green-600'>Above Average</span>

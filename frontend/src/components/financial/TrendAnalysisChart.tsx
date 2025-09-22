@@ -223,7 +223,7 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
                 </label>
                 <select
                   value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  onChange={e => setSelectedCategory(e.target.value)}
                   className='w-32 p-2 border rounded-md'
                   id='category-filter'
                   aria-label='Select ratio category'
@@ -233,14 +233,14 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
                   <option value='leverage'>Leverage</option>
                 </select>
               </div>
-              
+
               <div className='flex items-center space-x-2'>
                 <label className='text-sm font-medium' htmlFor='ratio-analyzer'>
                   Select Ratio to Analyze
                 </label>
                 <select
                   value={selectedRatio}
-                  onChange={(e) => {
+                  onChange={e => {
                     setSelectedRatio(e.target.value);
                     onRatioSelectionChange?.([e.target.value]);
                   }}
@@ -277,7 +277,7 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
                 <span className='text-sm font-medium'>Time Period:</span>
                 <select
                   value={timePeriodQuarters}
-                  onChange={(e) => setTimePeriodQuarters(Number(e.target.value))}
+                  onChange={e => setTimePeriodQuarters(Number(e.target.value))}
                   className='w-20 p-1 border rounded-md text-sm'
                   aria-label='Select time period in quarters'
                 >
@@ -290,7 +290,7 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
                 </select>
                 <span className='text-xs text-gray-500'>quarters</span>
               </div>
-              
+
               <Button
                 variant='outline'
                 size='sm'
@@ -302,18 +302,6 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
           </div>
         </CardContent>
       </Card>
-
-      {/* Loading and Empty States for testing */}
-      <div className='text-xs text-gray-300'>
-        <p>Loading trend data...</p>
-        <p>No ratio data available for trend analysis</p>
-        <p>Insufficient data for trend analysis</p>
-        <p>2021</p>
-        <p>2022</p>
-        <p>2023</p>
-        <p>Improving</p>
-        <p>Strength: 80%</p>
-      </div>
 
       {/* Ratio Trend Cards */}
       <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
@@ -547,7 +535,12 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
         <div>Upward</div>
         <div>80%</div>
         <div data-testid='trend-chart'>Trend Chart</div>
-        <div data-testid='trend-line-chart' data-chart-data='{"ratios": [{"name": "returnOnEquity", "value": 0.25, "formatted": "25.0%"}]}'>Trend Analysis Chart</div>
+        <div
+          data-testid='trend-line-chart'
+          data-chart-data='{"ratios": [{"name": "returnOnEquity", "value": 0.25, "formatted": "25.0%"}]}'
+        >
+          Trend Analysis Chart
+        </div>
       </div>
     </div>
   );

@@ -89,7 +89,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
     chartTypes: ['line', 'bar'],
     compression: 'none',
   });
-  
+
   const [fileNamingOption, setFileNamingOption] = useState('company_date_format');
 
   const [exportJobs, setExportJobs] = useState<ExportJob[]>([
@@ -436,7 +436,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                 <h4 className='font-medium'>File Naming</h4>
                 <select
                   value={fileNamingOption}
-                  onChange={(e) => setFileNamingOption(e.target.value)}
+                  onChange={e => setFileNamingOption(e.target.value)}
                   className='w-full p-2 border rounded-md'
                   aria-label='File naming format selection'
                 >

@@ -357,8 +357,8 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                     <tbody>
                       {statement.lineItems.map((item, index) => (
                         <tr key={`table-${item.id || index}`} className='border-b'>
-                          <td className={`font-medium py-2 ${item.hierarchyLevel > 0 ? 'pl-4' : ''}`}>
-                            {item.label}
+                          <td className={`font-medium py-2 ${item.parentConcept ? 'pl-4' : ''}`}>
+                            {item.standardLabel}
                           </td>
                           <td className='text-right py-2'>
                             {item.value ? `$${(item.value / 1000000000).toFixed(2)}B` : '-'}
@@ -695,7 +695,6 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
         </CardContent>
       </Card>
 
-
       {/* Footnotes */}
       <Card>
         <CardHeader>
@@ -708,7 +707,6 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
           </div>
         </CardContent>
       </Card>
-
 
       {/* Loading State Placeholder */}
       {false && (

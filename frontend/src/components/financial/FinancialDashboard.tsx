@@ -358,7 +358,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
             <div className='flex items-center justify-between'>
               <div>
                 <p className='text-sm font-medium text-muted-foreground'>Current Ratio</p>
-                <p 
+                <p
                   className='text-2xl font-bold text-blue-600'
                   aria-label='Net Profit Margin value'
                 >
