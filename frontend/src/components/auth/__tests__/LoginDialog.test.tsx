@@ -354,4 +354,221 @@ describe('LoginDialog', () => {
     expect(screen.getByText(errorMessage)).toBeInTheDocument();
     expect(mockOnClose).not.toHaveBeenCalled();
   });
+
+  it('should validate email format on sign in', async () => {
+    render(
+      <TestWrapper>
+        <LoginDialog open={true} onClose={mockOnClose} onSuccess={mockOnSuccess} />
+      </TestWrapper>
+    );
+
+    // Enter invalid email
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'invalid-email' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
+
+    // Try to submit
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    // Should not call authentication with invalid email
+    expect(mockAuthContext.signInWithEmail).not.toHaveBeenCalled();
+  });
+
+  it('should validate password length on sign in', async () => {
+    render(
+      <TestWrapper>
+        <LoginDialog open={true} onClose={mockOnClose} onSuccess={mockOnSuccess} />
+      </TestWrapper>
+    );
+
+    // Enter short password
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@example.com' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'short' } });
+
+    // Try to submit
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    // Should not call authentication with short password
+    expect(mockAuthContext.signInWithEmail).not.toHaveBeenCalled();
+  });
+
+  it('should validate password confirmation on sign up', async () => {
+    render(
+      <TestWrapper>
+        <LoginDialog open={true} onClose={mockOnClose} onSuccess={mockOnSuccess} />
+      </TestWrapper>
+    );
+
+    // Switch to sign up tab
+    fireEvent.click(screen.getByText('Sign Up'));
+
+    // Fill form with mismatched passwords
+    fireEvent.change(screen.getByLabelText('Full Name'), { target: { value: 'Test User' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@example.com' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
+    fireEvent.change(screen.getByLabelText('Confirm Password'), { target: { value: 'different123' } });
+
+    // Try to submit
+    fireEvent.click(screen.getByText('Create Account'));
+
+    // Should not call signUp with mismatched passwords
+    expect(mockAuthContext.signUp).not.toHaveBeenCalled();
+  });
+
+  it('should show loading state during authentication', () => {
+    // Set loading state
+    mockAuthContext.isLoading = true;
+
+    render(
+      <TestWrapper>
+        <LoginDialog open={true} onClose={mockOnClose} onSuccess={mockOnSuccess} />
+      </TestWrapper>
+    );
+
+    // Buttons should be disabled during loading
+    const googleButton = screen.getByText('Continue with Google');
+    const facebookButton = screen.getByText('Continue with Facebook');
+
+    expect(googleButton.closest('button')).toBeDisabled();
+    expect(facebookButton.closest('button')).toBeDisabled();
+  });
+
+  it('should handle successful sign up', async () => {
+    mockAuthContext.signUp.mockResolvedValue(undefined);
+
+    render(
+      <TestWrapper>
+        <LoginDialog open={true} onClose={mockOnClose} onSuccess={mockOnSuccess} />
+      </TestWrapper>
+    );
+
+    // Switch to sign up tab
+    fireEvent.click(screen.getByText('Sign Up'));
+
+    // Fill sign up form
+    fireEvent.change(screen.getByLabelText('Full Name'), { target: { value: 'New User' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'newuser@example.com' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
+    fireEvent.change(screen.getByLabelText('Confirm Password'), { target: { value: 'password123' } });
+
+    // Submit sign up
+    fireEvent.click(screen.getByText('Create Account'));
+
+    await waitFor(() => {
+      expect(mockAuthContext.signUp).toHaveBeenCalledWith(
+        'newuser@example.com',
+        'password123',
+        'New User'
+      );
+    });
+
+    // Dialog should close and success callback should be called
+    expect(mockOnClose).toHaveBeenCalled();
+    expect(mockOnSuccess).toHaveBeenCalled();
+  });
+
+  it('should clear error when dialog opens', () => {
+    const mockClearError = jest.fn();
+    mockAuthContext.clearError = mockClearError;
+    mockAuthContext.error = 'Previous error';
+
+    render(
+      <TestWrapper>
+        <LoginDialog open={true} onClose={mockOnClose} onSuccess={mockOnSuccess} />
+      </TestWrapper>
+    );
+
+    // Error should be cleared when dialog opens
+    expect(mockClearError).toHaveBeenCalled();
+  });
+
+  it('should handle form validation for empty fields', () => {
+    render(
+      <TestWrapper>
+        <LoginDialog open={true} onClose={mockOnClose} onSuccess={mockOnSuccess} />
+      </TestWrapper>
+    );
+
+    // Try to submit empty form
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    // Should not call authentication with empty fields
+    expect(mockAuthContext.signInWithEmail).not.toHaveBeenCalled();
+  });
+
+  it('should preserve email when switching tabs', () => {
+    render(
+      <TestWrapper>
+        <LoginDialog open={true} onClose={mockOnClose} onSuccess={mockOnSuccess} />
+      </TestWrapper>
+    );
+
+    // Fill email on sign in tab
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@example.com' } });
+
+    // Switch to sign up tab
+    fireEvent.click(screen.getByText('Sign Up'));
+
+    // Email should be preserved
+    expect(screen.getByDisplayValue('test@example.com')).toBeInTheDocument();
+
+    // Switch back to sign in tab
+    fireEvent.click(screen.getByText('Sign In'));
+
+    // Email should still be there
+    expect(screen.getByDisplayValue('test@example.com')).toBeInTheDocument();
+  });
+
+  it('should disable form submission during loading', () => {
+    mockAuthContext.isLoading = true;
+
+    render(
+      <TestWrapper>
+        <LoginDialog open={true} onClose={mockOnClose} onSuccess={mockOnSuccess} />
+      </TestWrapper>
+    );
+
+    // Fill form
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@example.com' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
+
+    // During loading, buttons should be disabled
+    const googleButton = screen.getByText('Continue with Google');
+    const facebookButton = screen.getByText('Continue with Facebook');
+
+    expect(googleButton.closest('button')).toBeDisabled();
+    expect(facebookButton.closest('button')).toBeDisabled();
+
+    // Should not call authentication during loading
+    expect(mockAuthContext.signInWithEmail).not.toHaveBeenCalled();
+  });
+
+  it('should handle authentication errors and keep dialog open', async () => {
+    const errorMessage = 'Invalid credentials';
+    mockAuthContext.signInWithEmail.mockRejectedValue(new Error(errorMessage));
+    mockAuthContext.error = errorMessage;
+
+    render(
+      <TestWrapper>
+        <LoginDialog open={true} onClose={mockOnClose} onSuccess={mockOnSuccess} />
+      </TestWrapper>
+    );
+
+    // Fill form
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@example.com' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'wrongpassword' } });
+
+    // Submit form
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    await waitFor(() => {
+      expect(mockAuthContext.signInWithEmail).toHaveBeenCalled();
+    });
+
+    // Should show error message
+    expect(screen.getByText(errorMessage)).toBeInTheDocument();
+
+    // Dialog should stay open
+    expect(mockOnClose).not.toHaveBeenCalled();
+    expect(mockOnSuccess).not.toHaveBeenCalled();
+  });
 });
