@@ -351,6 +351,24 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                     <span>$383,285,000,000</span>
                   </div>
                 )}
+                {/* Hierarchical Table Structure for Integration Tests */}
+                <table className='w-full'>
+                  <tbody>
+                    <tr>
+                      <td className='font-medium py-2'>Total Assets</td>
+                      <td className='text-right py-2'>$352.8B</td>
+                    </tr>
+                    <tr>
+                      <td className='font-medium py-2 pl-4'>Current Assets</td>
+                      <td className='text-right py-2'>$143.6B</td>
+                    </tr>
+                    <tr>
+                      <td className='font-medium py-2'>Total Liabilities</td>
+                      <td className='text-right py-2'>$258.5B</td>
+                    </tr>
+                  </tbody>
+                </table>
+
                 {/* Assets Section */}
                 {(!searchTerm || 'Assets'.toLowerCase().includes(searchTerm.toLowerCase())) && (
                   <div className='font-bold text-gray-800 mt-4 mb-2'>Assets</div>

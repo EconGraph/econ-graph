@@ -415,12 +415,12 @@ describe('XBRL Financial Integration Tests', () => {
 
       // Wait for statement data to load
       await waitFor(() => {
-        expect(screen.getByText('Total Assets')).toBeInTheDocument();
+        expect(screen.getAllByText('Total Assets')[0]).toBeInTheDocument();
       });
 
       // Verify hierarchical structure is displayed
-      const totalAssetsRow = screen.getByText('Total Assets').closest('tr');
-      const currentAssetsRow = screen.getByText('Current Assets').closest('tr');
+      const totalAssetsRow = screen.getAllByText('Total Assets')[0].closest('tr');
+      const currentAssetsRow = screen.getAllByText('Current Assets')[0].closest('tr');
 
       expect(totalAssetsRow).toBeInTheDocument();
       expect(currentAssetsRow).toBeInTheDocument();
@@ -450,7 +450,7 @@ describe('XBRL Financial Integration Tests', () => {
       expect(screen.getByLabelText('Company Value:')).toBeInTheDocument();
       expect(screen.getAllByText('0.15').length).toBeGreaterThan(0); // Multiple instances expected
       expect(screen.getByLabelText('Industry Percentile:')).toBeInTheDocument();
-      expect(screen.getByText('75.0%')).toBeInTheDocument();
+      expect(screen.getByLabelText('Company ranks at 75.0 percentile, Top 25%')).toBeInTheDocument();
       expect(screen.getByText('Above Average')).toBeInTheDocument();
     });
 

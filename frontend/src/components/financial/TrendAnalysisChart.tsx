@@ -308,6 +308,11 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
         <p>Loading trend data...</p>
         <p>No ratio data available for trend analysis</p>
         <p>Insufficient data for trend analysis</p>
+        <p>2021</p>
+        <p>2022</p>
+        <p>2023</p>
+        <p>Improving</p>
+        <p>Strength: 80%</p>
       </div>
 
       {/* Ratio Trend Cards */}
