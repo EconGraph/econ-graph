@@ -5,7 +5,7 @@ import { defineConfig, devices } from '@playwright/test';
  * Tests global analysis features: world map, country selection, economic indicators
  */
 export default defineConfig({
-  testDir: '../../tests/e2e/global-analysis',
+  testDir: './tests/e2e/global-analysis',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
