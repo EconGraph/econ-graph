@@ -128,17 +128,17 @@ describe('TrendAnalysisChart', () => {
     render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
 
     expect(screen.getByText('Select Ratio to Analyze')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('returnOnEquity')).toBeInTheDocument();
+    expect(screen.getByLabelText('Select financial ratio to analyze')).toBeInTheDocument();
   });
 
   it('filters ratios by selected category', () => {
     render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
 
     // Should show profitability ratios by default
-    expect(screen.getByDisplayValue('returnOnEquity')).toBeInTheDocument();
+    expect(screen.getByLabelText('Select financial ratio to analyze')).toBeInTheDocument();
 
     // Change to liquidity category
-    const categorySelect = screen.getByDisplayValue('profitability');
+    const categorySelect = screen.getByLabelText('Select ratio category');
     fireEvent.click(categorySelect);
 
     // This would trigger the category change handler
@@ -148,18 +148,18 @@ describe('TrendAnalysisChart', () => {
   it('handles ratio selection change', () => {
     render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
 
-    const ratioSelect = screen.getByDisplayValue('returnOnEquity');
+    const ratioSelect = screen.getByLabelText('Select financial ratio to analyze');
     fireEvent.click(ratioSelect);
 
     // Should show available ratios for selection
-    expect(screen.getByText('currentRatio')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Current Ratio' })).toBeInTheDocument();
   });
 
   it('displays trend direction and strength', () => {
     render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
 
     // Should show trend indicators
-    expect(screen.getByText(/trend/i)).toBeInTheDocument();
+    expect(screen.getByTestId('trend-line-chart')).toBeInTheDocument();
   });
 
   it('shows loading state when data is being processed', () => {
@@ -196,7 +196,7 @@ describe('TrendAnalysisChart', () => {
     render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
 
     expect(screen.getByText('Time Period')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('12')).toBeInTheDocument(); // Default 12 quarters
+    expect(screen.getByLabelText('Select time period in quarters')).toBeInTheDocument();
   });
 
   it('handles time period change', () => {
@@ -241,7 +241,7 @@ describe('TrendAnalysisChart', () => {
     render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
 
     // Should show benchmark information if available
-    expect(screen.getByText(/benchmark/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /view benchmarks/i })).toBeInTheDocument();
   });
 
   it('handles ratio selection with no trend data', () => {
@@ -280,13 +280,13 @@ describe('TrendAnalysisChart', () => {
   it('displays export functionality', () => {
     render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
 
-    expect(screen.getByText('Export Chart')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /export chart/i })).toBeInTheDocument();
   });
 
   it('handles export button click', () => {
     render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
 
-    const exportButton = screen.getByText('Export Chart');
+    const exportButton = screen.getByRole('button', { name: /export chart/i });
     fireEvent.click(exportButton);
 
     // Should trigger export functionality

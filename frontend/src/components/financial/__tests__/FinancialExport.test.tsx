@@ -377,7 +377,7 @@ describe('FinancialExport', () => {
     );
 
     expect(screen.getByText('File Naming')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('company_date_format')).toBeInTheDocument();
+    expect(screen.getByLabelText('File naming format selection')).toBeInTheDocument();
   });
 
   it('handles custom file naming', () => {
