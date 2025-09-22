@@ -5,7 +5,7 @@ import { defineConfig, devices } from '@playwright/test';
  * Tests professional analysis features: advanced charting, technical indicators, correlation analysis
  */
 export default defineConfig({
-  testDir: '/Users/josephmalicki/src/econ-graph5/frontend/tests/e2e/professional-analysis',
+  testDir: '../../tests/e2e/professional-analysis',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
