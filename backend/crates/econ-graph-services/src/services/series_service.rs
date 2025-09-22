@@ -72,7 +72,12 @@ pub async fn list_series(
     pool: &DatabasePool,
     params: SeriesSearchParams,
 ) -> AppResult<Vec<EconomicSeries>> {
-    let mut conn = pool.get().await?;
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {}",
+            e
+        ))
+    })?;
 
     let mut query = economic_series::table
         .filter(economic_series::is_active.eq(params.is_active.unwrap_or(true)))
@@ -164,7 +169,12 @@ pub async fn get_series_by_id(
     pool: &DatabasePool,
     series_id: uuid::Uuid,
 ) -> AppResult<Option<EconomicSeries>> {
-    let mut conn = pool.get().await?;
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {}",
+            e
+        ))
+    })?;
 
     let series = economic_series::table
         .filter(economic_series::id.eq(series_id))
@@ -249,7 +259,12 @@ pub async fn get_series_data(
     pool: &DatabasePool,
     params: DataQueryParams,
 ) -> AppResult<Vec<DataPoint>> {
-    let mut conn = pool.get().await?;
+    let mut conn = pool.get().await.map_err(|e| {
+        econ_graph_core::error::AppError::DatabaseError(format!(
+            "Failed to get database connection: {}",
+            e
+        ))
+    })?;
 
     let mut query = data_points::table
         .filter(data_points::series_id.eq(params.series_id))

@@ -370,7 +370,9 @@ mod tests {
         use econ_graph_core::schema::{data_sources, economic_series};
         use econ_graph_core::models::{NewDataSource, NewEconomicSeries};
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            econ_graph_core::error::AppError::DatabaseError(format!("Failed to get database connection: {}", e))
+        })?;
 
         // Create test data source
         let new_source = NewDataSource {
@@ -445,7 +447,9 @@ mod tests {
         use econ_graph_core::schema::{data_sources, economic_series};
         use econ_graph_core::models::{NewDataSource, NewEconomicSeries};
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            econ_graph_core::error::AppError::DatabaseError(format!("Failed to get database connection: {}", e))
+        })?;
 
         // Create test data source
         let new_source = NewDataSource {

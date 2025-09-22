@@ -1,6 +1,7 @@
 pub mod collaboration_service;
 pub mod comprehensive_series_catalog;
 pub mod crawler;
+pub mod financial_data_service;
 pub mod global_analysis_service;
 pub mod queue_service;
 pub mod search_service;
@@ -12,3 +13,4 @@ pub mod series_service;
 
 pub use collaboration_service::*;
 pub use crawler::*;
+pub use financial_data_service::*;

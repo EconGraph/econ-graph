@@ -9,6 +9,10 @@
     "@mui/icons-material": "^5.18.0",
     "@mui/material": "^5.18.0",
     "@mui/x-date-pickers": "^6.20.2",
+    "@radix-ui/react-checkbox": "^1.3.3",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-select": "^2.2.6",
+    "@radix-ui/react-switch": "^1.2.6",
     "@types/d3": "7.4.3",
     "@types/lodash": "4.17.20",
     "@types/node": "^20.19.13",
@@ -20,6 +24,8 @@
     "chart.js": "4.5.0",
     "chartjs-adapter-date-fns": "3.0.0",
     "chartjs-plugin-annotation": "3.1.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "cors": "^2.8.5",
     "d3": "^7.9.0",
     "d3-array": "^3.2.4",
@@ -35,6 +41,7 @@
     "date-fns": "2.30.0",
     "express": "^4.18.2",
     "lodash": "4.17.21",
+    "lucide-react": "^0.544.0",
     "react": "^18.3.1",
     "react-chartjs-2": "5.3.0",
     "react-dom": "^18.3.1",
@@ -42,7 +49,9 @@
     "react-router-dom": "6.30.1",
     "react-scripts": "^5.0.1",
     "rxjs": "7.8.2",
+    "tailwind-merge": "^3.3.1",
     "topojson-client": "^3.1.0",
+    "vaul": "^1.1.2",
     "web-vitals": "3.5.2"
   },
   "devDependencies": {
@@ -67,6 +76,7 @@
     "test": "react-scripts test",
     "test:unit": "react-scripts test --testPathIgnorePatterns=src/__tests__/integration --watchAll=false",
     "test:integration": "react-scripts test src/__tests__/integration --watchAll=false",
+    "test:xbrl-financial:integration": "react-scripts test src/__tests__/integration/xbrl-financial --watchAll=false",
     "eject": "react-scripts eject",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
@@ -122,6 +132,7 @@
   },
   "jest": {
     "moduleNameMapper": {
+      "^@/(.*)$": "<rootDir>/src/$1",
       "^react-app/jest$": "react-app/jest",
       "^d3$": "<rootDir>/src/__mocks__/d3.js",
       "^d3-geo$": "<rootDir>/src/__mocks__/d3-geo.js",
@@ -135,7 +146,7 @@
     "resetMocks": true,
     "restoreMocks": true,
     "transformIgnorePatterns": [
-      "node_modules/(?!(d3-geo|d3-zoom|d3-scale|d3-scale-chromatic|d3-array|d3-selection)/)"
+      "node_modules/(?!(@apollo/client|d3-geo|d3-zoom|d3-scale|d3-scale-chromatic|d3-array|d3-selection)/)"
     ]
   },
   "browserslist": {

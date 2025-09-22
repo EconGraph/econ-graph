@@ -159,6 +159,28 @@ services:
     networks:
       - test-network
 
+  # XBRL Financial Integration Tests
+  test-xbrl-financial:
+    build:
+      context: ../../
+      dockerfile: ci/docker/Dockerfile.test-runner
+    environment:
+      - BACKEND_URL=http://backend:9876
+      - FRONTEND_URL=http://frontend:18473
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/econ_graph_test
+      - REACT_APP_API_BASE_URL=http://backend:9876
+      - REACT_APP_ENABLE_XBRL_FEATURES=true
+      - REACT_APP_ENABLE_FINANCIAL_ANALYSIS=true
+      - REACT_APP_MOCK_API_RESPONSES=true
+    command: ["npm", "run", "test:xbrl-financial:integration"]
+    volumes:
+      - ./test-results/xbrl-financial:/app/test-results
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - test-network
+
 networks:
   test-network:
     driver: bridge

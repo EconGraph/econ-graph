@@ -1,0 +1,106 @@
+[package]
+name = "econ-graph-sec-crawler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Workspace dependencies
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+bigdecimal.workspace = true
+url.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+once_cell.workspace = true
+
+# HTTP and networking
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+tokio-util = { version = "0.7", features = ["io"] }
+
+# Configuration
+config.workspace = true
+dotenvy.workspace = true
+
+# Validation
+validator.workspace = true
+
+# CSV parsing
+csv.workspace = true
+
+# Scheduling
+tokio-cron-scheduler.workspace = true
+
+# CLI
+clap.workspace = true
+
+# Random
+rand.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# File system operations
+walkdir = "2.4"
+tempfile = "3.8"
+
+# XML parsing for XBRL
+quick-xml = "0.36"
+roxmltree = "0.20"
+xml = "1.0"
+
+# Database
+diesel = { version = "2.2", features = ["postgres", "chrono", "uuid", "numeric"] }
+diesel-async = { version = "=0.6.1", features = ["postgres", "bb8"] }
+
+# Regular expressions
+regex = "1.10"
+
+# Rate limiting
+governor = "0.6"
+nonzero_ext = "0.3"
+
+# Retry logic
+backoff = "0.4"
+
+# Progress tracking
+indicatif = "0.17"
+
+# Compression
+zstd = "0.13"
+
+# Hashing for file integrity
+sha2.workspace = true
+hex = "0.4"
+md5 = "0.7"
+
+# Local dependencies
+econ-graph-core = { path = "../econ-graph-core" }
+econ-graph-services = { path = "../econ-graph-services" }
+
+[dev-dependencies]
+# Testing
+tokio-test.workspace = true
+mockito.workspace = true
+tempfile.workspace = true
+testcontainers.workspace = true
+serial_test.workspace = true
+
+# Test utilities
+assert_matches = "1.5"
+rstest = "0.19"
+rstest_reuse = "0.6"
+
+[[bin]]
+name = "sec-crawler"
+path = "src/bin/sec_crawler.rs"
+
+[[bin]]
+name = "sec-company-crawler"
+path = "src/bin/sec_company_crawler.rs"

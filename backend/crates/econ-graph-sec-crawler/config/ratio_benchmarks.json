@@ -1,0 +1,236 @@
+{
+  "industries": {
+    "7370": {
+      "industry_code": "7370",
+      "industry_name": "Computer Programming, Data Processing, And Other Computer Related Services",
+      "benchmarks": {
+        "return_on_equity": {
+          "ratio_name": "return_on_equity",
+          "median": 0.15,
+          "p25": 0.08,
+          "p75": 0.25,
+          "p90": 0.35,
+          "p10": 0.03
+        },
+        "return_on_assets": {
+          "ratio_name": "return_on_assets",
+          "median": 0.08,
+          "p25": 0.04,
+          "p75": 0.15,
+          "p90": 0.25,
+          "p10": 0.01
+        },
+        "current_ratio": {
+          "ratio_name": "current_ratio",
+          "median": 2.5,
+          "p25": 1.8,
+          "p75": 3.5,
+          "p90": 5.0,
+          "p10": 1.2
+        },
+        "debt_to_equity": {
+          "ratio_name": "debt_to_equity",
+          "median": 0.3,
+          "p25": 0.1,
+          "p75": 0.6,
+          "p90": 1.0,
+          "p10": 0.0
+        },
+        "gross_profit_margin": {
+          "ratio_name": "gross_profit_margin",
+          "median": 0.75,
+          "p25": 0.60,
+          "p75": 0.85,
+          "p90": 0.90,
+          "p10": 0.40
+        },
+        "operating_margin": {
+          "ratio_name": "operating_margin",
+          "median": 0.20,
+          "p25": 0.10,
+          "p75": 0.30,
+          "p90": 0.40,
+          "p10": 0.02
+        },
+        "net_margin": {
+          "ratio_name": "net_margin",
+          "median": 0.15,
+          "p25": 0.08,
+          "p75": 0.25,
+          "p90": 0.35,
+          "p10": 0.01
+        }
+      }
+    },
+    "2834": {
+      "industry_code": "2834",
+      "industry_name": "Pharmaceutical Preparations",
+      "benchmarks": {
+        "return_on_equity": {
+          "ratio_name": "return_on_equity",
+          "median": 0.12,
+          "p25": 0.05,
+          "p75": 0.20,
+          "p90": 0.30,
+          "p10": 0.02
+        },
+        "return_on_assets": {
+          "ratio_name": "return_on_assets",
+          "median": 0.06,
+          "p25": 0.03,
+          "p75": 0.12,
+          "p90": 0.18,
+          "p10": 0.01
+        },
+        "current_ratio": {
+          "ratio_name": "current_ratio",
+          "median": 2.8,
+          "p25": 2.0,
+          "p75": 4.0,
+          "p90": 6.0,
+          "p10": 1.5
+        },
+        "debt_to_equity": {
+          "ratio_name": "debt_to_equity",
+          "median": 0.4,
+          "p25": 0.2,
+          "p75": 0.8,
+          "p90": 1.2,
+          "p10": 0.0
+        },
+        "gross_profit_margin": {
+          "ratio_name": "gross_profit_margin",
+          "median": 0.80,
+          "p25": 0.70,
+          "p75": 0.85,
+          "p90": 0.90,
+          "p10": 0.60
+        },
+        "operating_margin": {
+          "ratio_name": "operating_margin",
+          "median": 0.18,
+          "p25": 0.08,
+          "p75": 0.28,
+          "p90": 0.35,
+          "p10": 0.02
+        },
+        "net_margin": {
+          "ratio_name": "net_margin",
+          "median": 0.12,
+          "p25": 0.05,
+          "p75": 0.20,
+          "p90": 0.28,
+          "p10": 0.01
+        }
+      }
+    },
+    "2911": {
+      "industry_code": "2911",
+      "industry_name": "Petroleum Refining",
+      "benchmarks": {
+        "return_on_equity": {
+          "ratio_name": "return_on_equity",
+          "median": 0.10,
+          "p25": 0.05,
+          "p75": 0.18,
+          "p90": 0.25,
+          "p10": 0.02
+        },
+        "return_on_assets": {
+          "ratio_name": "return_on_assets",
+          "median": 0.05,
+          "p25": 0.02,
+          "p75": 0.10,
+          "p90": 0.15,
+          "p10": 0.01
+        },
+        "current_ratio": {
+          "ratio_name": "current_ratio",
+          "median": 1.8,
+          "p25": 1.3,
+          "p75": 2.5,
+          "p90": 3.5,
+          "p10": 1.0
+        },
+        "debt_to_equity": {
+          "ratio_name": "debt_to_equity",
+          "median": 0.5,
+          "p25": 0.3,
+          "p75": 0.8,
+          "p90": 1.2,
+          "p10": 0.1
+        },
+        "gross_profit_margin": {
+          "ratio_name": "gross_profit_margin",
+          "median": 0.15,
+          "p25": 0.08,
+          "p75": 0.25,
+          "p90": 0.35,
+          "p10": 0.03
+        },
+        "operating_margin": {
+          "ratio_name": "operating_margin",
+          "median": 0.08,
+          "p25": 0.03,
+          "p75": 0.15,
+          "p90": 0.22,
+          "p10": 0.01
+        },
+        "net_margin": {
+          "ratio_name": "net_margin",
+          "median": 0.05,
+          "p25": 0.02,
+          "p75": 0.10,
+          "p90": 0.15,
+          "p10": 0.01
+        }
+      }
+    },
+    "6021": {
+      "industry_code": "6021",
+      "industry_name": "National Commercial Banks",
+      "benchmarks": {
+        "return_on_equity": {
+          "ratio_name": "return_on_equity",
+          "median": 0.12,
+          "p25": 0.08,
+          "p75": 0.16,
+          "p90": 0.20,
+          "p10": 0.05
+        },
+        "return_on_assets": {
+          "ratio_name": "return_on_assets",
+          "median": 0.01,
+          "p25": 0.005,
+          "p75": 0.015,
+          "p90": 0.02,
+          "p10": 0.002
+        },
+        "current_ratio": {
+          "ratio_name": "current_ratio",
+          "median": 1.1,
+          "p25": 1.05,
+          "p75": 1.2,
+          "p90": 1.3,
+          "p10": 1.0
+        },
+        "debt_to_equity": {
+          "ratio_name": "debt_to_equity",
+          "median": 8.0,
+          "p25": 6.0,
+          "p75": 12.0,
+          "p90": 15.0,
+          "p10": 4.0
+        },
+        "net_margin": {
+          "ratio_name": "net_margin",
+          "median": 0.25,
+          "p25": 0.15,
+          "p75": 0.35,
+          "p90": 0.45,
+          "p10": 0.10
+        }
+      }
+    }
+  }
+}

@@ -232,6 +232,28 @@ jest.mock('./hooks/useSeriesData', () => ({
   }),
 }));
 
+// Mock Apollo Client to fix ES module issues
+jest.mock('@apollo/client', () => ({
+  gql: jest.fn().mockReturnValue({}),
+  useQuery: jest.fn(() => ({
+    data: null,
+    loading: false,
+    error: null,
+    refetch: jest.fn(),
+  })),
+  useMutation: jest.fn(() => [
+    jest.fn(),
+    {
+      data: null,
+      loading: false,
+      error: null,
+    },
+  ]),
+  ApolloClient: jest.fn(),
+  InMemoryCache: jest.fn(),
+  ApolloProvider: ({ children }: any) => children,
+}));
+
 // Mock Chart.js and related modules for component tests (they require canvas and have ESM issues)
 jest.mock('chartjs-adapter-date-fns', () => ({}));
 

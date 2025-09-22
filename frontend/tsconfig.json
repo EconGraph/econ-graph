@@ -1,12 +1,7 @@
 {
   "compilerOptions": {
     "target": "es2015",
-    "lib": [
-      "dom",
-      "dom.iterable",
-      "es6",
-      "es2015"
-    ],
+    "lib": ["dom", "dom.iterable", "es6", "es2015"],
     "downlevelIteration": true,
     "allowJs": true,
     "skipLibCheck": true,
@@ -20,9 +15,11 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
-  "include": [
-    "src"
-  ]
+  "include": ["src"]
 }

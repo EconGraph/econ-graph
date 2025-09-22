@@ -680,7 +680,12 @@ impl DataPoint {
     ) -> crate::error::AppResult<Vec<Self>> {
         use crate::schema::data_points::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let data_points =
             diesel_async::RunQueryDsl::load(dsl::data_points.select(Self::as_select()), &mut conn)
@@ -696,7 +701,12 @@ impl DataPoint {
     ) -> crate::error::AppResult<Self> {
         use crate::schema::data_points::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let data_point = diesel_async::RunQueryDsl::get_result(
             diesel::insert_into(dsl::data_points).values(new_data_point),
@@ -714,7 +724,12 @@ impl DataPoint {
     ) -> crate::error::AppResult<Vec<Self>> {
         use crate::schema::data_points::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let data_points = diesel_async::RunQueryDsl::get_results(
             diesel::insert_into(dsl::data_points).values(new_data_points),
@@ -734,7 +749,12 @@ impl DataPoint {
     ) -> crate::error::AppResult<Vec<Self>> {
         use crate::schema::data_points::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let data_points = diesel_async::RunQueryDsl::load(
             dsl::data_points
@@ -756,7 +776,12 @@ impl DataPoint {
     ) -> crate::error::AppResult<Option<Self>> {
         use crate::schema::data_points::dsl;
 
-        let mut conn = pool.get().await?;
+        let mut conn = pool.get().await.map_err(|e| {
+            crate::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
 
         let data_point = diesel_async::RunQueryDsl::first(
             dsl::data_points
