@@ -423,8 +423,8 @@ describe('XBRL Financial Integration Tests', () => {
       expect(screen.getAllByText('Current Assets').length).toBeGreaterThan(0);
 
       // Verify the structured data is present
-      expect(screen.getByText('$352.76B')).toBeInTheDocument();
-      expect(screen.getByText('$143.57B')).toBeInTheDocument();
+      expect(screen.getAllByText('$352.76B').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('$143.57B').length).toBeGreaterThan(0);
     });
   });
 

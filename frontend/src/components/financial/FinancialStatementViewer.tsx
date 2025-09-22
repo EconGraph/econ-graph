@@ -34,33 +34,52 @@ import { EducationalPanel } from './EducationalPanel';
 import { CollaborativePresence } from './CollaborativePresence';
 
 // Mock Apollo Client hooks for now
-const useQuery = (query: any, options?: any) => ({
-  data: {
-    financialStatement: {
-      id: 'mock-statement-id',
-      companyId: 'mock-company-id',
-      filingType: '10-K',
-      formType: '10-K',
-      accessionNumber: '0001234567-23-000001',
-      filingDate: '2023-12-31',
-      periodEndDate: '2023-12-31',
-      fiscalYear: 2023,
-      fiscalQuarter: 4,
-      documentType: 'XBRL',
-      documentUrl: 'http://example.com/filing.xbrl',
-      xbrlProcessingStatus: 'completed',
-      isAmended: false,
-      isRestated: false,
-      lineItems: [],
-      createdAt: '2023-12-31T00:00:00Z',
-      updatedAt: '2023-12-31T00:00:00Z',
-    },
-    financialRatios: [],
-    annotations: [],
-  },
-  loading: false,
-  error: null,
-});
+const useQuery = (query: any, options?: any) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const response = await fetch('/api/financial-statements');
+        if (response.ok) {
+          const result = await response.json();
+          setData({
+            financialStatement: result[0] || {
+              id: 'mock-statement-id',
+              companyId: 'mock-company-id',
+              filingType: '10-K',
+              formType: '10-K',
+              accessionNumber: '0001234567-23-000001',
+              filingDate: '2023-12-31',
+              periodEndDate: '2023-12-31',
+              fiscalYear: 2023,
+              fiscalQuarter: 4,
+              documentType: 'XBRL',
+              documentUrl: 'http://example.com/filing.xbrl',
+              xbrlProcessingStatus: 'completed',
+              isAmended: false,
+              isRestated: false,
+              lineItems: [],
+              createdAt: '2023-12-31T00:00:00Z',
+              updatedAt: '2023-12-31T00:00:00Z',
+            },
+            financialRatios: [],
+            annotations: [],
+          });
+        }
+        setLoading(false);
+      } catch (err) {
+        setError(err);
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  return { data, loading, error };
+};
 const useMutation = (mutation: any) => [() => Promise.resolve()];
 const useSubscription = (subscription: any, options?: any) => ({
   data: {
