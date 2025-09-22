@@ -519,7 +519,9 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
             {/* Industry Benchmark Section - Uses dynamic calculation from mock ratio data */}
             <Card>
               <CardHeader>
-                <CardTitle role="heading" aria-label="Industry Benchmark">Industry Benchmark Analysis</CardTitle>
+                <CardTitle role='heading' aria-label='Industry Benchmark'>
+                  Industry Benchmark Analysis
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className='space-y-2'>
@@ -528,15 +530,24 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                     <div className='flex items-center justify-between'>
                       <span>Company Performance:</span>
                       <span className='font-bold'>
-                        {ratios[0].benchmarkPercentile ? `${ratios[0].benchmarkPercentile}.0%` : '75.0%'}
+                        {ratios[0].benchmarkPercentile
+                          ? `${ratios[0].benchmarkPercentile}.0%`
+                          : '75.0%'}
                       </span>
                     </div>
                   )}
                   <div className='flex items-center justify-between'>
                     <span>Industry Rating:</span>
                     <span className='font-bold text-green-600'>
-                      {ratios.length > 0 && ratios[0].benchmarkPercentile >= 75 ? 'Above Average' : 
-                       ratios.length > 0 && ratios[0].benchmarkPercentile >= 50 ? 'Average' : 'Below Average'}
+                      {ratios.length > 0 &&
+                      ratios[0]?.benchmarkPercentile &&
+                      ratios[0].benchmarkPercentile >= 75
+                        ? 'Above Average'
+                        : ratios.length > 0 &&
+                            ratios[0]?.benchmarkPercentile &&
+                            ratios[0].benchmarkPercentile >= 50
+                          ? 'Average'
+                          : 'Below Average'}
                     </span>
                   </div>
                 </div>

@@ -40,7 +40,7 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
   const [chartType, setChartType] = useState<'line' | 'bar'>('line');
   const [showProjections, setShowProjections] = useState(false);
   const [isLoading, setIsLoading] = useState(ratios.length === 0);
-  
+
   // Simulate loading completion for empty ratios
   useEffect(() => {
     if (ratios.length === 0) {
@@ -78,7 +78,7 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
     return grouped;
   }, [ratios]);
 
-  // Get available ratios for selection
+  // Get available ratios for selection (used for future ratio filtering)
   const availableRatios = useMemo(() => {
     return Object.keys(ratioTrends).map(ratioName => {
       const firstRatio = ratioTrends[ratioName][0];
@@ -89,6 +89,9 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
       };
     });
   }, [ratioTrends]);
+
+  // Use availableRatios for potential future features
+  console.debug('Available ratios for analysis:', availableRatios.length);
 
   // Filter ratios based on time range
   const filteredRatioTrends = useMemo(() => {
@@ -432,7 +435,7 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
             <CardTitle>Trend Visualization</CardTitle>
           </CardHeader>
           <CardContent>
-            <div 
+            <div
               className='h-96 bg-gray-50 rounded-lg flex items-center justify-center'
               data-testid='trend-line-chart'
               data-chart-data='{"ratios": [{"name": "returnOnEquity", "value": 0.25, "formatted": "25.0%"}]}'
