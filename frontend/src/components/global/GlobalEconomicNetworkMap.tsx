@@ -19,6 +19,7 @@ import {
 } from '@mui/material';
 import { Info, ZoomIn, ZoomOut, RestartAlt } from '@mui/icons-material';
 import * as d3 from 'd3';
+import * as topojson from 'topojson-client';
 
 // Types for the component
 interface CountryData {
@@ -302,91 +303,124 @@ const GlobalEconomicNetworkMap: React.FC = () => {
       .scale(130)
       .translate([width / 2, height / 2]);
 
-    // const path = d3.geoPath().projection(projection); // Unused but kept for future map rendering
+    const path = d3.geoPath().projection(projection);
 
     // Create main group
     const g = svg.append('g');
 
-    // Add world map background (simplified)
-    g.append('rect').attr('width', width).attr('height', height).attr('fill', '#f0f8ff');
+    // Add world map background
+    g.append('rect')
+      .attr('width', width)
+      .attr('height', height)
+      .attr('fill', '#f8f9fa')
+      .attr('stroke', '#e0e0e0')
+      .attr('stroke-width', '2');
 
-    // Add countries as circles (simplified for demo)
-    g.selectAll('.country')
-      .data(selectedCountries)
-      .enter()
-      .append('circle')
-      .attr('class', 'country')
-      .attr('cx', d => projection([d.longitude, d.latitude])?.[0] || 0)
-      .attr('cy', d => projection([d.longitude, d.latitude])?.[1] || 0)
-      .attr('r', d => Math.sqrt((d.gdpUsd || 0) / 1e12) * 8 + 5)
-      .attr('fill', '#4CAF50')
-      .attr('stroke', '#2E7D32')
-      .attr('stroke-width', 2)
-      .style('cursor', 'pointer')
-      .on('click', (event, d) => {
-        setSelectedCountry(d);
+    // Load and render world map
+    d3.json('https://cdn.jsdelivr.net/npm/world-atlas@3/world/110m.json')
+      .then((world: any) => {
+        // Draw world countries
+        const worldFeatures = topojson.feature(world, world.objects.countries) as any;
+        g.selectAll('.world-country')
+          .data(worldFeatures.features)
+          .enter()
+          .append('path')
+          .attr('class', 'world-country')
+          .attr('d', (d: any) => path(d))
+          .attr('fill', '#e8e8e8')
+          .attr('stroke', '#ffffff')
+          .attr('stroke-width', '0.5')
+          .style('opacity', '0.7');
+
+        // Add economic data circles for selected countries
+        g.selectAll('.economic-country')
+          .data(selectedCountries)
+          .enter()
+          .append('circle')
+          .attr('class', 'economic-country')
+          .attr('cx', d => projection([d.longitude, d.latitude])?.[0] || 0)
+          .attr('cy', d => projection([d.longitude, d.latitude])?.[1] || 0)
+          .attr('r', d => Math.sqrt((d.gdpUsd || 0) / 1e12) * 8 + 5)
+          .attr('fill', '#1976d2')
+          .attr('stroke', '#0d47a1')
+          .attr('stroke-width', 3)
+          .style('opacity', '0.8')
+          .style('cursor', 'pointer')
+          .on('click', (event, d) => {
+            setSelectedCountry(d);
+          })
+          .on('mouseover', function (event, d) {
+            d3.select(this)
+              .transition()
+              .duration(200)
+              .attr('r', Math.sqrt((d.gdpUsd || 0) / 1e12) * 8 + 8)
+              .attr('fill', '#42a5f5')
+              .style('opacity', '1')
+              .style('filter', 'drop-shadow(0 4px 8px rgba(0,0,0,0.3))');
+          })
+          .on('mouseout', function (event, d) {
+            d3.select(this)
+              .transition()
+              .duration(200)
+              .attr('r', Math.sqrt((d.gdpUsd || 0) / 1e12) * 8 + 5)
+              .attr('fill', '#1976d2')
+              .style('opacity', '0.8')
+              .style('filter', 'none');
+          });
+
+        // Add country labels
+        g.selectAll('.country-label')
+          .data(selectedCountries)
+          .enter()
+          .append('text')
+          .attr('class', 'country-label')
+          .attr('x', d => (projection([d.longitude, d.latitude])?.[0] || 0) + 15)
+          .attr('y', d => (projection([d.longitude, d.latitude])?.[1] || 0) + 5)
+          .text(d => d.name)
+          .attr('font-size', '14px')
+          .attr('font-weight', '600')
+          .attr('fill', '#2c3e50')
+          .style('pointer-events', 'none')
+          .style('text-shadow', '1px 1px 2px rgba(255,255,255,0.8)');
+
+        // Add correlation lines - only show correlations between selected countries
+        const selectedCountryIds = selectedCountries.map(c => c.id);
+        const filteredCorrelations = sampleCorrelations.filter(
+          corr =>
+            Math.abs(corr.correlationCoefficient) >= minCorrelation &&
+            selectedCountryIds.includes(corr.countryAId) &&
+            selectedCountryIds.includes(corr.countryBId)
+        );
+
+        g.selectAll('.correlation-line')
+          .data(filteredCorrelations)
+          .enter()
+          .append('line')
+          .attr('class', 'correlation-line')
+          .attr('x1', d => {
+            const country = selectedCountries.find(c => c.id === d.countryAId);
+            return projection([country?.longitude || 0, country?.latitude || 0])?.[0] || 0;
+          })
+          .attr('y1', d => {
+            const country = selectedCountries.find(c => c.id === d.countryAId);
+            return projection([country?.longitude || 0, country?.latitude || 0])?.[1] || 0;
+          })
+          .attr('x2', d => {
+            const country = selectedCountries.find(c => c.id === d.countryBId);
+            return projection([country?.longitude || 0, country?.latitude || 0])?.[0] || 0;
+          })
+          .attr('y2', d => {
+            const country = selectedCountries.find(c => c.id === d.countryBId);
+            return projection([country?.longitude || 0, country?.latitude || 0])?.[1] || 0;
+          })
+          .attr('stroke', d => (d.correlationCoefficient > 0 ? '#1976d2' : '#d32f2f'))
+          .attr('stroke-width', d => Math.abs(d.correlationCoefficient) * 6 + 2)
+          .attr('opacity', 0.8)
+          .style('stroke-dasharray', d => (d.correlationCoefficient > 0 ? 'none' : '5,5'));
       })
-      .on('mouseover', function (event, d) {
-        d3.select(this)
-          .transition()
-          .duration(200)
-          .attr('r', Math.sqrt((d.gdpUsd || 0) / 1e12) * 8 + 8)
-          .attr('fill', '#66BB6A');
-      })
-      .on('mouseout', function (event, d) {
-        d3.select(this)
-          .transition()
-          .duration(200)
-          .attr('r', Math.sqrt((d.gdpUsd || 0) / 1e12) * 8 + 5)
-          .attr('fill', '#4CAF50');
+      .catch(error => {
+        console.error('Failed to load world map data:', error);
       });
-
-    // Add country labels
-    g.selectAll('.country-label')
-      .data(selectedCountries)
-      .enter()
-      .append('text')
-      .attr('class', 'country-label')
-      .attr('x', d => (projection([d.longitude, d.latitude])?.[0] || 0) + 15)
-      .attr('y', d => (projection([d.longitude, d.latitude])?.[1] || 0) + 5)
-      .text(d => d.name)
-      .attr('font-size', '12px')
-      .attr('fill', '#333')
-      .style('pointer-events', 'none');
-
-    // Add correlation lines - only show correlations between selected countries
-    const selectedCountryIds = selectedCountries.map(c => c.id);
-    const filteredCorrelations = sampleCorrelations.filter(
-      corr =>
-        Math.abs(corr.correlationCoefficient) >= minCorrelation &&
-        selectedCountryIds.includes(corr.countryAId) &&
-        selectedCountryIds.includes(corr.countryBId)
-    );
-
-    g.selectAll('.correlation-line')
-      .data(filteredCorrelations)
-      .enter()
-      .append('line')
-      .attr('class', 'correlation-line')
-      .attr('x1', d => {
-        const country = selectedCountries.find(c => c.id === d.countryAId);
-        return projection([country?.longitude || 0, country?.latitude || 0])?.[0] || 0;
-      })
-      .attr('y1', d => {
-        const country = selectedCountries.find(c => c.id === d.countryAId);
-        return projection([country?.longitude || 0, country?.latitude || 0])?.[1] || 0;
-      })
-      .attr('x2', d => {
-        const country = selectedCountries.find(c => c.id === d.countryBId);
-        return projection([country?.longitude || 0, country?.latitude || 0])?.[0] || 0;
-      })
-      .attr('y2', d => {
-        const country = selectedCountries.find(c => c.id === d.countryBId);
-        return projection([country?.longitude || 0, country?.latitude || 0])?.[1] || 0;
-      })
-      .attr('stroke', d => (d.correlationCoefficient > 0 ? '#2196F3' : '#F44336'))
-      .attr('stroke-width', d => Math.abs(d.correlationCoefficient) * 4)
-      .attr('opacity', 0.7);
   }, [minCorrelation, selectedIndicator, selectedCountries]);
 
   const handleIndicatorChange = (event: any) => {
