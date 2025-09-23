@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: admin-frontend
-        image: econ-graph-admin-frontend:v1.0.0
+        image: econ-graph-admin-frontend:latest
         imagePullPolicy: Never  # Use local image
         ports:
         - containerPort: 3001
