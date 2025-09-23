@@ -185,6 +185,11 @@ describe('ChartCollaborationConnected', () => {
       return user;
     });
 
+    mockCollaborationHook.getCommentsForAnnotation = jest.fn((annotationId) => {
+      const comments = mockComments.filter(comment => comment.annotationId === annotationId);
+      return comments;
+    });
+
     (useCollaboration as jest.Mock).mockReturnValue(mockCollaborationHook);
 
     // Clean up any existing portal containers
@@ -642,9 +647,14 @@ describe('ChartCollaborationConnected', () => {
       const user = userEvent.setup();
       renderChartCollaborationConnected();
 
-      // Open comments dialog
-      const commentButtons = screen.getAllByTestId('CommentIcon');
-      await user.click(commentButtons[0]);
+      // Open comments dialog by clicking on an annotation
+      const annotationItem = screen.getByText('GDP Growth Analysis');
+      await user.click(annotationItem);
+
+      // Wait for comments dialog to open
+      await waitFor(() => {
+        expect(screen.getByTestId('comment-input')).toBeInTheDocument();
+      });
 
       // Add comment
       const commentInput = screen.getByTestId('comment-input');

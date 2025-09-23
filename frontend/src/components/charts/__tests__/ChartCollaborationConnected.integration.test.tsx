@@ -241,14 +241,14 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
 
       // Wait for comments dialog to open
       await waitFor(() => {
-        expect(screen.getByText('Comments')).toBeInTheDocument();
+        expect(screen.getByText('Test Annotation - Comments')).toBeInTheDocument();
       });
 
       // Add comment
-      const commentInput = screen.getByPlaceholderText(/add a comment/i);
+      const commentInput = screen.getByTestId('comment-input');
       await user.type(commentInput, 'Test comment');
 
-      const addButton = screen.getByText('Add Comment');
+      const addButton = screen.getByText('Comment');
       await user.click(addButton);
 
       // Should call addComment
@@ -269,14 +269,14 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
 
       // Wait for comments dialog to open
       await waitFor(() => {
-        expect(screen.getByText('Comments')).toBeInTheDocument();
+        expect(screen.getByText('Test Annotation - Comments')).toBeInTheDocument();
       });
 
       // Add comment
-      const commentInput = screen.getByPlaceholderText(/add a comment/i);
+      const commentInput = screen.getByTestId('comment-input');
       await user.type(commentInput, 'Test comment');
 
-      const addButton = screen.getByText('Add Comment');
+      const addButton = screen.getByText('Comment');
       await user.click(addButton);
 
       // Should show error snackbar
