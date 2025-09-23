@@ -396,9 +396,14 @@ describe('ChartCollaborationConnected', () => {
       const user = userEvent.setup();
       renderChartCollaborationConnected();
 
-      const filterSelect = screen.getByRole('combobox', { name: /filter/i });
+      const filterSelect = screen.getByTestId('filter-annotations-select');
       await user.click(filterSelect);
-      await user.click(screen.getByText('My Annotations (1)'));
+
+      // Wait for dropdown options to appear
+      await waitFor(() => {
+        expect(screen.getByText('My Annotations (2)')).toBeInTheDocument();
+      });
+      await user.click(screen.getByText('My Annotations (2)'));
 
       // Should only show user's annotations
       expect(screen.getByText('GDP Growth Analysis')).toBeInTheDocument();
@@ -409,7 +414,7 @@ describe('ChartCollaborationConnected', () => {
       const user = userEvent.setup();
       renderChartCollaborationConnected();
 
-      const filterSelect = screen.getByRole('combobox', { name: /filter/i });
+      const filterSelect = screen.getByTestId('filter-annotations-select');
       await user.click(filterSelect);
       await user.click(screen.getByText('Pinned (1)'));
 
@@ -757,7 +762,7 @@ describe('ChartCollaborationConnected', () => {
       renderChartCollaborationConnected();
 
       // Filter to user's annotations
-      const filterSelect = screen.getByRole('combobox', { name: /filter/i });
+      const filterSelect = screen.getByTestId('filter-annotations-select');
       await user.click(filterSelect);
       await user.click(screen.getByText('My Annotations (0)'));
 

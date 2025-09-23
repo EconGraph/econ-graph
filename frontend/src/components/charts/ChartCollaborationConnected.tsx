@@ -396,6 +396,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
               value={filterBy}
               onChange={e => setFilterBy(e.target.value as any)}
               label='Filter Annotations'
+              data-testid='filter-annotations-select'
             >
               <MenuItem value='all'>All Annotations ({annotations.length})</MenuItem>
               <MenuItem value='mine'>
