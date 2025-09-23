@@ -305,10 +305,17 @@ export default function SystemHealthPage() {
       </Alert>
 
       {/* Health Metrics Grid */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
+      <Grid
+        container
+        spacing={3}
+        sx={{ mb: 3 }}
+        data-testid="health-metrics-grid"
+      >
         {healthMetrics.map((metric) => (
           <Grid item xs={12} sm={6} md={4} key={metric.name}>
-            <Card>
+            <Card
+              data-testid={`health-metric-card-${metric.name.toLowerCase().replace(/\s+/g, "-")}`}
+            >
               <CardContent>
                 <Box
                   sx={{
@@ -319,15 +326,22 @@ export default function SystemHealthPage() {
                   }}
                 >
                   <Box>
-                    <Typography variant="h6" gutterBottom>
+                    <Typography
+                      variant="h6"
+                      gutterBottom
+                      data-testid={`metric-name-${metric.name.toLowerCase().replace(/\s+/g, "-")}`}
+                    >
                       {metric.name}
                     </Typography>
-                    <Chip
-                      icon={getStatusIcon(metric.status)}
-                      label={metric.status.toUpperCase()}
-                      color={getStatusColor(metric.status)}
-                      size="small"
-                    />
+                    <Box role="status" aria-live="polite">
+                      <Chip
+                        icon={getStatusIcon(metric.status)}
+                        label={metric.status.toUpperCase()}
+                        color={getStatusColor(metric.status)}
+                        size="small"
+                        aria-label={`${metric.name} status: ${metric.status}`}
+                      />
+                    </Box>
                   </Box>
                   {metric.grafanaUrl && (
                     <Tooltip title="View in Grafana">
@@ -374,11 +388,11 @@ export default function SystemHealthPage() {
       </Grid>
 
       {/* Services Status */}
-      <Paper sx={{ p: 3, mb: 3 }}>
+      <Paper sx={{ p: 3, mb: 3 }} data-testid="services-status-section">
         <Typography variant="h6" gutterBottom>
           Service Status
         </Typography>
-        <List>
+        <List data-testid="services-list">
           {services.map((service, index) => (
             <React.Fragment key={service.name}>
               <ListItem>
@@ -399,6 +413,7 @@ export default function SystemHealthPage() {
                         label={service.status.toUpperCase()}
                         color={getStatusColor(service.status)}
                         size="small"
+                        aria-label={`${service.name} status: ${service.status}`}
                       />
                     </Box>
                   }
