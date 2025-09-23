@@ -9,63 +9,81 @@ const { TextEncoder, TextDecoder } = require('util');
 global.TextEncoder = TextEncoder;
 global.TextDecoder = TextDecoder;
 
+// Mock Chart.js and related modules
+jest.mock('chart.js', () => ({
+  Chart: jest.fn(),
+  registerables: [],
+}));
+
+jest.mock('chartjs-adapter-date-fns', () => ({}));
+
+jest.mock('react-chartjs-2', () => ({
+  Line: jest.fn(() => 'Mock Chart'),
+  Bar: jest.fn(() => 'Mock Chart'),
+  Pie: jest.fn(() => 'Mock Chart'),
+}));
+
 // Mock the hooks module globally
+const mockDataSources = [
+  {
+    id: 'fred',
+    name: 'Federal Reserve Economic Data',
+    description: 'Economic data from the Federal Reserve',
+    status: 'active',
+    lastUpdated: '2024-12-15T10:00:00Z',
+    seriesCount: 800000,
+    category: 'Government',
+    website: 'https://fred.stlouisfed.org',
+  },
+  {
+    id: 'bls',
+    name: 'Bureau of Labor Statistics',
+    description: 'Labor market and economic statistics',
+    status: 'active',
+    lastUpdated: '2024-12-14T09:00:00Z',
+    seriesCount: 50000,
+    category: 'Government',
+    website: 'https://www.bls.gov',
+  },
+];
+
+const mockSearchResults = [
+  {
+    id: 'gdp-series-1',
+    title: 'Real Gross Domestic Product',
+    description: 'Real GDP in billions of chained 2017 dollars',
+    sourceId: 'fred',
+    frequency: 'Quarterly',
+    units: 'Billions of Chained 2017 Dollars',
+    lastUpdated: '2024-10-01T00:00:00Z',
+    startDate: '1948-01-01T00:00:00Z',
+    endDate: '2024-11-01T00:00:00Z',
+    similarityScore: 0.9,
+  },
+  {
+    id: 'unemployment-series-1',
+    title: 'Unemployment Rate',
+    description: 'Unemployment rate as a percentage',
+    sourceId: 'fred',
+    frequency: 'Monthly',
+    units: 'Percent',
+    lastUpdated: '2024-11-01T00:00:00Z',
+    startDate: '1948-01-01T00:00:00Z',
+    endDate: '2024-11-01T00:00:00Z',
+    similarityScore: 0.85,
+  },
+];
+
 jest.mock('./hooks/useSeriesData', () => ({
   useDataSources: jest.fn(() => ({
-    data: [
-      {
-        id: 'fred',
-        name: 'Federal Reserve Economic Data',
-        description: 'Economic data from the Federal Reserve',
-        status: 'active',
-        lastUpdated: '2024-12-15T10:00:00Z',
-        seriesCount: 800000,
-        category: 'Government',
-        website: 'https://fred.stlouisfed.org',
-      },
-      {
-        id: 'bls',
-        name: 'Bureau of Labor Statistics',
-        description: 'Labor market and economic statistics',
-        status: 'active',
-        lastUpdated: '2024-12-14T09:00:00Z',
-        seriesCount: 50000,
-        category: 'Government',
-        website: 'https://www.bls.gov',
-      },
-    ],
+    data: mockDataSources,
     isLoading: false,
     error: null,
     isError: false,
     isSuccess: true,
   })),
   useSeriesSearch: jest.fn(() => ({
-    data: [
-      {
-        id: 'gdp-series-1',
-        title: 'Real Gross Domestic Product',
-        description: 'Real GDP in billions of chained 2017 dollars',
-        sourceId: 'fred',
-        frequency: 'Quarterly',
-        units: 'Billions of Chained 2017 Dollars',
-        lastUpdated: '2024-10-01T00:00:00Z',
-        startDate: '1948-01-01T00:00:00Z',
-        endDate: '2024-11-01T00:00:00Z',
-        similarityScore: 0.9,
-      },
-      {
-        id: 'unemployment-series-1',
-        title: 'Unemployment Rate',
-        description: 'Unemployment rate as a percentage',
-        sourceId: 'fred',
-        frequency: 'Monthly',
-        units: 'Percent',
-        lastUpdated: '2024-11-01T00:00:00Z',
-        startDate: '1948-01-01T00:00:00Z',
-        endDate: '2024-11-01T00:00:00Z',
-        similarityScore: 0.85,
-      },
-    ],
+    data: mockSearchResults,
     isLoading: false,
     error: null,
     isError: false,
