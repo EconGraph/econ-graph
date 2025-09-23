@@ -79,6 +79,16 @@ function App() {
             infrastructure
           </Typography>
 
+          <Box sx={{ p: 2, bgcolor: 'info.light', borderRadius: 1, mb: 2 }}>
+            <Typography variant="h6">📊 Available Services</Typography>
+            <Typography variant="body2">
+              • Main Frontend: <a href="http://localhost:8080/" target="_blank" rel="noreferrer">http://localhost:8080/</a><br/>
+              • Grafana Monitoring: <a href="http://localhost:8080/grafana" target="_blank" rel="noreferrer">http://localhost:8080/grafana</a><br/>
+              • Backend API: <a href="http://localhost:8080/api" target="_blank" rel="noreferrer">http://localhost:8080/api</a><br/>
+              • GraphQL Playground: <a href="http://localhost:8080/playground" target="_blank" rel="noreferrer">http://localhost:8080/playground</a>
+            </Typography>
+          </Box>
+
           <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
             <Tabs
               value={currentTab}

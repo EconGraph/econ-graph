@@ -1,584 +1,810 @@
 {
-  "dashboard": {
-    "id": null,
-    "uid": "econgraph-database",
-    "title": "EconGraph Database Statistics",
-    "description": "Comprehensive PostgreSQL database monitoring for economic time series data",
-    "tags": ["econgraph", "database", "postgresql", "performance"],
-    "timezone": "browser",
-    "schemaVersion": 37,
-    "version": 1,
-    "refresh": "1m",
-    "time": {
-      "from": "now-6h",
-      "to": "now"
-    },
-    "panels": [
-      {
-        "id": 1,
-        "title": "Database Size",
-        "type": "stat",
-        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "continuous-GrYlRd" },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                { "color": "green", "value": null },
-                { "color": "yellow", "value": 10000000000 },
-                { "color": "red", "value": 50000000000 }
-              ]
-            },
-            "unit": "bytes"
-          }
-        },
-        "options": {
-          "colorMode": "background",
-          "graphMode": "area",
-          "justifyMode": "auto",
-          "orientation": "auto",
-          "reduceOptions": {
-            "values": false,
-            "calcs": ["lastNotNull"],
-            "fields": ""
-          },
-          "textMode": "auto"
-        },
-        "targets": [
-          {
-            "expr": "pg_database_size_bytes{datname=\"econ_graph\"}",
-            "legendFormat": "Database Size",
-            "refId": "A"
-          }
-        ]
+  "id": null,
+  "uid": "econgraph-database",
+  "title": "EconGraph Database Statistics",
+  "description": "Comprehensive PostgreSQL database monitoring for economic time series data",
+  "tags": [
+    "econgraph",
+    "database",
+    "postgresql",
+    "performance"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 37,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Database Size",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
       },
-      {
-        "id": 2,
-        "title": "Total Records",
-        "type": "stat",
-        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "continuous-BlPu" },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                { "color": "green", "value": null },
-                { "color": "yellow", "value": 1000000 },
-                { "color": "red", "value": 10000000 }
-              ]
-            },
-            "unit": "short"
-          }
-        },
-        "options": {
-          "colorMode": "background",
-          "graphMode": "area",
-          "justifyMode": "auto",
-          "orientation": "auto",
-          "reduceOptions": {
-            "values": false,
-            "calcs": ["lastNotNull"],
-            "fields": ""
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
           },
-          "textMode": "auto"
-        },
-        "targets": [
-          {
-            "expr": "sum(pg_stat_user_tables_n_tup_ins + pg_stat_user_tables_n_tup_upd + pg_stat_user_tables_n_tup_del)",
-            "legendFormat": "Total Records",
-            "refId": "A"
-          }
-        ]
-      },
-      {
-        "id": 3,
-        "title": "Connection Pool Status",
-        "type": "stat",
-        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "thresholds" },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                { "color": "green", "value": null },
-                { "color": "yellow", "value": 50 },
-                { "color": "red", "value": 80 }
-              ]
-            },
-            "unit": "short"
-          }
-        },
-        "options": {
-          "colorMode": "background",
-          "graphMode": "area",
-          "justifyMode": "auto",
-          "orientation": "auto",
-          "reduceOptions": {
-            "values": false,
-            "calcs": ["lastNotNull"],
-            "fields": ""
-          },
-          "textMode": "auto"
-        },
-        "targets": [
-          {
-            "expr": "pg_stat_activity_count{datname=\"econ_graph\"}",
-            "legendFormat": "Active Connections",
-            "refId": "A"
-          }
-        ]
-      },
-      {
-        "id": 4,
-        "title": "Database Performance",
-        "type": "stat",
-        "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "thresholds" },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                { "color": "red", "value": null },
-                { "color": "yellow", "value": 0.8 },
-                { "color": "green", "value": 0.95 }
-              ]
-            },
-            "unit": "percent"
-          }
-        },
-        "options": {
-          "colorMode": "background",
-          "graphMode": "area",
-          "justifyMode": "auto",
-          "orientation": "auto",
-          "reduceOptions": {
-            "values": false,
-            "calcs": ["lastNotNull"],
-            "fields": ""
-          },
-          "textMode": "auto"
-        },
-        "targets": [
-          {
-            "expr": "(pg_stat_database_blks_hit{datname=\"econ_graph\"} / (pg_stat_database_blks_hit{datname=\"econ_graph\"} + pg_stat_database_blks_read{datname=\"econ_graph\"})) * 100",
-            "legendFormat": "Cache Hit Ratio",
-            "refId": "A"
-          }
-        ]
-      },
-      {
-        "id": 5,
-        "title": "Table Sizes",
-        "type": "table",
-        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "thresholds" },
-            "custom": {
-              "align": "auto",
-              "displayMode": "auto",
-              "filterable": false
-            },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                { "color": "green", "value": null }
-              ]
-            },
-            "unit": "bytes"
-          },
-          "overrides": [
-            {
-              "matcher": { "id": "byName", "options": "Table" },
-              "properties": [
-                { "id": "unit", "value": "string" },
-                { "id": "custom.width", "value": 200 }
-              ]
-            },
-            {
-              "matcher": { "id": "byName", "options": "Rows" },
-              "properties": [
-                { "id": "unit", "value": "short" }
-              ]
-            }
-          ]
-        },
-        "options": {
-          "showHeader": true
-        },
-        "targets": [
-          {
-            "expr": "pg_stat_user_tables_n_tup_ins + pg_stat_user_tables_n_tup_upd + pg_stat_user_tables_n_tup_del",
-            "legendFormat": "{{schemaname}}.{{relname}}",
-            "refId": "A",
-            "format": "table"
-          },
-          {
-            "expr": "pg_relation_size",
-            "legendFormat": "{{schemaname}}.{{relname}}",
-            "refId": "B",
-            "format": "table"
-          }
-        ],
-        "transformations": [
-          {
-            "id": "merge",
-            "options": {}
-          },
-          {
-            "id": "organize",
-            "options": {
-              "excludeByName": {
-                "Time": true,
-                "__name__": true,
-                "instance": true,
-                "job": true
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
               },
-              "indexByName": {},
-              "renameByName": {
-                "schemaname": "Schema",
-                "relname": "Table",
-                "Value #A": "Rows",
-                "Value #B": "Size"
+              {
+                "color": "yellow",
+                "value": 10000000000
+              },
+              {
+                "color": "red",
+                "value": 50000000000
               }
+            ]
+          },
+          "unit": "bytes"
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "pg_database_size_bytes{datname=\"econ_graph\"}",
+          "legendFormat": "Database Size",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Total Records",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-BlPu"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1000000
+              },
+              {
+                "color": "red",
+                "value": 10000000
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(pg_stat_user_tables_n_tup_ins + pg_stat_user_tables_n_tup_upd + pg_stat_user_tables_n_tup_del)",
+          "legendFormat": "Total Records",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Connection Pool Status",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "pg_stat_activity_count{datname=\"econ_graph\"}",
+          "legendFormat": "Active Connections",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Database Performance",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.8
+              },
+              {
+                "color": "green",
+                "value": 0.95
+              }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "(pg_stat_database_blks_hit{datname=\"econ_graph\"} / (pg_stat_database_blks_hit{datname=\"econ_graph\"} + pg_stat_database_blks_read{datname=\"econ_graph\"})) * 100",
+          "legendFormat": "Cache Hit Ratio",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Table Sizes",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto",
+            "filterable": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Table"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              },
+              {
+                "id": "custom.width",
+                "value": 200
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Rows"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "expr": "pg_stat_user_tables_n_tup_ins + pg_stat_user_tables_n_tup_upd + pg_stat_user_tables_n_tup_del",
+          "legendFormat": "{{schemaname}}.{{relname}}",
+          "refId": "A",
+          "format": "table"
+        },
+        {
+          "expr": "pg_relation_size",
+          "legendFormat": "{{schemaname}}.{{relname}}",
+          "refId": "B",
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            },
+            "indexByName": {},
+            "renameByName": {
+              "schemaname": "Schema",
+              "relname": "Table",
+              "Value #A": "Rows",
+              "Value #B": "Size"
             }
           }
-        ]
-      },
-      {
-        "id": 6,
-        "title": "Query Performance",
-        "type": "graph",
-        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "palette-classic" },
-            "custom": {
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 10,
-              "gradientMode": "none",
-              "hideFrom": { "legend": false, "tooltip": false, "vis": false },
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": { "type": "linear" },
-              "showPoints": "never",
-              "spanNulls": false,
-              "stacking": { "group": "A", "mode": "none" },
-              "thresholdsStyle": { "mode": "off" }
-            },
-            "unit": "ms"
-          }
-        },
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom"
-          },
-          "tooltip": { "mode": "single", "sort": "none" }
-        },
-        "targets": [
-          {
-            "expr": "pg_stat_statements_mean_time_seconds * 1000",
-            "legendFormat": "Mean Query Time",
-            "refId": "A"
-          },
-          {
-            "expr": "pg_stat_statements_max_time_seconds * 1000",
-            "legendFormat": "Max Query Time",
-            "refId": "B"
-          }
-        ]
-      },
-      {
-        "id": 7,
-        "title": "Database Activity",
-        "type": "graph",
-        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "palette-classic" },
-            "custom": {
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 10,
-              "gradientMode": "none",
-              "hideFrom": { "legend": false, "tooltip": false, "vis": false },
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": { "type": "linear" },
-              "showPoints": "never",
-              "spanNulls": false,
-              "stacking": { "group": "A", "mode": "none" },
-              "thresholdsStyle": { "mode": "off" }
-            },
-            "unit": "ops"
-          }
-        },
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom"
-          },
-          "tooltip": { "mode": "single", "sort": "none" }
-        },
-        "targets": [
-          {
-            "expr": "rate(pg_stat_database_xact_commit{datname=\"econ_graph\"}[5m])",
-            "legendFormat": "Commits/sec",
-            "refId": "A"
-          },
-          {
-            "expr": "rate(pg_stat_database_xact_rollback{datname=\"econ_graph\"}[5m])",
-            "legendFormat": "Rollbacks/sec",
-            "refId": "B"
-          },
-          {
-            "expr": "rate(pg_stat_database_tup_inserted{datname=\"econ_graph\"}[5m])",
-            "legendFormat": "Inserts/sec",
-            "refId": "C"
-          },
-          {
-            "expr": "rate(pg_stat_database_tup_updated{datname=\"econ_graph\"}[5m])",
-            "legendFormat": "Updates/sec",
-            "refId": "D"
-          },
-          {
-            "expr": "rate(pg_stat_database_tup_deleted{datname=\"econ_graph\"}[5m])",
-            "legendFormat": "Deletes/sec",
-            "refId": "E"
-          }
-        ]
-      },
-      {
-        "id": 8,
-        "title": "I/O Statistics",
-        "type": "graph",
-        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "palette-classic" },
-            "custom": {
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 10,
-              "gradientMode": "none",
-              "hideFrom": { "legend": false, "tooltip": false, "vis": false },
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": { "type": "linear" },
-              "showPoints": "never",
-              "spanNulls": false,
-              "stacking": { "group": "A", "mode": "none" },
-              "thresholdsStyle": { "mode": "off" }
-            },
-            "unit": "Bps"
-          }
-        },
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom"
-          },
-          "tooltip": { "mode": "single", "sort": "none" }
-        },
-        "targets": [
-          {
-            "expr": "rate(pg_stat_database_blks_read{datname=\"econ_graph\"}[5m]) * 8192",
-            "legendFormat": "Disk Reads/sec",
-            "refId": "A"
-          },
-          {
-            "expr": "rate(pg_stat_database_blks_hit{datname=\"econ_graph\"}[5m]) * 8192",
-            "legendFormat": "Cache Hits/sec",
-            "refId": "B"
-          }
-        ]
-      },
-      {
-        "id": 9,
-        "title": "Lock Statistics",
-        "type": "graph",
-        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "palette-classic" },
-            "custom": {
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 10,
-              "gradientMode": "none",
-              "hideFrom": { "legend": false, "tooltip": false, "vis": false },
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": { "type": "linear" },
-              "showPoints": "never",
-              "spanNulls": false,
-              "stacking": { "group": "A", "mode": "none" },
-              "thresholdsStyle": { "mode": "off" }
-            },
-            "unit": "short"
-          }
-        },
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom"
-          },
-          "tooltip": { "mode": "single", "sort": "none" }
-        },
-        "targets": [
-          {
-            "expr": "pg_locks_count",
-            "legendFormat": "{{mode}} locks",
-            "refId": "A"
-          }
-        ]
-      },
-      {
-        "id": 10,
-        "title": "WAL Statistics",
-        "type": "graph",
-        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "palette-classic" },
-            "custom": {
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 10,
-              "gradientMode": "none",
-              "hideFrom": { "legend": false, "tooltip": false, "vis": false },
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": { "type": "linear" },
-              "showPoints": "never",
-              "spanNulls": false,
-              "stacking": { "group": "A", "mode": "none" },
-              "thresholdsStyle": { "mode": "off" }
-            },
-            "unit": "Bps"
-          }
-        },
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom"
-          },
-          "tooltip": { "mode": "single", "sort": "none" }
-        },
-        "targets": [
-          {
-            "expr": "rate(pg_stat_wal_written_bytes[5m])",
-            "legendFormat": "WAL Written/sec",
-            "refId": "A"
-          },
-          {
-            "expr": "rate(pg_stat_wal_flushed_bytes[5m])",
-            "legendFormat": "WAL Flushed/sec",
-            "refId": "B"
-          }
-        ]
-      },
-      {
-        "id": 11,
-        "title": "Time Series Data Growth",
-        "type": "graph",
-        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "palette-classic" },
-            "custom": {
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 10,
-              "gradientMode": "none",
-              "hideFrom": { "legend": false, "tooltip": false, "vis": false },
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": { "type": "linear" },
-              "showPoints": "never",
-              "spanNulls": false,
-              "stacking": { "group": "A", "mode": "none" },
-              "thresholdsStyle": { "mode": "off" }
-            },
-            "unit": "short"
-          }
-        },
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom"
-          },
-          "tooltip": { "mode": "single", "sort": "none" }
-        },
-        "targets": [
-          {
-            "expr": "pg_stat_user_tables_n_tup_ins{relname=\"economic_series\"}",
-            "legendFormat": "Economic Series Count",
-            "refId": "A"
-          },
-          {
-            "expr": "pg_stat_user_tables_n_tup_ins{relname=\"data_points\"}",
-            "legendFormat": "Data Points Count",
-            "refId": "B"
-          },
-          {
-            "expr": "pg_stat_user_tables_n_tup_ins{relname=\"crawl_queue\"}",
-            "legendFormat": "Queue Items Count",
-            "refId": "C"
-          }
-        ]
-      }
-    ],
-    "templating": {
-      "list": []
+        }
+      ]
     },
-    "annotations": {
-      "list": [
+    {
+      "id": 6,
+      "title": "Query Performance",
+      "type": "graph",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "ms"
+        }
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
         {
-          "builtIn": 1,
-          "datasource": "-- Grafana --",
-          "enable": true,
-          "hide": true,
-          "iconColor": "rgba(0, 211, 255, 1)",
-          "name": "Annotations & Alerts",
-          "type": "dashboard"
+          "expr": "pg_stat_statements_mean_time_seconds * 1000",
+          "legendFormat": "Mean Query Time",
+          "refId": "A"
+        },
+        {
+          "expr": "pg_stat_statements_max_time_seconds * 1000",
+          "legendFormat": "Max Query Time",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Database Activity",
+      "type": "graph",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "ops"
+        }
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_xact_commit{datname=\"econ_graph\"}[5m])",
+          "legendFormat": "Commits/sec",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(pg_stat_database_xact_rollback{datname=\"econ_graph\"}[5m])",
+          "legendFormat": "Rollbacks/sec",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(pg_stat_database_tup_inserted{datname=\"econ_graph\"}[5m])",
+          "legendFormat": "Inserts/sec",
+          "refId": "C"
+        },
+        {
+          "expr": "rate(pg_stat_database_tup_updated{datname=\"econ_graph\"}[5m])",
+          "legendFormat": "Updates/sec",
+          "refId": "D"
+        },
+        {
+          "expr": "rate(pg_stat_database_tup_deleted{datname=\"econ_graph\"}[5m])",
+          "legendFormat": "Deletes/sec",
+          "refId": "E"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "I/O Statistics",
+      "type": "graph",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "Bps"
+        }
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_blks_read{datname=\"econ_graph\"}[5m]) * 8192",
+          "legendFormat": "Disk Reads/sec",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(pg_stat_database_blks_hit{datname=\"econ_graph\"}[5m]) * 8192",
+          "legendFormat": "Cache Hits/sec",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Lock Statistics",
+      "type": "graph",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "pg_locks_count",
+          "legendFormat": "{{mode}} locks",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "WAL Statistics",
+      "type": "graph",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "Bps"
+        }
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_wal_written_bytes[5m])",
+          "legendFormat": "WAL Written/sec",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(pg_stat_wal_flushed_bytes[5m])",
+          "legendFormat": "WAL Flushed/sec",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Time Series Data Growth",
+      "type": "graph",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "pg_stat_user_tables_n_tup_ins{relname=\"economic_series\"}",
+          "legendFormat": "Economic Series Count",
+          "refId": "A"
+        },
+        {
+          "expr": "pg_stat_user_tables_n_tup_ins{relname=\"data_points\"}",
+          "legendFormat": "Data Points Count",
+          "refId": "B"
+        },
+        {
+          "expr": "pg_stat_user_tables_n_tup_ins{relname=\"crawl_queue\"}",
+          "legendFormat": "Queue Items Count",
+          "refId": "C"
         }
       ]
     }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
   }
 }

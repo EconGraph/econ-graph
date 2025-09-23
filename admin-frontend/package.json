@@ -2,6 +2,7 @@
   "name": "econ-graph-admin",
   "version": "0.1.0",
   "private": true,
+  "homepage": "/admin",
   "description": "Administrative interface for EconGraph platform - INTERNAL USE ONLY",
   "dependencies": {
     "@apollo/client": "^4.0.5",
