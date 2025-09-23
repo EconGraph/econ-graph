@@ -705,11 +705,16 @@ describe('ChartCollaborationConnected', () => {
 
     it('should show error when sharing without chart ID', async () => {
       const user = userEvent.setup();
-      renderChartCollaborationConnected({ chartId: undefined });
+      renderChartCollaborationConnected({ chartId: 'chart-1' });
 
       // Open share dialog
       const shareButton = screen.getByTestId('share-chart-button');
       await user.click(shareButton);
+
+      // Wait for dialog to open
+      await waitFor(() => {
+        expect(screen.getByTestId('share-chart-dialog')).toBeInTheDocument();
+      });
 
       // Try to share without filling form
       const shareSubmitButton = screen.getByTestId('submit-share-button');
@@ -727,15 +732,9 @@ describe('ChartCollaborationConnected', () => {
       const mockOnAnnotationClick = jest.fn();
       renderChartCollaborationConnected({ onAnnotationClick: mockOnAnnotationClick });
 
-      // Click on an annotation
-      const annotationItems = screen.getAllByRole('button');
-      const annotationButton = annotationItems.find(item =>
-        item.textContent?.includes('GDP Growth Analysis')
-      );
-
-      if (annotationButton) {
-        await user.click(annotationButton);
-      }
+      // Click on an annotation - look for the annotation text content
+      const annotationItem = screen.getByText('GDP Growth Analysis');
+      await user.click(annotationItem);
 
       expect(mockOnAnnotationClick).toHaveBeenCalledWith(mockAnnotations[0]);
     });
@@ -744,15 +743,9 @@ describe('ChartCollaborationConnected', () => {
       const user = userEvent.setup();
       renderChartCollaborationConnected();
 
-      // Click on an annotation
-      const annotationItems = screen.getAllByRole('button');
-      const annotationButton = annotationItems.find(item =>
-        item.textContent?.includes('GDP Growth Analysis')
-      );
-
-      if (annotationButton) {
-        await user.click(annotationButton);
-      }
+      // Click on an annotation - look for the annotation text content
+      const annotationItem = screen.getByText('GDP Growth Analysis');
+      await user.click(annotationItem);
 
       expect(mockCollaborationHook.loadComments).toHaveBeenCalledWith('annotation-1');
     });
@@ -789,6 +782,12 @@ describe('ChartCollaborationConnected', () => {
       // Filter to user's annotations
       const filterSelect = screen.getByTestId('filter-annotations-select');
       await user.click(filterSelect);
+
+      // Wait for the dropdown option to appear
+      await waitFor(() => {
+        expect(screen.getByText('My Annotations (0)')).toBeInTheDocument();
+      }, { timeout: 5000 });
+
       await user.click(screen.getByText('My Annotations (0)'));
 
       expect(screen.getByText('No annotations found. Click "Add Annotation" to create your first annotation.')).toBeInTheDocument();
