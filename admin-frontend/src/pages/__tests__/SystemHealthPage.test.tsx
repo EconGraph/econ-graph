@@ -161,64 +161,79 @@ describe("SystemHealthPage", () => {
       expect(screen.getByText("NGINX")).toBeInTheDocument();
     });
 
-    it("displays quick actions section", async () => {
+    it("displays quick actions section", () => {
       render(
         <TestWrapper>
           <SystemHealthPage />
         </TestWrapper>,
       );
 
-      await waitFor(() => {
-        expect(screen.getByText("Quick Actions")).toBeInTheDocument();
-        expect(screen.getByText("Platform Overview")).toBeInTheDocument();
-        expect(screen.getByText("Performance Metrics")).toBeInTheDocument();
-        expect(screen.getByText("Crawler Status")).toBeInTheDocument();
-        expect(screen.getByText("Security Events")).toBeInTheDocument();
-      });
+      // Use data-testid attributes for reliable testing
+      expect(screen.getByTestId("quick-actions-section")).toBeInTheDocument();
+      expect(screen.getByTestId("quick-actions-grid")).toBeInTheDocument();
+      expect(screen.getByText("Quick Actions")).toBeInTheDocument();
+      expect(screen.getByText("Platform Overview")).toBeInTheDocument();
+      expect(screen.getByText("Performance Metrics")).toBeInTheDocument();
+      expect(screen.getByText("Crawler Status")).toBeInTheDocument();
+      expect(screen.getByText("Security Events")).toBeInTheDocument();
     });
   });
 
   describe("Health Metrics Display", () => {
-    it("shows correct metric values and descriptions", async () => {
+    it("shows correct metric values and descriptions", () => {
       render(
         <TestWrapper>
           <SystemHealthPage />
         </TestWrapper>,
       );
 
-      await waitFor(() => {
-        expect(screen.getByText("99.9%")).toBeInTheDocument(); // System Uptime
-        expect(screen.getByText("120ms")).toBeInTheDocument(); // Response Time
-        expect(screen.getByText("85%")).toBeInTheDocument(); // Database Connections
-        expect(screen.getByText("68%")).toBeInTheDocument(); // Memory Usage
-        expect(screen.getByText("78%")).toBeInTheDocument(); // Disk Space
-        expect(screen.getByText("24")).toBeInTheDocument(); // Active Users
-      });
+      // Use data-testid attributes for reliable testing
+      expect(
+        screen.getByTestId("metric-value-system-uptime"),
+      ).toHaveTextContent("99.9%");
+      expect(
+        screen.getByTestId("metric-value-response-time"),
+      ).toHaveTextContent("120ms");
+      expect(
+        screen.getByTestId("metric-value-database-connections"),
+      ).toHaveTextContent("85%");
+      expect(screen.getByTestId("metric-value-memory-usage")).toHaveTextContent(
+        "68%",
+      );
+      expect(screen.getByTestId("metric-value-disk-space")).toHaveTextContent(
+        "78%",
+      );
+      expect(screen.getByTestId("metric-value-active-users")).toHaveTextContent(
+        "24",
+      );
     });
 
-    it("displays metric descriptions", async () => {
+    it("displays metric descriptions", () => {
       render(
         <TestWrapper>
           <SystemHealthPage />
         </TestWrapper>,
       );
 
-      await waitFor(() => {
-        expect(
-          screen.getByText("Overall system availability"),
-        ).toBeInTheDocument();
-        expect(
-          screen.getByText("Average API response time"),
-        ).toBeInTheDocument();
-        expect(
-          screen.getByText("Active database connections"),
-        ).toBeInTheDocument();
-        expect(
-          screen.getByText("System memory utilization"),
-        ).toBeInTheDocument();
-        expect(screen.getByText("Available disk space")).toBeInTheDocument();
-        expect(screen.getByText("Currently active users")).toBeInTheDocument();
-      });
+      // Use data-testid attributes for reliable testing
+      expect(
+        screen.getByTestId("metric-description-system-uptime"),
+      ).toHaveTextContent("Overall system availability");
+      expect(
+        screen.getByTestId("metric-description-response-time"),
+      ).toHaveTextContent("Average API response time");
+      expect(
+        screen.getByTestId("metric-description-database-connections"),
+      ).toHaveTextContent("Active database connections");
+      expect(
+        screen.getByTestId("metric-description-memory-usage"),
+      ).toHaveTextContent("System memory utilization");
+      expect(
+        screen.getByTestId("metric-description-disk-space"),
+      ).toHaveTextContent("Available disk space");
+      expect(
+        screen.getByTestId("metric-description-active-users"),
+      ).toHaveTextContent("Currently active users");
     });
 
     it("shows status indicators with correct colors", async () => {
@@ -240,20 +255,16 @@ describe("SystemHealthPage", () => {
       ).toBeInTheDocument();
     });
 
-    it("displays trend indicators", async () => {
+    it("displays trend indicators", () => {
       render(
         <TestWrapper>
           <SystemHealthPage />
         </TestWrapper>,
       );
 
-      await waitFor(() => {
-        // Trend icons should be present (they're rendered as SVG icons)
-        const trendIcons = document.querySelectorAll(
-          '[data-testid="TrendingUpIcon"]',
-        );
-        expect(trendIcons.length).toBeGreaterThan(0);
-      });
+      // Trend icons should be present (they're rendered as SVG icons)
+      const trendIcons = screen.getAllByTestId("TrendingUpIcon");
+      expect(trendIcons.length).toBeGreaterThan(0);
     });
 
     it("shows last check timestamps", async () => {

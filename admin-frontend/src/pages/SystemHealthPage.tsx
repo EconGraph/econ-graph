@@ -218,16 +218,25 @@ export default function SystemHealthPage() {
   const getTrendIcon = (trend?: string) => {
     switch (trend) {
       case "up":
-        return <TrendingUp sx={{ color: "warning.main" }} />;
+        return (
+          <TrendingUp
+            sx={{ color: "warning.main" }}
+            data-testid="TrendingUpIcon"
+          />
+        );
       case "down":
         return (
           <TrendingUp
             sx={{ color: "success.main", transform: "rotate(180deg)" }}
+            data-testid="TrendingUpIcon"
           />
         );
       case "stable":
         return (
-          <TrendingUp sx={{ color: "info.main", transform: "rotate(90deg)" }} />
+          <TrendingUp
+            sx={{ color: "info.main", transform: "rotate(90deg)" }}
+            data-testid="TrendingUpIcon"
+          />
         );
       default:
         return null;
@@ -357,7 +366,12 @@ export default function SystemHealthPage() {
                   )}
                 </Box>
 
-                <Typography variant="h4" color="primary" gutterBottom>
+                <Typography
+                  variant="h4"
+                  color="primary"
+                  gutterBottom
+                  data-testid={`metric-value-${metric.name.toLowerCase().replace(/\s+/g, "-")}`}
+                >
                   {metric.value}
                 </Typography>
 
@@ -365,6 +379,7 @@ export default function SystemHealthPage() {
                   variant="body2"
                   color="text.secondary"
                   sx={{ mb: 1 }}
+                  data-testid={`metric-description-${metric.name.toLowerCase().replace(/\s+/g, "-")}`}
                 >
                   {metric.description}
                 </Typography>
@@ -477,11 +492,11 @@ export default function SystemHealthPage() {
       </Paper>
 
       {/* Quick Actions */}
-      <Paper sx={{ p: 3 }}>
+      <Paper sx={{ p: 3 }} data-testid="quick-actions-section">
         <Typography variant="h6" gutterBottom>
           Quick Actions
         </Typography>
-        <Grid container spacing={2}>
+        <Grid container spacing={2} data-testid="quick-actions-grid">
           <Grid item xs={12} sm={6} md={3}>
             <Button
               fullWidth
