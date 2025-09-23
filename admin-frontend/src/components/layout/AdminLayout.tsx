@@ -2,8 +2,8 @@
 // PURPOSE: Provide consistent admin layout with role-based navigation and security warnings
 // This ensures administrators have clear visual indicators and proper access controls
 
-import React, { useState } from 'react';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import React, { useState } from "react";
+import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import {
   Box,
   Drawer,
@@ -23,7 +23,7 @@ import {
   Menu,
   MenuItem,
   Divider,
-} from '@mui/material';
+} from "@mui/material";
 import {
   Menu as MenuIcon,
   Dashboard,
@@ -38,9 +38,9 @@ import {
   AccountCircle,
   Logout,
   Warning,
-} from '@mui/icons-material';
-import { useAuth } from '../../contexts/AuthContext';
-import { useSecurity } from '../../contexts/SecurityContext';
+} from "@mui/icons-material";
+import { useAuth } from "../../contexts/AuthContext";
+import { useSecurity } from "../../contexts/SecurityContext";
 
 const DRAWER_WIDTH = 280;
 
@@ -54,59 +54,59 @@ interface NavigationItem {
 
 const navigationItems: NavigationItem[] = [
   {
-    label: 'Dashboard',
-    path: '/',
+    label: "Dashboard",
+    path: "/",
     icon: <Dashboard />,
-    requiredRole: 'read_only',
+    requiredRole: "read_only",
   },
   {
-    label: 'System Health',
-    path: '/health',
+    label: "System Health",
+    path: "/health",
     icon: <HealthAndSafety />,
-    requiredRole: 'read_only',
+    requiredRole: "read_only",
   },
   {
-    label: 'Monitoring',
-    path: '/monitoring',
+    label: "Monitoring",
+    path: "/monitoring",
     icon: <Monitor />,
-    requiredRole: 'read_only',
+    requiredRole: "read_only",
   },
   {
-    label: 'Crawler Management',
-    path: '/crawler',
+    label: "Crawler Management",
+    path: "/crawler",
     icon: <Storage />,
-    requiredRole: 'admin',
+    requiredRole: "admin",
   },
   {
-    label: 'Database Management',
-    path: '/database',
+    label: "Database Management",
+    path: "/database",
     icon: <Storage />,
-    requiredRole: 'super_admin',
+    requiredRole: "super_admin",
   },
   {
-    label: 'User Management',
-    path: '/users',
+    label: "User Management",
+    path: "/users",
     icon: <People />,
-    requiredRole: 'super_admin',
+    requiredRole: "super_admin",
     badge: 0, // Will be updated with active user count
   },
   {
-    label: 'Security',
-    path: '/security',
+    label: "Security",
+    path: "/security",
     icon: <Security />,
-    requiredRole: 'admin',
+    requiredRole: "admin",
   },
   {
-    label: 'Audit Logs',
-    path: '/audit',
+    label: "Audit Logs",
+    path: "/audit",
     icon: <Assignment />,
-    requiredRole: 'read_only',
+    requiredRole: "read_only",
   },
   {
-    label: 'System Config',
-    path: '/config',
+    label: "System Config",
+    path: "/config",
     icon: <Settings />,
-    requiredRole: 'super_admin',
+    requiredRole: "super_admin",
   },
 ];
 
@@ -138,19 +138,19 @@ export default function AdminLayout() {
   const formatSessionTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
   };
 
   const getRoleColor = (role: string) => {
     switch (role) {
-      case 'super_admin':
-        return 'error';
-      case 'admin':
-        return 'warning';
-      case 'read_only':
-        return 'info';
+      case "super_admin":
+        return "error";
+      case "admin":
+        return "warning";
+      case "read_only":
+        return "info";
       default:
-        return 'default';
+        return "default";
     }
   };
 
@@ -167,19 +167,19 @@ export default function AdminLayout() {
       </Alert>
 
       {/* User Info */}
-      <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-          <Avatar sx={{ bgcolor: 'primary.main', mr: 1 }}>
-            {user?.username?.charAt(0) || 'A'}
+      <Box sx={{ p: 2, borderBottom: 1, borderColor: "divider" }}>
+        <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
+          <Avatar sx={{ bgcolor: "primary.main", mr: 1 }}>
+            {user?.username?.charAt(0) || "A"}
           </Avatar>
           <Box>
             <Typography variant="subtitle2" noWrap>
-              {user?.username || 'Administrator'}
+              {user?.username || "Administrator"}
             </Typography>
             <Chip
-              label={user?.role || 'unknown'}
+              label={user?.role || "unknown"}
               size="small"
-              color={getRoleColor(user?.role || '')}
+              color={getRoleColor(user?.role || "")}
               variant="outlined"
             />
           </Box>
@@ -207,14 +207,14 @@ export default function AdminLayout() {
                   setMobileOpen(false);
                 }}
                 sx={{
-                  '&.Mui-selected': {
-                    backgroundColor: 'primary.main',
-                    color: 'primary.contrastText',
-                    '&:hover': {
-                      backgroundColor: 'primary.dark',
+                  "&.Mui-selected": {
+                    backgroundColor: "primary.main",
+                    color: "primary.contrastText",
+                    "&:hover": {
+                      backgroundColor: "primary.dark",
                     },
-                    '& .MuiListItemIcon-root': {
-                      color: 'primary.contrastText',
+                    "& .MuiListItemIcon-root": {
+                      color: "primary.contrastText",
                     },
                   },
                 }}
@@ -237,9 +237,12 @@ export default function AdminLayout() {
 
       {/* Security Events Summary */}
       {securityEvents.length > 0 && (
-        <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
+        <Box sx={{ p: 2, borderTop: 1, borderColor: "divider" }}>
           <Typography variant="caption" color="error" display="block">
-            <Warning fontSize="small" sx={{ mr: 0.5, verticalAlign: 'middle' }} />
+            <Warning
+              fontSize="small"
+              sx={{ mr: 0.5, verticalAlign: "middle" }}
+            />
             {securityEvents.length} security event(s)
           </Typography>
         </Box>
@@ -248,14 +251,14 @@ export default function AdminLayout() {
   );
 
   return (
-    <Box sx={{ display: 'flex' }}>
+    <Box sx={{ display: "flex" }}>
       {/* App Bar */}
       <AppBar
         position="fixed"
         sx={{
           width: { sm: `calc(100% - ${DRAWER_WIDTH}px)` },
           ml: { sm: `${DRAWER_WIDTH}px` },
-          backgroundColor: '#d32f2f', // Admin red theme
+          backgroundColor: "#d32f2f", // Admin red theme
         }}
       >
         <Toolbar>
@@ -264,7 +267,7 @@ export default function AdminLayout() {
             aria-label="open drawer"
             edge="start"
             onClick={handleDrawerToggle}
-            sx={{ mr: 2, display: { sm: 'none' } }}
+            sx={{ mr: 2, display: { sm: "none" } }}
           >
             <MenuIcon />
           </IconButton>
@@ -304,31 +307,31 @@ export default function AdminLayout() {
         PaperProps={{
           elevation: 0,
           sx: {
-            overflow: 'visible',
-            filter: 'drop-shadow(0px 2px 8px rgba(0,0,0,0.32))',
+            overflow: "visible",
+            filter: "drop-shadow(0px 2px 8px rgba(0,0,0,0.32))",
             mt: 1.5,
-            '& .MuiAvatar-root': {
+            "& .MuiAvatar-root": {
               width: 32,
               height: 32,
               ml: -0.5,
               mr: 1,
             },
-            '&:before': {
+            "&:before": {
               content: '""',
-              display: 'block',
-              position: 'absolute',
+              display: "block",
+              position: "absolute",
               top: 0,
               right: 14,
               width: 10,
               height: 10,
-              bgcolor: 'background.paper',
-              transform: 'translateY(-50%) rotate(45deg)',
+              bgcolor: "background.paper",
+              transform: "translateY(-50%) rotate(45deg)",
               zIndex: 0,
             },
           },
         }}
-        transformOrigin={{ horizontal: 'right', vertical: 'top' }}
-        anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+        transformOrigin={{ horizontal: "right", vertical: "top" }}
+        anchorOrigin={{ horizontal: "right", vertical: "bottom" }}
       >
         <MenuItem onClick={handleProfileMenuClose}>
           <Avatar /> Profile
@@ -358,9 +361,9 @@ export default function AdminLayout() {
             keepMounted: true, // Better open performance on mobile.
           }}
           sx={{
-            display: { xs: 'block', sm: 'none' },
-            '& .MuiDrawer-paper': {
-              boxSizing: 'border-box',
+            display: { xs: "block", sm: "none" },
+            "& .MuiDrawer-paper": {
+              boxSizing: "border-box",
               width: DRAWER_WIDTH,
             },
           }}
@@ -370,9 +373,9 @@ export default function AdminLayout() {
         <Drawer
           variant="permanent"
           sx={{
-            display: { xs: 'none', sm: 'block' },
-            '& .MuiDrawer-paper': {
-              boxSizing: 'border-box',
+            display: { xs: "none", sm: "block" },
+            "& .MuiDrawer-paper": {
+              boxSizing: "border-box",
               width: DRAWER_WIDTH,
             },
           }}

@@ -274,7 +274,12 @@ const CrawlerConfig: React.FC = () => {
         <Grid item xs={12} md={6}>
           <Card>
             <CardContent>
-              <Typography variant="h6" component="h2" sx={{ mb: 2 }} data-testid="global-settings-title">
+              <Typography
+                variant="h6"
+                component="h2"
+                sx={{ mb: 2 }}
+                data-testid="global-settings-title"
+              >
                 <Settings sx={{ mr: 1, verticalAlign: "middle" }} />
                 Global Settings
               </Typography>
@@ -438,7 +443,11 @@ const CrawlerConfig: React.FC = () => {
                   mb: 2,
                 }}
               >
-                <Typography variant="h6" component="h2" data-testid="data-sources-title">
+                <Typography
+                  variant="h6"
+                  component="h2"
+                  data-testid="data-sources-title"
+                >
                   <Speed sx={{ mr: 1, verticalAlign: "middle" }} />
                   Data Sources
                 </Typography>

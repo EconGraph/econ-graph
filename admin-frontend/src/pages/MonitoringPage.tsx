@@ -2,7 +2,7 @@
 // PURPOSE: Provide access to Grafana dashboards and embed key metrics for quick overview
 // This leverages the existing monitoring infrastructure while providing admin-specific views
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import {
   Box,
   Typography,
@@ -18,7 +18,7 @@ import {
   IconButton,
   Tooltip,
   CircularProgress,
-} from '@mui/material';
+} from "@mui/material";
 import {
   OpenInNew,
   Refresh,
@@ -30,7 +30,7 @@ import {
   Info,
   Launch,
   Fullscreen,
-} from '@mui/icons-material';
+} from "@mui/icons-material";
 
 interface DashboardInfo {
   id: string;
@@ -38,7 +38,7 @@ interface DashboardInfo {
   description: string;
   url: string;
   embedUrl: string;
-  status: 'healthy' | 'warning' | 'error';
+  status: "healthy" | "warning" | "error";
   lastUpdate: string;
   metrics: {
     totalSeries: number;
@@ -75,12 +75,12 @@ export default function MonitoringPage() {
   const [loading, setLoading] = useState(true);
   const [dashboards, setDashboards] = useState<DashboardInfo[]>([]);
   const [systemStatus] = useState({
-    overall: 'healthy' as 'healthy' | 'warning' | 'error',
+    overall: "healthy" as "healthy" | "warning" | "error",
     services: {
-      backend: 'healthy',
-      database: 'healthy',
-      crawler: 'warning',
-      grafana: 'healthy',
+      backend: "healthy",
+      database: "healthy",
+      crawler: "warning",
+      grafana: "healthy",
     },
     alerts: 2,
   });
@@ -89,48 +89,54 @@ export default function MonitoringPage() {
   useEffect(() => {
     const grafanaDashboards: DashboardInfo[] = [
       {
-        id: 'econgraph-overview',
-        title: 'EconGraph Platform Overview',
-        description: 'High-level system monitoring and health overview with API metrics, resource utilization, and service availability',
-        url: 'http://localhost:30001/d/econgraph-overview/econgraph-platform-overview',
-        embedUrl: 'http://localhost:30001/d-solo/econgraph-overview/econgraph-platform-overview?orgId=1&from=now-1h&to=now&panelId=1',
-        status: 'healthy',
+        id: "econgraph-overview",
+        title: "EconGraph Platform Overview",
+        description:
+          "High-level system monitoring and health overview with API metrics, resource utilization, and service availability",
+        url: "http://localhost:30001/d/econgraph-overview/econgraph-platform-overview",
+        embedUrl:
+          "http://localhost:30001/d-solo/econgraph-overview/econgraph-platform-overview?orgId=1&from=now-1h&to=now&panelId=1",
+        status: "healthy",
         lastUpdate: new Date().toISOString(),
         metrics: {
           totalSeries: 0, // Will be populated from Prometheus metrics
           activeCrawlers: 0, // Will be populated from crawler status
           dataPoints: 0, // Will be populated from database statistics
-          uptime: '99.9%',
+          uptime: "99.9%",
         },
       },
       {
-        id: 'database-statistics',
-        title: 'Database Statistics',
-        description: 'Comprehensive PostgreSQL monitoring for time series data with performance metrics and growth trends',
-        url: 'http://localhost:30001/d/database-statistics/database-statistics',
-        embedUrl: 'http://localhost:30001/d-solo/database-statistics/database-statistics?orgId=1&from=now-6h&to=now&panelId=1',
-        status: 'healthy',
+        id: "database-statistics",
+        title: "Database Statistics",
+        description:
+          "Comprehensive PostgreSQL monitoring for time series data with performance metrics and growth trends",
+        url: "http://localhost:30001/d/database-statistics/database-statistics",
+        embedUrl:
+          "http://localhost:30001/d-solo/database-statistics/database-statistics?orgId=1&from=now-6h&to=now&panelId=1",
+        status: "healthy",
         lastUpdate: new Date().toISOString(),
         metrics: {
           totalSeries: 0, // Will be populated from database metrics
           activeCrawlers: 0,
           dataPoints: 0, // Will be populated from table statistics
-          uptime: '99.9%',
+          uptime: "99.9%",
         },
       },
       {
-        id: 'crawler-status',
-        title: 'Crawler Status',
-        description: 'Data crawler monitoring and queue processing analysis with error rates and performance metrics',
-        url: 'http://localhost:30001/d/crawler-status/crawler-status',
-        embedUrl: 'http://localhost:30001/d-solo/crawler-status/crawler-status?orgId=1&from=now-2h&to=now&panelId=1',
-        status: 'healthy',
+        id: "crawler-status",
+        title: "Crawler Status",
+        description:
+          "Data crawler monitoring and queue processing analysis with error rates and performance metrics",
+        url: "http://localhost:30001/d/crawler-status/crawler-status",
+        embedUrl:
+          "http://localhost:30001/d-solo/crawler-status/crawler-status?orgId=1&from=now-2h&to=now&panelId=1",
+        status: "healthy",
         lastUpdate: new Date().toISOString(),
         metrics: {
           totalSeries: 0,
           activeCrawlers: 0, // Will be populated from crawler metrics
           dataPoints: 0,
-          uptime: '100%',
+          uptime: "100%",
         },
       },
     ];
@@ -151,24 +157,24 @@ export default function MonitoringPage() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'healthy':
-        return 'success';
-      case 'warning':
-        return 'warning';
-      case 'error':
-        return 'error';
+      case "healthy":
+        return "success";
+      case "warning":
+        return "warning";
+      case "error":
+        return "error";
       default:
-        return 'default';
+        return "default";
     }
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'healthy':
+      case "healthy":
         return <CheckCircle />;
-      case 'warning':
+      case "warning":
         return <Warning />;
-      case 'error':
+      case "error":
         return <Error />;
       default:
         return <Info />;
@@ -181,7 +187,14 @@ export default function MonitoringPage() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          mb: 3,
+        }}
+      >
         <Box>
           <Typography variant="h4" gutterBottom>
             System Monitoring
@@ -190,7 +203,7 @@ export default function MonitoringPage() {
             Grafana dashboards and system metrics
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        <Box sx={{ display: "flex", gap: 1 }}>
           <Button
             variant="outlined"
             startIcon={<Launch />}
@@ -211,7 +224,7 @@ export default function MonitoringPage() {
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
                 <Chip
                   icon={getStatusIcon(systemStatus.overall)}
                   label={systemStatus.overall.toUpperCase()}
@@ -256,7 +269,10 @@ export default function MonitoringPage() {
           <Card>
             <CardContent>
               <Typography variant="h4">
-                {dashboards.reduce((sum, d) => sum + d.metrics.activeCrawlers, 0)}
+                {dashboards.reduce(
+                  (sum, d) => sum + d.metrics.activeCrawlers,
+                  0,
+                )}
               </Typography>
               <Typography variant="h6">Active Crawlers</Typography>
               <Typography variant="body2" color="text.secondary">
@@ -275,7 +291,7 @@ export default function MonitoringPage() {
         <Grid container spacing={2}>
           {Object.entries(systemStatus.services).map(([service, status]) => (
             <Grid item xs={12} sm={6} md={3} key={service}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                 <Chip
                   icon={getStatusIcon(status)}
                   label={service.toUpperCase()}
@@ -288,8 +304,8 @@ export default function MonitoringPage() {
         </Grid>
       </Paper>
 
-      <Paper sx={{ width: '100%' }}>
-        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+      <Paper sx={{ width: "100%" }}>
+        <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
           <Tabs value={tabValue} onChange={handleTabChange}>
             <Tab label="Dashboard Overview" />
             <Tab label="Embedded Views" />
@@ -307,7 +323,14 @@ export default function MonitoringPage() {
               <Grid item xs={12} md={6} lg={4} key={dashboard.id}>
                 <Card>
                   <CardContent>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                    <Box
+                      sx={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        mb: 2,
+                      }}
+                    >
                       <Box>
                         <Typography variant="h6" gutterBottom>
                           {dashboard.title}
@@ -329,17 +352,22 @@ export default function MonitoringPage() {
                       </IconButton>
                     </Box>
 
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ mb: 2 }}
+                    >
                       {dashboard.description}
                     </Typography>
 
                     <Box sx={{ mb: 2 }}>
                       <Typography variant="caption" color="text.secondary">
-                        Last Update: {new Date(dashboard.lastUpdate).toLocaleString()}
+                        Last Update:{" "}
+                        {new Date(dashboard.lastUpdate).toLocaleString()}
                       </Typography>
                     </Box>
 
-                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
                       <Chip
                         label={`${formatNumber(dashboard.metrics.totalSeries)} series`}
                         size="small"
@@ -358,7 +386,7 @@ export default function MonitoringPage() {
                       />
                     </Box>
 
-                    <Box sx={{ mt: 2, display: 'flex', gap: 1 }}>
+                    <Box sx={{ mt: 2, display: "flex", gap: 1 }}>
                       <Button
                         size="small"
                         variant="contained"
@@ -393,14 +421,22 @@ export default function MonitoringPage() {
             Embedded Dashboard Views
           </Typography>
           <Alert severity="info" sx={{ mb: 3 }}>
-            These are embedded views from Grafana dashboards. Click the fullscreen icon to open in Grafana.
+            These are embedded views from Grafana dashboards. Click the
+            fullscreen icon to open in Grafana.
           </Alert>
 
           <Grid container spacing={3}>
             {dashboards.map((dashboard) => (
               <Grid item xs={12} lg={6} key={dashboard.id}>
                 <Paper sx={{ p: 2 }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      mb: 2,
+                    }}
+                  >
                     <Typography variant="h6">{dashboard.title}</Typography>
                     <Tooltip title="Open in Grafana">
                       <IconButton
@@ -419,19 +455,21 @@ export default function MonitoringPage() {
                     sx={{
                       height: 300,
                       border: 1,
-                      borderColor: 'divider',
+                      borderColor: "divider",
                       borderRadius: 1,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      backgroundColor: 'grey.50',
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: "grey.50",
                     }}
                   >
                     {loading ? (
                       <CircularProgress />
                     ) : (
-                      <Box sx={{ textAlign: 'center' }}>
-                        <Dashboard sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
+                      <Box sx={{ textAlign: "center" }}>
+                        <Dashboard
+                          sx={{ fontSize: 48, color: "text.secondary", mb: 1 }}
+                        />
                         <Typography variant="body2" color="text.secondary">
                           Embedded Grafana Dashboard
                         </Typography>
@@ -500,7 +538,13 @@ export default function MonitoringPage() {
                       </Typography>
                     </Box>
 
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box
+                      sx={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
                       <Chip
                         icon={getStatusIcon(dashboard.status)}
                         label={dashboard.status.toUpperCase()}

@@ -31,7 +31,7 @@ global.IntersectionObserver = class IntersectionObserver {
   disconnect() {}
   observe() {}
   unobserve() {}
-};
+} as any;
 
 // Mock ResizeObserver
 global.ResizeObserver = class ResizeObserver {
@@ -49,7 +49,7 @@ global.WebSocket = class WebSocket {
   addEventListener() {}
   removeEventListener() {}
   dispatchEvent() {}
-};
+} as any;
 
 // Mock console methods to avoid noise in tests
 const originalConsoleError = console.error;

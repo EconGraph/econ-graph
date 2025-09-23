@@ -246,6 +246,8 @@ describe("CrawlerConfig", () => {
       if (fredSwitch) {
         await user.click(fredSwitch);
         expect(fredSwitch).not.toBeChecked();
+      } else {
+        throw new Error("FRED switch not found");
       }
     });
 

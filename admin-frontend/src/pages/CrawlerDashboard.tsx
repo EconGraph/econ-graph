@@ -248,7 +248,11 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
           <Card data-testid="crawler-status-card">
             <CardContent>
               <Box sx={{ display: "flex", alignItems: "center", mb: 2 }}>
-                <Typography variant="h6" component="h2" data-testid="crawler-status-title">
+                <Typography
+                  variant="h6"
+                  component="h2"
+                  data-testid="crawler-status-title"
+                >
                   Crawler Status
                 </Typography>
                 <Chip
@@ -303,7 +307,12 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
         <Grid item xs={12} md={6}>
           <Card data-testid="queue-statistics-card">
             <CardContent>
-              <Typography variant="h6" component="h2" sx={{ mb: 2 }} data-testid="queue-statistics-title">
+              <Typography
+                variant="h6"
+                component="h2"
+                sx={{ mb: 2 }}
+                data-testid="queue-statistics-title"
+              >
                 Queue Statistics
               </Typography>
 

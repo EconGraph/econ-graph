@@ -219,6 +219,8 @@ describe("CrawlerDashboard", () => {
         const closeButton = screen.getByRole("button", { name: /close/i });
         await userEvent.click(closeButton);
         expect(errorAlert).not.toBeInTheDocument();
+      } else {
+        throw new Error("Error alert not found");
       }
     });
   });

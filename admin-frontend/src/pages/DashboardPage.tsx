@@ -2,7 +2,7 @@
 // PURPOSE: Provide administrators with system status and key metrics
 // This ensures administrators can monitor system health and performance
 
-import React from 'react';
+import React from "react";
 import {
   Box,
   Typography,
@@ -11,9 +11,9 @@ import {
   CardContent,
   CardHeader,
   Alert,
-  Chip
-} from '@mui/material';
-import { useAuth } from '../contexts/AuthContext';
+  Chip,
+} from "@mui/material";
+import { useAuth } from "../contexts/AuthContext";
 
 function DashboardPage() {
   const { user } = useAuth();
@@ -33,16 +33,16 @@ function DashboardPage() {
           <Card>
             <CardHeader title="System Status" />
             <CardContent>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                   <Typography>Backend Service</Typography>
                   <Chip label="Running" color="success" size="small" />
                 </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                   <Typography>Database</Typography>
                   <Chip label="Connected" color="success" size="small" />
                 </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                   <Typography>Frontend</Typography>
                   <Chip label="Running" color="success" size="small" />
                 </Box>
@@ -56,8 +56,8 @@ function DashboardPage() {
             <CardHeader title="Quick Actions" />
             <CardContent>
               <Typography variant="body2" color="text.secondary">
-                Admin functionality is being implemented.
-                The basic infrastructure is now in place.
+                Admin functionality is being implemented. The basic
+                infrastructure is now in place.
               </Typography>
             </CardContent>
           </Card>
@@ -68,10 +68,12 @@ function DashboardPage() {
             <CardHeader title="Admin Interface Status" />
             <CardContent>
               <Alert severity="success">
-                ✅ Admin UI is successfully integrated with Kubernetes infrastructure
+                ✅ Admin UI is successfully integrated with Kubernetes
+                infrastructure
               </Alert>
               <Typography variant="body2" sx={{ mt: 2 }}>
-                The admin interface is now accessible and properly configured with:
+                The admin interface is now accessible and properly configured
+                with:
               </Typography>
               <ul>
                 <li>Kubernetes deployment and service manifests</li>
