@@ -280,6 +280,7 @@ export default function SystemHealthPage() {
             href="http://localhost:30001/d/econgraph-overview/econgraph-platform-overview"
             target="_blank"
             rel="noopener noreferrer"
+            data-testid="open-grafana-button"
           >
             Open Grafana
           </Button>
@@ -359,6 +360,7 @@ export default function SystemHealthPage() {
                         href={metric.grafanaUrl}
                         target="_blank"
                         rel="noopener noreferrer"
+                        data-testid={`metric-grafana-link-${metric.name.toLowerCase().replace(/\s+/g, "-")}`}
                       >
                         <OpenInNew />
                       </IconButton>
@@ -440,6 +442,7 @@ export default function SystemHealthPage() {
                       <Box sx={{ display: "flex", gap: 2, mt: 1 }}>
                         <Box
                           sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                          data-testid={`service-${service.name.toLowerCase().replace(/\s+/g, "-")}-cpu-usage`}
                         >
                           <Memory fontSize="small" color="action" />
                           <Typography variant="caption">
@@ -454,6 +457,7 @@ export default function SystemHealthPage() {
                         </Box>
                         <Box
                           sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                          data-testid={`service-${service.name.toLowerCase().replace(/\s+/g, "-")}-ram-usage`}
                         >
                           <Storage fontSize="small" color="action" />
                           <Typography variant="caption">
@@ -468,6 +472,7 @@ export default function SystemHealthPage() {
                         </Box>
                         <Box
                           sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                          data-testid={`service-${service.name.toLowerCase().replace(/\s+/g, "-")}-disk-usage`}
                         >
                           <Storage fontSize="small" color="action" />
                           <Typography variant="caption">
