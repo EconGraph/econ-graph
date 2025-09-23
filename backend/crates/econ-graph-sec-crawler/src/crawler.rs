@@ -323,6 +323,9 @@ impl SecEdgarCrawler {
             .context("Failed to read response body")?;
         let file_size = content.len() as u64;
 
+        // Record bytes downloaded metric
+        CRAWLER_METRICS.record_bytes_downloaded("sec", "edgar", file_size);
+
         // Store the XBRL file in the database
         let stored_doc = self
             .storage
