@@ -72,11 +72,11 @@ data:
                 try_files $uri $uri/ /index.html;
             }
 
-            # Static assets caching
-            location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
-                expires 1y;
-                add_header Cache-Control "public, immutable";
-            }
+        # Static assets caching (exclude admin paths to avoid conflicts)
+        location ~* ^(?!/admin).*\.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
 
             # Health check endpoint
             location /health {
