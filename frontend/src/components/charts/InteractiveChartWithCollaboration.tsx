@@ -211,6 +211,7 @@ interface InteractiveChartWithCollaborationProps {
   units: string;
   frequency: string;
   loading?: boolean;
+  collaborationEnabled?: boolean;
 }
 
 /**
@@ -226,7 +227,15 @@ interface InteractiveChartWithCollaborationProps {
  * @property {'diff'} diff - Calculate first differences between consecutive periods
  * @property {'pct_change'} pct_change - Calculate percentage changes between periods
  */
-type TransformationType = 'none' | 'growth_rate' | 'log' | 'diff' | 'pct_change';
+type TransformationType =
+  | 'none'
+  | 'yoy'
+  | 'qoq'
+  | 'mom'
+  | 'growth_rate'
+  | 'log'
+  | 'diff'
+  | 'pct_change';
 
 /**
  * **InteractiveChartWithCollaboration Component Function**
@@ -288,6 +297,7 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
   units,
   frequency,
   loading = false,
+  collaborationEnabled = true,
 }) => {
   const theme = useTheme();
 
@@ -324,6 +334,33 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
         let transformedValue = point.value;
 
         switch (transformation) {
+          case 'yoy':
+            // Year-over-Year: Compare with same period last year (assuming monthly data)
+            if (index >= 12 && data[index - 12].value !== null) {
+              transformedValue =
+                ((point.value - data[index - 12].value!) / data[index - 12].value!) * 100;
+            } else {
+              transformedValue = 0;
+            }
+            break;
+          case 'qoq':
+            // Quarter-over-Quarter: Compare with same period 3 months ago
+            if (index >= 3 && data[index - 3].value !== null) {
+              transformedValue =
+                ((point.value - data[index - 3].value!) / data[index - 3].value!) * 100;
+            } else {
+              transformedValue = 0;
+            }
+            break;
+          case 'mom':
+            // Month-over-Month: Compare with previous month
+            if (index > 0 && data[index - 1].value !== null) {
+              transformedValue =
+                ((point.value - data[index - 1].value!) / data[index - 1].value!) * 100;
+            } else {
+              transformedValue = 0;
+            }
+            break;
           case 'growth_rate':
             if (index > 0 && data[index - 1].value !== null) {
               transformedValue =
@@ -418,6 +455,12 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
 
   const getTransformationLabel = (transform: TransformationType) => {
     switch (transform) {
+      case 'yoy':
+        return 'Year-over-Year (%)';
+      case 'qoq':
+        return 'Quarter-over-Quarter (%)';
+      case 'mom':
+        return 'Month-over-Month (%)';
       case 'growth_rate':
         return 'Growth Rate (%)';
       case 'log':
@@ -425,15 +468,22 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
       case 'diff':
         return 'First Difference';
       case 'pct_change':
-        return 'Percent Change';
+        return 'Percentage Change';
       default:
-        return 'None';
+        return 'None (Levels)';
     }
   };
 
   const getYAxisTitle = () => {
     if (transformation === 'none') return units;
-    if (transformation === 'growth_rate' || transformation === 'pct_change') return 'Percent (%)';
+    if (
+      transformation === 'yoy' ||
+      transformation === 'qoq' ||
+      transformation === 'mom' ||
+      transformation === 'growth_rate' ||
+      transformation === 'pct_change'
+    )
+      return 'Percent (%)';
     if (transformation === 'log') return `Log(${units})`;
     if (transformation === 'diff') return `Δ ${units}`;
     return units;
@@ -537,8 +587,41 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
 
   return (
     <Box sx={{ position: 'relative' }}>
+      {/* Chart Title */}
+      <Typography
+        variant='h5'
+        component='h1'
+        gutterBottom
+        sx={{ mb: 2 }}
+        aria-label={`Chart title: ${seriesTitle}`}
+      >
+        {seriesTitle}
+      </Typography>
+
       <Paper elevation={2} sx={{ p: 3 }}>
-        {/* Chart Controls */}
+        {/* Chart Controls Section */}
+        <Typography
+          variant='subtitle1'
+          component='h2'
+          gutterBottom
+          sx={{ mb: 2 }}
+          aria-label='Chart controls section'
+        >
+          Chart Controls
+        </Typography>
+
+        {/* Date Range Display */}
+        {startDate && endDate && (
+          <Typography
+            variant='body2'
+            color='text.secondary'
+            sx={{ mb: 2 }}
+            aria-label={`Date range: ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`}
+          >
+            {startDate.toLocaleDateString()} - {endDate.toLocaleDateString()}
+          </Typography>
+        )}
+
         <Box sx={{ mb: 3 }}>
           <Grid container spacing={2} alignItems='center'>
             <Grid item xs={12} md={3}>
@@ -548,12 +631,16 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
                   value={transformation}
                   onChange={e => setTransformation(e.target.value as TransformationType)}
                   label='Transformation'
+                  aria-label='Data transformation options'
                 >
-                  <MenuItem value='none'>None</MenuItem>
-                  <MenuItem value='growth_rate'>Growth Rate</MenuItem>
+                  <MenuItem value='none'>None (Levels)</MenuItem>
+                  <MenuItem value='yoy'>Year-over-Year (%)</MenuItem>
+                  <MenuItem value='qoq'>Quarter-over-Quarter (%)</MenuItem>
+                  <MenuItem value='mom'>Month-over-Month (%)</MenuItem>
+                  <MenuItem value='growth_rate'>Growth Rate (%)</MenuItem>
                   <MenuItem value='log'>Logarithmic</MenuItem>
                   <MenuItem value='diff'>First Difference</MenuItem>
-                  <MenuItem value='pct_change'>Percent Change</MenuItem>
+                  <MenuItem value='pct_change'>Percentage Change</MenuItem>
                 </Select>
               </FormControl>
             </Grid>
@@ -568,6 +655,10 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
                     textField: {
                       size: 'small',
                       fullWidth: true,
+                      inputProps: {
+                        'data-testid': 'date-picker',
+                        'aria-label': 'Start date for chart data range',
+                      },
                     },
                   }}
                 />
@@ -584,6 +675,10 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
                     textField: {
                       size: 'small',
                       fullWidth: true,
+                      inputProps: {
+                        'data-testid': 'date-picker',
+                        'aria-label': 'End date for chart data range',
+                      },
                     },
                   }}
                 />
@@ -684,13 +779,15 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
       </Paper>
 
       {/* Collaboration Panel */}
-      <ChartCollaborationConnected
-        seriesId={seriesId}
-        chartId={chartId}
-        isOpen={collaborationOpen}
-        onToggle={() => setCollaborationOpen(!collaborationOpen)}
-        onAnnotationClick={handleAnnotationClick}
-      />
+      {collaborationEnabled && (
+        <ChartCollaborationConnected
+          seriesId={seriesId}
+          chartId={chartId}
+          isOpen={collaborationOpen}
+          onToggle={() => setCollaborationOpen(!collaborationOpen)}
+          onAnnotationClick={handleAnnotationClick}
+        />
+      )}
 
       {/* Floating Collaboration Button */}
       {!collaborationOpen && (
