@@ -16,13 +16,6 @@ spec:
   rules:
   - http:
       paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: econ-graph-frontend-service
-            port:
-              number: 3000
       - path: /admin
         pathType: Prefix
         backend:
@@ -30,14 +23,14 @@ spec:
             name: econ-graph-admin-frontend-service
             port:
               number: 3001
-      - path: /api
+      - path: /api/admin
         pathType: Prefix
         backend:
           service:
             name: econ-graph-backend-service
             port:
               number: 9876
-      - path: /api/admin
+      - path: /api
         pathType: Prefix
         backend:
           service:
@@ -84,5 +77,12 @@ spec:
         backend:
           service:
             name: grafana-service
+            port:
+              number: 3000
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-frontend-service
             port:
               number: 3000
