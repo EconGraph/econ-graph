@@ -790,10 +790,10 @@ describe('ChartCollaborationConnected', () => {
     it('should show overflow indicator when many collaborators', () => {
       const manyCollaborators = Array.from({ length: 15 }, (_, i) => ({
         id: `collab-${i}`,
-        userId: `user-${i}`,
+        userId: i % 2 === 0 ? 'user-1' : 'user-2', // Use existing user IDs
         chartId: 'chart-1',
         role: 'viewer',
-        lastAccessedAt: new Date(Date.now() - i * 60000).toISOString(),
+        lastAccessedAt: new Date(Date.now() - i * 10000).toISOString(), // 10 seconds ago instead of 1 minute
         createdAt: '2024-01-15T10:00:00Z',
         updatedAt: '2024-01-15T10:00:00Z',
       }));
