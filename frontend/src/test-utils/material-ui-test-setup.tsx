@@ -78,12 +78,40 @@ export const setupTestEnvironment = () => {
   // Clean up any existing test containers
   const existingTestContainers = document.querySelectorAll('[data-testid="test-container"]');
   existingTestContainers.forEach(container => container.remove());
+
+  // Clean up any portal containers with different testid
+  const portalContainers = document.querySelectorAll('[data-testid="portal-container"]');
+  portalContainers.forEach(container => container.remove());
+
+  // Clean up any remaining React roots
+  const reactRoots = document.querySelectorAll('[data-reactroot]');
+  reactRoots.forEach(root => root.remove());
+
+  // Clean up any remaining dialogs
+  const dialogs = document.querySelectorAll('[role="dialog"]');
+  dialogs.forEach(dialog => dialog.remove());
 };
 
 export const cleanupTestEnvironment = () => {
   // Clean up all portal containers
   const containers = document.querySelectorAll('[data-testid="material-ui-portal-container"]');
   containers.forEach(container => container.remove());
+
+  // Clean up all test containers
+  const testContainers = document.querySelectorAll('[data-testid="test-container"]');
+  testContainers.forEach(container => container.remove());
+
+  // Clean up all portal containers with different testid
+  const portalContainers = document.querySelectorAll('[data-testid="portal-container"]');
+  portalContainers.forEach(container => container.remove());
+
+  // Clean up any remaining React roots
+  const reactRoots = document.querySelectorAll('[data-reactroot]');
+  reactRoots.forEach(root => root.remove());
+
+  // Clean up any remaining dialogs
+  const dialogs = document.querySelectorAll('[role="dialog"]');
+  dialogs.forEach(dialog => dialog.remove());
 };
 
 // Helper function to wait for Material-UI dialogs to render
