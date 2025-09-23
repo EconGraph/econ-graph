@@ -1295,6 +1295,10 @@ jobs:
       working-directory: frontend
       run: npm ci
 
+    - name: Install admin-frontend dependencies
+      working-directory: admin-frontend
+      run: npm ci
+
     - name: Run frontend formatting check
       working-directory: frontend
       run: npm run prettier-check
@@ -1354,6 +1358,14 @@ jobs:
     - name: Run npm security audit
       run: npm audit --audit-level moderate
       working-directory: frontend
+
+    - name: Install admin-frontend dependencies
+      working-directory: admin-frontend
+      run: npm ci
+
+    - name: Run admin-frontend npm security audit
+      run: npm audit --audit-level moderate
+      working-directory: admin-frontend
 
   license-compliance:
     name: License Compliance Check
@@ -1416,7 +1428,7 @@ jobs:
 
         echo "🔍 Checking admin-frontend license compliance with license-checker..."
         cd ../admin-frontend
-        license-checker --config ../.license-checker.json
+        license-checker --config ../frontend/.license-checker.json
         echo "✅ Admin frontend license compliance check passed"
       working-directory: frontend
 
@@ -1438,7 +1450,7 @@ jobs:
         # Generate admin-frontend license report
         echo "Generating admin-frontend license report..."
         cd ../admin-frontend
-        license-checker --config ../.license-checker.json --json > admin-frontend-licenses.json || true
+        license-checker --config ../frontend/.license-checker.json --json > admin-frontend-licenses.json || true
         echo "Admin frontend license check completed"
 
         echo "✅ License compliance check completed successfully"

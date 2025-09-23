@@ -274,7 +274,11 @@ export default function SystemHealthPage() {
           >
             Open Grafana
           </Button>
-          <IconButton onClick={handleRefresh} disabled={loading}>
+          <IconButton
+            onClick={handleRefresh}
+            disabled={loading}
+            aria-label="Refresh system health data"
+          >
             <Refresh />
           </IconButton>
         </Box>

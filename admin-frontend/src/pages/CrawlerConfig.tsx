@@ -255,6 +255,7 @@ const CrawlerConfig: React.FC = () => {
           startIcon={<Save />}
           onClick={handleSaveConfig}
           disabled={saving}
+          data-testid="save-configuration-button"
         >
           {saving ? "Saving..." : "Save Configuration"}
         </Button>
@@ -326,6 +327,8 @@ const CrawlerConfig: React.FC = () => {
                     }
                     fullWidth
                     size="small"
+                    data-testid="max-workers-input"
+                    inputProps={{ "aria-label": "Maximum number of workers" }}
                   />
                 </Grid>
 
@@ -342,6 +345,8 @@ const CrawlerConfig: React.FC = () => {
                     }
                     fullWidth
                     size="small"
+                    data-testid="queue-size-limit-input"
+                    inputProps={{ "aria-label": "Queue size limit" }}
                   />
                 </Grid>
 
@@ -412,6 +417,11 @@ const CrawlerConfig: React.FC = () => {
                       onChange={(e) =>
                         handleConfigChange("schedule_frequency", e.target.value)
                       }
+                      data-testid="schedule-frequency-select"
+                      inputProps={{
+                        "aria-label": "Schedule frequency for crawler",
+                      }}
+                      MenuProps={{ disablePortal: true }}
                     >
                       <MenuItem value="every_15_minutes">
                         Every 15 Minutes
@@ -457,7 +467,9 @@ const CrawlerConfig: React.FC = () => {
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>Source</TableCell>
+                      <TableCell data-testid="data-sources-table-source-header">
+                        Source
+                      </TableCell>
                       <TableCell>Status</TableCell>
                       <TableCell>Health</TableCell>
                       <TableCell>Actions</TableCell>
@@ -535,7 +547,9 @@ const CrawlerConfig: React.FC = () => {
                 <Table>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Source</TableCell>
+                      <TableCell data-testid="data-source-details-table-source-header">
+                        Source
+                      </TableCell>
                       <TableCell>Priority</TableCell>
                       <TableCell>Rate Limit</TableCell>
                       <TableCell>Retry Attempts</TableCell>
@@ -659,7 +673,9 @@ const CrawlerConfig: React.FC = () => {
         maxWidth="md"
         fullWidth
       >
-        <DialogTitle>Edit Data Source Configuration</DialogTitle>
+        <DialogTitle data-testid="edit-dialog-title">
+          Edit Data Source Configuration
+        </DialogTitle>
         <DialogContent>
           {editingSource && (
             <Grid container spacing={2} sx={{ mt: 1 }}>

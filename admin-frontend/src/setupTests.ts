@@ -26,6 +26,20 @@ if (process.env.CI) {
   jest.setTimeout(10000); // 10 seconds for local
 }
 
+// Mock crypto for UUID generation
+Object.defineProperty(global, "crypto", {
+  value: {
+    randomUUID: jest.fn(() => "mock-uuid-1234-5678-9012-345678901234"),
+    getRandomValues: jest.fn((arr) => {
+      for (let i = 0; i < arr.length; i++) {
+        arr[i] = Math.floor(Math.random() * 256);
+      }
+      return arr;
+    }),
+  },
+  writable: true,
+});
+
 // Mock Apollo Client for GraphQL testing
 jest.mock("@apollo/client", () => ({
   gql: jest.fn().mockReturnValue({}),
@@ -231,11 +245,12 @@ global.IntersectionObserver = jest.fn().mockImplementation(() => ({
   disconnect: jest.fn(),
 }));
 
-// Mock ResizeObserver
-global.ResizeObserver = jest.fn().mockImplementation(() => ({
+// Mock ResizeObserver with proper implementation
+global.ResizeObserver = jest.fn().mockImplementation((callback) => ({
   observe: jest.fn(),
   unobserve: jest.fn(),
   disconnect: jest.fn(),
+  callback,
 }));
 
 // Mock WebSocket for real-time features
