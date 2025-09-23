@@ -215,6 +215,7 @@ impl SecEdgarCrawler {
 
         self.rate_limiter.wait_for_permit().await;
 
+        let start = std::time::Instant::now();
         let response = self
             .client
             .get(&url)
@@ -222,8 +223,15 @@ impl SecEdgarCrawler {
             .await
             .context("Failed to fetch company submissions")?;
 
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!("HTTP error: {}", response.status()));
+        let duration = start.elapsed().as_secs_f64();
+        let status = response.status();
+        CRAWLER_METRICS.record_request("sec", "edgar", "/submissions", status.as_str(), duration);
+        if status.as_u16() == 429 {
+            CRAWLER_METRICS.record_rate_limit_hit("sec", "edgar");
+        }
+        if !status.is_success() {
+            CRAWLER_METRICS.record_error("sec", "edgar", "http_error");
+            return Err(anyhow::anyhow!("HTTP error: {}", status));
         }
 
         let submissions: CompanySubmissionsResponse = response
