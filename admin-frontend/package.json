@@ -2,7 +2,7 @@
   "name": "econ-graph-admin",
   "version": "0.1.0",
   "private": true,
-  "homepage": ".",
+  "homepage": "/admin",
   "description": "Administrative interface for EconGraph platform - INTERNAL USE ONLY",
   "dependencies": {
     "@emotion/react": "11.14.0",
