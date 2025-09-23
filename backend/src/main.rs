@@ -188,31 +188,39 @@ async fn main() -> AppResult<()> {
     info!("🔧 Environment Configuration:");
     info!(
         "  - RUST_LOG: {:?}",
-        std::env::var("RUST_LOG").unwrap_or_else(|_| "not set".to_string())
+        std::env::var("RUST_LOG").unwrap_or_else(|_| "not set (default: INFO)".to_string())
     );
     info!(
         "  - BACKEND_PORT: {:?}",
-        std::env::var("BACKEND_PORT").unwrap_or_else(|_| "not set".to_string())
+        std::env::var("BACKEND_PORT").unwrap_or_else(|_| "not set (default: 9876)".to_string())
     );
     info!(
         "  - FRONTEND_PORT: {:?}",
-        std::env::var("FRONTEND_PORT").unwrap_or_else(|_| "not set".to_string())
+        std::env::var("FRONTEND_PORT").unwrap_or_else(|_| "not set (default: 3000)".to_string())
+    );
+    info!(
+        "  - SERVER_HOST: {:?}",
+        std::env::var("SERVER_HOST").unwrap_or_else(|_| "not set (default: 127.0.0.1)".to_string())
     );
     info!(
         "  - DATABASE_URL: {:?}",
         if std::env::var("DATABASE_URL").is_ok() {
-            "set"
+            "configured"
         } else {
-            "not set"
+            "not set (will use default)"
         }
     );
     info!(
         "  - JWT_SECRET: {:?}",
         if std::env::var("JWT_SECRET").is_ok() {
-            "set"
+            "configured"
         } else {
-            "not set"
+            "not set (will use default)"
         }
+    );
+    info!(
+        "  - CORS_ALLOWED_ORIGINS: {:?}",
+        std::env::var("CORS_ALLOWED_ORIGINS").unwrap_or_else(|_| "not set (will use default)".to_string())
     );
 
     // Load configuration
@@ -225,10 +233,16 @@ async fn main() -> AppResult<()> {
     })?;
 
     info!("📊 Configuration loaded successfully:");
-    info!("  - Server host: {}", config.server.host);
-    info!("  - Server port: {}", config.server.port);
+    info!("  - Server host: {} (will bind to 0.0.0.0 for container networking)", config.server.host);
+    info!("  - Server port: {} (external access via this port)", config.server.port);
     info!("  - CORS origins: {:?}", config.cors.allowed_origins);
-    info!("  - Database URL: {}", config.database_url);
+    info!("  - Database URL: {} (host: {}, port: {}, database: {})",
+          config.database_url,
+          config.database_url.split('@').nth(1).and_then(|s| s.split('/').next()).unwrap_or("unknown"),
+          config.database_url.split(':').nth(3).unwrap_or("unknown"),
+          config.database_url.split('/').last().unwrap_or("unknown"));
+    info!("  - Max concurrent crawler jobs: {}", config.crawler.max_concurrent_jobs);
+    info!("  - Queue poll interval: {} seconds", config.crawler.queue_poll_interval_seconds);
 
     // Create database connection pool
     info!("🗄️  Creating database connection pool...");
@@ -446,22 +460,35 @@ async fn main() -> AppResult<()> {
         "📊 Prometheus metrics available at http://localhost:{}/metrics",
         port
     );
-    info!("🔗 API endpoints:");
-    info!("  - POST/GET /graphql - GraphQL API");
-    info!("  - GET /playground - GraphQL Playground");
-    info!("  - GET /health - Health check");
-    info!("  - GET /metrics - Prometheus metrics");
-    info!("  - GET / - API documentation");
+    info!("🔗 API endpoints configured:");
+    info!("  - POST/GET /graphql - GraphQL API (main endpoint)");
+    info!("  - GET /playground - GraphQL Playground (development)");
+    info!("  - GET /health - Health check (monitoring)");
+    info!("  - GET /metrics - Prometheus metrics (monitoring)");
+    info!("  - GET / - API documentation (root)");
+    info!("  - POST /auth/login - Authentication");
+    info!("  - POST /auth/register - User registration");
+    info!("  - POST /auth/refresh - Token refresh");
+    info!("  - POST /mcp - MCP server endpoint");
 
     // Start the server
     info!("🚀 Starting HTTP server...");
+    info!("🔍 CRITICAL DEBUG: Attempting to bind to 0.0.0.0:{}", port);
+
     let (_, server) =
         warp::serve(routes).bind_with_graceful_shutdown(([0, 0, 0, 0], port), async {
             signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
             info!("🛑 Received shutdown signal, gracefully shutting down...");
         });
 
-    info!("✅ Server is now running and accepting connections!");
+    info!("✅ Server is now running and accepting connections on 0.0.0.0:{}", port);
+    info!("🔍 CRITICAL DEBUG: Health check available at http://0.0.0.0:{}/health", port);
+    info!("📡 Server is ready for external connections!");
+    info!("🔗 Quick access URLs:");
+    info!("  - Health check: http://localhost:{}/health", port);
+    info!("  - API docs: http://localhost:{}/", port);
+    info!("  - GraphQL Playground: http://localhost:{}/playground", port);
+    info!("  - Metrics: http://localhost:{}/metrics", port);
     server.await;
 
     info!("✅ Server shutdown complete");

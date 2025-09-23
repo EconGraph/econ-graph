@@ -160,7 +160,79 @@ export type _UnusedType = { /* ... */ };
 // Remove or use the imported items
 ```
 
-### 5. Test Execution Failures
+### 5. Port Configuration Issues
+
+**Symptoms:**
+- Backend health check failures (`Failed to start container`)
+- E2E tests fail with "Backend server never became ready"
+- Connection timeouts to backend services
+- Tests pass locally but fail in CI
+
+**Root Causes:**
+- Port configuration mismatch between environments
+- Backend server not binding to expected port
+- Docker container port mapping issues
+- Environment variable conflicts
+
+**Important Note:**
+Non-standard ports (like 9876 for backend, 3001 for frontend) are **intentionally used for local development** to avoid conflicts with other services. This is by design and should be preserved.
+
+**Diagnosis Steps:**
+1. Check port configuration in different environments:
+   ```bash
+   # Local development
+   cat ports.env
+   
+   # CI environment
+   cat ci-env.config
+   
+   # CI workflow
+   grep -r "BACKEND_PORT" .github/workflows/
+   ```
+
+2. Verify backend startup logs for port binding:
+   ```bash
+   # Look for these log messages in backend startup
+   grep "Server is now running" backend.log
+   grep "Health check available" backend.log
+   ```
+
+3. Test backend health endpoint:
+   ```bash
+   curl http://localhost:9876/health  # Local development
+   curl http://localhost:8080/health  # CI environment
+   ```
+
+**Solutions:**
+1. **Keep local development ports** (non-standard by design):
+   ```bash
+   # ports.env - Keep as-is for local development
+   BACKEND_PORT=9876
+   FRONTEND_PORT=3001
+   ```
+
+2. **Standardize CI port configuration**:
+   ```bash
+   # ci-env.config - Use standard ports for CI
+   BACKEND_PORT=8080
+   FRONTEND_PORT=3000
+   ```
+
+3. **Update CI workflow** to use consistent ports:
+   ```yaml
+   # .github/workflows/ci-core.yml
+   env:
+     BACKEND_PORT: 8080  # Use standard port for CI
+     FRONTEND_PORT: 3000
+   ```
+
+4. **Add comprehensive backend startup logging** (already implemented):
+   - Port binding confirmation
+   - Health check URL logging
+   - Environment variable logging
+   - Quick access URLs for debugging
+
+### 6. Test Execution Failures
 
 **Symptoms:**
 - Tests fail with specific error messages
@@ -289,9 +361,88 @@ cargo test --lib -- --nocapture --test-threads=1
 - Track test execution times
 - Watch for resource usage spikes
 
+### 6. Database Migration Order Issues
+
+**Symptoms:**
+- `❌ ERROR: Migration 'YYYY-MM-DD-*' has date YYYY-MM-DD`
+- `This is after the latest migration date: YYYY-MM-DD`
+- `Migration dates must be chronologically ordered`
+- Quality checks job fails with migration ordering errors
+
+**Root Causes:**
+- Migration dates not following chronological order
+- Backdating migrations for "logical grouping"
+- Cross-day development creating date mismatches
+- Migration consolidation without proper date management
+
+**Important Note:**
+Migration dates must reflect the actual chronological order of development, not logical grouping. Non-standard dates (like backdated migrations) cause database state inconsistencies.
+
+**Diagnosis Steps:**
+1. Check migration directory structure:
+   ```bash
+   ls -la backend/migrations/
+   ```
+
+2. Verify migration date ordering:
+   ```bash
+   # Check migration dates
+   find backend/migrations -name "*-*" -type d | sort
+   
+   # Compare with commit dates
+   for dir in backend/migrations/*/; do
+     migration_name=$(basename "$dir")
+     commit_date=$(git log --format="%ad" --date=short -1 -- "$dir")
+     echo "$commit_date: $migration_name"
+   done | sort
+   ```
+
+3. Check CI quality-checks job output:
+   ```bash
+   gh run view RUN_ID --job quality-checks
+   ```
+
+**Solutions:**
+1. **Fix Migration Ordering**:
+   ```bash
+   # Rename migrations to proper chronological order
+   mv backend/migrations/2024-01-01-000001_old_name \
+      backend/migrations/2025-09-10-000001_new_name
+   ```
+
+2. **Consolidate Problematic Migrations**:
+   ```bash
+   # Create consolidated migration
+   diesel migration generate consolidated_initial_schema
+   
+   # Move all problematic migrations into consolidated one
+   # Update migration files accordingly
+   ```
+
+3. **Use Proper Migration Naming**:
+   ```bash
+   # Format: YYYY-MM-DD-000001_description
+   # Example: 2025-09-23-000001_add_user_preferences
+   ```
+
+4. **Pre-commit Hook Prevention**:
+   ```bash
+   # Install pre-commit hooks
+   pre-commit install
+   
+   # The hook will prevent commits with ordering issues
+   ```
+
+**Prevention:**
+- Always use current date for new migrations
+- Never backdate migrations for logical grouping
+- Use pre-commit hooks to catch ordering issues early
+- Consolidate migrations when needed rather than backdating
+
 ## Additional Resources
 
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [Rust Testing Guide](https://doc.rust-lang.org/book/ch11-00-testing.html)
 - [Docker Troubleshooting](https://docs.docker.com/config/troubleshooting/)
 - [PostgreSQL Error Codes](https://www.postgresql.org/docs/current/errcodes-appendix.html)
+- [Database Migration Best Practices](https://docs.djangoproject.com/en/stable/topics/migrations/)

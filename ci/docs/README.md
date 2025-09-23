@@ -28,6 +28,11 @@ The CI pipeline includes multiple specialized test suites that run in parallel:
 - **Comprehensive Tests**: Integration/workflow tests (excludes specialized suites)
 
 ### CI Pipeline Jobs
+- `backend-build-cache`: Backend compilation and caching
+- `backend-tests`: Backend unit tests with PostgreSQL
+- `frontend-tests`: Frontend unit tests and coverage
+- `quality-checks`: Code formatting, linting, and migration order validation
+- `security-audit`: Security vulnerability scanning
 - `e2e-core-tests`: Basic functionality tests
 - `e2e-global-analysis-tests`: Global analysis features
 - `e2e-professional-analysis-tests`: Professional analysis features
@@ -55,6 +60,7 @@ npm run test:e2e:mobile:comprehensive
 The CI pipeline is configured in `.github/workflows/ci-core.yml` and includes:
 - Backend tests with PostgreSQL service containers
 - Frontend tests with coverage reporting
+- Quality checks including code formatting, linting, and database migration order validation
 - E2E tests with optimized Docker containers
 - Parallel execution of specialized test suites
 - Security audits and license compliance checks

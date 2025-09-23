@@ -1,0 +1,101 @@
+#!/bin/bash
+
+# Pre-commit hook to check for database migration date ordering issues
+# This hook ensures that new migrations have dates after existing migrations
+
+set -e
+
+MIGRATIONS_DIR="backend/migrations"
+if [ ! -d "$MIGRATIONS_DIR" ]; then
+    echo "No migrations directory found, skipping migration date check"
+    exit 0
+fi
+
+echo "🔍 Checking database migration date ordering..."
+
+# Get list of migration directories
+MIGRATION_DIRS=$(find "$MIGRATIONS_DIR" -maxdepth 1 -type d -name "*-*" | sort)
+
+if [ -z "$MIGRATION_DIRS" ]; then
+    echo "No migrations found, skipping check"
+    exit 0
+fi
+
+# Get the latest migration date (excluding diesel initial setup)
+LATEST_MIGRATION_DATE=""
+for dir in $MIGRATION_DIRS; do
+    migration_name=$(basename "$dir")
+    # Skip diesel initial setup
+    if [[ "$migration_name" == "00000000000000_diesel_initial_setup" ]]; then
+        continue
+    fi
+    # Extract date from migration name (format: YYYY-MM-DD-*)
+    if [[ "$migration_name" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2}) ]]; then
+        migration_date="${BASH_REMATCH[1]}"
+        if [ -z "$LATEST_MIGRATION_DATE" ] || [[ "$migration_date" > "$LATEST_MIGRATION_DATE" ]]; then
+            LATEST_MIGRATION_DATE="$migration_date"
+        fi
+    fi
+done
+
+if [ -z "$LATEST_MIGRATION_DATE" ]; then
+    echo "No valid migration dates found, skipping check"
+    exit 0
+fi
+
+echo "📅 Latest existing migration date: $LATEST_MIGRATION_DATE"
+
+# Check for new migrations being added
+NEW_MIGRATIONS=$(git diff --cached --name-only | grep "^$MIGRATIONS_DIR/" | grep -v "/\." || true)
+
+if [ -z "$NEW_MIGRATIONS" ]; then
+    echo "✅ No new migrations in this commit"
+    exit 0
+fi
+
+# Check each new migration
+ERRORS=0
+for migration_path in $NEW_MIGRATIONS; do
+    if [[ "$migration_path" == *.sql ]]; then
+        migration_dir=$(dirname "$migration_path")
+        migration_name=$(basename "$migration_dir")
+
+        # Skip diesel initial setup
+        if [[ "$migration_name" == "00000000000000_diesel_initial_setup" ]]; then
+            continue
+        fi
+
+        # Extract date from migration name
+        if [[ "$migration_name" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2}) ]]; then
+            new_migration_date="${BASH_REMATCH[1]}"
+
+            # Check if new migration date is before or equal to latest existing date
+            if [[ "$new_migration_date" < "$LATEST_MIGRATION_DATE" ]] || [[ "$new_migration_date" == "$LATEST_MIGRATION_DATE" ]]; then
+                echo "❌ ERROR: Migration '$migration_name' has date $new_migration_date"
+                echo "   This is before or equal to the latest existing migration date: $LATEST_MIGRATION_DATE"
+                echo "   Migration dates must be chronologically after existing migrations"
+                echo ""
+                ERRORS=$((ERRORS + 1))
+            else
+                echo "✅ Migration '$migration_name' has valid date $new_migration_date"
+            fi
+        else
+            echo "⚠️  WARNING: Migration '$migration_name' doesn't follow date format YYYY-MM-DD-*"
+        fi
+    fi
+done
+
+if [ $ERRORS -gt 0 ]; then
+    echo ""
+    echo "🚨 Found $ERRORS migration date ordering issue(s)"
+    echo ""
+    echo "💡 Solutions:"
+    echo "   1. Use a date after $LATEST_MIGRATION_DATE for new migrations"
+    echo "   2. If consolidating old migrations, use today's date"
+    echo "   3. Consider using: $(date +%Y-%m-%d)-000001_your_migration_name"
+    echo ""
+    exit 1
+fi
+
+echo "✅ All migration dates are properly ordered!"
+exit 0
