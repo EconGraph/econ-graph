@@ -405,7 +405,11 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
                       <PinIcon />
                     </IconButton>
 
-                    <IconButton size='small' onClick={() => setSelectedAnnotation(annotation)}>
+                    <IconButton
+                      size='small'
+                      onClick={() => setSelectedAnnotation(annotation)}
+                      data-testid='comment-button'
+                    >
                       <CommentIcon />
                     </IconButton>
 
@@ -435,13 +439,17 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
       {/* New Annotation Dialog */}
       <Dialog
         open={newAnnotationDialog}
-        onClose={() => setNewAnnotationDialog(false)}
+        onClose={() => {
+          setNewAnnotationDialog(false);
+          resetAnnotationForm();
+        }}
         maxWidth='sm'
         fullWidth
         aria-labelledby='annotation-dialog-title'
         aria-describedby='annotation-dialog-description'
         disableEnforceFocus={false}
         disableAutoFocus={false}
+        data-testid='annotation-dialog'
         disableRestoreFocus={false}
       >
         <DialogTitle id='annotation-dialog-title'>Add Chart Annotation</DialogTitle>
@@ -459,6 +467,8 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
               onChange={e => setAnnotationForm(prev => ({ ...prev, title: e.target.value }))}
               required
               fullWidth
+              inputProps={{ 'data-testid': 'annotation-title-input' }}
+              aria-label='Annotation title'
             />
 
             <TextField
@@ -468,6 +478,8 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
               multiline
               rows={3}
               fullWidth
+              inputProps={{ 'data-testid': 'annotation-description-input' }}
+              aria-label='Annotation description'
             />
 
             <TextField
@@ -478,6 +490,8 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
               required
               InputLabelProps={{ shrink: true }}
               fullWidth
+              inputProps={{ 'data-testid': 'annotation-date-input' }}
+              aria-label='Annotation date'
             />
 
             <TextField
@@ -486,6 +500,8 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
               value={annotationForm.value}
               onChange={e => setAnnotationForm(prev => ({ ...prev, value: e.target.value }))}
               fullWidth
+              inputProps={{ 'data-testid': 'annotation-value-input' }}
+              aria-label='Annotation value'
             />
 
             <FormControl fullWidth>
@@ -496,6 +512,8 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
                   setAnnotationForm(prev => ({ ...prev, type: e.target.value as any }))
                 }
                 label='Annotation Type'
+                inputProps={{ 'data-testid': 'annotation-type-select' }}
+                aria-label='Annotation type'
               >
                 {ANNOTATION_TYPES.map(type => (
                   <MenuItem key={type.value} value={type.value}>
@@ -534,12 +552,26 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
               onChange={e => setAnnotationForm(prev => ({ ...prev, tags: e.target.value }))}
               placeholder='analysis, trend, important'
               fullWidth
+              inputProps={{ 'data-testid': 'annotation-tags-input' }}
+              aria-label='Annotation tags'
             />
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setNewAnnotationDialog(false)}>Cancel</Button>
-          <Button onClick={handleCreateAnnotation} variant='contained'>
+          <Button
+            onClick={() => {
+              setNewAnnotationDialog(false);
+              resetAnnotationForm();
+            }}
+            data-testid='cancel-annotation-button'
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleCreateAnnotation}
+            variant='contained'
+            data-testid='submit-annotation-button'
+          >
             Add Annotation
           </Button>
         </DialogActions>
@@ -548,12 +580,16 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
       {/* Comments Dialog */}
       <Dialog
         open={!!selectedAnnotation}
-        onClose={() => setSelectedAnnotation(null)}
+        onClose={() => {
+          setSelectedAnnotation(null);
+          setNewComment('');
+        }}
         maxWidth='md'
         fullWidth
         aria-labelledby='comments-dialog-title'
         aria-describedby='comments-dialog-description'
         disableEnforceFocus={false}
+        data-testid='comments-dialog'
         disableAutoFocus={false}
         disableRestoreFocus={false}
       >
@@ -603,11 +639,14 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
                   multiline
                   rows={2}
                   fullWidth
+                  inputProps={{ 'data-testid': 'comment-input' }}
+                  aria-label='Add a comment'
                 />
                 <Button
                   variant='contained'
                   onClick={handleAddComment}
                   disabled={!newComment.trim()}
+                  data-testid='submit-comment-button'
                 >
                   Comment
                 </Button>

@@ -341,7 +341,7 @@ describe('PeerComparisonChart', () => {
     // Test selecting/deselecting companies using accessibility labels
     const microsoftCheckbox = screen.getByLabelText('Include Microsoft Corporation in comparison');
     const amazonCheckbox = screen.getByLabelText('Include Amazon.com Inc. in comparison');
-    
+
     expect(microsoftCheckbox).toBeInTheDocument();
     expect(amazonCheckbox).toBeInTheDocument();
 

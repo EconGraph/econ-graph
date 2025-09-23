@@ -134,10 +134,152 @@ const useResponsive = () => {
 - **Accessibility Tests**: Test keyboard navigation, screen readers
 - **Performance Tests**: Test rendering performance, memory usage
 
+### **Material-UI Testing Best Practices**
+```typescript
+// Proper Material-UI test setup for dialogs and portals
+import { ThemeProvider, createTheme, StyledEngineProvider } from '@mui/material/styles';
+import { CssBaseline } from '@mui/material';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+
+const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <StyledEngineProvider injectFirst>
+    <ThemeProvider theme={theme}>
+      <LocalizationProvider dateAdapter={AdapterDateFns}>
+        <CssBaseline />
+        {children}
+      </LocalizationProvider>
+    </ThemeProvider>
+  </StyledEngineProvider>
+);
+
+// Custom render function for Material-UI components with portals
+const customRender = (ui: React.ReactElement, options = {}) => {
+  const portalContainer = document.createElement('div');
+  portalContainer.setAttribute('data-testid', 'portal-container');
+  document.body.appendChild(portalContainer);
+  
+  return render(ui, {
+    container: document.body,
+    ...options,
+  });
+};
+```
+
+### **ARIA Labels and Accessibility Testing**
+```typescript
+// Proper ARIA label usage in tests
+describe('Component with ARIA labels', () => {
+  it('should find elements by proper ARIA attributes', () => {
+    // Use aria-label for custom elements
+    expect(screen.getByLabelText('John Doe (editor)')).toBeInTheDocument();
+    
+    // Use role-based selectors for standard elements
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    
+    // Use combobox role for select elements
+    const filterSelect = screen.getByRole('combobox');
+    expect(filterSelect).toBeInTheDocument();
+    
+    // Wait for dynamic content with proper timing
+    await waitFor(() => {
+      expect(screen.getByText('Dialog Title')).toBeInTheDocument();
+    }, { timeout: 5000 });
+  });
+});
+
+// Material-UI Select Component Testing Pattern
+describe('Select Component Testing', () => {
+  it('should handle Select dropdown interactions', async () => {
+    const user = userEvent.setup();
+    
+    // Component with proper ARIA labels
+    render(
+      <FormControl>
+        <InputLabel>Filter Annotations</InputLabel>
+        <Select
+          value={filterBy}
+          onChange={handleFilterChange}
+          label="Filter Annotations"
+          inputProps={{
+            'aria-label': 'Filter annotations by type'
+          }}
+          MenuProps={{ 
+            disablePortal: true,
+            container: document.body
+          }}
+        >
+          <MenuItem value="all">All Annotations</MenuItem>
+          <MenuItem value="pinned">Pinned Annotations</MenuItem>
+        </Select>
+      </FormControl>
+    );
+    
+    // Find select using aria-label (most reliable)
+    const filterSelect = screen.getByLabelText('Filter annotations by type');
+    
+    // Click to open dropdown
+    await user.click(filterSelect);
+    
+    // Wait for dropdown options to appear
+    await waitFor(() => {
+      expect(screen.getByText('Pinned Annotations')).toBeInTheDocument();
+    });
+    
+    // Click option
+    await user.click(screen.getByText('Pinned Annotations'));
+    
+    // Verify selection worked (test actual behavior, not internal state)
+    await waitFor(() => {
+      expect(screen.getByText('Pinned Annotations')).toBeInTheDocument();
+    });
+  });
+});
+```
+
+### **Dialog and Portal Testing**
+```typescript
+// Material-UI Dialog testing considerations
+describe('Material-UI Dialog Components', () => {
+  it('should handle dialog portals correctly', async () => {
+    const user = userEvent.setup();
+    render(<TestWrapper><DialogComponent /></TestWrapper>);
+    
+    // Click to open dialog
+    await user.click(screen.getByText('Open Dialog'));
+    
+    // Wait for dialog to appear (portal content)
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    }, { timeout: 5000 });
+    
+    // Dialog content may be in a different DOM tree due to portals
+    // Use proper selectors and timing
+    await waitFor(() => {
+      expect(screen.getByLabelText('Form Field')).toBeInTheDocument();
+    }, { timeout: 2000 });
+  });
+});
+```
+
 ### **Test Structure**
 ```typescript
-// Example test structure
+// Example test structure with Material-UI considerations
 describe('InteractiveWorldMap', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // Clean up portal containers for Material-UI components
+    const existingContainers = document.querySelectorAll('[data-testid="portal-container"]');
+    existingContainers.forEach(container => container.remove());
+  });
+
+  afterEach(() => {
+    // Clean up portal containers after each test
+    const containers = document.querySelectorAll('[data-testid="portal-container"]');
+    containers.forEach(container => container.remove());
+  });
+
   it('renders world map with countries', () => {
     // Test basic rendering
   });
@@ -151,7 +293,7 @@ describe('InteractiveWorldMap', () => {
   });
   
   it('is accessible via keyboard navigation', () => {
-    // Test accessibility
+    // Test accessibility with proper ARIA selectors
   });
 });
 ```
@@ -257,6 +399,14 @@ test: add unit tests for world map
 - **Error Handling**: Implement proper error boundaries
 - **Context Updates**: Split state into logical groups to prevent unnecessary re-renders
 
+### **Material-UI Testing Pitfalls**
+- **Dialog Portal Issues**: Material-UI Dialogs use portals - require special test setup
+- **Missing Providers**: Always include `StyledEngineProvider`, `ThemeProvider`, `LocalizationProvider`
+- **Portal Cleanup**: Clean up portal containers between tests to prevent DOM pollution
+- **ARIA Selector Mismatches**: Check actual component ARIA implementation before writing tests
+- **Timing Issues**: Use proper `waitFor` with appropriate timeouts for dialog content
+- **Test Environment**: Material-UI components behave differently in test vs production environments
+
 ### **UI/UX Issues**
 - **Loading States**: Always show loading indicators
 - **Error States**: Provide clear error messages
@@ -292,6 +442,45 @@ test: add unit tests for world map
    - **Solution**: Use `Box` components as containers and proper event handling
    - **Impact**: Seamless integration with consistent design system
 
+### **Material-UI Testing Discoveries**
+1. **Dialog Portal Rendering Issues**
+   - **Issue**: Material-UI Dialogs render content via portals, causing test failures
+   - **Root Cause**: Dialog container opens but portal content doesn't render in test environment
+   - **Solution**: Use `StyledEngineProvider`, proper theme setup, and custom render functions
+   - **Impact**: Comprehensive dialog testing requires special setup and timing considerations
+
+2. **ARIA Label Testing Patterns**
+   - **Discovery**: Material-UI components use specific ARIA patterns that require proper test selectors
+   - **Solution**: Use `getByLabelText()` for `aria-label` attributes, `getByRole()` for standard roles
+   - **Best Practice**: Always check component's actual ARIA implementation before writing tests
+   - **Impact**: More reliable and accessible test suites that match real user interactions
+
+3. **Select Component Testing with ARIA Labels**
+   - **Issue**: Material-UI Select components are difficult to test due to portal rendering and lack of proper ARIA labels
+   - **Root Cause**: Select components don't automatically have accessible names, making `getByLabelText()` fail
+   - **Solution**: Add `inputProps={{ 'aria-label': 'Descriptive label' }}` to Select components
+   - **Testing Pattern**: Use `screen.getByLabelText('Descriptive label')` instead of `screen.getByTestId()`
+   - **Portal Fix**: Add `MenuProps={{ disablePortal: true }}` to prevent dropdown options from rendering in portals
+   - **Impact**: Reliable Select component testing that works consistently across test environments
+
+4. **Test Setup Requirements**
+   - **Discovery**: Material-UI components require comprehensive provider setup for testing
+   - **Solution**: Include `ThemeProvider`, `LocalizationProvider`, `StyledEngineProvider`, and `CssBaseline`
+   - **Best Practice**: Create reusable `TestWrapper` components for consistent test setup
+   - **Impact**: Consistent test environment that matches production component behavior
+
+5. **Portal Container Management**
+   - **Issue**: Material-UI portals create DOM elements that persist between tests
+   - **Solution**: Clean up portal containers in `beforeEach` and `afterEach` hooks
+   - **Best Practice**: Use `data-testid` attributes for reliable portal container identification
+   - **Impact**: Isolated tests without DOM pollution from previous test runs
+
+6. **Timing and Async Testing**
+   - **Discovery**: Material-UI dialogs have complex render timing that requires proper `waitFor` usage
+   - **Solution**: Use appropriate timeouts (5000ms for dialogs, 2000ms for content) and proper async/await patterns
+   - **Best Practice**: Always wait for dialog titles before checking dialog content
+   - **Impact**: Reliable test execution that accounts for Material-UI's render cycles
+
 ### **Testing Strategy Insights**
 1. **Mock Strategy**: Comprehensive D3.js mocking required for Jest compatibility
 2. **Test Coverage**: 100+ test cases across components, hooks, and context
@@ -310,5 +499,464 @@ test: add unit tests for world map
 3. **Testing**: Create comprehensive test suites with proper mocking
 4. **Performance**: Implement proper memoization and cleanup
 5. **Accessibility**: Build accessibility features from the start, not as an afterthought
+
+## 🧪 **General Testing Principles & Component Testability**
+
+### **Core Testing Philosophy**
+1. **Test Behavior, Not Implementation**: Focus on what users can see and do, not internal component structure
+2. **Write Tests That Fail for the Right Reasons**: Tests should catch real bugs, not implementation changes
+3. **Make Components Testable by Design**: Build testability into components from the start
+4. **Use the Testing Pyramid**: Unit tests for logic, integration tests for interactions, E2E tests for user flows
+5. **Test Accessibility**: Ensure components work for all users, including those using assistive technologies
+
+### **Component Testability Design Patterns**
+
+#### **1. Separation of Concerns**
+```typescript
+// ❌ BAD: Mixed concerns make testing difficult
+const ComplexComponent = () => {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  
+  // Business logic mixed with UI
+  const processData = (rawData) => {
+    return rawData.filter(item => item.active)
+                  .map(item => ({ ...item, processed: true }));
+  };
+  
+  // API calls mixed with UI
+  useEffect(() => {
+    fetchData().then(setData);
+  }, []);
+  
+  return <div>{/* Complex UI */}</div>;
+};
+
+// ✅ GOOD: Separated concerns enable focused testing
+const useDataProcessing = (rawData) => {
+  return useMemo(() => 
+    rawData.filter(item => item.active)
+           .map(item => ({ ...item, processed: true })), 
+    [rawData]
+  );
+};
+
+const useDataFetching = () => {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  
+  useEffect(() => {
+    setLoading(true);
+    fetchData().then(setData).finally(() => setLoading(false));
+  }, []);
+  
+  return { data, loading };
+};
+
+const SimpleComponent = () => {
+  const { data: rawData, loading } = useDataFetching();
+  const processedData = useDataProcessing(rawData);
+  
+  return <div>{/* Simple UI */}</div>;
+};
+```
+
+#### **2. Pure Function Extraction**
+```typescript
+// ❌ BAD: Business logic embedded in component
+const ChartComponent = ({ data }) => {
+  const handleDataTransform = (data) => {
+    // Complex transformation logic
+    return data.map(item => ({
+      ...item,
+      value: item.rawValue * 100,
+      formatted: `${(item.rawValue * 100).toFixed(2)}%`
+    }));
+  };
+  
+  return <Chart data={handleDataTransform(data)} />;
+};
+
+// ✅ GOOD: Pure functions can be unit tested independently
+// utils/chartUtils.ts
+export const transformChartData = (data) => {
+  return data.map(item => ({
+    ...item,
+    value: item.rawValue * 100,
+    formatted: `${(item.rawValue * 100).toFixed(2)}%`
+  }));
+};
+
+// Component becomes simple and testable
+const ChartComponent = ({ data }) => {
+  const transformedData = useMemo(() => transformChartData(data), [data]);
+  return <Chart data={transformedData} />;
+};
+
+// utils/__tests__/chartUtils.test.ts
+describe('transformChartData', () => {
+  it('should transform raw values to percentages', () => {
+    const input = [{ rawValue: 0.15, label: 'Test' }];
+    const result = transformChartData(input);
+    expect(result[0].value).toBe(15);
+    expect(result[0].formatted).toBe('15.00%');
+  });
+});
+```
+
+#### **3. Dependency Injection for Testability**
+```typescript
+// ❌ BAD: Hard-coded dependencies make testing difficult
+const UserProfile = () => {
+  const [user, setUser] = useState(null);
+  
+  useEffect(() => {
+    // Hard to mock this API call
+    fetch('/api/user').then(res => res.json()).then(setUser);
+  }, []);
+  
+  return <div>{user?.name}</div>;
+};
+
+// ✅ GOOD: Injected dependencies enable easy mocking
+interface UserProfileProps {
+  userService?: UserService;
+}
+
+const UserProfile = ({ userService = defaultUserService }: UserProfileProps) => {
+  const [user, setUser] = useState(null);
+  
+  useEffect(() => {
+    userService.getCurrentUser().then(setUser);
+  }, [userService]);
+  
+  return <div>{user?.name}</div>;
+};
+
+// Easy to test with mock service
+const mockUserService = {
+  getCurrentUser: jest.fn().mockResolvedValue({ name: 'Test User' })
+};
+
+test('should display user name', async () => {
+  render(<UserProfile userService={mockUserService} />);
+  await waitFor(() => {
+    expect(screen.getByText('Test User')).toBeInTheDocument();
+  });
+});
+```
+
+### **Robust Test Selector Strategies**
+
+#### **1. Accessibility-First Selectors**
+```typescript
+// ❌ BAD: Fragile selectors that break with UI changes
+test('should submit form', () => {
+  const submitButton = screen.getByText('Submit'); // Breaks if text changes
+  fireEvent.click(submitButton);
+});
+
+// ✅ GOOD: Semantic selectors that match user intent
+test('should submit form', () => {
+  const submitButton = screen.getByRole('button', { name: /submit/i });
+  fireEvent.click(submitButton);
+});
+
+// Even better: Use data-testid for complex interactions
+test('should submit form with validation', () => {
+  const submitButton = screen.getByTestId('submit-form-button');
+  fireEvent.click(submitButton);
+  expect(screen.getByRole('alert')).toBeInTheDocument();
+});
+```
+
+#### **2. Progressive Selector Fallbacks**
+```typescript
+// Robust selector strategy with fallbacks
+const findFormField = (fieldName: string) => {
+  // 1. Try semantic selector first (most accessible)
+  try {
+    return screen.getByLabelText(fieldName);
+  } catch {
+    // 2. Fall back to placeholder
+    try {
+      return screen.getByPlaceholderText(fieldName);
+    } catch {
+      // 3. Fall back to data-testid
+      return screen.getByTestId(`${fieldName.toLowerCase()}-input`);
+    }
+  }
+};
+
+test('should fill form field', () => {
+  const nameField = findFormField('Name');
+  fireEvent.change(nameField, { target: { value: 'John Doe' } });
+  expect(nameField).toHaveValue('John Doe');
+});
+```
+
+#### **3. Portal-Aware Testing**
+```typescript
+// Material-UI Dialogs and other portal components
+test('should handle dialog interactions', async () => {
+  const user = userEvent.setup();
+  
+  // Open dialog
+  await user.click(screen.getByRole('button', { name: 'Open Dialog' }));
+  
+  // Wait for portal content to render
+  await waitFor(() => {
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  }, { timeout: 5000 });
+  
+  // Interact with dialog content (may be in different DOM tree)
+  await waitFor(() => {
+    const input = screen.getByLabelText('Dialog Input');
+    expect(input).toBeInTheDocument();
+  }, { timeout: 2000 });
+  
+  await user.type(input, 'Test Value');
+  expect(input).toHaveValue('Test Value');
+});
+```
+
+### **Test Organization Patterns**
+
+#### **1. Test Structure by Complexity**
+```typescript
+describe('ComplexComponent', () => {
+  // Setup and teardown
+  beforeEach(() => {
+    jest.clearAllMocks();
+    setupTestEnvironment();
+  });
+  
+  afterEach(() => {
+    cleanupTestEnvironment();
+  });
+  
+  // Group tests by functionality
+  describe('Basic Rendering', () => {
+    it('should render without crashing', () => {
+      render(<ComplexComponent />);
+      expect(screen.getByRole('main')).toBeInTheDocument();
+    });
+    
+    it('should display loading state', () => {
+      render(<ComplexComponent loading={true} />);
+      expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    });
+  });
+  
+  describe('User Interactions', () => {
+    it('should handle button clicks', async () => {
+      const user = userEvent.setup();
+      render(<ComplexComponent />);
+      
+      await user.click(screen.getByRole('button', { name: /submit/i }));
+      expect(mockOnSubmit).toHaveBeenCalled();
+    });
+  });
+  
+  describe('Error Handling', () => {
+    it('should display error messages', () => {
+      render(<ComplexComponent error="Test error" />);
+      expect(screen.getByRole('alert')).toHaveTextContent('Test error');
+    });
+  });
+});
+```
+
+#### **2. Mock Strategy Patterns**
+```typescript
+// Centralized mock setup
+const createMockProps = (overrides = {}) => ({
+  data: mockData,
+  onAction: jest.fn(),
+  loading: false,
+  error: null,
+  ...overrides
+});
+
+// Reusable mock implementations
+const mockApiService = {
+  fetchData: jest.fn(),
+  updateData: jest.fn(),
+  deleteData: jest.fn(),
+};
+
+// Reset mocks between tests
+beforeEach(() => {
+  Object.values(mockApiService).forEach(mock => mock.mockClear());
+});
+```
+
+### **Component Design for Testability**
+
+#### **1. Prop Interface Design**
+```typescript
+// ✅ GOOD: Clear, testable prop interface
+interface ChartProps {
+  data: ChartData[];
+  onDataPointClick?: (point: DataPoint) => void;
+  loading?: boolean;
+  error?: string | null;
+  config?: Partial<ChartConfig>;
+  'data-testid'?: string; // Always include for testing
+}
+
+// ❌ BAD: Unclear or hard-to-test props
+interface BadChartProps {
+  data: any; // Too generic
+  onClick: Function; // Too generic
+  style?: React.CSSProperties; // Hard to test styling
+}
+```
+
+#### **2. Event Handler Patterns**
+```typescript
+// ✅ GOOD: Testable event handlers
+const ChartComponent = ({ data, onDataPointClick }: ChartProps) => {
+  const handlePointClick = useCallback((event: MouseEvent, point: DataPoint) => {
+    if (onDataPointClick) {
+      onDataPointClick(point);
+    }
+  }, [onDataPointClick]);
+  
+  return (
+    <Chart 
+      data={data} 
+      onPointClick={handlePointClick}
+      data-testid="interactive-chart"
+    />
+  );
+};
+
+// Easy to test
+test('should call onDataPointClick when point is clicked', async () => {
+  const mockOnClick = jest.fn();
+  render(<ChartComponent data={mockData} onDataPointClick={mockOnClick} />);
+  
+  await user.click(screen.getByTestId('interactive-chart'));
+  expect(mockOnClick).toHaveBeenCalledWith(expect.objectContaining({
+    id: expect.any(String),
+    value: expect.any(Number)
+  }));
+});
+```
+
+### **Key Testing Principles from Real-World Debugging**
+
+#### **1. ARIA Labels Are Essential for Both Accessibility and Testing**
+- **Principle**: Every interactive element should have proper ARIA labels
+- **Why**: ARIA labels provide the most reliable way to find elements in tests
+- **Implementation**: Add `inputProps={{ 'aria-label': 'Descriptive label' }}` to Material-UI Select components
+- **Testing**: Use `screen.getByLabelText('Descriptive label')` instead of fragile selectors
+- **Benefit**: Tests become more robust and components become more accessible
+
+#### **2. Debug Systematically, Don't Give Up**
+- **Approach**: When tests fail, add debugging code to understand what's actually happening
+- **Method**: Use `console.log()` to inspect DOM structure, element properties, and timing
+- **Pattern**: Start with the most likely cause, then systematically eliminate possibilities
+- **Example**: Log all elements, check aria attributes, verify portal rendering, test different selectors
+
+#### **3. Test Real Behavior, Not Internal Implementation**
+- **Anti-Pattern**: Testing internal state values like `toHaveValue('all')`
+- **Better Approach**: Test the actual user-visible behavior (filtering results, UI changes)
+- **Example**: Instead of checking if a select has value 'pinned', check if pinned items are visible
+- **Benefit**: Tests remain stable when internal implementation changes
+
+#### **4. Material-UI Components Need Special Test Setup**
+- **Portal Issues**: Use `MenuProps={{ disablePortal: true }}` for Select components
+- **Provider Setup**: Always include all required Material-UI providers in test environment
+- **Timing**: Use appropriate `waitFor` timeouts for portal content rendering
+- **Cleanup**: Clean up portal containers between tests to prevent DOM pollution
+
+### **Testing Anti-Patterns to Avoid**
+
+#### **1. Testing Implementation Details**
+```typescript
+// ❌ BAD: Testing internal state or methods
+test('should update internal state', () => {
+  const component = render(<MyComponent />);
+  const instance = component.getInstance();
+  expect(instance.state.isOpen).toBe(false);
+  
+  instance.toggle(); // Testing internal method
+  expect(instance.state.isOpen).toBe(true);
+});
+
+// ✅ GOOD: Testing user-visible behavior
+test('should open dialog when button is clicked', async () => {
+  const user = userEvent.setup();
+  render(<MyComponent />);
+  
+  await user.click(screen.getByRole('button', { name: /open/i }));
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+});
+```
+
+#### **2. Over-Mocking**
+```typescript
+// ❌ BAD: Mocking everything makes tests brittle
+jest.mock('react', () => ({
+  ...jest.requireActual('react'),
+  useState: jest.fn(),
+  useEffect: jest.fn(),
+}));
+
+// ✅ GOOD: Mock only what's necessary
+jest.mock('../api/userService', () => ({
+  getCurrentUser: jest.fn(),
+}));
+```
+
+#### **3. Ignoring Accessibility**
+```typescript
+// ❌ BAD: Not testing accessibility
+test('should display user name', () => {
+  render(<UserProfile user={{ name: 'John' }} />);
+  expect(screen.getByText('John')).toBeInTheDocument();
+});
+
+// ✅ GOOD: Testing accessibility
+test('should display user name with proper semantics', () => {
+  render(<UserProfile user={{ name: 'John' }} />);
+  
+  const nameElement = screen.getByText('John');
+  expect(nameElement).toBeInTheDocument();
+  expect(nameElement).toHaveAttribute('aria-label', 'User name: John');
+});
+```
+
+### **Performance Testing Considerations**
+
+#### **1. Testing Render Performance**
+```typescript
+test('should render large datasets efficiently', () => {
+  const largeDataset = generateLargeDataset(10000);
+  const startTime = performance.now();
+  
+  render(<DataTable data={largeDataset} />);
+  
+  const endTime = performance.now();
+  expect(endTime - startTime).toBeLessThan(1000); // Should render in < 1s
+});
+```
+
+#### **2. Testing Memory Usage**
+```typescript
+test('should not leak memory on unmount', () => {
+  const { unmount } = render(<ComplexComponent />);
+  
+  // Simulate component lifecycle
+  unmount();
+  
+  // Check that event listeners are cleaned up
+  expect(mockRemoveEventListener).toHaveBeenCalled();
+});
+```
+
+This comprehensive testing approach ensures components are reliable, maintainable, and accessible while providing confidence in the codebase's quality and user experience.
 
 This persona provides comprehensive guidance for frontend development in the EconGraph project, with a focus on creating world-class data visualization interfaces.
