@@ -1,401 +1,196 @@
-// REQUIREMENT: Comprehensive test setup for React frontend testing
-// PURPOSE: Configure testing environment with necessary polyfills and mocks
-// This ensures all tests have access to required testing utilities and API mocks
-
-// All imports at the top
+// jest-dom adds custom jest matchers for asserting on DOM nodes.
+// allows you to do things like:
+// expect(element).toHaveTextContent(/react/i)
+// learn more: https://github.com/testing-library/jest-dom
 import '@testing-library/jest-dom';
-import 'whatwg-fetch'; // Polyfill for fetch in test environment
-import { configure } from '@testing-library/react';
-import ResizeObserver from 'resize-observer-polyfill';
-import './test-utils/testIsolation';
-// Removed unused imports: mockSeriesData, mockDataSources, mockSearchResults, mockSuggestions
 
-// Configure React Testing Library for CI environment
-configure({
-  asyncUtilTimeout: 10000, // Increase timeout for CI environment
-  testIdAttribute: 'data-testid',
-});
+// Polyfill for Node.js environment
+const { TextEncoder, TextDecoder } = require('util');
+global.TextEncoder = TextEncoder;
+global.TextDecoder = TextDecoder;
 
-// Set Jest timeout for CI environment
-if (process.env.CI) {
-  jest.setTimeout(30000); // 30 seconds for CI
-} else {
-  jest.setTimeout(10000); // 10 seconds for local
-}
-
-// CRITICAL: Import polyfills FIRST before any other imports
-require('./test-utils/polyfills');
-
-// Mock the hook functions directly - this is simpler and more reliable
-jest.mock('./hooks/useSeriesData', () => ({
-  useSeriesDetail: jest.fn((seriesId, options = {}) => {
-    if (seriesId === 'test-series-1') {
-      return {
-        data: {
-          id: 'test-series-1',
-          title: 'Test Economic Series',
-          description: 'A test series for unit testing',
-          frequency: 'Monthly',
-          units: 'Percent',
-          startDate: '2020-01-01',
-          endDate: '2024-12-01',
-          isActive: true,
-          source: { name: 'Test Source', description: 'Test data source' },
-        },
-        isLoading: false,
-        isError: false,
-        isSuccess: true,
-        error: null,
-        refetch: jest.fn(),
-      };
-    }
-    if (seriesId === 'nonexistent-series') {
-      return {
-        data: null,
-        isLoading: false,
-        isError: true,
-        isSuccess: false,
-        error: new Error('Series not found'),
-        refetch: jest.fn(),
-      };
-    }
-    if (!seriesId || options.enabled === false) {
-      return {
-        data: undefined,
-        isLoading: false,
-        isError: false,
-        isSuccess: false,
-        error: null,
-        refetch: jest.fn(),
-      };
-    }
-    return {
-      data: undefined,
-      isLoading: true,
-      isError: false,
-      isSuccess: false,
-      error: null,
-      refetch: jest.fn(),
-    };
-  }),
-
-  useSeriesData: jest.fn((seriesId, options = {}) => {
-    if (seriesId && options.enabled !== false) {
-      const dataPoints = Array.from({ length: 12 }, (_, index) => ({
-        date: `2024-${String(index + 1).padStart(2, '0')}-01`,
-        value: Math.random() * 100 + 50,
-        revisionDate: `2024-${String(index + 1).padStart(2, '0')}-15`,
-        isOriginalRelease: index % 3 === 0,
-      }));
-      return {
-        data: dataPoints,
-        isLoading: false,
-        isError: false,
-        isSuccess: true,
-        error: null,
-        refetch: jest.fn(),
-      };
-    }
-    return {
-      data: undefined,
-      isLoading: false,
-      isError: false,
-      isSuccess: false,
-      error: null,
-      refetch: jest.fn(),
-    };
-  }),
-
-  useSeriesSearch: jest.fn(options => {
-    if (options.query && options.query.length >= 2 && options.enabled !== false) {
-      const mockResults = [
-        {
-          id: '1',
-          title: 'GDP Growth Rate',
-          description: 'Economic growth indicator',
-          rank: 1,
-          similarityScore: 0.95,
-        },
-        {
-          id: '2',
-          title: 'Unemployment Rate',
-          description: 'Labor market indicator',
-          rank: 2,
-          similarityScore: 0.87,
-        },
-        {
-          id: '3',
-          title: 'Inflation Rate',
-          description: 'Price level indicator',
-          rank: 3,
-          similarityScore: 0.79,
-        },
-      ];
-      return {
-        data: mockResults,
-        isLoading: false,
-        isError: false,
-        isSuccess: true,
-        error: null,
-        refetch: jest.fn(),
-      };
-    }
-    return {
-      data: undefined,
-      isLoading: false,
-      isError: false,
-      isSuccess: false,
-      error: null,
-      refetch: jest.fn(),
-    };
-  }),
-
-  useSearchSuggestions: jest.fn(options => {
-    if (options.partialQuery && options.partialQuery.length >= 2 && options.enabled !== false) {
-      const mockSuggestions = [
-        {
-          suggestion: 'unemployment',
-          matchCount: 15,
-          suggestionType: 'COMPLETION',
-          confidence: 0.9,
-        },
-        { suggestion: 'inflation', matchCount: 12, suggestionType: 'COMPLETION', confidence: 0.8 },
-      ];
-      return {
-        data: mockSuggestions,
-        isLoading: false,
-        isError: false,
-        isSuccess: true,
-        error: null,
-        refetch: jest.fn(),
-      };
-    }
-    return {
-      data: undefined,
-      isLoading: false,
-      isError: false,
-      isSuccess: false,
-      error: null,
-      refetch: jest.fn(),
-    };
-  }),
-
-  useDataSources: jest.fn(() => {
-    const mockSources = [
-      { id: '1', name: 'Federal Reserve', description: 'US Federal Reserve Economic Data' },
-      { id: '2', name: 'Bureau of Labor Statistics', description: 'US Labor Statistics' },
-    ];
-    return {
-      data: mockSources,
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      error: null,
-      refetch: jest.fn(),
-    };
-  }),
-
-  useCrawlerStatus: jest.fn((options = {}) => {
-    if (options.enabled !== false) {
-      return {
-        data: {
-          crawlerStatus: {
-            isRunning: true,
-            lastRunAt: new Date().toISOString(),
-            nextRunAt: new Date(Date.now() + 60000).toISOString(),
-          },
-          queueStatistics: {
-            totalItems: 1000,
-            pendingItems: 25,
-            completedItems: 950,
-          },
-        },
-        isLoading: false,
-        isError: false,
-        isSuccess: true,
-        error: null,
-        refetch: jest.fn(),
-      };
-    }
-    return {
-      data: undefined,
-      isLoading: false,
-      isError: false,
-      isSuccess: false,
-      error: null,
-      refetch: jest.fn(),
-    };
-  }),
-
-  useDataTransformation: jest.fn((data, transformation = 'NONE') => {
-    return data || [];
-  }),
-}));
-
-// Mock Apollo Client to fix ES module issues
-jest.mock('@apollo/client', () => ({
-  gql: jest.fn().mockReturnValue({}),
-  useQuery: jest.fn(() => ({
-    data: null,
-    loading: false,
-    error: null,
-    refetch: jest.fn(),
-  })),
-  useMutation: jest.fn(() => [
-    jest.fn(),
-    {
-      data: null,
-      loading: false,
-      error: null,
-    },
-  ]),
-  ApolloClient: jest.fn(),
-  InMemoryCache: jest.fn(),
-  ApolloProvider: ({ children }: any) => children,
-}));
-
-// Mock Chart.js and related modules for component tests (they require canvas and have ESM issues)
-jest.mock('chartjs-adapter-date-fns', () => ({}));
-
-// Mock MUI date pickers to avoid version compatibility issues
-jest.mock('@mui/x-date-pickers/LocalizationProvider', () => ({
-  LocalizationProvider: ({ children }: any) => children,
-}));
-
-jest.mock('@mui/x-date-pickers/DatePicker', () => ({
-  DatePicker: ({ children, ...props }: any) => {
-    const React = require('react');
-    return React.createElement(
-      'div',
-      {
-        'data-testid': 'date-picker',
-        ...props,
-      },
-      children
-    );
-  },
-}));
-
-jest.mock('react-chartjs-2', () => ({
-  Line: ({ data, options, ...props }: any) => {
-    const React = require('react');
-    return React.createElement(
-      'div',
-      {
-        'data-testid': 'line-chart',
-        'data-chart-data': JSON.stringify(data),
-        ...props,
-      },
-      'Mock Line Chart'
-    );
-  },
-  Bar: ({ data, options, ...props }: any) => {
-    const React = require('react');
-    return React.createElement(
-      'div',
-      {
-        'data-testid': 'bar-chart',
-        'data-chart-data': JSON.stringify(data),
-        ...props,
-      },
-      'Mock Bar Chart'
-    );
-  },
-}));
-
-// Use ResizeObserver polyfill for testing
-global.ResizeObserver = ResizeObserver;
-
-// Mock IntersectionObserver for lazy loading components
-global.IntersectionObserver = jest.fn().mockImplementation(() => ({
-  observe: jest.fn(),
-  unobserve: jest.fn(),
-  disconnect: jest.fn(),
-}));
-
-// Mock window.matchMedia for Material-UI components
-Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: jest.fn().mockImplementation(query => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: jest.fn(), // Deprecated
-    removeListener: jest.fn(), // Deprecated
-    addEventListener: jest.fn(),
-    removeEventListener: jest.fn(),
-    dispatchEvent: jest.fn(),
-  })),
-});
-
-// Mock useMediaQuery hook to prevent theme.breakpoints errors
-jest.mock('@mui/material/useMediaQuery', () => {
-  return jest.fn(() => false);
-});
-
-// Create isolated localStorage mock for each test
-const createLocalStorageMock = () => ({
+// Mock localStorage
+const localStorageMock: Storage = {
   getItem: jest.fn(),
   setItem: jest.fn(),
   removeItem: jest.fn(),
   clear: jest.fn(),
-  length: 0,
   key: jest.fn(),
-});
-
-// Create isolated sessionStorage mock for each test
-const createSessionStorageMock = () => ({
-  getItem: jest.fn(),
-  setItem: jest.fn(),
-  removeItem: jest.fn(),
-  clear: jest.fn(),
   length: 0,
-  key: jest.fn(),
-});
-
-// Global storage mocks that will be reset for each test
-let localStorageMock = createLocalStorageMock();
-let sessionStorageMock = createSessionStorageMock();
-
+};
+(global as any).localStorage = localStorageMock;
 Object.defineProperty(window, 'localStorage', {
   value: localStorageMock,
-  writable: true,
 });
 
-Object.defineProperty(window, 'sessionStorage', {
-  value: sessionStorageMock,
-  writable: true,
-});
+// Mock Chart.js and related modules
+jest.mock('chart.js', () => ({
+  Chart: {
+    register: jest.fn(),
+  },
+  registerables: [],
+}));
 
-// Suppress console warnings during tests (optional)
-const originalConsoleWarn = console.warn;
-const originalConsoleError = console.error;
+jest.mock('chartjs-adapter-date-fns', () => ({}));
 
-beforeEach(() => {
-  // Reset localStorage mock for each test to prevent state pollution
-  localStorageMock = createLocalStorageMock();
-  Object.defineProperty(window, 'localStorage', {
-    value: localStorageMock,
-    writable: true,
-  });
+jest.mock('react-chartjs-2', () => ({
+  Line: jest.fn(() => 'Mock Chart'),
+  Bar: jest.fn(() => 'Mock Chart'),
+  Pie: jest.fn(() => 'Mock Chart'),
+}));
 
-  // Reset sessionStorage mock for each test
-  sessionStorageMock = createSessionStorageMock();
-  Object.defineProperty(window, 'sessionStorage', {
-    value: sessionStorageMock,
-    writable: true,
-  });
+// Mock chartjs-plugin-annotation to avoid plugin runtime issues in tests
+jest.mock('chartjs-plugin-annotation', () => ({
+  __esModule: true,
+  default: { id: 'annotation', beforeDraw: jest.fn(), afterDraw: jest.fn() },
+}));
 
-  // Clear all mocks to prevent test pollution
-  jest.clearAllMocks();
+// Mock the hooks module globally
+const mockDataSources = [
+  {
+    id: 'fred',
+    name: 'Federal Reserve Economic Data',
+    description: 'Economic data from the Federal Reserve',
+    base_url: 'https://fred.stlouisfed.org',
+    api_key_required: false,
+    rate_limit_per_minute: 120,
+    series_count: 800000,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-12-15T10:00:00Z',
+  },
+  {
+    id: 'bls',
+    name: 'Bureau of Labor Statistics',
+    description: 'Labor market and economic statistics',
+    base_url: 'https://www.bls.gov',
+    api_key_required: true,
+    rate_limit_per_minute: 60,
+    series_count: 50000,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-12-14T09:00:00Z',
+  },
+  {
+    id: 'census',
+    name: 'U.S. Census Bureau',
+    description: 'Demographic and economic data',
+    base_url: 'https://www.census.gov',
+    api_key_required: false,
+    rate_limit_per_minute: 100,
+    series_count: 25000,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-12-13T08:00:00Z',
+  },
+  {
+    id: 'worldbank',
+    name: 'World Bank Open Data',
+    description: 'Global development indicators',
+    base_url: 'https://data.worldbank.org',
+    api_key_required: false,
+    rate_limit_per_minute: 80,
+    series_count: 15000,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-12-12T07:00:00Z',
+  },
+];
 
-  // Suppress console warnings during tests
-  console.warn = jest.fn();
-  console.error = jest.fn();
-});
+const mockSearchResults = [
+  {
+    id: 'gdp-series-1',
+    title: 'Real Gross Domestic Product',
+    description: 'Real GDP in billions of chained 2017 dollars',
+    sourceId: 'fred',
+    frequency: 'Quarterly',
+    units: 'Billions of Chained 2017 Dollars',
+    lastUpdated: '2024-10-01T00:00:00Z',
+    startDate: '1948-01-01T00:00:00Z',
+    endDate: '2024-11-01T00:00:00Z',
+    similarityScore: 0.9,
+  },
+  {
+    id: 'unemployment-series-1',
+    title: 'Unemployment Rate',
+    description: 'Unemployment rate as a percentage',
+    sourceId: 'fred',
+    frequency: 'Monthly',
+    units: 'Percent',
+    lastUpdated: '2024-11-01T00:00:00Z',
+    startDate: '1948-01-01T00:00:00Z',
+    endDate: '2024-11-01T00:00:00Z',
+    similarityScore: 0.85,
+  },
+];
 
-afterEach(() => {
-  // Restore original console methods
-  console.warn = originalConsoleWarn;
-  console.error = originalConsoleError;
-});
+jest.mock('./hooks/useSeriesData', () => ({
+  useDataSources: jest.fn().mockImplementation(() => ({
+    data: mockDataSources,
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+  useSeriesSearch: jest.fn().mockImplementation(() => ({
+    data: mockSearchResults,
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+  useSeriesDetail: jest.fn().mockImplementation(() => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+  useSeriesData: jest.fn().mockImplementation(() => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+  useSearchSuggestions: jest.fn().mockImplementation(() => ({
+    data: [],
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+  useCrawlerStatus: jest.fn().mockImplementation(() => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+}));
+
+// Mock D3 modules
+jest.mock('d3-geo', () => ({
+  geoPath: jest.fn(() => ({
+    projection: jest.fn(),
+    pointRadius: jest.fn(),
+  })),
+  geoNaturalEarth1: jest.fn(() => ({
+    scale: jest.fn().mockReturnThis(),
+    translate: jest.fn().mockReturnThis(),
+    center: jest.fn().mockReturnThis(),
+  })),
+  geoMercator: jest.fn(() => ({
+    scale: jest.fn().mockReturnThis(),
+    translate: jest.fn().mockReturnThis(),
+    center: jest.fn().mockReturnThis(),
+  })),
+  geoOrthographic: jest.fn(() => ({
+    scale: jest.fn().mockReturnThis(),
+    translate: jest.fn().mockReturnThis(),
+    center: jest.fn().mockReturnThis(),
+  })),
+}));
+
+jest.mock('d3-zoom', () => ({
+  zoom: jest.fn(() => ({
+    scaleExtent: jest.fn().mockReturnThis(),
+    on: jest.fn().mockReturnThis(),
+  })),
+}));

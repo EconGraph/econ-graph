@@ -1,97 +1,22 @@
 /**
- * Mock for d3-array module
- * Provides mock implementations for array utility functions
+ * Mock implementation of D3-Array for testing
+ * PURPOSE: Provide predictable test behavior for D3 array components
  */
 
-// Mock extent function
-export const extent = jest.fn().mockReturnValue([0, 100]);
-
-// Mock min function
-export const min = jest.fn().mockReturnValue(0);
-
-// Mock max function
-export const max = jest.fn().mockReturnValue(100);
-
-// Mock sum function
-export const sum = jest.fn().mockReturnValue(500);
-
-// Mock mean function
-export const mean = jest.fn().mockReturnValue(50);
-
-// Mock median function
-export const median = jest.fn().mockReturnValue(50);
-
-// Mock quantile function
-export const quantile = jest.fn().mockReturnValue(25);
-
-// Mock bisect function
-export const bisect = jest.fn().mockReturnValue(5);
-
-// Mock bisectLeft function
-export const bisectLeft = jest.fn().mockReturnValue(5);
-
-// Mock bisectRight function
-export const bisectRight = jest.fn().mockReturnValue(5);
-
-// Mock bisector function
-export const bisector = jest.fn().mockReturnValue({
-  left: jest.fn().mockReturnValue(5),
-  right: jest.fn().mockReturnValue(5),
-});
-
-// Mock ascending function
-export const ascending = jest.fn().mockReturnValue(-1);
-
-// Mock descending function
-export const descending = jest.fn().mockReturnValue(1);
-
-// Mock shuffle function
-export const shuffle = jest.fn().mockReturnValue([1, 2, 3, 4, 5]);
-
-// Mock ticks function
-export const ticks = jest.fn().mockReturnValue([0, 25, 50, 75, 100]);
-
-// Mock tickStep function
-export const tickStep = jest.fn().mockReturnValue(25);
-
-// Mock tickIncrement function
-export const tickIncrement = jest.fn().mockReturnValue(1);
-
-// Mock range function
-export const range = jest.fn().mockReturnValue([0, 1, 2, 3, 4]);
-
-// Mock transpose function
-export const transpose = jest.fn().mockReturnValue([
-  [1, 2],
-  [3, 4],
-]);
-
-// Mock zip function
-export const zip = jest.fn().mockReturnValue([
-  [1, 3],
-  [2, 4],
-]);
-
-// Default export
-export default {
-  extent,
-  min,
-  max,
-  sum,
-  mean,
-  median,
-  quantile,
-  bisect,
-  bisectLeft,
-  bisectRight,
-  bisector,
-  ascending,
-  descending,
-  shuffle,
-  ticks,
-  tickStep,
-  tickIncrement,
-  range,
-  transpose,
-  zip,
+module.exports = {
+  extent: jest.fn(() => [0, 100]),
+  max: jest.fn(() => 100),
+  min: jest.fn(() => 0),
+  mean: jest.fn(() => 50),
+  median: jest.fn(() => 50),
+  sum: jest.fn(() => 500),
+  range: jest.fn(() => [0, 1, 2, 3, 4]),
+  bisectLeft: jest.fn(() => 0),
+  bisectRight: jest.fn(() => 0),
+  bisectCenter: jest.fn(() => 0),
+  bisector: jest.fn(() => jest.fn()),
+  shuffle: jest.fn(array => array.slice()),
+  ticks: jest.fn(() => [0, 25, 50, 75, 100]),
+  tickStep: jest.fn(() => 25),
+  tickIncrement: jest.fn(() => 25),
 };
