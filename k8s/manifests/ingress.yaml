@@ -4,7 +4,7 @@ metadata:
   name: econ-graph-ingress
   namespace: econ-graph
   annotations:
-    nginx.ingress.kubernetes.io/cors-allow-origin: "https://econgraph.com,https://admin.econgraph.com,http://localhost:3000,http://localhost:3001"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
     nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
     nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
@@ -14,9 +14,22 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-  - host: admin.econ-graph.local
-    http:
+  - http:
       paths:
+      - path: /admin
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-admin-frontend-service
+            port:
+              number: 3001
+      - path: /api/admin
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
       - path: /api
         pathType: Prefix
         backend:
@@ -52,13 +65,20 @@ spec:
             name: econ-graph-backend-service
             port:
               number: 9876
-      - path: /admin
+      - path: /grafana
         pathType: Prefix
         backend:
           service:
-            name: econ-graph-admin-frontend-service
+            name: grafana-service
             port:
-              number: 3001
+              number: 3000
+      - path: /login
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana-service
+            port:
+              number: 3000
       - path: /
         pathType: Prefix
         backend:
