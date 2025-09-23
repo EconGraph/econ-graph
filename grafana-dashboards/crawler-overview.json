@@ -1,0 +1,115 @@
+{
+  "title": "Crawler Overview",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "tags": ["crawler", "overview"],
+  "templating": {
+    "list": [
+      {
+        "name": "crawler_type",
+        "type": "query",
+        "datasource": null,
+        "refresh": 2,
+        "hide": 0,
+        "query": "label_values(econgraph_crawler_requests_total, crawler_type)",
+        "includeAll": true,
+        "multi": true
+      },
+      {
+        "name": "source",
+        "type": "query",
+        "datasource": null,
+        "refresh": 2,
+        "hide": 0,
+        "query": "label_values(econgraph_crawler_requests_total, source)",
+        "includeAll": true,
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Requests (rate)",
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(rate(econgraph_crawler_requests_total{crawler_type=~\"$crawler_type\",source=~\"$source\"}[5m]))",
+          "legendFormat": "requests/s"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Error Rate",
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(rate(econgraph_crawler_errors_total{crawler_type=~\"$crawler_type\",source=~\"$source\"}[5m]))",
+          "legendFormat": "errors/s"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Rate Limit Hits",
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(rate(econgraph_crawler_rate_limit_hits_total{crawler_type=~\"$crawler_type\",source=~\"$source\"}[15m]))",
+          "legendFormat": "429/s"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Request Duration (p95)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(econgraph_crawler_request_duration_seconds_bucket{crawler_type=~\"$crawler_type\",source=~\"$source\"}[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests by Source",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+      "targets": [
+        {
+          "expr": "sum by (source) (rate(econgraph_crawler_requests_total{crawler_type=~\"$crawler_type\",source=~\"$source\"}[5m]))",
+          "legendFormat": "{{source}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Retries & Timeouts",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+      "targets": [
+        {
+          "expr": "sum by (source) (rate(econgraph_crawler_retries_total{crawler_type=~\"$crawler_type\",source=~\"$source\"}[15m]))",
+          "legendFormat": "retries: {{source}}"
+        },
+        {
+          "expr": "sum by (source) (rate(econgraph_crawler_timeouts_total{crawler_type=~\"$crawler_type\",source=~\"$source\"}[15m]))",
+          "legendFormat": "timeouts: {{source}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Bytes Downloaded (rate)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+      "targets": [
+        {
+          "expr": "sum by (source) (rate(econgraph_crawler_bytes_downloaded_total{crawler_type=~\"$crawler_type\",source=~\"$source\"}[5m]))",
+          "legendFormat": "{{source}}"
+        }
+      ]
+    }
+  ]
+}
