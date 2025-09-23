@@ -13,6 +13,11 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-send-timeout: "5"
 spec:
   ingressClassName: nginx
+  defaultBackend:
+    service:
+      name: econ-graph-frontend-service
+      port:
+        number: 3000
   rules:
   - host: admin.econ-graph.local
     http:
@@ -53,7 +58,7 @@ spec:
             port:
               number: 9876
       - path: /admin
-        pathType: Prefix
+        pathType: Exact
         backend:
           service:
             name: econ-graph-admin-frontend-service
