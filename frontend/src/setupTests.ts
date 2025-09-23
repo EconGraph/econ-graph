@@ -11,7 +11,9 @@ global.TextDecoder = TextDecoder;
 
 // Mock Chart.js and related modules
 jest.mock('chart.js', () => ({
-  Chart: jest.fn(),
+  Chart: {
+    register: jest.fn(),
+  },
   registerables: [],
 }));
 
