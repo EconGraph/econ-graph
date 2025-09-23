@@ -96,16 +96,18 @@ const SeriesExplorer: React.FC = () => {
   const searchInputRef = React.useRef<HTMLInputElement>(null);
 
   // Fetch real data sources for filtering
-  const { data: dataSources } = useDataSources();
+  const dataSourcesResult = useDataSources();
+  const { data: dataSources } = dataSourcesResult || {};
 
   // Use real search functionality
-  const { data: searchResults, isLoading: isSearchLoading } = useSeriesSearch({
+  const searchResult = useSeriesSearch({
     query: searchQuery,
     sourceId: selectedSource && selectedSource !== 'All Sources' ? selectedSource : undefined,
     frequency:
       selectedFrequency && selectedFrequency !== 'All Frequencies' ? selectedFrequency : undefined,
     enabled: true,
   });
+  const { data: searchResults, isLoading: isSearchLoading } = searchResult || {};
 
   // Transform search results to match the expected format
   const allMockSeries: EconomicSeries[] = React.useMemo(() => {
