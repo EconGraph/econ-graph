@@ -3,6 +3,7 @@
 use econ_graph_core::database::DatabasePool;
 use econ_graph_core::error::{AppError, AppResult};
 use econ_graph_core::models::DataSource;
+use econ_graph_metrics::crawler::CRAWLER_METRICS;
 use reqwest::Client;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -95,12 +96,26 @@ pub async fn discover_fred_series(
             term, api_key
         );
 
+        let start = std::time::Instant::now();
         let response = client.get(&url).send().await.map_err(|e| {
             AppError::ExternalApiError(format!("FRED search request failed: {}", e))
         })?;
+        let duration = start.elapsed().as_secs_f64();
+        let status = response.status();
+        CRAWLER_METRICS.record_request(
+            "economic",
+            "fred",
+            "/fred/series/search",
+            status.as_str(),
+            duration,
+        );
 
-        if !response.status().is_success() {
+        if !status.is_success() {
             println!("FRED search failed for '{}': {}", term, response.status());
+            if status.as_u16() == 429 {
+                CRAWLER_METRICS.record_rate_limit_hit("economic", "fred");
+            }
+            CRAWLER_METRICS.record_error("economic", "fred", "http_error");
             continue;
         }
 
@@ -108,11 +123,14 @@ pub async fn discover_fred_series(
             AppError::ExternalApiError(format!("Failed to parse FRED search response: {}", e))
         })?;
 
+        let count_before = discovered_series.len();
         for series_info in search_response.seriess {
             // Store series metadata in database
             store_fred_series(pool, &fred_source.id, &series_info).await?;
             discovered_series.push(series_info.id);
         }
+        let added = (discovered_series.len() - count_before) as u64;
+        CRAWLER_METRICS.record_items_collected("economic", "fred", "series", added);
     }
 
     println!("Discovered {} FRED series total", discovered_series.len());

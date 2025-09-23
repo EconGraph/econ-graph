@@ -1,0 +1,100 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: crawler-alerts
+  labels:
+    role: alert-rules
+spec:
+  groups:
+  - name: crawler.rules
+    interval: 30s
+    rules:
+    - alert: CrawlerHighErrorRate
+      expr: sum(rate(econgraph_crawler_errors_total[5m])) / clamp_max(sum(rate(econgraph_crawler_requests_total[5m])), 1) > 0.05
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: High crawler error rate (>5%)
+        description: Crawler error rate is above 5% for 10 minutes.
+
+    - alert: CrawlerHighErrorRateBySource
+      expr: sum by (source) (rate(econgraph_crawler_errors_total[5m])) / clamp_max(sum by (source) (rate(econgraph_crawler_requests_total[5m])), 1) > 0.05
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: High crawler error rate (>5%) for source {{ $labels.source }}
+        description: Error rate is above 5% for 10 minutes for source {{ $labels.source }}.
+
+    - alert: CrawlerFrequentRateLimitHits
+      expr: sum(rate(econgraph_crawler_rate_limit_hits_total[15m])) > 0.5
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: Frequent 429 rate limit hits
+        description: Crawlers are frequently hitting upstream rate limits.
+
+    - alert: CrawlerFrequentRateLimitHitsBySource
+      expr: sum by (source) (rate(econgraph_crawler_rate_limit_hits_total[15m])) > 0.1
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: Frequent 429 rate limit hits for {{ $labels.source }}
+        description: Rate limit hits are frequent for source {{ $labels.source }}.
+
+    - alert: CrawlerHighTimeouts
+      expr: sum(rate(econgraph_crawler_timeouts_total[10m])) > 0.2
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: Elevated crawler timeouts
+        description: Timeout rate exceeds threshold.
+
+    - alert: CrawlerHighTimeoutsBySource
+      expr: sum by (source) (rate(econgraph_crawler_timeouts_total[10m])) > 0.05
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: Elevated crawler timeouts for {{ $labels.source }}
+        description: Timeout rate exceeds threshold for source {{ $labels.source }}.
+
+    - alert: CrawlerHighLatencyP95
+      expr: histogram_quantile(0.95, sum(rate(econgraph_crawler_request_duration_seconds_bucket[5m])) by (le)) > 5
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: High crawler p95 latency (>5s)
+        description: 95th percentile of request latency is above 5 seconds.
+
+    - alert: CrawlerHighLatencyP95BySource
+      expr: histogram_quantile(0.95, sum by (le, source) (rate(econgraph_crawler_request_duration_seconds_bucket[5m]))) > 5
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: High p95 latency (>5s) for {{ $labels.source }}
+        description: 95th percentile of request latency is above 5 seconds for source {{ $labels.source }}.
+
+    - alert: CrawlerNoTraffic
+      expr: sum(rate(econgraph_crawler_requests_total[15m])) == 0
+      for: 30m
+      labels:
+        severity: critical
+      annotations:
+        summary: No crawler traffic detected
+        description: Crawler has produced no requests for 30 minutes.
+
+    - alert: CrawlerNoTrafficBySource
+      expr: sum by (source) (rate(econgraph_crawler_requests_total[15m])) == 0
+      for: 30m
+      labels:
+        severity: warning
+      annotations:
+        summary: No crawler traffic for {{ $labels.source }}
+        description: Source {{ $labels.source }} has produced no requests for 30 minutes.
