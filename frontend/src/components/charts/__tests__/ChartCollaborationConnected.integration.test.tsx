@@ -160,7 +160,7 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
       await user.click(addButton);
 
       // Try to submit without filling required fields
-      const submitButton = screen.getByText('Add Annotation');
+      const submitButton = screen.getByTestId('submit-annotation-button');
       await user.click(submitButton);
 
       // Should show error snackbar
@@ -296,7 +296,7 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
       await user.click(shareButton);
 
       // Try to submit without filling required fields
-      const submitButton = screen.getByText('Share Chart');
+      const submitButton = screen.getByTestId('submit-share-button');
       await user.click(submitButton);
 
       // Should show error snackbar
@@ -323,7 +323,7 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
       await user.click(screen.getByText('Test User'));
 
       // Submit
-      const submitButton = screen.getByText('Share Chart');
+      const submitButton = screen.getByTestId('submit-share-button');
       await user.click(submitButton);
 
       // Should call shareChart

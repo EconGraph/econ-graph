@@ -337,7 +337,12 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                 <Typography variant='subtitle2'>
                   Active Collaborators ({activeCollaborators.length})
                 </Typography>
-                <IconButton size='small' onClick={() => setShareDialog(true)}>
+                <IconButton
+                  size='small'
+                  onClick={() => setShareDialog(true)}
+                  aria-label='Share chart'
+                  data-testid='share-chart-button'
+                >
                   <ShareIcon />
                 </IconButton>
               </Box>
@@ -523,6 +528,8 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                               handleDeleteAnnotation(annotation.id);
                             }}
                             color='error'
+                            aria-label={`Delete annotation: ${annotation.title}`}
+                            data-testid={`delete-annotation-${annotation.id}`}
                           >
                             <DeleteIcon />
                           </IconButton>
@@ -655,7 +662,12 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setNewAnnotationDialog(false)}>Cancel</Button>
-          <Button onClick={handleCreateAnnotation} variant='contained' disabled={loading}>
+          <Button
+            onClick={handleCreateAnnotation}
+            variant='contained'
+            disabled={loading}
+            data-testid='submit-annotation-button'
+          >
             Add Annotation
           </Button>
         </DialogActions>
@@ -676,9 +688,9 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                 {selectedAnnotation.description}
               </Typography>
 
-              {getCommentsForAnnotation(selectedAnnotation.id).length > 0 && (
+              {(getCommentsForAnnotation(selectedAnnotation.id)?.length || 0) > 0 && (
                 <List sx={{ mb: 2 }}>
-                  {getCommentsForAnnotation(selectedAnnotation.id).map(comment => {
+                  {(getCommentsForAnnotation(selectedAnnotation.id) || []).map(comment => {
                     const author = getUserById(comment.userId);
                     return (
                       <ListItem key={comment.id} alignItems='flex-start'>
@@ -732,7 +744,13 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
       </Dialog>
 
       {/* Share Chart Dialog */}
-      <Dialog open={shareDialog} onClose={() => setShareDialog(false)} maxWidth='sm' fullWidth>
+      <Dialog
+        open={shareDialog}
+        onClose={() => setShareDialog(false)}
+        maxWidth='sm'
+        fullWidth
+        data-testid='share-chart-dialog'
+      >
         <DialogTitle>Share Chart</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
@@ -743,6 +761,8 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
               required
               fullWidth
               helperText='Enter the user ID of the person you want to share with'
+              inputProps={{ 'data-testid': 'share-target-user-input' }}
+              aria-label='Target user ID'
             />
 
             <FormControl fullWidth>
@@ -751,6 +771,8 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                 value={shareForm.permissionLevel}
                 onChange={e => setShareForm(prev => ({ ...prev, permissionLevel: e.target.value }))}
                 label='Permission Level'
+                inputProps={{ 'data-testid': 'share-permission-level-select' }}
+                aria-label='Permission level'
               >
                 <MenuItem value='view'>View - Can view annotations</MenuItem>
                 <MenuItem value='comment'>Comment - Can view and comment</MenuItem>
@@ -761,8 +783,15 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShareDialog(false)}>Cancel</Button>
-          <Button onClick={handleShareChart} variant='contained' disabled={loading}>
+          <Button onClick={() => setShareDialog(false)} data-testid='cancel-share-button'>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleShareChart}
+            variant='contained'
+            disabled={loading}
+            data-testid='submit-share-button'
+          >
             Share Chart
           </Button>
         </DialogActions>

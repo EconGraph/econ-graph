@@ -444,4 +444,436 @@ test: add unit tests for world map
 4. **Performance**: Implement proper memoization and cleanup
 5. **Accessibility**: Build accessibility features from the start, not as an afterthought
 
+## 🧪 **General Testing Principles & Component Testability**
+
+### **Core Testing Philosophy**
+1. **Test Behavior, Not Implementation**: Focus on what users can see and do, not internal component structure
+2. **Write Tests That Fail for the Right Reasons**: Tests should catch real bugs, not implementation changes
+3. **Make Components Testable by Design**: Build testability into components from the start
+4. **Use the Testing Pyramid**: Unit tests for logic, integration tests for interactions, E2E tests for user flows
+5. **Test Accessibility**: Ensure components work for all users, including those using assistive technologies
+
+### **Component Testability Design Patterns**
+
+#### **1. Separation of Concerns**
+```typescript
+// ❌ BAD: Mixed concerns make testing difficult
+const ComplexComponent = () => {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  
+  // Business logic mixed with UI
+  const processData = (rawData) => {
+    return rawData.filter(item => item.active)
+                  .map(item => ({ ...item, processed: true }));
+  };
+  
+  // API calls mixed with UI
+  useEffect(() => {
+    fetchData().then(setData);
+  }, []);
+  
+  return <div>{/* Complex UI */}</div>;
+};
+
+// ✅ GOOD: Separated concerns enable focused testing
+const useDataProcessing = (rawData) => {
+  return useMemo(() => 
+    rawData.filter(item => item.active)
+           .map(item => ({ ...item, processed: true })), 
+    [rawData]
+  );
+};
+
+const useDataFetching = () => {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  
+  useEffect(() => {
+    setLoading(true);
+    fetchData().then(setData).finally(() => setLoading(false));
+  }, []);
+  
+  return { data, loading };
+};
+
+const SimpleComponent = () => {
+  const { data: rawData, loading } = useDataFetching();
+  const processedData = useDataProcessing(rawData);
+  
+  return <div>{/* Simple UI */}</div>;
+};
+```
+
+#### **2. Pure Function Extraction**
+```typescript
+// ❌ BAD: Business logic embedded in component
+const ChartComponent = ({ data }) => {
+  const handleDataTransform = (data) => {
+    // Complex transformation logic
+    return data.map(item => ({
+      ...item,
+      value: item.rawValue * 100,
+      formatted: `${(item.rawValue * 100).toFixed(2)}%`
+    }));
+  };
+  
+  return <Chart data={handleDataTransform(data)} />;
+};
+
+// ✅ GOOD: Pure functions can be unit tested independently
+// utils/chartUtils.ts
+export const transformChartData = (data) => {
+  return data.map(item => ({
+    ...item,
+    value: item.rawValue * 100,
+    formatted: `${(item.rawValue * 100).toFixed(2)}%`
+  }));
+};
+
+// Component becomes simple and testable
+const ChartComponent = ({ data }) => {
+  const transformedData = useMemo(() => transformChartData(data), [data]);
+  return <Chart data={transformedData} />;
+};
+
+// utils/__tests__/chartUtils.test.ts
+describe('transformChartData', () => {
+  it('should transform raw values to percentages', () => {
+    const input = [{ rawValue: 0.15, label: 'Test' }];
+    const result = transformChartData(input);
+    expect(result[0].value).toBe(15);
+    expect(result[0].formatted).toBe('15.00%');
+  });
+});
+```
+
+#### **3. Dependency Injection for Testability**
+```typescript
+// ❌ BAD: Hard-coded dependencies make testing difficult
+const UserProfile = () => {
+  const [user, setUser] = useState(null);
+  
+  useEffect(() => {
+    // Hard to mock this API call
+    fetch('/api/user').then(res => res.json()).then(setUser);
+  }, []);
+  
+  return <div>{user?.name}</div>;
+};
+
+// ✅ GOOD: Injected dependencies enable easy mocking
+interface UserProfileProps {
+  userService?: UserService;
+}
+
+const UserProfile = ({ userService = defaultUserService }: UserProfileProps) => {
+  const [user, setUser] = useState(null);
+  
+  useEffect(() => {
+    userService.getCurrentUser().then(setUser);
+  }, [userService]);
+  
+  return <div>{user?.name}</div>;
+};
+
+// Easy to test with mock service
+const mockUserService = {
+  getCurrentUser: jest.fn().mockResolvedValue({ name: 'Test User' })
+};
+
+test('should display user name', async () => {
+  render(<UserProfile userService={mockUserService} />);
+  await waitFor(() => {
+    expect(screen.getByText('Test User')).toBeInTheDocument();
+  });
+});
+```
+
+### **Robust Test Selector Strategies**
+
+#### **1. Accessibility-First Selectors**
+```typescript
+// ❌ BAD: Fragile selectors that break with UI changes
+test('should submit form', () => {
+  const submitButton = screen.getByText('Submit'); // Breaks if text changes
+  fireEvent.click(submitButton);
+});
+
+// ✅ GOOD: Semantic selectors that match user intent
+test('should submit form', () => {
+  const submitButton = screen.getByRole('button', { name: /submit/i });
+  fireEvent.click(submitButton);
+});
+
+// Even better: Use data-testid for complex interactions
+test('should submit form with validation', () => {
+  const submitButton = screen.getByTestId('submit-form-button');
+  fireEvent.click(submitButton);
+  expect(screen.getByRole('alert')).toBeInTheDocument();
+});
+```
+
+#### **2. Progressive Selector Fallbacks**
+```typescript
+// Robust selector strategy with fallbacks
+const findFormField = (fieldName: string) => {
+  // 1. Try semantic selector first (most accessible)
+  try {
+    return screen.getByLabelText(fieldName);
+  } catch {
+    // 2. Fall back to placeholder
+    try {
+      return screen.getByPlaceholderText(fieldName);
+    } catch {
+      // 3. Fall back to data-testid
+      return screen.getByTestId(`${fieldName.toLowerCase()}-input`);
+    }
+  }
+};
+
+test('should fill form field', () => {
+  const nameField = findFormField('Name');
+  fireEvent.change(nameField, { target: { value: 'John Doe' } });
+  expect(nameField).toHaveValue('John Doe');
+});
+```
+
+#### **3. Portal-Aware Testing**
+```typescript
+// Material-UI Dialogs and other portal components
+test('should handle dialog interactions', async () => {
+  const user = userEvent.setup();
+  
+  // Open dialog
+  await user.click(screen.getByRole('button', { name: 'Open Dialog' }));
+  
+  // Wait for portal content to render
+  await waitFor(() => {
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  }, { timeout: 5000 });
+  
+  // Interact with dialog content (may be in different DOM tree)
+  await waitFor(() => {
+    const input = screen.getByLabelText('Dialog Input');
+    expect(input).toBeInTheDocument();
+  }, { timeout: 2000 });
+  
+  await user.type(input, 'Test Value');
+  expect(input).toHaveValue('Test Value');
+});
+```
+
+### **Test Organization Patterns**
+
+#### **1. Test Structure by Complexity**
+```typescript
+describe('ComplexComponent', () => {
+  // Setup and teardown
+  beforeEach(() => {
+    jest.clearAllMocks();
+    setupTestEnvironment();
+  });
+  
+  afterEach(() => {
+    cleanupTestEnvironment();
+  });
+  
+  // Group tests by functionality
+  describe('Basic Rendering', () => {
+    it('should render without crashing', () => {
+      render(<ComplexComponent />);
+      expect(screen.getByRole('main')).toBeInTheDocument();
+    });
+    
+    it('should display loading state', () => {
+      render(<ComplexComponent loading={true} />);
+      expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    });
+  });
+  
+  describe('User Interactions', () => {
+    it('should handle button clicks', async () => {
+      const user = userEvent.setup();
+      render(<ComplexComponent />);
+      
+      await user.click(screen.getByRole('button', { name: /submit/i }));
+      expect(mockOnSubmit).toHaveBeenCalled();
+    });
+  });
+  
+  describe('Error Handling', () => {
+    it('should display error messages', () => {
+      render(<ComplexComponent error="Test error" />);
+      expect(screen.getByRole('alert')).toHaveTextContent('Test error');
+    });
+  });
+});
+```
+
+#### **2. Mock Strategy Patterns**
+```typescript
+// Centralized mock setup
+const createMockProps = (overrides = {}) => ({
+  data: mockData,
+  onAction: jest.fn(),
+  loading: false,
+  error: null,
+  ...overrides
+});
+
+// Reusable mock implementations
+const mockApiService = {
+  fetchData: jest.fn(),
+  updateData: jest.fn(),
+  deleteData: jest.fn(),
+};
+
+// Reset mocks between tests
+beforeEach(() => {
+  Object.values(mockApiService).forEach(mock => mock.mockClear());
+});
+```
+
+### **Component Design for Testability**
+
+#### **1. Prop Interface Design**
+```typescript
+// ✅ GOOD: Clear, testable prop interface
+interface ChartProps {
+  data: ChartData[];
+  onDataPointClick?: (point: DataPoint) => void;
+  loading?: boolean;
+  error?: string | null;
+  config?: Partial<ChartConfig>;
+  'data-testid'?: string; // Always include for testing
+}
+
+// ❌ BAD: Unclear or hard-to-test props
+interface BadChartProps {
+  data: any; // Too generic
+  onClick: Function; // Too generic
+  style?: React.CSSProperties; // Hard to test styling
+}
+```
+
+#### **2. Event Handler Patterns**
+```typescript
+// ✅ GOOD: Testable event handlers
+const ChartComponent = ({ data, onDataPointClick }: ChartProps) => {
+  const handlePointClick = useCallback((event: MouseEvent, point: DataPoint) => {
+    if (onDataPointClick) {
+      onDataPointClick(point);
+    }
+  }, [onDataPointClick]);
+  
+  return (
+    <Chart 
+      data={data} 
+      onPointClick={handlePointClick}
+      data-testid="interactive-chart"
+    />
+  );
+};
+
+// Easy to test
+test('should call onDataPointClick when point is clicked', async () => {
+  const mockOnClick = jest.fn();
+  render(<ChartComponent data={mockData} onDataPointClick={mockOnClick} />);
+  
+  await user.click(screen.getByTestId('interactive-chart'));
+  expect(mockOnClick).toHaveBeenCalledWith(expect.objectContaining({
+    id: expect.any(String),
+    value: expect.any(Number)
+  }));
+});
+```
+
+### **Testing Anti-Patterns to Avoid**
+
+#### **1. Testing Implementation Details**
+```typescript
+// ❌ BAD: Testing internal state or methods
+test('should update internal state', () => {
+  const component = render(<MyComponent />);
+  const instance = component.getInstance();
+  expect(instance.state.isOpen).toBe(false);
+  
+  instance.toggle(); // Testing internal method
+  expect(instance.state.isOpen).toBe(true);
+});
+
+// ✅ GOOD: Testing user-visible behavior
+test('should open dialog when button is clicked', async () => {
+  const user = userEvent.setup();
+  render(<MyComponent />);
+  
+  await user.click(screen.getByRole('button', { name: /open/i }));
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+});
+```
+
+#### **2. Over-Mocking**
+```typescript
+// ❌ BAD: Mocking everything makes tests brittle
+jest.mock('react', () => ({
+  ...jest.requireActual('react'),
+  useState: jest.fn(),
+  useEffect: jest.fn(),
+}));
+
+// ✅ GOOD: Mock only what's necessary
+jest.mock('../api/userService', () => ({
+  getCurrentUser: jest.fn(),
+}));
+```
+
+#### **3. Ignoring Accessibility**
+```typescript
+// ❌ BAD: Not testing accessibility
+test('should display user name', () => {
+  render(<UserProfile user={{ name: 'John' }} />);
+  expect(screen.getByText('John')).toBeInTheDocument();
+});
+
+// ✅ GOOD: Testing accessibility
+test('should display user name with proper semantics', () => {
+  render(<UserProfile user={{ name: 'John' }} />);
+  
+  const nameElement = screen.getByText('John');
+  expect(nameElement).toBeInTheDocument();
+  expect(nameElement).toHaveAttribute('aria-label', 'User name: John');
+});
+```
+
+### **Performance Testing Considerations**
+
+#### **1. Testing Render Performance**
+```typescript
+test('should render large datasets efficiently', () => {
+  const largeDataset = generateLargeDataset(10000);
+  const startTime = performance.now();
+  
+  render(<DataTable data={largeDataset} />);
+  
+  const endTime = performance.now();
+  expect(endTime - startTime).toBeLessThan(1000); // Should render in < 1s
+});
+```
+
+#### **2. Testing Memory Usage**
+```typescript
+test('should not leak memory on unmount', () => {
+  const { unmount } = render(<ComplexComponent />);
+  
+  // Simulate component lifecycle
+  unmount();
+  
+  // Check that event listeners are cleaned up
+  expect(mockRemoveEventListener).toHaveBeenCalled();
+});
+```
+
+This comprehensive testing approach ensures components are reliable, maintainable, and accessible while providing confidence in the codebase's quality and user experience.
+
 This persona provides comprehensive guidance for frontend development in the EconGraph project, with a focus on creating world-class data visualization interfaces.

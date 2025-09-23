@@ -402,38 +402,30 @@ describe('ChartCollaboration', () => {
       // Wait for dialog and form to appear
       await waitForDialog('Add Chart Annotation');
 
-      const titleField = findFormFieldInDialog('input', 'Title');
+      // Use the new robust selector
+      const titleField = screen.getByTestId('annotation-title-input');
       expect(titleField).toBeInTheDocument();
 
-      await user.type(titleField!, 'Test Title');
+      await user.type(titleField, 'Test Title');
+      expect(titleField).toHaveValue('Test Title');
 
-      // Close dialog - look for cancel or close button
-      const cancelButton = screen.queryByRole('button', { name: /cancel/i }) ||
-                          screen.queryByRole('button', { name: /close/i }) ||
-                          screen.queryByTestId('close-dialog');
+      // Close dialog using the cancel button
+      const cancelButton = screen.getByTestId('cancel-annotation-button');
+      await user.click(cancelButton);
 
-      if (cancelButton) {
-        await user.click(cancelButton);
+      // Wait for dialog to close
+      await waitFor(() => {
+        expect(screen.queryByTestId('annotation-dialog')).not.toBeInTheDocument();
+      }, { timeout: 3000 });
 
-        // Wait for dialog to close
-        await waitFor(() => {
-          expect(screen.queryByText('Add Chart Annotation')).not.toBeInTheDocument();
-        }, { timeout: 3000 });
+      // Reopen dialog
+      await user.click(addButton);
+      await waitForDialog('Add Chart Annotation');
 
-        // Reopen dialog
-        await user.click(addButton);
-        await waitForDialog('Add Chart Annotation');
-
-        // Check form is reset
-        const resetTitleField = findFormFieldInDialog('input', 'Title');
-        if (resetTitleField) {
-          expect(resetTitleField).toHaveValue('');
-        }
-      } else {
-        // If no cancel button found, just verify the dialog opened
-        expect(screen.getByText('Add Chart Annotation')).toBeInTheDocument();
-      }
-    }, 20000);
+      // Check form is reset using the robust selector
+      const resetTitleField = screen.getByTestId('annotation-title-input');
+      expect(resetTitleField).toHaveValue('');
+    });
   });
 
   describe('Annotation Interactions', () => {
@@ -510,9 +502,9 @@ describe('ChartCollaboration', () => {
       if (commentButtons.length > 1) {
         await user.click(commentButtons[1]); // Second annotation has comments
 
-        // Wait for dialog to appear
+        // Wait for comments dialog to appear using robust selector
         await waitFor(() => {
-          expect(screen.getByText(/comments/i)).toBeInTheDocument();
+          expect(screen.getByTestId('comments-dialog')).toBeInTheDocument();
         }, { timeout: 5000 });
 
         // Check for comment content
@@ -525,7 +517,7 @@ describe('ChartCollaboration', () => {
         // If no comment buttons found, just verify the component renders
         expect(screen.getByText('Chart Collaboration')).toBeInTheDocument();
       }
-    }, 20000);
+    });
 
     it('should add new comment', async () => {
       const user = userEvent.setup();
@@ -536,36 +528,28 @@ describe('ChartCollaboration', () => {
       if (commentButtons.length > 0) {
         await user.click(commentButtons[0]);
 
-        // Wait for comments dialog to appear
+        // Wait for comments dialog to appear using robust selector
         await waitFor(() => {
-          expect(screen.getByText(/comments/i)).toBeInTheDocument();
+          expect(screen.getByTestId('comments-dialog')).toBeInTheDocument();
         }, { timeout: 5000 });
 
-        // Add comment - look for comment input field
-        const commentInput = screen.queryByLabelText(/add.*comment/i) ||
-                           screen.queryByPlaceholderText(/add.*comment/i) ||
-                           screen.queryByRole('textbox');
+        // Add comment using robust selector
+        const commentInput = screen.getByTestId('comment-input');
+        await user.type(commentInput, 'This is a new comment');
 
-        if (commentInput) {
-          await user.type(commentInput, 'This is a new comment');
+        const commentButton = screen.getByTestId('submit-comment-button');
+        await user.click(commentButton);
 
-          const commentButton = screen.queryByRole('button', { name: /comment/i }) ||
-                               screen.queryByText('Comment');
-
-          if (commentButton) {
-            await user.click(commentButton);
-            expect(mockHandlers.onCommentAdd).toHaveBeenCalledWith('annotation-1', {
-              content: 'This is a new comment',
-              author: mockCurrentUser,
-              isResolved: false,
-            });
-          }
-        }
+        expect(mockHandlers.onCommentAdd).toHaveBeenCalledWith('annotation-1', {
+          content: 'This is a new comment',
+          author: mockCurrentUser,
+          isResolved: false,
+        });
       } else {
         // If no comment buttons found, just verify the component renders
         expect(screen.getByText('Chart Collaboration')).toBeInTheDocument();
       }
-    }, 20000);
+    });
 
     it('should not add empty comment', async () => {
       const user = userEvent.setup();
@@ -573,16 +557,25 @@ describe('ChartCollaboration', () => {
 
       // Open comments dialog
       const commentButtons = screen.getAllByTestId('CommentIcon');
-      await user.click(commentButtons[0]);
+      if (commentButtons.length > 0) {
+        await user.click(commentButtons[0]);
 
-      // Wait for comments dialog to appear
-      await waitFor(() => {
-        expect(screen.getByText('Comment')).toBeInTheDocument();
-      });
+        // Wait for comments dialog to appear using robust selector
+        await waitFor(() => {
+          expect(screen.getByTestId('comments-dialog')).toBeInTheDocument();
+        }, { timeout: 5000 });
 
-      // Try to add empty comment
-      const commentButton = screen.getByText('Comment');
-      expect(commentButton).toBeDisabled();
+        // Try to add empty comment - button should be disabled
+        const commentButton = screen.getByTestId('submit-comment-button');
+        expect(commentButton).toBeDisabled();
+
+        // Click should not trigger the handler
+        await user.click(commentButton);
+        expect(mockHandlers.onCommentAdd).not.toHaveBeenCalled();
+      } else {
+        // If no comment buttons found, just verify the component renders
+        expect(screen.getByText('Chart Collaboration')).toBeInTheDocument();
+      }
     });
 
     it('should clear comment input after adding', async () => {
