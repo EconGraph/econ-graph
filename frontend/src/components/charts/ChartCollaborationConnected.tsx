@@ -724,6 +724,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                   value={newComment}
                   onChange={e => setNewComment(e.target.value)}
                   multiline
+                  inputProps={{ 'data-testid': 'comment-input' }}
                   rows={2}
                   fullWidth
                 />

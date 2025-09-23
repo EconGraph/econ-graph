@@ -595,7 +595,7 @@ describe('ChartCollaborationConnected', () => {
       await user.click(commentButtons[0]);
 
       // Add comment
-      const commentInput = screen.getByLabelText('Add a comment...');
+      const commentInput = screen.getByTestId('comment-input');
       await user.type(commentInput, 'This is a new comment');
 
       const commentButton = screen.getByText('Comment');
@@ -613,7 +613,7 @@ describe('ChartCollaborationConnected', () => {
       await user.click(commentButtons[0]);
 
       // Add comment
-      const commentInput = screen.getByLabelText('Add a comment...');
+      const commentInput = screen.getByTestId('comment-input');
       await user.type(commentInput, 'Test comment');
 
       const commentButton = screen.getByText('Comment');
@@ -633,9 +633,9 @@ describe('ChartCollaborationConnected', () => {
       const shareButton = screen.getByTestId('ShareIcon');
       await user.click(shareButton);
 
-      expect(screen.getByText('Share Chart')).toBeInTheDocument();
-      expect(screen.getByLabelText('User ID to share with')).toBeInTheDocument();
-      expect(screen.getByLabelText('Permission Level')).toBeInTheDocument();
+      expect(screen.getByTestId('share-chart-dialog')).toBeInTheDocument();
+      expect(screen.getByTestId('share-target-user-input')).toBeInTheDocument();
+      expect(screen.getByTestId('share-permission-level-select')).toBeInTheDocument();
     });
 
     it('should share chart with valid data', async () => {
@@ -654,7 +654,7 @@ describe('ChartCollaborationConnected', () => {
       await user.click(screen.getByText('Edit - Can create and edit annotations'));
 
       // Submit
-      const shareSubmitButton = screen.getByText('Share Chart');
+      const shareSubmitButton = screen.getByTestId('submit-share-button');
       await user.click(shareSubmitButton);
 
       expect(mockCollaborationHook.shareChart).toHaveBeenCalledWith({
@@ -673,7 +673,7 @@ describe('ChartCollaborationConnected', () => {
       await user.click(shareButton);
 
       // Try to share without filling form
-      const shareSubmitButton = screen.getByText('Share Chart');
+      const shareSubmitButton = screen.getByTestId('submit-share-button');
       await user.click(shareSubmitButton);
 
       await waitFor(() => {

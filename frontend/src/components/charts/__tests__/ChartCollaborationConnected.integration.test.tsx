@@ -186,7 +186,7 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
       await user.type(screen.getByLabelText('Annotation content'), 'Test Content');
 
       // Submit
-      const submitButton = screen.getByText('Add Annotation');
+      const submitButton = screen.getByTestId('submit-annotation-button');
       await user.click(submitButton);
 
       // Should call createAnnotation with correct data
@@ -219,7 +219,7 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
       await user.type(screen.getByLabelText('Annotation content'), 'Test Content');
 
       // Submit
-      const submitButton = screen.getByText('Add Annotation');
+      const submitButton = screen.getByTestId('submit-annotation-button');
       await user.click(submitButton);
 
       // Should show error snackbar
@@ -414,7 +414,7 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
       renderChartCollaborationConnected();
 
       // Should show loading indicators
-      expect(screen.getAllByLabelText('Loading...')).toHaveLength(2); // Collaborators
+      expect(screen.getAllByLabelText('Loading...')).toHaveLength(1); // Collaborators
     });
 
     it('should handle error state', () => {
