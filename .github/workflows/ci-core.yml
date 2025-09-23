@@ -1496,7 +1496,7 @@ jobs:
       working-directory: frontend
       run: npm test -- --coverage --watchAll=false
       env:
-        REACT_APP_GRAPHQL_ENDPOINT: http://localhost:9876/graphql
+        REACT_APP_GRAPHQL_ENDPOINT: http://localhost:8080/graphql
 
   e2e-container-build:
     name: Build E2E Test Containers
@@ -1655,14 +1655,15 @@ jobs:
       run: |
         # Use the pre-built backend binary from the optimized container
         docker run --rm -d --name backend-server \
-          -p 9876:9876 \
+          -p 8080:8080 \
           -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
           econ-graph-e2e-optimized:latest \
           ./backend/econ-graph-backend
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:9876/health 2>/dev/null; then
+          if curl -f http://localhost:8080/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
@@ -1792,14 +1793,15 @@ jobs:
       run: |
         # Use the pre-built backend binary from the optimized container
         docker run --rm -d --name backend-server \
-          -p 9876:9876 \
+          -p 8080:8080 \
           -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
           econ-graph-e2e-optimized:latest \
           ./backend/econ-graph-backend
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:9876/health 2>/dev/null; then
+          if curl -f http://localhost:8080/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
@@ -1929,14 +1931,15 @@ jobs:
       run: |
         # Use the pre-built backend binary from the optimized container
         docker run --rm -d --name backend-server \
-          -p 9876:9876 \
+          -p 8080:8080 \
           -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
           econ-graph-e2e-optimized:latest \
           ./backend/econ-graph-backend
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:9876/health 2>/dev/null; then
+          if curl -f http://localhost:8080/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
@@ -2068,14 +2071,15 @@ jobs:
       run: |
         # Use the pre-built backend binary from the optimized container
         docker run --rm -d --name backend-server \
-          -p 9876:9876 \
+          -p 8080:8080 \
           -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
           econ-graph-e2e-optimized:latest \
           ./backend/econ-graph-backend
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:9876/health 2>/dev/null; then
+          if curl -f http://localhost:8080/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
@@ -2207,14 +2211,15 @@ jobs:
       run: |
         # Use the pre-built backend binary from the optimized container
         docker run --rm -d --name backend-server \
-          -p 9876:9876 \
+          -p 8080:8080 \
           -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
           econ-graph-e2e-optimized:latest \
           ./backend/econ-graph-backend
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:9876/health 2>/dev/null; then
+          if curl -f http://localhost:8080/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
@@ -2346,14 +2351,15 @@ jobs:
       run: |
         # Use the pre-built backend binary from the optimized container
         docker run --rm -d --name backend-server \
-          -p 9876:9876 \
+          -p 8080:8080 \
           -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
           econ-graph-e2e-optimized:latest \
           ./backend/econ-graph-backend
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:9876/health 2>/dev/null; then
+          if curl -f http://localhost:8080/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
@@ -2485,14 +2491,15 @@ jobs:
       run: |
         # Use the pre-built backend binary from the optimized container
         docker run --rm -d --name backend-server \
-          -p 9876:9876 \
+          -p 8080:8080 \
           -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
           econ-graph-e2e-optimized:latest \
           ./backend/econ-graph-backend
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:9876/health 2>/dev/null; then
+          if curl -f http://localhost:8080/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi

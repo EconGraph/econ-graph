@@ -253,6 +253,95 @@ cargo test --lib --features test-database
 - [ ] Test data uses unique identifiers
 - [ ] Results are handled properly
 
+## 5. Port Configuration Issues
+
+**Symptoms:**
+- `Backend server never became ready` errors
+- `curl: (7) Failed to connect to localhost port` errors
+- E2E tests failing with connection timeouts
+- Backend health checks failing consistently
+
+**Root Causes:**
+- Port configuration mismatch between development and CI environments
+- Hardcoded port values in CI workflows
+- Missing environment variables for port configuration
+- Inconsistent port usage across different test suites
+
+**Diagnosis Steps:**
+1. Check if backend is starting on the expected port:
+   ```bash
+   # In CI logs, look for:
+   # "Server starting on http://0.0.0.0:8080" (should be 8080, not 9876)
+   ```
+2. Verify environment variables are set correctly:
+   ```bash
+   # Backend should log: "BACKEND_PORT: 8080"
+   ```
+3. Check Docker port mappings:
+   ```bash
+   # Should be: -p 8080:8080 (not -p 9876:9876)
+   ```
+4. Verify health check URLs:
+   ```bash
+   # Should be: http://localhost:8080/health (not localhost:9876)
+   ```
+
+**Solutions:**
+1. **Standardize CI Ports**: Use port 8080 for backend in CI environments
+2. **Preserve Development Ports**: Keep non-standard ports (9876) for local development to avoid conflicts
+3. **Add Environment Variables**: Ensure `BACKEND_PORT=8080` is set in Docker containers
+4. **Update Health Checks**: Use correct port in health check loops
+5. **Add Debugging**: Backend logs should show which port it's binding to
+
+**Port Strategy:**
+- **Local Development**: `BACKEND_PORT=9876` (non-standard to avoid conflicts)
+- **CI Environment**: `BACKEND_PORT=8080` (standard port for consistency)
+- **Documentation**: Clearly explain the port strategy and reasoning
+
+**Prevention:**
+- Always use environment variables for port configuration
+- Test port changes in CI before merging
+- Document port strategy clearly
+- Add port binding confirmation logs to backend startup
+
+## 6. Database Migration Order Issues
+
+**Symptoms:**
+- Migration date ordering validation failures in CI
+- `ERROR: Migration 'migration_name' has date X after latest migration date Y`
+- Database schema inconsistencies between environments
+- Migration conflicts during deployment
+
+**Root Causes:**
+- Migration dates not following chronological order
+- Backdating migrations for "logical grouping"
+- Cross-day development creating date mismatches
+- Multiple developers working on migrations simultaneously
+
+**Diagnosis Steps:**
+1. Check migration date ordering:
+   ```bash
+   # Look for migrations with dates after the latest migration
+   ls -la backend/migrations/
+   ```
+2. Compare commit dates vs migration dates:
+   ```bash
+   git log --oneline --name-only backend/migrations/
+   ```
+3. Check CI quality checks output for migration validation errors
+
+**Solutions:**
+1. **Fix Migration Dates**: Ensure migration dates reflect actual chronological order
+2. **Consolidate Migrations**: Combine problematic migrations into single consolidated migration
+3. **Use Proper Naming**: Follow `YYYY-MM-DD-000001_description` format
+4. **Pre-commit Prevention**: Install pre-commit hooks to catch ordering issues early
+
+**Prevention:**
+- Always use current date for new migrations
+- Never backdate migrations for "logical grouping"
+- Use pre-commit hooks to validate migration dates
+- Coordinate with team on migration timing
+
 ## Emergency Fixes
 
 ### Quick Database Fix
