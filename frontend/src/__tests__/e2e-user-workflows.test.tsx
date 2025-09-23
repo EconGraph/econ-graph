@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event';
 import { TestProviders } from '../test-utils/test-providers';
 import App from '../App';
 
+
 // Mock the InteractiveChartWithCollaboration component
 jest.mock('../components/charts/InteractiveChartWithCollaboration', () => {
   return function MockInteractiveChartWithCollaboration({ seriesData, onDataTransform }: any) {

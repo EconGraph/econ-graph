@@ -7,7 +7,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TestProviders } from '../../test-utils/test-providers';
 import SeriesExplorer from '../SeriesExplorer';
-// Removed unused imports: mockSearchResults, mockDataSources, mockSuggestions
+
 
 function renderSeriesExplorer() {
   return render(
