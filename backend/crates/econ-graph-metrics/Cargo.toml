@@ -1,0 +1,10 @@
+[package]
+name = "econ-graph-metrics"
+version = "0.1.0"
+edition = "2021"
+license = "MS-PL"
+
+[dependencies]
+prometheus = "0.14"
+once_cell = "1.19"
+anyhow = "1.0"

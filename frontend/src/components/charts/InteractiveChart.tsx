@@ -317,7 +317,11 @@ const InteractiveChart: React.FC<ChartProps> = ({ data, title, units, frequency 
                 value={startDate}
                 onChange={setStartDate}
                 slotProps={{
-                  textField: { size: 'small', fullWidth: true },
+                  textField: {
+                    size: 'small',
+                    fullWidth: true,
+                    inputProps: { 'data-testid': 'date-picker-start', 'aria-label': 'Start Date' },
+                  },
                 }}
               />
             </LocalizationProvider>
@@ -330,7 +334,11 @@ const InteractiveChart: React.FC<ChartProps> = ({ data, title, units, frequency 
                 value={endDate}
                 onChange={setEndDate}
                 slotProps={{
-                  textField: { size: 'small', fullWidth: true },
+                  textField: {
+                    size: 'small',
+                    fullWidth: true,
+                    inputProps: { 'data-testid': 'date-picker-end', 'aria-label': 'End Date' },
+                  },
                 }}
               />
             </LocalizationProvider>
@@ -410,7 +418,11 @@ const InteractiveChart: React.FC<ChartProps> = ({ data, title, units, frequency 
       </Box>
 
       {/* Chart */}
-      <Box sx={{ height: 400 }}>
+      <Box
+        sx={{ height: 400 }}
+        data-testid='line-chart-container'
+        aria-label='Interactive line chart'
+      >
         <Line data={chartData} options={chartOptions} />
       </Box>
 

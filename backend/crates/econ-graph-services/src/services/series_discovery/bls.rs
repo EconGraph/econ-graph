@@ -3,6 +3,7 @@
 use econ_graph_core::database::DatabasePool;
 use econ_graph_core::error::{AppError, AppResult};
 use econ_graph_core::models::{DataSource, EconomicSeries, NewEconomicSeries};
+use econ_graph_metrics::crawler::CRAWLER_METRICS;
 use reqwest::Client;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -85,15 +86,26 @@ pub async fn discover_bls_series(
 async fn fetch_bls_surveys(client: &Client, api_key: &str) -> AppResult<Vec<BlsSurvey>> {
     let url = "https://api.bls.gov/publicAPI/v2/surveys";
 
+    let start = std::time::Instant::now();
     let response =
         client.get(url).send().await.map_err(|e| {
             AppError::ExternalApiError(format!("BLS surveys request failed: {}", e))
         })?;
 
-    if !response.status().is_success() {
+    let duration = start.elapsed().as_secs_f64();
+    let status = response.status();
+    CRAWLER_METRICS.record_request(
+        "economic",
+        "bls",
+        "/publicAPI/v2/surveys",
+        status.as_str(),
+        duration,
+    );
+
+    if !status.is_success() {
         return Err(AppError::ExternalApiError(format!(
             "BLS surveys API returned status: {}",
-            response.status()
+            status
         )));
     }
 

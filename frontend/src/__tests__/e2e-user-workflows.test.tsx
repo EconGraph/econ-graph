@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event';
 import { TestProviders } from '../test-utils/test-providers';
 import App from '../App';
 
+
 // Mock the InteractiveChartWithCollaboration component
 jest.mock('../components/charts/InteractiveChartWithCollaboration', () => {
   return function MockInteractiveChartWithCollaboration({ seriesData, onDataTransform }: any) {
@@ -131,7 +132,7 @@ describe('End-to-End User Workflows', () => {
 
       // 3. Verify we're on the Series Explorer page
       await waitFor(() => {
-        expect(screen.getByText('Explore Economic Series')).toBeInTheDocument();
+        expect(screen.getByText('Series Explorer')).toBeInTheDocument();
       }, { timeout: 10000 });
 
       console.log('✅ Basic navigation workflow test passed');
@@ -150,7 +151,7 @@ describe('End-to-End User Workflows', () => {
 
       // Verify we're on the Series Explorer page
       await waitFor(() => {
-        expect(screen.getByText('Explore Economic Series')).toBeInTheDocument();
+        expect(screen.getByText('Series Explorer')).toBeInTheDocument();
       }, { timeout: 10000 });
 
       // Search for GDP data
@@ -297,7 +298,7 @@ describe('End-to-End User Workflows', () => {
 
         await waitFor(() => {
           if (page === 'Explore Series') {
-            expect(screen.getByText('Explore Economic Series')).toBeInTheDocument();
+            expect(screen.getByText('Series Explorer')).toBeInTheDocument();
           } else if (page === 'About') {
             // Use getAllByText and take the first one (main heading)
             const aboutElements = screen.getAllByText('About EconGraph');

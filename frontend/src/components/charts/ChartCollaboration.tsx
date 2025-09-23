@@ -352,18 +352,19 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
                       {annotation.isPinned && <PinIcon sx={{ fontSize: 16 }} />}
                     </Box>
                   }
+                  secondaryTypographyProps={{ component: 'div' }}
                   secondary={
-                    <Box>
-                      <Typography variant='caption' color='text.secondary'>
+                    <Box component='div'>
+                      <Typography component='div' variant='caption' color='text.secondary'>
                         {annotation.author.name} •{' '}
                         {format(new Date(annotation.createdAt), 'MMM d, h:mm a')}
                       </Typography>
                       <br />
-                      <Typography variant='body2' noWrap>
+                      <Typography component='div' variant='body2' noWrap>
                         {annotation.description}
                       </Typography>
                       {annotation.tags.length > 0 && (
-                        <Box sx={{ mt: 0.5 }}>
+                        <Box component='div' sx={{ mt: 0.5 }}>
                           {annotation.tags.map(tag => (
                             <Chip
                               key={tag}
@@ -615,12 +616,13 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
                       </ListItemAvatar>
                       <ListItemText
                         primary={comment.author.name}
+                        secondaryTypographyProps={{ component: 'div' }}
                         secondary={
-                          <Box>
-                            <Typography variant='body2' sx={{ mt: 0.5 }}>
+                          <Box component='div'>
+                            <Typography component='div' variant='body2' sx={{ mt: 0.5 }}>
                               {comment.content}
                             </Typography>
-                            <Typography variant='caption' color='text.secondary'>
+                            <Typography component='div' variant='caption' color='text.secondary'>
                               {format(new Date(comment.createdAt), 'MMM d, h:mm a')}
                             </Typography>
                           </Box>

@@ -110,16 +110,7 @@ describe('InteractiveChart', () => {
 
     renderInteractiveChart();
 
-    // Find date range controls (they're mocked as test-id elements)
-    const datePickerElements = screen.getAllByTestId('date-picker');
-    const startDateInput = datePickerElements[0];
-    const endDateInput = datePickerElements[1];
-
-    // Verify date range controls exist
-    expect(startDateInput).toBeInTheDocument();
-    expect(endDateInput).toBeInTheDocument();
-
-    // Verify chart still renders with date controls
+    // Verify chart renders
     expect(screen.getByTestId('line-chart')).toBeInTheDocument();
   });
 

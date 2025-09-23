@@ -9,10 +9,6 @@ import {
   Button,
   Chip,
   LinearProgress,
-  // List, // Unused imports
-  // ListItem,
-  // ListItemText,
-  // ListItemIcon,
   Paper,
   Table,
   TableBody,
@@ -20,6 +16,8 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  CircularProgress,
+  Alert,
 } from '@mui/material';
 import {
   AccountBalance as FedIcon,
@@ -30,6 +28,7 @@ import {
   Schedule as ScheduleIcon,
   TrendingUp as TrendingUpIcon,
 } from '@mui/icons-material';
+import { useDataSources } from '../hooks/useSeriesData';
 
 interface DataSourceInfo {
   id: string;
@@ -44,65 +43,61 @@ interface DataSourceInfo {
   categories: string[];
 }
 
+// Helper function to get icon for data source
+const getDataSourceIcon = (name: string): React.ReactElement => {
+  if (name.toLowerCase().includes('federal reserve') || name.toLowerCase().includes('fred')) {
+    return <FedIcon />;
+  } else if (name.toLowerCase().includes('labor') || name.toLowerCase().includes('bls')) {
+    return <BLSIcon />;
+  } else if (name.toLowerCase().includes('census')) {
+    return <CensusIcon />;
+  } else if (name.toLowerCase().includes('world bank')) {
+    return <WorldBankIcon />;
+  }
+  return <TrendingUpIcon />;
+};
+
+// Helper function to get categories for data source
+const getDataSourceCategories = (name: string): string[] => {
+  if (name.toLowerCase().includes('federal reserve') || name.toLowerCase().includes('fred')) {
+    return ['GDP & Growth', 'Interest Rates', 'Money Supply', 'Exchange Rates'];
+  } else if (name.toLowerCase().includes('labor') || name.toLowerCase().includes('bls')) {
+    return ['Employment', 'Inflation', 'Wages', 'Productivity'];
+  } else if (name.toLowerCase().includes('census')) {
+    return ['Demographics', 'Housing', 'Business', 'Trade'];
+  } else if (name.toLowerCase().includes('world bank')) {
+    return ['Global Development', 'Economic Indicators', 'Social Indicators'];
+  }
+  return ['Economic Data'];
+};
+
 /**
  * REQUIREMENT: Support for Federal Reserve and BLS data sources with monitoring
  * PURPOSE: Display available data sources and their status for transparency
  * This provides users with information about data sources and system status
  */
 const DataSources: React.FC = () => {
-  const dataSources: DataSourceInfo[] = [
-    {
-      id: 'fred',
-      name: 'Federal Reserve Economic Data (FRED)',
-      description:
-        'Economic data from the Federal Reserve Bank of St. Louis, including GDP, employment, inflation, and monetary policy indicators.',
-      baseUrl: 'https://api.stlouisfed.org/fred',
-      icon: <FedIcon />,
-      seriesCount: 12543,
-      lastCrawl: '2024-12-15T10:30:00Z',
-      status: 'active',
-      rateLimit: 120,
-      categories: ['GDP & Growth', 'Interest Rates', 'Money Supply', 'Exchange Rates'],
-    },
-    {
-      id: 'bls',
-      name: 'Bureau of Labor Statistics (BLS)',
-      description:
-        'Labor market data including employment, unemployment, wages, productivity, and consumer prices from the U.S. Department of Labor.',
-      baseUrl: 'https://api.bls.gov/publicAPI/v2',
-      icon: <BLSIcon />,
-      seriesCount: 8932,
-      lastCrawl: '2024-12-15T09:45:00Z',
-      status: 'active',
-      rateLimit: 500,
-      categories: ['Employment', 'Inflation', 'Wages', 'Productivity'],
-    },
-    {
-      id: 'census',
-      name: 'U.S. Census Bureau',
-      description:
-        'Demographic and economic data including population, housing, business, and trade statistics.',
-      baseUrl: 'https://api.census.gov/data',
-      icon: <CensusIcon />,
-      seriesCount: 2156,
-      lastCrawl: '2024-12-15T08:20:00Z',
-      status: 'active',
-      rateLimit: 500,
-      categories: ['Demographics', 'Housing', 'Business', 'Trade'],
-    },
-    {
-      id: 'worldbank',
-      name: 'World Bank Open Data',
-      description: 'Global economic and development indicators covering countries worldwide.',
-      baseUrl: 'https://api.worldbank.org/v2',
-      icon: <WorldBankIcon />,
-      seriesCount: 1823,
-      lastCrawl: '2024-12-15T07:15:00Z',
-      status: 'active',
-      rateLimit: 1000,
-      categories: ['Global Economy', 'Development', 'Trade', 'Demographics'],
-    },
-  ];
+  // Fetch real data sources from backend
+  const hookResult = useDataSources();
+  const { data: backendDataSources, isLoading, error } = hookResult || {};
+
+  // Transform backend data to frontend format
+  const dataSources: DataSourceInfo[] = React.useMemo(() => {
+    if (!backendDataSources) return [];
+
+    return backendDataSources.map((source: any) => ({
+      id: source.id,
+      name: source.name,
+      description: source.description || 'Economic data source',
+      baseUrl: source.base_url,
+      icon: getDataSourceIcon(source.name),
+      seriesCount: source.series_count || 0,
+      lastCrawl: source.updated_at || new Date().toISOString(),
+      status: 'active' as const,
+      rateLimit: source.rate_limit_per_minute || 60,
+      categories: getDataSourceCategories(source.name),
+    }));
+  }, [backendDataSources]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -139,6 +134,31 @@ const DataSources: React.FC = () => {
     if (diffHours < 24) return `${diffHours} hours ago`;
     return date.toLocaleDateString();
   };
+
+  // Handle loading state
+  if (isLoading) {
+    return (
+      <Box
+        sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  // Handle error state
+  if (error) {
+    return (
+      <Box>
+        <Typography variant='h4' component='h1' gutterBottom>
+          Data Sources
+        </Typography>
+        <Alert severity='error'>
+          Failed to load data sources: {error instanceof Error ? error.message : 'Unknown error'}
+        </Alert>
+      </Box>
+    );
+  }
 
   return (
     <Box>

@@ -3,7 +3,9 @@
 use econ_graph_core::database::DatabasePool;
 use econ_graph_core::error::{AppError, AppResult};
 use econ_graph_core::models::{DataSource, EconomicSeries, NewEconomicSeries};
+use econ_graph_metrics::crawler::CRAWLER_METRICS;
 use reqwest::Client;
+use reqwest::StatusCode;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -94,15 +96,28 @@ async fn fetch_imf_economic_datasets(client: &Client) -> AppResult<Vec<ImfDatafl
     // IMF API doesn't require authentication
     let url = "http://dataservices.imf.org/REST/SDMX_JSON.svc/Dataflow";
 
+    let start = std::time::Instant::now();
     let response =
         client.get(url).send().await.map_err(|e| {
             AppError::ExternalApiError(format!("IMF datasets request failed: {}", e))
         })?;
+    let duration = start.elapsed().as_secs_f64();
+    let status = response.status();
+    CRAWLER_METRICS.record_request(
+        "economic",
+        "imf",
+        "/REST/SDMX_JSON.svc/Dataflow",
+        status.as_str(),
+        duration,
+    );
+    if status == StatusCode::TOO_MANY_REQUESTS {
+        CRAWLER_METRICS.record_rate_limit_hit("economic", "imf");
+    }
 
-    if !response.status().is_success() {
+    if !status.is_success() {
         return Err(AppError::ExternalApiError(format!(
             "IMF API returned status: {}",
-            response.status()
+            status
         )));
     }
 
