@@ -410,7 +410,6 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Annotation Filtering', () => {
     it('should filter to show only user annotations', async () => {
-      const user = userEvent.setup();
       renderChartCollaborationConnected();
 
       // Find the select using data-testid
@@ -784,8 +783,6 @@ describe('ChartCollaborationConnected', () => {
     });
 
     it('should show empty state when filtered annotations are empty', async () => {
-      const user = userEvent.setup();
-
       // Create annotations where user has none
       const otherUserAnnotations = mockAnnotations.map(ann => ({
         ...ann,

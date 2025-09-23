@@ -368,6 +368,7 @@ describe('chartCollaborationUtils', () => {
         content: '',
         color: '#f44336',
         annotationType: 'note',
+        isPublic: true,
       });
       expect(result.annotationDate).toMatch(/^\d{4}-\d{2}-\d{2}$/); // ISO date format
     });
