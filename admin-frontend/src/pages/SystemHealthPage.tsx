@@ -305,10 +305,10 @@ export default function SystemHealthPage() {
         }
         sx={{ mb: 3 }}
       >
-        <Typography variant="h6">
+        <Typography variant="h6" data-testid="system-status-display">
           System Status: {overallStatus.toUpperCase()}
         </Typography>
-        <Typography variant="body2">
+        <Typography variant="body2" data-testid="last-update-timestamp">
           Last updated: {lastUpdate.toLocaleString()}
           {loading && " (Refreshing...)"}
         </Typography>

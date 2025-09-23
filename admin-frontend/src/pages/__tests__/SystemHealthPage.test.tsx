@@ -440,34 +440,35 @@ describe("SystemHealthPage", () => {
   });
 
   describe("Overall Status Alert", () => {
-    it("displays overall system status based on service health", async () => {
+    it("displays overall system status based on service health", () => {
       render(
         <TestWrapper>
           <SystemHealthPage />
         </TestWrapper>,
       );
 
-      await waitFor(() => {
-        // Should show warning status due to degraded crawler
-        expect(screen.getByText("System Status: WARNING")).toBeInTheDocument();
-      });
+      // Use data-testid attributes for reliable testing
+      expect(screen.getByTestId("system-status-display")).toHaveTextContent(
+        "System Status: WARNING",
+      );
     });
 
-    it("shows last update timestamp", async () => {
+    it("shows last update timestamp", () => {
       render(
         <TestWrapper>
           <SystemHealthPage />
         </TestWrapper>,
       );
 
-      await waitFor(() => {
-        expect(screen.getByText(/Last updated:/)).toBeInTheDocument();
-      });
+      // Use data-testid attributes for reliable testing
+      expect(screen.getByTestId("last-update-timestamp")).toHaveTextContent(
+        /Last updated:/,
+      );
     });
   });
 
   describe("User Interactions", () => {
-    it("handles refresh button click", async () => {
+    it("handles refresh button click", () => {
       render(
         <TestWrapper>
           <SystemHealthPage />
@@ -478,14 +479,10 @@ describe("SystemHealthPage", () => {
       fireEvent.click(refreshButton);
 
       // Should trigger loading state
-      await waitFor(() => {
-        expect(refreshButton).toBeDisabled();
-      });
+      expect(refreshButton).toBeDisabled();
 
       // Should show refreshing message
-      await waitFor(() => {
-        expect(screen.getByText(/Refreshing\.\.\./)).toBeInTheDocument();
-      });
+      expect(screen.getByText(/Refreshing\.\.\./)).toBeInTheDocument();
     });
 
     it("updates timestamp after refresh", async () => {
