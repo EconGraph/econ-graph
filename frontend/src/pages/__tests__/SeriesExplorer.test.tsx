@@ -49,8 +49,10 @@ describe('SeriesExplorer', () => {
     await user.clear(searchInput);
     await user.type(searchInput, 'GDP');
 
-    // Verify input value
-    expect(searchInput).toHaveValue('GDP');
+    // Wait for the input to be updated
+    await waitFor(() => {
+      expect(searchInput).toHaveValue('GDP');
+    });
 
     // Look for the main search button (not the advanced search icon button)
     const searchButton = screen.queryByRole('button', { name: /^search$/i }) ||
@@ -85,8 +87,10 @@ describe('SeriesExplorer', () => {
     await user.clear(searchInput);
     await user.type(searchInput, 'GDP');
 
-    // Verify the input value is correct
-    expect(searchInput).toHaveValue('GDP');
+    // Wait for the input to be updated
+    await waitFor(() => {
+      expect(searchInput).toHaveValue('GDP');
+    });
 
     // Component structure is ready for search results when backend is connected
     expect(screen.getByText(/explore economic series/i)).toBeInTheDocument();
@@ -106,8 +110,10 @@ describe('SeriesExplorer', () => {
     await user.clear(searchInput);
     await user.type(searchInput, 'GDP');
 
-    // Verify the input value is correct
-    expect(searchInput).toHaveValue('GDP');
+    // Wait for the input to be updated
+    await waitFor(() => {
+      expect(searchInput).toHaveValue('GDP');
+    });
 
     // Component structure is ready for search suggestions when backend is connected
     expect(screen.getByText(/explore economic series/i)).toBeInTheDocument();

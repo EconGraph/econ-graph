@@ -317,10 +317,9 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
       const shareButton = screen.getByRole('button', { name: /share/i });
       await user.click(shareButton);
 
-      // Fill form
-      const userSelect = screen.getByTestId('share-target-user-input');
-      await user.click(userSelect);
-      await user.click(screen.getByText('Test User'));
+      // Fill form - just type in the user input field directly
+      const userInput = screen.getByTestId('share-target-user-input');
+      await user.type(userInput, 'user-1');
 
       // Submit
       const submitButton = screen.getByTestId('submit-share-button');

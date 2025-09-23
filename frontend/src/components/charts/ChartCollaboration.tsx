@@ -405,7 +405,11 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
                       <PinIcon />
                     </IconButton>
 
-                    <IconButton size='small' onClick={() => setSelectedAnnotation(annotation)}>
+                    <IconButton
+                      size='small'
+                      onClick={() => setSelectedAnnotation(annotation)}
+                      data-testid='comment-button'
+                    >
                       <CommentIcon />
                     </IconButton>
 

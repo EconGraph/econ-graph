@@ -413,17 +413,27 @@ describe('ChartCollaborationConnected', () => {
       const user = userEvent.setup();
       renderChartCollaborationConnected();
 
-      const filterSelect = screen.getByTestId('filter-annotations-select');
+      // Find the select using aria-label
+      const filterSelect = screen.getByLabelText('Filter annotations by type');
+
+      // Click the select to open the dropdown
       await user.click(filterSelect);
 
-      // Wait for dropdown options to appear
+      // Wait for the dropdown to appear
       await waitFor(() => {
         expect(screen.getByText('My Annotations (2)')).toBeInTheDocument();
       });
+
+      // Click the "My Annotations" option
       await user.click(screen.getByText('My Annotations (2)'));
 
-      // Should only show user's annotations
-      expect(screen.getByText('GDP Growth Analysis')).toBeInTheDocument();
+      // Wait for the change to take effect and verify the filter is applied
+      await waitFor(() => {
+        // The user's annotation should be visible
+        expect(screen.getByText('GDP Growth Analysis')).toBeInTheDocument();
+      });
+
+      // The other user's annotation should be hidden
       expect(screen.queryByText('Market Correction')).not.toBeInTheDocument();
     });
 
@@ -495,9 +505,8 @@ describe('ChartCollaborationConnected', () => {
       await user.type(dateInput, '2024-01-20');
       await user.type(screen.getByRole('spinbutton'), '110.5');
 
-      // Select annotation type - use getAllByRole and select the first combobox (Annotation Type)
-      const comboboxes = screen.getAllByRole('combobox');
-      const typeSelect = comboboxes[0]; // First combobox is Annotation Type
+      // Select annotation type using aria-label
+      const typeSelect = screen.getByLabelText('Annotation type selection');
       await user.click(typeSelect);
 
       // Wait for dropdown to open and select Analysis option
