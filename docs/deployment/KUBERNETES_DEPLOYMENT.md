@@ -192,6 +192,54 @@ kubectl get endpoints -n econ-graph
 kubectl describe service <service-name> -n econ-graph
 ```
 
+#### NodePort Services Not Accessible (Kind Cluster Issue)
+**Problem**: NodePort services (ports 30000, 30080, 30001, 30002) may not be accessible via `localhost` in kind clusters.
+
+**Root Cause**: Kind runs Kubernetes inside Docker containers, and NodePort services are bound to the kind node's internal network, not the host's localhost.
+
+**Solutions**:
+
+1. **Use Port Forwarding (Recommended)**:
+```bash
+# Frontend
+kubectl port-forward service/econ-graph-frontend-service 3000:3000 -n econ-graph
+# Backend  
+kubectl port-forward service/econ-graph-backend-service 9876:9876 -n econ-graph
+# Admin Frontend
+kubectl port-forward service/econ-graph-admin-frontend-service 3001:3001 -n econ-graph
+# Grafana
+kubectl port-forward service/grafana 3001:3000 -n econ-graph
+```
+
+2. **Configure Kind with Extra Port Mappings**:
+```bash
+# Create kind cluster with port mappings
+kind create cluster --name econ-graph --config - <<EOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  extraPortMappings:
+  - containerPort: 30000
+    hostPort: 30000
+  - containerPort: 30080
+    hostPort: 30080
+  - containerPort: 30001
+    hostPort: 30001
+  - containerPort: 30002
+    hostPort: 30002
+EOF
+```
+
+3. **Use Ingress (For Admin UI)**:
+```bash
+# Add to /etc/hosts (or equivalent)
+echo "127.0.0.1 admin.econ-graph.local" >> /etc/hosts
+
+# Access via ingress controller port
+curl -H "Host: admin.econ-graph.local" http://localhost:30466/admin
+```
+
 #### Database Connection Issues
 ```bash
 # Check PostgreSQL status
