@@ -94,6 +94,7 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
+    "test:serial": "react-scripts test --runInBand --watchAll=false",
     "test:unit": "react-scripts test --testPathIgnorePatterns=src/__tests__/integration --watchAll=false",
     "test:integration": "react-scripts test src/__tests__/integration --watchAll=false",
     "test:xbrl-financial:integration": "react-scripts test src/__tests__/integration/xbrl-financial --watchAll=false",

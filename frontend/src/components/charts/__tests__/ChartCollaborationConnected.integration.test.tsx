@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, StyledEngineProvider } from '@mui/material';
@@ -182,8 +182,8 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
       await user.click(addButton);
 
       // Fill form
-      await user.type(screen.getByRole('textbox', { name: /title/i }), 'Test Title');
-      await user.type(screen.getByRole('textbox', { name: /content/i }), 'Test Content');
+      fireEvent.change(screen.getByRole('textbox', { name: /title/i }), { target: { value: 'Test Title' } });
+      fireEvent.change(screen.getByRole('textbox', { name: /content/i }), { target: { value: 'Test Content' } });
 
       // Submit
       const submitButton = screen.getByTestId('submit-annotation-button');
@@ -215,8 +215,8 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
       await user.click(addButton);
 
       // Fill form
-      await user.type(screen.getByRole('textbox', { name: /title/i }), 'Test Title');
-      await user.type(screen.getByRole('textbox', { name: /content/i }), 'Test Content');
+      fireEvent.change(screen.getByRole('textbox', { name: /title/i }), { target: { value: 'Test Title' } });
+      fireEvent.change(screen.getByRole('textbox', { name: /content/i }), { target: { value: 'Test Content' } });
 
       // Submit
       const submitButton = screen.getByTestId('submit-annotation-button');

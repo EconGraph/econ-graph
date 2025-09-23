@@ -526,7 +526,9 @@ describe('ChartCollaborationConnected', () => {
       const submitButton = screen.getByTestId('submit-annotation-button');
       await user.click(submitButton);
 
-      expect(mockCollaborationHook.createAnnotation).toHaveBeenCalledWith({
+      // Wait for async operation to complete
+      await waitFor(() => {
+        expect(mockCollaborationHook.createAnnotation).toHaveBeenCalledWith({
         series_id: 'series-1',
         annotation_date: expect.any(String), // Default date from form state
         annotation_value: undefined, // Default empty value
@@ -535,7 +537,8 @@ describe('ChartCollaborationConnected', () => {
         annotation_type: 'note', // Default value since dropdown selection is skipped
         color: '#f44336', // Default color
         is_public: true,
-      });
+        });
+      }, { timeout: 300 });
     });
 
     it('should show snackbar on successful creation', async () => {
