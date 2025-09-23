@@ -252,9 +252,9 @@ describe('FinancialDashboard', () => {
     // Initially should show 10-K data
     expect(screen.getByText('10-K (2023)')).toBeInTheDocument();
 
-    // Look for quarterly statement data  
+    // Look for quarterly statement data
     expect(screen.getByText('10-Q (Q3 2023)')).toBeInTheDocument();
-    
+
     // Should show Q3 data somewhere (multiple instances expected)
     expect(screen.getAllByText(/Q3/).length).toBeGreaterThan(0);
   });

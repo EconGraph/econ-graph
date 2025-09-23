@@ -97,7 +97,7 @@ describe('FinancialAlerts', () => {
 
     // Should show severity filter options are available in the component
     expect(screen.getByText('Severity:')).toBeInTheDocument();
-    
+
     // Since the options are in SelectContent, they may not be visible until clicked
     // For now, just verify the filter exists
     expect(screen.getByText('Severity:')).toBeInTheDocument();
