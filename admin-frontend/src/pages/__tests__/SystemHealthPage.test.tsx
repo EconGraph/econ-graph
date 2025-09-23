@@ -11,25 +11,25 @@ import { AuthProvider } from "../../contexts/AuthContext";
 import { SecurityProvider } from "../../contexts/SecurityContext";
 
 // Mock the contexts
-const mockAuthContext = {
-  user: {
-    id: "1",
-    name: "Test Admin",
-    email: "admin@test.com",
-    role: "admin",
-  },
-  login: jest.fn(),
-  logout: jest.fn(),
-  isAuthenticated: true,
-  loading: false,
-};
+// const mockAuthContext = {
+//   user: {
+//     id: "1",
+//     name: "Test Admin",
+//     email: "admin@test.com",
+//     role: "admin",
+//   },
+//   login: jest.fn(),
+//   logout: jest.fn(),
+//   isAuthenticated: true,
+//   loading: false,
+// };
 
-const mockSecurityContext = {
-  checkAccess: jest.fn(() => true),
-  sessionRemainingTime: 3600,
-  securityEvents: [],
-  refreshSecurityContext: jest.fn(),
-};
+// const mockSecurityContext = {
+//   checkAccess: jest.fn(() => true),
+//   sessionRemainingTime: 3600,
+//   securityEvents: [],
+//   refreshSecurityContext: jest.fn(),
+// };
 
 // Create a test theme
 const theme = createTheme();

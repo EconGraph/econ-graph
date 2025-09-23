@@ -24,24 +24,24 @@ const mockAuthContext = {
   loading: false,
 };
 
-const mockSecurityContext = {
-  checkAccess: jest.fn((role: string) => {
-    // Mock role-based access control
-    const userRole = mockAuthContext.user.role;
-    const roleHierarchy = {
-      read_only: ["read_only"],
-      admin: ["read_only", "admin"],
-      super_admin: ["read_only", "admin", "super_admin"],
-    };
-    return (
-      roleHierarchy[userRole as keyof typeof roleHierarchy]?.includes(role) ||
-      false
-    );
-  }),
-  sessionRemainingTime: 3600, // 1 hour
-  securityEvents: [],
-  refreshSecurityContext: jest.fn(),
-};
+// const mockSecurityContext = {
+//   checkAccess: jest.fn((role: string) => {
+//     // Mock role-based access control
+//     const userRole = mockAuthContext.user.role;
+//     const roleHierarchy = {
+//       read_only: ["read_only"],
+//       admin: ["read_only", "admin"],
+//       super_admin: ["read_only", "admin", "super_admin"],
+//     };
+//     return (
+//       roleHierarchy[userRole as keyof typeof roleHierarchy]?.includes(role) ||
+//       false
+//     );
+//   }),
+//   sessionRemainingTime: 3600, // 1 hour
+//   securityEvents: [],
+//   refreshSecurityContext: jest.fn(),
+// };
 
 // Mock React Router
 const mockNavigate = jest.fn();
@@ -211,21 +211,7 @@ describe("AdminLayout", () => {
     });
 
     it("shows notifications badge when security events exist", () => {
-      const contextWithEvents = {
-        ...mockSecurityContext,
-        securityEvents: [
-          {
-            id: "1",
-            type: "failed_login",
-            timestamp: new Date().toISOString(),
-          },
-          {
-            id: "2",
-            type: "permission_denied",
-            timestamp: new Date().toISOString(),
-          },
-        ],
-      };
+      // Test implementation would go here
 
       render(
         <BrowserRouter>
@@ -245,10 +231,7 @@ describe("AdminLayout", () => {
     });
 
     it("formats session time correctly", () => {
-      const contextWithCustomTime = {
-        ...mockSecurityContext,
-        sessionRemainingTime: 3661, // 1 hour, 1 minute, 1 second
-      };
+      // Test implementation would go here
 
       render(
         <BrowserRouter>
@@ -287,13 +270,7 @@ describe("AdminLayout", () => {
 
   describe("Role-based Access Control", () => {
     it("hides navigation items for read-only users", () => {
-      const readOnlyUser = {
-        ...mockAuthContext,
-        user: {
-          ...mockAuthContext.user,
-          role: "read_only",
-        },
-      };
+      // Test implementation would go here
 
       render(
         <BrowserRouter>
@@ -322,13 +299,7 @@ describe("AdminLayout", () => {
     });
 
     it("shows admin items for admin users", () => {
-      const adminUser = {
-        ...mockAuthContext,
-        user: {
-          ...mockAuthContext.user,
-          role: "admin",
-        },
-      };
+      // Test implementation would go here
 
       render(
         <BrowserRouter>
@@ -355,10 +326,7 @@ describe("AdminLayout", () => {
 
   describe("Error Handling", () => {
     it("handles missing user data gracefully", () => {
-      const contextWithoutUser = {
-        ...mockAuthContext,
-        user: null,
-      };
+      // Test implementation would go here
 
       render(
         <BrowserRouter>

@@ -9,16 +9,7 @@
  */
 
 import React, { useState } from "react";
-import {
-  Box,
-  Typography,
-  Paper,
-  Container,
-  Tabs,
-  Tab,
-  Alert,
-  CircularProgress,
-} from "@mui/material";
+import { Box, Typography, Paper, Container, Tabs, Tab } from "@mui/material";
 import { ApolloProvider } from "@apollo/client/react";
 import { apolloClient } from "./services/graphqlClient";
 import CrawlerDashboard from "./pages/CrawlerDashboard";

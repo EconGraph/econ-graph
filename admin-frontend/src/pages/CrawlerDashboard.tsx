@@ -9,7 +9,7 @@
  * - Error monitoring and logs
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Box,
   Card,
@@ -31,50 +31,19 @@ import {
   IconButton,
   Tooltip,
   CircularProgress,
-  Divider,
 } from "@mui/material";
 import {
   PlayArrow,
   Stop,
   Refresh,
-  Warning,
   CheckCircle,
   Error,
   Info,
-  History,
-  Settings,
-  Analytics,
 } from "@mui/icons-material";
 import { format } from "date-fns";
 import { useCrawlerData } from "../hooks/useCrawlerData";
 
 // Types for crawler data
-interface CrawlerStatus {
-  is_running: boolean;
-  active_workers: number;
-  last_crawl: string | null;
-  next_scheduled_crawl: string | null;
-}
-
-interface ActivityItem {
-  id: string;
-  timestamp: string;
-  source: string;
-  series: string;
-  status: string;
-  duration: number;
-}
-
-interface QueueStatistics {
-  total_items: number;
-  pending_items: number;
-  processing_items: number;
-  completed_items: number;
-  failed_items: number;
-  retrying_items: number;
-  oldest_pending: string | null;
-  average_processing_time: number | null;
-}
 
 interface CrawlerDashboardProps {
   // Props can be added as needed for configuration
@@ -144,34 +113,6 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
   const getStatusIcon = (status: boolean) => {
     return status ? <CheckCircle /> : <Error />;
   };
-
-  // Mock recent activity data (this would come from a separate query)
-  const recentActivity: ActivityItem[] = [
-    {
-      id: "1",
-      timestamp: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
-      source: "FRED",
-      series: "GDP",
-      status: "completed",
-      duration: 2.3,
-    },
-    {
-      id: "2",
-      timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-      source: "BLS",
-      series: "UNEMPLOYMENT",
-      status: "failed",
-      duration: 0.1,
-    },
-    {
-      id: "3",
-      timestamp: new Date(Date.now() - 8 * 60 * 1000).toISOString(),
-      source: "Census",
-      series: "POPULATION",
-      status: "completed",
-      duration: 1.8,
-    },
-  ];
 
   if (loading) {
     return (

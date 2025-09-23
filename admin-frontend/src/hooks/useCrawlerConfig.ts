@@ -282,7 +282,7 @@ export const useCrawlerConfiguration = () => {
   const refreshAll = useCallback(() => {
     config.refresh();
     dataSources.refresh();
-  }, [config.refresh, dataSources.refresh]);
+  }, [config, dataSources]);
 
   return {
     config,

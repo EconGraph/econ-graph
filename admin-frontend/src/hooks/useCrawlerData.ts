@@ -8,7 +8,7 @@
  * - Error handling and loading states
  */
 
-import { useQuery, useMutation, useSubscription } from "@apollo/client/react";
+import { useQuery, useMutation } from "@apollo/client/react";
 import { useCallback, useEffect, useState } from "react";
 import {
   GET_CRAWLER_STATUS,
@@ -285,7 +285,7 @@ export const useCrawlerData = (autoRefresh: boolean = true) => {
     status.refresh();
     queueStats.refresh();
     performance.refresh();
-  }, [status.refresh, queueStats.refresh, performance.refresh]);
+  }, [status, queueStats, performance]);
 
   return {
     status,

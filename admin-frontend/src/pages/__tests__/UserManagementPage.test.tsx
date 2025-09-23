@@ -24,25 +24,25 @@ const mockSuperAdminContext = {
   loading: false,
 };
 
-const mockAdminContext = {
-  user: {
-    id: "2",
-    name: "Admin User",
-    email: "admin@test.com",
-    role: "admin",
-  },
-  login: jest.fn(),
-  logout: jest.fn(),
-  isAuthenticated: true,
-  loading: false,
-};
+// const mockAdminContext = {
+//   user: {
+//     id: "2",
+//     name: "Admin User",
+//     email: "admin@test.com",
+//     role: "admin",
+//   },
+//   login: jest.fn(),
+//   logout: jest.fn(),
+//   isAuthenticated: true,
+//   loading: false,
+// };
 
-const mockSecurityContext = {
-  checkAccess: jest.fn((role: string) => role === "super_admin"),
-  sessionRemainingTime: 3600,
-  securityEvents: [],
-  refreshSecurityContext: jest.fn(),
-};
+// const mockSecurityContext = {
+//   checkAccess: jest.fn((role: string) => role === "super_admin"),
+//   sessionRemainingTime: 3600,
+//   securityEvents: [],
+//   refreshSecurityContext: jest.fn(),
+// };
 
 // Create a test theme
 const theme = createTheme();
@@ -83,10 +83,7 @@ describe("UserManagementPage", () => {
     });
 
     it("denies access for non-super_admin users", () => {
-      const nonSuperAdminSecurity = {
-        ...mockSecurityContext,
-        checkAccess: jest.fn(() => false),
-      };
+      // Test implementation would go here
 
       render(
         <BrowserRouter>

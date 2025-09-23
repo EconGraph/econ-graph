@@ -10,13 +10,7 @@
  */
 
 import React from "react";
-import {
-  render,
-  screen,
-  fireEvent,
-  waitFor,
-  act,
-} from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import userEvent from "@testing-library/user-event";
 import CrawlerConfig from "../CrawlerConfig";
@@ -243,12 +237,11 @@ describe("CrawlerConfig", () => {
 
       expect(fredSwitch).toBeChecked();
 
-      if (fredSwitch) {
-        await user.click(fredSwitch);
-        expect(fredSwitch).not.toBeChecked();
-      } else {
-        throw new Error("FRED switch not found");
-      }
+      // This test assumes FRED switch exists
+      expect(fredSwitch).toBeInTheDocument();
+      expect(fredSwitch).not.toBeNull();
+      await user.click(fredSwitch!);
+      expect(fredSwitch).not.toBeChecked();
     });
 
     it("updates source priority", async () => {

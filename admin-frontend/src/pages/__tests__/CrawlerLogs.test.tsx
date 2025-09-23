@@ -11,13 +11,7 @@
  */
 
 import React from "react";
-import {
-  render,
-  screen,
-  fireEvent,
-  waitFor,
-  act,
-} from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import userEvent from "@testing-library/user-event";
 import CrawlerLogs from "../CrawlerLogs";

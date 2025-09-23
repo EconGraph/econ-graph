@@ -11,13 +11,7 @@
  */
 
 import React from "react";
-import {
-  render,
-  screen,
-  fireEvent,
-  waitFor,
-  act,
-} from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import userEvent from "@testing-library/user-event";
 import CrawlerDashboard from "../CrawlerDashboard";
@@ -213,15 +207,11 @@ describe("CrawlerDashboard", () => {
         jest.advanceTimersByTime(1000);
       });
 
-      // Simulate error state
-      const errorAlert = screen.queryByRole("alert");
-      if (errorAlert) {
-        const closeButton = screen.getByRole("button", { name: /close/i });
-        await userEvent.click(closeButton);
-        expect(errorAlert).not.toBeInTheDocument();
-      } else {
-        throw new Error("Error alert not found");
-      }
+      // Simulate error state - this test assumes error alert exists
+      const errorAlert = screen.getByRole("alert");
+      const closeButton = screen.getByRole("button", { name: /close/i });
+      await userEvent.click(closeButton);
+      expect(errorAlert).not.toBeInTheDocument();
     });
   });
 

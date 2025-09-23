@@ -9,7 +9,7 @@
  * - Data source health monitoring
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Box,
   Card,
@@ -40,20 +40,17 @@ import {
   Select,
   MenuItem,
   Slider,
-  Divider,
 } from "@mui/material";
 import {
   Settings,
   Save,
   Refresh,
   Edit,
-  Delete,
   Add,
   CheckCircle,
   Error,
   Warning,
   Info,
-  Schedule,
   Speed,
   Security,
 } from "@mui/icons-material";
@@ -72,7 +69,7 @@ interface DataSource {
   health_status: "healthy" | "warning" | "error";
 }
 
-interface CrawlerConfig {
+interface CrawlerConfigData {
   global_enabled: boolean;
   max_workers: number;
   queue_size_limit: number;
@@ -85,7 +82,7 @@ interface CrawlerConfig {
 }
 
 const CrawlerConfig: React.FC = () => {
-  const [config, setConfig] = useState<CrawlerConfig>({
+  const [config, setConfig] = useState<CrawlerConfigData>({
     global_enabled: true,
     max_workers: 5,
     queue_size_limit: 10000,
@@ -153,8 +150,8 @@ const CrawlerConfig: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleConfigChange = (field: keyof CrawlerConfig, value: any) => {
-    setConfig((prev) => ({
+  const handleConfigChange = (field: keyof CrawlerConfigData, value: any) => {
+    setConfig((prev: CrawlerConfigData) => ({
       ...prev,
       [field]: value,
     }));
@@ -165,7 +162,7 @@ const CrawlerConfig: React.FC = () => {
     field: keyof DataSource,
     value: any,
   ) => {
-    setDataSources((prev) =>
+    setDataSources((prev: DataSource[]) =>
       prev.map((source) =>
         source.id === id ? { ...source, [field]: value } : source,
       ),

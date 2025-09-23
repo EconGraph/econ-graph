@@ -35,15 +35,8 @@ import {
   MenuItem,
   Switch,
   FormControlLabel,
-  Divider,
   LinearProgress,
   Badge,
-  Tabs,
-  Tab,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
 } from "@mui/material";
 import {
   Refresh,
@@ -51,10 +44,6 @@ import {
   Search,
   FilterList,
   Clear,
-  PlayArrow,
-  Pause,
-  Stop,
-  Warning,
   Error,
   Info,
   CheckCircle,
@@ -112,11 +101,9 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
   const [levelFilter, setLevelFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [selectedTab, setSelectedTab] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const logContainerRef = useRef<HTMLDivElement>(null);
   const autoRefreshRef = useRef<NodeJS.Timeout | null>(null);
 
   // Mock log data for development
@@ -282,16 +269,6 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
         return <Info />;
     }
   };
-
-  const TabPanel = ({
-    children,
-    value,
-    index,
-  }: {
-    children: React.ReactNode;
-    value: number;
-    index: number;
-  }) => <div hidden={value !== index}>{value === index && children}</div>;
 
   return (
     <Box sx={{ p: 3 }}>

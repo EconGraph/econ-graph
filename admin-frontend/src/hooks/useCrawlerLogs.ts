@@ -374,12 +374,7 @@ export const useCrawlerMonitoring = (
     performance.refresh();
     systemHealth.refresh();
     logStats.refresh();
-  }, [
-    logs.refresh,
-    performance.refresh,
-    systemHealth.refresh,
-    logStats.refresh,
-  ]);
+  }, [logs, performance, systemHealth, logStats]);
 
   return {
     logs,

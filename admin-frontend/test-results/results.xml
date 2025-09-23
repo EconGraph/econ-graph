@@ -1,0 +1,10 @@
+<testsuites id="" name="" tests="3" failures="0" skipped="0" errors="0" time="24.694712">
+<testsuite name="demo.spec.ts" timestamp="2025-09-23T04:51:27.569Z" hostname="chromium" tests="3" failures="0" skipped="0" time="30.454" errors="0">
+<testcase name="Crawler Admin Demo › should demonstrate the complete crawler admin interface" classname="demo.spec.ts" time="15.249">
+</testcase>
+<testcase name="Crawler Admin Demo › should demonstrate mobile responsiveness" classname="demo.spec.ts" time="8.309">
+</testcase>
+<testcase name="Crawler Admin Demo › should demonstrate tablet responsiveness" classname="demo.spec.ts" time="6.896">
+</testcase>
+</testsuite>
+</testsuites>
