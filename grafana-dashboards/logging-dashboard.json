@@ -1,0 +1,171 @@
+{
+  "id": null,
+  "uid": "econgraph-logging",
+  "title": "EconGraph Logs & Debugging",
+  "description": "Real-time log monitoring and debugging for EconGraph platform",
+  "tags": [
+    "econgraph",
+    "logs",
+    "debugging"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 37,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Authentication Logs",
+      "type": "logs",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "{app=\"econ-graph-backend\"} |= \"auth\"",
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki-uid"
+          }
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Database Connection Logs",
+      "type": "logs",
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "targets": [
+        {
+          "expr": "{app=\"econ-graph-backend\"} |= \"database\" |= \"connection\"",
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki-uid"
+          }
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Error Logs",
+      "type": "logs",
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "targets": [
+        {
+          "expr": "{namespace=\"econ-graph\"} |= \"error\" |= \"ERROR\"",
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki-uid"
+          }
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 4,
+      "title": "All Backend Logs",
+      "type": "logs",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "{app=\"econ-graph-backend\"}",
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki-uid"
+          }
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "type": "textbox",
+        "label": "Namespace",
+        "query": "econ-graph",
+        "current": {
+          "selected": false,
+          "text": "econ-graph",
+          "value": "econ-graph"
+        }
+      },
+      {
+        "name": "app",
+        "type": "textbox",
+        "label": "App",
+        "query": "econ-graph-backend",
+        "current": {
+          "selected": false,
+          "text": "econ-graph-backend",
+          "value": "econ-graph-backend"
+        }
+      }
+    ]
+  }
+}
