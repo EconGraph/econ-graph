@@ -112,16 +112,16 @@ const mockUsers = {
   },
 };
 
-  // const mockComments = [
-  // {
-  //   id: 'comment-1',
-  //   annotationId: 'annotation-2',
-  //   userId: 'user-1',
-  //   content: 'I agree with this analysis',
-  //   createdAt: '2024-01-16T11:00:00Z',
-  //   updatedAt: '2024-01-16T11:00:00Z',
-  // },
-  // ];
+  const mockComments = [
+  {
+    id: 'comment-1',
+    annotationId: 'annotation-2',
+    userId: 'user-1',
+    content: 'I agree with this analysis',
+    createdAt: '2024-01-16T11:00:00Z',
+    updatedAt: '2024-01-16T11:00:00Z',
+  },
+  ];
 
 // Mock collaboration hook return value
 const mockCollaborationHook = {
@@ -143,7 +143,9 @@ const mockCollaborationHook = {
     console.log('getUserById returning:', user);
     return user;
   }),
-  getCommentsForAnnotation: jest.fn(() => []), // Always return empty array for simplicity
+  getCommentsForAnnotation: jest.fn((annotationId) => {
+    return mockComments.filter(comment => comment.annotationId === annotationId);
+  }),
 };
 
 const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -592,11 +594,14 @@ describe('ChartCollaborationConnected', () => {
       const user = userEvent.setup();
       renderChartCollaborationConnected();
 
-      // Open comments for annotation with comments
-      const commentButtons = screen.getAllByTestId('CommentIcon');
-      await user.click(commentButtons[1]); // Second annotation has comments
+      // Select an annotation to open comments dialog
+      const annotationTitles = screen.getAllByText('Market Correction');
+      await user.click(annotationTitles[0]);
 
-      expect(screen.getByText('I agree with this analysis')).toBeInTheDocument();
+      // Wait for comments dialog to open
+      await waitFor(() => {
+        expect(screen.getByText('I agree with this analysis')).toBeInTheDocument();
+      });
       expect(screen.getByText('Test User')).toBeInTheDocument();
     });
 
@@ -604,9 +609,14 @@ describe('ChartCollaborationConnected', () => {
       const user = userEvent.setup();
       renderChartCollaborationConnected();
 
-      // Open comments dialog
-      const commentButtons = screen.getAllByTestId('CommentIcon');
-      await user.click(commentButtons[0]);
+      // Select an annotation to open comments dialog
+      const annotationTitles = screen.getAllByText('GDP Growth Analysis');
+      await user.click(annotationTitles[0]);
+
+      // Wait for comments dialog to open
+      await waitFor(() => {
+        expect(screen.getByTestId('comment-input')).toBeInTheDocument();
+      });
 
       // Add comment
       const commentInput = screen.getByTestId('comment-input');
