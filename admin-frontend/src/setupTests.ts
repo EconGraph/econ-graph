@@ -15,15 +15,15 @@ import { configure } from "@testing-library/react";
 
 // Configure React Testing Library for admin frontend
 configure({
-  asyncUtilTimeout: 10000, // Increase timeout for CI environment
+  asyncUtilTimeout: 2000,
   testIdAttribute: "data-testid",
 });
 
 // Set Jest timeout for CI environment
 if (process.env.CI) {
-  jest.setTimeout(30000); // 30 seconds for CI
+  jest.setTimeout(15000);
 } else {
-  jest.setTimeout(10000); // 10 seconds for local
+  jest.setTimeout(5000);
 }
 
 // Mock crypto for UUID generation
@@ -63,44 +63,71 @@ jest.mock("@apollo/client", () => ({
 }));
 
 // Mock GraphQL hooks for crawler admin functionality
-jest.mock("./hooks/useCrawlerData", () => ({
+const useCrawlerDataPath = require.resolve("./hooks/useCrawlerData");
+jest.mock(useCrawlerDataPath, () => ({
   useCrawlerData: jest.fn(() => ({
     status: {
-      data: {
+      status: {
         is_running: true,
         active_workers: 5,
         last_crawl: new Date().toISOString(),
         next_scheduled_crawl: new Date(Date.now() + 60000).toISOString(),
       },
-      loading: false,
-      error: null,
-      refresh: jest.fn(),
     },
     queueStats: {
-      data: {
+      statistics: {
         total_items: 1000,
         pending_items: 25,
         processing_items: 10,
         completed_items: 950,
         failed_items: 15,
+        retrying_items: 2,
+        average_processing_time: 2.5,
       },
-      loading: false,
-      error: null,
-      refresh: jest.fn(),
     },
-    performance: {
-      data: {
-        avg_processing_time: 2.5,
-        success_rate: 0.95,
-        throughput_per_hour: 100,
+    control: {
+      actions: {
+        triggerCrawl: jest.fn().mockResolvedValue({}),
+        stopCrawler: jest.fn().mockResolvedValue({}),
       },
-      loading: false,
-      error: null,
-      refresh: jest.fn(),
     },
+    refreshAll: jest.fn().mockResolvedValue(undefined),
     loading: false,
     error: null,
-    refreshAll: jest.fn(),
+  })),
+}));
+
+// Also mock by module specifier string to ensure resolution matches component imports
+jest.mock("./hooks/useCrawlerData", () => ({
+  useCrawlerData: jest.fn(() => ({
+    status: {
+      status: {
+        is_running: true,
+        active_workers: 5,
+        last_crawl: new Date().toISOString(),
+        next_scheduled_crawl: new Date(Date.now() + 60000).toISOString(),
+      },
+    },
+    queueStats: {
+      statistics: {
+        total_items: 1000,
+        pending_items: 25,
+        processing_items: 10,
+        completed_items: 950,
+        failed_items: 15,
+        retrying_items: 2,
+        average_processing_time: 2.5,
+      },
+    },
+    control: {
+      actions: {
+        triggerCrawl: jest.fn().mockResolvedValue({}),
+        stopCrawler: jest.fn().mockResolvedValue({}),
+      },
+    },
+    refreshAll: jest.fn().mockResolvedValue(undefined),
+    loading: false,
+    error: null,
   })),
 }));
 
@@ -246,12 +273,18 @@ global.IntersectionObserver = jest.fn().mockImplementation(() => ({
 }));
 
 // Mock ResizeObserver with proper implementation
-global.ResizeObserver = jest.fn().mockImplementation((callback) => ({
-  observe: jest.fn(),
-  unobserve: jest.fn(),
-  disconnect: jest.fn(),
-  callback,
-}));
+class ResizeObserverMock {
+  callback: any;
+  constructor(callback: any) {
+    this.callback = callback;
+  }
+  observe = jest.fn();
+  unobserve = jest.fn();
+  disconnect = jest.fn();
+}
+// Assign on both global and window
+(global as any).ResizeObserver = ResizeObserverMock as any;
+(window as any).ResizeObserver = ResizeObserverMock as any;
 
 // Mock WebSocket for real-time features
 global.WebSocket = jest.fn().mockImplementation(() => ({

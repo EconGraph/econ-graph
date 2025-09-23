@@ -210,10 +210,16 @@ export default function MonitoringPage() {
             href="http://localhost:30001"
             target="_blank"
             rel="noopener noreferrer"
+            data-testid="open-grafana-button"
           >
             Open Grafana
           </Button>
-          <IconButton onClick={handleRefresh} disabled={loading}>
+          <IconButton
+            onClick={handleRefresh}
+            disabled={loading}
+            aria-label="Refresh monitoring data"
+            data-testid="monitor-refresh-button"
+          >
             <Refresh />
           </IconButton>
         </Box>
@@ -285,7 +291,11 @@ export default function MonitoringPage() {
 
       {/* Service Status */}
       <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
+        <Typography
+          variant="h6"
+          gutterBottom
+          data-testid="service-status-title"
+        >
           Service Status
         </Typography>
         <Grid container spacing={2}>
@@ -306,10 +316,14 @@ export default function MonitoringPage() {
 
       <Paper sx={{ width: "100%" }}>
         <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
-          <Tabs value={tabValue} onChange={handleTabChange}>
-            <Tab label="Dashboard Overview" />
-            <Tab label="Embedded Views" />
-            <Tab label="Quick Metrics" />
+          <Tabs
+            value={tabValue}
+            onChange={handleTabChange}
+            data-testid="monitor-tabs"
+          >
+            <Tab label="Dashboard Overview" data-testid="tab-overview" />
+            <Tab label="Embedded Views" data-testid="tab-embedded" />
+            <Tab label="Quick Metrics" data-testid="tab-metrics" />
           </Tabs>
         </Box>
 
