@@ -1,11 +1,6 @@
 name: Admin Frontend Tests
 
 on:
-  push:
-    branches: [ main, develop, feature/admin-crawler-ui ]
-    paths:
-      - 'admin-frontend/**'
-      - '.github/workflows/admin-frontend-tests.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
