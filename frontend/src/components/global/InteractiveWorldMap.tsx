@@ -107,7 +107,9 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
       .attr('width', width)
       .attr('height', height)
       .attr('viewBox', `0 0 ${width} ${height}`)
-      .style('background-color', '#f8f9fa');
+      .style('background-color', '#f5f5f5')
+      .style('border-radius', '8px')
+      .style('box-shadow', '0 2px 8px rgba(0,0,0,0.1)');
 
     // Create map container
     const mapContainer = svg.append('g').attr('class', 'map-container');
@@ -141,12 +143,13 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
           const indicator = countryData.economicIndicators.find(
             ind => ind.name === selectedIndicator
           );
-          return indicator ? colorScale(indicator.value) : '#e0e0e0';
+          return indicator ? colorScale(indicator.value) : '#d0d0d0';
         }
-        return '#e0e0e0';
+        return '#d0d0d0';
       })
-      .style('stroke', showBorders ? '#ffffff' : 'none')
-      .style('stroke-width', showBorders ? '0.5' : '0')
+      .style('stroke', showBorders ? '#ffffff' : '#cccccc')
+      .style('stroke-width', showBorders ? '1' : '0.5')
+      .style('opacity', '0.9')
       .style('cursor', 'pointer')
       .on('click', (event: MouseEvent, d: any) => {
         const countryCode = d.properties.ISO_A2;
@@ -162,14 +165,18 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
           onCountryHover(countryData);
           d3.select(event.currentTarget as SVGElement)
             .style('stroke', '#1976d2')
-            .style('stroke-width', '2');
+            .style('stroke-width', '3')
+            .style('opacity', '1')
+            .style('filter', 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))');
         }
       })
       .on('mouseout', (event: MouseEvent) => {
         onCountryHover(null);
         d3.select(event.currentTarget as SVGElement)
-          .style('stroke', showBorders ? '#ffffff' : 'none')
-          .style('stroke-width', showBorders ? '0.5' : '0');
+          .style('stroke', showBorders ? '#ffffff' : '#cccccc')
+          .style('stroke-width', showBorders ? '1' : '0.5')
+          .style('opacity', '0.9')
+          .style('filter', 'none');
       });
 
     // Draw country borders
@@ -181,7 +188,8 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
         .attr('d', (d: any) => path(d))
         .style('fill', 'none')
         .style('stroke', '#ffffff')
-        .style('stroke-width', '0.5');
+        .style('stroke-width', '1')
+        .style('opacity', '0.8');
     }
 
     // Add country labels
@@ -203,9 +211,11 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
         .attr('text-anchor', 'middle')
         .attr('font-size', labelSize)
         .attr('font-family', 'Arial, sans-serif')
-        .attr('fill', '#333333')
+        .attr('fill', '#2c3e50')
+        .attr('font-weight', '500')
         .text((d: any) => d.properties.NAME)
-        .style('pointer-events', 'none');
+        .style('pointer-events', 'none')
+        .style('text-shadow', '1px 1px 2px rgba(255,255,255,0.8)');
     }
 
     // Set up zoom behavior
@@ -248,11 +258,21 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
     <Box
       width={width}
       height={height}
-      border='1px solid #e0e0e0'
-      borderRadius={1}
+      border='2px solid #e0e0e0'
+      borderRadius={2}
       overflow='hidden'
+      boxShadow='0 4px 12px rgba(0,0,0,0.15)'
+      bgcolor='#fafafa'
     >
-      <svg ref={svgRef} width={width} height={height} style={{ display: 'block' }} />
+      <svg
+        ref={svgRef}
+        width={width}
+        height={height}
+        style={{
+          display: 'block',
+          borderRadius: '6px',
+        }}
+      />
     </Box>
   );
 };
