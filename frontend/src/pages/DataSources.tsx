@@ -83,9 +83,12 @@ const DataSources: React.FC = () => {
 
   // Transform backend data to frontend format
   const dataSources: DataSourceInfo[] = React.useMemo(() => {
+    console.log('DataSources component - backendDataSources:', backendDataSources);
+    console.log('DataSources component - dataSources length:', backendDataSources?.length || 0);
+
     if (!backendDataSources) return [];
 
-    return backendDataSources.map((source: any) => ({
+    const transformed = backendDataSources.map((source: any) => ({
       id: source.id,
       name: source.name,
       description: source.description || 'Economic data source',
@@ -97,6 +100,9 @@ const DataSources: React.FC = () => {
       rateLimit: source.rate_limit_per_minute || 60,
       categories: getDataSourceCategories(source.name),
     }));
+
+    console.log('DataSources component - transformed dataSources:', transformed);
+    return transformed;
   }, [backendDataSources]);
 
   const getStatusColor = (status: string) => {
