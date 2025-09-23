@@ -397,6 +397,13 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
               onChange={e => setFilterBy(e.target.value as any)}
               label='Filter Annotations'
               data-testid='filter-annotations-select'
+              inputProps={{
+                'aria-label': 'Filter annotations by type',
+              }}
+              MenuProps={{
+                disablePortal: true,
+                container: document.body,
+              }}
             >
               <MenuItem value='all'>All Annotations ({annotations.length})</MenuItem>
               <MenuItem value='mine'>
@@ -614,6 +621,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                 }
                 label='Annotation Type'
                 aria-label='Annotation type selection'
+                MenuProps={{ disablePortal: true }}
               >
                 {ANNOTATION_TYPES.map(type => (
                   <MenuItem key={type.value} value={type.value}>
@@ -654,6 +662,10 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                   setAnnotationForm(prev => ({ ...prev, isPublic: e.target.value === 'true' }))
                 }
                 label='Visibility'
+                inputProps={{
+                  'aria-label': 'Select annotation visibility',
+                }}
+                MenuProps={{ disablePortal: true }}
               >
                 <MenuItem value='true'>Public - Visible to all collaborators</MenuItem>
                 <MenuItem value='false'>Private - Only visible to you</MenuItem>
@@ -775,6 +787,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                 label='Permission Level'
                 inputProps={{ 'data-testid': 'share-permission-level-select' }}
                 aria-label='Permission level'
+                MenuProps={{ disablePortal: true }}
               >
                 <MenuItem value='view'>View - Can view annotations</MenuItem>
                 <MenuItem value='comment'>Comment - Can view and comment</MenuItem>

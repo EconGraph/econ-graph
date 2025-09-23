@@ -431,13 +431,31 @@ describe('ChartCollaborationConnected', () => {
       const user = userEvent.setup();
       renderChartCollaborationConnected();
 
-      const filterSelect = screen.getByTestId('filter-annotations-select');
+      // Find the select using aria-label
+      const filterSelect = screen.getByLabelText('Filter annotations by type');
+
+      // Verify initial state
+      expect(filterSelect).toBeInTheDocument();
+
+      // Click the select to open the dropdown
       await user.click(filterSelect);
+
+      // Wait for the dropdown to appear
+      await waitFor(() => {
+        expect(screen.getByText('Pinned (1)')).toBeInTheDocument();
+      });
+
+      // Click the "Pinned" option
       await user.click(screen.getByText('Pinned (1)'));
 
-      // Should only show pinned annotations
+      // Wait for the change to take effect and verify the filter is applied
+      await waitFor(() => {
+        // The pinned annotation should be visible
+        expect(screen.getByText('Market Correction')).toBeInTheDocument();
+      });
+
+      // The non-pinned annotation should be hidden
       expect(screen.queryByText('GDP Growth Analysis')).not.toBeInTheDocument();
-      expect(screen.getByText('Market Correction')).toBeInTheDocument();
     });
   });
 

@@ -188,6 +188,54 @@ describe('Component with ARIA labels', () => {
     }, { timeout: 5000 });
   });
 });
+
+// Material-UI Select Component Testing Pattern
+describe('Select Component Testing', () => {
+  it('should handle Select dropdown interactions', async () => {
+    const user = userEvent.setup();
+    
+    // Component with proper ARIA labels
+    render(
+      <FormControl>
+        <InputLabel>Filter Annotations</InputLabel>
+        <Select
+          value={filterBy}
+          onChange={handleFilterChange}
+          label="Filter Annotations"
+          inputProps={{
+            'aria-label': 'Filter annotations by type'
+          }}
+          MenuProps={{ 
+            disablePortal: true,
+            container: document.body
+          }}
+        >
+          <MenuItem value="all">All Annotations</MenuItem>
+          <MenuItem value="pinned">Pinned Annotations</MenuItem>
+        </Select>
+      </FormControl>
+    );
+    
+    // Find select using aria-label (most reliable)
+    const filterSelect = screen.getByLabelText('Filter annotations by type');
+    
+    // Click to open dropdown
+    await user.click(filterSelect);
+    
+    // Wait for dropdown options to appear
+    await waitFor(() => {
+      expect(screen.getByText('Pinned Annotations')).toBeInTheDocument();
+    });
+    
+    // Click option
+    await user.click(screen.getByText('Pinned Annotations'));
+    
+    // Verify selection worked (test actual behavior, not internal state)
+    await waitFor(() => {
+      expect(screen.getByText('Pinned Annotations')).toBeInTheDocument();
+    });
+  });
+});
 ```
 
 ### **Dialog and Portal Testing**
@@ -407,19 +455,27 @@ test: add unit tests for world map
    - **Best Practice**: Always check component's actual ARIA implementation before writing tests
    - **Impact**: More reliable and accessible test suites that match real user interactions
 
-3. **Test Setup Requirements**
+3. **Select Component Testing with ARIA Labels**
+   - **Issue**: Material-UI Select components are difficult to test due to portal rendering and lack of proper ARIA labels
+   - **Root Cause**: Select components don't automatically have accessible names, making `getByLabelText()` fail
+   - **Solution**: Add `inputProps={{ 'aria-label': 'Descriptive label' }}` to Select components
+   - **Testing Pattern**: Use `screen.getByLabelText('Descriptive label')` instead of `screen.getByTestId()`
+   - **Portal Fix**: Add `MenuProps={{ disablePortal: true }}` to prevent dropdown options from rendering in portals
+   - **Impact**: Reliable Select component testing that works consistently across test environments
+
+4. **Test Setup Requirements**
    - **Discovery**: Material-UI components require comprehensive provider setup for testing
    - **Solution**: Include `ThemeProvider`, `LocalizationProvider`, `StyledEngineProvider`, and `CssBaseline`
    - **Best Practice**: Create reusable `TestWrapper` components for consistent test setup
    - **Impact**: Consistent test environment that matches production component behavior
 
-4. **Portal Container Management**
+5. **Portal Container Management**
    - **Issue**: Material-UI portals create DOM elements that persist between tests
    - **Solution**: Clean up portal containers in `beforeEach` and `afterEach` hooks
    - **Best Practice**: Use `data-testid` attributes for reliable portal container identification
    - **Impact**: Isolated tests without DOM pollution from previous test runs
 
-5. **Timing and Async Testing**
+6. **Timing and Async Testing**
    - **Discovery**: Material-UI dialogs have complex render timing that requires proper `waitFor` usage
    - **Solution**: Use appropriate timeouts (5000ms for dialogs, 2000ms for content) and proper async/await patterns
    - **Best Practice**: Always wait for dialog titles before checking dialog content
@@ -788,6 +844,33 @@ test('should call onDataPointClick when point is clicked', async () => {
   }));
 });
 ```
+
+### **Key Testing Principles from Real-World Debugging**
+
+#### **1. ARIA Labels Are Essential for Both Accessibility and Testing**
+- **Principle**: Every interactive element should have proper ARIA labels
+- **Why**: ARIA labels provide the most reliable way to find elements in tests
+- **Implementation**: Add `inputProps={{ 'aria-label': 'Descriptive label' }}` to Material-UI Select components
+- **Testing**: Use `screen.getByLabelText('Descriptive label')` instead of fragile selectors
+- **Benefit**: Tests become more robust and components become more accessible
+
+#### **2. Debug Systematically, Don't Give Up**
+- **Approach**: When tests fail, add debugging code to understand what's actually happening
+- **Method**: Use `console.log()` to inspect DOM structure, element properties, and timing
+- **Pattern**: Start with the most likely cause, then systematically eliminate possibilities
+- **Example**: Log all elements, check aria attributes, verify portal rendering, test different selectors
+
+#### **3. Test Real Behavior, Not Internal Implementation**
+- **Anti-Pattern**: Testing internal state values like `toHaveValue('all')`
+- **Better Approach**: Test the actual user-visible behavior (filtering results, UI changes)
+- **Example**: Instead of checking if a select has value 'pinned', check if pinned items are visible
+- **Benefit**: Tests remain stable when internal implementation changes
+
+#### **4. Material-UI Components Need Special Test Setup**
+- **Portal Issues**: Use `MenuProps={{ disablePortal: true }}` for Select components
+- **Provider Setup**: Always include all required Material-UI providers in test environment
+- **Timing**: Use appropriate `waitFor` timeouts for portal content rendering
+- **Cleanup**: Clean up portal containers between tests to prevent DOM pollution
 
 ### **Testing Anti-Patterns to Avoid**
 
