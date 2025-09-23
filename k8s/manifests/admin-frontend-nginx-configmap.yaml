@@ -54,18 +54,29 @@ data:
             add_header Referrer-Policy "no-referrer-when-downgrade" always;
             add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline'" always;
 
-            # Handle /admin/static assets specifically (more specific, must come first)
-            location /admin/static {
-                # Remove /admin prefix and serve static files from root
-                rewrite ^/admin/static/(.*)$ /static/$1 last;
-            }
+        # Handle /admin/static assets specifically (more specific, must come first)
+        location /admin/static {
+            # Remove /admin prefix and serve static files from root
+            rewrite ^/admin/static/(.*)$ /static/$1 last;
+        }
 
-            # Handle /admin prefix - strip it and serve from root
-            location /admin {
-                # Remove /admin prefix and serve from root
-                rewrite ^/admin/(.*)$ /$1 break;
-                try_files $uri $uri/ /index.html;
-            }
+        # Handle /admin/api and /admin/graphql - proxy to backend
+        location ~ ^/admin/(api|graphql|auth|playground|health) {
+            # Remove /admin prefix and proxy to backend
+            rewrite ^/admin/(.*)$ /$1 break;
+            proxy_pass http://econ-graph-backend-service.econ-graph.svc.cluster.local:9876;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Handle /admin prefix - strip it and serve from root
+        location /admin {
+            # Remove /admin prefix and serve from root
+            rewrite ^/admin/(.*)$ /$1 break;
+            try_files $uri $uri/ /index.html;
+        }
 
             # Handle root path (fallback)
             location / {
