@@ -182,8 +182,8 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
       await user.click(addButton);
 
       // Fill form
-      await user.type(screen.getByLabelText('Annotation title'), 'Test Title');
-      await user.type(screen.getByLabelText('Annotation content'), 'Test Content');
+      await user.type(screen.getByRole('textbox', { name: /title/i }), 'Test Title');
+      await user.type(screen.getByRole('textbox', { name: /content/i }), 'Test Content');
 
       // Submit
       const submitButton = screen.getByTestId('submit-annotation-button');
@@ -215,8 +215,8 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
       await user.click(addButton);
 
       // Fill form
-      await user.type(screen.getByLabelText('Annotation title'), 'Test Title');
-      await user.type(screen.getByLabelText('Annotation content'), 'Test Content');
+      await user.type(screen.getByRole('textbox', { name: /title/i }), 'Test Title');
+      await user.type(screen.getByRole('textbox', { name: /content/i }), 'Test Content');
 
       // Submit
       const submitButton = screen.getByTestId('submit-annotation-button');
@@ -318,7 +318,7 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
       await user.click(shareButton);
 
       // Fill form
-      const userSelect = screen.getByLabelText(/target user/i);
+      const userSelect = screen.getByTestId('share-target-user-input');
       await user.click(userSelect);
       await user.click(screen.getByText('Test User'));
 

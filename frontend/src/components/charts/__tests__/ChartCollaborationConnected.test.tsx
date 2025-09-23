@@ -215,7 +215,7 @@ describe('ChartCollaborationConnected', () => {
       renderChartCollaborationConnected();
 
       expect(screen.getByText('Chart Collaboration')).toBeInTheDocument();
-      expect(screen.getByText('Add Annotation')).toBeInTheDocument();
+      expect(screen.getByTestId('submit-annotation-button')).toBeInTheDocument();
       expect(screen.getByText('Filter Annotations')).toBeInTheDocument();
     });
 
@@ -396,7 +396,7 @@ describe('ChartCollaborationConnected', () => {
       const user = userEvent.setup();
       renderChartCollaborationConnected();
 
-      const filterSelect = screen.getByLabelText('Filter Annotations');
+      const filterSelect = screen.getByRole('combobox', { name: /filter/i });
       await user.click(filterSelect);
       await user.click(screen.getByText('My Annotations (1)'));
 
@@ -409,7 +409,7 @@ describe('ChartCollaborationConnected', () => {
       const user = userEvent.setup();
       renderChartCollaborationConnected();
 
-      const filterSelect = screen.getByLabelText('Filter Annotations');
+      const filterSelect = screen.getByRole('combobox', { name: /filter/i });
       await user.click(filterSelect);
       await user.click(screen.getByText('Pinned (1)'));
 
@@ -449,8 +449,10 @@ describe('ChartCollaborationConnected', () => {
       // Fill form - use getByRole instead of getByLabelText due to Material-UI label association issues
       await user.type(screen.getByRole('textbox', { name: /title/i }), 'New Analysis');
       await user.type(screen.getByRole('textbox', { name: /content/i }), 'This is a new analysis');
-      await user.clear(screen.getByDisplayValue('2025-09-23'));
-      await user.type(screen.getByDisplayValue(''), '2024-01-20');
+      // Clear and set date field - target the date field directly by its current value
+      const dateInput = screen.getByDisplayValue('2025-09-23');
+      await user.clear(dateInput);
+      await user.type(dateInput, '2024-01-20');
       await user.type(screen.getByRole('spinbutton'), '110.5');
 
       // Select annotation type - use getAllByRole and select the first combobox (Annotation Type)
@@ -489,11 +491,11 @@ describe('ChartCollaborationConnected', () => {
       // Open dialog and fill form
       const addButton = screen.getByText('Add Annotation');
       await user.click(addButton);
-      await user.type(screen.getByLabelText('Title'), 'Test Title');
-      await user.type(screen.getByLabelText('Content'), 'Test content');
+      await user.type(screen.getByRole('textbox', { name: /title/i }), 'Test Title');
+      await user.type(screen.getByRole('textbox', { name: /content/i }), 'Test content');
 
       // Submit
-      const submitButton = screen.getByText('Add Annotation');
+      const submitButton = screen.getByTestId('submit-annotation-button');
       await user.click(submitButton);
 
       await waitFor(() => {
@@ -513,11 +515,11 @@ describe('ChartCollaborationConnected', () => {
       // Open dialog and fill form
       const addButton = screen.getByText('Add Annotation');
       await user.click(addButton);
-      await user.type(screen.getByLabelText('Title'), 'Test Title');
-      await user.type(screen.getByLabelText('Content'), 'Test content');
+      await user.type(screen.getByRole('textbox', { name: /title/i }), 'Test Title');
+      await user.type(screen.getByRole('textbox', { name: /content/i }), 'Test content');
 
       // Submit
-      const submitButton = screen.getByText('Add Annotation');
+      const submitButton = screen.getByTestId('submit-annotation-button');
       await user.click(submitButton);
 
       await waitFor(() => {
@@ -755,7 +757,7 @@ describe('ChartCollaborationConnected', () => {
       renderChartCollaborationConnected();
 
       // Filter to user's annotations
-      const filterSelect = screen.getByLabelText('Filter Annotations');
+      const filterSelect = screen.getByRole('combobox', { name: /filter/i });
       await user.click(filterSelect);
       await user.click(screen.getByText('My Annotations (0)'));
 
