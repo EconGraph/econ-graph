@@ -128,7 +128,9 @@ if [ "$http_status" = "302" ]; then
 
     if echo "$location" | grep -q "login"; then
         # Test the login page to make sure it's Grafana, not frontend
-        login_response=$(curl -s "http://localhost:8080/login")
+        # Use the actual redirect location from the response
+        login_url="http://localhost:8080$location"
+        login_response=$(curl -s "$login_url")
         if echo "$login_response" | grep -q "Grafana" && ! echo "$login_response" | grep -q "EconGraph"; then
             echo "  ✅ PASS - Grafana redirects to login and serves proper Grafana login page"
             tests_passed=$((tests_passed + 1))
