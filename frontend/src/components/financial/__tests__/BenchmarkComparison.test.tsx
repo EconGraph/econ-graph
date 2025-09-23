@@ -34,7 +34,7 @@ describe('BenchmarkComparison', () => {
     expect(screen.getByRole('region', { name: 'Industry benchmark data for returnOnEquity' })).toBeInTheDocument();
     expect(screen.getByLabelText('Company Value:')).toBeInTheDocument();
     expect(screen.getByLabelText(/Company ranks at 75.0 percentile/)).toBeInTheDocument();
-    
+
     // Check that the company value is displayed using accessibility labels
     const companyValueElements = screen.getAllByText('0.15');
     expect(companyValueElements.length).toBeGreaterThan(0);
@@ -98,7 +98,7 @@ describe('BenchmarkComparison', () => {
     expect(screen.getByLabelText('10th percentile value: 0.08')).toBeInTheDocument();
     expect(screen.getByLabelText('25th percentile value: 0.10')).toBeInTheDocument();
     expect(screen.getByLabelText('90th percentile value: 0.18')).toBeInTheDocument();
-    
+
     // Check that headers exist
     expect(screen.getByRole('rowheader', { name: 'P75:' })).toBeInTheDocument();
     expect(screen.getByRole('rowheader', { name: 'P10:' })).toBeInTheDocument();

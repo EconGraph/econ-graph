@@ -367,7 +367,7 @@ describe('XBRL Financial Integration Tests', () => {
 
       // Verify calculated values from mock backend data are rendered correctly
       expect(screen.getAllByText('$352.76B').length).toBeGreaterThan(0); // Total Assets: 352755000000 / 1B
-      expect(screen.getAllByText('$143.57B').length).toBeGreaterThan(0); // Current Assets: 143566000000 / 1B  
+      expect(screen.getAllByText('$143.57B').length).toBeGreaterThan(0); // Current Assets: 143566000000 / 1B
       expect(screen.getAllByText('$258.55B').length).toBeGreaterThan(0); // Total Liabilities: 258549000000 / 1B
       expect(screen.getAllByText('$94.21B').length).toBeGreaterThan(0); // Stockholders' Equity from mock data
     });

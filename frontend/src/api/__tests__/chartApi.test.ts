@@ -6,6 +6,7 @@
  */
 
 import { generateChartConfig, validateChartRequest, ChartRequest } from '../chartApi';
+// import { generateChartImage } from '../chartApi';
 
 describe('Chart API', () => {
   const mockSeriesData = [
