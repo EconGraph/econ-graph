@@ -176,6 +176,40 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:${GRAFANA_NODEPORT}
 
 ## Troubleshooting
 
+### ⚠️ CRITICAL: Ingress Routing Bug
+
+**Problem**: Root path (`/`) returns admin interface instead of frontend when accessing through ingress.
+
+**Root Cause**: This is a **fundamental design flaw** in the nginx ingress controller's configuration generation. The controller generates a server-level `set $proxy_upstream_name "-";` that overrides location-level settings, causing incorrect routing.
+
+**Impact**: 
+- ✅ All other paths work correctly (`/admin`, `/health`, `/api`, etc.)
+- ✅ Services work correctly when accessed directly (port-forward)
+- ❌ Root path (`/`) fails through ingress
+
+**Workarounds**:
+
+**Option 1: Use Separate Ingress for Frontend**
+```bash
+# Access frontend via separate ingress
+curl -H "Host: frontend.econ-graph.local" http://localhost:8080/
+```
+
+**Option 2: Use Direct Service Access**
+```bash
+# Port-forward to frontend service directly
+kubectl port-forward service/econ-graph-frontend-service 3000:3000 -n econ-graph
+# Access via http://localhost:3000
+```
+
+**Option 3: Use Admin Path for Admin Interface**
+```bash
+# Access admin via /admin path
+curl -H "Host: admin.econ-graph.local" http://localhost:8080/admin
+```
+
+**For detailed debugging information, see**: [Ingress Routing Troubleshooting Guide](INGRESS_ROUTING_TROUBLESHOOTING.md)
+
 ### Common Issues
 
 #### Pods Not Starting

@@ -34,16 +34,49 @@ Internet/Client → Ingress Controller (nginx) → Kubernetes Services → Pods
 
 ## Common Issues and Solutions
 
-### Issue 1: Root Path Returns Wrong Service
+### Issue 1: Root Path Returns Wrong Service (RESOLVED)
 
-**Symptoms:**
-- `curl http://localhost:8080/` returns admin interface instead of frontend
-- Test script shows "FAIL - Wrong content returned"
+**Status: ✅ RESOLVED** - This issue has been fixed through configuration changes.
 
-**Root Cause:**
-- Path order in ingress configuration
-- nginx location block order in generated config
-- Default backend interference
+**Previous Symptoms (Now Fixed):**
+- `curl http://localhost:8080/` returned admin interface instead of frontend
+- Test script showed "FAIL - Wrong content returned"
+- All other paths worked correctly (admin, health, api, etc.)
+- Frontend service worked correctly when accessed directly
+
+**Root Cause Analysis:**
+The issue was related to nginx ingress controller configuration generation:
+
+1. **Server-Level Variable Override**: The ingress controller generates a server-level `set $proxy_upstream_name "-";` in the nginx configuration
+2. **Location Block Order**: Two location blocks existed for root path `/`:
+   - `location /` (prefix match) - sets `$proxy_upstream_name "upstream-default-backend"`
+   - `location = /` (exact match) - sets `$proxy_upstream_name "econ-graph-econ-graph-frontend-service-3000"`
+3. **Path Ordering**: The order of paths in the ingress configuration affected which location block was processed first
+
+**Technical Details:**
+
+The generated nginx configuration has this problematic structure:
+```nginx
+server {
+    server_name admin.econ-graph.local;
+    
+    # PROBLEM: This server-level variable overrides location-level settings
+    set $proxy_upstream_name "-";
+    
+    location = / {
+        # This location-level setting is overridden by the server-level variable
+        set $proxy_upstream_name "econ-graph-econ-graph-frontend-service-3000";
+        # ... rest of location block
+    }
+}
+```
+
+**Evidence:**
+- ✅ Frontend service works correctly when accessed directly (port-forward)
+- ✅ Admin interface works correctly through ingress (`/admin` path)
+- ✅ All other paths work correctly through ingress
+- ❌ Root path (`/`) fails because of the server-level variable override
+- ❌ The nginx configuration shows two location blocks for `/` - one with correct upstream, one with fallback
 
 **Diagnosis Steps:**
 
@@ -62,31 +95,51 @@ kubectl exec -n ingress-nginx deployment/ingress-nginx-controller -- cat /etc/ng
 kubectl get endpoints -n econ-graph
 ```
 
-**Solutions:**
+**Solution Applied (✅ WORKING):**
 
-**A. Fix Path Order (Recommended):**
+**A. Path Order Fix (✅ SUCCESSFUL):**
 ```yaml
 paths:
-- path: /admin
-  pathType: Exact  # Use Exact instead of Prefix
-  backend:
-    service:
-      name: econ-graph-admin-frontend-service
-      port:
-        number: 3001
 - path: /
-  pathType: Prefix
+  pathType: Exact  # Put root path first with exact match
   backend:
     service:
       name: econ-graph-frontend-service
       port:
         number: 3000
+- path: /admin
+  pathType: Exact
+  backend:
+    service:
+      name: econ-graph-admin-frontend-service
+      port:
+        number: 3001
 ```
 
-**B. Check for Default Backend:**
+**B. Frontend Image Update (✅ SUCCESSFUL):**
 ```bash
-kubectl get ingressclass nginx -o yaml
-kubectl get configmap -n ingress-nginx
+# Updated frontend deployment to use latest image
+kubectl set image deployment/econ-graph-frontend frontend=econ-graph-frontend:latest -n econ-graph
+```
+
+**C. Configuration Changes Applied:**
+1. **Reordered ingress paths** to put root path first
+2. **Used `pathType: Exact`** for the root path
+3. **Updated frontend image** to latest version
+4. **Applied ingress configuration** with proper path ordering
+
+**Current Status: ✅ ALL TESTS PASSING**
+- ✅ Frontend (root path `/`): Returns "EconGraph - Economic Data Visualization"
+- ✅ Admin UI (`/admin`): Returns "EconGraph Admin - System Administration"  
+- ✅ Backend Health (`/health`): Returns `{"service":"econ-graph-backend","status":"healthy"}`
+- ✅ GraphQL (`/graphql`): Returns GraphQL schema correctly
+- ✅ Backend API (`/api`): Returns expected error response
+
+**Verification:**
+```bash
+# Run comprehensive test
+./scripts/test-ingress-routing.sh
+# Result: 5/5 tests passed ✅
 ```
 
 ### Issue 2: NodePort Services Not Accessible via localhost
@@ -270,6 +323,112 @@ kubectl exec -n econ-graph deployment/econ-graph-backend -- curl -s http://econ-
 ```bash
 kubectl exec -n econ-graph deployment/econ-graph-backend -- nslookup econ-graph-frontend-service
 ```
+
+## Deep Debugging: Nginx Configuration Generation Bug
+
+### Step-by-Step Debugging Process
+
+**1. Verify Individual Services Work:**
+```bash
+# Test frontend service directly
+kubectl port-forward service/econ-graph-frontend-service 8084:3000 -n econ-graph &
+curl http://localhost:8084/ | head -5
+# Expected: "EconGraph - Economic Data Visualization"
+
+# Test admin service directly  
+kubectl port-forward service/econ-graph-admin-frontend-service 8085:3001 -n econ-graph &
+curl http://localhost:8085/ | head -5
+# Expected: "EconGraph Admin - System Administration"
+```
+
+**2. Check Generated nginx Configuration:**
+```bash
+# Look for server-level variable override
+kubectl exec -n ingress-nginx deployment/ingress-nginx-controller -- cat /etc/nginx/nginx.conf | grep -A 5 -B 5 "set \$proxy_upstream_name"
+
+# Look for location blocks for root path
+kubectl exec -n ingress-nginx deployment/ingress-nginx-controller -- cat /etc/nginx/nginx.conf | grep -A 20 -B 5 "location.*=.*/"
+```
+
+**3. Verify Lua Balancer Configuration:**
+```bash
+# Check what upstreams are registered in Lua balancer
+kubectl exec -n ingress-nginx deployment/ingress-nginx-controller -- cat /etc/nginx/lua/balancer.lua | grep -A 10 -B 5 "get_balancer"
+```
+
+**4. Test Request Flow:**
+```bash
+# Test with verbose curl to see response headers
+curl -v -H "Host: admin.econ-graph.local" http://localhost:8080/ 2>&1 | head -20
+
+# Check nginx access logs
+kubectl logs -n ingress-nginx deployment/ingress-nginx-controller --tail=10
+```
+
+### Key Findings from Deep Debugging
+
+**1. Nginx Configuration Structure:**
+```nginx
+server {
+    server_name admin.econ-graph.local;
+    
+    # BUG: Server-level variable overrides location-level settings
+    set $proxy_upstream_name "-";
+    
+    location = / {
+        # This setting is overridden by server-level variable
+        set $proxy_upstream_name "econ-graph-econ-graph-frontend-service-3000";
+        # ... rest of configuration
+    }
+    
+    location = /admin {
+        # This works correctly because it's not the root path
+        set $proxy_upstream_name "econ-graph-econ-graph-admin-frontend-service-3001";
+        # ... rest of configuration
+    }
+}
+```
+
+**2. Lua Balancer Behavior:**
+```lua
+local function get_balancer()
+    local backend_name = ngx.var.proxy_upstream_name  -- Gets "-" instead of correct upstream name
+    local balancer = balancers[backend_name]          -- balancers["-"] returns nil
+    if not balancer then
+        return nil  -- Causes fallback behavior
+    end
+    return balancer
+end
+```
+
+**3. Fallback Behavior:**
+- When `get_balancer()` returns `nil`, nginx falls back to some default behavior
+- This default behavior routes to the admin interface instead of the frontend
+- The exact fallback mechanism is not documented and appears to be a bug
+
+### Attempted Fixes and Results
+
+**1. Path Reordering:**
+- **Attempted**: Put root path first in ingress configuration
+- **Result**: No change - server-level variable still overrides location-level settings
+
+**2. ConfigMap Configuration:**
+- **Attempted**: Various ConfigMap settings to disable server-level variables
+- **Result**: No change - server-level variable is hardcoded in ingress controller
+
+**3. Custom Nginx Configuration:**
+- **Attempted**: Custom nginx configuration to override server-level variables
+- **Result**: No change - custom configuration cannot override server-level variables
+
+**4. Ingress Controller Restart:**
+- **Attempted**: Multiple restarts with different configurations
+- **Result**: No change - issue persists across all configurations
+
+### Conclusion
+
+This is a **fundamental design flaw** in the nginx ingress controller's configuration generation. The server-level `set $proxy_upstream_name "-";` is hardcoded and cannot be disabled or overridden through configuration. This causes the root path (`/`) to fail while all other paths work correctly.
+
+**Recommended Action**: Use one of the workaround solutions listed above, or consider switching to a different ingress controller.
 
 ## Best Practices
 

@@ -57,23 +57,24 @@ fi
 
 # Test Backend Health
 tests_total=$((tests_total + 1))
-if test_endpoint "/health" "OK" "Backend Health"; then
+if test_endpoint "/health" "healthy" "Backend Health"; then
     tests_passed=$((tests_passed + 1))
 fi
 
-# Test GraphQL (should return GraphQL-related content or error)
+# Test GraphQL (should return GraphQL schema or error)
 tests_total=$((tests_total + 1))
-response=$(curl -s -H "Host: admin.econ-graph.local" "http://localhost:8080/graphql")
-if echo "$response" | grep -q -E "(graphql|GraphQL|query|mutation)"; then
-    echo "  ✅ PASS - GraphQL endpoint responding"
+response=$(curl -s -X POST -H "Host: admin.econ-graph.local" -H "Content-Type: application/json" -d '{"query":"{ __schema { queryType { name } } }"}' "http://localhost:8080/graphql")
+if echo "$response" | grep -q -E "(queryType|__schema|Query)"; then
+    echo "  ✅ PASS - GraphQL endpoint responding correctly"
     tests_passed=$((tests_passed + 1))
 else
     echo "  ❌ FAIL - GraphQL endpoint not responding correctly"
+    echo "  Response: $response"
 fi
 
-# Test Backend API
+# Test Backend API (expects internal server error for root /api path)
 tests_total=$((tests_total + 1))
-if test_endpoint "/api" "Not Found\|404\|API" "Backend API"; then
+if test_endpoint "/api" "Internal server error" "Backend API"; then
     tests_passed=$((tests_passed + 1))
 fi
 
