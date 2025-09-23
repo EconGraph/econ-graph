@@ -1,10 +1,10 @@
-# 🚀 IMMEDIATE K8S RESTART COMMANDS - v3.6.0
+# 🚀 IMMEDIATE K8S RESTART COMMANDS
 
 ## ⚡ **ONE-COMMAND RESTART** (Recommended)
 
 ```bash
 # Navigate to project root and run the automated restart script
-cd /workspace
+cd /Users/josephmalicki/src/econ-graph5
 ./scripts/deploy/restart-k8s-rollout.sh
 ```
 
@@ -12,31 +12,30 @@ cd /workspace
 
 ### Step 1: Environment Setup
 ```bash
-cd /workspace
+cd /Users/josephmalicki/src/econ-graph5
 export KUBECONFIG=~/.kube/config
+
+# Load port configuration
+source ports.env
 
 # Verify cluster exists
 kind get clusters
 kubectl config current-context
 ```
 
-### Step 2: Build New Images with v3.6.0 Tag
+### Step 2: Build New Images
 ```bash
-# Build backend
+# Use the automated build script
+./scripts/deploy/build-images.sh
+
+# Or build manually:
 cd backend
-docker build -t econ-graph-backend:v3.6.0 .
 docker build -t econ-graph-backend:latest .
 
 # Build frontend  
 cd ../frontend
 docker build \
-  --build-arg REACT_APP_API_URL="" \
-  --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
-  --build-arg REACT_APP_WS_URL="ws://localhost/graphql" \
-  --build-arg NODE_ENV="production" \
-  -t econ-graph-frontend:v3.6.0 .
-docker build \
-  --build-arg REACT_APP_API_URL="" \
+  --build-arg REACT_APP_API_URL="http://localhost" \
   --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
   --build-arg REACT_APP_WS_URL="ws://localhost/graphql" \
   --build-arg NODE_ENV="production" \
@@ -48,19 +47,23 @@ docker build \
   --build-arg REACT_APP_API_URL="http://localhost" \
   --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
   --build-arg REACT_APP_WS_URL="ws://localhost/graphql" \
-  --build-arg REACT_APP_GRAFANA_URL="http://localhost:30002" \
+  --build-arg REACT_APP_GRAFANA_URL="http://localhost:${GRAFANA_NODEPORT}" \
   --build-arg NODE_ENV="production" \
-  -t econ-graph-admin-frontend:v1.0.0 .
+  -t econ-graph-admin-frontend:latest .
+
+# Build chart API service
+cd ../chart-api-service
+docker build -t econ-graph-chart-api:latest .
 
 cd ..
 ```
 
 ### Step 3: Load Images into Kind Cluster  
 ```bash
-kind load docker-image econ-graph-backend:v3.6.0 --name econ-graph
-kind load docker-image econ-graph-frontend:v3.6.0 --name econ-graph
-kind load docker-image econ-graph-backend:latest --name econ-graph  
+kind load docker-image econ-graph-backend:latest --name econ-graph
 kind load docker-image econ-graph-frontend:latest --name econ-graph
+kind load docker-image econ-graph-admin-frontend:latest --name econ-graph
+kind load docker-image econ-graph-chart-api:latest --name econ-graph
 ```
 
 ### Step 4: Apply Updated Manifests
@@ -104,7 +107,7 @@ kubectl get ingress -n econ-graph
 
 ---
 
-## 📊 **WHAT'S BEING DEPLOYED - v3.6.0**
+## 📊 **WHAT'S BEING DEPLOYED**
 
 ### ✅ **Test Quality Improvements:**
 - **173/173 frontend tests passing** (100% success rate)
@@ -124,33 +127,46 @@ kubectl get ingress -n econ-graph
 - **Type safety enhanced** across React components
 - **Error handling improved** in all workflows
 
+### ✅ **Infrastructure Components:**
+- **Backend**: Rust API with GraphQL
+- **Frontend**: React application
+- **Admin Frontend**: Administrative interface
+- **Chart API Service**: Private chart generation service
+- **Monitoring Stack**: Grafana + Loki + Prometheus
+
 ---
 
 ## 🌐 **Expected URLs After Restart**
 
-**Note**: Add `127.0.0.1 admin.econ-graph.local` to your `/etc/hosts` file first.
+Load port configuration first:
+```bash
+source ports.env
+```
 
-- **Frontend**: http://admin.econ-graph.local
+- **Frontend**: http://localhost:${FRONTEND_NODEPORT}
   - ✅ All 173 tests passing
   - ✅ Professional Analysis page working
   - ✅ Accessibility compliant
 
-- **Admin UI**: http://admin.econ-graph.local/admin
+- **Admin UI**: http://localhost:${FRONTEND_NODEPORT}/admin
   - ✅ Administrative interface with security notice
   - ✅ System health monitoring
   - ✅ User management features
 
-- **Backend API**: http://admin.econ-graph.local/api
+- **Backend API**: http://localhost:${BACKEND_NODEPORT}
   - ✅ 72 unit tests passing
   - ✅ GraphQL API optimized
   - ✅ Health checks working
 
-- **GraphQL**: http://admin.econ-graph.local/graphql
+- **GraphQL**: http://localhost:${BACKEND_NODEPORT}/graphql
   - ✅ Schema validated
   - ✅ Query performance improved
 
-- **Health Check**: http://admin.econ-graph.local/health
+- **Health Check**: http://localhost:${BACKEND_NODEPORT}/health
   - ✅ Service status monitoring
+
+- **Grafana**: http://localhost:${GRAFANA_NODEPORT}
+  - ✅ Monitoring dashboards (admin/admin123)
 
 ---
 

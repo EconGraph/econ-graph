@@ -45,7 +45,7 @@ The EconGraph Chart API Service is a private, secure Express.js service that pro
 
 ### Base URL
 - **Development**: `http://localhost:3001`
-- **Production**: Internal Kubernetes service (port 3001)
+- **Production**: Internal Kubernetes service (`chart-api-service.econ-graph.svc.cluster.local:3001`)
 
 ### Authentication Headers
 All requests must include:

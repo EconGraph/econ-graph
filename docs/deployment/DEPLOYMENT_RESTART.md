@@ -1,8 +1,7 @@
-# 🚀 Kubernetes Deployment Restart - v3.7.1
+# 🚀 Kubernetes Deployment Restart
 
-## ✅ **Ready to Deploy: Integration Test Fixes and GitHub Actions Control**
+## ✅ **Ready to Deploy: Latest Version with Monitoring Stack**
 
-**Version**: v3.7.1  
 **Status**: Integration tests fixed, GitHub Actions release/deploy disabled, port configuration standardized  
 **Changes**: All auth tests passing (11/11), collaboration tests fixed (6/7), enhanced logging and debugging
 
@@ -47,13 +46,13 @@ cd ../..
 # Build images with new version
 ./scripts/deploy/build-images.sh
 
-# Tag with v3.6.0
-docker tag econ-graph-backend:latest econ-graph-backend:v3.6.0
-docker tag econ-graph-frontend:latest econ-graph-frontend:v3.6.0
+# Tag with latest version
+docker tag econ-graph-backend:latest econ-graph-backend:latest
+docker tag econ-graph-frontend:latest econ-graph-frontend:latest
 
 # Load into kind cluster
-kind load docker-image econ-graph-backend:v3.6.0 --name econ-graph
-kind load docker-image econ-graph-frontend:v3.6.0 --name econ-graph
+kind load docker-image econ-graph-backend:latest --name econ-graph
+kind load docker-image econ-graph-frontend:latest --name econ-graph
 ```
 
 ### 3. **Apply Updated Manifests**
@@ -91,7 +90,7 @@ kubectl logs -f deployment/econ-graph-frontend -n econ-graph
 
 ---
 
-## 📋 **What's New in v3.6.0**
+## 📋 **What's New in Latest Version**
 
 ### ✅ **Critical Fixes Applied:**
 
@@ -110,7 +109,7 @@ kubectl logs -f deployment/econ-graph-frontend -n econ-graph
 
 ### ✅ **Deployment Changes:**
 
-- **Image Tags**: Updated to `v3.6.0` (from `latest`)
+- **Image Tags**: Using latest stable versions
 - **Health Checks**: All probes verified working
 - **Resource Limits**: Optimized for test environment performance
 - **Configuration**: All environment variables properly set
@@ -119,10 +118,16 @@ kubectl logs -f deployment/econ-graph-frontend -n econ-graph
 
 ## 🌐 **Expected Application URLs After Restart**
 
-- **Frontend**: http://localhost:3000 (React app with all 173 tests passing)
-- **Backend**: http://localhost:9876 (Rust API with improved performance)  
-- **GraphQL**: http://localhost:9876/graphql (Enhanced schema)
-- **Health Check**: http://localhost:9876/health (System status)
+Load port configuration from `ports.env`:
+```bash
+source ports.env
+```
+
+- **Frontend**: http://localhost:${FRONTEND_NODEPORT} (React app with all 173 tests passing)
+- **Backend**: http://localhost:${BACKEND_NODEPORT} (Rust API with improved performance)  
+- **GraphQL**: http://localhost:${BACKEND_NODEPORT}/graphql (Enhanced schema)
+- **Health Check**: http://localhost:${BACKEND_NODEPORT}/health (System status)
+- **Grafana**: http://localhost:${GRAFANA_NODEPORT} (admin/admin123)
 
 ---
 
