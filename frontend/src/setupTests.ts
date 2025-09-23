@@ -194,18 +194,3 @@ jest.mock('d3-zoom', () => ({
     on: jest.fn().mockReturnThis(),
   })),
 }));
-
-// Global test setup
-beforeEach(() => {
-  // Clear all mocks
-  jest.clearAllMocks();
-
-  // Reset localStorage mock
-  (global as any).localStorage.clear();
-  (global as any).localStorage.getItem.mockReturnValue(null);
-  (global as any).localStorage.setItem.mockImplementation(() => {});
-  (global as any).localStorage.removeItem.mockImplementation(() => {});
-
-  // Reset any global state
-  delete (global as any).__TEST_STATE__;
-});

@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, setupTestEnvironment, cleanupTestEnvironment, waitForDialog, findFormFieldInDialog } from '../../../test-utils/material-ui-test-setup';
 import ChartCollaboration, { ChartAnnotation } from '../ChartCollaboration';
@@ -323,10 +323,10 @@ describe('ChartCollaboration', () => {
       expect(valueField).toBeInTheDocument();
 
       // Fill form fields
-      await user.type(titleField!, 'New Annotation');
-      await user.type(descriptionField!, 'This is a test annotation');
-      await user.type(dateField!, '2024-01-20');
-      await user.type(valueField!, '105.5');
+      fireEvent.change(titleField!, { target: { value: 'New Annotation' } });
+      fireEvent.change(descriptionField!, { target: { value: 'This is a test annotation' } });
+      fireEvent.change(dateField!, { target: { value: '2024-01-20' } });
+      fireEvent.change(valueField!, { target: { value: '105.5' } });
 
       // Select annotation type - find select field
       const typeSelect = findFormFieldInDialog('select', 'Type') ||

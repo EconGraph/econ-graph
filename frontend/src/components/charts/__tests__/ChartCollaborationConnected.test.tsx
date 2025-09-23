@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, StyledEngineProvider } from '@mui/material';
@@ -511,8 +511,8 @@ describe('ChartCollaborationConnected', () => {
       });
 
       // Fill form - use accessible labels
-      await user.type(screen.getByRole('textbox', { name: /title/i }), 'New Analysis');
-      await user.type(screen.getByRole('textbox', { name: /content/i }), 'This is a new analysis');
+      fireEvent.change(screen.getByRole('textbox', { name: /title/i }), { target: { value: 'New Analysis' } });
+      fireEvent.change(screen.getByRole('textbox', { name: /content/i }), { target: { value: 'This is a new analysis' } });
       // Skip date and value inputs due to jsdom limitations - test with default values
 
       // Select annotation type - use the first combobox (Annotation Type)
@@ -545,8 +545,8 @@ describe('ChartCollaborationConnected', () => {
       // Open dialog and fill form
       const addButton = screen.getByText('Add Annotation');
       await user.click(addButton);
-      await user.type(screen.getByRole('textbox', { name: /title/i }), 'Test Title');
-      await user.type(screen.getByRole('textbox', { name: /content/i }), 'Test content');
+      fireEvent.change(screen.getByRole('textbox', { name: /title/i }), { target: { value: 'Test Title' } });
+      fireEvent.change(screen.getByRole('textbox', { name: /content/i }), { target: { value: 'Test content' } });
 
       // Submit
       const submitButton = screen.getByTestId('submit-annotation-button');
@@ -569,8 +569,8 @@ describe('ChartCollaborationConnected', () => {
       // Open dialog and fill form
       const addButton = screen.getByText('Add Annotation');
       await user.click(addButton);
-      await user.type(screen.getByRole('textbox', { name: /title/i }), 'Test Title');
-      await user.type(screen.getByRole('textbox', { name: /content/i }), 'Test content');
+      fireEvent.change(screen.getByRole('textbox', { name: /title/i }), { target: { value: 'Test Title' } });
+      fireEvent.change(screen.getByRole('textbox', { name: /content/i }), { target: { value: 'Test content' } });
 
       // Submit
       const submitButton = screen.getByTestId('submit-annotation-button');
@@ -667,7 +667,7 @@ describe('ChartCollaborationConnected', () => {
 
       // Add comment
       const commentInput = screen.getByTestId('comment-input');
-      await user.type(commentInput, 'This is a new comment');
+      fireEvent.change(commentInput, { target: { value: 'This is a new comment' } });
 
       const commentButton = screen.getByText('Comment');
       await user.click(commentButton);
@@ -690,7 +690,7 @@ describe('ChartCollaborationConnected', () => {
 
       // Add comment
       const commentInput = screen.getByTestId('comment-input');
-      await user.type(commentInput, 'Test comment');
+      fireEvent.change(commentInput, { target: { value: 'Test comment' } });
 
       const commentButton = screen.getByText('Comment');
       await user.click(commentButton);
@@ -728,7 +728,7 @@ describe('ChartCollaborationConnected', () => {
       });
 
       // Fill share form
-      await user.type(screen.getByTestId('share-target-user-input'), 'user-3');
+      fireEvent.change(screen.getByTestId('share-target-user-input'), { target: { value: 'user-3' } });
 
       const permissionSelect = screen.getByRole('combobox');
       await user.click(permissionSelect);

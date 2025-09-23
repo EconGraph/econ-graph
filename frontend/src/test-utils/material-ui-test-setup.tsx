@@ -143,27 +143,43 @@ export const findFormFieldInDialog = (
   fieldType: 'input' | 'textarea' | 'select',
   fieldName: string
 ) => {
+  console.log(
+    `🔍 DEBUG: findFormFieldInDialog called with fieldType=${fieldType}, fieldName=${fieldName}`
+  );
   const dialog = document.querySelector('[role="dialog"]');
-  if (!dialog) return null;
+  console.log(`🔍 DEBUG: Dialog found:`, dialog);
+  if (!dialog) {
+    console.log(`🔍 DEBUG: No dialog found, returning null`);
+    return null;
+  }
+
+  console.log(`🔍 DEBUG: Dialog HTML length:`, dialog.innerHTML.length);
+  console.log(`🔍 DEBUG: Dialog innerHTML preview:`, dialog.innerHTML.substring(0, 500));
 
   // Try different strategies to find the field
   // 1. By aria-label
   let field = dialog.querySelector(`${fieldType}[aria-label*="${fieldName}"]`);
+  console.log(`🔍 DEBUG: Strategy 1 (aria-label) result:`, field);
   if (field) return field;
 
   // 2. By placeholder
   field = dialog.querySelector(`${fieldType}[placeholder*="${fieldName}"]`);
+  console.log(`🔍 DEBUG: Strategy 2 (placeholder) result:`, field);
   if (field) return field;
 
   // 3. By associated label
   const labels = dialog.querySelectorAll('label');
+  console.log(`🔍 DEBUG: Found ${labels.length} labels in dialog`);
   for (const label of labels) {
+    console.log(`🔍 DEBUG: Checking label:`, label.textContent);
     if (label.textContent?.toLowerCase().includes(fieldName.toLowerCase())) {
       const labelFor = label.getAttribute('for');
+      console.log(`🔍 DEBUG: Label has for="${labelFor}"`);
       if (labelFor) {
         // Escape special characters in the ID for CSS selector
         const escapedId = labelFor.replace(/[!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~]/g, '\\$&');
         field = dialog.querySelector(`#${escapedId}`);
+        console.log(`🔍 DEBUG: Strategy 3 (label for) result:`, field);
         if (field) return field;
       }
     }
@@ -171,8 +187,10 @@ export const findFormFieldInDialog = (
 
   // 4. By data-testid
   field = dialog.querySelector(`${fieldType}[data-testid*="${fieldName.toLowerCase()}"]`);
+  console.log(`🔍 DEBUG: Strategy 4 (data-testid) result:`, field);
   if (field) return field;
 
+  console.log(`🔍 DEBUG: No field found for ${fieldType} with name ${fieldName}`);
   return null;
 };
 
