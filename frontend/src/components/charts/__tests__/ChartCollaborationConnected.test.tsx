@@ -441,14 +441,21 @@ describe('ChartCollaborationConnected', () => {
       const addButton = screen.getByText('Add Annotation');
       await user.click(addButton);
 
-      // Fill form
-      await user.type(screen.getByLabelText('Annotation title'), 'New Analysis');
-      await user.type(screen.getByLabelText('Annotation content'), 'This is a new analysis');
-      await user.type(screen.getByLabelText('Annotation date'), '2024-01-20');
-      await user.type(screen.getByLabelText('Annotation value (optional)'), '110.5');
+      // Wait for dialog to appear
+      await waitFor(() => {
+        expect(screen.getByText('Add Chart Annotation')).toBeInTheDocument();
+      });
 
-      // Select annotation type
-      const typeSelect = screen.getByLabelText('Annotation type selection');
+      // Fill form - use getByRole instead of getByLabelText due to Material-UI label association issues
+      await user.type(screen.getByRole('textbox', { name: /title/i }), 'New Analysis');
+      await user.type(screen.getByRole('textbox', { name: /content/i }), 'This is a new analysis');
+      await user.clear(screen.getByDisplayValue('2025-09-23'));
+      await user.type(screen.getByDisplayValue(''), '2024-01-20');
+      await user.type(screen.getByRole('spinbutton'), '110.5');
+
+      // Select annotation type - use getAllByRole and select the first combobox (Annotation Type)
+      const comboboxes = screen.getAllByRole('combobox');
+      const typeSelect = comboboxes[0]; // First combobox is Annotation Type
       await user.click(typeSelect);
 
       // Wait for dropdown to open and select Analysis option
@@ -460,7 +467,7 @@ describe('ChartCollaborationConnected', () => {
       await user.click(analysisOption);
 
       // Submit
-      const submitButton = screen.getByText('Add Annotation');
+      const submitButton = screen.getByTestId('submit-annotation-button');
       await user.click(submitButton);
 
       expect(mockCollaborationHook.createAnnotation).toHaveBeenCalledWith({
