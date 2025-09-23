@@ -1,704 +1,989 @@
 {
-  "dashboard": {
-    "id": null,
-    "uid": "econgraph-crawler",
-    "title": "EconGraph Crawler Status",
-    "description": "Comprehensive monitoring of data crawler operations, queue processing, and data source status",
-    "tags": ["econgraph", "crawler", "queue", "data-sources"],
-    "timezone": "browser",
-    "schemaVersion": 37,
-    "version": 1,
-    "refresh": "15s",
-    "time": {
-      "from": "now-2h",
-      "to": "now"
-    },
-    "panels": [
-      {
-        "id": 1,
-        "title": "Active Crawler Instances",
-        "type": "stat",
-        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "thresholds" },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                { "color": "red", "value": null },
-                { "color": "yellow", "value": 1 },
-                { "color": "green", "value": 2 }
-              ]
-            },
-            "unit": "short"
-          }
-        },
-        "options": {
-          "colorMode": "background",
-          "graphMode": "area",
-          "justifyMode": "auto",
-          "orientation": "auto",
-          "reduceOptions": {
-            "values": false,
-            "calcs": ["lastNotNull"],
-            "fields": ""
-          },
-          "textMode": "auto"
-        },
-        "targets": [
-          {
-            "expr": "sum(up{job=\"econgraph-crawler\"})",
-            "legendFormat": "Active Crawlers",
-            "refId": "A"
-          }
-        ]
+  "id": null,
+  "uid": "econgraph-crawler",
+  "title": "EconGraph Crawler Status",
+  "description": "Comprehensive monitoring of data crawler operations, queue processing, and data source status",
+  "tags": [
+    "econgraph",
+    "crawler",
+    "queue",
+    "data-sources"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 37,
+  "version": 1,
+  "refresh": "15s",
+  "time": {
+    "from": "now-2h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Active Crawler Instances",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
       },
-      {
-        "id": 2,
-        "title": "Queue Items Pending",
-        "type": "stat",
-        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "thresholds" },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                { "color": "green", "value": null },
-                { "color": "yellow", "value": 100 },
-                { "color": "red", "value": 1000 }
-              ]
-            },
-            "unit": "short"
-          }
-        },
-        "options": {
-          "colorMode": "background",
-          "graphMode": "area",
-          "justifyMode": "auto",
-          "orientation": "auto",
-          "reduceOptions": {
-            "values": false,
-            "calcs": ["lastNotNull"],
-            "fields": ""
-          },
-          "textMode": "auto"
-        },
-        "targets": [
-          {
-            "expr": "sum(econgraph_queue_items{status=\"pending\"})",
-            "legendFormat": "Pending Items",
-            "refId": "A"
-          }
-        ]
-      },
-      {
-        "id": 3,
-        "title": "Processing Rate",
-        "type": "stat",
-        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "continuous-GrYlRd" },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                { "color": "red", "value": null },
-                { "color": "yellow", "value": 1 },
-                { "color": "green", "value": 5 }
-              ]
-            },
-            "unit": "ops"
-          }
-        },
-        "options": {
-          "colorMode": "background",
-          "graphMode": "area",
-          "justifyMode": "auto",
-          "orientation": "auto",
-          "reduceOptions": {
-            "values": false,
-            "calcs": ["lastNotNull"],
-            "fields": ""
-          },
-          "textMode": "auto"
-        },
-        "targets": [
-          {
-            "expr": "sum(rate(econgraph_queue_items_processed_total[5m]))",
-            "legendFormat": "Items/sec",
-            "refId": "A"
-          }
-        ]
-      },
-      {
-        "id": 4,
-        "title": "Error Rate",
-        "type": "stat",
-        "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "thresholds" },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                { "color": "green", "value": null },
-                { "color": "yellow", "value": 0.01 },
-                { "color": "red", "value": 0.05 }
-              ]
-            },
-            "unit": "percentunit"
-          }
-        },
-        "options": {
-          "colorMode": "background",
-          "graphMode": "area",
-          "justifyMode": "auto",
-          "orientation": "auto",
-          "reduceOptions": {
-            "values": false,
-            "calcs": ["lastNotNull"],
-            "fields": ""
-          },
-          "textMode": "auto"
-        },
-        "targets": [
-          {
-            "expr": "sum(rate(econgraph_crawl_errors_total[5m])) / sum(rate(econgraph_queue_items_processed_total[5m]))",
-            "legendFormat": "Error Rate",
-            "refId": "A"
-          }
-        ]
-      },
-      {
-        "id": 5,
-        "title": "Queue Processing Rate",
-        "type": "graph",
-        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "palette-classic" },
-            "custom": {
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 10,
-              "gradientMode": "none",
-              "hideFrom": { "legend": false, "tooltip": false, "vis": false },
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": { "type": "linear" },
-              "showPoints": "never",
-              "spanNulls": false,
-              "stacking": { "group": "A", "mode": "none" },
-              "thresholdsStyle": { "mode": "off" }
-            },
-            "unit": "ops"
-          }
-        },
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom"
-          },
-          "tooltip": { "mode": "single", "sort": "none" }
-        },
-        "targets": [
-          {
-            "expr": "rate(econgraph_queue_items_processed_total[5m])",
-            "legendFormat": "{{source}} Items Processed/sec",
-            "refId": "A"
-          },
-          {
-            "expr": "rate(econgraph_queue_items_failed_total[5m])",
-            "legendFormat": "{{source}} Items Failed/sec",
-            "refId": "B"
-          }
-        ]
-      },
-      {
-        "id": 6,
-        "title": "Queue Status Distribution",
-        "type": "piechart",
-        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "palette-classic" },
-            "custom": {
-              "hideFrom": { "legend": false, "tooltip": false, "vis": false }
-            },
-            "mappings": []
-          }
-        },
-        "options": {
-          "reduceOptions": {
-            "values": false,
-            "calcs": ["lastNotNull"],
-            "fields": ""
-          },
-          "pieType": "pie",
-          "tooltip": { "mode": "single", "sort": "none" },
-          "legend": {
-            "displayMode": "list",
-            "placement": "bottom"
-          }
-        },
-        "targets": [
-          {
-            "expr": "sum(econgraph_queue_items{status=\"pending\"})",
-            "legendFormat": "Pending",
-            "refId": "A"
-          },
-          {
-            "expr": "sum(econgraph_queue_items{status=\"processing\"})",
-            "legendFormat": "Processing",
-            "refId": "B"
-          },
-          {
-            "expr": "sum(econgraph_queue_items{status=\"completed\"})",
-            "legendFormat": "Completed",
-            "refId": "C"
-          },
-          {
-            "expr": "sum(econgraph_queue_items{status=\"failed\"})",
-            "legendFormat": "Failed",
-            "refId": "D"
-          },
-          {
-            "expr": "sum(econgraph_queue_items{status=\"retrying\"})",
-            "legendFormat": "Retrying",
-            "refId": "E"
-          }
-        ]
-      },
-      {
-        "id": 7,
-        "title": "Data Source Crawl Status",
-        "type": "table",
-        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "thresholds" },
-            "custom": {
-              "align": "auto",
-              "displayMode": "auto",
-              "filterable": false
-            },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                { "color": "green", "value": null }
-              ]
-            }
-          },
-          "overrides": [
-            {
-              "matcher": { "id": "byName", "options": "Source" },
-              "properties": [
-                { "id": "custom.width", "value": 120 }
-              ]
-            },
-            {
-              "matcher": { "id": "byName", "options": "Last Crawl" },
-              "properties": [
-                { "id": "unit", "value": "dateTimeFromNow" }
-              ]
-            },
-            {
-              "matcher": { "id": "byName", "options": "Items Today" },
-              "properties": [
-                { "id": "unit", "value": "short" }
-              ]
-            },
-            {
-              "matcher": { "id": "byName", "options": "Success Rate" },
-              "properties": [
-                { "id": "unit", "value": "percent" },
-                { "id": "custom.displayMode", "value": "basic" },
-                { "id": "color", "value": { "mode": "continuous-GrYlRd" } }
-              ]
-            }
-          ]
-        },
-        "options": {
-          "showHeader": true
-        },
-        "targets": [
-          {
-            "expr": "econgraph_last_crawl_timestamp",
-            "legendFormat": "{{source}}",
-            "refId": "A",
-            "format": "table"
-          },
-          {
-            "expr": "increase(econgraph_queue_items_processed_total[24h])",
-            "legendFormat": "{{source}}",
-            "refId": "B",
-            "format": "table"
-          },
-          {
-            "expr": "(increase(econgraph_queue_items_processed_total[24h]) - increase(econgraph_queue_items_failed_total[24h])) / increase(econgraph_queue_items_processed_total[24h]) * 100",
-            "legendFormat": "{{source}}",
-            "refId": "C",
-            "format": "table"
-          }
-        ],
-        "transformations": [
-          {
-            "id": "merge",
-            "options": {}
-          },
-          {
-            "id": "organize",
-            "options": {
-              "excludeByName": {
-                "Time": true,
-                "__name__": true,
-                "instance": true,
-                "job": true
-              },
-              "indexByName": {},
-              "renameByName": {
-                "source": "Source",
-                "Value #A": "Last Crawl",
-                "Value #B": "Items Today",
-                "Value #C": "Success Rate"
-              }
-            }
-          }
-        ]
-      },
-      {
-        "id": 8,
-        "title": "Crawler Worker Health",
-        "type": "graph",
-        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "palette-classic" },
-            "custom": {
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 10,
-              "gradientMode": "none",
-              "hideFrom": { "legend": false, "tooltip": false, "vis": false },
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": { "type": "linear" },
-              "showPoints": "never",
-              "spanNulls": false,
-              "stacking": { "group": "A", "mode": "none" },
-              "thresholdsStyle": { "mode": "off" }
-            },
-            "unit": "percent"
-          }
-        },
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom"
-          },
-          "tooltip": { "mode": "single", "sort": "none" }
-        },
-        "targets": [
-          {
-            "expr": "rate(container_cpu_usage_seconds_total{pod=~\"econgraph-crawler-.*\"}[5m]) * 100",
-            "legendFormat": "{{pod}} CPU %",
-            "refId": "A"
-          }
-        ]
-      },
-      {
-        "id": 9,
-        "title": "Queue Processing Time Distribution",
-        "type": "heatmap",
-        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
-        "fieldConfig": {
-          "defaults": {
-            "custom": {
-              "hideFrom": { "legend": false, "tooltip": false, "vis": false }
-            }
-          }
-        },
-        "options": {
-          "calculate": false,
-          "cellGap": 2,
-          "cellValues": {},
+      "fieldConfig": {
+        "defaults": {
           "color": {
-            "exponent": 0.5,
-            "fill": "dark-orange",
-            "mode": "scheme",
-            "reverse": false,
-            "scale": "exponential",
-            "scheme": "Spectral",
-            "steps": 64
+            "mode": "thresholds"
           },
-          "exemplars": { "color": "rgba(255,0,255,0.7)" },
-          "filterValues": { "le": 1e-9 },
-          "legend": { "show": false },
-          "rowsFrame": { "layout": "auto" },
-          "tooltip": { "show": true, "yHistogram": false },
-          "yAxis": {
-            "axisPlacement": "left",
-            "reverse": false,
-            "unit": "s"
-          }
-        },
-        "targets": [
-          {
-            "expr": "sum(increase(econgraph_queue_processing_duration_seconds_bucket[5m])) by (le)",
-            "legendFormat": "{{le}}",
-            "refId": "A",
-            "format": "heatmap"
-          }
-        ]
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 2
+              }
+            ]
+          },
+          "unit": "short"
+        }
       },
-      {
-        "id": 10,
-        "title": "API Rate Limiting Status",
-        "type": "graph",
-        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "palette-classic" },
-            "custom": {
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 10,
-              "gradientMode": "none",
-              "hideFrom": { "legend": false, "tooltip": false, "vis": false },
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": { "type": "linear" },
-              "showPoints": "never",
-              "spanNulls": false,
-              "stacking": { "group": "A", "mode": "none" },
-              "thresholdsStyle": { "mode": "off" }
-            },
-            "unit": "reqpm"
-          }
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
         },
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom"
-          },
-          "tooltip": { "mode": "single", "sort": "none" }
-        },
-        "targets": [
-          {
-            "expr": "rate(econgraph_api_requests_total{source=\"fred\"}[5m]) * 60",
-            "legendFormat": "FRED Requests/min",
-            "refId": "A"
-          },
-          {
-            "expr": "rate(econgraph_api_requests_total{source=\"bls\"}[5m]) * 60",
-            "legendFormat": "BLS Requests/min",
-            "refId": "B"
-          }
-        ]
+        "textMode": "auto"
       },
-      {
-        "id": 11,
-        "title": "Data Freshness by Source",
-        "type": "graph",
-        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "palette-classic" },
-            "custom": {
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 10,
-              "gradientMode": "none",
-              "hideFrom": { "legend": false, "tooltip": false, "vis": false },
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": { "type": "linear" },
-              "showPoints": "never",
-              "spanNulls": false,
-              "stacking": { "group": "A", "mode": "none" },
-              "thresholdsStyle": { "mode": "off" }
-            },
-            "unit": "h"
-          }
-        },
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom"
-          },
-          "tooltip": { "mode": "single", "sort": "none" }
-        },
-        "targets": [
-          {
-            "expr": "(time() - econgraph_last_crawl_timestamp) / 3600",
-            "legendFormat": "{{source}} Hours Since Last Crawl",
-            "refId": "A"
-          }
-        ]
-      },
-      {
-        "id": 12,
-        "title": "Error Analysis by Source",
-        "type": "graph",
-        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "palette-classic" },
-            "custom": {
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 10,
-              "gradientMode": "none",
-              "hideFrom": { "legend": false, "tooltip": false, "vis": false },
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": { "type": "linear" },
-              "showPoints": "never",
-              "spanNulls": false,
-              "stacking": { "group": "A", "mode": "none" },
-              "thresholdsStyle": { "mode": "off" }
-            },
-            "unit": "ops"
-          }
-        },
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom"
-          },
-          "tooltip": { "mode": "single", "sort": "none" }
-        },
-        "targets": [
-          {
-            "expr": "rate(econgraph_crawl_errors_total[5m])",
-            "legendFormat": "{{source}} {{error_type}} Errors/sec",
-            "refId": "A"
-          }
-        ]
-      },
-      {
-        "id": 13,
-        "title": "Queue Backlog Trend",
-        "type": "graph",
-        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 36 },
-        "fieldConfig": {
-          "defaults": {
-            "color": { "mode": "palette-classic" },
-            "custom": {
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 10,
-              "gradientMode": "none",
-              "hideFrom": { "legend": false, "tooltip": false, "vis": false },
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": { "type": "linear" },
-              "showPoints": "never",
-              "spanNulls": false,
-              "stacking": { "group": "A", "mode": "none" },
-              "thresholdsStyle": { "mode": "line" }
-            },
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                { "color": "green", "value": null },
-                { "color": "red", "value": 1000 }
-              ]
-            },
-            "unit": "short"
-          }
-        },
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom"
-          },
-          "tooltip": { "mode": "single", "sort": "none" }
-        },
-        "targets": [
-          {
-            "expr": "sum(econgraph_queue_items{status=\"pending\"}) by (source)",
-            "legendFormat": "{{source}} Pending Items",
-            "refId": "A"
-          },
-          {
-            "expr": "sum(econgraph_queue_items{status=\"retrying\"}) by (source)",
-            "legendFormat": "{{source}} Retrying Items",
-            "refId": "B"
-          }
-        ]
-      }
-    ],
-    "templating": {
-      "list": [
+      "targets": [
         {
-          "current": {
-            "selected": false,
-            "text": "All",
-            "value": "$__all"
-          },
-          "datasource": "Prometheus",
-          "definition": "label_values(econgraph_queue_items, source)",
-          "hide": 0,
-          "includeAll": true,
-          "label": "Data Source",
-          "multi": true,
-          "name": "source",
-          "options": [],
-          "query": {
-            "query": "label_values(econgraph_queue_items, source)",
-            "refId": "StandardVariableQuery"
-          },
-          "refresh": 1,
-          "regex": "",
-          "skipUrlSync": false,
-          "sort": 0,
-          "type": "query"
+          "expr": "sum(up{job=\"econgraph-crawler\"})",
+          "legendFormat": "Active Crawlers",
+          "refId": "A"
         }
       ]
     },
-    "annotations": {
-      "list": [
+    {
+      "id": 2,
+      "title": "Queue Items Pending",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 100
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
         {
-          "builtIn": 1,
-          "datasource": "-- Grafana --",
-          "enable": true,
-          "hide": true,
-          "iconColor": "rgba(0, 211, 255, 1)",
-          "name": "Annotations & Alerts",
-          "type": "dashboard"
+          "expr": "sum(econgraph_queue_items{status=\"pending\"})",
+          "legendFormat": "Pending Items",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Processing Rate",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "ops"
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(econgraph_queue_items_processed_total[5m]))",
+          "legendFormat": "Items/sec",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Error Rate",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.01
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          },
+          "unit": "percentunit"
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(econgraph_crawl_errors_total[5m])) / sum(rate(econgraph_queue_items_processed_total[5m]))",
+          "legendFormat": "Error Rate",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Queue Processing Rate",
+      "type": "graph",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "ops"
+        }
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(econgraph_queue_items_processed_total[5m])",
+          "legendFormat": "{{source}} Items Processed/sec",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(econgraph_queue_items_failed_total[5m])",
+          "legendFormat": "{{source}} Items Failed/sec",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Queue Status Distribution",
+      "type": "piechart",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            }
+          },
+          "mappings": []
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "pieType": "pie",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(econgraph_queue_items{status=\"pending\"})",
+          "legendFormat": "Pending",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(econgraph_queue_items{status=\"processing\"})",
+          "legendFormat": "Processing",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(econgraph_queue_items{status=\"completed\"})",
+          "legendFormat": "Completed",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(econgraph_queue_items{status=\"failed\"})",
+          "legendFormat": "Failed",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(econgraph_queue_items{status=\"retrying\"})",
+          "legendFormat": "Retrying",
+          "refId": "E"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Data Source Crawl Status",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto",
+            "filterable": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Source"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last Crawl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Items Today"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Success Rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "basic"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "continuous-GrYlRd"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "expr": "econgraph_last_crawl_timestamp",
+          "legendFormat": "{{source}}",
+          "refId": "A",
+          "format": "table"
+        },
+        {
+          "expr": "increase(econgraph_queue_items_processed_total[24h])",
+          "legendFormat": "{{source}}",
+          "refId": "B",
+          "format": "table"
+        },
+        {
+          "expr": "(increase(econgraph_queue_items_processed_total[24h]) - increase(econgraph_queue_items_failed_total[24h])) / increase(econgraph_queue_items_processed_total[24h]) * 100",
+          "legendFormat": "{{source}}",
+          "refId": "C",
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            },
+            "indexByName": {},
+            "renameByName": {
+              "source": "Source",
+              "Value #A": "Last Crawl",
+              "Value #B": "Items Today",
+              "Value #C": "Success Rate"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Crawler Worker Health",
+      "type": "graph",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "percent"
+        }
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(container_cpu_usage_seconds_total{pod=~\"econgraph-crawler-.*\"}[5m]) * 100",
+          "legendFormat": "{{pod}} CPU %",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Queue Processing Time Distribution",
+      "type": "heatmap",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            }
+          }
+        }
+      },
+      "options": {
+        "calculate": false,
+        "cellGap": 2,
+        "cellValues": {},
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-orange",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "Spectral",
+          "steps": 64
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1E-9
+        },
+        "legend": {
+          "show": false
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "show": true,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "reverse": false,
+          "unit": "s"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(econgraph_queue_processing_duration_seconds_bucket[5m])) by (le)",
+          "legendFormat": "{{le}}",
+          "refId": "A",
+          "format": "heatmap"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "API Rate Limiting Status",
+      "type": "graph",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "reqpm"
+        }
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(econgraph_api_requests_total{source=\"fred\"}[5m]) * 60",
+          "legendFormat": "FRED Requests/min",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(econgraph_api_requests_total{source=\"bls\"}[5m]) * 60",
+          "legendFormat": "BLS Requests/min",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Data Freshness by Source",
+      "type": "graph",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "h"
+        }
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "(time() - econgraph_last_crawl_timestamp) / 3600",
+          "legendFormat": "{{source}} Hours Since Last Crawl",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Error Analysis by Source",
+      "type": "graph",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "ops"
+        }
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(econgraph_crawl_errors_total[5m])",
+          "legendFormat": "{{source}} {{error_type}} Errors/sec",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Queue Backlog Trend",
+      "type": "graph",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(econgraph_queue_items{status=\"pending\"}) by (source)",
+          "legendFormat": "{{source}} Pending Items",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(econgraph_queue_items{status=\"retrying\"}) by (source)",
+          "legendFormat": "{{source}} Retrying Items",
+          "refId": "B"
         }
       ]
     }
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "Prometheus",
+        "definition": "label_values(econgraph_queue_items, source)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Data Source",
+        "multi": true,
+        "name": "source",
+        "options": [],
+        "query": {
+          "query": "label_values(econgraph_queue_items, source)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
   }
 }
