@@ -144,7 +144,10 @@ const mockCollaborationHook = {
     return user;
   }),
   getCommentsForAnnotation: jest.fn((annotationId) => {
-    return mockComments.filter(comment => comment.annotationId === annotationId);
+    console.log('getCommentsForAnnotation called with:', annotationId);
+    const comments = mockComments.filter(comment => comment.annotationId === annotationId);
+    console.log('getCommentsForAnnotation returning:', comments);
+    return comments;
   }),
 };
 
@@ -217,28 +220,35 @@ describe('ChartCollaborationConnected', () => {
       renderChartCollaborationConnected();
 
       expect(screen.getByText('Chart Collaboration')).toBeInTheDocument();
-      expect(screen.getByTestId('submit-annotation-button')).toBeInTheDocument();
-      expect(screen.getByText('Filter Annotations')).toBeInTheDocument();
+      expect(screen.getByText('Add Annotation')).toBeInTheDocument();
+      expect(screen.getByTestId('filter-annotations-select')).toBeInTheDocument();
     });
 
     it('should not render when closed', () => {
       renderChartCollaborationConnected({ isOpen: false });
 
-      expect(screen.queryByText('Chart Collaboration')).not.toBeInTheDocument();
+      // The drawer should be closed, so the main content should not be visible
+      // Check that the drawer paper is translated off-screen
+      const drawerPaper = document.querySelector('.MuiDrawer-paper');
+      expect(drawerPaper).toHaveStyle({
+        visibility: 'hidden',
+        transform: 'translateX(1024px)'
+      });
     });
 
     it('should display active collaborators', () => {
       renderChartCollaborationConnected();
 
       expect(screen.getByText('Active Collaborators (2)')).toBeInTheDocument();
-      expect(screen.getByText('Test User')).toBeInTheDocument();
-      expect(screen.getByText('John Doe')).toBeInTheDocument();
+      expect(screen.getByLabelText('Test User (admin)')).toBeInTheDocument();
+      expect(screen.getByLabelText('John Doe (editor)')).toBeInTheDocument();
     });
 
     it('should show total comment count', () => {
       renderChartCollaborationConnected();
 
-      // Should show badge with total comments
+      // Should show badge with total comments (1 comment for annotation-2)
+      // The badge should be visible with the comment count
       const commentBadge = screen.getByText('1');
       expect(commentBadge).toBeInTheDocument();
     });
@@ -654,7 +664,7 @@ describe('ChartCollaborationConnected', () => {
       const user = userEvent.setup();
       renderChartCollaborationConnected({ chartId: 'chart-1' });
 
-      const shareButton = screen.getByTestId('ShareIcon');
+      const shareButton = screen.getByTestId('share-chart-button');
       await user.click(shareButton);
 
       expect(screen.getByTestId('share-chart-dialog')).toBeInTheDocument();
@@ -667,13 +677,18 @@ describe('ChartCollaborationConnected', () => {
       renderChartCollaborationConnected({ chartId: 'chart-1' });
 
       // Open share dialog
-      const shareButton = screen.getByTestId('ShareIcon');
+      const shareButton = screen.getByTestId('share-chart-button');
       await user.click(shareButton);
 
-      // Fill share form
-      await user.type(screen.getByLabelText('User ID to share with'), 'user-3');
+      // Wait for share dialog to open
+      await waitFor(() => {
+        expect(screen.getByTestId('share-chart-dialog')).toBeInTheDocument();
+      });
 
-      const permissionSelect = screen.getByLabelText('Permission Level');
+      // Fill share form
+      await user.type(screen.getByTestId('share-target-user-input'), 'user-3');
+
+      const permissionSelect = screen.getByRole('combobox');
       await user.click(permissionSelect);
       await user.click(screen.getByText('Edit - Can create and edit annotations'));
 
@@ -693,7 +708,7 @@ describe('ChartCollaborationConnected', () => {
       renderChartCollaborationConnected({ chartId: undefined });
 
       // Open share dialog
-      const shareButton = screen.getByTestId('ShareIcon');
+      const shareButton = screen.getByTestId('share-chart-button');
       await user.click(shareButton);
 
       // Try to share without filling form
