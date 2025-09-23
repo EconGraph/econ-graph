@@ -29,7 +29,7 @@
       },
       "targets": [
         {
-          "expr": "{app=\"econ-graph-backend\"} |= \"auth\"",
+          "expr": "{job=\"backend-logs\"} |= \"auth\"",
           "refId": "A",
           "datasource": {
             "type": "loki",
@@ -60,7 +60,7 @@
       },
       "targets": [
         {
-          "expr": "{app=\"econ-graph-backend\"} |= \"database\" |= \"connection\"",
+          "expr": "{job=\"backend-logs\"} |= \"database\" |= \"connection\"",
           "refId": "A",
           "datasource": {
             "type": "loki",
@@ -91,7 +91,7 @@
       },
       "targets": [
         {
-          "expr": "{namespace=\"econ-graph\"} |= \"error\" |= \"ERROR\"",
+          "expr": "{job=\"backend-logs\"} |= \"error\" |= \"ERROR\"",
           "refId": "A",
           "datasource": {
             "type": "loki",
@@ -122,7 +122,7 @@
       },
       "targets": [
         {
-          "expr": "{app=\"econ-graph-backend\"}",
+          "expr": "{job=\"backend-logs\"}",
           "refId": "A",
           "datasource": {
             "type": "loki",
@@ -143,29 +143,6 @@
     }
   ],
   "templating": {
-    "list": [
-      {
-        "name": "namespace",
-        "type": "textbox",
-        "label": "Namespace",
-        "query": "econ-graph",
-        "current": {
-          "selected": false,
-          "text": "econ-graph",
-          "value": "econ-graph"
-        }
-      },
-      {
-        "name": "app",
-        "type": "textbox",
-        "label": "App",
-        "query": "econ-graph-backend",
-        "current": {
-          "selected": false,
-          "text": "econ-graph-backend",
-          "value": "econ-graph-backend"
-        }
-      }
-    ]
+    "list": []
   }
 }
