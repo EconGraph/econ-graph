@@ -4,7 +4,7 @@
 -- Chronological order by commit date:
 -- 2025-09-10: 2024-01-01-* (consolidated refactor)
 -- 2025-09-12: 2025-09-12-104236_comprehensive_crawler_and_schema_fixes
--- 2025-09-12: 2025-09-12-124405_create_series_metadata_table  
+-- 2025-09-12: 2025-09-12-124405_create_series_metadata_table
 -- 2025-09-12: 2025-09-13-021105-0000_consolidated_admin_audit_security_tables
 -- 2025-09-14: 2025-09-13-185806-0000_update_census_data_source_config
 -- 2025-09-14: 2025-09-13-213800-0000_add_api_key_name_to_data_sources
@@ -544,8 +544,8 @@ CREATE INDEX idx_security_events_severity ON security_events(severity);
 CREATE INDEX idx_security_events_created_at ON security_events(created_at);
 CREATE INDEX idx_security_events_resolved_at ON security_events(resolved_at);
 
--- Create annotation_templates table
-CREATE TABLE annotation_templates (
+-- Create chart_annotation_templates table
+CREATE TABLE chart_annotation_templates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
     description TEXT,
@@ -556,21 +556,21 @@ CREATE TABLE annotation_templates (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Create indexes for annotation_templates
-CREATE INDEX idx_annotation_templates_name ON annotation_templates(name);
-CREATE INDEX idx_annotation_templates_created_by ON annotation_templates(created_by);
-CREATE INDEX idx_annotation_templates_is_public ON annotation_templates(is_public);
+-- Create indexes for chart_annotation_templates
+CREATE INDEX idx_chart_annotation_templates_name ON chart_annotation_templates(name);
+CREATE INDEX idx_chart_annotation_templates_created_by ON chart_annotation_templates(created_by);
+CREATE INDEX idx_chart_annotation_templates_is_public ON chart_annotation_templates(is_public);
 
--- Create updated_at trigger for annotation_templates
-CREATE TRIGGER update_annotation_templates_updated_at
-    BEFORE UPDATE ON annotation_templates
+-- Create updated_at trigger for chart_annotation_templates
+CREATE TRIGGER update_chart_annotation_templates_updated_at
+    BEFORE UPDATE ON chart_annotation_templates
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- Create annotation_assignments table
-CREATE TABLE annotation_assignments (
+-- Create template_annotation_assignments table
+CREATE TABLE template_annotation_assignments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    template_id UUID NOT NULL REFERENCES annotation_templates(id) ON DELETE CASCADE,
+    template_id UUID NOT NULL REFERENCES chart_annotation_templates(id) ON DELETE CASCADE,
     chart_id VARCHAR(255) NOT NULL,
     assigned_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     assigned_to UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -581,12 +581,12 @@ CREATE TABLE annotation_assignments (
     UNIQUE(template_id, chart_id, assigned_to)
 );
 
--- Create indexes for annotation_assignments
-CREATE INDEX idx_annotation_assignments_template_id ON annotation_assignments(template_id);
-CREATE INDEX idx_annotation_assignments_chart_id ON annotation_assignments(chart_id);
-CREATE INDEX idx_annotation_assignments_assigned_by ON annotation_assignments(assigned_by);
-CREATE INDEX idx_annotation_assignments_assigned_to ON annotation_assignments(assigned_to);
-CREATE INDEX idx_annotation_assignments_completed_at ON annotation_assignments(completed_at);
+-- Create indexes for template_annotation_assignments
+CREATE INDEX idx_template_annotation_assignments_template_id ON template_annotation_assignments(template_id);
+CREATE INDEX idx_template_annotation_assignments_chart_id ON template_annotation_assignments(chart_id);
+CREATE INDEX idx_template_annotation_assignments_assigned_by ON template_annotation_assignments(assigned_by);
+CREATE INDEX idx_template_annotation_assignments_assigned_to ON template_annotation_assignments(assigned_to);
+CREATE INDEX idx_template_annotation_assignments_completed_at ON template_annotation_assignments(completed_at);
 
 -- Create annotation_comments table
 CREATE TABLE annotation_comments (
@@ -609,8 +609,8 @@ CREATE TRIGGER update_annotation_comments_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- Create annotation_replies table
-CREATE TABLE annotation_replies (
+-- Create chart_annotation_replies table
+CREATE TABLE chart_annotation_replies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     comment_id UUID NOT NULL REFERENCES annotation_comments(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -619,19 +619,19 @@ CREATE TABLE annotation_replies (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Create indexes for annotation_replies
-CREATE INDEX idx_annotation_replies_comment_id ON annotation_replies(comment_id);
-CREATE INDEX idx_annotation_replies_user_id ON annotation_replies(user_id);
-CREATE INDEX idx_annotation_replies_created_at ON annotation_replies(created_at);
+-- Create indexes for chart_annotation_replies
+CREATE INDEX idx_chart_annotation_replies_comment_id ON chart_annotation_replies(comment_id);
+CREATE INDEX idx_chart_annotation_replies_user_id ON chart_annotation_replies(user_id);
+CREATE INDEX idx_chart_annotation_replies_created_at ON chart_annotation_replies(created_at);
 
--- Create updated_at trigger for annotation_replies
-CREATE TRIGGER update_annotation_replies_updated_at
-    BEFORE UPDATE ON annotation_replies
+-- Create updated_at trigger for chart_annotation_replies
+CREATE TRIGGER update_chart_annotation_replies_updated_at
+    BEFORE UPDATE ON chart_annotation_replies
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- Create financial_annotations table
-CREATE TABLE financial_annotations (
+-- Create chart_financial_annotations table
+CREATE TABLE chart_financial_annotations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     annotation_id UUID NOT NULL REFERENCES chart_annotations(id) ON DELETE CASCADE,
     financial_metric VARCHAR(100) NOT NULL,
@@ -642,15 +642,15 @@ CREATE TABLE financial_annotations (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Create indexes for financial_annotations
-CREATE INDEX idx_financial_annotations_annotation_id ON financial_annotations(annotation_id);
-CREATE INDEX idx_financial_annotations_financial_metric ON financial_annotations(financial_metric);
-CREATE INDEX idx_financial_annotations_metric_value ON financial_annotations(metric_value);
-CREATE INDEX idx_financial_annotations_confidence_level ON financial_annotations(confidence_level);
+-- Create indexes for chart_financial_annotations
+CREATE INDEX idx_chart_financial_annotations_annotation_id ON chart_financial_annotations(annotation_id);
+CREATE INDEX idx_chart_financial_annotations_financial_metric ON chart_financial_annotations(financial_metric);
+CREATE INDEX idx_chart_financial_annotations_metric_value ON chart_financial_annotations(metric_value);
+CREATE INDEX idx_chart_financial_annotations_confidence_level ON chart_financial_annotations(confidence_level);
 
--- Create updated_at trigger for financial_annotations
-CREATE TRIGGER update_financial_annotations_updated_at
-    BEFORE UPDATE ON financial_annotations
+-- Create updated_at trigger for chart_financial_annotations
+CREATE TRIGGER update_chart_financial_annotations_updated_at
+    BEFORE UPDATE ON chart_financial_annotations
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
