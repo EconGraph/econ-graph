@@ -223,6 +223,12 @@ jobs:
         license-checker --json > npm-licenses.json
         echo "npm dependency licenses:"
         license-checker --summary
+
+        echo "Checking admin-frontend npm licenses..."
+        cd ../admin-frontend
+        license-checker --json > admin-frontend-npm-licenses.json
+        echo "Admin frontend npm dependency licenses:"
+        license-checker --summary
       working-directory: frontend
 
     - name: Upload license reports
@@ -232,6 +238,7 @@ jobs:
         path: |
           backend/rust-licenses.json
           frontend/npm-licenses.json
+          admin-frontend/admin-frontend-npm-licenses.json
 
   docker-security-scan:
     name: Docker Image Security Scan

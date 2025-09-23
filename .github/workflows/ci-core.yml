@@ -1413,6 +1413,11 @@ jobs:
         echo "🔍 Checking frontend license compliance with license-checker..."
         license-checker --config .license-checker.json
         echo "✅ Frontend license compliance check passed"
+
+        echo "🔍 Checking admin-frontend license compliance with license-checker..."
+        cd ../admin-frontend
+        license-checker --config ../.license-checker.json
+        echo "✅ Admin frontend license compliance check passed"
       working-directory: frontend
 
     - name: 📋 Generate License Report
@@ -1430,6 +1435,12 @@ jobs:
         license-checker --config .license-checker.json --json > frontend-licenses.json || true
         echo "Frontend license check completed"
 
+        # Generate admin-frontend license report
+        echo "Generating admin-frontend license report..."
+        cd ../admin-frontend
+        license-checker --config ../.license-checker.json --json > admin-frontend-licenses.json || true
+        echo "Admin frontend license check completed"
+
         echo "✅ License compliance check completed successfully"
 
     - name: Upload license reports
@@ -1439,6 +1450,7 @@ jobs:
         path: |
           backend-licenses.json
           frontend-licenses.json
+          admin-frontend/admin-frontend-licenses.json
 
   backend-integration-tests:
     name: Backend Integration Tests
