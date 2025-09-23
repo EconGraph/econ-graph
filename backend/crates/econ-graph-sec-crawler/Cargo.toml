@@ -83,6 +83,7 @@ md5 = "0.7"
 # Local dependencies
 econ-graph-core = { path = "../econ-graph-core" }
 econ-graph-services = { path = "../econ-graph-services" }
+econ-graph-metrics = { path = "../econ-graph-metrics" }
 
 [dev-dependencies]
 # Testing

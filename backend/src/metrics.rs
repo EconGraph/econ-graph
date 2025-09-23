@@ -4,6 +4,8 @@
 //! application performance, database operations, GraphQL queries, and more.
 //! All metrics are exposed via the /metrics endpoint for Prometheus scraping.
 
+pub mod crawler_metrics;
+
 use prometheus::{
     Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, Opts, Registry,
     TextEncoder,
@@ -11,9 +13,13 @@ use prometheus::{
 use std::sync::Arc;
 use warp::Reply;
 
-/// Global metrics registry for the application
-pub static REGISTRY: once_cell::sync::Lazy<Arc<Registry>> =
-    once_cell::sync::Lazy::new(|| Arc::new(Registry::new()));
+/// Global metrics registry for the application (uses Prometheus default registry)
+pub static REGISTRY: once_cell::sync::Lazy<Arc<Registry>> = once_cell::sync::Lazy::new(|| {
+    // Use the process-wide default registry so other crates can register metrics
+    // without depending on this crate. This enables cross-crate crawler metrics
+    // registration (services, SEC crawler) to appear on the same /metrics endpoint.
+    Arc::new(prometheus::default_registry().clone())
+});
 
 /// Application-level metrics
 pub struct AppMetrics {
@@ -253,6 +259,13 @@ impl AppMetrics {
 /// Global metrics instance
 pub static METRICS: once_cell::sync::Lazy<AppMetrics> =
     once_cell::sync::Lazy::new(|| AppMetrics::new().expect("Failed to initialize metrics"));
+
+/// Global crawler metrics instance
+pub static CRAWLER_METRICS: once_cell::sync::Lazy<crawler_metrics::CrawlerMetrics> =
+    once_cell::sync::Lazy::new(|| {
+        crawler_metrics::CrawlerMetrics::new(&*REGISTRY)
+            .expect("Failed to initialize crawler metrics")
+    });
 
 /// Generate Prometheus metrics output
 pub fn generate_metrics() -> anyhow::Result<String> {

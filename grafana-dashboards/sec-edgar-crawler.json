@@ -1,0 +1,50 @@
+{
+  "title": "SEC EDGAR Crawler",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "tags": ["crawler", "sec"],
+  "templating": {"list": []},
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Filings Downloaded (rate)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "sum by (form_type) (rate(econgraph_sec_filings_downloaded_total[10m]))", "legendFormat": "{{form_type}}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "XBRL Parsed (rate)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "sum by (form_type) (rate(econgraph_sec_xbrl_files_processed_total[10m]))", "legendFormat": "{{form_type}}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Filing Processing Duration (p95)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(econgraph_sec_filing_processing_duration_seconds_bucket[10m])) by (le))", "legendFormat": "p95"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "XBRL Parsing Duration (p95)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(econgraph_sec_xbrl_parsing_duration_seconds_bucket[10m])) by (le))", "legendFormat": "p95"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Filing Sizes (bytes)",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+      "targets": [
+        {"expr": "sum by (form_type) (rate(econgraph_sec_filing_sizes_bytes_sum[10m])) / sum by (form_type) (rate(econgraph_sec_filing_sizes_bytes_count[10m]))", "legendFormat": "avg {{form_type}}"}
+      ]
+    }
+  ]
+}

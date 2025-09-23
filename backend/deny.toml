@@ -128,6 +128,7 @@ exceptions = [
     { allow = ["MS-PL"], crate = "econ-graph-crawler" },
     { allow = ["MS-PL"], crate = "econ-graph-graphql" },
     { allow = ["MS-PL"], crate = "econ-graph-mcp" },
+    { allow = ["MS-PL"], crate = "econ-graph-metrics" },
     { allow = ["MS-PL"], crate = "econ-graph-sec-crawler" },
     { allow = ["MS-PL"], crate = "econ-graph-services" },
     # Each entry is the crate and version constraint, and its specific allow
