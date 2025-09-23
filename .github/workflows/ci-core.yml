@@ -1442,12 +1442,12 @@ jobs:
         cargo deny check licenses --format json > backend-licenses.json || true
         echo "Backend license check completed"
 
-        # Generate frontend license report
+        # Generate frontend license report (run from repo root using shared config)
         echo "Generating frontend license report..."
-        license-checker --config .license-checker.json --json > frontend-licenses.json || true
+        license-checker --config frontend/.license-checker.json --json > frontend-licenses.json || true
         echo "Frontend license check completed"
 
-        # Generate admin-frontend license report
+        # Generate admin-frontend license report (use shared config path)
         echo "Generating admin-frontend license report..."
         cd ../admin-frontend
         license-checker --config ../frontend/.license-checker.json --json > admin-frontend-licenses.json || true
