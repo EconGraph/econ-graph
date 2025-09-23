@@ -109,6 +109,42 @@ if test_endpoint "/api" "Internal server error" "Backend API" "500"; then
     tests_passed=$((tests_passed + 1))
 fi
 
+# Test Grafana (should redirect to login and serve proper Grafana login page)
+tests_total=$((tests_total + 1))
+echo "🔍 Testing Grafana: /grafana"
+response=$(curl -s -w "\n%{http_code}" "http://localhost:8080/grafana")
+
+# Extract HTTP status code (last line)
+http_status=$(echo "$response" | tail -n1)
+# Extract response body (all but last line)
+response_body=$(echo "$response" | sed '$d')
+
+echo "  📊 HTTP Status: $http_status (expected: 302)"
+
+if [ "$http_status" = "302" ]; then
+    # Check if it redirects to login
+    location=$(curl -s -I "http://localhost:8080/grafana" | grep -i "location:" | cut -d' ' -f2- | tr -d '\r\n')
+    echo "  📍 Redirect Location: $location"
+
+    if echo "$location" | grep -q "login"; then
+        # Test the login page to make sure it's Grafana, not frontend
+        login_response=$(curl -s "http://localhost:8080/login")
+        if echo "$login_response" | grep -q "Grafana" && ! echo "$login_response" | grep -q "EconGraph"; then
+            echo "  ✅ PASS - Grafana redirects to login and serves proper Grafana login page"
+            tests_passed=$((tests_passed + 1))
+        else
+            echo "  ❌ FAIL - Grafana login page shows wrong content (frontend instead of Grafana)"
+            echo "  Response: $(echo "$login_response" | head -1 | cut -c1-100)..."
+        fi
+    else
+        echo "  ❌ FAIL - Grafana doesn't redirect to login page"
+    fi
+else
+    echo "  ❌ FAIL - Grafana doesn't return 302 redirect"
+    echo "  HTTP Status: $http_status"
+    echo "  Response: $(echo "$response_body" | head -1 | cut -c1-100)..."
+fi
+
 echo ""
 echo "📊 Test Results: $tests_passed/$tests_total tests passed"
 
