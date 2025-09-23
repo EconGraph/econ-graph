@@ -2119,14 +2119,15 @@ jobs:
   mobile-e2e-global-analysis-tests:
     name: Mobile Global Analysis E2E Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
 
     services:
       postgres:
-        image: postgres:17
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
           POSTGRES_DB: econ_graph_test
         options: >-
           --health-cmd pg_isready
@@ -2143,10 +2144,8 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@1.89.0
       with:
-        toolchain: stable
-        override: true
         components: rustfmt, clippy
 
     - name: Cache cargo registry
@@ -2155,20 +2154,22 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
+          ~/.cargo/bin
           backend/target
-        key: ${{ runner.os }}-cargo-mobile-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
-          ${{ runner.os }}-cargo-mobile-
+          ${{ runner.os }}-shared-cargo-
 
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
         diesel migration run
       working-directory: backend
 
@@ -2257,14 +2258,15 @@ jobs:
   mobile-e2e-professional-analysis-tests:
     name: Mobile Professional Analysis E2E Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
 
     services:
       postgres:
-        image: postgres:17
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
           POSTGRES_DB: econ_graph_test
         options: >-
           --health-cmd pg_isready
@@ -2281,10 +2283,8 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@1.89.0
       with:
-        toolchain: stable
-        override: true
         components: rustfmt, clippy
 
     - name: Cache cargo registry
@@ -2293,20 +2293,22 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
+          ~/.cargo/bin
           backend/target
-        key: ${{ runner.os }}-cargo-mobile-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
-          ${{ runner.os }}-cargo-mobile-
+          ${{ runner.os }}-shared-cargo-
 
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
         diesel migration run
       working-directory: backend
 
@@ -2395,14 +2397,15 @@ jobs:
   mobile-e2e-tests:
     name: Mobile End-to-End Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
 
     services:
       postgres:
-        image: postgres:17
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
           POSTGRES_DB: econ_graph_test
         options: >-
           --health-cmd pg_isready
@@ -2419,10 +2422,8 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Install Rust toolchain
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@1.89.0
       with:
-        toolchain: stable
-        override: true
         components: rustfmt, clippy
 
     - name: Cache cargo registry
@@ -2431,20 +2432,22 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
+          ~/.cargo/bin
           backend/target
-        key: ${{ runner.os }}-cargo-mobile-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-shared-cargo-v2
         restore-keys: |
-          ${{ runner.os }}-cargo-mobile-
+          ${{ runner.os }}-shared-cargo-
 
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
         diesel migration run
       working-directory: backend
 
@@ -2477,8 +2480,6 @@ jobs:
       run: |
         docker load < e2e-container-optimized.tar.gz
         docker load < e2e-mobile-container-optimized.tar.gz
-
-    # Backend is already built in the optimized container, no need to build it again
 
     - name: Start backend service
       run: |
@@ -2517,14 +2518,14 @@ jobs:
           sleep 2
         done
 
-    - name: Run mobile end-to-end tests
+    - name: Run mobile end-to-end tests (core only)
       run: |
         docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-mobile-optimized:latest \
-          npm run test:e2e:mobile
+          npm run test:e2e:mobile:core
 
     - name: Stop services
       if: always()
