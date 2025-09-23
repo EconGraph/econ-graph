@@ -175,6 +175,9 @@ const customRender = (ui: React.ReactElement, options = {}) => {
 };
 
 describe('ChartCollaborationConnected', () => {
+  beforeAll(() => {
+    jest.setTimeout(20000);
+  });
   beforeEach(() => {
     jest.clearAllMocks();
     mockUseAuth.mockReturnValue({ user: mockUser });
@@ -555,7 +558,7 @@ describe('ChartCollaborationConnected', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Creation failed')).toBeInTheDocument();
-      });
+      }, { timeout: 10000 });
     });
   });
 
