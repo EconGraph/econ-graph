@@ -19,6 +19,7 @@ use crate::storage::{XbrlStorage, XbrlStorageConfig};
 use crate::utils::{build_submissions_url, build_xbrl_url, get_fiscal_quarter, parse_sec_date};
 use econ_graph_core::database::DatabasePool;
 use econ_graph_core::models::{Company, FinancialStatement};
+use econ_graph_metrics::crawler::CRAWLER_METRICS;
 
 /// **SEC EDGAR Crawler**
 ///
@@ -162,6 +163,7 @@ impl SecEdgarCrawler {
 
         self.rate_limiter.wait_for_permit().await;
 
+        let start = std::time::Instant::now();
         let response = self
             .client
             .get(&url)
@@ -169,8 +171,15 @@ impl SecEdgarCrawler {
             .await
             .context("Failed to fetch company submissions")?;
 
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!("HTTP error: {}", response.status()));
+        let duration = start.elapsed().as_secs_f64();
+        let status = response.status();
+        CRAWLER_METRICS.record_request("sec", "edgar", "/submissions", status.as_str(), duration);
+        if status.as_u16() == 429 {
+            CRAWLER_METRICS.record_rate_limit_hit("sec", "edgar");
+        }
+        if !status.is_success() {
+            CRAWLER_METRICS.record_error("sec", "edgar", "http_error");
+            return Err(anyhow::anyhow!("HTTP error: {}", status));
         }
 
         let submissions: CompanySubmissionsResponse = response
@@ -289,6 +298,7 @@ impl SecEdgarCrawler {
 
         self.rate_limiter.wait_for_permit().await;
 
+        let start = std::time::Instant::now();
         let response = self
             .client
             .get(&xbrl_url)
@@ -296,11 +306,15 @@ impl SecEdgarCrawler {
             .await
             .context("Failed to download XBRL file")?;
 
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "HTTP error downloading XBRL: {}",
-                response.status()
-            ));
+        let duration = start.elapsed().as_secs_f64();
+        let status = response.status();
+        CRAWLER_METRICS.record_request("sec", "edgar", "/xbrl", status.as_str(), duration);
+        if status.as_u16() == 429 {
+            CRAWLER_METRICS.record_rate_limit_hit("sec", "edgar");
+        }
+        if !status.is_success() {
+            CRAWLER_METRICS.record_error("sec", "edgar", "http_error");
+            return Err(anyhow::anyhow!("HTTP error downloading XBRL: {}", status));
         }
 
         let content = response
@@ -474,6 +488,7 @@ impl SecEdgarCrawler {
 
         self.rate_limiter.wait_for_permit().await;
 
+        let start = std::time::Instant::now();
         let response = self
             .client
             .get(&taxonomy_url)
@@ -481,10 +496,17 @@ impl SecEdgarCrawler {
             .await
             .context("Failed to download taxonomy component")?;
 
-        if !response.status().is_success() {
+        let duration = start.elapsed().as_secs_f64();
+        let status = response.status();
+        CRAWLER_METRICS.record_request("sec", "edgar", "/taxonomy", status.as_str(), duration);
+        if status.as_u16() == 429 {
+            CRAWLER_METRICS.record_rate_limit_hit("sec", "edgar");
+        }
+        if !status.is_success() {
+            CRAWLER_METRICS.record_error("sec", "edgar", "http_error");
             return Err(anyhow::anyhow!(
                 "HTTP error downloading taxonomy component: {}",
-                response.status()
+                status
             ));
         }
 

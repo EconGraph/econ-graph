@@ -8,6 +8,7 @@ members = [
     "crates/econ-graph-sec-crawler",
     "crates/econ-graph-mcp",
     "crates/econ-graph-backend",
+    "crates/econ-graph-metrics",
 ]
 
 [workspace.package]
