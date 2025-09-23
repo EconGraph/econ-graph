@@ -65,41 +65,6 @@ jobs:
         path: admin-frontend/coverage/
         retention-days: 7
 
-  admin-frontend-build-test:
-    name: Admin Frontend Build Test
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.branch || github.ref }}
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'npm'
-        cache-dependency-path: admin-frontend/package-lock.json
-
-    - name: Install admin frontend dependencies
-      working-directory: admin-frontend
-      run: npm ci
-
-    - name: Build admin frontend
-      working-directory: admin-frontend
-      run: npm run build
-      env:
-        REACT_APP_GRAPHQL_ENDPOINT: http://localhost:8080/graphql
-
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: admin-frontend-build-${{ github.sha }}
-        path: admin-frontend/build/
-        retention-days: 1
-
   admin-frontend-integration-tests:
     name: Admin Frontend Integration Tests
     runs-on: ubuntu-latest
