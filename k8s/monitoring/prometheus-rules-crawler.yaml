@@ -1,0 +1,55 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: crawler-alerts
+  labels:
+    role: alert-rules
+spec:
+  groups:
+  - name: crawler.rules
+    interval: 30s
+    rules:
+    - alert: CrawlerHighErrorRate
+      expr: sum(rate(econgraph_crawler_errors_total[5m])) / clamp_max(sum(rate(econgraph_crawler_requests_total[5m])), 1) > 0.05
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: High crawler error rate (>5%)
+        description: Crawler error rate is above 5% for 10 minutes.
+
+    - alert: CrawlerFrequentRateLimitHits
+      expr: sum(rate(econgraph_crawler_rate_limit_hits_total[15m])) > 0.5
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: Frequent 429 rate limit hits
+        description: Crawlers are frequently hitting upstream rate limits.
+
+    - alert: CrawlerHighTimeouts
+      expr: sum(rate(econgraph_crawler_timeouts_total[10m])) > 0.2
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: Elevated crawler timeouts
+        description: Timeout rate exceeds threshold.
+
+    - alert: CrawlerHighLatencyP95
+      expr: histogram_quantile(0.95, sum(rate(econgraph_crawler_request_duration_seconds_bucket[5m])) by (le)) > 5
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: High crawler p95 latency (>5s)
+        description: 95th percentile of request latency is above 5 seconds.
+
+    - alert: CrawlerNoTraffic
+      expr: sum(rate(econgraph_crawler_requests_total[15m])) == 0
+      for: 30m
+      labels:
+        severity: critical
+      annotations:
+        summary: No crawler traffic detected
+        description: Crawler has produced no requests for 30 minutes.
