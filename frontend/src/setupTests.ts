@@ -39,6 +39,12 @@ jest.mock('react-chartjs-2', () => ({
   Pie: jest.fn(() => 'Mock Chart'),
 }));
 
+// Mock chartjs-plugin-annotation to avoid plugin runtime issues in tests
+jest.mock('chartjs-plugin-annotation', () => ({
+  __esModule: true,
+  default: { id: 'annotation', beforeDraw: jest.fn(), afterDraw: jest.fn() },
+}));
+
 // Mock the hooks module globally
 const mockDataSources = [
   {
@@ -156,5 +162,35 @@ jest.mock('./hooks/useSeriesData', () => ({
     error: null,
     isError: false,
     isSuccess: true,
+  })),
+}));
+
+// Mock D3 modules
+jest.mock('d3-geo', () => ({
+  geoPath: jest.fn(() => ({
+    projection: jest.fn(),
+    pointRadius: jest.fn(),
+  })),
+  geoNaturalEarth1: jest.fn(() => ({
+    scale: jest.fn().mockReturnThis(),
+    translate: jest.fn().mockReturnThis(),
+    center: jest.fn().mockReturnThis(),
+  })),
+  geoMercator: jest.fn(() => ({
+    scale: jest.fn().mockReturnThis(),
+    translate: jest.fn().mockReturnThis(),
+    center: jest.fn().mockReturnThis(),
+  })),
+  geoOrthographic: jest.fn(() => ({
+    scale: jest.fn().mockReturnThis(),
+    translate: jest.fn().mockReturnThis(),
+    center: jest.fn().mockReturnThis(),
+  })),
+}));
+
+jest.mock('d3-zoom', () => ({
+  zoom: jest.fn(() => ({
+    scaleExtent: jest.fn().mockReturnThis(),
+    on: jest.fn().mockReturnThis(),
   })),
 }));
