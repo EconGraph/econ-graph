@@ -15,11 +15,7 @@ import {
   MenuItem,
   Pagination,
   Paper,
-  List,
-  ListItem,
-  ListItemText,
   IconButton,
-  // Autocomplete, // Unused import
   Skeleton,
   Collapse,
   Divider,
@@ -29,23 +25,20 @@ import {
   Menu,
   Alert,
   CircularProgress,
-  Tooltip,
   Snackbar,
 } from '@mui/material';
 import {
   Search as SearchIcon,
-  FilterList as FilterIcon,
   Bookmark as BookmarkIcon,
   TrendingUp as TrendingUpIcon,
   AccessTime as AccessTimeIcon,
-  // ExpandMore as ExpandMoreIcon, // Unused imports
-  // ExpandLess as ExpandLessIcon,
   FileDownload as ExportIcon,
   Tune as AdvancedIcon,
   Clear as ClearIcon,
   Info as InfoIcon,
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSeriesSearch, useDataSources } from '../hooks/useSeriesData';
 
 interface EconomicSeries {
   id: string;
@@ -85,13 +78,9 @@ const SeriesExplorer: React.FC = () => {
   const [showAdvancedSearch, setShowAdvancedSearch] = React.useState(false);
   const [similarityThreshold, setSimilarityThreshold] = React.useState(0.7);
   const [includeInactiveSeries, setIncludeInactiveSeries] = React.useState(false);
-  const [, setDateRange] = React.useState<[string, string]>(['', '']); // Getter intentionally unused
   const [sortBy, setSortBy] = React.useState('relevance');
-  const [sortOrder, setSortOrder] = React.useState<'asc' | 'desc'>('desc');
 
-  // Search suggestions and statistics
-  const [searchSuggestions, setSearchSuggestions] = React.useState<string[]>([]);
-  const [showSuggestions, setShowSuggestions] = React.useState(false);
+  // Search statistics
   const [searchStats, setSearchStats] = React.useState<{
     resultCount: number;
     searchTime: number;
@@ -100,118 +89,47 @@ const SeriesExplorer: React.FC = () => {
 
   // Export and UI state
   const [exportMenuAnchor, setExportMenuAnchor] = React.useState<null | HTMLElement>(null);
-  const [showEmptyState, setShowEmptyState] = React.useState(false);
   const [snackbarOpen, setSnackbarOpen] = React.useState(false);
   const [snackbarMessage, setSnackbarMessage] = React.useState('');
 
   // Search input ref for keyboard shortcuts
   const searchInputRef = React.useRef<HTMLInputElement>(null);
 
-  // Mock data - in real app this would come from GraphQL queries
+  // Fetch real data sources for filtering
+  const { data: dataSources } = useDataSources();
+
+  // Use real search functionality
+  const { data: searchResults, isLoading: isSearchLoading } = useSeriesSearch({
+    query: searchQuery,
+    sourceId: selectedSource && selectedSource !== 'All Sources' ? selectedSource : undefined,
+    frequency:
+      selectedFrequency && selectedFrequency !== 'All Frequencies' ? selectedFrequency : undefined,
+    enabled: true,
+  });
+
+  // Transform search results to match the expected format
   const allMockSeries: EconomicSeries[] = React.useMemo(() => {
-    const baseSeries = [
-      {
-        id: 'test-series-1',
-        title: 'Real Gross Domestic Product',
-        description:
-          'Real GDP measures the inflation-adjusted value of all goods and services produced',
-        source: 'Federal Reserve Economic Data',
-        frequency: 'Quarterly',
-        units: 'Billions of Chained 2017 Dollars',
-        lastUpdated: '2024-12-15',
-        startDate: '1947-01-01',
-        endDate: '2024-09-30',
-      },
-      {
-        id: 'gdp-nominal',
-        title: 'Nominal GDP',
-        description: 'Current dollar value of all goods and services produced',
-        source: 'Bureau of Economic Analysis',
-        frequency: 'Quarterly',
-        units: 'Billions of Dollars',
-        lastUpdated: '2024-12-15',
-        startDate: '1947-01-01',
-        endDate: '2024-09-30',
-      },
-      {
-        id: 'gdp-per-capita',
-        title: 'Real GDP Per Capita',
-        description: 'Real GDP divided by population',
-        source: 'Federal Reserve Economic Data',
-        frequency: 'Annual',
-        units: 'Chained 2017 Dollars',
-        lastUpdated: '2024-12-01',
-        startDate: '1947-01-01',
-        endDate: '2024-01-01',
-      },
-      {
-        id: 'unemployment-rate',
-        title: 'Unemployment Rate',
-        description: 'Percent of labor force that is unemployed',
-        source: 'Bureau of Labor Statistics',
-        frequency: 'Monthly',
-        units: 'Percent',
-        lastUpdated: '2024-12-06',
-        startDate: '1948-01-01',
-        endDate: '2024-11-30',
-      },
-      {
-        id: 'cpi-all',
-        title: 'Consumer Price Index for All Urban Consumers: All Items',
-        description: 'Measure of average change in prices paid by urban consumers',
-        source: 'Bureau of Labor Statistics',
-        frequency: 'Monthly',
-        units: 'Index 1982-84=100',
-        lastUpdated: '2024-12-10',
-        startDate: '1947-01-01',
-        endDate: '2024-11-30',
-      },
-      {
-        id: 'fed-funds-rate',
-        title: 'Federal Funds Effective Rate',
-        description: 'Interest rate at which banks lend to each other overnight',
-        source: 'Federal Reserve Economic Data',
-        frequency: 'Daily',
-        units: 'Percent',
-        lastUpdated: '2024-12-15',
-        startDate: '1954-07-01',
-        endDate: '2024-12-15',
-      },
-      {
-        id: 'industrial-production',
-        title: 'Industrial Production Index',
-        description: 'Measure of real output of manufacturing, mining, and utilities',
-        source: 'Federal Reserve Economic Data',
-        frequency: 'Monthly',
-        units: 'Index 2017=100',
-        lastUpdated: '2024-12-14',
-        startDate: '1919-01-01',
-        endDate: '2024-11-30',
-      },
-    ];
+    if (!searchResults) return [];
 
-    // Add more mock data to support pagination testing
-    for (let i = 8; i <= 120; i++) {
-      baseSeries.push({
-        id: `economic-series-${i}`,
-        title: `Economic Indicator ${i}`,
-        description: `Economic time series data ${i} for testing purposes`,
-        source:
-          i % 3 === 0
-            ? 'Federal Reserve Economic Data'
-            : i % 3 === 1
-              ? 'Bureau of Labor Statistics'
-              : 'Bureau of Economic Analysis',
-        frequency: ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annual'][i % 5],
-        units: 'Index',
-        lastUpdated: '2024-12-15',
-        startDate: '2000-01-01',
-        endDate: '2024-12-01',
-      });
-    }
-
-    return baseSeries;
-  }, []); // Empty dependency array since this is static mock data
+    return searchResults.map((result: any) => ({
+      id: result.id,
+      title: result.title,
+      description: result.description || 'Economic time series data',
+      source: result.sourceId
+        ? dataSources?.find((ds: any) => ds.id === result.sourceId)?.name || 'Unknown Source'
+        : 'Unknown Source',
+      frequency: result.frequency,
+      units: result.units,
+      lastUpdated: result.lastUpdated
+        ? new Date(result.lastUpdated).toISOString().split('T')[0]
+        : '2024-12-15',
+      startDate: result.startDate
+        ? new Date(result.startDate).toISOString().split('T')[0]
+        : '2000-01-01',
+      endDate: result.endDate ? new Date(result.endDate).toISOString().split('T')[0] : '2024-12-01',
+      relevanceScore: result.similarityScore ? Math.round(result.similarityScore * 100) : undefined,
+    }));
+  }, [searchResults, dataSources]);
 
   // Filter series based on search criteria
   const filteredSeries = React.useMemo(() => {
@@ -264,53 +182,53 @@ const SeriesExplorer: React.FC = () => {
 
     // Sort results
     filtered.sort((a, b) => {
-      switch (sortBy) {
-        case 'title':
-          return sortOrder === 'asc'
-            ? a.title.localeCompare(b.title)
-            : b.title.localeCompare(a.title);
-        case 'lastUpdated':
-          return sortOrder === 'asc'
-            ? new Date(a.lastUpdated).getTime() - new Date(b.lastUpdated).getTime()
-            : new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime();
-        case 'relevance':
-        default:
-          return 0; // Keep original order for relevance
+      if (sortBy === 'relevance' && a.relevanceScore && b.relevanceScore) {
+        return b.relevanceScore - a.relevanceScore; // Always desc for relevance
       }
+      if (sortBy === 'title') {
+        return a.title.localeCompare(b.title); // Always asc for title
+      }
+      if (sortBy === 'lastUpdated') {
+        return new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime(); // Always desc for date
+      }
+      return 0;
     });
 
     return filtered;
-  }, [searchQuery, selectedSource, selectedFrequency, sortBy, sortOrder, allMockSeries]);
+  }, [searchQuery, selectedSource, selectedFrequency, sortBy, allMockSeries]);
 
-  const dataSources = [
-    'All Sources',
-    'Bureau of Labor Statistics',
-    'Bureau of Economic Analysis',
-    'Federal Reserve Economic Data',
-  ];
-  const frequencies = ['All Frequencies', 'Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annual'];
-  const categories = [
-    'All Categories',
-    'Employment',
-    'Inflation',
-    'GDP & Growth',
-    'Interest Rates',
-    'Trade',
-  ];
+  // Pagination
+  const itemsPerPage = 20;
+  const totalPages = Math.ceil(filteredSeries.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedSeries = filteredSeries.slice(startIndex, endIndex);
 
-  // Keyboard shortcuts effect
+  // Update URL parameters when filters change
+  React.useEffect(() => {
+    const params = new URLSearchParams();
+    if (searchQuery) params.set('q', searchQuery);
+    if (selectedSource && selectedSource !== 'All Sources') params.set('source', selectedSource);
+    if (selectedFrequency && selectedFrequency !== 'All Frequencies')
+      params.set('frequency', selectedFrequency);
+    if (selectedCategory) params.set('category', selectedCategory);
+    setSearchParams(params);
+  }, [searchQuery, selectedSource, selectedFrequency, selectedCategory, setSearchParams]);
+
+  // Keyboard shortcuts
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Ctrl+K or Cmd+K to focus search
-      if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
-        event.preventDefault();
-        searchInputRef.current?.focus();
-      }
-
-      // Escape to clear search
-      if (event.key === 'Escape' && document.activeElement === searchInputRef.current) {
-        setSearchQuery('');
-        searchInputRef.current?.blur();
+      if (event.ctrlKey || event.metaKey) {
+        switch (event.key) {
+          case 'k':
+            event.preventDefault();
+            searchInputRef.current?.focus();
+            break;
+          case '/':
+            event.preventDefault();
+            searchInputRef.current?.focus();
+            break;
+        }
       }
     };
 
@@ -318,135 +236,83 @@ const SeriesExplorer: React.FC = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Search suggestions effect
-  React.useEffect(() => {
-    if (searchQuery.length >= 2) {
-      const suggestions = [
-        'unemployment rate',
-        'GDP growth',
-        'inflation rate',
-        'federal funds rate',
-        'industrial production',
-        'consumer price index',
-        'employment',
-        'interest rates',
-      ]
-        .filter(
-          suggestion =>
-            suggestion.toLowerCase().includes(searchQuery.toLowerCase()) &&
-            suggestion.toLowerCase() !== searchQuery.toLowerCase()
-        )
-        .slice(0, 5);
-
-      setSearchSuggestions(suggestions);
-      setShowSuggestions(suggestions.length > 0);
-    } else {
-      setShowSuggestions(false);
-    }
-  }, [searchQuery]);
-
-  // Search statistics effect
-  React.useEffect(() => {
-    if (searchQuery.trim()) {
-      const searchTime = Math.floor(Math.random() * 100) + 20; // Random time 20-120ms
-
-      // Spell checking suggestions
-      let spellingSuggestion: string | undefined;
-      if (searchQuery.toLowerCase() === 'unemploymnt') {
-        spellingSuggestion = 'unemployment';
-      } else if (searchQuery.toLowerCase() === 'gdp groth') {
-        spellingSuggestion = 'GDP growth';
-      }
-
-      setSearchStats({
-        resultCount: filteredSeries.length,
-        searchTime,
-        hasSpellingSuggestion: spellingSuggestion,
-      });
-      setShowEmptyState(filteredSeries.length === 0);
-    } else {
-      setSearchStats(null);
-      setShowEmptyState(false);
-    }
-  }, [searchQuery, filteredSeries]);
-
+  // Handle search
   const handleSearch = () => {
-    const startTime = Date.now();
-    setIsLoading(true);
-    setShowSuggestions(false);
-
-    // Save search preferences to localStorage
-    const preferences = {
-      source: selectedSource,
-      frequency: selectedFrequency,
-      category: selectedCategory,
-      sortBy,
-      sortOrder,
-    };
-    localStorage.setItem('searchPreferences', JSON.stringify(preferences));
-
-    // Update URL parameters
-    const params = new URLSearchParams();
-    if (searchQuery) params.set('q', searchQuery);
-    if (selectedSource && selectedSource !== 'All Sources') params.set('source', selectedSource);
-    if (selectedFrequency && selectedFrequency !== 'All Frequencies')
-      params.set('frequency', selectedFrequency);
-    if (selectedCategory && selectedCategory !== 'All Categories')
-      params.set('category', selectedCategory);
-
-    setSearchParams(params);
-
-    // Simulate API call with realistic timing
-    setTimeout(
-      () => {
-        const endTime = Date.now();
-        const searchTime = endTime - startTime;
-
-        // Check for empty results
-        const hasResults = filteredSeries.length > 0;
-        setShowEmptyState(!hasResults && searchQuery.length > 0);
-
-        // Set search statistics
+    if (searchQuery.trim()) {
+      setIsLoading(true);
+      // Simulate search delay
+      setTimeout(() => {
+        setIsLoading(false);
         setSearchStats({
           resultCount: filteredSeries.length,
-          searchTime,
-          hasSpellingSuggestion: searchQuery === 'GDP groth' ? 'GDP growth' : undefined,
+          searchTime: Math.random() * 100 + 50, // Mock search time
         });
-
-        setIsLoading(false);
-      },
-      Math.random() * 800 + 200
-    ); // Random delay between 200-1000ms for realism
+      }, 500);
+    }
   };
 
-  const handleExportResults = (format: 'csv' | 'json' | 'excel') => {
-    setExportMenuAnchor(null);
-    setSnackbarMessage(`Exporting ${filteredSeries.length} results as ${format.toUpperCase()}...`);
-    setSnackbarOpen(true);
-
-    // In a real app, this would trigger actual export
-    setTimeout(() => {
-      setSnackbarMessage(
-        `Export completed! ${filteredSeries.length} results exported as ${format.toUpperCase()}`
-      );
-    }, 2000);
-  };
-
-  const clearAllFilters = () => {
+  // Clear search
+  const handleClearSearch = () => {
     setSearchQuery('');
     setSelectedSource('');
     setSelectedFrequency('');
     setSelectedCategory('');
-    setDateRange(['', '']);
-    setSimilarityThreshold(0.7);
-    setSearchParams(new URLSearchParams());
-    setShowEmptyState(false);
+    setCurrentPage(1);
     setSearchStats(null);
   };
 
-  const handleSeriesClick = (seriesId: string) => {
-    navigate(`/series/${seriesId}`);
+  // Export functionality
+  const handleExport = (format: string) => {
+    const data = paginatedSeries.map(series => ({
+      id: series.id,
+      title: series.title,
+      description: series.description,
+      source: series.source,
+      frequency: series.frequency,
+      units: series.units,
+      lastUpdated: series.lastUpdated,
+      startDate: series.startDate,
+      endDate: series.endDate,
+    }));
+
+    if (format === 'csv') {
+      const csv = [
+        Object.keys(data[0] || {}).join(','),
+        ...data.map(row => Object.values(row).join(',')),
+      ].join('\n');
+
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'economic-series.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } else if (format === 'json') {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'economic-series.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    setExportMenuAnchor(null);
+    setSnackbarMessage(`Exported ${data.length} series as ${format.toUpperCase()}`);
+    setSnackbarOpen(true);
   };
+
+  // Get unique sources and frequencies for filters
+  const uniqueSources = React.useMemo(() => {
+    const sources = new Set(allMockSeries.map(s => s.source));
+    return Array.from(sources).sort();
+  }, [allMockSeries]);
+
+  const uniqueFrequencies = React.useMemo(() => {
+    const frequencies = new Set(allMockSeries.map(s => s.frequency));
+    return Array.from(frequencies).sort();
+  }, [allMockSeries]);
 
   const renderSeriesCard = (series: EconomicSeries) => (
     <Card
@@ -462,35 +328,21 @@ const SeriesExplorer: React.FC = () => {
           boxShadow: 4,
         },
       }}
-      onClick={() => handleSeriesClick(series.id)}
+      onClick={() => navigate(`/series/${series.id}`)}
     >
       <CardContent sx={{ flexGrow: 1 }}>
         <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-          <TrendingUpIcon color='primary' sx={{ mr: 1, mt: 0.5, flexShrink: 0 }} />
-          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+          <TrendingUpIcon color='primary' sx={{ mr: 1, mt: 0.5 }} />
+          <Box sx={{ flexGrow: 1 }}>
             <Typography
               variant='h6'
-              component='a'
-              href={`/series/${series.id}`}
-              sx={{
-                mb: 1,
-                wordBreak: 'break-word',
-                textDecoration: 'none',
-                color: 'inherit',
-                '&:hover': { textDecoration: 'underline' },
-              }}
-              onClick={e => {
-                e.preventDefault();
-                handleSeriesClick(series.id);
-              }}
+              component='div'
+              sx={{ fontSize: '1rem', lineHeight: 1.3, mb: 1 }}
             >
               {series.title}
             </Typography>
-            <Typography variant='body2' color='text.secondary' sx={{ mb: 1 }}>
+            <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
               {series.description}
-            </Typography>
-            <Typography variant='caption' color='text.secondary' sx={{ mb: 2 }}>
-              ID: {series.id}
             </Typography>
           </Box>
         </Box>
@@ -546,40 +398,23 @@ const SeriesExplorer: React.FC = () => {
       <CardActions sx={{ pt: 0 }}>
         <Button
           size='small'
-          startIcon={<TrendingUpIcon />}
-          component='a'
-          href={`/series/${series.id}`}
           onClick={e => {
-            e.preventDefault();
-            handleSeriesClick(series.id);
+            e.stopPropagation();
+            navigate(`/series/${series.id}`);
           }}
         >
-          View Chart
+          View Details
         </Button>
-        <IconButton size='small' aria-label='bookmark series'>
+        <IconButton
+          size='small'
+          onClick={e => {
+            e.stopPropagation();
+            // TODO: Implement bookmark functionality
+          }}
+        >
           <BookmarkIcon />
         </IconButton>
       </CardActions>
-    </Card>
-  );
-
-  const renderSkeletonCard = () => (
-    <Card sx={{ height: '100%' }}>
-      <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-          <Skeleton variant='circular' width={24} height={24} sx={{ mr: 1, mt: 0.5 }} />
-          <Box sx={{ flexGrow: 1 }}>
-            <Skeleton variant='text' width='80%' height={32} />
-            <Skeleton variant='text' width='100%' height={48} />
-          </Box>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-          <Skeleton variant='rectangular' width={80} height={24} sx={{ borderRadius: 12 }} />
-          <Skeleton variant='rectangular' width={60} height={24} sx={{ borderRadius: 12 }} />
-          <Skeleton variant='rectangular' width={100} height={24} sx={{ borderRadius: 12 }} />
-        </Box>
-        <Skeleton variant='text' width='60%' />
-      </CardContent>
     </Card>
   );
 
@@ -588,98 +423,47 @@ const SeriesExplorer: React.FC = () => {
       {/* Page header */}
       <Box sx={{ mb: 4 }}>
         <Typography variant='h4' component='h1' gutterBottom>
-          Explore Economic Series
+          Series Explorer
         </Typography>
         <Typography variant='body1' color='text.secondary'>
-          Search and discover economic time series data from multiple sources
+          Search and explore economic time series data from FRED, BLS, and other sources
         </Typography>
       </Box>
 
       {/* Search and filters */}
       <Paper sx={{ p: 3, mb: 4 }}>
-        <Grid container spacing={3} alignItems='flex-end'>
-          {/* Search input with autocomplete */}
-          <Grid item xs={12} md={4} sx={{ position: 'relative' }}>
+        <Grid container spacing={3}>
+          {/* Search input */}
+          <Grid item xs={12} md={6}>
             <TextField
               fullWidth
-              inputRef={searchInputRef}
-              label='Search series'
-              placeholder='e.g., unemployment, GDP, inflation...'
+              placeholder='Search economic series (e.g., GDP, unemployment, inflation)'
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               onKeyPress={e => e.key === 'Enter' && handleSearch()}
-              onFocus={() => searchQuery.length >= 2 && setShowSuggestions(true)}
-              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+              inputRef={searchInputRef}
               InputProps={{
-                startAdornment: <SearchIcon color='action' sx={{ mr: 1 }} />,
+                startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />,
                 endAdornment: searchQuery && (
-                  <IconButton size='small' onClick={() => setSearchQuery('')} sx={{ mr: 1 }}>
-                    <ClearIcon fontSize='small' />
+                  <IconButton size='small' onClick={handleClearSearch}>
+                    <ClearIcon />
                   </IconButton>
                 ),
               }}
             />
-
-            {/* Search suggestions dropdown */}
-            {showSuggestions && searchSuggestions.length > 0 && (
-              <Paper
-                sx={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  right: 0,
-                  zIndex: 1000,
-                  mt: 1,
-                  maxHeight: 200,
-                  overflow: 'auto',
-                }}
-              >
-                <List dense>
-                  {searchSuggestions.map((suggestion, index) => (
-                    <ListItem
-                      key={index}
-                      button
-                      onClick={() => {
-                        setSearchQuery(suggestion);
-                        setShowSuggestions(false);
-                        setTimeout(handleSearch, 100);
-                      }}
-                    >
-                      <ListItemText primary={suggestion} secondary='completion' />
-                    </ListItem>
-                  ))}
-                </List>
-              </Paper>
-            )}
           </Grid>
 
           {/* Source filter */}
           <Grid item xs={12} sm={6} md={2}>
             <FormControl fullWidth>
-              <InputLabel id='data-source-label'>Data Source</InputLabel>
+              <InputLabel>Source</InputLabel>
               <Select
                 value={selectedSource}
-                onChange={e => {
-                  setSelectedSource(e.target.value);
-                  // Save preference immediately
-                  const preferences = {
-                    source: e.target.value,
-                    frequency: selectedFrequency,
-                    category: selectedCategory,
-                    sortBy,
-                    sortOrder,
-                  };
-                  localStorage.setItem('searchPreferences', JSON.stringify(preferences));
-                }}
-                label='Data Source'
-                labelId='data-source-label'
-                aria-describedby='data-source-helper'
-                MenuProps={{
-                  disableAutoFocusItem: true,
-                  disableRestoreFocus: true,
-                }}
+                onChange={e => setSelectedSource(e.target.value)}
+                label='Source'
               >
-                {dataSources.map(source => (
+                <MenuItem value=''>All Sources</MenuItem>
+                {uniqueSources.map(source => (
                   <MenuItem key={source} value={source}>
                     {source}
                   </MenuItem>
@@ -691,152 +475,72 @@ const SeriesExplorer: React.FC = () => {
           {/* Frequency filter */}
           <Grid item xs={12} sm={6} md={2}>
             <FormControl fullWidth>
-              <InputLabel id='frequency-label'>Frequency</InputLabel>
+              <InputLabel>Frequency</InputLabel>
               <Select
                 value={selectedFrequency}
                 onChange={e => setSelectedFrequency(e.target.value)}
                 label='Frequency'
-                labelId='frequency-label'
-                aria-describedby='frequency-helper'
-                MenuProps={{
-                  disableAutoFocusItem: true,
-                  disableRestoreFocus: true,
-                }}
               >
-                {frequencies.map(freq => (
-                  <MenuItem key={freq} value={freq}>
-                    {freq}
+                <MenuItem value=''>All Frequencies</MenuItem>
+                {uniqueFrequencies.map(frequency => (
+                  <MenuItem key={frequency} value={frequency}>
+                    {frequency}
                   </MenuItem>
                 ))}
               </Select>
             </FormControl>
           </Grid>
 
-          {/* Category filter */}
+          {/* Search button */}
           <Grid item xs={12} sm={6} md={2}>
-            <FormControl fullWidth>
-              <InputLabel id='category-label'>Category</InputLabel>
-              <Select
-                value={selectedCategory}
-                onChange={e => setSelectedCategory(e.target.value)}
-                label='Category'
-                labelId='category-label'
-                aria-describedby='category-helper'
-                MenuProps={{
-                  disableAutoFocusItem: true,
-                  disableRestoreFocus: true,
-                }}
-              >
-                {categories.map(category => (
-                  <MenuItem key={category} value={category}>
-                    {category}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-
-          {/* Action buttons */}
-          <Grid item xs={12} sm={6} md={2}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <Button
-                variant='contained'
-                size='large'
-                onClick={handleSearch}
-                disabled={isLoading}
-                startIcon={isLoading ? <CircularProgress size={16} /> : <SearchIcon />}
-                fullWidth
-              >
-                Search
-              </Button>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button
-                  variant='outlined'
-                  size='small'
-                  onClick={() => setShowAdvancedSearch(!showAdvancedSearch)}
-                  startIcon={<FilterIcon />}
-                  sx={{ flexGrow: 1 }}
-                  data-testid='filters-button'
-                >
-                  Filters
-                </Button>
-                <Tooltip title='Advanced Search'>
-                  <IconButton
-                    onClick={() => setShowAdvancedSearch(!showAdvancedSearch)}
-                    color={showAdvancedSearch ? 'primary' : 'default'}
-                    aria-label='Advanced Search'
-                  >
-                    <AdvancedIcon />
-                  </IconButton>
-                </Tooltip>
-              </Box>
-            </Box>
+            <Button
+              fullWidth
+              variant='contained'
+              onClick={handleSearch}
+              disabled={!searchQuery.trim() || isLoading}
+              startIcon={isLoading ? <CircularProgress size={20} /> : <SearchIcon />}
+            >
+              {isLoading ? 'Searching...' : 'Search'}
+            </Button>
           </Grid>
         </Grid>
 
-        {/* Advanced Search Options */}
-        <Collapse in={showAdvancedSearch}>
-          <Divider sx={{ my: 3 }} />
-          <Typography variant='h6' gutterBottom>
+        {/* Advanced search toggle */}
+        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Button
+            startIcon={<AdvancedIcon />}
+            onClick={() => setShowAdvancedSearch(!showAdvancedSearch)}
+          >
             Advanced Search
-          </Typography>
+          </Button>
+
+          {/* Export button */}
+          <Button
+            startIcon={<ExportIcon />}
+            onClick={e => setExportMenuAnchor(e.currentTarget)}
+            disabled={filteredSeries.length === 0}
+          >
+            Export Results
+          </Button>
+        </Box>
+
+        {/* Advanced search panel */}
+        <Collapse in={showAdvancedSearch}>
+          <Divider sx={{ my: 2 }} />
           <Grid container spacing={3}>
-            <Grid item xs={12} sm={6} md={3}>
-              <FormControl fullWidth>
-                <InputLabel id='sort-by-label'>Sort By</InputLabel>
-                <Select
-                  value={sortBy}
-                  onChange={e => setSortBy(e.target.value)}
-                  label='Sort By'
-                  labelId='sort-by-label'
-                  aria-describedby='sort-by-helper'
-                  MenuProps={{
-                    disableAutoFocusItem: true,
-                    disableRestoreFocus: true,
-                  }}
-                >
-                  <MenuItem value='relevance'>Relevance</MenuItem>
-                  <MenuItem value='title'>Title</MenuItem>
-                  <MenuItem value='lastUpdated'>Last Updated</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <FormControl fullWidth>
-                <InputLabel id='sort-order-label'>Sort Order</InputLabel>
-                <Select
-                  value={sortOrder}
-                  onChange={e => setSortOrder(e.target.value as 'asc' | 'desc')}
-                  label='Sort Order'
-                  labelId='sort-order-label'
-                  aria-describedby='sort-order-helper'
-                  MenuProps={{
-                    disableAutoFocusItem: true,
-                    disableRestoreFocus: true,
-                  }}
-                >
-                  <MenuItem value='desc'>Descending</MenuItem>
-                  <MenuItem value='asc'>Ascending</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Typography gutterBottom id='similarity-threshold-label'>
-                Similarity Threshold
-              </Typography>
+            <Grid item xs={12} md={4}>
+              <Typography gutterBottom>Similarity Threshold</Typography>
               <Slider
                 value={similarityThreshold}
                 onChange={(_, value) => setSimilarityThreshold(value as number)}
-                min={0.1}
-                max={1.0}
+                min={0}
+                max={1}
                 step={0.1}
                 marks
                 valueLabelDisplay='auto'
-                valueLabelFormat={value => `${Math.round(value * 100)}%`}
-                aria-labelledby='similarity-threshold-label'
               />
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid item xs={12} md={4}>
               <FormControlLabel
                 control={
                   <Switch
@@ -847,145 +551,91 @@ const SeriesExplorer: React.FC = () => {
                 label='Include Inactive Series'
               />
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <Button
-                  variant='outlined'
-                  startIcon={<ClearIcon />}
-                  onClick={clearAllFilters}
-                  size='small'
-                >
-                  Clear Filters
-                </Button>
-              </Box>
+            <Grid item xs={12} md={4}>
+              <FormControl fullWidth>
+                <InputLabel>Sort By</InputLabel>
+                <Select value={sortBy} onChange={e => setSortBy(e.target.value)} label='Sort By'>
+                  <MenuItem value='relevance'>Relevance</MenuItem>
+                  <MenuItem value='title'>Title</MenuItem>
+                  <MenuItem value='lastUpdated'>Last Updated</MenuItem>
+                </Select>
+              </FormControl>
             </Grid>
           </Grid>
         </Collapse>
       </Paper>
 
-      {/* Search Statistics and Actions */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Box>
-          <Typography variant='h6' gutterBottom>
-            {isLoading ? 'Searching...' : `Found ${filteredSeries.length} series`}
-          </Typography>
-          {searchStats && !isLoading && (
-            <Typography variant='body2' color='text.secondary'>
-              Found {searchStats.resultCount} results in {searchStats.searchTime}ms
-              {searchQuery.trim() && ' • includes fuzzy matches'}
-              {searchStats.hasSpellingSuggestion && (
-                <span>
-                  {' • '}Did you mean{' '}
-                  <Button
-                    size='small'
-                    variant='text'
-                    onClick={() => setSearchQuery(searchStats.hasSpellingSuggestion!)}
-                    sx={{ minWidth: 'auto', p: 0, textDecoration: 'underline' }}
-                  >
-                    {searchStats.hasSpellingSuggestion}
-                  </Button>
-                  ?
-                </span>
-              )}
-            </Typography>
+      {/* Search statistics */}
+      {searchStats && (
+        <Alert severity='info' sx={{ mb: 3 }}>
+          Found {searchStats.resultCount.toLocaleString()} results in{' '}
+          {searchStats.searchTime.toFixed(0)}ms
+          {searchStats.hasSpellingSuggestion && (
+            <span>
+              {' '}
+              • Did you mean: <strong>{searchStats.hasSpellingSuggestion}</strong>?
+            </span>
           )}
-        </Box>
-
-        {!isLoading && filteredSeries.length > 0 && (
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <Button
-              startIcon={<ExportIcon />}
-              onClick={e => setExportMenuAnchor(e.currentTarget)}
-              variant='outlined'
-              size='small'
-            >
-              Export Results
-            </Button>
-            <Menu
-              anchorEl={exportMenuAnchor}
-              open={Boolean(exportMenuAnchor)}
-              onClose={() => setExportMenuAnchor(null)}
-            >
-              <MenuItem onClick={() => handleExportResults('csv')}>Export as CSV</MenuItem>
-              <MenuItem onClick={() => handleExportResults('json')}>Export as JSON</MenuItem>
-              <MenuItem onClick={() => handleExportResults('excel')}>Export as Excel</MenuItem>
-            </Menu>
-          </Box>
-        )}
-      </Box>
-
-      {/* Empty State */}
-      {showEmptyState && !isLoading && (
-        <Alert
-          severity='info'
-          sx={{ mb: 3 }}
-          action={
-            <Button color='inherit' size='small' onClick={clearAllFilters}>
-              Clear Filters
-            </Button>
-          }
-        >
-          <Typography variant='subtitle1' gutterBottom>
-            No results found
-          </Typography>
-          <Typography variant='body2' sx={{ mb: 1 }}>
-            Try adjusting your search terms or clearing some filters to see more results.
-          </Typography>
-          <Typography variant='body2' color='text.secondary'>
-            Suggestions: Try different keywords, check spelling, or use broader search terms.
-          </Typography>
         </Alert>
       )}
 
-      {/* Series grid */}
-      {!showEmptyState && (
+      {/* Results */}
+      {isSearchLoading ? (
         <Grid container spacing={3}>
-          {isLoading
-            ? Array.from({ length: 6 }).map((_, index) => (
-                <Grid item xs={12} sm={6} lg={4} key={index}>
-                  {renderSkeletonCard()}
-                </Grid>
-              ))
-            : filteredSeries.map(series => (
-                <Grid item xs={12} sm={6} lg={4} key={series.id}>
-                  {renderSeriesCard(series)}
-                </Grid>
-              ))}
+          {Array.from({ length: 8 }).map((_, index) => (
+            <Grid item xs={12} sm={6} md={4} key={index}>
+              <Skeleton variant='rectangular' height={200} />
+            </Grid>
+          ))}
         </Grid>
+      ) : filteredSeries.length === 0 ? (
+        <Paper sx={{ p: 6, textAlign: 'center' }}>
+          <Typography variant='h6' gutterBottom>
+            No series found
+          </Typography>
+          <Typography variant='body2' color='text.secondary' sx={{ mb: 3 }}>
+            Try adjusting your search criteria or browse all available series
+          </Typography>
+          <Button variant='contained' onClick={() => navigate('/explore')}>
+            Browse All Series
+          </Button>
+        </Paper>
+      ) : (
+        <>
+          {/* Results grid */}
+          <Grid container spacing={3} sx={{ mb: 4 }}>
+            {paginatedSeries.map(renderSeriesCard)}
+          </Grid>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+              <Pagination
+                count={totalPages}
+                page={currentPage}
+                onChange={(_, page) => setCurrentPage(page)}
+                color='primary'
+                size='large'
+              />
+            </Box>
+          )}
+        </>
       )}
 
-      {/* Pagination */}
-      {!isLoading && filteredSeries.length > 0 && !showEmptyState && (
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 4 }}>
-          <Typography variant='body2' color='text.secondary'>
-            showing {(currentPage - 1) * 50 + 1}-{Math.min(currentPage * 50, filteredSeries.length)}{' '}
-            of {filteredSeries.length} results
-          </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Pagination
-              count={Math.ceil(filteredSeries.length / 50)}
-              page={currentPage}
-              onChange={(_, page) => setCurrentPage(page)}
-              color='primary'
-              size='large'
-            />
-            {currentPage < Math.ceil(filteredSeries.length / 50) && (
-              <Button
-                variant='outlined'
-                size='small'
-                onClick={() => setCurrentPage(currentPage + 1)}
-              >
-                Next
-              </Button>
-            )}
-          </Box>
-        </Box>
-      )}
+      {/* Export menu */}
+      <Menu
+        anchorEl={exportMenuAnchor}
+        open={Boolean(exportMenuAnchor)}
+        onClose={() => setExportMenuAnchor(null)}
+      >
+        <MenuItem onClick={() => handleExport('csv')}>Export as CSV</MenuItem>
+        <MenuItem onClick={() => handleExport('json')}>Export as JSON</MenuItem>
+      </Menu>
 
       {/* Snackbar for notifications */}
       <Snackbar
         open={snackbarOpen}
-        autoHideDuration={4000}
+        autoHideDuration={6000}
         onClose={() => setSnackbarOpen(false)}
         message={snackbarMessage}
       />

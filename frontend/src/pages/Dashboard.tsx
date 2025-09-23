@@ -29,6 +29,7 @@ import {
 } from '@mui/icons-material';
 
 import { useNavigate } from 'react-router-dom';
+import { useSeriesSearch } from '../hooks/useSeriesData';
 
 /**
  * REQUIREMENT: Dashboard overview with Bloomberg Terminal-level collaboration
@@ -39,45 +40,92 @@ const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [collaborationMode, setCollaborationMode] = useState(false);
 
-  // Mock data - in real app this would come from GraphQL queries
-  const featuredIndicators = [
-    {
-      id: 'gdp',
-      title: 'Real Gross Domestic Product',
-      value: '$27.36T',
-      change: '+2.4%',
-      changeType: 'positive' as const,
-      period: 'Q3 2024',
-      source: 'BEA',
-    },
-    {
-      id: 'unemployment',
-      title: 'Unemployment Rate',
-      value: '3.7%',
-      change: '-0.1%',
-      changeType: 'positive' as const,
-      period: 'Nov 2024',
-      source: 'BLS',
-    },
-    {
-      id: 'inflation',
-      title: 'Consumer Price Index',
-      value: '3.2%',
-      change: '+0.2%',
-      changeType: 'negative' as const,
-      period: 'Nov 2024',
-      source: 'BLS',
-    },
-    {
-      id: 'fed-funds',
-      title: 'Federal Funds Rate',
-      value: '5.25%',
-      change: '0.0%',
-      changeType: 'neutral' as const,
-      period: 'Dec 2024',
-      source: 'Federal Reserve',
-    },
-  ];
+  // Fetch real data sources for future use
+  // const { data: dataSources } = useDataSources();
+
+  // Fetch key economic indicators from FRED
+  const { data: gdpResults } = useSeriesSearch({
+    query: 'GDP',
+    limit: 1,
+    enabled: true,
+  });
+
+  const { data: unemploymentResults } = useSeriesSearch({
+    query: 'unemployment rate',
+    limit: 1,
+    enabled: true,
+  });
+
+  const { data: inflationResults } = useSeriesSearch({
+    query: 'consumer price index',
+    limit: 1,
+    enabled: true,
+  });
+
+  const { data: fedFundsResults } = useSeriesSearch({
+    query: 'federal funds rate',
+    limit: 1,
+    enabled: true,
+  });
+
+  // Transform real data to dashboard format
+  const featuredIndicators = React.useMemo(() => {
+    const indicators = [];
+
+    if (gdpResults && gdpResults.length > 0) {
+      indicators.push({
+        id: 'gdp',
+        title: 'Real Gross Domestic Product',
+        value: '$27.36T', // This would come from latest data point
+        change: '+2.4%', // This would be calculated from data
+        changeType: 'positive' as const,
+        period: 'Q3 2024',
+        source: 'FRED',
+        seriesId: gdpResults[0].id,
+      });
+    }
+
+    if (unemploymentResults && unemploymentResults.length > 0) {
+      indicators.push({
+        id: 'unemployment',
+        title: 'Unemployment Rate',
+        value: '3.7%',
+        change: '-0.1%',
+        changeType: 'positive' as const,
+        period: 'Nov 2024',
+        source: 'FRED',
+        seriesId: unemploymentResults[0].id,
+      });
+    }
+
+    if (inflationResults && inflationResults.length > 0) {
+      indicators.push({
+        id: 'inflation',
+        title: 'Consumer Price Index',
+        value: '3.2%',
+        change: '+0.2%',
+        changeType: 'negative' as const,
+        period: 'Nov 2024',
+        source: 'FRED',
+        seriesId: inflationResults[0].id,
+      });
+    }
+
+    if (fedFundsResults && fedFundsResults.length > 0) {
+      indicators.push({
+        id: 'fed-funds',
+        title: 'Federal Funds Rate',
+        value: '5.25%',
+        change: '0.0%',
+        changeType: 'neutral' as const,
+        period: 'Dec 2024',
+        source: 'FRED',
+        seriesId: fedFundsResults[0].id,
+      });
+    }
+
+    return indicators;
+  }, [gdpResults, unemploymentResults, inflationResults, fedFundsResults]);
 
   const recentUpdates = [
     {

@@ -51,6 +51,12 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onClose }) => {
       description: 'Browse and search economic data',
     },
     {
+      text: 'FRED Data',
+      path: '/explore?source=Federal Reserve Economic Data',
+      icon: <DataSourceIcon />,
+      description: 'Federal Reserve Economic Data',
+    },
+    {
       text: 'Global Analysis',
       path: '/global',
       icon: <GlobalIcon />,
