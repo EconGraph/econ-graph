@@ -35,6 +35,11 @@ export const MaterialUITestWrapper: React.FC<{ children: React.ReactNode }> = ({
 
 // Custom render function that handles Material-UI portals properly
 export const customRender = (ui: React.ReactElement, options: RenderOptions = {}) => {
+  // Create a proper container instead of using document.body
+  const container = document.createElement('div');
+  container.setAttribute('data-testid', 'test-container');
+  document.body.appendChild(container);
+
   // Create a portal container for Material-UI dialogs
   const portalContainer = document.createElement('div');
   portalContainer.setAttribute('data-testid', 'material-ui-portal-container');
@@ -42,7 +47,7 @@ export const customRender = (ui: React.ReactElement, options: RenderOptions = {}
 
   const renderResult = render(ui, {
     wrapper: MaterialUITestWrapper,
-    container: document.body, // Render to body to handle portals
+    container: container, // Use proper container instead of document.body
     ...options,
   });
 
@@ -53,6 +58,10 @@ export const customRender = (ui: React.ReactElement, options: RenderOptions = {}
       // Clean up portal container
       if (document.body.contains(portalContainer)) {
         document.body.removeChild(portalContainer);
+      }
+      // Clean up test container
+      if (document.body.contains(container)) {
+        document.body.removeChild(container);
       }
     },
   };
@@ -65,6 +74,10 @@ export const setupTestEnvironment = () => {
     '[data-testid="material-ui-portal-container"]'
   );
   existingContainers.forEach(container => container.remove());
+
+  // Clean up any existing test containers
+  const existingTestContainers = document.querySelectorAll('[data-testid="test-container"]');
+  existingTestContainers.forEach(container => container.remove());
 };
 
 export const cleanupTestEnvironment = () => {

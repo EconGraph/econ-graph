@@ -114,12 +114,13 @@ describe('ChartCollaboration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     setupTestEnvironment();
-    // Increase timeout for complex Material-UI interactions
-    jest.setTimeout(15000);
   });
 
   afterEach(() => {
     cleanupTestEnvironment();
+    // Clean up any remaining test containers
+    const testContainers = document.querySelectorAll('[data-testid="test-container"]');
+    testContainers.forEach(container => container.remove());
   });
 
   const renderChartCollaboration = (props = {}) => {
@@ -298,12 +299,17 @@ describe('ChartCollaboration', () => {
       const user = userEvent.setup();
       renderChartCollaboration();
 
+      // Verify component renders first
+      expect(screen.getByRole('button', { name: 'Add Annotation' })).toBeInTheDocument();
+
       // Open dialog
       const addButton = screen.getByRole('button', { name: 'Add Annotation' });
       await user.click(addButton);
 
-      // Wait for dialog to appear and render properly
-      await waitForDialog('Add Chart Annotation');
+      // Wait for dialog to appear
+      await waitFor(() => {
+        expect(screen.getByText('Add Chart Annotation')).toBeInTheDocument();
+      }, { timeout: 300 });
 
       // Fill form using our helper functions
       const titleField = findFormFieldInDialog('input', 'Title');
@@ -486,7 +492,7 @@ describe('ChartCollaboration', () => {
             expect(screen.getByText('GDP Growth Spike - Comments')).toBeInTheDocument();
           }
         }
-        }, { timeout: 5000 });
+        }, { timeout: 300 });
 
       expect(screen.getByText('GDP Growth Spike - Comments')).toBeInTheDocument();
     });
@@ -524,7 +530,7 @@ describe('ChartCollaboration', () => {
         // Wait for comments dialog to appear using robust selector
         await waitFor(() => {
           expect(screen.getByTestId('comments-dialog')).toBeInTheDocument();
-        }, { timeout: 5000 });
+        }, { timeout: 300 });
 
         // Check for comment content
         const commentText = screen.queryByText('This looks like a temporary dip');
@@ -550,7 +556,7 @@ describe('ChartCollaboration', () => {
         // Wait for comments dialog to appear using robust selector
         await waitFor(() => {
           expect(screen.getByTestId('comments-dialog')).toBeInTheDocument();
-        }, { timeout: 5000 });
+        }, { timeout: 300 });
 
         // Add comment using robust selector
         const commentInput = screen.getByTestId('comment-input');
@@ -582,7 +588,7 @@ describe('ChartCollaboration', () => {
         // Wait for comments dialog to appear using robust selector
         await waitFor(() => {
           expect(screen.getByTestId('comments-dialog')).toBeInTheDocument();
-        }, { timeout: 5000 });
+        }, { timeout: 300 });
 
         // Try to add empty comment - button should be disabled
         const commentButton = screen.getByTestId('submit-comment-button');

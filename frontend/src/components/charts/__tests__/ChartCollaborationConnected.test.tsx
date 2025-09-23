@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, StyledEngineProvider } from '@mui/material';
@@ -164,19 +164,43 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 // Custom render function for Material-UI components with portals
 const customRender = (ui: React.ReactElement, options = {}) => {
+  // Create a proper container instead of using document.body
+  const container = document.createElement('div');
+  container.setAttribute('data-testid', 'test-container');
+  document.body.appendChild(container);
+
   const portalContainer = document.createElement('div');
   portalContainer.setAttribute('data-testid', 'portal-container');
   document.body.appendChild(portalContainer);
 
-  return render(ui, {
-    container: document.body,
+  const utils = render(ui, {
+    container: container, // Use proper container instead of document.body
     ...options,
   });
+
+  return {
+    ...utils,
+    cleanup: () => {
+      // Clean up test container
+      if (document.body.contains(container)) {
+        document.body.removeChild(container);
+      }
+      // Clean up portal container
+      if (document.body.contains(portalContainer)) {
+        document.body.removeChild(portalContainer);
+      }
+    },
+  };
 };
 
 describe('ChartCollaborationConnected', () => {
-  beforeAll(() => {
-    jest.setTimeout(20000);
+
+  afterEach(() => {
+    // Clean up any remaining test containers
+    const testContainers = document.querySelectorAll('[data-testid="test-container"]');
+    testContainers.forEach(container => container.remove());
+    const portalContainers = document.querySelectorAll('[data-testid="portal-container"]');
+    portalContainers.forEach(container => container.remove());
   });
   beforeEach(() => {
     jest.clearAllMocks();
@@ -530,7 +554,7 @@ describe('ChartCollaborationConnected', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Annotation created successfully')).toBeInTheDocument();
-      }, { timeout: 20000 });
+      }, { timeout: 300 });
     });
 
     it('should show error snackbar on creation failure', async () => {
@@ -554,7 +578,7 @@ describe('ChartCollaborationConnected', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Creation failed')).toBeInTheDocument();
-      }, { timeout: 20000 });
+      }, { timeout: 300 });
     });
   });
 

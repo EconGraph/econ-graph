@@ -3,7 +3,7 @@
 // This ensures the main series discovery interface works correctly
 
 import React from 'react';
-import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, setupTestEnvironment, cleanupTestEnvironment } from '../../test-utils/material-ui-test-setup';
 import SeriesExplorer from '../SeriesExplorer';
@@ -335,7 +335,6 @@ describe('SeriesExplorer', () => {
     // PURPOSE: Verify that users can sort results by different criteria
     // This helps users find the most relevant or recent series
 
-    const user = userEvent.setup();
     renderSeriesExplorer();
 
     // Since the mock isn't working properly, check that the component renders without crashing
@@ -388,7 +387,6 @@ describe('SeriesExplorer', () => {
     // PURPOSE: Verify appropriate messaging when no results are found
     // This provides helpful feedback for unsuccessful searches
 
-    const user = userEvent.setup();
     renderSeriesExplorer();
 
     // Since the mock isn't working properly, check that the component renders without crashing
@@ -421,7 +419,6 @@ describe('SeriesExplorer', () => {
     // PURPOSE: Verify that power users can access advanced search features
     // This supports sophisticated search scenarios
 
-    const user = userEvent.setup();
     renderSeriesExplorer();
 
     // Since the mock isn't working properly, check that the component renders without crashing
@@ -454,7 +451,6 @@ describe('SeriesExplorer', () => {
     // PURPOSE: Verify that user preferences are remembered across sessions
     // This improves user experience by maintaining preferred settings
 
-    const user = userEvent.setup();
     renderSeriesExplorer();
 
     // Since the mock isn't working properly, check that the component renders without crashing
@@ -486,7 +482,6 @@ describe('SeriesExplorer', () => {
     // PURPOSE: Verify that power users can navigate efficiently with keyboard
     // This improves accessibility and user productivity
 
-    const user = userEvent.setup();
     renderSeriesExplorer();
 
     // Since the mock isn't working properly, check that the component renders without crashing
