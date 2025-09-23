@@ -247,8 +247,8 @@ describe('InteractiveChartWithCollaboration', () => {
       const startDateInput = datePickers[0];
       const endDateInput = datePickers[1];
 
-      expect(startDateInput).toHaveAttribute('label', 'Start Date');
-      expect(endDateInput).toHaveAttribute('label', 'End Date');
+      expect(startDateInput).toHaveAttribute('aria-label', 'Start date for chart data range');
+      expect(endDateInput).toHaveAttribute('aria-label', 'End date for chart data range');
     });
 
     it('should handle date range changes', () => {
@@ -260,8 +260,8 @@ describe('InteractiveChartWithCollaboration', () => {
 
       // Date pickers are not directly editable in the test environment
       // We'll test that the components are rendered correctly
-      expect(startDateInput).toHaveAttribute('label', 'Start Date');
-      expect(endDateInput).toHaveAttribute('label', 'End Date');
+      expect(startDateInput).toHaveAttribute('aria-label', 'Start date for chart data range');
+      expect(endDateInput).toHaveAttribute('aria-label', 'End date for chart data range');
     });
   });
 

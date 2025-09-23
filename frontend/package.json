@@ -61,6 +61,7 @@
     "@testing-library/react": "^14.3.1",
     "@testing-library/user-event": "^14.6.1",
     "@types/jest": "^29.5.14",
+    "identity-obj-proxy": "^3.0.0",
     "jest": "^27.5.1",
     "jest-environment-jsdom": "^29.7.0",
     "msw": "2.11.1",
@@ -70,10 +71,30 @@
     "supertest": "^7.1.4",
     "typescript": "^4.9.5"
   },
+  "jest": {
+    "moduleNameMapper": {
+      "^@/(.*)$": "<rootDir>/src/$1",
+      "^react-app/jest$": "react-app/jest",
+      "^d3$": "<rootDir>/src/__mocks__/d3.js",
+      "^d3-geo$": "<rootDir>/src/__mocks__/d3-geo.js",
+      "^d3-zoom$": "<rootDir>/src/__mocks__/d3-zoom.js",
+      "^d3-scale$": "<rootDir>/src/__mocks__/d3-scale.js",
+      "^d3-scale-chromatic$": "<rootDir>/src/__mocks__/d3-scale-chromatic.js",
+      "^d3-array$": "<rootDir>/src/__mocks__/d3-array.js",
+      "^d3-selection$": "<rootDir>/src/__mocks__/d3-selection.js"
+    },
+    "clearMocks": true,
+    "resetMocks": true,
+    "restoreMocks": true,
+    "transformIgnorePatterns": [
+      "node_modules/(?!(@apollo/client|d3-geo|d3-zoom|d3-scale|d3-scale-chromatic|d3-array|d3-selection)/)"
+    ]
+  },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
+    "test:serial": "react-scripts test --runInBand --watchAll=false",
     "test:unit": "react-scripts test --testPathIgnorePatterns=src/__tests__/integration --watchAll=false",
     "test:integration": "react-scripts test src/__tests__/integration --watchAll=false",
     "test:xbrl-financial:integration": "react-scripts test src/__tests__/integration/xbrl-financial --watchAll=false",
@@ -128,25 +149,6 @@
           "testing-library/no-node-access": "off"
         }
       }
-    ]
-  },
-  "jest": {
-    "moduleNameMapper": {
-      "^@/(.*)$": "<rootDir>/src/$1",
-      "^react-app/jest$": "react-app/jest",
-      "^d3$": "<rootDir>/src/__mocks__/d3.js",
-      "^d3-geo$": "<rootDir>/src/__mocks__/d3-geo.js",
-      "^d3-zoom$": "<rootDir>/src/__mocks__/d3-zoom.js",
-      "^d3-scale$": "<rootDir>/src/__mocks__/d3-scale.js",
-      "^d3-scale-chromatic$": "<rootDir>/src/__mocks__/d3-scale-chromatic.js",
-      "^d3-array$": "<rootDir>/src/__mocks__/d3-array.js",
-      "^d3-selection$": "<rootDir>/src/__mocks__/d3-selection.js"
-    },
-    "clearMocks": true,
-    "resetMocks": true,
-    "restoreMocks": true,
-    "transformIgnorePatterns": [
-      "node_modules/(?!(@apollo/client|d3-geo|d3-zoom|d3-scale|d3-scale-chromatic|d3-array|d3-selection)/)"
     ]
   },
   "browserslist": {

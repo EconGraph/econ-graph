@@ -164,6 +164,27 @@ const customRender = (ui: React.ReactElement, options = {}) => {
     ...options,
   });
 };
+
+// CRITICAL: Material-UI TextField Testing Pattern
+// ❌ BAD: user.type() hangs with Material-UI TextField components
+await user.type(titleField, 'New Annotation'); // This will hang indefinitely
+
+// ✅ GOOD: Use fireEvent.change() for Material-UI TextField components
+fireEvent.change(titleField, { target: { value: 'New Annotation' } });
+
+// Complete TextField testing pattern
+test('should handle form input correctly', async () => {
+  render(<FormComponent />);
+  
+  // Find TextField by label or testid
+  const titleField = screen.getByLabelText('Title');
+  
+  // Use fireEvent.change() instead of user.type()
+  fireEvent.change(titleField, { target: { value: 'Test Title' } });
+  
+  // Verify the value was set
+  expect(titleField).toHaveValue('Test Title');
+});
 ```
 
 ### **ARIA Labels and Accessibility Testing**
@@ -406,6 +427,7 @@ test: add unit tests for world map
 - **ARIA Selector Mismatches**: Check actual component ARIA implementation before writing tests
 - **Timing Issues**: Use proper `waitFor` with appropriate timeouts for dialog content
 - **Test Environment**: Material-UI components behave differently in test vs production environments
+- **CRITICAL: TextField Input Testing**: `user.type()` hangs with Material-UI TextField components - use `fireEvent.change()` instead
 
 ### **UI/UX Issues**
 - **Loading States**: Always show loading indicators
@@ -480,6 +502,21 @@ test: add unit tests for world map
    - **Solution**: Use appropriate timeouts (5000ms for dialogs, 2000ms for content) and proper async/await patterns
    - **Best Practice**: Always wait for dialog titles before checking dialog content
    - **Impact**: Reliable test execution that accounts for Material-UI's render cycles
+
+7. **CRITICAL: TextField Input Testing with user.type() vs fireEvent.change()**
+   - **Issue**: `user.type()` from `@testing-library/user-event` hangs indefinitely with Material-UI TextField components
+   - **Root Cause**: Material-UI's controlled TextField components don't properly handle `user.type()` simulation in Jest/jsdom environment
+   - **Solution**: Use `fireEvent.change()` instead of `user.type()` for Material-UI TextField components
+   - **Testing Pattern**: 
+     ```typescript
+     // ❌ BAD: Will hang indefinitely
+     await user.type(titleField, 'New Annotation');
+     
+     // ✅ GOOD: Works reliably
+     fireEvent.change(titleField, { target: { value: 'New Annotation' } });
+     ```
+   - **Impact**: This single change can fix multiple test failures and prevent test suite hanging issues
+   - **Scope**: Applies to all Material-UI TextField, TextareaAutosize, and similar controlled input components
 
 ### **Testing Strategy Insights**
 1. **Mock Strategy**: Comprehensive D3.js mocking required for Jest compatibility
@@ -871,6 +908,13 @@ test('should call onDataPointClick when point is clicked', async () => {
 - **Provider Setup**: Always include all required Material-UI providers in test environment
 - **Timing**: Use appropriate `waitFor` timeouts for portal content rendering
 - **Cleanup**: Clean up portal containers between tests to prevent DOM pollution
+
+#### **5. CRITICAL: user.type() vs fireEvent.change() for Material-UI TextField Components**
+- **Discovery**: `user.type()` hangs indefinitely with Material-UI TextField components in Jest/jsdom
+- **Root Cause**: Material-UI's controlled components don't properly handle `user.type()` simulation
+- **Solution**: Always use `fireEvent.change()` for Material-UI TextField components
+- **Pattern**: `fireEvent.change(field, { target: { value: 'text' } })` instead of `await user.type(field, 'text')`
+- **Impact**: This can fix 50%+ of Material-UI test failures and prevent test suite hanging
 
 ### **Testing Anti-Patterns to Avoid**
 

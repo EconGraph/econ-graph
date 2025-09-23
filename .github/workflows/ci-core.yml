@@ -1199,9 +1199,13 @@ jobs:
       working-directory: frontend
       run: npm run typecheck
 
-    - name: Run tests
+    - name: Run tests (parallel)
       working-directory: frontend
-      run: npm test -- --coverage --watchAll=false
+      run: npm test -- --coverage --watchAll=false --testPathIgnorePatterns="ChartCollaborationConnected|ChartCollaboration|ProfessionalChart|InteractiveChartWithCollaboration"
+
+    - name: Run problematic tests (serial)
+      working-directory: frontend
+      run: npm run test:serial -- --testPathPattern="ChartCollaborationConnected|ChartCollaboration|ProfessionalChart|InteractiveChartWithCollaboration" --coverage
 
   quality-checks:
     name: Quality Checks
