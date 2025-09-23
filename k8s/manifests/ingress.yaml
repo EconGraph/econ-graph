@@ -24,7 +24,7 @@ spec:
             port:
               number: 3000
       - path: /admin
-        pathType: Exact
+        pathType: Prefix
         backend:
           service:
             name: econ-graph-admin-frontend-service

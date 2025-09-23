@@ -286,3 +286,50 @@ BACKEND_INTEGRATION_DB_PORT=5447
 * ✅ **Incremental Progress**: Each change moves you closer to a working system
 * ✅ **Verifiable Fixes**: You can explain exactly how each fix addresses a specific problem
 * ✅ **Honest Communication**: You accurately represent what you know and what you don't know
+
+## Root Cause Analysis and Systematic Debugging
+
+**CRITICAL: Stop jumping between different approaches. Dig deeper to find the actual root cause.**
+
+### The "Try Different Approaches" Anti-Pattern
+* ❌ **NEVER** try multiple different solutions simultaneously without understanding why the first one failed
+* ❌ **NEVER** abandon a debugging approach just because it didn't work immediately
+* ❌ **NEVER** make configuration changes without first understanding the current system behavior
+* ❌ **NEVER** assume the problem is in the wrong place without evidence
+
+### Proper Root Cause Analysis Process
+1. **Observe the Exact Behavior**: What exactly is happening? Get the precise error messages, logs, and system state
+2. **Understand the Expected Behavior**: What should be happening? What is the correct flow?
+3. **Trace the Request/Data Flow**: Follow the request from start to finish, understanding each component
+4. **Identify the First Point of Deviation**: Where does the actual behavior diverge from expected?
+5. **Investigate That Specific Component**: Focus on the exact point of failure, not the symptoms
+6. **Test Your Hypothesis**: Make ONE targeted change to test your understanding
+7. **Verify the Fix**: Confirm the change addresses the root cause, not just symptoms
+
+### Debugging Discipline Requirements
+* **Read Error Messages Completely**: Don't just scan for keywords - understand the full context
+* **Check Logs at Each Layer**: Application logs, nginx logs, ingress logs, pod logs
+* **Verify Configuration is Applied**: Don't assume config changes took effect - verify them
+* **Test Each Component Individually**: Isolate the problem by testing components separately
+* **Document Your Understanding**: Write down what you think is happening before making changes
+
+### Common Debugging Mistakes to Avoid
+* ❌ **"Let me try a different approach"** - This is usually giving up on understanding the problem
+* ❌ **Making multiple config changes** - You won't know which one fixed it (if any)
+* ❌ **Assuming the problem is elsewhere** - Without evidence, focus on where the error occurs
+* ❌ **Changing multiple files simultaneously** - Makes it impossible to isolate the issue
+* ❌ **Not reading logs completely** - Error messages contain crucial context
+
+### When You're Stuck
+* **Stop and Document**: Write down exactly what you know and what you don't know
+* **Ask Specific Questions**: "Why is nginx looking for /admin/static/ instead of /static/?"
+* **Test Your Assumptions**: Don't assume nginx rewrite rules work as expected - test them
+* **Check Documentation**: Verify your understanding of how the technology actually works
+* **Get More Information**: Add more logging, check more logs, get more details
+
+### Success Criteria for Root Cause Analysis
+* ✅ **You can explain exactly why the problem occurs** - Not just "it doesn't work"
+* ✅ **You can point to the specific line of code or configuration** causing the issue
+* ✅ **You understand the data flow** from request to response
+* ✅ **Your fix addresses the root cause** - Not just the symptoms
+* ✅ **You can predict what will happen** when you make the change

@@ -84,6 +84,10 @@ spec:
           limits:
             memory: "256Mi"
             cpu: "200m"
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
         livenessProbe:
           httpGet:
             path: /health
@@ -96,4 +100,8 @@ spec:
             port: 3001
           initialDelaySeconds: 5
           periodSeconds: 5
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: admin-frontend-nginx-config
       restartPolicy: Always
