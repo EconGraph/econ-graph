@@ -12,6 +12,7 @@ use econ_graph_core::models::data_source::DataSource;
 use econ_graph_core::models::economic_series::{
     EconomicSeries, NewEconomicSeries, SeriesFrequency,
 };
+use econ_graph_metrics::crawler::CRAWLER_METRICS;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -132,25 +133,31 @@ pub struct BdsDataPoint {
 pub async fn execute_query(client: &Client, query: &CensusQueryBuilder) -> AppResult<String> {
     let url = query.build_url()?;
 
+    let start = std::time::Instant::now();
     let response = client
         .get(&url)
         .send()
         .await
         .map_err(|e| AppError::ExternalApiError(format!("Census API request failed: {}", e)))?;
+    let duration = start.elapsed().as_secs_f64();
+    let status = response.status();
+    CRAWLER_METRICS.record_request(
+        "economic",
+        "census",
+        "/timeseries/bds",
+        status.as_str(),
+        duration,
+    );
 
-    if !response.status().is_success() {
+    if !status.is_success() {
         return Err(AppError::ExternalApiError(format!(
-            "Census API returned error: {} - {}",
-            response.status(),
-            response
-                .status()
-                .canonical_reason()
-                .unwrap_or("Unknown error")
+            "Census API returned error: {}",
+            status
         )));
     }
 
     // Handle 204 No Content responses (known API limitation for multi-year queries)
-    if response.status() == 204 {
+    if status == 204 {
         return Err(AppError::ExternalApiError(
             "Census API returned 204 No Content - no data available for the requested parameters"
                 .to_string(),

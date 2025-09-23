@@ -3,6 +3,7 @@
 use econ_graph_core::database::DatabasePool;
 use econ_graph_core::error::{AppError, AppResult};
 use econ_graph_core::models::{DataSource, EconomicSeries, NewEconomicSeries};
+use econ_graph_metrics::crawler::CRAWLER_METRICS;
 use reqwest::Client;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -174,14 +175,23 @@ async fn fetch_indicators_by_topic(
         topic_id
     );
 
+    let start = std::time::Instant::now();
     let response = client.get(&url).send().await.map_err(|e| {
         AppError::ExternalApiError(format!("World Bank topic indicators request failed: {}", e))
     })?;
-
-    if !response.status().is_success() {
+    let duration = start.elapsed().as_secs_f64();
+    let status = response.status();
+    CRAWLER_METRICS.record_request(
+        "economic",
+        "world_bank",
+        "/topic/indicator",
+        status.as_str(),
+        duration,
+    );
+    if !status.is_success() {
         return Err(AppError::ExternalApiError(format!(
             "World Bank API returned status: {}",
-            response.status()
+            status
         )));
     }
 
@@ -329,15 +339,23 @@ async fn fetch_indicators_paginated(
             page
         );
 
+        let start = std::time::Instant::now();
         let response = client.get(&url).send().await.map_err(|e| {
             AppError::ExternalApiError(format!("World Bank paginated request failed: {}", e))
         })?;
-
-        if !response.status().is_success() {
+        let duration = start.elapsed().as_secs_f64();
+        let status = response.status();
+        CRAWLER_METRICS.record_request(
+            "economic",
+            "world_bank",
+            "/indicator",
+            status.as_str(),
+            duration,
+        );
+        if !status.is_success() {
             println!(
                 "Warning: World Bank API returned status {} for page {}",
-                response.status(),
-                page
+                status, page
             );
             continue;
         }
@@ -372,14 +390,23 @@ async fn fetch_single_indicator(
         indicator_id
     );
 
+    let start = std::time::Instant::now();
     let response = client.get(&url).send().await.map_err(|e| {
         AppError::ExternalApiError(format!("World Bank single indicator request failed: {}", e))
     })?;
-
-    if !response.status().is_success() {
+    let duration = start.elapsed().as_secs_f64();
+    let status = response.status();
+    CRAWLER_METRICS.record_request(
+        "economic",
+        "world_bank",
+        "/indicator/{id}",
+        status.as_str(),
+        duration,
+    );
+    if !status.is_success() {
         return Err(AppError::ExternalApiError(format!(
             "World Bank API returned status: {}",
-            response.status()
+            status
         )));
     }
 
