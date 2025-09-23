@@ -23,18 +23,39 @@ test_endpoint() {
     local path="$1"
     local expected_content="$2"
     local description="$3"
+    local expected_status="${4:-200}"
 
     echo "🔍 Testing $description: $path"
 
-    response=$(curl -s -H "Host: admin.econ-graph.local" "http://localhost:8080$path")
+    # Get both response body and HTTP status code
+    response=$(curl -s -w "\n%{http_code}" "http://localhost:8080$path")
 
-    if echo "$response" | grep -q "$expected_content"; then
-        echo "  ✅ PASS - Correct content returned"
-        return 0
+    # Extract HTTP status code (last line)
+    http_status=$(echo "$response" | tail -n1)
+    # Extract response body (all but last line)
+    response_body=$(echo "$response" | sed '$d')
+
+    echo "  📊 HTTP Status: $http_status (expected: $expected_status)"
+
+    # Check HTTP status code first
+    if [ "$http_status" = "$expected_status" ]; then
+        # If status is OK, also check content
+        if [ "$http_status" = "200" ] && echo "$response_body" | grep -q "$expected_content"; then
+            echo "  ✅ PASS - HTTP $http_status and content matches"
+            return 0
+        elif [ "$http_status" = "200" ]; then
+            echo "  ⚠️  HTTP 200 but content doesn't match expected pattern"
+            echo "  Expected: $expected_content"
+            echo "  Got: $(echo "$response_body" | head -1 | cut -c1-100)..."
+            return 1
+        else
+            # For non-200 status codes, we don't check content
+            echo "  ✅ PASS - HTTP $http_status (as expected)"
+            return 0
+        fi
     else
-        echo "  ❌ FAIL - Wrong content returned"
-        echo "  Expected: $expected_content"
-        echo "  Got: $(echo "$response" | head -1 | cut -c1-50)..."
+        echo "  ❌ FAIL - HTTP $http_status (expected $expected_status)"
+        echo "  Response: $(echo "$response_body" | head -1 | cut -c1-100)..."
         return 1
     fi
 }
@@ -63,18 +84,28 @@ fi
 
 # Test GraphQL (should return GraphQL schema or error)
 tests_total=$((tests_total + 1))
-response=$(curl -s -X POST -H "Host: admin.econ-graph.local" -H "Content-Type: application/json" -d '{"query":"{ __schema { queryType { name } } }"}' "http://localhost:8080/graphql")
-if echo "$response" | grep -q -E "(queryType|__schema|Query)"; then
-    echo "  ✅ PASS - GraphQL endpoint responding correctly"
+echo "🔍 Testing GraphQL: /graphql"
+response=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -d '{"query":"{ __schema { queryType { name } } }"}' "http://localhost:8080/graphql")
+
+# Extract HTTP status code (last line)
+http_status=$(echo "$response" | tail -n1)
+# Extract response body (all but last line)
+response_body=$(echo "$response" | sed '$d')
+
+echo "  📊 HTTP Status: $http_status (expected: 200)"
+
+if [ "$http_status" = "200" ] && echo "$response_body" | grep -q -E "(queryType|__schema|Query)"; then
+    echo "  ✅ PASS - HTTP $http_status and GraphQL schema returned"
     tests_passed=$((tests_passed + 1))
 else
     echo "  ❌ FAIL - GraphQL endpoint not responding correctly"
-    echo "  Response: $response"
+    echo "  HTTP Status: $http_status"
+    echo "  Response: $(echo "$response_body" | head -1 | cut -c1-100)..."
 fi
 
 # Test Backend API (expects internal server error for root /api path)
 tests_total=$((tests_total + 1))
-if test_endpoint "/api" "Internal server error" "Backend API"; then
+if test_endpoint "/api" "Internal server error" "Backend API" "500"; then
     tests_passed=$((tests_passed + 1))
 fi
 

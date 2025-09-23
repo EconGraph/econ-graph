@@ -14,8 +14,7 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-  - host: admin.econ-graph.local
-    http:
+  - http:
       paths:
       - path: /
         pathType: Exact
