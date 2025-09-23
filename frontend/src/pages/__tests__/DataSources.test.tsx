@@ -7,19 +7,116 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { TestProviders } from '../../test-utils/test-providers';
+import { render as customRender, setupTestEnvironment, cleanupTestEnvironment } from '../../test-utils/material-ui-test-setup';
 import DataSources from '../DataSources';
+
+// Mock the hooks module
+const mockDataSources = [
+  {
+    id: 'fred',
+    name: 'Federal Reserve Economic Data',
+    description: 'Economic data from the Federal Reserve',
+    base_url: 'https://fred.stlouisfed.org',
+    api_key_required: false,
+    rate_limit_per_minute: 120,
+    series_count: 800000,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-12-15T10:00:00Z',
+  },
+  {
+    id: 'bls',
+    name: 'Bureau of Labor Statistics',
+    description: 'Labor market and economic statistics',
+    base_url: 'https://www.bls.gov',
+    api_key_required: true,
+    rate_limit_per_minute: 60,
+    series_count: 50000,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-12-14T09:00:00Z',
+  },
+  {
+    id: 'census',
+    name: 'U.S. Census Bureau',
+    description: 'Demographic and economic data',
+    base_url: 'https://www.census.gov',
+    api_key_required: false,
+    rate_limit_per_minute: 100,
+    series_count: 25000,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-12-13T08:00:00Z',
+  },
+  {
+    id: 'worldbank',
+    name: 'World Bank Open Data',
+    description: 'Global development indicators',
+    base_url: 'https://data.worldbank.org',
+    api_key_required: false,
+    rate_limit_per_minute: 80,
+    series_count: 15000,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-12-12T07:00:00Z',
+  },
+];
+
+jest.mock('../../hooks/useSeriesData', () => ({
+  useDataSources: jest.fn(() => ({
+    data: mockDataSources,
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+  useSeriesSearch: jest.fn(() => ({
+    data: [],
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+  useSeriesDetail: jest.fn(() => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+  useSeriesData: jest.fn(() => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+  useSearchSuggestions: jest.fn(() => ({
+    data: [],
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+  useCrawlerStatus: jest.fn(() => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+}));
 
 
 function renderDataSources() {
-  return render(
-    <TestProviders>
-      <DataSources />
-    </TestProviders>
-  );
+  return customRender(<DataSources />);
 }
 
 describe('DataSources', () => {
+  beforeEach(() => {
+    setupTestEnvironment();
+  });
+
+  afterEach(() => {
+    cleanupTestEnvironment();
+  });
+
   describe('Page Layout and Structure', () => {
     test('should render data sources page successfully', () => {
       renderDataSources();
@@ -73,15 +170,15 @@ describe('DataSources', () => {
     test('should display Federal Reserve data source information', () => {
       renderDataSources();
 
-      expect(screen.getAllByText('Federal Reserve Economic Data (FRED)')).toHaveLength(2);
-      expect(screen.getAllByText('Bureau of Labor Statistics (BLS)')).toHaveLength(2);
+      expect(screen.getAllByText('Federal Reserve Economic Data')).toHaveLength(1);
+      expect(screen.getAllByText('Bureau of Labor Statistics')).toHaveLength(1);
     });
 
     test('should display Census Bureau data source information', () => {
       renderDataSources();
 
-      expect(screen.getAllByText('U.S. Census Bureau')).toHaveLength(2);
-      expect(screen.getAllByText('World Bank Open Data')).toHaveLength(2);
+      expect(screen.getAllByText('U.S. Census Bureau')).toHaveLength(1);
+      expect(screen.getAllByText('World Bank Open Data')).toHaveLength(1);
     });
   });
 

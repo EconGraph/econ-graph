@@ -29,21 +29,45 @@ const mockDataSources = [
     id: 'fred',
     name: 'Federal Reserve Economic Data',
     description: 'Economic data from the Federal Reserve',
-    status: 'active',
-    lastUpdated: '2024-12-15T10:00:00Z',
-    seriesCount: 800000,
-    category: 'Government',
-    website: 'https://fred.stlouisfed.org',
+    base_url: 'https://fred.stlouisfed.org',
+    api_key_required: false,
+    rate_limit_per_minute: 120,
+    series_count: 800000,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-12-15T10:00:00Z',
   },
   {
     id: 'bls',
     name: 'Bureau of Labor Statistics',
     description: 'Labor market and economic statistics',
-    status: 'active',
-    lastUpdated: '2024-12-14T09:00:00Z',
-    seriesCount: 50000,
-    category: 'Government',
-    website: 'https://www.bls.gov',
+    base_url: 'https://www.bls.gov',
+    api_key_required: true,
+    rate_limit_per_minute: 60,
+    series_count: 50000,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-12-14T09:00:00Z',
+  },
+  {
+    id: 'census',
+    name: 'U.S. Census Bureau',
+    description: 'Demographic and economic data',
+    base_url: 'https://www.census.gov',
+    api_key_required: false,
+    rate_limit_per_minute: 100,
+    series_count: 25000,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-12-13T08:00:00Z',
+  },
+  {
+    id: 'worldbank',
+    name: 'World Bank Open Data',
+    description: 'Global development indicators',
+    base_url: 'https://data.worldbank.org',
+    api_key_required: false,
+    rate_limit_per_minute: 80,
+    series_count: 15000,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-12-12T07:00:00Z',
   },
 ];
 
@@ -75,42 +99,42 @@ const mockSearchResults = [
 ];
 
 jest.mock('./hooks/useSeriesData', () => ({
-  useDataSources: jest.fn(() => ({
+  useDataSources: jest.fn().mockImplementation(() => ({
     data: mockDataSources,
     isLoading: false,
     error: null,
     isError: false,
     isSuccess: true,
   })),
-  useSeriesSearch: jest.fn(() => ({
+  useSeriesSearch: jest.fn().mockImplementation(() => ({
     data: mockSearchResults,
     isLoading: false,
     error: null,
     isError: false,
     isSuccess: true,
   })),
-  useSeriesDetail: jest.fn(() => ({
+  useSeriesDetail: jest.fn().mockImplementation(() => ({
     data: null,
     isLoading: false,
     error: null,
     isError: false,
     isSuccess: true,
   })),
-  useSeriesData: jest.fn(() => ({
+  useSeriesData: jest.fn().mockImplementation(() => ({
     data: null,
     isLoading: false,
     error: null,
     isError: false,
     isSuccess: true,
   })),
-  useSearchSuggestions: jest.fn(() => ({
+  useSearchSuggestions: jest.fn().mockImplementation(() => ({
     data: [],
     isLoading: false,
     error: null,
     isError: false,
     isSuccess: true,
   })),
-  useCrawlerStatus: jest.fn(() => ({
+  useCrawlerStatus: jest.fn().mockImplementation(() => ({
     data: null,
     isLoading: false,
     error: null,

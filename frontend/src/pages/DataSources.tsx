@@ -78,7 +78,8 @@ const getDataSourceCategories = (name: string): string[] => {
  */
 const DataSources: React.FC = () => {
   // Fetch real data sources from backend
-  const { data: backendDataSources, isLoading, error } = useDataSources();
+  const hookResult = useDataSources();
+  const { data: backendDataSources, isLoading, error } = hookResult || {};
 
   // Transform backend data to frontend format
   const dataSources: DataSourceInfo[] = React.useMemo(() => {
@@ -88,12 +89,12 @@ const DataSources: React.FC = () => {
       id: source.id,
       name: source.name,
       description: source.description || 'Economic data source',
-      baseUrl: source.baseUrl,
+      baseUrl: source.base_url,
       icon: getDataSourceIcon(source.name),
-      seriesCount: source.seriesCount || 0,
-      lastCrawl: source.updatedAt || new Date().toISOString(),
+      seriesCount: source.series_count || 0,
+      lastCrawl: source.updated_at || new Date().toISOString(),
       status: 'active' as const,
-      rateLimit: source.rateLimitPerMinute || 60,
+      rateLimit: source.rate_limit_per_minute || 60,
       categories: getDataSourceCategories(source.name),
     }));
   }, [backendDataSources]);
