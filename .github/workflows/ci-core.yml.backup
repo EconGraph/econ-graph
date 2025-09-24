@@ -2101,9 +2101,33 @@ jobs:
 
     - name: Start backend service
       run: |
-        # Use comprehensive debugging script to diagnose all possible backend startup issues
-        chmod +x scripts/debug-backend-startup.sh
-        ./scripts/debug-backend-startup.sh
+        # Use the pre-built backend binary from the optimized container
+        docker run --rm -d --name backend-server \
+          -p 8080:8080 \
+          -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
+          econ-graph-e2e-optimized:latest \
+          ./backend/econ-graph-backend
+
+        # Wait for backend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:8080/health 2>/dev/null; then
+            echo "Backend is ready!"
+            break
+          fi
+          echo "Waiting for backend... ($i/30)"
+          sleep 2
+        done
+
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
 
     - name: Start frontend service
       run: |
