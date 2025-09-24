@@ -294,7 +294,10 @@ diesel::table! {
 diesel::table! {
     crawl_queue (id) {
         id -> Uuid,
-        series_id -> Uuid,
+        #[max_length = 50]
+        source -> Varchar,
+        #[max_length = 255]
+        series_id -> Varchar,
         #[max_length = 50]
         status -> Varchar,
         priority -> Int4,
@@ -302,11 +305,13 @@ diesel::table! {
         max_attempts -> Int4,
         last_attempt_at -> Nullable<Timestamptz>,
         next_attempt_at -> Nullable<Timestamptz>,
-        locked_by -> Nullable<Uuid>,
+        #[max_length = 100]
+        locked_by -> Nullable<Varchar>,
         locked_at -> Nullable<Timestamptz>,
         error_message -> Nullable<Text>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
+        scheduled_for -> Nullable<Timestamptz>,
     }
 }
 
@@ -319,6 +324,7 @@ diesel::table! {
         revision_date -> Date,
         is_original_release -> Bool,
         created_at -> Timestamptz,
+        updated_at -> Timestamptz,
     }
 }
 
@@ -528,15 +534,17 @@ diesel::table! {
     global_economic_events (id) {
         id -> Uuid,
         #[max_length = 500]
-        title -> Varchar,
+        name -> Varchar,
         description -> Nullable<Text>,
-        event_date -> Date,
         #[max_length = 50]
-        impact_level -> Varchar,
-        #[max_length = 100]
         event_type -> Varchar,
-        #[max_length = 255]
-        source -> Nullable<Varchar>,
+        #[max_length = 20]
+        severity -> Varchar,
+        start_date -> Date,
+        end_date -> Nullable<Date>,
+        primary_country_id -> Nullable<Uuid>,
+        affected_regions -> Nullable<Array<Nullable<Text>>>,
+        economic_impact_score -> Nullable<Numeric>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
     }
@@ -865,7 +873,6 @@ diesel::joinable!(chart_annotation_templates -> users (created_by));
 diesel::joinable!(chart_annotations -> users (user_id));
 diesel::joinable!(chart_financial_annotations -> chart_annotations (annotation_id));
 diesel::joinable!(crawl_attempts -> economic_series (series_id));
-diesel::joinable!(crawl_queue -> economic_series (series_id));
 diesel::joinable!(data_points -> economic_series (series_id));
 diesel::joinable!(economic_series -> data_sources (source_id));
 diesel::joinable!(event_country_impacts -> countries (country_id));

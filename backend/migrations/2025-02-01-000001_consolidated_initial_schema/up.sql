@@ -132,6 +132,7 @@ CREATE TABLE data_points (
     revision_date DATE NOT NULL,
     is_original_release BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- Ensure unique data point per series and date
     UNIQUE(series_id, date, revision_date)
@@ -144,32 +145,44 @@ CREATE INDEX idx_data_points_revision_date ON data_points(revision_date);
 CREATE INDEX idx_data_points_value ON data_points(value);
 CREATE INDEX idx_data_points_is_original_release ON data_points(is_original_release);
 
+-- Create updated_at trigger for data_points
+CREATE TRIGGER update_data_points_updated_at
+    BEFORE UPDATE ON data_points
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
 -- Create crawl_queue table (with all constraints merged)
 CREATE TABLE crawl_queue (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    series_id UUID NOT NULL REFERENCES economic_series(id) ON DELETE CASCADE,
+    source VARCHAR(50) NOT NULL,
+    series_id VARCHAR(255) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
     priority INTEGER NOT NULL DEFAULT 5,
     attempts INTEGER NOT NULL DEFAULT 0,
     max_attempts INTEGER NOT NULL DEFAULT 3,
     last_attempt_at TIMESTAMPTZ,
     next_attempt_at TIMESTAMPTZ,
-    locked_by UUID,
+    locked_by VARCHAR(100),
     locked_at TIMESTAMPTZ,
     error_message TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    scheduled_for TIMESTAMPTZ,
 
     -- Constraints merged from ALTER TABLE statements
     CONSTRAINT check_crawl_queue_status CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'retrying', 'cancelled')),
     CONSTRAINT check_crawl_queue_priority CHECK (priority >= 1 AND priority <= 10),
-    CONSTRAINT check_crawl_queue_lock_consistency CHECK ((locked_by IS NULL AND locked_at IS NULL) OR (locked_by IS NOT NULL AND locked_at IS NOT NULL))
+    CONSTRAINT check_crawl_queue_lock_consistency CHECK ((locked_by IS NULL AND locked_at IS NULL) OR (locked_by IS NOT NULL AND locked_at IS NOT NULL)),
+    CONSTRAINT unique_active_queue_item UNIQUE (source, series_id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Create indexes for crawl_queue
 CREATE INDEX idx_crawl_queue_status ON crawl_queue(status);
-CREATE INDEX idx_crawl_queue_priority ON crawl_queue(priority);
+CREATE INDEX idx_crawl_queue_priority ON crawl_queue(priority DESC);
 CREATE INDEX idx_crawl_queue_next_attempt_at ON crawl_queue(next_attempt_at);
+CREATE INDEX idx_crawl_queue_scheduled_for ON crawl_queue(scheduled_for);
+CREATE INDEX idx_crawl_queue_source ON crawl_queue(source);
+CREATE INDEX idx_crawl_queue_processing ON crawl_queue(status, priority DESC, scheduled_for, locked_by) WHERE status IN ('pending', 'retrying');
 CREATE INDEX idx_crawl_queue_locked_by ON crawl_queue(locked_by);
 CREATE INDEX idx_crawl_queue_series_id ON crawl_queue(series_id);
 CREATE INDEX idx_crawl_queue_created_at ON crawl_queue(created_at);
@@ -251,6 +264,34 @@ CREATE INDEX idx_countries_subregion ON countries(subregion);
 -- Create updated_at trigger for countries
 CREATE TRIGGER update_countries_updated_at
     BEFORE UPDATE ON countries
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Create global_economic_events table
+CREATE TABLE global_economic_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(500) NOT NULL,
+    description TEXT,
+    event_type VARCHAR(50) NOT NULL,
+    severity VARCHAR(20) NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE,
+    primary_country_id UUID,
+    affected_regions TEXT[],
+    economic_impact_score DECIMAL(5,2),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Create indexes for global_economic_events
+CREATE INDEX idx_global_economic_events_event_type ON global_economic_events(event_type);
+CREATE INDEX idx_global_economic_events_severity ON global_economic_events(severity);
+CREATE INDEX idx_global_economic_events_start_date ON global_economic_events(start_date);
+CREATE INDEX idx_global_economic_events_primary_country_id ON global_economic_events(primary_country_id);
+
+-- Create updated_at trigger for global_economic_events
+CREATE TRIGGER update_global_economic_events_updated_at
+    BEFORE UPDATE ON global_economic_events
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
@@ -359,30 +400,6 @@ CREATE TRIGGER update_leading_indicators_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- Create global_economic_events table
-CREATE TABLE global_economic_events (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    title VARCHAR(500) NOT NULL,
-    description TEXT,
-    event_date DATE NOT NULL,
-    impact_level VARCHAR(50) NOT NULL,
-    event_type VARCHAR(100) NOT NULL,
-    source VARCHAR(255),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- Create indexes for global_economic_events
-CREATE INDEX idx_global_economic_events_event_date ON global_economic_events(event_date);
-CREATE INDEX idx_global_economic_events_impact_level ON global_economic_events(impact_level);
-CREATE INDEX idx_global_economic_events_event_type ON global_economic_events(event_type);
-CREATE INDEX idx_global_economic_events_source ON global_economic_events(source);
-
--- Create updated_at trigger for global_economic_events
-CREATE TRIGGER update_global_economic_events_updated_at
-    BEFORE UPDATE ON global_economic_events
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
 
 -- Create event_country_impacts table
 CREATE TABLE event_country_impacts (
