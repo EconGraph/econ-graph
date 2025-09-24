@@ -90,48 +90,101 @@ Provides an accessible name for elements that lack visible text, enabling assist
 ### **Purpose**
 Defines the function or purpose of an element to assistive technologies, especially when native HTML semantics are insufficient.
 
-### **When to Use**
+### **Semantic HTML vs ARIA Roles: The Fundamental Choice**
+
+#### **The Golden Rule: Prefer Native HTML Elements**
+
+```html
+<!-- ✅ GOOD: Native semantic elements -->
+<button>Click me</button>
+<nav>Navigation</nav>
+<main>Main content</main>
+<header>Page header</header>
+<footer>Page footer</footer>
+
+<!-- ❌ BAD: Using ARIA roles when native elements exist -->
+<div role="button" tabindex="0">Click me</div>
+<div role="navigation">Navigation</div>
+<div role="main">Main content</div>
+```
+
+#### **Why Native Elements Are Superior**
+
+1. **Built-in Accessibility**: Native elements come with accessibility features out of the box
+2. **Keyboard Support**: Native elements handle keyboard interactions automatically
+3. **Screen Reader Support**: Better announcement and navigation
+4. **Less Code**: No need for additional ARIA attributes
+5. **Future-Proof**: Browser improvements benefit native elements automatically
+
+### **When to Use ARIA Roles**
 
 #### ✅ **Appropriate Use Cases**
 
-1. **Custom interactive components**
+1. **Custom interactive components that can't use native elements**
 ```html
-<div role="button" tabindex="0" aria-label="Custom button">
-  Custom Button
+<!-- Custom toggle switch that can't be a checkbox -->
+<div role="switch" 
+     aria-checked="false" 
+     tabindex="0"
+     aria-label="Enable notifications">
+  <span class="switch-handle"></span>
 </div>
 ```
 
 2. **Non-semantic containers with specific functions**
 ```html
-<div role="navigation" aria-label="Main navigation">
-  <!-- Navigation links -->
+<!-- Custom navigation that can't use <nav> -->
+<div role="navigation" aria-label="Breadcrumb navigation">
+  <ol>
+    <li><a href="/">Home</a></li>
+    <li><a href="/products">Products</a></li>
+    <li>Current Page</li>
+  </ol>
 </div>
 ```
 
 3. **Custom form controls**
 ```html
-<div role="combobox" aria-expanded="false" aria-haspopup="listbox">
+<!-- Custom combobox that can't use <select> -->
+<div role="combobox" 
+     aria-expanded="false" 
+     aria-haspopup="listbox"
+     aria-controls="options-list">
   <input type="text" aria-label="Select country" />
+  <ul id="options-list" role="listbox">
+    <li role="option">United States</li>
+    <li role="option">Canada</li>
+  </ul>
 </div>
 ```
 
 4. **Custom dialogs and modals**
 ```html
-<div role="dialog" aria-labelledby="dialog-title" aria-modal="true">
+<!-- Custom modal that can't use <dialog> -->
+<div role="dialog" 
+     aria-labelledby="dialog-title" 
+     aria-modal="true"
+     aria-describedby="dialog-description">
   <h2 id="dialog-title">Confirm Action</h2>
-  <!-- Dialog content -->
+  <p id="dialog-description">Are you sure you want to delete this item?</p>
+  <button>Cancel</button>
+  <button>Delete</button>
 </div>
 ```
 
-#### ❌ **When to Avoid**
+#### ❌ **When to Avoid ARIA Roles**
 
-1. **Native semantic elements**
+1. **Native semantic elements exist**
 ```html
 <!-- ❌ BAD: Redundant role on native element -->
 <button role="button">Click me</button>
+<nav role="navigation">Menu</nav>
+<main role="main">Content</main>
 
 <!-- ✅ GOOD: Native semantics are sufficient -->
 <button>Click me</button>
+<nav>Menu</nav>
+<main>Content</main>
 ```
 
 2. **Over-specifying roles**
@@ -151,12 +204,215 @@ Defines the function or purpose of an element to assistive technologies, especia
 </nav>
 ```
 
-### **Best Practices**
+### **The `<div role="button">` vs `<button>` Dilemma**
 
-- **Prefer native HTML elements**: Use semantic HTML before adding roles
-- **Use ARIA roles sparingly**: Only when native semantics are insufficient
-- **Test with assistive technologies**: Verify roles improve accessibility
-- **Follow ARIA patterns**: Use established ARIA patterns for complex components
+#### **When You Might Consider `<div role="button">`**
+
+```html
+<!-- ❌ BAD: Using div when button would work -->
+<div role="button" 
+     tabindex="0" 
+     onclick="handleClick()"
+     onkeydown="handleKeydown(event)">
+  Custom Button
+</div>
+
+<!-- ✅ GOOD: Use native button element -->
+<button onclick="handleClick()">
+  Custom Button
+</button>
+```
+
+#### **When `<div role="button">` Might Be Acceptable**
+
+```html
+<!-- ✅ ACCEPTABLE: Complex interactive component that can't be a button -->
+<div role="button" 
+     tabindex="0"
+     aria-label="Toggle advanced settings"
+     aria-pressed="false"
+     onclick="toggleSettings()"
+     onkeydown="handleKeydown(event)">
+  <svg class="icon">...</svg>
+  <span class="label">Settings</span>
+  <span class="indicator">▼</span>
+</div>
+```
+
+**But even then, consider:**
+```html
+<!-- ✅ BETTER: Use button with complex content -->
+<button aria-label="Toggle advanced settings" 
+        aria-pressed="false"
+        onclick="toggleSettings()">
+  <svg class="icon">...</svg>
+  <span class="label">Settings</span>
+  <span class="indicator">▼</span>
+</button>
+```
+
+### **Material-UI and React Component Considerations**
+
+#### **React Component Patterns**
+
+```tsx
+// ❌ BAD: Custom div button in React
+const CustomButton = ({ onClick, children }) => (
+  <div 
+    role="button" 
+    tabIndex={0}
+    onClick={onClick}
+    onKeyDown={(e) => e.key === 'Enter' && onClick()}
+  >
+    {children}
+  </div>
+);
+
+// ✅ GOOD: Use native button or Material-UI Button
+const CustomButton = ({ onClick, children }) => (
+  <button onClick={onClick}>
+    {children}
+  </button>
+);
+
+// ✅ BETTER: Use Material-UI Button for consistency
+const CustomButton = ({ onClick, children }) => (
+  <Button onClick={onClick}>
+    {children}
+  </Button>
+);
+```
+
+#### **Material-UI Component Accessibility**
+
+```tsx
+// ✅ GOOD: Material-UI components are accessible by default
+<Button variant="contained" onClick={handleClick}>
+  Submit
+</Button>
+
+<IconButton aria-label="Close dialog" onClick={handleClose}>
+  <CloseIcon />
+</IconButton>
+
+// ❌ AVOID: Wrapping Material-UI components unnecessarily
+<div role="button" onClick={handleClick}>
+  <Button>Submit</Button>
+</div>
+```
+
+### **Testing Considerations for Role vs Native Elements**
+
+#### **Testing Native Elements**
+```typescript
+// ✅ GOOD: Test native button behavior
+test('should handle button click', async () => {
+  const user = userEvent.setup();
+  render(<Button onClick={mockClick}>Click me</Button>);
+  
+  await user.click(screen.getByRole('button', { name: /click me/i }));
+  expect(mockClick).toHaveBeenCalled();
+});
+
+// ✅ GOOD: Test keyboard navigation
+test('should handle keyboard activation', async () => {
+  const user = userEvent.setup();
+  render(<Button onClick={mockClick}>Click me</Button>);
+  
+  const button = screen.getByRole('button', { name: /click me/i });
+  button.focus();
+  await user.keyboard('{Enter}');
+  expect(mockClick).toHaveBeenCalled();
+});
+```
+
+#### **Testing Custom Role Elements**
+```typescript
+// ⚠️ CAUTION: Testing custom role elements requires more setup
+test('should handle custom button click', async () => {
+  const user = userEvent.setup();
+  render(<CustomDivButton onClick={mockClick}>Click me</CustomDivButton>);
+  
+  // Must test both click and keyboard events
+  await user.click(screen.getByRole('button', { name: /click me/i }));
+  expect(mockClick).toHaveBeenCalled();
+  
+  // Must manually test keyboard support
+  const customButton = screen.getByRole('button', { name: /click me/i });
+  customButton.focus();
+  await user.keyboard('{Enter}');
+  expect(mockClick).toHaveBeenCalledTimes(2);
+});
+```
+
+### **Decision Framework: Role vs Native Element**
+
+#### **Step 1: Can you use a native HTML element?**
+```html
+<!-- ✅ YES: Use native element -->
+<button>Submit</button>
+<input type="text" />
+<select><option>Choice</option></select>
+<textarea></textarea>
+```
+
+#### **Step 2: If not, can you style a native element to look custom?**
+```css
+/* ✅ YES: Style native elements */
+button.custom-button {
+  background: linear-gradient(45deg, #fe6b8b, #ff8e53);
+  border: none;
+  border-radius: 20px;
+  padding: 10px 20px;
+  color: white;
+  cursor: pointer;
+}
+
+button.custom-button:hover {
+  transform: scale(1.05);
+}
+```
+
+#### **Step 3: Only if absolutely necessary, use ARIA roles**
+```html
+<!-- ⚠️ LAST RESORT: Custom role element -->
+<div role="button" 
+     tabindex="0"
+     aria-label="Custom interactive element"
+     onclick="handleClick()"
+     onkeydown="handleKeydown(event)">
+  Complex Custom Component
+</div>
+```
+
+### **Best Practices Summary**
+
+1. **Always prefer native HTML elements**
+2. **Style native elements instead of replacing them**
+3. **Use ARIA roles only when native elements are impossible**
+4. **Test both mouse and keyboard interactions**
+5. **Ensure proper focus management**
+6. **Provide clear labels and descriptions**
+7. **Test with actual assistive technologies**
+
+### **Common Anti-Patterns to Avoid**
+
+```html
+<!-- ❌ BAD: Unnecessary role on native element -->
+<button role="button">Click me</button>
+
+<!-- ❌ BAD: Using div when button would work -->
+<div role="button" tabindex="0" onclick="handleClick()">Click me</div>
+
+<!-- ❌ BAD: Missing keyboard support -->
+<div role="button" onclick="handleClick()">Click me</div>
+
+<!-- ❌ BAD: Missing accessibility attributes -->
+<div role="button" tabindex="0">Click me</div>
+
+<!-- ✅ GOOD: Native button with proper accessibility -->
+<button onclick="handleClick()">Click me</button>
+```
 
 ## 🧪 **Data Test IDs (`data-testid`)**
 
