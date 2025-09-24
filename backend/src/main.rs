@@ -27,13 +27,11 @@ mod services;
 #[cfg(test)]
 mod test_utils;
 
-#[cfg(test)]
-mod integration_tests;
 
 use auth::routes::auth_routes;
 use auth::services::AuthService;
 use config::Config;
-use database::{create_pool, DatabasePool};
+use database::{initialize_database, DatabasePool};
 use error::{AppError, AppResult};
 use graphql::schema::create_schema_with_data;
 // use services::crawler::start_crawler; // TODO: Implement start_crawler function
@@ -230,31 +228,8 @@ async fn main() -> AppResult<()> {
     info!("  - CORS origins: {:?}", config.cors.allowed_origins);
     info!("  - Database URL: {}", config.database_url);
 
-    // Create database connection pool
-    info!("🗄️  Creating database connection pool...");
-    info!("  - Database URL: {}", config.database_url);
-
-    let pool = create_pool(&config.database_url).await.map_err(|e| {
-        let error = AppError::DatabaseError(format!("Failed to create database pool: {}", e));
-        error.log_with_context("Application startup database pool creation");
-        eprintln!("❌ Failed to create database pool: {}", e);
-        error
-    })?;
-
-    info!("✅ Database connection pool created successfully");
-
-    // Run migrations
-    info!("🔄 Running database migrations...");
-    database::run_migrations(&config.database_url)
-        .await
-        .map_err(|e| {
-            let error = AppError::DatabaseError(format!("Failed to run migrations: {}", e));
-            error.log_with_context("Application startup database migrations");
-            eprintln!("❌ Failed to run migrations: {}", e);
-            error
-        })?;
-
-    info!("✅ Database migrations completed successfully");
+    // Initialize database with connection testing
+    let pool = initialize_database(&config.database_url).await?;
 
     // Create GraphQL schema
     let schema = create_schema_with_data(pool.clone());

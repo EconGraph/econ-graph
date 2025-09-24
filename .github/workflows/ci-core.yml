@@ -1506,7 +1506,7 @@ jobs:
     - name: Run backend integration tests
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --package econ-graph-backend --bin econ-graph-backend -- --test-threads=2 --nocapture integration_tests
+        cargo test --package econ-graph-backend --lib -- --test-threads=2 --nocapture integration_tests::tests::test_database_connection_test_during_startup integration_tests::tests::test_database_connection_test_with_invalid_url integration_tests::tests::test_database_authentication_failure integration_tests::tests::test_startup_failure_scenarios integration_tests::tests::test_database_connection_test_performance integration_tests::tests::test_initialize_database_function
       working-directory: backend
 
   frontend-integration-tests:
