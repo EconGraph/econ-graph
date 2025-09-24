@@ -230,6 +230,15 @@ async fn main() -> AppResult<()> {
     info!("  - CORS origins: {:?}", config.cors.allowed_origins);
     info!("  - Database URL: {}", config.database_url);
 
+    // Debug: Check environment variables that could affect database connection
+    info!("🔍 Database connection environment variables:");
+    info!("  - USER: {:?}", std::env::var("USER").ok());
+    info!("  - PGUSER: {:?}", std::env::var("PGUSER").ok());
+    info!("  - PGPASSWORD: {:?}", std::env::var("PGPASSWORD").is_ok());
+    info!("  - PGDATABASE: {:?}", std::env::var("PGDATABASE").ok());
+    info!("  - PGHOST: {:?}", std::env::var("PGHOST").ok());
+    info!("  - PGPORT: {:?}", std::env::var("PGPORT").ok());
+
     // Create database connection pool
     info!("🗄️  Creating database connection pool...");
     info!("  - Database URL: {}", config.database_url);

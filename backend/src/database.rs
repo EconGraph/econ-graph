@@ -81,6 +81,13 @@ pub async fn run_migrations(database_url: &str) -> AppResult<()> {
             formatted_url
         );
 
+        // Debug: Check environment variables that could affect database connection
+        info!("🔍 Migration connection environment variables:");
+        info!("  - USER: {:?}", std::env::var("USER").ok());
+        info!("  - PGUSER: {:?}", std::env::var("PGUSER").ok());
+        info!("  - PGPASSWORD: {:?}", std::env::var("PGPASSWORD").is_ok());
+        info!("  - PGDATABASE: {:?}", std::env::var("PGDATABASE").ok());
+
         // Try to establish connection
         let mut conn = diesel::PgConnection::establish(&formatted_url).map_err(|e| {
             let error = AppError::InternalError(format!(
