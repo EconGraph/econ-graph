@@ -1169,6 +1169,72 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5444/econ_graph_test
 
+  backend-schema-validation-tests:
+    name: Backend Schema Validation Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: [backend-build-cache]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5445:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5445/econ_graph_test
+
+    - name: Run backend schema validation tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --package econ-graph-core --test schema_validation_test -- --test-threads=2 --nocapture
+      working-directory: backend
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5445/econ_graph_test
+
   frontend-tests:
     name: Frontend Tests
     runs-on: ubuntu-latest
