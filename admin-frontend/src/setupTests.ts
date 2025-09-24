@@ -63,8 +63,7 @@ jest.mock("@apollo/client", () => ({
 }));
 
 // Mock GraphQL hooks for crawler admin functionality
-const useCrawlerDataPath = require.resolve("./hooks/useCrawlerData");
-jest.mock(useCrawlerDataPath, () => ({
+jest.mock("./hooks/useCrawlerData", () => ({
   useCrawlerData: jest.fn(() => ({
     status: {
       status: {
