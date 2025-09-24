@@ -122,47 +122,6 @@ export default function MonitoringPage() {
     }
   }, []);
 
-  const serviceStatusCards = useMemo(
-    () =>
-      Object.entries(systemStatus.services).map(([service, status]) => (
-        <Grid item xs={12} sm={6} md={3} key={service}>
-          <Card>
-            <CardContent>
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
-                <Typography variant="h6">{service}</Typography>
-                <Box
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 1,
-                  }}
-                >
-                  <Box
-                    sx={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: "50%",
-                      backgroundColor: getStatusColor(status),
-                    }}
-                  />
-                  <Typography variant="body2">
-                    {status.toUpperCase()}
-                  </Typography>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      )),
-    [systemStatus.services, getStatusColor],
-  );
-
   // Real Grafana dashboards from our existing monitoring infrastructure
   useEffect(() => {
     const grafanaDashboards: DashboardInfo[] = [

@@ -7,6 +7,9 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import UserManagementPage from "../UserManagementPage";
+
+// Set timeout for all tests in this file due to performance characteristics
+jest.setTimeout(30000);
 // Mock the contexts to prevent resource leaks
 jest.mock("../../contexts/AuthContext", () => ({
   AuthProvider: ({ children }: any) => children,

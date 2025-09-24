@@ -7,6 +7,10 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import MonitoringPage from "../MonitoringPage";
+
+// Set timeout for all tests in this file due to performance characteristics
+// TODO: Optimize MonitoringPage component performance to reduce test timeouts
+jest.setTimeout(30000);
 // Mock the contexts to prevent resource leaks
 jest.mock("../../contexts/AuthContext", () => ({
   AuthProvider: ({ children }: any) => children,

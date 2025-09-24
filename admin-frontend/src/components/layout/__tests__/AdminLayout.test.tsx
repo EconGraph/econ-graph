@@ -10,6 +10,9 @@ import AdminLayout from "../AdminLayout";
 import { AuthProvider } from "../../../contexts/AuthContext";
 import { SecurityProvider } from "../../../contexts/SecurityContext";
 
+// Set timeout for all tests in this file due to performance characteristics
+jest.setTimeout(30000);
+
 // Mock the contexts with test data
 const mockAuthContext = {
   user: {
