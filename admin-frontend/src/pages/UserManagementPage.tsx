@@ -403,7 +403,7 @@ export default function UserManagementPage() {
             >
               Add User
             </Button>
-            <IconButton onClick={() => setLoading(true)}>
+            <IconButton onClick={() => setLoading(true)} aria-label="refresh">
               <Refresh />
             </IconButton>
           </Box>
