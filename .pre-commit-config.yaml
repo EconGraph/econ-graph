@@ -88,6 +88,16 @@ repos:
         files: '^frontend/package.*\.json$'
         pass_filenames: false
 
+  # Database migration validation
+  - repo: local
+    hooks:
+      - id: migration-date-order-check
+        name: Database Migration Date Order Check
+        entry: bash -c 'cd backend && python3 scripts/check_migration_order.py'
+        language: system
+        files: '^backend/migrations/.*\.sql$'
+        pass_filenames: false
+
 # Global configuration
 default_install_hook_types: [pre-commit, pre-push]
 fail_fast: false  # Continue running hooks even if one fails
