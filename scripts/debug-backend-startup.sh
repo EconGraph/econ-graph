@@ -54,32 +54,16 @@ echo "  - Binary path: ./backend/econ-graph-backend"
 
 # Start the backend container
 echo "🚀 Starting backend container..."
-
-# Try to get PostgreSQL container name/ID for network sharing
-POSTGRES_CONTAINER=$(docker ps -q --filter name=postgres)
-if [ ! -z "$POSTGRES_CONTAINER" ]; then
-  echo "  - Found PostgreSQL container: $POSTGRES_CONTAINER"
-  echo "  - Using PostgreSQL container's network"
-  # When sharing PostgreSQL container's network, use localhost instead of host.docker.internal
-  LOCAL_DATABASE_URL=$(echo "${DATABASE_URL}" | sed 's/host\.docker\.internal/localhost/g')
-  echo "  - Using DATABASE_URL: $LOCAL_DATABASE_URL"
-  docker run --rm -d --name backend-server \
-    -p 8080:8080 \
-    -e DATABASE_URL="$LOCAL_DATABASE_URL" \
-    -e BACKEND_PORT=8080 \
-    --network container:$POSTGRES_CONTAINER \
-    econ-graph-e2e-optimized:latest \
-    ./backend/econ-graph-backend
-else
-  echo "  - PostgreSQL container not found, using host network"
-  docker run --rm -d --name backend-server \
-    -p 8080:8080 \
-    -e DATABASE_URL="${DATABASE_URL}" \
-    -e BACKEND_PORT=8080 \
-    --network host \
-    econ-graph-e2e-optimized:latest \
-    ./backend/econ-graph-backend
-fi
+echo "  - Using host networking (no port publishing)"
+# Ensure DATABASE_URL targets localhost since we are sharing the host network namespace
+LOCAL_DATABASE_URL=$(echo "${DATABASE_URL}" | sed 's/host\.docker\.internal/localhost/g')
+echo "  - Using DATABASE_URL: $LOCAL_DATABASE_URL"
+docker run --rm -d --name backend-server \
+  -e DATABASE_URL="$LOCAL_DATABASE_URL" \
+  -e BACKEND_PORT=8080 \
+  --network host \
+  econ-graph-e2e-optimized:latest \
+  ./backend/econ-graph-backend
 
 # Get container ID for debugging
 CONTAINER_ID=$(docker ps -q --filter name=backend-server)
