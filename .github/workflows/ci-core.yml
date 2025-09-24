@@ -1578,6 +1578,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
+    env:
+      PGUSER: postgres
+      PGPASSWORD: password
+      PGDATABASE: econ_graph_test
 
     services:
       postgres:
@@ -1670,6 +1674,16 @@ jobs:
           echo "Waiting for backend... ($i/30)"
           sleep 2
         done
+
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
 
     - name: Start frontend service
       run: |
@@ -1809,6 +1823,16 @@ jobs:
           sleep 2
         done
 
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
+
     - name: Start frontend service
       run: |
         # Use the pre-built frontend from the container
@@ -1946,6 +1970,16 @@ jobs:
           echo "Waiting for backend... ($i/30)"
           sleep 2
         done
+
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
 
     - name: Start frontend service
       run: |
@@ -2087,6 +2121,16 @@ jobs:
           sleep 2
         done
 
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
+
     - name: Start frontend service
       run: |
         # Use the pre-built frontend from the container
@@ -2226,6 +2270,16 @@ jobs:
           echo "Waiting for backend... ($i/30)"
           sleep 2
         done
+
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
 
     - name: Start frontend service
       run: |
@@ -2367,6 +2421,16 @@ jobs:
           sleep 2
         done
 
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
+
     - name: Start frontend service
       run: |
         # Use the pre-built frontend from the container
@@ -2506,6 +2570,16 @@ jobs:
           echo "Waiting for backend... ($i/30)"
           sleep 2
         done
+
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
 
     - name: Start frontend service
       run: |
