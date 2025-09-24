@@ -1509,6 +1509,12 @@ jobs:
         cargo test --package econ-graph-backend --bin econ-graph-backend -- --test-threads=2 --nocapture integration_tests
       working-directory: backend
 
+    - name: Run database connection test integration tests
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --package econ-graph-backend --test integration_tests -- --test-threads=2 --nocapture test_database_connection_test_during_startup test_database_connection_test_with_invalid_url test_database_authentication_failure test_startup_failure_scenarios test_database_connection_test_performance test_initialize_database_function
+      working-directory: backend
+
   frontend-integration-tests:
     name: Frontend Integration Tests
     runs-on: ubuntu-latest
