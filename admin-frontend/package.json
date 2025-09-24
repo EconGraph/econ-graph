@@ -75,6 +75,11 @@
       }
     ]
   },
+  "jest": {
+    "transformIgnorePatterns": [
+      "node_modules/(?!(@apollo/client|@apollo/client/react|graphql)/)"
+    ]
+  },
   "browserslist": {
     "production": [
       ">0.2%",

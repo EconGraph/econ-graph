@@ -91,21 +91,26 @@ Object.defineProperty(window, "matchMedia", {
   })),
 });
 
-// Mock ResizeObserver
-global.ResizeObserver = jest.fn().mockImplementation(() => ({
-  observe: jest.fn(),
-  unobserve: jest.fn(),
-  disconnect: jest.fn(),
-}));
+// Mock ResizeObserver - must be done before any imports
+class MockResizeObserver {
+  observe = jest.fn();
+  unobserve = jest.fn();
+  disconnect = jest.fn();
+}
+
+// Mock ResizeObserver globally
+global.ResizeObserver = MockResizeObserver as any;
 
 // Also mock ResizeObserver on window for compatibility
 Object.defineProperty(window, "ResizeObserver", {
   writable: true,
-  value: jest.fn().mockImplementation(() => ({
-    observe: jest.fn(),
-    unobserve: jest.fn(),
-    disconnect: jest.fn(),
-  })),
+  value: MockResizeObserver,
+});
+
+// Mock ResizeObserver on globalThis as well
+Object.defineProperty(globalThis, "ResizeObserver", {
+  writable: true,
+  value: MockResizeObserver,
 });
 
 // Mock IntersectionObserver
