@@ -1578,10 +1578,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
-    env:
-      PGUSER: postgres
-      PGPASSWORD: password
-      PGDATABASE: econ_graph_test
+    # Note: PostgreSQL environment variables removed to prevent conflicts with DATABASE_URL
+    # The DATABASE_URL in Docker containers should handle authentication
 
     services:
       postgres:
