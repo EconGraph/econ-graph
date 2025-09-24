@@ -1663,7 +1663,7 @@ jobs:
       run: |
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
-          -p 3000:3000 \
+          --network host \
           econ-graph-e2e-optimized:latest \
           npx serve -s build -l 3000
 
@@ -1679,9 +1679,10 @@ jobs:
 
     - name: Run E2E Core Tests
       run: |
-        # Use our log tailing script to capture backend logs during test execution
+        # Verify frontend connectivity and capture backend logs during test execution
+        chmod +x scripts/verify-frontend-connectivity.sh
         chmod +x scripts/run-e2e-with-backend-logs.sh
-        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
@@ -1789,7 +1790,7 @@ jobs:
       run: |
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
-          -p 3000:3000 \
+          --network host \
           econ-graph-e2e-optimized:latest \
           npx serve -s build -l 3000
 
@@ -1805,9 +1806,10 @@ jobs:
 
     - name: Run Global Analysis E2E Tests
       run: |
-        # Use our log tailing script to capture backend logs during test execution
+        # Verify frontend connectivity and capture backend logs during test execution
+        chmod +x scripts/verify-frontend-connectivity.sh
         chmod +x scripts/run-e2e-with-backend-logs.sh
-        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
@@ -1915,7 +1917,7 @@ jobs:
       run: |
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
-          -p 3000:3000 \
+          --network host \
           econ-graph-e2e-optimized:latest \
           npx serve -s build -l 3000
 
@@ -1931,9 +1933,10 @@ jobs:
 
     - name: Run Professional Analysis E2E Tests
       run: |
-        # Use our log tailing script to capture backend logs during test execution
+        # Verify frontend connectivity and capture backend logs during test execution
+        chmod +x scripts/verify-frontend-connectivity.sh
         chmod +x scripts/run-e2e-with-backend-logs.sh
-        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
@@ -2043,7 +2046,7 @@ jobs:
       run: |
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
-          -p 3000:3000 \
+          --network host \
           econ-graph-e2e-optimized:latest \
           npx serve -s build -l 3000
 
@@ -2059,9 +2062,10 @@ jobs:
 
     - name: Run end-to-end tests
       run: |
-        # Use our log tailing script to capture backend logs during test execution
+        # Verify frontend connectivity and capture backend logs during test execution
+        chmod +x scripts/verify-frontend-connectivity.sh
         chmod +x scripts/run-e2e-with-backend-logs.sh
-        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
@@ -2171,7 +2175,7 @@ jobs:
       run: |
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
-          -p 3000:3000 \
+          --network host \
           econ-graph-e2e-mobile-optimized:latest \
           npx serve -s build -l 3000
 
@@ -2299,7 +2303,7 @@ jobs:
       run: |
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
-          -p 3000:3000 \
+          --network host \
           econ-graph-e2e-mobile-optimized:latest \
           npx serve -s build -l 3000
 
@@ -2427,7 +2431,7 @@ jobs:
       run: |
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
-          -p 3000:3000 \
+          --network host \
           econ-graph-e2e-mobile-optimized:latest \
           npx serve -s build -l 3000
 
