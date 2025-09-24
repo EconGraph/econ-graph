@@ -61,6 +61,7 @@ echo "  - Using DATABASE_URL: $LOCAL_DATABASE_URL"
 docker run --rm -d --name backend-server \
   -e DATABASE_URL="$LOCAL_DATABASE_URL" \
   -e BACKEND_PORT=8080 \
+  -e USER=postgres \
   --network host \
   econ-graph-e2e-optimized:latest \
   ./backend/econ-graph-backend

@@ -1679,7 +1679,9 @@ jobs:
 
     - name: Run E2E Core Tests
       run: |
-        docker run --rm \
+        # Use our log tailing script to capture backend logs during test execution
+        chmod +x scripts/run-e2e-with-backend-logs.sh
+        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
@@ -1803,7 +1805,9 @@ jobs:
 
     - name: Run Global Analysis E2E Tests
       run: |
-        docker run --rm \
+        # Use our log tailing script to capture backend logs during test execution
+        chmod +x scripts/run-e2e-with-backend-logs.sh
+        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
@@ -1927,7 +1931,9 @@ jobs:
 
     - name: Run Professional Analysis E2E Tests
       run: |
-        docker run --rm \
+        # Use our log tailing script to capture backend logs during test execution
+        chmod +x scripts/run-e2e-with-backend-logs.sh
+        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
@@ -2053,7 +2059,9 @@ jobs:
 
     - name: Run end-to-end tests
       run: |
-        docker run --rm \
+        # Use our log tailing script to capture backend logs during test execution
+        chmod +x scripts/run-e2e-with-backend-logs.sh
+        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
@@ -2179,7 +2187,9 @@ jobs:
 
     - name: Run Mobile Global Analysis E2E Tests
       run: |
-        docker run --rm \
+        # Use our log tailing script to capture backend logs during test execution
+        chmod +x scripts/run-e2e-with-backend-logs.sh
+        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
@@ -2305,7 +2315,9 @@ jobs:
 
     - name: Run Mobile Professional Analysis E2E Tests
       run: |
-        docker run --rm \
+        # Use our log tailing script to capture backend logs during test execution
+        chmod +x scripts/run-e2e-with-backend-logs.sh
+        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
@@ -2431,7 +2443,9 @@ jobs:
 
     - name: Run mobile end-to-end tests (core only)
       run: |
-        docker run --rm \
+        # Use our log tailing script to capture backend logs during test execution
+        chmod +x scripts/run-e2e-with-backend-logs.sh
+        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
