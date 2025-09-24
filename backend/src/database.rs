@@ -16,6 +16,15 @@ pub type PooledConn<'a> = PooledConnection<'a, AsyncPgConnection>;
 
 /// Create a database connection pool
 pub async fn create_pool(database_url: &str) -> AppResult<DatabasePool> {
+    // CRITICAL FIX: Clear PostgreSQL environment variables that override connection string
+    // These variables take precedence over the DATABASE_URL and cause authentication failures
+    std::env::remove_var("PGUSER");
+    std::env::remove_var("PGPASSWORD");
+    std::env::remove_var("PGDATABASE");
+    std::env::remove_var("PGHOST");
+    std::env::remove_var("PGPORT");
+    info!("🧹 Cleared PostgreSQL environment variables to use DATABASE_URL");
+
     let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
 
     let pool = Pool::builder()
@@ -87,6 +96,15 @@ pub async fn run_migrations(database_url: &str) -> AppResult<()> {
         info!("  - PGUSER: {:?}", std::env::var("PGUSER").ok());
         info!("  - PGPASSWORD: {:?}", std::env::var("PGPASSWORD").is_ok());
         info!("  - PGDATABASE: {:?}", std::env::var("PGDATABASE").ok());
+
+        // CRITICAL FIX: Clear PostgreSQL environment variables that override connection string
+        // These variables take precedence over the DATABASE_URL and cause authentication failures
+        std::env::remove_var("PGUSER");
+        std::env::remove_var("PGPASSWORD");
+        std::env::remove_var("PGDATABASE");
+        std::env::remove_var("PGHOST");
+        std::env::remove_var("PGPORT");
+        info!("🧹 Cleared PostgreSQL environment variables to use DATABASE_URL");
 
         // Try to establish connection
         let mut conn = diesel::PgConnection::establish(&formatted_url).map_err(|e| {
