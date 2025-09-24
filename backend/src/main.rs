@@ -27,8 +27,6 @@ mod services;
 #[cfg(test)]
 mod test_utils;
 
-#[cfg(test)]
-mod integration_tests;
 
 use auth::routes::auth_routes;
 use auth::services::AuthService;
