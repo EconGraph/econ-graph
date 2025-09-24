@@ -25,7 +25,7 @@ echo "  - Binary path: ./backend/econ-graph-backend"
 echo "🚀 Starting backend container..."
 docker run --rm -d --name backend-server \
   -p 8080:8080 \
-  -e DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph_test \
+  -e DATABASE_URL="${DATABASE_URL}" \
   -e BACKEND_PORT=8080 \
   econ-graph-e2e-optimized:latest \
   ./backend/econ-graph-backend
