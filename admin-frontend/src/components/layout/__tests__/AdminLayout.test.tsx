@@ -106,15 +106,15 @@ describe("AdminLayout", () => {
       );
 
       // Super admin should see all navigation items
-      expect(screen.getByText("Dashboard")).toBeInTheDocument();
-      expect(screen.getByText("System Health")).toBeInTheDocument();
-      expect(screen.getByText("Monitoring")).toBeInTheDocument();
-      expect(screen.getByText("Crawler Management")).toBeInTheDocument();
-      expect(screen.getByText("Database Management")).toBeInTheDocument();
-      expect(screen.getByText("User Management")).toBeInTheDocument();
-      expect(screen.getByText("Security")).toBeInTheDocument();
-      expect(screen.getByText("Audit Logs")).toBeInTheDocument();
-      expect(screen.getByText("System Config")).toBeInTheDocument();
+      expect(screen.getAllByText("Dashboard")[0]).toBeInTheDocument();
+      expect(screen.getAllByText("System Health")[0]).toBeInTheDocument();
+      expect(screen.getAllByText("Monitoring")[0]).toBeInTheDocument();
+      expect(screen.getAllByText("Crawler Management")[0]).toBeInTheDocument();
+      expect(screen.getAllByText("Database Management")[0]).toBeInTheDocument();
+      expect(screen.getAllByText("User Management")[0]).toBeInTheDocument();
+      expect(screen.getAllByText("Security")[0]).toBeInTheDocument();
+      expect(screen.getAllByText("Audit Logs")[0]).toBeInTheDocument();
+      expect(screen.getAllByText("System Config")[0]).toBeInTheDocument();
     });
 
     it("renders outlet content", () => {
@@ -136,7 +136,7 @@ describe("AdminLayout", () => {
         </TestWrapper>,
       );
 
-      const monitoringItem = screen.getByText("Monitoring");
+      const monitoringItem = screen.getAllByText("Monitoring")[0];
       fireEvent.click(monitoringItem);
 
       expect(mockNavigate).toHaveBeenCalledWith("/monitoring");
@@ -159,7 +159,7 @@ describe("AdminLayout", () => {
 
       // The active item should have selected styling
       const monitoringItem = screen
-        .getByText("Monitoring")
+        .getAllByText("Monitoring")[0]
         .closest('[role="button"]');
       expect(monitoringItem).toHaveClass("Mui-selected");
     });
@@ -288,10 +288,10 @@ describe("AdminLayout", () => {
       );
 
       // Read-only users should only see basic items
-      expect(screen.getByText("Dashboard")).toBeInTheDocument();
-      expect(screen.getByText("System Health")).toBeInTheDocument();
-      expect(screen.getByText("Monitoring")).toBeInTheDocument();
-      expect(screen.getByText("Audit Logs")).toBeInTheDocument();
+      expect(screen.getAllByText("Dashboard")[0]).toBeInTheDocument();
+      expect(screen.getAllByText("System Health")[0]).toBeInTheDocument();
+      expect(screen.getAllByText("Monitoring")[0]).toBeInTheDocument();
+      expect(screen.getAllByText("Audit Logs")[0]).toBeInTheDocument();
 
       // Admin-only items should not be visible
       expect(screen.queryByText("Crawler Management")).not.toBeInTheDocument();
@@ -317,8 +317,8 @@ describe("AdminLayout", () => {
       );
 
       // Admin users should see admin items but not super admin items
-      expect(screen.getByText("Crawler Management")).toBeInTheDocument();
-      expect(screen.getByText("Security")).toBeInTheDocument();
+      expect(screen.getAllByText("Crawler Management")[0]).toBeInTheDocument();
+      expect(screen.getAllByText("Security")[0]).toBeInTheDocument();
 
       // Super admin items should not be visible
       expect(screen.queryByText("Database Management")).not.toBeInTheDocument();
