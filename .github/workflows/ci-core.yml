@@ -1689,43 +1689,6 @@ jobs:
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:core
 
-    - name: Copy Playwright test artifacts from container
-      if: always()
-      run: |
-        echo "📋 Copying Playwright test artifacts from container..."
-        # Create local directories for artifacts
-        mkdir -p test-results playwright-report
-
-        # Copy test results from the container if they exist
-        if docker exec frontend-server test -d /app/test-results 2>/dev/null; then
-          echo "  - Copying test-results from container..."
-          docker cp frontend-server:/app/test-results/. ./test-results/ || echo "    ⚠️ Failed to copy test-results"
-        else
-          echo "  - No test-results directory found in container"
-        fi
-
-        # Copy playwright report from the container if it exists
-        if docker exec frontend-server test -d /app/playwright-report 2>/dev/null; then
-          echo "  - Copying playwright-report from container..."
-          docker cp frontend-server:/app/playwright-report/. ./playwright-report/ || echo "    ⚠️ Failed to copy playwright-report"
-        else
-          echo "  - No playwright-report directory found in container"
-        fi
-
-        # List what we found
-        echo "📋 Artifacts found on host:"
-        ls -la test-results/ 2>/dev/null || echo "  - No test-results directory"
-        ls -la playwright-report/ 2>/dev/null || echo "  - No playwright-report directory"
-
-    - name: Upload Playwright test artifacts
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: playwright-test-results-e2e-core
-        path: |
-          test-results/
-          playwright-report/
-        retention-days: 7
 
     - name: Stop services
       if: always()
