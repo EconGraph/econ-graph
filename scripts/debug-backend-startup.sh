@@ -27,6 +27,7 @@ docker run --rm -d --name backend-server \
   -p 8080:8080 \
   -e DATABASE_URL="${DATABASE_URL}" \
   -e BACKEND_PORT=8080 \
+  --network host \
   econ-graph-e2e-optimized:latest \
   ./backend/econ-graph-backend
 
