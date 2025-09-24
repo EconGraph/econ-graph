@@ -53,10 +53,12 @@
 - **Data**: Use test fixtures and factories
 
 #### **End-to-End Tests (5%)**
-- **Purpose**: Test complete user workflows
+- **Purpose**: Test complete user workflows with **REAL NETWORK CALLS**
 - **Coverage**: Full API workflows, authentication flows, data pipelines
 - **Tools**: `reqwest` for HTTP testing, `tokio-test` for async
 - **Environment**: Test database with realistic data
+- **⚠️ IMPORTANT**: E2E tests are designed to make actual network requests - **NOT mocking external services is their entire point**
+- **Limitations**: External services (Grafana, monitoring) may not be available in CI environments
 
 ### **3. Quality Standards**
 
@@ -93,7 +95,61 @@ async fn test_user_authentication_success() -> AppResult<()> {
 }
 ```
 
-### **4. Test Infrastructure**
+### **4. End-to-End Testing Principles**
+
+#### **🎯 Core E2E Testing Philosophy**
+**E2E tests are designed to test the ENTIRE system end-to-end, including real network calls to external services. NOT mocking external services is their fundamental purpose.**
+
+#### **✅ What E2E Tests SHOULD Do**
+- **Make real HTTP requests** to backend APIs
+- **Connect to real databases** (test databases, not production)
+- **Test complete user workflows** from frontend to backend
+- **Verify actual network communication** between services
+- **Test with real data flows** and transformations
+- **Validate actual authentication flows** and security
+
+#### **⚠️ Practical Limitations in CI Environments**
+- **External Services**: Grafana, monitoring dashboards may not be running
+- **Third-party APIs**: FRED, BLS, World Bank APIs may have rate limits or require authentication
+- **Network Dependencies**: Tests may fail if external services are down
+- **Timeouts**: Network calls may take longer than unit test timeouts
+
+#### **🔧 Handling External Service Dependencies**
+```rust
+// ✅ GOOD: Test the actual network call when possible
+#[tokio::test]
+async fn test_grafana_dashboard_access() -> AppResult<()> {
+    // This test WILL make a real HTTP request to Grafana
+    let response = reqwest::get("http://localhost:30001/health").await?;
+    assert!(response.status().is_success());
+}
+
+// ⚠️ ACCEPTABLE: Skip tests when external services unavailable
+#[tokio::test]
+#[ignore] // Skip in CI if Grafana not available
+async fn test_grafana_dashboard_integration() -> AppResult<()> {
+    // Only run when Grafana is actually running
+    if !is_grafana_available().await {
+        return Ok(());
+    }
+    // Test actual Grafana integration
+}
+
+// ❌ WRONG: Don't mock external services in E2E tests
+#[tokio::test]
+async fn test_grafana_dashboard_with_mock() -> AppResult<()> {
+    // This defeats the purpose of E2E testing!
+    // Use integration tests instead if you need to mock
+}
+```
+
+#### **🏗️ E2E Test Environment Strategy**
+- **Local Development**: All external services running (Grafana, monitoring, etc.)
+- **CI Environment**: Core services only (backend, frontend, database)
+- **Staging Environment**: Full external service integration
+- **Production**: Full end-to-end validation
+
+### **5. Test Infrastructure**
 
 #### **Test Utilities**
 ```rust
@@ -279,9 +335,12 @@ jobs:
 - **Cleanup**: Automatic cleanup after each test
 
 #### **Mocking Strategy**
-- **External APIs**: Mock all external service calls
-- **Database**: Use test database for integration tests
-- **Time**: Mock time for deterministic tests
+- **Unit Tests**: Mock all external dependencies (APIs, databases, time)
+- **Integration Tests**: Use test databases, mock external APIs only
+- **E2E Tests**: **NO MOCKING** - use real network calls and external services
+- **External APIs**: Mock in unit/integration tests, use real calls in E2E
+- **Database**: Use test database for integration tests, real connections for E2E
+- **Time**: Mock time for deterministic unit tests, real time for E2E
 - **Random**: Use seeded random for reproducible tests
 
 ### **9. Monitoring and Metrics**
