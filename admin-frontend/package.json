@@ -55,6 +55,25 @@
     "prettier-fix": "NODE_OPTIONS='--max-old-space-size=512' prettier --write 'src/**/*.{js,ts,tsx,css}'",
     "typecheck": "NODE_OPTIONS='--max-old-space-size=1024' tsc --noEmit"
   },
+  "jest": {
+    "collectCoverageFrom": [
+      "src/**/*.{ts,tsx}",
+      "!src/**/*.d.ts",
+      "!src/**/*.stories.{ts,tsx}",
+      "!src/**/__tests__/**",
+      "!src/**/__mocks__/**",
+      "!src/setupTests.ts",
+      "!src/index.tsx"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "branches": 60,
+        "functions": 60,
+        "lines": 60,
+        "statements": 60
+      }
+    }
+  },
   "eslintConfig": {
     "extends": [
       "react-app",
