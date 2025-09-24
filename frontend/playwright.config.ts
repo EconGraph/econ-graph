@@ -18,7 +18,7 @@ export default defineConfig({
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: 'http://localhost:18473',
+    baseURL: process.env.CI ? 'http://localhost:3000' : 'http://localhost:18473',
 
     /* Run in headless mode by default */
     headless: true,
@@ -62,7 +62,7 @@ export default defineConfig({
   ],
 
   /* Run your local dev server before starting the tests */
-  webServer: {
+  webServer: process.env.CI ? undefined : {
     command: 'cd dev-server && npm start',
     url: 'http://localhost:18473',
     reuseExistingServer: !process.env.CI,
