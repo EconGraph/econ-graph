@@ -1303,6 +1303,10 @@ jobs:
       working-directory: admin-frontend
       run: npm ci
 
+    - name: Install admin-frontend dependencies
+      working-directory: admin-frontend
+      run: npm ci
+
     - name: Run frontend formatting check
       working-directory: frontend
       run: npm run prettier-check
@@ -1453,7 +1457,7 @@ jobs:
 
         # Generate admin-frontend license report (use shared config path)
         echo "Generating admin-frontend license report..."
-        cd ../admin-frontend
+        cd admin-frontend
         license-checker --config ../frontend/.license-checker.json --json > admin-frontend-licenses.json || true
         echo "Admin frontend license check completed"
 
