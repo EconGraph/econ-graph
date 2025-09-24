@@ -9,7 +9,13 @@
  * - Export capabilities
  */
 
-import React, { useState, useEffect, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import {
   Box,
   Card,
@@ -81,6 +87,17 @@ interface PerformanceMetrics {
 interface CrawlerLogsProps {
   // Props can be added as needed
 }
+
+// Memoized component for expensive date formatting operations
+const FormattedTimestamp = React.memo(
+  ({ timestamp }: { timestamp: string }) => {
+    const formattedTime = useMemo(
+      () => format(new Date(timestamp), "HH:mm:ss.SSS"),
+      [timestamp],
+    );
+    return <span>{formattedTime}</span>;
+  },
+);
 
 const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -223,25 +240,25 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
     setFilteredLogs(filtered);
   }, [logs, searchTerm, levelFilter, sourceFilter]);
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     setLoading(true);
     // TODO: Implement actual refresh
     setTimeout(() => {
       setLoading(false);
     }, 1000);
-  };
+  }, []);
 
-  const handleExportLogs = () => {
+  const handleExportLogs = useCallback(() => {
     // TODO: Implement actual export
     console.log("Exporting logs...");
-  };
+  }, []);
 
-  const handleClearLogs = () => {
+  const handleClearLogs = useCallback(() => {
     setLogs([]);
     setFilteredLogs([]);
-  };
+  }, []);
 
-  const getLevelColor = (level: string) => {
+  const getLevelColor = useCallback((level: string) => {
     switch (level) {
       case "error":
       case "fatal":
@@ -255,9 +272,9 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
       default:
         return "default";
     }
-  };
+  }, []);
 
-  const getStatusIcon = (status?: string) => {
+  const getStatusIcon = useCallback((status?: string) => {
     switch (status) {
       case "success":
         return <CheckCircle color="success" />;
@@ -268,7 +285,7 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
       default:
         return <Info />;
     }
-  };
+  }, []);
 
   return (
     <Box sx={{ p: 3 }}>
@@ -508,7 +525,7 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
                   <TableRow key={log.id} hover>
                     <TableCell>
                       <Typography variant="body2">
-                        {format(new Date(log.timestamp), "HH:mm:ss.SSS")}
+                        <FormattedTimestamp timestamp={log.timestamp} />
                       </Typography>
                     </TableCell>
                     <TableCell>

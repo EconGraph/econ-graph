@@ -161,18 +161,6 @@ const CrawlerConfig: React.FC = () => {
   // Memoize the data sources array to prevent unnecessary re-renders
   const memoizedDataSources = useMemo(() => dataSources, [dataSources]);
 
-  // Memoize expensive status calculations
-  const statusCalculations = useMemo(() => {
-    return {
-      totalSources: dataSources.length,
-      enabledSources: dataSources.filter((s) => s.enabled).length,
-      healthySources: dataSources.filter((s) => s.health_status === "healthy")
-        .length,
-      errorSources: dataSources.filter((s) => s.health_status === "error")
-        .length,
-    };
-  }, [dataSources]);
-
   // Optimized event handlers with useCallback to prevent unnecessary re-renders
   const handleEditSource = useCallback((source: DataSource) => {
     setEditingSource(source);

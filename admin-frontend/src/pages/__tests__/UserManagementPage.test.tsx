@@ -7,22 +7,55 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import UserManagementPage from "../UserManagementPage";
-import { AuthProvider } from "../../contexts/AuthContext";
-import { SecurityProvider } from "../../contexts/SecurityContext";
+// Mock the contexts to prevent resource leaks
+jest.mock("../../contexts/AuthContext", () => ({
+  AuthProvider: ({ children }: any) => children,
+  useAuth: () => ({
+    user: {
+      id: "test-user",
+      username: "admin",
+      role: "super_admin",
+      sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
+    },
+    isAuthenticated: true,
+    login: jest.fn(),
+    logout: jest.fn(),
+    refreshSession: jest.fn(),
+    extendSession: jest.fn(),
+  }),
+}));
 
-// Mock the contexts
-const mockSuperAdminContext = {
-  user: {
-    id: "1",
-    name: "Super Admin",
-    email: "superadmin@test.com",
-    role: "super_admin",
-  },
-  login: jest.fn(),
-  logout: jest.fn(),
-  isAuthenticated: true,
-  loading: false,
-};
+jest.mock("../../contexts/SecurityContext", () => ({
+  SecurityProvider: ({ children }: any) => children,
+  useSecurity: () => ({
+    checkAccess: jest.fn(() => true),
+    logSecurityEvent: jest.fn(),
+    securityEvents: [],
+  }),
+}));
+
+// Mock timers to prevent resource leaks
+jest.useFakeTimers();
+
+// Mock setTimeout to run immediately in tests
+jest
+  .spyOn(global, "setTimeout")
+  .mockImplementation((fn: any, delay?: number) => {
+    if (typeof fn === "function") {
+      fn();
+    }
+    return 1 as any;
+  });
+
+// Mock setInterval to prevent resource leaks
+jest
+  .spyOn(global, "setInterval")
+  .mockImplementation((fn: any, delay?: number) => {
+    if (typeof fn === "function") {
+      fn();
+    }
+    return 1 as any;
+  });
 
 // const mockAdminContext = {
 //   user: {
@@ -47,17 +80,28 @@ const mockSuperAdminContext = {
 // Create a test theme
 const theme = createTheme();
 
+// Mock super admin context
+const mockSuperAdminContext = {
+  user: {
+    id: "test-user",
+    username: "admin",
+    role: "super_admin",
+    sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
+  },
+  isAuthenticated: true,
+  login: jest.fn(),
+  logout: jest.fn(),
+  refreshSession: jest.fn(),
+  extendSession: jest.fn(),
+};
+
 // Test wrapper component
 const TestWrapper: React.FC<{
   children: React.ReactNode;
   authContext?: any;
 }> = ({ children, authContext = mockSuperAdminContext }) => (
   <BrowserRouter>
-    <ThemeProvider theme={theme}>
-      <AuthProvider>
-        <SecurityProvider>{children}</SecurityProvider>
-      </AuthProvider>
-    </ThemeProvider>
+    <ThemeProvider theme={theme}>{children}</ThemeProvider>
   </BrowserRouter>
 );
 
@@ -88,11 +132,7 @@ describe("UserManagementPage", () => {
       render(
         <BrowserRouter>
           <ThemeProvider theme={theme}>
-            <AuthProvider>
-              <SecurityProvider>
-                <UserManagementPage />
-              </SecurityProvider>
-            </AuthProvider>
+            <UserManagementPage />
           </ThemeProvider>
         </BrowserRouter>,
       );

@@ -2,7 +2,7 @@
 // PURPOSE: Manage all registered users, view active sessions, and control user access
 // This provides comprehensive user administration capabilities for system administrators
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Box,
   Typography,
@@ -85,6 +85,25 @@ function TabPanel(props: TabPanelProps) {
   );
 }
 
+// Memoized components for expensive date formatting operations
+const FormattedDateTime = React.memo(
+  ({ dateString }: { dateString: string }) => {
+    const formattedDate = useMemo(
+      () => new Date(dateString).toLocaleString(),
+      [dateString],
+    );
+    return <span>{formattedDate}</span>;
+  },
+);
+
+const FormattedDate = React.memo(({ dateString }: { dateString: string }) => {
+  const formattedDate = useMemo(
+    () => new Date(dateString).toLocaleDateString(),
+    [dateString],
+  );
+  return <span>{formattedDate}</span>;
+});
+
 export default function UserManagementPage() {
   const [tabValue, setTabValue] = useState(0);
   const [users, setUsers] = useState<User[]>([]);
@@ -153,43 +172,55 @@ export default function UserManagementPage() {
     setLoading(false);
   }, []);
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setTabValue(newValue);
-  };
+  const handleTabChange = useCallback(
+    (event: React.SyntheticEvent, newValue: number) => {
+      setTabValue(newValue);
+    },
+    [],
+  );
 
-  const handleEditUser = (user: User) => {
+  const handleEditUser = useCallback((user: User) => {
     setEditingUser(user);
     setOpenDialog(true);
-  };
+  }, []);
 
-  const handleCloseDialog = () => {
+  const handleCloseDialog = useCallback(() => {
     setOpenDialog(false);
     setEditingUser(null);
-  };
+  }, []);
 
-  const handleSaveUser = () => {
+  const handleSaveUser = useCallback(() => {
     // In real implementation, this would call API to update user
     console.log("Saving user:", editingUser);
     handleCloseDialog();
-  };
+  }, [editingUser, handleCloseDialog]);
 
-  const handleSuspendUser = (userId: string) => {
-    // In real implementation, this would call API to suspend user
-    setUsers(
-      users.map((u) =>
-        u.id === userId
-          ? { ...u, status: u.status === "suspended" ? "active" : "suspended" }
-          : u,
-      ),
-    );
-  };
+  const handleSuspendUser = useCallback(
+    (userId: string) => {
+      // In real implementation, this would call API to suspend user
+      setUsers(
+        users.map((u) =>
+          u.id === userId
+            ? {
+                ...u,
+                status: u.status === "suspended" ? "active" : "suspended",
+              }
+            : u,
+        ),
+      );
+    },
+    [users],
+  );
 
-  const handleDeleteUser = (userId: string) => {
-    // In real implementation, this would call API to delete user
-    setUsers(users.filter((u) => u.id !== userId));
-  };
+  const handleDeleteUser = useCallback(
+    (userId: string) => {
+      // In real implementation, this would call API to delete user
+      setUsers(users.filter((u) => u.id !== userId));
+    },
+    [users],
+  );
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = useCallback((status: string) => {
     switch (status) {
       case "active":
         return "success";
@@ -200,9 +231,9 @@ export default function UserManagementPage() {
       default:
         return "default";
     }
-  };
+  }, []);
 
-  const getRoleColor = (role: string) => {
+  const getRoleColor = useCallback((role: string) => {
     switch (role) {
       case "super_admin":
         return "error";
@@ -213,15 +244,17 @@ export default function UserManagementPage() {
       default:
         return "default";
     }
-  };
+  }, []);
 
-  const filteredUsers = users.filter((user) => {
-    const matchesSearch =
-      user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesRole = roleFilter === "all" || user.role === roleFilter;
-    return matchesSearch && matchesRole;
-  });
+  const filteredUsers = useMemo(() => {
+    return users.filter((user) => {
+      const matchesSearch =
+        user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.email.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesRole = roleFilter === "all" || user.role === roleFilter;
+      return matchesSearch && matchesRole;
+    });
+  }, [users, searchTerm, roleFilter]);
 
   if (!checkAccess("super_admin")) {
     return (
@@ -421,10 +454,10 @@ export default function UserManagementPage() {
                       />
                     </TableCell>
                     <TableCell>
-                      {new Date(user.lastLogin).toLocaleString()}
+                      <FormattedDateTime dateString={user.lastLogin} />
                     </TableCell>
                     <TableCell>
-                      {new Date(user.createdAt).toLocaleDateString()}
+                      <FormattedDate dateString={user.createdAt} />
                     </TableCell>
                     <TableCell align="right">
                       <Tooltip title="Edit User">
@@ -513,7 +546,7 @@ export default function UserManagementPage() {
                     </TableCell>
                     <TableCell>{user.ipAddress}</TableCell>
                     <TableCell>
-                      {new Date(user.lastLogin).toLocaleString()}
+                      <FormattedDateTime dateString={user.lastLogin} />
                     </TableCell>
                     <TableCell>
                       <Tooltip title={user.userAgent}>

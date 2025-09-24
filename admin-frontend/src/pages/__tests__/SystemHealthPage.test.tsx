@@ -3,13 +3,7 @@
 // This validates the health monitoring interface works with our existing infrastructure
 
 import React from "react";
-import {
-  render,
-  screen,
-  fireEvent,
-  waitFor,
-  act,
-} from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import SystemHealthPage from "../SystemHealthPage";
@@ -32,6 +26,17 @@ jest.useFakeTimers();
 // Mock all timers to run immediately
 jest
   .spyOn(global, "setTimeout")
+  .mockImplementation((fn: any, delay?: number) => {
+    if (typeof fn === "function") {
+      // Run the function immediately for tests
+      fn();
+    }
+    return 1 as any;
+  });
+
+// Mock setInterval to prevent resource leaks
+jest
+  .spyOn(global, "setInterval")
   .mockImplementation((fn: any, delay?: number) => {
     if (typeof fn === "function") {
       // Run the function immediately for tests

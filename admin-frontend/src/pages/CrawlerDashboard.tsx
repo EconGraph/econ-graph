@@ -9,7 +9,7 @@
  * - Error monitoring and logs
  */
 
-import React, { useState } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import {
   Box,
   Card,
@@ -49,6 +49,23 @@ interface CrawlerDashboardProps {
   // Props can be added as needed for configuration
 }
 
+// Memoized component for expensive date formatting operations
+const FormattedDate = React.memo(
+  ({
+    dateString,
+    formatString,
+  }: {
+    dateString: string;
+    formatString: string;
+  }) => {
+    const formattedDate = useMemo(
+      () => format(new Date(dateString), formatString),
+      [dateString, formatString],
+    );
+    return <span>{formattedDate}</span>;
+  },
+);
+
 const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
   const [snackbar, setSnackbar] = useState<{
     open: boolean;
@@ -65,25 +82,25 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
     useCrawlerData(true);
 
   // Show snackbar notification
-  const showNotification = (
-    message: string,
-    severity: "success" | "error" | "info" = "info",
-  ) => {
-    setSnackbar({ open: true, message, severity });
-  };
+  const showNotification = useCallback(
+    (message: string, severity: "success" | "error" | "info" = "info") => {
+      setSnackbar({ open: true, message, severity });
+    },
+    [],
+  );
 
   // Handle refresh
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     try {
       await refreshAll();
       showNotification("Data refreshed successfully", "success");
     } catch (err) {
       showNotification("Failed to refresh data", "error");
     }
-  };
+  }, [refreshAll, showNotification]);
 
   // Handle trigger crawl
-  const handleTriggerCrawl = async () => {
+  const handleTriggerCrawl = useCallback(async () => {
     try {
       await control.actions.triggerCrawl({
         sources: ["FRED"],
@@ -94,25 +111,25 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
     } catch (err) {
       showNotification("Failed to trigger crawl", "error");
     }
-  };
+  }, [control.actions, showNotification]);
 
   // Handle stop crawler
-  const handleStopCrawler = async () => {
+  const handleStopCrawler = useCallback(async () => {
     try {
       await control.actions.stopCrawler();
       showNotification("Crawler stopped successfully", "success");
     } catch (err) {
       showNotification("Failed to stop crawler", "error");
     }
-  };
+  }, [control.actions, showNotification]);
 
-  const getStatusColor = (status: boolean) => {
+  const getStatusColor = useCallback((status: boolean) => {
     return status ? "success" : "error";
-  };
+  }, []);
 
-  const getStatusIcon = (status: boolean) => {
+  const getStatusIcon = useCallback((status: boolean) => {
     return status ? <CheckCircle /> : <Error />;
-  };
+  }, []);
 
   if (loading) {
     return (
@@ -218,12 +235,14 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                     Last Crawl
                   </Typography>
                   <Typography variant="body1">
-                    {status.status?.last_crawl
-                      ? format(
-                          new Date(status.status.last_crawl),
-                          "MMM dd, HH:mm",
-                        )
-                      : "Never"}
+                    {status.status?.last_crawl ? (
+                      <FormattedDate
+                        dateString={status.status.last_crawl}
+                        formatString="MMM dd, HH:mm"
+                      />
+                    ) : (
+                      "Never"
+                    )}
                   </Typography>
                 </Grid>
                 <Grid item xs={12}>
@@ -231,12 +250,14 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                     Next Scheduled Crawl
                   </Typography>
                   <Typography variant="body1">
-                    {status.status?.next_scheduled_crawl
-                      ? format(
-                          new Date(status.status.next_scheduled_crawl),
-                          "MMM dd, HH:mm",
-                        )
-                      : "Not scheduled"}
+                    {status.status?.next_scheduled_crawl ? (
+                      <FormattedDate
+                        dateString={status.status.next_scheduled_crawl}
+                        formatString="MMM dd, HH:mm"
+                      />
+                    ) : (
+                      "Not scheduled"
+                    )}
                   </Typography>
                 </Grid>
               </Grid>
@@ -418,7 +439,10 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                     ].map((activity, index) => (
                       <TableRow key={index}>
                         <TableCell>
-                          {format(activity.time, "HH:mm:ss")}
+                          <FormattedDate
+                            dateString={activity.time.toISOString()}
+                            formatString="HH:mm:ss"
+                          />
                         </TableCell>
                         <TableCell>{activity.source}</TableCell>
                         <TableCell>{activity.series}</TableCell>

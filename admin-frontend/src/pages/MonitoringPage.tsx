@@ -2,7 +2,7 @@
 // PURPOSE: Provide access to Grafana dashboards and embed key metrics for quick overview
 // This leverages the existing monitoring infrastructure while providing admin-specific views
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Box,
   Typography,
@@ -85,6 +85,84 @@ export default function MonitoringPage() {
     alerts: 2,
   });
 
+  // Memoize calculated values
+  const totalSeries = useMemo(
+    () => dashboards.reduce((sum, d) => sum + d.metrics.totalSeries, 0),
+    [dashboards],
+  );
+
+  const activeCrawlers = useMemo(
+    () => dashboards.reduce((sum, d) => sum + d.metrics.activeCrawlers, 0),
+    [dashboards],
+  );
+
+  const getStatusColor = useCallback((status: string) => {
+    switch (status) {
+      case "healthy":
+        return "success";
+      case "warning":
+        return "warning";
+      case "error":
+        return "error";
+      default:
+        return "default";
+    }
+  }, []);
+
+  const getStatusIcon = useCallback((status: string) => {
+    switch (status) {
+      case "healthy":
+        return <CheckCircle />;
+      case "warning":
+        return <Warning />;
+      case "error":
+        return <Error />;
+      default:
+        return <Info />;
+    }
+  }, []);
+
+  const serviceStatusCards = useMemo(
+    () =>
+      Object.entries(systemStatus.services).map(([service, status]) => (
+        <Grid item xs={12} sm={6} md={3} key={service}>
+          <Card>
+            <CardContent>
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <Typography variant="h6">{service}</Typography>
+                <Box
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 1,
+                  }}
+                >
+                  <Box
+                    sx={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      backgroundColor: getStatusColor(status),
+                    }}
+                  />
+                  <Typography variant="body2">
+                    {status.toUpperCase()}
+                  </Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+      )),
+    [systemStatus.services, getStatusColor],
+  );
+
   // Real Grafana dashboards from our existing monitoring infrastructure
   useEffect(() => {
     const grafanaDashboards: DashboardInfo[] = [
@@ -145,45 +223,22 @@ export default function MonitoringPage() {
     setLoading(false);
   }, []);
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setTabValue(newValue);
-  };
+  const handleTabChange = useCallback(
+    (event: React.SyntheticEvent, newValue: number) => {
+      setTabValue(newValue);
+    },
+    [],
+  );
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     setLoading(true);
     // In real implementation, this would refresh data from Grafana API
     setTimeout(() => setLoading(false), 1000);
-  };
+  }, []);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "healthy":
-        return "success";
-      case "warning":
-        return "warning";
-      case "error":
-        return "error";
-      default:
-        return "default";
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "healthy":
-        return <CheckCircle />;
-      case "warning":
-        return <Warning />;
-      case "error":
-        return <Error />;
-      default:
-        return <Info />;
-    }
-  };
-
-  const formatNumber = (num: number) => {
+  const formatNumber = useCallback((num: number) => {
     return new Intl.NumberFormat().format(num);
-  };
+  }, []);
 
   return (
     <Box>
@@ -261,9 +316,7 @@ export default function MonitoringPage() {
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography variant="h4">
-                {dashboards.reduce((sum, d) => sum + d.metrics.totalSeries, 0)}
-              </Typography>
+              <Typography variant="h4">{totalSeries}</Typography>
               <Typography variant="h6">Total Series</Typography>
               <Typography variant="body2" color="text.secondary">
                 Across all dashboards
@@ -274,12 +327,7 @@ export default function MonitoringPage() {
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography variant="h4">
-                {dashboards.reduce(
-                  (sum, d) => sum + d.metrics.activeCrawlers,
-                  0,
-                )}
-              </Typography>
+              <Typography variant="h4">{activeCrawlers}</Typography>
               <Typography variant="h6">Active Crawlers</Typography>
               <Typography variant="body2" color="text.secondary">
                 Data collection
@@ -299,18 +347,22 @@ export default function MonitoringPage() {
           Service Status
         </Typography>
         <Grid container spacing={2}>
-          {Object.entries(systemStatus.services).map(([service, status]) => (
-            <Grid item xs={12} sm={6} md={3} key={service}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <Chip
-                  icon={getStatusIcon(status)}
-                  label={service.toUpperCase()}
-                  color={getStatusColor(status)}
-                  size="small"
-                />
-              </Box>
-            </Grid>
-          ))}
+          {useMemo(
+            () =>
+              Object.entries(systemStatus.services).map(([service, status]) => (
+                <Grid item xs={12} sm={6} md={3} key={service}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                    <Chip
+                      icon={getStatusIcon(status)}
+                      label={service.toUpperCase()}
+                      color={getStatusColor(status)}
+                      size="small"
+                    />
+                  </Box>
+                </Grid>
+              )),
+            [systemStatus.services, getStatusIcon, getStatusColor],
+          )}
         </Grid>
       </Paper>
 

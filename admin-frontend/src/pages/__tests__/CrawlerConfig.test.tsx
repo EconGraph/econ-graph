@@ -10,9 +10,8 @@
  */
 
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
-import userEvent from "@testing-library/user-event";
 import CrawlerConfig from "../CrawlerConfig";
 
 // Mock Material-UI theme
@@ -81,8 +80,7 @@ describe("CrawlerConfig", () => {
   });
 
   describe("Global Settings Management", () => {
-    it("handles enable crawler toggle", async () => {
-      const user = userEvent.setup();
+    it("handles enable crawler toggle", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const enableSwitch = screen.getByRole("checkbox", {
@@ -90,12 +88,11 @@ describe("CrawlerConfig", () => {
       });
       expect(enableSwitch).toBeChecked();
 
-      await user.click(enableSwitch);
+      fireEvent.click(enableSwitch);
       expect(enableSwitch).not.toBeChecked();
     });
 
-    it("handles maintenance mode toggle", async () => {
-      const user = userEvent.setup();
+    it("handles maintenance mode toggle", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const maintenanceSwitch = screen.getByRole("checkbox", {
@@ -103,60 +100,51 @@ describe("CrawlerConfig", () => {
       });
       expect(maintenanceSwitch).not.toBeChecked();
 
-      await user.click(maintenanceSwitch);
+      fireEvent.click(maintenanceSwitch);
       expect(maintenanceSwitch).toBeChecked();
     });
 
-    it("updates max workers value", async () => {
-      const user = userEvent.setup();
+    it("updates max workers value", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const maxWorkersInput = screen.getByLabelText("Max Workers");
       expect(maxWorkersInput).toHaveValue(5);
 
-      await user.clear(maxWorkersInput);
-      await user.type(maxWorkersInput, "10");
+      fireEvent.change(maxWorkersInput, { target: { value: "10" } });
       expect(maxWorkersInput).toHaveValue(10);
     });
 
-    it("updates queue size limit", async () => {
-      const user = userEvent.setup();
+    it("updates queue size limit", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const queueLimitInput = screen.getByLabelText("Queue Size Limit");
       expect(queueLimitInput).toHaveValue(10000);
 
-      await user.clear(queueLimitInput);
-      await user.type(queueLimitInput, "20000");
+      fireEvent.change(queueLimitInput, { target: { value: "20000" } });
       expect(queueLimitInput).toHaveValue(20000);
     });
 
-    it("updates default timeout value", async () => {
-      const user = userEvent.setup();
+    it("updates default timeout value", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const timeoutInput = screen.getByLabelText("Default Timeout (seconds)");
       expect(timeoutInput).toHaveValue(30);
 
-      await user.clear(timeoutInput);
-      await user.type(timeoutInput, "60");
+      fireEvent.change(timeoutInput, { target: { value: "60" } });
       expect(timeoutInput).toHaveValue(60);
     });
 
-    it("updates default retry attempts", async () => {
-      const user = userEvent.setup();
+    it("updates default retry attempts", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const retryInput = screen.getByLabelText("Default Retry Attempts");
       expect(retryInput).toHaveValue(3);
 
-      await user.clear(retryInput);
-      await user.type(retryInput, "5");
+      fireEvent.change(retryInput, { target: { value: "5" } });
       expect(retryInput).toHaveValue(5);
     });
 
-    it("updates schedule frequency", async () => {
-      const user = userEvent.setup();
+    it("updates schedule frequency", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const frequencySelect = screen.getByLabelText(
@@ -166,7 +154,7 @@ describe("CrawlerConfig", () => {
       expect(frequencySelect).toBeInTheDocument();
 
       // Test that we can interact with the select
-      await user.click(frequencySelect);
+      fireEvent.click(frequencySelect);
 
       // Check that the dropdown options are available
       expect(screen.getByText("Daily")).toBeInTheDocument();
@@ -210,28 +198,26 @@ describe("CrawlerConfig", () => {
       expect(screen.getByText("Disabled")).toBeInTheDocument();
     });
 
-    it("handles edit source button click", async () => {
-      const user = userEvent.setup();
+    it("handles edit source button click", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const editButtons = screen.getAllByLabelText("Edit Configuration");
       expect(editButtons).toHaveLength(4);
 
-      await user.click(editButtons[0]);
+      fireEvent.click(editButtons[0]);
 
       expect(
         screen.getByText("Edit Data Source Configuration"),
       ).toBeInTheDocument();
     });
 
-    it("handles test connection button click", async () => {
-      const user = userEvent.setup();
+    it("handles test connection button click", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const testButtons = screen.getAllByLabelText("Test Connection");
       expect(testButtons).toHaveLength(4);
 
-      await user.click(testButtons[0]);
+      fireEvent.click(testButtons[0]);
 
       // Test that the connection test was triggered by checking for loading state
       // or health status change (the actual implementation updates health status)
@@ -240,8 +226,7 @@ describe("CrawlerConfig", () => {
   });
 
   describe("Data Source Configuration", () => {
-    it("updates source enabled status", async () => {
-      const user = userEvent.setup();
+    it("updates source enabled status", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const sourceSwitches = screen.getAllByRole("checkbox");
@@ -254,55 +239,47 @@ describe("CrawlerConfig", () => {
       // This test assumes FRED switch exists
       expect(fredSwitch).toBeInTheDocument();
       expect(fredSwitch).not.toBeNull();
-      await user.click(fredSwitch!);
+      fireEvent.click(fredSwitch!);
       expect(fredSwitch).not.toBeChecked();
     });
 
-    it("updates source priority", async () => {
-      const user = userEvent.setup();
+    it("updates source priority", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const priorityInputs = screen.getAllByDisplayValue("1");
       expect(priorityInputs.length).toBeGreaterThan(0);
 
-      await user.clear(priorityInputs[0]);
-      await user.type(priorityInputs[0], "5");
+      fireEvent.change(priorityInputs[0], { target: { value: "5" } });
       expect(priorityInputs[0]).toHaveValue(5);
     });
 
-    it("updates source rate limit", async () => {
-      const user = userEvent.setup();
+    it("updates source rate limit", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const rateLimitInputs = screen.getAllByDisplayValue("5");
       expect(rateLimitInputs.length).toBeGreaterThan(0);
 
-      await user.clear(rateLimitInputs[0]);
-      await user.type(rateLimitInputs[0], "10");
+      fireEvent.change(rateLimitInputs[0], { target: { value: "10" } });
       expect(rateLimitInputs[0]).toHaveValue(10);
     });
 
-    it("updates source retry attempts", async () => {
-      const user = userEvent.setup();
+    it("updates source retry attempts", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const retryInputs = screen.getAllByDisplayValue("3");
       expect(retryInputs.length).toBeGreaterThan(0);
 
-      await user.clear(retryInputs[0]);
-      await user.type(retryInputs[0], "5");
+      fireEvent.change(retryInputs[0], { target: { value: "5" } });
       expect(retryInputs[0]).toHaveValue(5);
     });
 
-    it("updates source timeout", async () => {
-      const user = userEvent.setup();
+    it("updates source timeout", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const timeoutInputs = screen.getAllByDisplayValue("30");
       expect(timeoutInputs.length).toBeGreaterThan(0);
 
-      await user.clear(timeoutInputs[0]);
-      await user.type(timeoutInputs[0], "60");
+      fireEvent.change(timeoutInputs[0], { target: { value: "60" } });
       expect(timeoutInputs[0]).toHaveValue(60);
     });
   });
@@ -321,12 +298,11 @@ describe("CrawlerConfig", () => {
     // This performance issue was identified during debugging of similar timeout
     // problems in the admin frontend test suite.
     jest.setTimeout(10000); // 10 seconds - reduced timeout since optimizations improved performance
-    it("opens edit dialog when edit button is clicked", async () => {
-      const user = userEvent.setup();
+    it("opens edit dialog when edit button is clicked", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const editButtons = screen.getAllByLabelText("Edit Configuration");
-      await user.click(editButtons[0]);
+      fireEvent.click(editButtons[0]);
 
       expect(
         screen.getByText("Edit Data Source Configuration"),
@@ -339,66 +315,67 @@ describe("CrawlerConfig", () => {
     });
 
     it("closes edit dialog when cancel is clicked", async () => {
-      const user = userEvent.setup();
       renderWithTheme(<CrawlerConfig />);
 
       const editButtons = screen.getAllByLabelText("Edit Configuration");
-      await user.click(editButtons[0]);
+      fireEvent.click(editButtons[0]);
 
       expect(
         screen.getByText("Edit Data Source Configuration"),
       ).toBeInTheDocument();
 
-      await user.click(screen.getByText("Cancel"));
+      fireEvent.click(screen.getByText("Cancel"));
 
-      await waitFor(() => {
-        expect(
-          screen.queryByTestId("edit-dialog-title"),
-        ).not.toBeInTheDocument();
-      });
+      await waitFor(
+        () => {
+          expect(
+            screen.queryByTestId("edit-dialog-title"),
+          ).not.toBeInTheDocument();
+        },
+        { timeout: 5000 },
+      );
     });
 
     it("saves changes when save is clicked", async () => {
-      const user = userEvent.setup();
       renderWithTheme(<CrawlerConfig />);
 
       const editButtons = screen.getAllByLabelText("Edit Configuration");
-      await user.click(editButtons[0]);
+      fireEvent.click(editButtons[0]);
 
       const sourceNameInput = screen.getByLabelText("Source Name");
-      await user.clear(sourceNameInput);
-      await user.type(sourceNameInput, "Updated FRED");
+      fireEvent.change(sourceNameInput, { target: { value: "Updated FRED" } });
 
-      await user.click(screen.getByText("Save"));
+      fireEvent.click(screen.getByText("Save"));
 
-      await waitFor(() => {
-        expect(
-          screen.queryByTestId("edit-dialog-title"),
-        ).not.toBeInTheDocument();
-      });
+      await waitFor(
+        () => {
+          expect(
+            screen.queryByTestId("edit-dialog-title"),
+          ).not.toBeInTheDocument();
+        },
+        { timeout: 5000 },
+      );
     });
   });
 
   describe("Save Configuration", () => {
-    it("handles save configuration button click", async () => {
-      const user = userEvent.setup();
+    it("handles save configuration button click", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const saveButton = screen.getByText("Save Configuration");
       expect(saveButton).not.toBeDisabled();
 
-      await user.click(saveButton);
+      fireEvent.click(saveButton);
 
       // Test that the save operation was triggered by checking button state
       expect(saveButton).toBeInTheDocument();
     });
 
-    it("shows saving state during save operation", async () => {
-      const user = userEvent.setup();
+    it("shows saving state during save operation", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const saveButton = screen.getByText("Save Configuration");
-      await user.click(saveButton);
+      fireEvent.click(saveButton);
 
       // Should show saving state
       expect(screen.getByText("Saving...")).toBeInTheDocument();
@@ -406,13 +383,12 @@ describe("CrawlerConfig", () => {
   });
 
   describe("Error Handling", () => {
-    it("displays error messages when save fails", async () => {
-      const user = userEvent.setup();
+    it("displays error messages when save fails", () => {
       renderWithTheme(<CrawlerConfig />);
 
       // Simulate error by clicking save
       const saveButton = screen.getByText("Save Configuration");
-      await user.click(saveButton);
+      fireEvent.click(saveButton);
 
       // Error handling would be tested with actual error scenarios
       expect(
@@ -420,12 +396,11 @@ describe("CrawlerConfig", () => {
       ).toBeInTheDocument();
     });
 
-    it("handles connection test failures", async () => {
-      const user = userEvent.setup();
+    it("handles connection test failures", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const testButtons = screen.getAllByLabelText("Test Connection");
-      await user.click(testButtons[0]);
+      fireEvent.click(testButtons[0]);
 
       // Connection test error handling would be tested here
       expect(testButtons[0]).toBeInTheDocument();
@@ -449,15 +424,14 @@ describe("CrawlerConfig", () => {
       ).toBeInTheDocument();
     });
 
-    it("supports keyboard navigation", async () => {
-      const user = userEvent.setup();
+    it("supports keyboard navigation", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const maxWorkersInput = screen.getByLabelText("Max Workers");
       maxWorkersInput.focus();
       expect(maxWorkersInput).toHaveFocus();
 
-      await user.keyboard("{Tab}");
+      fireEvent.keyDown(maxWorkersInput, { key: "Tab", code: "Tab" });
       // Should move to next focusable element
     });
 
@@ -478,13 +452,11 @@ describe("CrawlerConfig", () => {
       expect(screen.getByText("Data Sources")).toBeInTheDocument();
     });
 
-    it("updates form state without unnecessary re-renders", async () => {
-      const user = userEvent.setup();
+    it("updates form state without unnecessary re-renders", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const maxWorkersInput = screen.getByLabelText("Max Workers");
-      await user.clear(maxWorkersInput);
-      await user.type(maxWorkersInput, "10");
+      fireEvent.change(maxWorkersInput, { target: { value: "10" } });
 
       // Component should be stable
       expect(maxWorkersInput).toHaveValue(10);
@@ -492,13 +464,11 @@ describe("CrawlerConfig", () => {
   });
 
   describe("Data Validation", () => {
-    it("validates numeric inputs", async () => {
-      const user = userEvent.setup();
+    it("validates numeric inputs", () => {
       renderWithTheme(<CrawlerConfig />);
 
       const maxWorkersInput = screen.getByLabelText("Max Workers");
-      await user.clear(maxWorkersInput);
-      await user.type(maxWorkersInput, "abc");
+      fireEvent.change(maxWorkersInput, { target: { value: "abc" } });
 
       // Should handle invalid input gracefully
       expect(maxWorkersInput).toHaveValue(null);

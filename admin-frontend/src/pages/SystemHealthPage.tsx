@@ -2,7 +2,7 @@
 // PURPOSE: Provide immediate system health visibility with links to detailed Grafana dashboards
 // This gives administrators quick insight into system status without duplicating monitoring functionality
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Box,
   Typography,
@@ -59,6 +59,20 @@ interface ServiceStatus {
     disk: number;
   };
 }
+
+// Memoized component for expensive date formatting operations
+const FormattedDate = React.memo(({ date }: { date: Date }) => {
+  const formattedDate = useMemo(() => date.toLocaleString(), [date]);
+  return <span>{formattedDate}</span>;
+});
+
+const FormattedTime = React.memo(({ dateString }: { dateString: string }) => {
+  const formattedTime = useMemo(
+    () => new Date(dateString).toLocaleTimeString(),
+    [dateString],
+  );
+  return <span>{formattedTime}</span>;
+});
 
 export default function SystemHealthPage() {
   const [loading, setLoading] = useState(true);
@@ -174,16 +188,16 @@ export default function SystemHealthPage() {
     setLoading(false);
   }, []);
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     setLoading(true);
     // In real implementation, this would refresh data from system APIs
     setTimeout(() => {
       setLastUpdate(new Date());
       setLoading(false);
     }, 1000);
-  };
+  }, []);
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = useCallback((status: string) => {
     switch (status) {
       case "healthy":
       case "running":
@@ -197,9 +211,9 @@ export default function SystemHealthPage() {
       default:
         return "default";
     }
-  };
+  }, []);
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = useCallback((status: string) => {
     switch (status) {
       case "healthy":
       case "running":
@@ -213,9 +227,9 @@ export default function SystemHealthPage() {
       default:
         return <Info />;
     }
-  };
+  }, []);
 
-  const getTrendIcon = (trend?: string) => {
+  const getTrendIcon = useCallback((trend?: string) => {
     switch (trend) {
       case "up":
         return (
@@ -241,19 +255,21 @@ export default function SystemHealthPage() {
       default:
         return null;
     }
-  };
+  }, []);
 
-  const getResourceColor = (value: number) => {
+  const getResourceColor = useCallback((value: number) => {
     if (value >= 90) return "error";
     if (value >= 75) return "warning";
     return "success";
-  };
+  }, []);
 
-  const overallStatus = services.some((s) => s.status === "stopped")
-    ? "error"
-    : services.some((s) => s.status === "degraded")
-      ? "warning"
-      : "healthy";
+  const overallStatus = useMemo(() => {
+    return services.some((s) => s.status === "stopped")
+      ? "error"
+      : services.some((s) => s.status === "degraded")
+        ? "warning"
+        : "healthy";
+  }, [services]);
 
   return (
     <Box>
@@ -309,7 +325,7 @@ export default function SystemHealthPage() {
           System Status: {overallStatus.toUpperCase()}
         </Typography>
         <Typography variant="body2" data-testid="last-update-timestamp">
-          Last updated: {lastUpdate.toLocaleString()}
+          Last updated: <FormattedDate date={lastUpdate} />
           {loading && " (Refreshing...)"}
         </Typography>
       </Alert>
@@ -394,7 +410,7 @@ export default function SystemHealthPage() {
                   }}
                 >
                   <Typography variant="caption" color="text.secondary">
-                    {new Date(metric.lastCheck).toLocaleTimeString()}
+                    <FormattedTime dateString={metric.lastCheck} />
                   </Typography>
                   {getTrendIcon(metric.trend)}
                 </Box>
