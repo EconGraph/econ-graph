@@ -158,6 +158,57 @@ pub async fn check_database_health(pool: &DatabasePool) -> AppResult<()> {
     test_connection(pool).await
 }
 
+/// Initialize database with comprehensive connection testing
+/// This function handles the complete database initialization sequence:
+/// 1. Create connection pool
+/// 2. Test database connectivity
+/// 3. Run migrations
+///
+/// This is used during application startup to ensure the database is ready
+/// before the application begins serving requests.
+pub async fn initialize_database(database_url: &str) -> AppResult<DatabasePool> {
+    use tracing::info;
+
+    // Create database connection pool
+    info!("🗄️  Creating database connection pool...");
+    info!("  - Database URL: {}", database_url);
+
+    let pool = create_pool(database_url).await.map_err(|e| {
+        let error = AppError::InternalError(format!("Failed to create database pool: {}", e));
+        error.log_with_context("Application startup database pool creation");
+        eprintln!("❌ Failed to create database pool: {}", e);
+        error
+    })?;
+
+    info!("✅ Database connection pool created successfully");
+
+    // Test database connection
+    info!("🔍 Testing database connection...");
+    test_connection(&pool).await.map_err(|e| {
+        let error = AppError::InternalError(format!("Database connection test failed: {}", e));
+        error.log_with_context("Application startup database connection test");
+        eprintln!("❌ Database connection test failed: {}", e);
+        error
+    })?;
+
+    info!("✅ Database connection test successful");
+
+    // Run migrations
+    info!("🔄 Running database migrations...");
+    run_migrations(database_url)
+        .await
+        .map_err(|e| {
+            let error = AppError::InternalError(format!("Failed to run migrations: {}", e));
+            error.log_with_context("Application startup database migrations");
+            eprintln!("❌ Failed to run migrations: {}", e);
+            error
+        })?;
+
+    info!("✅ Database migrations completed successfully");
+
+    Ok(pool)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
