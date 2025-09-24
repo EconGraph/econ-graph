@@ -26,6 +26,12 @@ mod tests {
 
         let container = TestContainer::new().await;
         container.clean_database().await.unwrap();
+
+        // Run migrations after cleaning
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+        database::run_migrations(&database_url).await.unwrap();
+
         let pool = container.pool();
 
         // Create test data source
@@ -161,6 +167,12 @@ mod tests {
 
         let container = TestContainer::new().await;
         container.clean_database().await.unwrap();
+
+        // Run migrations after cleaning
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+        database::run_migrations(&database_url).await.unwrap();
+
         let pool = container.pool();
 
         // Test queue statistics on empty queue
@@ -221,6 +233,12 @@ mod tests {
 
         let container = TestContainer::new().await;
         container.clean_database().await.unwrap();
+
+        // Run migrations after cleaning
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+        database::run_migrations(&database_url).await.unwrap();
+
         let pool = container.pool();
 
         // Test crawler status
@@ -257,6 +275,12 @@ mod tests {
 
         let container = TestContainer::new().await;
         container.clean_database().await.unwrap();
+
+        // Run migrations after cleaning
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+        database::run_migrations(&database_url).await.unwrap();
+
         let pool = container.pool();
 
         // Test the database connection test function directly
@@ -340,6 +364,12 @@ mod tests {
 
         let container = TestContainer::new().await;
         container.clean_database().await.unwrap();
+
+        // Run migrations after cleaning
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+        database::run_migrations(&database_url).await.unwrap();
+
         let pool = container.pool();
 
         // Test successful connection test (should log success)
@@ -410,6 +440,12 @@ mod tests {
 
         let container = TestContainer::new().await;
         container.clean_database().await.unwrap();
+
+        // Run migrations after cleaning
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+        database::run_migrations(&database_url).await.unwrap();
+
         let pool = container.pool();
 
         let start_time = std::time::Instant::now();
