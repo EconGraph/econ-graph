@@ -3432,4 +3432,3 @@ ALTER TABLE ONLY public.xbrl_taxonomy_linkbases
 --
 
 \unrestrict bQkCAalL0prwhezWeA3a4buoXOdG7cWTeOVfSJFusD2dRg45YlH8Ef5vycJx8Ny
-
