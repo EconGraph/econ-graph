@@ -10,6 +10,7 @@ members = [
     "crates/econ-graph-backend",
     "crates/econ-graph-metrics",
 ]
+resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
@@ -35,11 +36,11 @@ once_cell = "1.19"
 # Database
 diesel = { version = "=2.2.12", features = ["postgres", "chrono", "uuid", "numeric", "serde_json"] }
 diesel-async = { version = "=0.6.1", features = ["postgres", "bb8"] }
-bb8 = "=0.8.6"
+bb8 = "=0.9.0"
 diesel_migrations = "=2.2.0"
 
 # HTTP and networking
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "=0.12.23", features = ["json", "stream"] }
 
 # Configuration
 config = "0.14"
