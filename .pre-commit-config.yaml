@@ -25,22 +25,22 @@ repos:
   - repo: local
     hooks:
       - id: frontend-prettier
-        name: Frontend Prettier Check
-        entry: bash -c 'cd frontend && npx prettier --check "src/**/*.{ts,tsx,js,jsx,json,css,md}"'
+        name: Frontend Prettier Check (Memory Optimized)
+        entry: bash -c 'cd frontend && NODE_OPTIONS="--max-old-space-size=512" npx prettier --check "src/**/*.{ts,tsx,js,jsx,json,css,md}"'
         language: system
         files: '^frontend/src/.*\.(ts|tsx|js|jsx|json|css|md)$'
         pass_filenames: false
 
       - id: frontend-eslint
-        name: Frontend ESLint Check
-        entry: bash -c 'cd frontend && npx eslint "src/**/*.{ts,tsx,js,jsx}" --max-warnings 20'
+        name: Frontend ESLint Check (Memory Optimized)
+        entry: bash -c 'cd frontend && NODE_OPTIONS="--max-old-space-size=1024" npx eslint "src/**/*.{ts,tsx,js,jsx}" --max-warnings 20 --cache --cache-location .eslintcache'
         language: system
         files: '^frontend/src/.*\.(ts|tsx|js|jsx)$'
         pass_filenames: false
 
       - id: typescript-check
-        name: TypeScript Compilation Check
-        entry: bash -c 'cd frontend && npx tsc --noEmit'
+        name: TypeScript Compilation Check (Memory Optimized)
+        entry: bash -c 'cd frontend && NODE_OPTIONS="--max-old-space-size=1024" npx tsc --noEmit'
         language: system
         files: '^frontend/.*\.(ts|tsx)$'
         pass_filenames: false
@@ -82,8 +82,8 @@ repos:
         pass_filenames: false
 
       - id: npm-audit
-        name: NPM Security Audit
-        entry: bash -c 'cd frontend && npm audit --audit-level moderate'
+        name: NPM Security Audit (Memory Optimized)
+        entry: bash -c 'cd frontend && NODE_OPTIONS="--max-old-space-size=1024" npm audit --audit-level moderate'
         language: system
         files: '^frontend/package.*\.json$'
         pass_filenames: false

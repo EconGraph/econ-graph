@@ -1231,21 +1231,21 @@ jobs:
       working-directory: frontend
       run: npm ci
 
-    - name: Run linting
+    - name: Run linting (Memory Optimized)
       working-directory: frontend
-      run: npm run lint
+      run: npm run lint:memory-optimized
 
-    - name: Run type checking
+    - name: Run type checking (Memory Optimized)
       working-directory: frontend
       run: npm run typecheck
 
-    - name: Run tests (parallel)
+    - name: Run tests (Memory Optimized)
       working-directory: frontend
-      run: npm test -- --coverage --watchAll=false --testPathIgnorePatterns="ChartCollaborationConnected|ChartCollaboration|ProfessionalChart|InteractiveChartWithCollaboration"
+      run: npm run test:ci
 
-    - name: Run problematic tests (serial)
+    - name: Run problematic tests (Memory Optimized Serial)
       working-directory: frontend
-      run: npm run test:serial -- --testPathPattern="ChartCollaborationConnected|ChartCollaboration|ProfessionalChart|InteractiveChartWithCollaboration" --coverage
+      run: NODE_OPTIONS='--max-old-space-size=1024' npm run test:serial -- --testPathPattern="ChartCollaborationConnected|ChartCollaboration|ProfessionalChart|InteractiveChartWithCollaboration" --coverage
 
   quality-checks:
     name: Quality Checks
@@ -1297,13 +1297,13 @@ jobs:
       working-directory: frontend
       run: npm ci
 
-    - name: Run frontend formatting check
+    - name: Run frontend formatting check (Memory Optimized)
       working-directory: frontend
       run: npm run prettier-check
 
-    - name: Run frontend linting
+    - name: Run frontend linting (Memory Optimized)
       working-directory: frontend
-      run: npm run lint
+      run: npm run lint:memory-optimized
 
   security-audit:
     name: Security Audit
@@ -1353,8 +1353,8 @@ jobs:
       working-directory: frontend
       run: npm ci
 
-    - name: Run npm security audit
-      run: npm audit --audit-level moderate
+    - name: Run npm security audit (Memory Optimized)
+      run: NODE_OPTIONS='--max-old-space-size=1024' npm audit --audit-level moderate
       working-directory: frontend
 
   license-compliance:
@@ -1532,9 +1532,9 @@ jobs:
       working-directory: frontend
       run: npm ci
 
-    - name: Run frontend integration tests
+    - name: Run frontend integration tests (Memory Optimized)
       working-directory: frontend
-      run: npm test -- --coverage --watchAll=false
+      run: npm run test:ci
       env:
         REACT_APP_GRAPHQL_ENDPOINT: http://localhost:9876/graphql
 
