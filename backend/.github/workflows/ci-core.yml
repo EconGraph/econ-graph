@@ -1,0 +1,45 @@
+name: Core CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  backend-migration-validation-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Test migration validation with valid migrations
+      run: |
+        echo "Testing migration validation with existing migrations..."
+        python3 scripts/check_migration_order.py
+
+    - name: Test migration validation with duplicate timestamps
+      run: |
+        echo "Testing migration validation with duplicate timestamps..."
+        # Create a temporary migration with duplicate timestamp to test the validation
+        mkdir -p migrations/2024-01-01-000001_duplicate_timestamp_migration
+        echo "-- Duplicate timestamp migration" > migrations/2024-01-01-000001_duplicate_timestamp_migration/up.sql
+        echo "-- Duplicate timestamp migration" > migrations/2024-01-01-000001_duplicate_timestamp_migration/down.sql
+
+        # This should fail with exit code 1
+        if python3 scripts/check_migration_order.py; then
+          echo "ERROR: Migration validation should have failed with duplicate timestamps"
+          exit 1
+        else
+          echo "✅ Migration validation correctly detected duplicate timestamps"
+        fi
+
+        # Clean up
+        rm -rf migrations/2024-01-01-000001_duplicate_timestamp_migration
