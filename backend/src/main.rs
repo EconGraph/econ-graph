@@ -239,6 +239,19 @@ async fn main() -> AppResult<()> {
     info!("  - PGHOST: {:?}", std::env::var("PGHOST").ok());
     info!("  - PGPORT: {:?}", std::env::var("PGPORT").ok());
 
+    // Debug: Network and container information
+    info!("🔍 Network debugging:");
+    info!("  - Container hostname: {:?}", std::env::var("HOSTNAME").ok());
+    info!("  - Container environment: {:?}", std::env::var("CONTAINER").ok());
+
+    // Debug: All environment variables containing DATABASE or PG
+    info!("🔍 All environment variables containing 'DATABASE' or 'PG':");
+    for (key, value) in std::env::vars() {
+        if key.contains("DATABASE") || key.contains("PG") {
+            info!("  - {}: {:?}", key, value);
+        }
+    }
+
     // Create database connection pool
     info!("🗄️  Creating database connection pool...");
     info!("  - Database URL: {}", config.database_url);

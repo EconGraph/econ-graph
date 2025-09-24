@@ -11,8 +11,39 @@ echo "  - Available images:"
 docker images | grep econ-graph || echo "    No econ-graph images found"
 echo "  - Port 8080 status:"
 netstat -tlnp | grep :8080 || echo "    Port 8080 is free"
-echo "  - PostgreSQL connectivity test:"
-nc -zv host.docker.internal 5432 && echo "    ✅ PostgreSQL reachable" || echo "    ❌ PostgreSQL not reachable"
+
+echo "🔍 Docker network debugging:"
+echo "  - Available networks:"
+docker network ls
+echo "  - PostgreSQL container status:"
+docker ps | grep postgres || echo "    No PostgreSQL container found"
+echo "  - PostgreSQL container network (if exists):"
+if docker ps | grep -q postgres; then
+  docker inspect $(docker ps -q --filter name=postgres) | jq -r '.[0].NetworkSettings.Networks | keys[]' 2>/dev/null || echo "    Cannot inspect PostgreSQL network"
+else
+  echo "    PostgreSQL container not running"
+fi
+
+echo "🔍 PostgreSQL service debugging:"
+echo "  - PostgreSQL port binding:"
+docker port postgres 2>/dev/null || echo "    Cannot get PostgreSQL port binding"
+echo "  - PostgreSQL connectivity from host:"
+if nc -z localhost 5432 2>/dev/null; then
+  echo "    ✅ PostgreSQL reachable on localhost:5432"
+else
+  echo "    ❌ PostgreSQL not reachable on localhost:5432"
+fi
+echo "  - PostgreSQL connectivity from host (host.docker.internal):"
+if nc -z host.docker.internal 5432 2>/dev/null; then
+  echo "    ✅ PostgreSQL reachable on host.docker.internal:5432"
+else
+  echo "    ❌ PostgreSQL not reachable on host.docker.internal:5432"
+fi
+
+echo "🔍 Environment variables debugging:"
+echo "  - DATABASE_URL: ${DATABASE_URL}"
+echo "  - All environment variables containing 'DATABASE' or 'PG':"
+env | grep -i -E "(DATABASE|PG)" || echo "    No DATABASE/PG environment variables found"
 
 # Environment variables debugging
 echo "📋 Environment variables being passed to container:"
@@ -23,17 +54,48 @@ echo "  - Binary path: ./backend/econ-graph-backend"
 
 # Start the backend container
 echo "🚀 Starting backend container..."
-docker run --rm -d --name backend-server \
-  -p 8080:8080 \
-  -e DATABASE_URL="${DATABASE_URL}" \
-  -e BACKEND_PORT=8080 \
-  --network host \
-  econ-graph-e2e-optimized:latest \
-  ./backend/econ-graph-backend
+
+# Try to get PostgreSQL container name/ID for network sharing
+POSTGRES_CONTAINER=$(docker ps -q --filter name=postgres)
+if [ ! -z "$POSTGRES_CONTAINER" ]; then
+  echo "  - Found PostgreSQL container: $POSTGRES_CONTAINER"
+  echo "  - Using PostgreSQL container's network"
+  # When sharing PostgreSQL container's network, use localhost instead of host.docker.internal
+  LOCAL_DATABASE_URL=$(echo "${DATABASE_URL}" | sed 's/host\.docker\.internal/localhost/g')
+  echo "  - Using DATABASE_URL: $LOCAL_DATABASE_URL"
+  docker run --rm -d --name backend-server \
+    -p 8080:8080 \
+    -e DATABASE_URL="$LOCAL_DATABASE_URL" \
+    -e BACKEND_PORT=8080 \
+    --network container:$POSTGRES_CONTAINER \
+    econ-graph-e2e-optimized:latest \
+    ./backend/econ-graph-backend
+else
+  echo "  - PostgreSQL container not found, using host network"
+  docker run --rm -d --name backend-server \
+    -p 8080:8080 \
+    -e DATABASE_URL="${DATABASE_URL}" \
+    -e BACKEND_PORT=8080 \
+    --network host \
+    econ-graph-e2e-optimized:latest \
+    ./backend/econ-graph-backend
+fi
 
 # Get container ID for debugging
 CONTAINER_ID=$(docker ps -q --filter name=backend-server)
 echo "📋 Container started with ID: $CONTAINER_ID"
+
+echo "🔍 Backend container debugging:"
+echo "  - Container network interfaces:"
+docker exec backend-server ip addr show 2>/dev/null || echo "    Cannot get network interfaces"
+echo "  - Container DNS resolution test:"
+docker exec backend-server nslookup postgres 2>/dev/null || echo "    Cannot resolve postgres hostname"
+docker exec backend-server nslookup localhost 2>/dev/null || echo "    Cannot resolve localhost"
+echo "  - Container port connectivity test:"
+docker exec backend-server nc -zv localhost 5432 2>/dev/null && echo "    ✅ localhost:5432 reachable from container" || echo "    ❌ localhost:5432 not reachable from container"
+docker exec backend-server nc -zv postgres 5432 2>/dev/null && echo "    ✅ postgres:5432 reachable from container" || echo "    ❌ postgres:5432 not reachable from container"
+echo "  - Container environment variables:"
+docker exec backend-server env | grep -i -E "(DATABASE|PG)" 2>/dev/null || echo "    Cannot get environment variables"
 
 # Start real-time log tailing in background
 echo "📋 Starting real-time backend log tailing..."
