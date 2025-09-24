@@ -97,6 +97,46 @@ jobs:
         cargo build --verbose
       working-directory: backend
 
+  backend-migration-validation-tests:
+    name: Backend Migration Validation Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Run migration order validation
+      run: |
+        cd backend
+        python3 scripts/check_migration_order.py
+
+    - name: Test migration validation with invalid order
+      run: |
+        cd backend
+        # Create a temporary migration with invalid timestamp for testing
+        mkdir -p migrations/2024-01-01-000000_invalid_migration_test
+        echo "-- Test migration" > migrations/2024-01-01-000000_invalid_migration_test/up.sql
+        echo "-- Test migration down" > migrations/2024-01-01-000000_invalid_migration_test/down.sql
+        
+        # This should fail because the timestamp is before existing migrations
+        if python3 scripts/check_migration_order.py; then
+          echo "❌ Migration validation should have failed but didn't"
+          exit 1
+        else
+          echo "✅ Migration validation correctly detected invalid order"
+        fi
+        
+        # Clean up test migration
+        rm -rf migrations/2024-01-01-000000_invalid_migration_test
+
   backend-smoke-tests:
     name: Backend Smoke Tests (Fast)
     runs-on: ubuntu-latest
