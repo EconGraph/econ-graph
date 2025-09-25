@@ -1884,6 +1884,20 @@ jobs:
         curl -f -s --connect-timeout 5 http://localhost:51249/health > /dev/null && echo "    ✅ Backend (51249) reachable" || echo "    ❌ Backend (51249) NOT reachable"
         echo ""
 
+        # Debug: Frontend server detailed analysis
+        echo "🔧 Frontend Server Detailed Analysis:"
+        echo "  - Testing frontend HTML response:"
+        curl -v http://localhost:3000/ 2>&1 | head -20 || echo "    ❌ Cannot get frontend HTML"
+        echo "  - Testing frontend static files:"
+        curl -f -s --connect-timeout 5 http://localhost:3000/static/js/main.6b919b30.js > /dev/null && echo "    ✅ Frontend JS bundle reachable" || echo "    ❌ Frontend JS bundle NOT reachable"
+        echo "  - Testing frontend health endpoint:"
+        curl -f -s --connect-timeout 5 http://localhost:3000/health > /dev/null && echo "    ✅ Frontend health endpoint reachable" || echo "    ❌ Frontend health endpoint NOT reachable"
+        echo "  - Frontend container status:"
+        docker ps --filter name=frontend-server --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" || echo "    No frontend container found"
+        echo "  - Frontend container logs (last 20 lines):"
+        docker logs --tail 20 frontend-server 2>/dev/null || echo "    Cannot get frontend logs"
+        echo ""
+
         # Verify frontend connectivity and capture backend logs during test execution
         chmod +x scripts/verify-frontend-connectivity.sh
         chmod +x scripts/run-e2e-with-backend-logs.sh

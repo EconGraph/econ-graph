@@ -75,13 +75,34 @@ fi
 # Test frontend-backend integration
 echo "  - Testing frontend-backend integration..."
 echo "    📋 Making a test request to frontend that should trigger backend calls..."
-# Make a request to the frontend that should trigger backend API calls
+
+# Debug: Test frontend static file serving
+echo "    📋 Testing frontend static file serving..."
+echo "      - Testing HTML response:"
+curl -s -w "HTTP_CODE:%{http_code}\n" http://localhost:3000/ | tail -1
+echo "      - Testing JavaScript bundle:"
+curl -s -w "HTTP_CODE:%{http_code}\n" http://localhost:3000/static/js/main.6b919b30.js | tail -1
+echo "      - Testing CSS files:"
+curl -s -w "HTTP_CODE:%{http_code}\n" http://localhost:3000/static/css/main.*.css | tail -1
+
+# Debug: Frontend container analysis
+echo "    📋 Frontend container analysis:"
+echo "      - Container status:"
+docker ps --filter name=frontend-server --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" || echo "        No frontend container found"
+echo "      - Container network:"
+docker inspect frontend-server --format='{{json .NetworkSettings}}' | jq '.' 2>/dev/null || echo "        Cannot get network settings"
+echo "      - Container logs (last 10 lines):"
+docker logs --tail 10 frontend-server 2>/dev/null || echo "        Cannot get container logs"
+
+# Test basic frontend response
 FRONTEND_RESPONSE=$(curl -s -w "%{http_code}" http://localhost:3000/ 2>/dev/null || echo "000")
 HTTP_CODE="${FRONTEND_RESPONSE: -3}"
 if [ "$HTTP_CODE" = "200" ]; then
   echo "    ✅ Frontend responding with HTTP 200"
 else
   echo "    ❌ Frontend responding with HTTP $HTTP_CODE"
+  echo "    📋 Full frontend response:"
+  curl -v http://localhost:3000/ 2>&1 | head -20
   exit 1
 fi
 
