@@ -3,6 +3,12 @@ import { defineConfig, devices } from '@playwright/test';
 /**
  * @see https://playwright.dev/docs/test-configuration
  */
+// Debug: Log Playwright configuration
+console.log('🔧 Playwright Configuration:');
+console.log('  - FRONTEND_URL:', process.env.FRONTEND_URL);
+console.log('  - CI:', process.env.CI);
+console.log('  - Final baseURL:', process.env.FRONTEND_URL || (process.env.CI ? 'http://localhost:3000' : 'http://localhost:18473'));
+
 export default defineConfig({
   testDir: './tests/e2e',
   /* Run tests in files in parallel */
@@ -68,4 +74,5 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
   },
+
 });

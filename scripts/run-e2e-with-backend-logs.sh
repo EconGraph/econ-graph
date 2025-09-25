@@ -35,9 +35,20 @@ stop_backend_logs() {
 # Set trap to stop log tailing on exit
 trap stop_backend_logs EXIT
 
+# Debug: Show what URLs Playwright will be using
+echo "🔧 Playwright URL Configuration:"
+echo "  - FRONTEND_URL: $FRONTEND_URL"
+echo "  - BACKEND_URL: $BACKEND_URL"
+echo "  - REACT_APP_GRAPHQL_ENDPOINT: $REACT_APP_GRAPHQL_ENDPOINT"
+echo "  - REACT_APP_API_URL: $REACT_APP_API_URL"
+echo "  - REACT_APP_GRAPHQL_URL: $REACT_APP_GRAPHQL_URL"
+echo "  - REACT_APP_BACKEND_PORT: $REACT_APP_BACKEND_PORT"
+echo ""
+
 # Run the actual Playwright tests
 echo "🚀 Running Playwright E2E tests with backend logs..."
 echo "📋 Backend logs will be streamed continuously during test execution"
+echo "📋 Look for '🌐 Playwright Network Request:' messages to see what URLs are being hit"
 echo ""
 
 # Execute the provided command (Playwright test command)

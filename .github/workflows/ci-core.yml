@@ -1882,6 +1882,7 @@ jobs:
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
+          -e DEBUG="pw:api,pw:browser*" \
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:global-analysis
 
