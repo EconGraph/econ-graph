@@ -85,6 +85,40 @@ else
   exit 1
 fi
 
+# Test GraphQL endpoint connectivity
+echo "  - Testing GraphQL endpoint connectivity..."
+echo "    📋 Testing GraphQL endpoint with Origin header..."
+if curl -f -s -X POST \
+  -H "Content-Type: application/json" \
+  -H "Origin: ${FRONTEND_URL}" \
+  -d '{"query":"query { __typename }"}' \
+  ${BACKEND_URL}/graphql > /dev/null; then
+  echo "      ✅ GraphQL endpoint is reachable from frontend origin"
+else
+  echo "      ❌ GraphQL endpoint is NOT reachable from frontend origin"
+  echo "      📋 Testing GraphQL endpoint without Origin header..."
+  if curl -f -s -X POST \
+    -H "Content-Type: application/json" \
+    -d '{"query":"query { __typename }"}' \
+    ${BACKEND_URL}/graphql > /dev/null; then
+    echo "      ✅ GraphQL endpoint is reachable without Origin header (CORS issue?)"
+  else
+    echo "      ❌ GraphQL endpoint is NOT reachable at all"
+  fi
+fi
+
+# Test CORS preflight request
+echo "    📋 Testing CORS preflight request..."
+if curl -f -s -X OPTIONS \
+  -H "Origin: ${FRONTEND_URL}" \
+  -H "Access-Control-Request-Method: POST" \
+  -H "Access-Control-Request-Headers: content-type" \
+  ${BACKEND_URL}/graphql > /dev/null; then
+  echo "      ✅ CORS preflight request successful"
+else
+  echo "      ❌ CORS preflight request failed"
+fi
+
 # Check if backend logs show any activity
 echo "  - Checking for recent backend activity..."
 if docker logs --tail 10 backend-server 2>/dev/null | grep -q "GET\|POST\|PUT\|DELETE"; then

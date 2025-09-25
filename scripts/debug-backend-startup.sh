@@ -226,4 +226,26 @@ if [ "$BACKEND_READY" = false ]; then
   exit 1
 fi
 
+# Debug: Show Docker network configuration
+echo "🔍 Docker network debugging:"
+echo "  - All Docker networks:"
+docker network ls
+echo "  - Backend container network details:"
+docker inspect backend-server --format='{{json .NetworkSettings}}' | jq '.' 2>/dev/null || docker inspect backend-server --format='{{.NetworkSettings}}'
+echo "  - Frontend container network details (if exists):"
+docker inspect frontend-server --format='{{json .NetworkSettings}}' | jq '.' 2>/dev/null || echo "    Frontend container not found"
+
+# Debug: Test different network approaches
+echo "  - Testing alternative network approaches:"
+echo "    📋 Testing backend-server hostname resolution:"
+docker exec backend-server nslookup backend-server 2>/dev/null || echo "      nslookup failed"
+echo "    📋 Testing direct IP connectivity:"
+BACKEND_IP=$(docker inspect backend-server --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null)
+if [ ! -z "$BACKEND_IP" ]; then
+  echo "      Backend IP: $BACKEND_IP"
+  docker exec backend-server curl -f -s http://${BACKEND_IP}:${BACKEND_PORT}/health > /dev/null 2>&1 && echo "      ✅ Direct IP connectivity works" || echo "      ❌ Direct IP connectivity failed"
+else
+  echo "      Could not determine backend IP"
+fi
+
 echo "✅ Backend startup completed successfully!"

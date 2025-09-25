@@ -226,6 +226,12 @@ async fn main() -> AppResult<()> {
     info!("  - Server host: {}", config.server.host);
     info!("  - Server port: {}", config.server.port);
     info!("  - CORS origins: {:?}", config.cors.allowed_origins);
+
+    // Debug: Show CORS environment variables
+    info!("🔧 CORS Environment Variables:");
+    info!("  - CORS_ALLOWED_ORIGINS: {:?}", std::env::var("CORS_ALLOWED_ORIGINS").ok());
+    info!("  - FRONTEND_PORT: {:?}", std::env::var("FRONTEND_PORT").ok());
+    info!("  - Final CORS origins that will be used: {:?}", config.cors.allowed_origins);
     info!("  - Database URL: {}", config.database_url);
 
     // Debug: Check environment variables that could affect database connection
@@ -307,11 +313,27 @@ async fn main() -> AppResult<()> {
     // }
     info!("⚠️  Background crawler startup temporarily disabled");
 
-    // Create Warp filters with configured CORS origins
+    // TEMPORARY: Disable CORS entirely for debugging
+    info!("⚠️  TEMPORARY: CORS disabled for debugging - this should NOT be in production!");
     let cors = warp::cors()
-        .allow_origins(config.cors.allowed_origins.clone())
+        .allow_any_origin()
         .allow_headers(vec!["content-type", "authorization"])
         .allow_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"]);
+
+    // Add request logging to see what requests are coming in
+    let request_logger = warp::log::custom(|info| {
+        info!("🌐 Incoming request: {} {} from {}",
+              info.method(),
+              info.path(),
+              info.remote_addr().unwrap_or("unknown".parse().unwrap())
+        );
+        if let Some(origin) = info.request_headers().get("origin") {
+            info!("  - Origin header: {:?}", origin);
+        }
+        if let Some(user_agent) = info.request_headers().get("user-agent") {
+            info!("  - User-Agent: {:?}", user_agent);
+        }
+    });
 
     // GraphQL endpoint with authentication
     let pool_for_graphql = pool.clone();
@@ -425,6 +447,7 @@ async fn main() -> AppResult<()> {
         .or(auth_filter)
         .or(mcp_filter)
         .with(cors)
+        .with(request_logger)
         .with(warp::trace::request());
 
     // Initialize metrics

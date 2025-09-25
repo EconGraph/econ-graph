@@ -37,6 +37,11 @@ export default defineConfig({
 
     /* Record video on failure */
     video: 'retain-on-failure',
+
+    /* Add network debugging */
+    extraHTTPHeaders: {
+      'X-Debug': 'playwright-test',
+    },
   },
 
   /* Configure projects for major browsers */
