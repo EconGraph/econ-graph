@@ -278,16 +278,7 @@ export default function AdminLayout() {
 
           {/* Notifications */}
           <IconButton color="inherit" sx={{ mr: 1 }}>
-            <Badge
-              badgeContent={(() => {
-                console.log(
-                  "🔍 AdminLayout DEBUG: Badge badgeContent =",
-                  securityEvents.length,
-                );
-                return securityEvents.length;
-              })()}
-              color="error"
-            >
+            <Badge badgeContent={securityEvents.length} color="error">
               <Notifications />
             </Badge>
           </IconButton>
