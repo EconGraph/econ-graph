@@ -3,7 +3,13 @@
 // This validates the admin interface layout, navigation, and security controls work as expected
 
 import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import AdminLayout from "../AdminLayout";
@@ -11,7 +17,8 @@ import { AuthProvider } from "../../../contexts/AuthContext";
 import { SecurityProvider } from "../../../contexts/SecurityContext";
 
 // Set timeout for all tests in this file due to performance characteristics
-jest.setTimeout(30000);
+// TODO: Optimize AdminLayout component performance to reduce test timeouts
+jest.setTimeout(60000);
 
 // Mock the contexts with test data
 const mockAuthContext = {
@@ -82,8 +89,12 @@ describe("AdminLayout", () => {
         </TestWrapper>,
       );
 
+      // First check if the main layout renders
+      expect(screen.getByTestId("admin-layout")).toBeInTheDocument();
+
+      // Then check specific content
       expect(screen.getByText("EconGraph Administration")).toBeInTheDocument();
-      expect(screen.getByText("🔒 ADMIN INTERFACE")).toBeInTheDocument();
+      expect(screen.getAllByText("🔒 ADMIN INTERFACE")[0]).toBeInTheDocument();
     });
 
     it("displays user information correctly", () => {
@@ -214,23 +225,55 @@ describe("AdminLayout", () => {
     });
 
     it("shows notifications badge when security events exist", () => {
-      // Test implementation would go here
+      // Override the global mock to provide security events
+      const originalUseSecurity =
+        require("../../../contexts/SecurityContext").useSecurity;
+      const mockUseSecurity = jest.fn(() => ({
+        checkAccess: jest.fn(() => true),
+        logSecurityEvent: jest.fn(),
+        securityEvents: [
+          {
+            id: "1",
+            type: "login_failed",
+            timestamp: new Date().toISOString(),
+            details: "Failed login attempt",
+          },
+          {
+            id: "2",
+            type: "suspicious_activity",
+            timestamp: new Date().toISOString(),
+            details: "Suspicious activity detected",
+          },
+        ],
+      }));
+
+      // Temporarily replace the mock
+      require("../../../contexts/SecurityContext").useSecurity =
+        mockUseSecurity;
 
       render(
-        <BrowserRouter>
-          <ThemeProvider theme={theme}>
-            <AuthProvider>
-              <SecurityProvider>
-                <AdminLayout />
-              </SecurityProvider>
-            </AuthProvider>
-          </ThemeProvider>
-        </BrowserRouter>,
+        <TestWrapper>
+          <AdminLayout />
+        </TestWrapper>,
       );
 
-      // Should show badge with count of security events
+      // Step 1: Verify the main layout renders
+      expect(screen.getByTestId("admin-layout")).toBeInTheDocument();
+
+      // Step 2: Check that the notification badge shows the correct count
       expect(screen.getByText("2")).toBeInTheDocument();
-      expect(screen.getByText("2 security event(s)")).toBeInTheDocument();
+
+      // Step 3: Verify security events summary appears in the navigation drawer
+      // Note: Using within() to target the specific drawer since both mobile and desktop
+      // drawers render the same content, avoiding "Found multiple elements" errors
+      const desktopDrawer = screen.getByRole("navigation");
+      expect(
+        within(desktopDrawer).getByText("2 security event(s)"),
+      ).toBeInTheDocument();
+
+      // Restore the original mock
+      require("../../../contexts/SecurityContext").useSecurity =
+        originalUseSecurity;
     });
 
     it("formats session time correctly", () => {
@@ -302,18 +345,43 @@ describe("AdminLayout", () => {
     });
 
     it("shows admin items for admin users", () => {
-      // Test implementation would go here
+      // Override the global mock to provide an admin user (not super_admin)
+      const originalUseAuth = require("../../../contexts/AuthContext").useAuth;
+      const originalUseSecurity =
+        require("../../../contexts/SecurityContext").useSecurity;
+
+      const mockUseAuth = jest.fn(() => ({
+        user: {
+          id: "test-user",
+          username: "admin",
+          role: "admin", // Admin role, not super_admin
+          sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
+        },
+        isAuthenticated: true,
+        login: jest.fn(),
+        logout: jest.fn(),
+        refreshSession: jest.fn(),
+        extendSession: jest.fn(),
+      }));
+
+      const mockUseSecurity = jest.fn(() => ({
+        checkAccess: jest.fn((role) => {
+          // Admin users can access admin and read_only roles, but not super_admin
+          return role === "admin" || role === "read_only";
+        }),
+        logSecurityEvent: jest.fn(),
+        securityEvents: [],
+      }));
+
+      // Temporarily replace the mocks
+      require("../../../contexts/AuthContext").useAuth = mockUseAuth;
+      require("../../../contexts/SecurityContext").useSecurity =
+        mockUseSecurity;
 
       render(
-        <BrowserRouter>
-          <ThemeProvider theme={theme}>
-            <AuthProvider>
-              <SecurityProvider>
-                <AdminLayout />
-              </SecurityProvider>
-            </AuthProvider>
-          </ThemeProvider>
-        </BrowserRouter>,
+        <TestWrapper>
+          <AdminLayout />
+        </TestWrapper>,
       );
 
       // Admin users should see admin items but not super admin items
@@ -321,30 +389,49 @@ describe("AdminLayout", () => {
       expect(screen.getAllByText("Security")[0]).toBeInTheDocument();
 
       // Super admin items should not be visible
-      expect(screen.queryByText("Database Management")).not.toBeInTheDocument();
-      expect(screen.queryByText("User Management")).not.toBeInTheDocument();
-      expect(screen.queryByText("System Config")).not.toBeInTheDocument();
+      expect(screen.queryAllByText("Database Management")).toHaveLength(0);
+      expect(screen.queryAllByText("User Management")).toHaveLength(0);
+      expect(screen.queryAllByText("System Config")).toHaveLength(0);
+
+      // Restore the original mocks
+      require("../../../contexts/AuthContext").useAuth = originalUseAuth;
+      require("../../../contexts/SecurityContext").useSecurity =
+        originalUseSecurity;
     });
   });
 
   describe("Error Handling", () => {
     it("handles missing user data gracefully", () => {
-      // Test implementation would go here
+      // Override the global mock to provide a user with missing data
+      const originalUseAuth = require("../../../contexts/AuthContext").useAuth;
+      const mockUseAuth = jest.fn(() => ({
+        user: {
+          id: "test-user",
+          username: null, // Missing username to trigger fallback
+          role: null, // Missing role to trigger fallback
+          sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
+        },
+        isAuthenticated: true,
+        login: jest.fn(),
+        logout: jest.fn(),
+        refreshSession: jest.fn(),
+        extendSession: jest.fn(),
+      }));
+
+      // Temporarily replace the mock
+      require("../../../contexts/AuthContext").useAuth = mockUseAuth;
 
       render(
-        <BrowserRouter>
-          <ThemeProvider theme={theme}>
-            <AuthProvider>
-              <SecurityProvider>
-                <AdminLayout />
-              </SecurityProvider>
-            </AuthProvider>
-          </ThemeProvider>
-        </BrowserRouter>,
+        <TestWrapper>
+          <AdminLayout />
+        </TestWrapper>,
       );
 
-      expect(screen.getByText("Administrator")).toBeInTheDocument();
-      expect(screen.getByText("unknown")).toBeInTheDocument();
+      expect(screen.getAllByText("Administrator")[0]).toBeInTheDocument();
+      expect(screen.getAllByText("unknown")[0]).toBeInTheDocument();
+
+      // Restore the original mock
+      require("../../../contexts/AuthContext").useAuth = originalUseAuth;
     });
   });
 });

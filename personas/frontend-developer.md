@@ -428,6 +428,7 @@ test: add unit tests for world map
 - **Timing Issues**: Use proper `waitFor` with appropriate timeouts for dialog content
 - **Test Environment**: Material-UI components behave differently in test vs production environments
 - **CRITICAL: TextField Input Testing**: `user.type()` hangs with Material-UI TextField components - use `fireEvent.change()` instead
+- **CRITICAL: Duplicate Drawer Elements**: AdminLayout and similar components render duplicate navigation elements (mobile + desktop drawers) causing "Found multiple elements" errors
 
 ### **UI/UX Issues**
 - **Loading States**: Always show loading indicators
@@ -517,6 +518,25 @@ test: add unit tests for world map
      ```
    - **Impact**: This single change can fix multiple test failures and prevent test suite hanging issues
    - **Scope**: Applies to all Material-UI TextField, TextareaAutosize, and similar controlled input components
+
+8. **CRITICAL: Duplicate Drawer Elements in AdminLayout Components**
+   - **Issue**: AdminLayout and similar components render duplicate navigation elements (mobile + desktop drawers) causing "Found multiple elements" errors in tests
+   - **Root Cause**: Material-UI responsive drawer pattern renders both mobile (temporary) and desktop (permanent) drawers simultaneously, creating duplicate DOM elements
+   - **Symptoms**: Tests fail with "Found multiple elements with the text: [Navigation Item]" errors and timeout at exactly 30 seconds
+   - **Solution**: Use `within()` to target specific drawer containers instead of `getAllByText()[0]` hacks
+   - **Testing Pattern**: 
+     ```typescript
+     // ❌ BAD: Causes "Found multiple elements" errors
+     expect(screen.getByText("Dashboard")).toBeInTheDocument();
+     expect(screen.getByText("2 security event(s)")).toBeInTheDocument();
+     
+     // ✅ GOOD: Target specific drawer container
+     const desktopDrawer = screen.getByRole("navigation");
+     expect(within(desktopDrawer).getByText("Dashboard")).toBeInTheDocument();
+     expect(within(desktopDrawer).getByText("2 security event(s)")).toBeInTheDocument();
+     ```
+   - **Scope**: Applies to all components using Material-UI responsive drawer patterns (AdminLayout, navigation components)
+   - **Impact**: Prevents systematic test timeouts and "Found multiple elements" errors across entire test suites
 
 ### **Testing Strategy Insights**
 1. **Mock Strategy**: Comprehensive D3.js mocking required for Jest compatibility

@@ -200,7 +200,7 @@ export default function MonitoringPage() {
   }, []);
 
   return (
-    <Box>
+    <Box data-testid="monitoring-content">
       <Box
         sx={{
           display: "flex",

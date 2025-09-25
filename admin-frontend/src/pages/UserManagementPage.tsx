@@ -258,7 +258,7 @@ export default function UserManagementPage() {
 
   if (!checkAccess("super_admin")) {
     return (
-      <Box sx={{ p: 3, textAlign: "center" }}>
+      <Box sx={{ p: 3, textAlign: "center" }} data-testid="access-denied">
         <Alert severity="error">
           <Typography variant="h6">Access Denied</Typography>
           <Typography>
@@ -270,7 +270,7 @@ export default function UserManagementPage() {
   }
 
   return (
-    <Box>
+    <Box data-testid="user-management-content">
       <Typography variant="h4" gutterBottom>
         User Management
       </Typography>

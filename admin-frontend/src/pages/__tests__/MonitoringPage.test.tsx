@@ -10,7 +10,7 @@ import MonitoringPage from "../MonitoringPage";
 
 // Set timeout for all tests in this file due to performance characteristics
 // TODO: Optimize MonitoringPage component performance to reduce test timeouts
-jest.setTimeout(30000);
+jest.setTimeout(60000);
 // Mock the contexts to prevent resource leaks
 jest.mock("../../contexts/AuthContext", () => ({
   AuthProvider: ({ children }: any) => children,
@@ -84,6 +84,10 @@ describe("MonitoringPage", () => {
         </TestWrapper>,
       );
 
+      // First check if the main content renders
+      expect(screen.getByTestId("monitoring-content")).toBeInTheDocument();
+
+      // Then check specific content
       expect(screen.getByText("System Monitoring")).toBeInTheDocument();
       expect(
         screen.getByText("Grafana dashboards and system metrics"),

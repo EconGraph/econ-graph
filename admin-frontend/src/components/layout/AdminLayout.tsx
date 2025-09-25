@@ -251,7 +251,7 @@ export default function AdminLayout() {
   );
 
   return (
-    <Box sx={{ display: "flex" }}>
+    <Box sx={{ display: "flex" }} data-testid="admin-layout">
       {/* App Bar */}
       <AppBar
         position="fixed"
@@ -278,7 +278,16 @@ export default function AdminLayout() {
 
           {/* Notifications */}
           <IconButton color="inherit" sx={{ mr: 1 }}>
-            <Badge badgeContent={securityEvents.length} color="error">
+            <Badge
+              badgeContent={(() => {
+                console.log(
+                  "🔍 AdminLayout DEBUG: Badge badgeContent =",
+                  securityEvents.length,
+                );
+                return securityEvents.length;
+              })()}
+              color="error"
+            >
               <Notifications />
             </Badge>
           </IconButton>

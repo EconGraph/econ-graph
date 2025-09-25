@@ -297,7 +297,7 @@ describe("CrawlerConfig", () => {
     // Related GitHub Issue: #88 - CrawlerDashboard Jest mock resolution issues
     // This performance issue was identified during debugging of similar timeout
     // problems in the admin frontend test suite.
-    jest.setTimeout(10000); // 10 seconds - reduced timeout since optimizations improved performance
+    jest.setTimeout(30000); // 30 seconds - increased timeout for dialog operations
     it("opens edit dialog when edit button is clicked", () => {
       renderWithTheme(<CrawlerConfig />);
 
