@@ -1878,33 +1878,51 @@ jobs:
         echo "🔍 DEBUG: Contents of frontend-server container:"
         docker exec frontend-server ls -la /app/ 2>/dev/null || echo "  ❌ Cannot access /app/ in frontend-server"
 
-        # DEBUG: Check for test-results in various locations
-        echo "🔍 DEBUG: Searching for test-results in frontend-server:"
-        docker exec frontend-server find /app -name "test-results" -type d 2>/dev/null || echo "  ❌ No test-results directory found"
-        docker exec frontend-server find /app -name "playwright-report" -type d 2>/dev/null || echo "  ❌ No playwright-report directory found"
-
-        # DEBUG: Check for any Playwright-related files
-        echo "🔍 DEBUG: Searching for Playwright files in frontend-server:"
-        docker exec frontend-server find /app -name "*.webm" -o -name "*.png" -o -name "*.md" | head -10 2>/dev/null || echo "  ❌ No Playwright files found"
-
         # Create local directories for artifacts
         mkdir -p test-results playwright-report
 
-        # Copy test results from the container if they exist
-        if docker exec frontend-server test -d /app/test-results 2>/dev/null; then
-          echo "  - Copying test-results from container..."
-          docker cp frontend-server:/app/test-results/. ./test-results/ || echo "    ⚠️ Failed to copy test-results"
-        else
-          echo "  - No test-results directory found in container"
-        fi
+        # MULTI-LOCATION SEARCH: Search for artifacts in multiple containers and locations
+        echo "🔍 DEBUG: Multi-location artifact search:"
 
-        # Copy playwright report from the container if it exists
-        if docker exec frontend-server test -d /app/playwright-report 2>/dev/null; then
-          echo "  - Copying playwright-report from container..."
-          docker cp frontend-server:/app/playwright-report/. ./playwright-report/ || echo "    ⚠️ Failed to copy playwright-report"
-        else
-          echo "  - No playwright-report directory found in container"
-        fi
+        # Search in all running containers
+        for container in $(docker ps --format "{{.Names}}"); do
+          echo "  🔍 Searching in container: $container"
+
+          # Search for test-results directory
+          if docker exec $container test -d /app/test-results 2>/dev/null; then
+            echo "    ✅ Found test-results in $container:/app/test-results"
+            docker cp $container:/app/test-results/. ./test-results/ 2>/dev/null && echo "    ✅ Copied test-results from $container" || echo "    ⚠️ Failed to copy from $container"
+          fi
+
+          # Search for playwright-report directory
+          if docker exec $container test -d /app/playwright-report 2>/dev/null; then
+            echo "    ✅ Found playwright-report in $container:/app/playwright-report"
+            docker cp $container:/app/playwright-report/. ./playwright-report/ 2>/dev/null && echo "    ✅ Copied playwright-report from $container" || echo "    ⚠️ Failed to copy from $container"
+          fi
+
+          # Search in frontend subdirectory
+          if docker exec $container test -d /app/frontend/test-results 2>/dev/null; then
+            echo "    ✅ Found test-results in $container:/app/frontend/test-results"
+            docker cp $container:/app/frontend/test-results/. ./test-results/ 2>/dev/null && echo "    ✅ Copied test-results from $container/frontend" || echo "    ⚠️ Failed to copy from $container/frontend"
+          fi
+
+          if docker exec $container test -d /app/frontend/playwright-report 2>/dev/null; then
+            echo "    ✅ Found playwright-report in $container:/app/frontend/playwright-report"
+            docker cp $container:/app/frontend/playwright-report/. ./playwright-report/ 2>/dev/null && echo "    ✅ Copied playwright-report from $container/frontend" || echo "    ⚠️ Failed to copy from $container/frontend"
+          fi
+
+          # Search for any Playwright files anywhere in the container
+          echo "    🔍 Searching for Playwright files in $container:"
+          docker exec $container find /app -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -5 | while read file; do
+            echo "      📄 Found: $file"
+            # Extract directory and copy
+            dir=$(dirname "$file")
+            if [[ "$dir" == *"test-results"* ]]; then
+              echo "      📁 Copying from directory: $dir"
+              docker cp $container:"$dir" ./test-results/ 2>/dev/null || echo "      ⚠️ Failed to copy $dir"
+            fi
+          done
+        done
 
         # List what we found
         echo "📋 Artifacts found on host:"
