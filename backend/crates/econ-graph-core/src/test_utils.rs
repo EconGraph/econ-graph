@@ -131,6 +131,11 @@ impl TestContainer {
             .execute(&mut conn)
             .await?;
 
+        // Run migrations after cleaning to ensure database is ready
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+        crate::database::run_migrations(&database_url).await?;
+
         Ok(())
     }
 }
