@@ -87,4 +87,5 @@ echo "📋 Look for '🌐 Playwright Network Request:' messages to see what URLs
 echo ""
 
 # Execute the provided command (Playwright test command)
+# Use exec to ensure proper exit code propagation
 exec "$@"

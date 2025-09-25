@@ -154,4 +154,6 @@ echo "✅ Frontend connectivity verification completed!"
 echo "🚀 Proceeding with Playwright tests..."
 
 # Execute the provided command
+# Use exec to ensure proper exit code propagation from Playwright tests
+echo "🚀 Executing: $@"
 exec "$@"

@@ -1743,6 +1743,8 @@ jobs:
         chmod +x scripts/verify-frontend-connectivity.sh
         chmod +x scripts/run-e2e-with-backend-logs.sh
         chmod +x scripts/run-e2e-with-frontend-logs.sh
+        # Execute E2E tests with proper exit code propagation
+        set -e  # Exit on any command failure
         ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
@@ -1887,6 +1889,8 @@ jobs:
         chmod +x scripts/verify-frontend-connectivity.sh
         chmod +x scripts/run-e2e-with-backend-logs.sh
         chmod +x scripts/run-e2e-with-frontend-logs.sh
+        # Execute E2E tests with proper exit code propagation
+        set -e  # Exit on any command failure
         ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
@@ -2085,6 +2089,8 @@ jobs:
         chmod +x scripts/verify-frontend-connectivity.sh
         chmod +x scripts/run-e2e-with-backend-logs.sh
         chmod +x scripts/run-e2e-with-frontend-logs.sh
+        # Execute E2E tests with proper exit code propagation
+        set -e  # Exit on any command failure
         ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
@@ -2284,6 +2290,8 @@ jobs:
         chmod +x scripts/verify-frontend-connectivity.sh
         chmod +x scripts/run-e2e-with-backend-logs.sh
         chmod +x scripts/run-e2e-with-frontend-logs.sh
+        # Execute E2E tests with proper exit code propagation
+        set -e  # Exit on any command failure
         ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
@@ -2488,6 +2496,8 @@ jobs:
     - name: Run Mobile Global Analysis E2E Tests
       run: |
         # Use our log tailing script to capture backend logs during test execution
+        # Ensure proper exit code propagation from Playwright tests
+        set -e  # Exit on any command failure
         chmod +x scripts/run-e2e-with-backend-logs.sh
         ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
@@ -2693,6 +2703,8 @@ jobs:
     - name: Run Mobile Professional Analysis E2E Tests
       run: |
         # Use our log tailing script to capture backend logs during test execution
+        # Ensure proper exit code propagation from Playwright tests
+        set -e  # Exit on any command failure
         chmod +x scripts/run-e2e-with-backend-logs.sh
         ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
@@ -2898,6 +2910,8 @@ jobs:
     - name: Run mobile end-to-end tests (core only)
       run: |
         # Use our log tailing script to capture backend logs during test execution
+        # Ensure proper exit code propagation from Playwright tests
+        set -e  # Exit on any command failure
         chmod +x scripts/run-e2e-with-backend-logs.sh
         ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
