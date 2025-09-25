@@ -245,7 +245,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:17.6-alpine
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
@@ -347,7 +347,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -425,7 +425,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -491,7 +491,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -557,7 +557,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -623,7 +623,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -689,7 +689,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -755,7 +755,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -821,7 +821,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -887,7 +887,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -953,7 +953,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1019,7 +1019,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1085,7 +1085,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1151,7 +1151,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17.6
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
