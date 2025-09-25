@@ -52,6 +52,12 @@ const API_BASE_URL =
   process.env.REACT_APP_API_URL ||
   `http://localhost:${process.env.REACT_APP_BACKEND_PORT || '9876'}`;
 
+// Debug: Log the API URL being used
+console.log('🔧 Frontend API Configuration:');
+console.log('  - REACT_APP_API_URL:', process.env.REACT_APP_API_URL);
+console.log('  - REACT_APP_BACKEND_PORT:', process.env.REACT_APP_BACKEND_PORT);
+console.log('  - Final API_BASE_URL:', API_BASE_URL);
+
 // Facebook SDK initialization
 declare global {
   interface Window {

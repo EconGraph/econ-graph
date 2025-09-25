@@ -18,7 +18,7 @@ export default defineConfig({
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: process.env.CI ? 'http://localhost:3000' : 'http://localhost:18473',
+    baseURL: process.env.FRONTEND_URL || (process.env.CI ? 'http://localhost:3000' : 'http://localhost:18473'),
 
     /* Run in headless mode by default */
     headless: true,
