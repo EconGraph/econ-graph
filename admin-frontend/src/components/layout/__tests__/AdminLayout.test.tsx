@@ -219,8 +219,11 @@ describe("AdminLayout", () => {
         </TestWrapper>,
       );
 
+      // Use within() to target the specific drawer since both mobile and desktop
+      // drawers render the same content, avoiding "Found multiple elements" errors
+      const desktopDrawer = screen.getByRole("navigation");
       expect(
-        screen.getByText("All actions are logged and monitored"),
+        within(desktopDrawer).getByText("All actions are logged and monitored"),
       ).toBeInTheDocument();
     });
 

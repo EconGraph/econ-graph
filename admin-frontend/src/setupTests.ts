@@ -38,7 +38,7 @@ jest.mock("./contexts/AuthContext", () => ({
   useAuth: () => ({
     user: {
       id: "test-user",
-      username: "admin",
+      username: "Test Admin",
       role: "super_admin",
       sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
     },
@@ -56,6 +56,7 @@ jest.mock("./contexts/SecurityContext", () => ({
     checkAccess: jest.fn(() => true),
     logSecurityEvent: jest.fn(),
     securityEvents: [],
+    sessionRemainingTime: 3600, // 60 minutes in seconds
   }),
 }));
 
