@@ -42,6 +42,10 @@ export default defineConfig({
     extraHTTPHeaders: {
       'X-Debug': 'playwright-test',
     },
+
+    /* Add network error interception */
+    actionTimeout: 10000,
+    navigationTimeout: 10000,
   },
 
   /* Configure projects for major browsers */
@@ -80,4 +84,6 @@ export default defineConfig({
     timeout: 120 * 1000,
   },
 
+  /* Global setup to add network error interception */
+  globalSetup: require.resolve('./tests/e2e/global-setup.ts'),
 });

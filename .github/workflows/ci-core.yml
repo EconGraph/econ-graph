@@ -1875,6 +1875,15 @@ jobs:
 
     - name: Run Global Analysis E2E Tests
       run: |
+        # Debug: Validate ports before running tests
+        echo "🔧 Port Validation Before E2E Tests:"
+        echo "  - Checking what ports are listening:"
+        netstat -tlnp | grep -E ":(3000|51249|8080|9876)" || echo "    No expected ports found"
+        echo "  - Testing URL reachability:"
+        curl -f -s --connect-timeout 5 http://localhost:3000 > /dev/null && echo "    ✅ Frontend (3000) reachable" || echo "    ❌ Frontend (3000) NOT reachable"
+        curl -f -s --connect-timeout 5 http://localhost:51249/health > /dev/null && echo "    ✅ Backend (51249) reachable" || echo "    ❌ Backend (51249) NOT reachable"
+        echo ""
+
         # Verify frontend connectivity and capture backend logs during test execution
         chmod +x scripts/verify-frontend-connectivity.sh
         chmod +x scripts/run-e2e-with-backend-logs.sh
