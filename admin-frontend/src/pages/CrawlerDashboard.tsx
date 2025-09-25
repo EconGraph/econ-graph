@@ -78,8 +78,8 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
   });
 
   // Use real GraphQL data
-  const { status, queueStats, control, refreshAll, loading, error } =
-    useCrawlerData(true);
+  const { status, queueStats, logs, control, refreshAll, loading, error } =
+    useCrawlerData(true); // This hook now uses React Query internally
 
   // Show snackbar notification
   const showNotification = useCallback(
@@ -406,58 +406,42 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                     <TableRow>
                       <TableCell>Time</TableCell>
                       <TableCell>Source</TableCell>
-                      <TableCell>Series</TableCell>
+                      <TableCell>Message</TableCell>
                       <TableCell>Status</TableCell>
                       <TableCell>Duration</TableCell>
                       <TableCell>Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {/* Mock data for recent activity */}
-                    {[
-                      {
-                        time: new Date(Date.now() - 5 * 60 * 1000),
-                        source: "FRED",
-                        series: "GDP",
-                        status: "completed",
-                        duration: "2.3s",
-                      },
-                      {
-                        time: new Date(Date.now() - 10 * 60 * 1000),
-                        source: "BLS",
-                        series: "UNRATE",
-                        status: "failed",
-                        duration: "0.8s",
-                      },
-                      {
-                        time: new Date(Date.now() - 15 * 60 * 1000),
-                        source: "Census",
-                        series: "POP",
-                        status: "completed",
-                        duration: "1.5s",
-                      },
-                    ].map((activity, index) => (
-                      <TableRow key={index}>
+                    {/* Real GraphQL log data */}
+                    {logs.logs?.map((log: any, index: number) => (
+                      <TableRow key={log.id || index}>
                         <TableCell>
                           <FormattedDate
-                            dateString={activity.time.toISOString()}
+                            dateString={log.timestamp}
                             formatString="HH:mm:ss"
                           />
                         </TableCell>
-                        <TableCell>{activity.source}</TableCell>
-                        <TableCell>{activity.series}</TableCell>
+                        <TableCell>{log.source}</TableCell>
+                        <TableCell>{log.message}</TableCell>
                         <TableCell>
                           <Chip
-                            label={activity.status}
+                            label={log.status}
                             color={
-                              activity.status === "completed"
+                              log.status === "completed"
                                 ? "success"
-                                : "error"
+                                : log.status === "failed"
+                                  ? "error"
+                                  : "default"
                             }
                             size="small"
                           />
                         </TableCell>
-                        <TableCell>{activity.duration}</TableCell>
+                        <TableCell>
+                          {log.duration_ms
+                            ? `${(log.duration_ms / 1000).toFixed(1)}s`
+                            : "-"}
+                        </TableCell>
                         <TableCell>
                           <Tooltip title="View Details">
                             <IconButton size="small">
@@ -467,6 +451,15 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                         </TableCell>
                       </TableRow>
                     ))}
+                    {(!logs.logs || logs.logs.length === 0) && (
+                      <TableRow>
+                        <TableCell colSpan={6} align="center">
+                          <Typography variant="body2" color="text.secondary">
+                            No recent activity
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               </TableContainer>

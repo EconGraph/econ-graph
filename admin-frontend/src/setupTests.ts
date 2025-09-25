@@ -1,3 +1,9 @@
+// jest-dom adds custom jest matchers for asserting on DOM nodes.
+// allows you to do things like:
+// expect(element).toHaveTextContent(/react/i)
+// learn more: https://github.com/testing-library/jest-dom
+import "@testing-library/jest-dom";
+
 // Polyfills for MSW in Node.js environment
 import { TextEncoder, TextDecoder } from "util";
 import { TransformStream as NodeTransformStream } from "stream/web";
@@ -5,12 +11,6 @@ import { TransformStream as NodeTransformStream } from "stream/web";
 global.TextEncoder = TextEncoder;
 global.TextDecoder = TextDecoder as any;
 global.TransformStream = NodeTransformStream as any;
-
-// jest-dom adds custom jest matchers for asserting on DOM nodes.
-// allows you to do things like:
-// expect(element).toHaveTextContent(/react/i)
-// learn more: https://github.com/testing-library/jest-dom
-import "@testing-library/jest-dom";
 
 // Note: Timer mocking is now handled per-test to avoid interfering with async operations
 // Individual tests can use jest.useFakeTimers() if needed for specific timer testing

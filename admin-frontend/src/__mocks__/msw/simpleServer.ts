@@ -18,6 +18,16 @@ import updateDataSourceSuccess from "../graphql/updateDataSource/success.json";
 import updateDataSourceError from "../graphql/updateDataSource/error.json";
 import testDataSourceConnectionSuccess from "../graphql/testDataSourceConnection/success.json";
 import testDataSourceConnectionError from "../graphql/testDataSourceConnection/error.json";
+import getCrawlerStatusSuccess from "../graphql/getCrawlerStatus/success.json";
+import getCrawlerStatusError from "../graphql/getCrawlerStatus/error.json";
+import getCrawlerStatusLoading from "../graphql/getCrawlerStatus/loading.json";
+import getQueueStatisticsSuccess from "../graphql/getQueueStatistics/success.json";
+import getQueueStatisticsError from "../graphql/getQueueStatistics/error.json";
+import getPerformanceMetricsSuccess from "../graphql/getPerformanceMetrics/success.json";
+import getPerformanceMetricsError from "../graphql/getPerformanceMetrics/error.json";
+import getSystemHealthSuccess from "../graphql/getSystemHealth/success.json";
+import getSystemHealthError from "../graphql/getSystemHealth/error.json";
+import getSystemHealthLoading from "../graphql/getSystemHealth/loading.json";
 
 // Mock scenarios for testing different states
 export enum MockScenarios {
@@ -54,6 +64,28 @@ export const mockResponses = {
   TestDataSourceConnection: {
     success: testDataSourceConnectionSuccess,
     error: testDataSourceConnectionError,
+  },
+
+  GetCrawlerStatus: {
+    success: getCrawlerStatusSuccess,
+    error: getCrawlerStatusError,
+    loading: getCrawlerStatusLoading,
+  },
+
+  GetQueueStatistics: {
+    success: getQueueStatisticsSuccess,
+    error: getQueueStatisticsError,
+  },
+
+  GetPerformanceMetrics: {
+    success: getPerformanceMetricsSuccess,
+    error: getPerformanceMetricsError,
+  },
+
+  GetSystemHealth: {
+    success: getSystemHealthSuccess,
+    error: getSystemHealthError,
+    loading: getSystemHealthLoading,
   },
 };
 

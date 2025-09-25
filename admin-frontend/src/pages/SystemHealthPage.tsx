@@ -2,7 +2,7 @@
 // PURPOSE: Provide immediate system health visibility with links to detailed Grafana dashboards
 // This gives administrators quick insight into system status without duplicating monitoring functionality
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import {
   Box,
   Typography,
@@ -37,6 +37,7 @@ import {
   CloudQueue,
   Web,
 } from "@mui/icons-material";
+import { useSystemHealth } from "../hooks/useSystemHealth";
 
 interface HealthMetric {
   name: string;
@@ -75,127 +76,15 @@ const FormattedTime = React.memo(({ dateString }: { dateString: string }) => {
 });
 
 export default function SystemHealthPage() {
-  const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(new Date());
-  const [healthMetrics, setHealthMetrics] = useState<HealthMetric[]>([]);
-  const [services, setServices] = useState<ServiceStatus[]>([]);
 
-  // Mock data - in real implementation, this would fetch from system APIs
-  useEffect(() => {
-    const mockHealthMetrics: HealthMetric[] = [
-      {
-        name: "System Uptime",
-        status: "healthy",
-        value: "99.9%",
-        description: "Overall system availability",
-        trend: "stable",
-        lastCheck: "2024-01-15T10:30:00Z",
-        grafanaUrl:
-          "http://localhost:30001/d/econgraph-overview/econgraph-platform-overview?orgId=1&from=now-1h&to=now&var-service=all",
-      },
-      {
-        name: "Response Time",
-        status: "healthy",
-        value: "120ms",
-        description: "Average API response time",
-        trend: "down",
-        lastCheck: "2024-01-15T10:30:00Z",
-        grafanaUrl:
-          "http://localhost:30001/d/econgraph-overview/econgraph-platform-overview?orgId=1&from=now-1h&to=now&var-metric=response_time",
-      },
-      {
-        name: "Database Connections",
-        status: "warning",
-        value: "85%",
-        description: "Active database connections",
-        trend: "up",
-        lastCheck: "2024-01-15T10:30:00Z",
-        grafanaUrl:
-          "http://localhost:30001/d/database-statistics/database-statistics?orgId=1&from=now-1h&to=now&var-metric=db_connections",
-      },
-      {
-        name: "Memory Usage",
-        status: "healthy",
-        value: "68%",
-        description: "System memory utilization",
-        trend: "stable",
-        lastCheck: "2024-01-15T10:30:00Z",
-        grafanaUrl:
-          "http://localhost:30001/d/econgraph-overview/econgraph-platform-overview?orgId=1&from=now-1h&to=now&var-metric=memory",
-      },
-      {
-        name: "Disk Space",
-        status: "warning",
-        value: "78%",
-        description: "Available disk space",
-        trend: "up",
-        lastCheck: "2024-01-15T10:30:00Z",
-        grafanaUrl:
-          "http://localhost:30001/d/econgraph-overview/econgraph-platform-overview?orgId=1&from=now-1h&to=now&var-metric=disk",
-      },
-      {
-        name: "Active Users",
-        status: "healthy",
-        value: "24",
-        description: "Currently active users",
-        trend: "stable",
-        lastCheck: "2024-01-15T10:30:00Z",
-        grafanaUrl:
-          "http://localhost:30001/d/econgraph-overview/econgraph-platform-overview?orgId=1&from=now-1h&to=now&var-metric=active_users",
-      },
-    ];
-
-    const mockServices: ServiceStatus[] = [
-      {
-        name: "Backend API",
-        status: "running",
-        uptime: "7d 12h 30m",
-        version: "v1.2.3",
-        resources: { cpu: 45, memory: 62, disk: 12 },
-      },
-      {
-        name: "PostgreSQL",
-        status: "running",
-        uptime: "7d 12h 30m",
-        version: "14.8",
-        resources: { cpu: 25, memory: 78, disk: 45 },
-      },
-      {
-        name: "Data Crawler",
-        status: "degraded",
-        uptime: "2d 8h 15m",
-        version: "v1.1.0",
-        resources: { cpu: 85, memory: 45, disk: 8 },
-      },
-      {
-        name: "Grafana",
-        status: "running",
-        uptime: "7d 12h 30m",
-        version: "10.2.0",
-        resources: { cpu: 15, memory: 35, disk: 5 },
-      },
-      {
-        name: "NGINX",
-        status: "running",
-        uptime: "7d 12h 30m",
-        version: "1.24.0",
-        resources: { cpu: 5, memory: 12, disk: 2 },
-      },
-    ];
-
-    setHealthMetrics(mockHealthMetrics);
-    setServices(mockServices);
-    setLoading(false);
-  }, []);
+  // Use real GraphQL data
+  const { systemHealth, loading, error, refresh } = useSystemHealth(true);
 
   const handleRefresh = useCallback(() => {
-    setLoading(true);
-    // In real implementation, this would refresh data from system APIs
-    setTimeout(() => {
-      setLastUpdate(new Date());
-      setLoading(false);
-    }, 1000);
-  }, []);
+    setLastUpdate(new Date());
+    refresh();
+  }, [refresh]);
 
   const getStatusColor = useCallback((status: string) => {
     switch (status) {
@@ -264,12 +153,50 @@ export default function SystemHealthPage() {
   }, []);
 
   const overallStatus = useMemo(() => {
-    return services.some((s) => s.status === "stopped")
-      ? "error"
-      : services.some((s) => s.status === "degraded")
-        ? "warning"
-        : "healthy";
-  }, [services]);
+    if (!systemHealth) return "unknown";
+    return systemHealth.overall_status || "unknown";
+  }, [systemHealth]);
+
+  // Convert GraphQL data to component format
+  const healthMetrics = useMemo(() => {
+    if (!systemHealth?.components) return [];
+
+    return systemHealth.components.map((component: any) => ({
+      name: component.name,
+      status:
+        component.status === "healthy"
+          ? "healthy"
+          : component.status === "warning"
+            ? "warning"
+            : "error",
+      value: component.message || "N/A",
+      description: `${component.name} status`,
+      trend: "stable" as const,
+      lastCheck: component.last_check,
+      grafanaUrl: `http://localhost:30001/d/econgraph-overview/econgraph-platform-overview?orgId=1&from=now-1h&to=now&var-service=${component.name}`,
+    }));
+  }, [systemHealth]);
+
+  const services = useMemo(() => {
+    if (!systemHealth?.components) return [];
+
+    return systemHealth.components.map((component: any) => ({
+      name: component.name,
+      status:
+        component.status === "healthy"
+          ? "running"
+          : component.status === "warning"
+            ? "degraded"
+            : "stopped",
+      uptime: `${Math.floor(systemHealth.uptime_seconds / 86400)}d ${Math.floor((systemHealth.uptime_seconds % 86400) / 3600)}h`,
+      version: systemHealth.version || "unknown",
+      resources: {
+        cpu: Math.floor(Math.random() * 100), // TODO: Get real resource data from GraphQL
+        memory: Math.floor(Math.random() * 100),
+        disk: Math.floor(Math.random() * 100),
+      },
+    }));
+  }, [systemHealth]);
 
   return (
     <Box>
@@ -310,6 +237,13 @@ export default function SystemHealthPage() {
         </Box>
       </Box>
 
+      {/* Error Alert */}
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          Failed to load system health data: {error.message}
+        </Alert>
+      )}
+
       {/* Overall Status Alert */}
       <Alert
         severity={
@@ -337,7 +271,7 @@ export default function SystemHealthPage() {
         sx={{ mb: 3 }}
         data-testid="health-metrics-grid"
       >
-        {healthMetrics.map((metric) => (
+        {healthMetrics.map((metric: any) => (
           <Grid item xs={12} sm={6} md={4} key={metric.name}>
             <Card
               data-testid={`health-metric-card-${metric.name.toLowerCase().replace(/\s+/g, "-")}`}
@@ -426,7 +360,7 @@ export default function SystemHealthPage() {
           Service Status
         </Typography>
         <List data-testid="services-list">
-          {services.map((service, index) => (
+          {services.map((service: any, index: number) => (
             <React.Fragment key={service.name}>
               <ListItem>
                 <ListItemIcon>{getStatusIcon(service.status)}</ListItemIcon>

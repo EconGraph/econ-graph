@@ -13,6 +13,7 @@
 import React from "react";
 import { render, screen, act } from "@testing-library/react";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import CrawlerDashboard from "../CrawlerDashboard";
 
@@ -43,27 +44,228 @@ afterAll(() => {
   console.warn = originalConsoleWarn;
 });
 
-const renderWithTheme = (component: React.ReactElement) => {
-  return render(<ThemeProvider theme={theme}>{component}</ThemeProvider>);
+// Mock the useCrawlerData hooks to return our GraphQL mock data
+jest.mock("../../hooks/useCrawlerData", () => ({
+  useCrawlerData: jest.fn(),
+  useCrawlerStatus: jest.fn(),
+  useQueueStatistics: jest.fn(),
+  usePerformanceMetrics: jest.fn(),
+}));
+
+// Create a single QueryClient for all tests to avoid performance issues
+const createTestQueryClient = () =>
+  new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        gcTime: 0,
+        staleTime: 0,
+      },
+    },
+  });
+
+// Create a single QueryClient instance for the test suite
+let testQueryClient: QueryClient;
+
+// Test wrapper with QueryClient - fixed to use single instance
+const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  return (
+    <QueryClientProvider client={testQueryClient}>
+      <ThemeProvider theme={theme}>{children}</ThemeProvider>
+    </QueryClientProvider>
+  );
 };
 
-describe.skip("CrawlerDashboard", () => {
+const renderWithTheme = (component: React.ReactElement) => {
+  return render(<TestWrapper>{component}</TestWrapper>);
+};
+
+describe("CrawlerDashboard", () => {
+  beforeAll(() => {
+    // Initialize QueryClient once for all tests
+    testQueryClient = createTestQueryClient();
+
+    // Set up hook mocks with GraphQL mock data
+    const {
+      useCrawlerData,
+      useCrawlerStatus,
+      useQueueStatistics,
+      usePerformanceMetrics,
+    } = require("../../hooks/useCrawlerData");
+
+    // Import mock data dynamically
+    const getCrawlerStatusSuccess = require("../../__mocks__/graphql/getCrawlerStatus/success.json");
+    const getQueueStatisticsSuccess = require("../../__mocks__/graphql/getQueueStatistics/success.json");
+    const getPerformanceMetricsSuccess = require("../../__mocks__/graphql/getPerformanceMetrics/success.json");
+
+    // Mock useCrawlerData to return combined mock data with correct structure
+    useCrawlerData.mockReturnValue({
+      status: {
+        status: getCrawlerStatusSuccess.data.crawlerStatus,
+        loading: false,
+        error: null,
+        refresh: jest.fn(),
+      },
+      queueStats: {
+        statistics: getQueueStatisticsSuccess.data.queueStatistics,
+        loading: false,
+        error: null,
+        refresh: jest.fn(),
+        derived: {
+          progressPercentage: 66.7,
+          successRate: 66.7,
+          errorRate: 0,
+        },
+      },
+      performance: {
+        metrics: getPerformanceMetricsSuccess.data.performanceMetrics,
+        latestMetrics: getPerformanceMetricsSuccess.data.performanceMetrics[0],
+        loading: false,
+        error: null,
+        refresh: jest.fn(),
+      },
+      logs: {
+        logs: [],
+        loading: false,
+        error: null,
+        refresh: jest.fn(),
+      },
+      control: {
+        loading: false,
+        error: null,
+        actions: {
+          triggerCrawl: jest.fn(),
+          startCrawler: jest.fn(),
+          stopCrawler: jest.fn(),
+          pauseCrawler: jest.fn(),
+          resumeCrawler: jest.fn(),
+        },
+      },
+      refreshAll: jest.fn(),
+      loading: false,
+      error: null,
+    });
+
+    // Mock individual hooks
+    useCrawlerStatus.mockReturnValue({
+      status: getCrawlerStatusSuccess.data.crawlerStatus,
+      loading: false,
+      error: null,
+      refresh: jest.fn(),
+    });
+
+    useQueueStatistics.mockReturnValue({
+      statistics: getQueueStatisticsSuccess.data.queueStatistics,
+      loading: false,
+      error: null,
+      refresh: jest.fn(),
+      derived: {
+        progressPercentage: 66.7,
+        successRate: 66.7,
+        errorRate: 0,
+      },
+    });
+
+    usePerformanceMetrics.mockReturnValue({
+      metrics: getPerformanceMetricsSuccess.data.performanceMetrics,
+      latestMetrics: getPerformanceMetricsSuccess.data.performanceMetrics[0],
+      loading: false,
+      error: null,
+      refresh: jest.fn(),
+    });
+  });
+
   beforeEach(() => {
-    jest.clearAllMocks();
+    // Clear QueryClient cache between tests to ensure isolation
+    testQueryClient.clear();
+
     // Mock timers for consistent testing
     jest.useFakeTimers();
   });
 
   afterEach(() => {
+    // Clean up timers
+    jest.runOnlyPendingTimers();
     jest.useRealTimers();
   });
 
+  afterAll(() => {
+    // Clean up QueryClient after all tests
+    testQueryClient.clear();
+  });
+
   describe("Component Rendering", () => {
+    it("renders crawler dashboard with GraphQL mock data", async () => {
+      renderWithTheme(<CrawlerDashboard />);
+
+      // Wait for the component to load data from GraphQL mocks
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+
+      // Check that crawler status is displayed (from mock data)
+      expect(screen.getByText(/running/i)).toBeInTheDocument();
+      expect(screen.getByText(/Processing FRED data/i)).toBeInTheDocument();
+
+      // Check that queue statistics are displayed (from mock data)
+      expect(screen.getByText(/150/)).toBeInTheDocument(); // total items
+      expect(screen.getByText(/45/)).toBeInTheDocument(); // pending items
+
+      // Check that performance metrics are displayed (from mock data)
+      expect(screen.getByText(/45.2%/)).toBeInTheDocument(); // CPU usage
+      expect(screen.getByText(/2.1 GB/)).toBeInTheDocument(); // Memory usage
+    });
+
     it("renders loading state initially", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       expect(screen.getByText("Loading crawler data...")).toBeInTheDocument();
       expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    });
+
+    it("handles GraphQL error scenarios", async () => {
+      // Mock useCrawlerData to return error
+      const { useCrawlerData } = require("../../hooks/useCrawlerData");
+      useCrawlerData.mockReturnValue({
+        status: {
+          data: null,
+          loading: false,
+          error: new Error("Failed to retrieve crawler status"),
+          refresh: jest.fn(),
+        },
+        queueStats: {
+          data: null,
+          loading: false,
+          error: null,
+          refresh: jest.fn(),
+        },
+        performance: {
+          data: null,
+          loading: false,
+          error: null,
+          refresh: jest.fn(),
+        },
+        control: {
+          triggerCrawl: jest.fn(),
+          startCrawler: jest.fn(),
+          stopCrawler: jest.fn(),
+          pauseCrawler: jest.fn(),
+          resumeCrawler: jest.fn(),
+        },
+        refreshAll: jest.fn(),
+        loading: false,
+        error: new Error("Failed to retrieve crawler status"),
+      });
+
+      renderWithTheme(<CrawlerDashboard />);
+
+      // Wait for the component to process the error
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+
+      // Check that error state is displayed
+      expect(screen.getByText(/Error/i)).toBeInTheDocument();
     });
 
     it("renders main dashboard after loading", async () => {

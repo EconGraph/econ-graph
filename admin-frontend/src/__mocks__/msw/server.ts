@@ -15,6 +15,16 @@ import getCrawlerConfigLoading from "../graphql/getCrawlerConfig/loading.json";
 import getDataSourcesSuccess from "../graphql/getDataSources/success.json";
 import getDataSourcesError from "../graphql/getDataSources/error.json";
 import getDataSourcesEmpty from "../graphql/getDataSources/empty.json";
+import getCrawlerStatusSuccess from "../graphql/getCrawlerStatus/success.json";
+import getCrawlerStatusError from "../graphql/getCrawlerStatus/error.json";
+import getCrawlerStatusLoading from "../graphql/getCrawlerStatus/loading.json";
+import getQueueStatisticsSuccess from "../graphql/getQueueStatistics/success.json";
+import getQueueStatisticsError from "../graphql/getQueueStatistics/error.json";
+import getPerformanceMetricsSuccess from "../graphql/getPerformanceMetrics/success.json";
+import getPerformanceMetricsError from "../graphql/getPerformanceMetrics/error.json";
+import getSystemHealthSuccess from "../graphql/getSystemHealth/success.json";
+import getSystemHealthError from "../graphql/getSystemHealth/error.json";
+import getSystemHealthLoading from "../graphql/getSystemHealth/loading.json";
 
 // Track current scenario for dynamic responses
 let currentScenario = "success";
@@ -36,7 +46,7 @@ const handlers = [
     console.log(`[MSW Server] ===== GRAPHQL REQUEST INTERCEPTED =====`);
 
     try {
-      const body = await request.json() as any;
+      const body = (await request.json()) as any;
       const { operationName, variables } = body;
 
       console.log(`[MSW Server] Operation: ${operationName}`);
@@ -69,6 +79,52 @@ const handlers = [
               break;
             default:
               response = getDataSourcesSuccess;
+          }
+          break;
+
+        case "GetCrawlerStatus":
+          switch (currentScenario) {
+            case "error":
+              response = getCrawlerStatusError;
+              break;
+            case "loading":
+              response = getCrawlerStatusLoading;
+              break;
+            default:
+              response = getCrawlerStatusSuccess;
+          }
+          break;
+
+        case "GetQueueStatistics":
+          switch (currentScenario) {
+            case "error":
+              response = getQueueStatisticsError;
+              break;
+            default:
+              response = getQueueStatisticsSuccess;
+          }
+          break;
+
+        case "GetPerformanceMetrics":
+          switch (currentScenario) {
+            case "error":
+              response = getPerformanceMetricsError;
+              break;
+            default:
+              response = getPerformanceMetricsSuccess;
+          }
+          break;
+
+        case "GetSystemHealth":
+          switch (currentScenario) {
+            case "error":
+              response = getSystemHealthError;
+              break;
+            case "loading":
+              response = getSystemHealthLoading;
+              break;
+            default:
+              response = getSystemHealthSuccess;
           }
           break;
 

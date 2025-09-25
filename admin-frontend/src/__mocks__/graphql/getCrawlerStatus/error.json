@@ -1,0 +1,12 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Failed to retrieve crawler status",
+      "extensions": {
+        "code": "CONNECTION_ERROR",
+        "details": "Unable to connect to crawler service"
+      }
+    }
+  ]
+}
