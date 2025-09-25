@@ -22,9 +22,9 @@ stop_log_tailing() {
 # Set trap to stop log tailing on exit
 trap stop_log_tailing EXIT
 
-# Execute the provided command (e.g., Playwright tests)
+# Execute the provided command (e.g., backend log tailing + Playwright tests)
 echo "▶️ Running E2E tests with frontend logs..."
-"$@" # This executes all arguments passed to the script
+"$@" # This executes all arguments passed to the script (which should include backend log tailing)
 
 # The trap will handle stopping the log tailing when this script exits
 echo "✅ E2E tests command finished."

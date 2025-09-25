@@ -1775,10 +1775,11 @@ jobs:
 
     - name: Run E2E Core Tests
       run: |
-        # Verify frontend connectivity and capture backend logs during test execution
+        # Verify frontend connectivity and capture both backend and frontend logs during test execution
         chmod +x scripts/verify-frontend-connectivity.sh
         chmod +x scripts/run-e2e-with-backend-logs.sh
-        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        chmod +x scripts/run-e2e-with-frontend-logs.sh
+        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
@@ -1954,10 +1955,11 @@ jobs:
         docker logs --tail 20 frontend-server 2>/dev/null || echo "    Cannot get frontend logs"
         echo ""
 
-        # Verify frontend connectivity and capture backend logs during test execution
+        # Verify frontend connectivity and capture both backend and frontend logs during test execution
         chmod +x scripts/verify-frontend-connectivity.sh
         chmod +x scripts/run-e2e-with-backend-logs.sh
-        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        chmod +x scripts/run-e2e-with-frontend-logs.sh
+        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
@@ -2187,10 +2189,11 @@ jobs:
 
     - name: Run Professional Analysis E2E Tests
       run: |
-        # Verify frontend connectivity and capture backend logs during test execution
+        # Verify frontend connectivity and capture both backend and frontend logs during test execution
         chmod +x scripts/verify-frontend-connectivity.sh
         chmod +x scripts/run-e2e-with-backend-logs.sh
-        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        chmod +x scripts/run-e2e-with-frontend-logs.sh
+        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
@@ -2421,10 +2424,11 @@ jobs:
 
     - name: Run end-to-end tests
       run: |
-        # Verify frontend connectivity and capture backend logs during test execution
+        # Verify frontend connectivity and capture both backend and frontend logs during test execution
         chmod +x scripts/verify-frontend-connectivity.sh
         chmod +x scripts/run-e2e-with-backend-logs.sh
-        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        chmod +x scripts/run-e2e-with-frontend-logs.sh
+        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
