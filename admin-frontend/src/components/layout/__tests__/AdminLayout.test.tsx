@@ -319,32 +319,74 @@ describe("AdminLayout", () => {
 
   describe("Role-based Access Control", () => {
     it("hides navigation items for read-only users", () => {
-      // Test implementation would go here
+      // Import the actual modules to spy on them
+      const authContext = require("../../../contexts/AuthContext");
+      const securityContext = require("../../../contexts/SecurityContext");
+
+      // Spy on the hooks and provide read-only user mocks
+      const authSpy = jest.spyOn(authContext, "useAuth").mockReturnValue({
+        user: {
+          id: "test-user",
+          username: "readonly",
+          role: "read_only", // Read-only role
+          sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
+        },
+        isAuthenticated: true,
+        login: jest.fn(),
+        logout: jest.fn(),
+        refreshSession: jest.fn(),
+        extendSession: jest.fn(),
+      });
+
+      const securitySpy = jest
+        .spyOn(securityContext, "useSecurity")
+        .mockReturnValue({
+          checkAccess: jest.fn((role) => {
+            // Read-only users can only access read_only items
+            return role === "read_only";
+          }),
+          logSecurityEvent: jest.fn(),
+          securityEvents: [],
+          sessionRemainingTime: 3600,
+        });
 
       render(
-        <BrowserRouter>
-          <ThemeProvider theme={theme}>
-            <AuthProvider>
-              <SecurityProvider>
-                <AdminLayout />
-              </SecurityProvider>
-            </AuthProvider>
-          </ThemeProvider>
-        </BrowserRouter>,
+        <TestWrapper>
+          <AdminLayout />
+        </TestWrapper>,
       );
 
+      // Use within() to target the desktop drawer to avoid duplicate element issues
+      const desktopDrawer = screen.getByRole("navigation");
+
       // Read-only users should only see basic items
-      expect(screen.getAllByText("Dashboard")[0]).toBeInTheDocument();
-      expect(screen.getAllByText("System Health")[0]).toBeInTheDocument();
-      expect(screen.getAllByText("Monitoring")[0]).toBeInTheDocument();
-      expect(screen.getAllByText("Audit Logs")[0]).toBeInTheDocument();
+      expect(within(desktopDrawer).getByText("Dashboard")).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("System Health"),
+      ).toBeInTheDocument();
+      expect(within(desktopDrawer).getByText("Monitoring")).toBeInTheDocument();
+      expect(within(desktopDrawer).getByText("Audit Logs")).toBeInTheDocument();
 
       // Admin-only items should not be visible
-      expect(screen.queryByText("Crawler Management")).not.toBeInTheDocument();
-      expect(screen.queryByText("Database Management")).not.toBeInTheDocument();
-      expect(screen.queryByText("User Management")).not.toBeInTheDocument();
-      expect(screen.queryByText("Security")).not.toBeInTheDocument();
-      expect(screen.queryByText("System Config")).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("Crawler Management"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("Database Management"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("User Management"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("Security"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("System Config"),
+      ).not.toBeInTheDocument();
+
+      // Restore the spies
+      authSpy.mockRestore();
+      securitySpy.mockRestore();
     });
 
     it("shows admin items for admin users", () => {
