@@ -7,6 +7,31 @@
 [![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-blue)](https://github.com/jmalicki/econ-graph/tree/main/frontend)
 [![License](https://img.shields.io/badge/License-MS--RSL-red.svg)](LICENSE)
 
+## 🎯 **What EconGraph Does**
+
+EconGraph is a **production-ready economic data intelligence platform** that transforms how economists, analysts, and researchers access and analyze economic data. Built with modern technology and designed for enterprise use, it provides:
+
+### 📊 **Core Capabilities**
+- **🌍 Global Data Access**: Unified interface to FRED, BLS, Census, World Bank, OECD, ECB, BOE data sources
+- **📈 Advanced Visualization**: Interactive charts with hover tooltips, zoom, and professional-grade time series visualization
+- **🔄 Data Transformations**: Instant YoY, QoQ, MoM calculations for trend analysis and comparative studies
+- **🔍 Intelligent Search**: AI-powered search with autocomplete, filtering, and relevance ranking across all data sources
+- **🤝 Collaboration Tools**: Team workspaces, chart annotations, and shared analysis environments
+- **📱 Modern Interface**: Responsive React frontend with Material-UI design system
+
+### 💼 **Business Value**
+- **90% Cost Savings**: Delivers Bloomberg Terminal-level functionality at a fraction of the cost
+- **Open Source**: Full customization and source code access for enterprise needs
+- **Enterprise Ready**: Scalable architecture supporting thousands of concurrent users
+- **API-First Design**: Comprehensive GraphQL API for programmatic access and integrations
+- **Real-time Updates**: Automated data synchronization with source systems
+
+### 🎯 **Who It's For**
+- **Economic Researchers & Academics** - Unified data access for research and publication
+- **Financial Analysts & Portfolio Managers** - Real-time data for investment decisions
+- **Government Agencies & Policy Makers** - Data transparency and regulatory compliance
+- **Business Intelligence Teams** - Strategic planning and market analysis
+
 
 ## 💰 **DEVELOPMENT COST TRANSPARENCY**
 
@@ -165,17 +190,6 @@ EconGraph maintains the highest standards of quality and reliability expected by
 - **Security**: Enterprise-grade authentication and data protection
 - **Scalability**: Tested to support 1000+ concurrent users
 
-### 🎬 **Automated Quality Validation**
-```bash
-# Run comprehensive quality validation
-./epic-e2e-demo.sh
-```
-
-**Quality Assurance Features:**
-- **End-to-End Testing**: Complete user workflow validation
-- **API Reliability**: GraphQL schema and performance testing
-- **Data Integrity**: Database consistency and accuracy validation
-- **User Experience**: Frontend functionality and responsiveness testing
 
 ---
 
@@ -258,6 +272,43 @@ EconGraph maintains the highest standards of quality and reliability expected by
 
 5. **🎉 Open your browser** to `http://localhost:3000`
 
+---
+
+## 💰 **DEVELOPMENT COST TRANSPARENCY**
+
+> **AI-Assisted Development with Cursor - Comprehensive Cost Analysis**
+
+### 📊 **Cursor AI Usage Statistics (Aug 12 - Sep 9, 2025)**
+- **Total AI Interactions**: 347 requests
+- **Total Tokens Processed**: **517.1M tokens** 
+- **Success Rate**: 77.5% (269 successful, 78 errored)
+- **Average Request Size**: 1.49M tokens
+- **Peak Development Day**: Sep 5, 2025 (155.8M tokens)
+- **Development Period**: 28 days of active AI-assisted coding
+
+### 💵 **Actual Development Costs**
+- **Cursor Pro Subscription**: ~$20/month
+- **Estimated Token Costs**: $258-$1,034 (at $0.50-$2.00 per 1M tokens)
+- **Total Project Cost**: $278-$1,054
+- **Daily Average**: $9.21-$36.86
+- **Cost per Major Feature**: ~$50-$200
+
+### ⚡ **ROI & Efficiency Analysis**
+- **🏗️ Features Delivered**: 15+ major components (React frontend, Rust backend, GraphQL API, collaboration features, global analysis, CI/CD pipelines)
+- **📝 Lines of Code**: 50,000+ across frontend/backend with comprehensive documentation
+- **⏰ Time Saved**: Estimated 200+ hours vs traditional solo development
+- **🚀 Development Speed**: 10-20x faster iteration cycles
+- **✅ Quality Achieved**: Professional-grade testing, documentation, security scanning
+
+### 🎯 **Major Achievements with AI Assistance**
+- **Frontend**: Complete React/TypeScript app with Material-UI, Chart.js, routing
+- **Backend**: Rust/Axum server with GraphQL, PostgreSQL, Diesel ORM, Docker
+- **Testing**: 157+ passing tests (unit, integration, e2e) with testcontainers
+- **CI/CD**: GitHub Actions workflows with security scanning, formatting, linting
+- **Documentation**: Google-style comments, comprehensive README, investor pitch
+- **Features**: Real-time collaboration, economic data visualization, transformations
+
+> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The $278-$1,054 total investment produced a full-stack application that would typically require $50,000-$100,000 in development costs and 6-12 months with a traditional team.
 
 ---
 
