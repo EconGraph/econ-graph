@@ -104,9 +104,16 @@ describe("AdminLayout", () => {
         </TestWrapper>,
       );
 
-      expect(screen.getByText("Test Admin")).toBeInTheDocument();
-      expect(screen.getByText("super_admin")).toBeInTheDocument();
-      expect(screen.getByText("Session: 60:00")).toBeInTheDocument();
+      // Use within() to target the desktop drawer to avoid duplicate element issues
+      const desktopDrawer = screen.getByRole("navigation");
+
+      expect(within(desktopDrawer).getByText("Test Admin")).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("super_admin"),
+      ).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("Session: 61:01"),
+      ).toBeInTheDocument();
     });
 
     it("renders navigation items based on user role", () => {
@@ -117,15 +124,28 @@ describe("AdminLayout", () => {
       );
 
       // Super admin should see all navigation items
-      expect(screen.getAllByText("Dashboard")[0]).toBeInTheDocument();
-      expect(screen.getAllByText("System Health")[0]).toBeInTheDocument();
-      expect(screen.getAllByText("Monitoring")[0]).toBeInTheDocument();
-      expect(screen.getAllByText("Crawler Management")[0]).toBeInTheDocument();
-      expect(screen.getAllByText("Database Management")[0]).toBeInTheDocument();
-      expect(screen.getAllByText("User Management")[0]).toBeInTheDocument();
-      expect(screen.getAllByText("Security")[0]).toBeInTheDocument();
-      expect(screen.getAllByText("Audit Logs")[0]).toBeInTheDocument();
-      expect(screen.getAllByText("System Config")[0]).toBeInTheDocument();
+      // Use within() to target the desktop drawer to avoid duplicate element issues
+      const desktopDrawer = screen.getByRole("navigation");
+
+      expect(within(desktopDrawer).getByText("Dashboard")).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("System Health"),
+      ).toBeInTheDocument();
+      expect(within(desktopDrawer).getByText("Monitoring")).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("Crawler Management"),
+      ).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("Database Management"),
+      ).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("User Management"),
+      ).toBeInTheDocument();
+      expect(within(desktopDrawer).getByText("Security")).toBeInTheDocument();
+      expect(within(desktopDrawer).getByText("Audit Logs")).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("System Config"),
+      ).toBeInTheDocument();
     });
 
     it("renders outlet content", () => {
@@ -147,7 +167,8 @@ describe("AdminLayout", () => {
         </TestWrapper>,
       );
 
-      const monitoringItem = screen.getAllByText("Monitoring")[0];
+      const desktopDrawer = screen.getByRole("navigation");
+      const monitoringItem = within(desktopDrawer).getByText("Monitoring");
       fireEvent.click(monitoringItem);
 
       expect(mockNavigate).toHaveBeenCalledWith("/monitoring");
@@ -294,7 +315,12 @@ describe("AdminLayout", () => {
         </BrowserRouter>,
       );
 
-      expect(screen.getByText("Session: 61:01")).toBeInTheDocument();
+      // Use within() to target the desktop drawer to avoid duplicate element issues
+      const desktopDrawer = screen.getByRole("navigation");
+
+      expect(
+        within(desktopDrawer).getByText("Session: 61:01"),
+      ).toBeInTheDocument();
     });
   });
 
@@ -430,8 +456,13 @@ describe("AdminLayout", () => {
       );
 
       // Admin users should see admin items but not super admin items
-      expect(screen.getAllByText("Crawler Management")[0]).toBeInTheDocument();
-      expect(screen.getAllByText("Security")[0]).toBeInTheDocument();
+      // Use within() to target the desktop drawer to avoid duplicate element issues
+      const desktopDrawer = screen.getByRole("navigation");
+
+      expect(
+        within(desktopDrawer).getByText("Crawler Management"),
+      ).toBeInTheDocument();
+      expect(within(desktopDrawer).getByText("Security")).toBeInTheDocument();
 
       // Super admin items should not be visible
       expect(screen.queryAllByText("Database Management")).toHaveLength(0);
@@ -472,8 +503,13 @@ describe("AdminLayout", () => {
         </TestWrapper>,
       );
 
-      expect(screen.getAllByText("Administrator")[0]).toBeInTheDocument();
-      expect(screen.getAllByText("unknown")[0]).toBeInTheDocument();
+      // Use within() to target the desktop drawer to avoid duplicate element issues
+      const desktopDrawer = screen.getByRole("navigation");
+
+      expect(
+        within(desktopDrawer).getByText("Administrator"),
+      ).toBeInTheDocument();
+      expect(within(desktopDrawer).getByText("unknown")).toBeInTheDocument();
 
       // Restore the original mock
       require("../../../contexts/AuthContext").useAuth = originalUseAuth;

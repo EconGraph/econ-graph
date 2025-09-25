@@ -56,7 +56,7 @@ jest.mock("./contexts/SecurityContext", () => ({
     checkAccess: jest.fn(() => true),
     logSecurityEvent: jest.fn(),
     securityEvents: [],
-    sessionRemainingTime: 3600, // 60 minutes in seconds
+    sessionRemainingTime: 3661, // 61 minutes and 1 second in seconds
   }),
 }));
 
