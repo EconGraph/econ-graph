@@ -1,98 +1,45 @@
-# 🎬 EconGraph Demo Tools
+# 🛠️ EconGraph Development Tools
 
-> **Professional demo creation scripts and assets for showcasing the EconGraph prototype**
-> 
-> **📁 70+ organized demo files** - All demo-related scripts, audio, video, and documentation in one place
+> **Development and testing utilities for the EconGraph prototype**
 
-## 🚀 **Recommended Demo Scripts**
+## 📁 **Available Tools**
 
-### **💼 Real UI Business Demo (BEST)**
-```bash
-./create-real-ui-business-demo.sh
-```
-- **Shows:** Actual React app running at localhost:3000
-- **Features:** Live UI interactions + business case presentation
-- **Duration:** 3-4 minutes
-- **Result:** Professional demo of working software + business value
+### **🧪 Testing Scripts**
+- `epic-e2e-demo.sh` - End-to-end testing script
+- `test-e2e-locally.sh` - Local testing utilities
+- `test-e2e-simple.sh` - Simplified testing approach
 
-### **🎯 Honest Pitch Video**
-```bash
-./create-honest-pitch-video.sh
-```
-- **Shows:** Real interface with roadmap vision
-- **Features:** Current prototype + future ML/analytics roadmap
-- **Duration:** 2 minutes
-- **Result:** Perfect investor/client pitch video
+### **📊 Development Utilities**
+- `professional-demo-orchestrator.sh` - Development orchestration
+- `temp_business_demo_script.md` - Business logic documentation
 
-### **🌐 Realistic Demo**
-```bash
-./create-realistic-demo.sh
-```
-- **Shows:** Cursor-free interface recording
-- **Features:** Only actual implemented features
-- **Duration:** Variable
-- **Result:** Honest prototype demonstration
+### **📝 Documentation**
+- `EPIC_DEMO_README.md` - Epic demo documentation
+- `PROFESSIONAL_DEMO_SUMMARY.md` - Professional demo summary
+- `professional-business-impact-narration.txt` - Business impact documentation
 
----
-
-## 📁 **All Demo Scripts**
-
-### **🎬 Interface Recording**
-- `create-real-ui-business-demo.sh` - **RECOMMENDED** business demo
-- `create-realistic-demo.sh` - Cursor-free realistic demo
-- `create-real-interface-demo.sh` - Manual interface recording
-- `create-automated-ui-demo.sh` - Screenshot-based automation
-- `create-honest-pitch-video.sh` - Professional pitch presentation
-
-### **🎤 Audio & Narration**
-- `create-narration-audio.sh` - Generate narration audio
-- `create-honest-narration.sh` - Honest feature narration
-- `create-comprehensive-narration.sh` - Extended narration
-
-### **🎥 Video Production**
-- `create-final-professional-video.sh` - Professional video compilation
-- `create-comprehensive-business-demo.sh` - Extended business presentation
-- `combine-honest-demo.sh` - Combine video with audio
-
-### **📹 Recording Tools**
-- `record-actual-interface.sh` - Record real interface
-- `capture-real-interface.sh` - Interface capture tools
-
-### **🎥 Video Production Assets**
-- `professional-econgraph-demo-v2.mp4` - Sample professional demo
-- `comprehensive-demo-error.png` - Demo screenshots
+### **🖼️ Assets**
+- `comprehensive-demo-error.png` - Error screenshots for debugging
 - `error-screenshot.png` - Debug screenshots
-
-### **🎤 Audio & Narration Files**
-- `professional-business-impact-narration.txt` - Business narration script
-- Various audio files and segments in demo-videos/
-
-### **🛠️ Production Tools**
-- `professional-demo-orchestrator.sh` - Demo orchestration
-- `temp_business_demo_script.md` - Business demo script template
-
-### **⚠️ Legacy Scripts**
-*Historical scripts from development - use recommended scripts above*
-- Various `create-*` scripts for different demo approaches
-- Multiple JavaScript files for automated demo generation
+- `professional-econgraph-demo-v2.mp4` - Reference implementation
 
 ---
 
-## 🎯 **Quick Start**
+## 🚀 **Quick Start**
 
-1. **For Business Presentations:**
+1. **For Development Testing:**
    ```bash
-   ./create-real-ui-business-demo.sh
+   ./epic-e2e-demo.sh
    ```
 
-2. **For Technical Demos:**
+2. **For Local Testing:**
    ```bash
-   ./create-realistic-demo.sh
+   ./test-e2e-locally.sh
    ```
 
-3. **For Investor Pitches:**
+3. **For Simple Testing:**
    ```bash
-   ./create-honest-pitch-video.sh
+   ./test-e2e-simple.sh
    ```
 
 ---
@@ -102,29 +49,26 @@
 - **Node.js 18+** - For browser automation
 - **npm** - For installing dependencies
 - **Rust + Cargo** - For running the backend
-- **QuickTime Player** - For screen recording (macOS)
-- **ffmpeg** - For video processing
+- **ffmpeg** - For media processing (if needed)
 
 ---
 
-## 🎬 **Demo Creation Process**
+## 🎯 **Development Process**
 
-1. **Choose your script** based on use case
+1. **Choose your testing script** based on your needs
 2. **Run the script** - it will guide you through setup
-3. **Follow the instructions** for recording
-4. **Record your screen** showing real UI interactions
-5. **Save the result** in `../demo-videos/`
+3. **Follow the instructions** for testing
+4. **Review results** and debug as needed
 
 ---
 
-## 💡 **Tips for Great Demos**
+## 💡 **Tips for Development**
 
-- **Show Real Interactions:** Click buttons, use search, navigate pages
-- **Hide Cursor:** Use QuickTime's cursor hiding option
-- **Professional Pace:** Don't rush, let features load properly
-- **Business Focus:** Always connect features to business value
-- **Honest Approach:** Only show what's actually implemented
+- **Test Real Interactions:** Verify actual functionality
+- **Check Error Handling:** Review error screenshots when issues occur
+- **Document Issues:** Use the provided documentation templates
+- **Focus on Functionality:** Test what's actually implemented
 
 ---
 
-**🎯 All scripts create videos showing the REAL working prototype - no fake features or mockups!**
+**🎯 All tools focus on testing and developing the REAL working prototype - no mockups or fake features!**
