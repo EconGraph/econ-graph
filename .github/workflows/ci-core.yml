@@ -1621,6 +1621,21 @@ jobs:
     # Note: PostgreSQL environment variables removed to prevent conflicts with DATABASE_URL
     # The DATABASE_URL in Docker containers should handle authentication
 
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -1648,23 +1663,6 @@ jobs:
         echo "REACT_APP_API_URL=$REACT_APP_API_URL" >> $GITHUB_ENV
         echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS" >> $GITHUB_ENV
 
-    services:
-      postgres:
-        image: postgres:17.6
-        env:
-          POSTGRES_PASSWORD: password
-          POSTGRES_USER: postgres
-          POSTGRES_DB: econ_graph_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-
-    steps:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
 
