@@ -12,10 +12,21 @@
 import React from "react";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import CrawlerConfig from "../CrawlerConfig";
+// Mock responses will be imported via jest.mock
 
 // Mock Material-UI theme
 const theme = createTheme();
+
+// Mock the useCrawlerConfig hook directly
+jest.mock("../../hooks/useCrawlerConfig", () => ({
+  useCrawlerConfig: jest.fn(),
+  useDataSources: jest.fn(),
+  useUpdateCrawlerConfig: jest.fn(),
+  useUpdateDataSource: jest.fn(),
+  useTestDataSourceConnection: jest.fn(),
+}));
 
 // Mock console methods to avoid noise in tests
 const originalConsoleError = console.error;
@@ -31,13 +42,146 @@ afterAll(() => {
   console.warn = originalConsoleWarn;
 });
 
+// Create a single QueryClient for all tests to avoid performance issues
+const createTestQueryClient = () =>
+  new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        gcTime: 0,
+        staleTime: 0,
+      },
+    },
+  });
+
+// Create a single QueryClient instance for the test suite
+let testQueryClient: QueryClient;
+
+// Test wrapper with QueryClient - fixed to use single instance
+const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  return (
+    <QueryClientProvider client={testQueryClient}>
+      <ThemeProvider theme={theme}>{children}</ThemeProvider>
+    </QueryClientProvider>
+  );
+};
+
 const renderWithTheme = (component: React.ReactElement) => {
-  return render(<ThemeProvider theme={theme}>{component}</ThemeProvider>);
+  return render(<TestWrapper>{component}</TestWrapper>);
 };
 
 describe("CrawlerConfig", () => {
+  beforeAll(() => {
+    // Initialize QueryClient once for all tests
+    testQueryClient = createTestQueryClient();
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
+    // Clear QueryClient cache between tests to ensure isolation
+    testQueryClient.clear();
+
+    // Set up mock implementations for the hooks
+    const {
+      useCrawlerConfig,
+      useDataSources,
+      useUpdateCrawlerConfig,
+      useUpdateDataSource,
+      useTestDataSourceConnection,
+    } = require("../../hooks/useCrawlerConfig");
+
+    // Mock responses
+    const mockResponses = {
+      GetCrawlerConfig: {
+        success: {
+          data: {
+            crawlerConfig: {
+              global_enabled: true,
+              max_workers: 5,
+              queue_size_limit: 10000,
+              default_timeout: 30,
+              default_retry_attempts: 3,
+              rate_limit_global: 10,
+              schedule_frequency: "hourly",
+              error_threshold: 5,
+              maintenance_mode: false,
+              created_at: "2025-01-01T00:00:00Z",
+              updated_at: "2025-01-01T10:00:00Z",
+            },
+          },
+        },
+      },
+      GetDataSources: {
+        success: {
+          data: {
+            dataSources: [
+              {
+                id: "fred",
+                name: "Federal Reserve Economic Data (FRED)",
+                enabled: true,
+                priority: 1,
+                rate_limit: 5,
+                retry_attempts: 3,
+                timeout: 30,
+                health_status: "healthy",
+                last_success: "2025-01-01T01:50:00Z",
+                last_error: null,
+              },
+              {
+                id: "bls",
+                name: "Bureau of Labor Statistics (BLS)",
+                enabled: true,
+                priority: 2,
+                rate_limit: 3,
+                retry_attempts: 3,
+                timeout: 45,
+                health_status: "healthy",
+                last_success: "2025-01-01T01:35:00Z",
+                last_error: null,
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    useCrawlerConfig.mockReturnValue({
+      data: mockResponses.GetCrawlerConfig.success, // Return full GraphQL response
+      isLoading: false,
+      error: null,
+    });
+
+    useDataSources.mockReturnValue({
+      data: mockResponses.GetDataSources.success, // Return full GraphQL response
+      isLoading: false,
+      error: null,
+    });
+
+    useUpdateCrawlerConfig.mockReturnValue({
+      mutate: jest.fn(),
+      mutateAsync: jest.fn(),
+      isLoading: false,
+      error: null,
+    });
+
+    useUpdateDataSource.mockReturnValue({
+      mutate: jest.fn(),
+      mutateAsync: jest.fn(),
+      isLoading: false,
+      error: null,
+    });
+
+    useTestDataSourceConnection.mockReturnValue({
+      mutate: jest.fn(),
+      mutateAsync: jest.fn(),
+      isLoading: false,
+      error: null,
+    });
+  });
+
+  afterAll(() => {
+    // Clean up QueryClient after all tests
+    testQueryClient.clear();
   });
 
   describe("Component Rendering", () => {
@@ -48,6 +192,101 @@ describe("CrawlerConfig", () => {
       expect(
         screen.getByTestId("save-configuration-button"),
       ).toBeInTheDocument();
+      expect(screen.getByTestId("global-settings-title")).toBeInTheDocument();
+      expect(screen.getByTestId("data-sources-title")).toBeInTheDocument();
+    });
+
+    it("logs error when receiving invalid config data", () => {
+      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
+
+      // Mock hooks to return invalid data structure
+      const {
+        useCrawlerConfig,
+        useDataSources,
+      } = require("../../hooks/useCrawlerConfig");
+      useCrawlerConfig.mockReturnValue({
+        data: { invalidStructure: true }, // Missing crawlerConfig
+        isLoading: false,
+        error: null,
+      });
+      useDataSources.mockReturnValue({
+        data: {
+          data: {
+            dataSources: [
+              {
+                id: "fred",
+                name: "Federal Reserve Economic Data (FRED)",
+                enabled: true,
+                priority: 1,
+                rate_limit: 5,
+                retry_attempts: 3,
+                timeout: 30,
+                health_status: "healthy",
+                last_success: "2025-01-01T01:50:00Z",
+                last_error: null,
+              },
+            ],
+          },
+        },
+        isLoading: false,
+        error: null,
+      });
+
+      renderWithTheme(<CrawlerConfig />);
+
+      // Verify error was logged
+      expect(consoleSpy).toHaveBeenCalledWith(
+        "[CrawlerConfig] Received configData but missing crawlerConfig:",
+        { invalidStructure: true },
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    it("logs error when receiving invalid data sources data", () => {
+      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
+
+      // Mock hooks to return invalid data structure
+      const {
+        useCrawlerConfig,
+        useDataSources,
+      } = require("../../hooks/useCrawlerConfig");
+      useCrawlerConfig.mockReturnValue({
+        data: {
+          data: {
+            crawlerConfig: {
+              global_enabled: true,
+              max_workers: 5,
+              queue_size_limit: 10000,
+              default_timeout: 30,
+              default_retry_attempts: 3,
+              rate_limit_global: 10,
+              schedule_frequency: "hourly",
+              error_threshold: 5,
+              maintenance_mode: false,
+              created_at: "2025-01-01T00:00:00Z",
+              updated_at: "2025-01-01T10:00:00Z",
+            },
+          },
+        },
+        isLoading: false,
+        error: null,
+      });
+      useDataSources.mockReturnValue({
+        data: { invalidStructure: true }, // Missing dataSources
+        isLoading: false,
+        error: null,
+      });
+
+      renderWithTheme(<CrawlerConfig />);
+
+      // Verify error was logged
+      expect(consoleSpy).toHaveBeenCalledWith(
+        "[CrawlerConfig] Received dataSourcesData but missing dataSources:",
+        { invalidStructure: true },
+      );
+
+      consoleSpy.mockRestore();
     });
 
     it("displays global settings section", () => {

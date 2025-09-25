@@ -9,7 +9,16 @@
  * - Data source health monitoring
  */
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
+import {
+  useCrawlerConfig,
+  useDataSources,
+  useUpdateCrawlerConfig,
+  useUpdateDataSource,
+  useTestDataSourceConnection,
+  type CrawlerConfigData,
+  type DataSource,
+} from "../hooks/useCrawlerConfig";
 import {
   Box,
   Card,
@@ -40,6 +49,7 @@ import {
   Select,
   MenuItem,
   Slider,
+  CircularProgress,
 } from "@mui/material";
 import {
   Settings,
@@ -55,95 +65,57 @@ import {
   Security,
 } from "@mui/icons-material";
 
-// Types for crawler configuration
-interface DataSource {
-  id: string;
-  name: string;
-  enabled: boolean;
-  priority: number;
-  rate_limit: number;
-  retry_attempts: number;
-  timeout_seconds: number;
-  last_success: string | null;
-  last_error: string | null;
-  health_status: "healthy" | "warning" | "error";
-}
-
-interface CrawlerConfigData {
-  global_enabled: boolean;
-  max_workers: number;
-  queue_size_limit: number;
-  default_timeout: number;
-  default_retry_attempts: number;
-  rate_limit_global: number;
-  schedule_frequency: string;
-  error_threshold: number;
-  maintenance_mode: boolean;
-}
+// Types are now imported from useCrawlerConfig hook
 
 const CrawlerConfig: React.FC = () => {
-  const [config, setConfig] = useState<CrawlerConfigData>({
-    global_enabled: true,
-    max_workers: 5,
-    queue_size_limit: 10000,
-    default_timeout: 30,
-    default_retry_attempts: 3,
-    rate_limit_global: 10,
-    schedule_frequency: "hourly",
-    error_threshold: 5,
-    maintenance_mode: false,
-  });
+  // React Query hooks for data fetching
+  const {
+    data: configData,
+    isLoading: configLoading,
+    error: configError,
+  } = useCrawlerConfig();
 
-  const [dataSources, setDataSources] = useState<DataSource[]>([
-    {
-      id: "fred",
-      name: "Federal Reserve Economic Data (FRED)",
-      enabled: true,
-      priority: 1,
-      rate_limit: 5,
-      retry_attempts: 3,
-      timeout_seconds: 30,
-      last_success: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-      last_error: null,
-      health_status: "healthy",
-    },
-    {
-      id: "bls",
-      name: "Bureau of Labor Statistics (BLS)",
-      enabled: true,
-      priority: 2,
-      rate_limit: 3,
-      retry_attempts: 3,
-      timeout_seconds: 45,
-      last_success: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
-      last_error: null,
-      health_status: "healthy",
-    },
-    {
-      id: "census",
-      name: "US Census Bureau",
-      enabled: true,
-      priority: 3,
-      rate_limit: 2,
-      retry_attempts: 5,
-      timeout_seconds: 60,
-      last_success: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
-      last_error: "Connection timeout",
-      health_status: "warning",
-    },
-    {
-      id: "worldbank",
-      name: "World Bank",
-      enabled: false,
-      priority: 4,
-      rate_limit: 1,
-      retry_attempts: 3,
-      timeout_seconds: 30,
-      last_success: null,
-      last_error: "API key expired",
-      health_status: "error",
-    },
-  ]);
+  const {
+    data: dataSourcesData,
+    isLoading: dataSourcesLoading,
+    error: dataSourcesError,
+  } = useDataSources();
+
+  // Mutation hooks
+  const updateConfigMutation = useUpdateCrawlerConfig();
+  const updateDataSourceMutation = useUpdateDataSource();
+  const testConnectionMutation = useTestDataSourceConnection();
+
+  // Local state for form management
+  const [config, setConfig] = useState<CrawlerConfigData | null>(null);
+  const [dataSources, setDataSources] = useState<DataSource[]>([]);
+
+  // Sync React Query data with local state
+  useEffect(() => {
+    if (configData?.data?.crawlerConfig) {
+      setConfig(configData.data.crawlerConfig);
+    } else if (configData && !configData.data?.crawlerConfig) {
+      console.error(
+        "[CrawlerConfig] Received configData but missing crawlerConfig:",
+        configData,
+      );
+    }
+  }, [configData]);
+
+  useEffect(() => {
+    if (dataSourcesData?.data?.dataSources) {
+      setDataSources(dataSourcesData.data.dataSources);
+    } else if (dataSourcesData && !dataSourcesData.data?.dataSources) {
+      console.error(
+        "[CrawlerConfig] Received dataSourcesData but missing dataSources:",
+        dataSourcesData,
+      );
+    }
+  }, [dataSourcesData]);
+
+  // Loading and error states
+  const isLoading = configLoading || dataSourcesLoading;
+  const hasError = configError || dataSourcesError;
 
   // Create separate components for expensive operations to isolate re-renders
   const LastSuccessCell = ({ lastSuccess }: { lastSuccess: string | null }) => {
@@ -172,27 +144,28 @@ const CrawlerConfig: React.FC = () => {
     setEditingSource(null);
   }, []);
 
-  const handleSaveSource = useCallback(async (updatedSource: DataSource) => {
-    setSaving(true);
-    try {
-      setDataSources((prev: DataSource[]) =>
-        prev.map((source: DataSource) =>
-          source.id === updatedSource.id ? updatedSource : source,
-        ),
-      );
-      setEditDialogOpen(false);
-      setEditingSource(null);
-    } catch (error) {
-      setError("Failed to save data source configuration");
-    } finally {
-      setSaving(false);
-    }
-  }, []);
+  const handleSaveSource = useCallback(
+    async (updatedSource: DataSource) => {
+      setSaving(true);
+      try {
+        await updateDataSourceMutation.mutateAsync({
+          id: updatedSource.id,
+          input: updatedSource,
+        });
+        setEditDialogOpen(false);
+        setEditingSource(null);
+      } catch (error) {
+        setError("Failed to save data source configuration");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [updateDataSourceMutation],
+  );
 
   const handleTestConnection = useCallback(async (sourceId: string) => {
     try {
-      // Simulate connection test
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await testConnectionMutation.mutateAsync(sourceId);
       // Update health status
       setDataSources((prev: DataSource[]) =>
         prev.map((source: DataSource) =>
@@ -213,10 +186,13 @@ const CrawlerConfig: React.FC = () => {
 
   const handleConfigChange = useCallback(
     (field: keyof CrawlerConfigData, value: any) => {
-      setConfig((prev: CrawlerConfigData) => ({
-        ...prev,
-        [field]: value,
-      }));
+      setConfig((prev: CrawlerConfigData | null) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          [field]: value,
+        };
+      });
     },
     [],
   );
@@ -237,20 +213,11 @@ const CrawlerConfig: React.FC = () => {
       setSaving(true);
       setError(null);
 
-      // TODO: Implement actual GraphQL mutation
-      // const mutation = `
-      //   mutation UpdateCrawlerConfig($config: CrawlerConfigInput!) {
-      //     updateCrawlerConfig(config: $config) {
-      //       success
-      //       message
-      //     }
-      //   }
-      // `;
+      if (!config) {
+        throw new Error("No configuration to save");
+      }
 
-      // Configuration and data sources are being saved
-
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await updateConfigMutation.mutateAsync(config);
 
       setSaving(false);
     } catch (err) {
@@ -284,6 +251,66 @@ const CrawlerConfig: React.FC = () => {
         return <Info />;
     }
   }, []);
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <Box
+        sx={{
+          p: 3,
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          minHeight: "50vh",
+        }}
+      >
+        <Box sx={{ textAlign: "center" }}>
+          <Typography variant="h6" sx={{ mb: 2 }}>
+            Loading Crawler Configuration...
+          </Typography>
+          <CircularProgress />
+        </Box>
+      </Box>
+    );
+  }
+
+  // Error state
+  if (hasError) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
+          <Typography variant="h6">Failed to load configuration</Typography>
+          <Typography variant="body2">
+            {configError?.message ||
+              dataSourcesError?.message ||
+              "An error occurred while loading the crawler configuration."}
+          </Typography>
+        </Alert>
+        <Button
+          variant="contained"
+          onClick={() => window.location.reload()}
+          startIcon={<Refresh />}
+        >
+          Retry
+        </Button>
+      </Box>
+    );
+  }
+
+  // No data state
+  if (!config || dataSources.length === 0) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="info">
+          <Typography variant="h6">No configuration data available</Typography>
+          <Typography variant="body2">
+            The crawler configuration could not be loaded. Please check your
+            connection and try again.
+          </Typography>
+        </Alert>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ p: 3 }}>

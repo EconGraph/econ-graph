@@ -1,10 +1,13 @@
+// Polyfills for MSW in Node.js environment
+import { TextEncoder, TextDecoder } from "util";
+global.TextEncoder = TextEncoder;
+global.TextDecoder = TextDecoder as any;
+
 // jest-dom adds custom jest matchers for asserting on DOM nodes.
 // allows you to do things like:
 // expect(element).toHaveTextContent(/react/i)
 // learn more: https://github.com/testing-library/jest-dom
 import "@testing-library/jest-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ReactNode } from "react";
 
 // Mock timers globally to prevent resource leaks in all tests
 jest.useFakeTimers();
@@ -45,15 +48,10 @@ if (process.env.CI) {
   jest.setTimeout(5000);
 }
 
-// Mock fetch globally
-global.fetch = jest.fn(() =>
-  Promise.resolve({
-    ok: true,
-    status: 200,
-    json: () => Promise.resolve({}),
-    text: () => Promise.resolve(""),
-  }),
-) as jest.Mock;
+// MSW setup is now handled per-test to avoid conflicts
+// Individual tests should call setupSimpleMSW() and cleanupSimpleMSW() as needed
+
+// Fetch mocking is now handled by MSW
 
 // Mock window.matchMedia
 Object.defineProperty(window, "matchMedia", {

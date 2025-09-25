@@ -1,294 +1,247 @@
 /**
- * Custom hooks for crawler configuration management
- *
- * Provides:
- * - Data source configuration management
- * - Global crawler settings
- * - Configuration validation and testing
- * - Real-time configuration updates
+ * React Query hooks for Crawler Configuration
+ * 
+ * Provides data fetching and mutation capabilities for crawler configuration
+ * using GraphQL operations with proper caching and error handling.
  */
 
-import { useQuery, useMutation } from "@apollo/client/react";
-import { useCallback, useState } from "react";
-import {
-  GET_CRAWLER_CONFIG,
-  GET_DATA_SOURCES,
-  GET_DATA_SOURCE_BY_ID,
-  type CrawlerConfig,
-  type DataSource,
-} from "../services/graphql/queries";
-import {
-  UPDATE_CRAWLER_CONFIG,
-  CREATE_DATA_SOURCE,
-  UPDATE_DATA_SOURCE,
-  DELETE_DATA_SOURCE,
-  TOGGLE_DATA_SOURCE,
-  TEST_DATA_SOURCE_CONNECTION,
-  SET_MAINTENANCE_MODE,
-  type CrawlerConfigInput,
-  type DataSourceInput,
-} from "../services/graphql/mutations";
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-// ============================================================================
-// CRAWLER CONFIGURATION HOOK
-// ============================================================================
+// Types
+export interface CrawlerConfigData {
+  global_enabled: boolean;
+  max_workers: number;
+  queue_size_limit: number;
+  default_timeout: number;
+  default_retry_attempts: number;
+  rate_limit_global: number;
+  schedule_frequency: string;
+  error_threshold: number;
+  maintenance_mode: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
-export const useCrawlerConfig = () => {
-  const { data, loading, error, refetch } = useQuery<{
-    crawlerConfig: CrawlerConfig;
-  }>(GET_CRAWLER_CONFIG, {
-    errorPolicy: "all",
-  });
+export interface DataSource {
+  id: string;
+  name: string;
+  enabled: boolean;
+  priority: number;
+  rate_limit: number;
+  retry_attempts: number;
+  timeout_seconds: number;
+  last_success: string | null;
+  last_error: string | null;
+  health_status: "healthy" | "warning" | "error";
+  base_url: string;
+  api_key_required: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
-  const [updateConfig] = useMutation(UPDATE_CRAWLER_CONFIG, {
-    errorPolicy: "all",
-  });
-  const [setMaintenanceMode] = useMutation(SET_MAINTENANCE_MODE, {
-    errorPolicy: "all",
-  });
+// GraphQL operations
+const GET_CRAWLER_CONFIG = `
+  query GetCrawlerConfig {
+    crawlerConfig {
+      global_enabled
+      max_workers
+      queue_size_limit
+      default_timeout
+      default_retry_attempts
+      rate_limit_global
+      schedule_frequency
+      error_threshold
+      maintenance_mode
+      created_at
+      updated_at
+    }
+  }
+`;
 
-  const [updateLoading, setUpdateLoading] = useState(false);
-  const [updateError, setUpdateError] = useState<string | null>(null);
+const GET_DATA_SOURCES = `
+  query GetDataSources {
+    dataSources {
+      id
+      name
+      enabled
+      priority
+      rate_limit
+      retry_attempts
+      timeout_seconds
+      last_success
+      last_error
+      health_status
+      base_url
+      api_key_required
+      created_at
+      updated_at
+    }
+  }
+`;
 
-  const refresh = useCallback(() => {
-    refetch();
-  }, [refetch]);
-
-  const updateConfiguration = useCallback(
-    async (input: CrawlerConfigInput) => {
-      try {
-        setUpdateLoading(true);
-        setUpdateError(null);
-        const result = await updateConfig({ variables: { input } });
-        await refetch(); // Refresh the config after update
-        return (result.data as any)?.updateCrawlerConfig;
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : "Failed to update configuration";
-        setUpdateError(errorMessage);
-        throw err;
-      } finally {
-        setUpdateLoading(false);
+const UPDATE_CRAWLER_CONFIG = `
+  mutation UpdateCrawlerConfig($input: CrawlerConfigInput!) {
+    updateCrawlerConfig(input: $input) {
+      success
+      message
+      config {
+        global_enabled
+        max_workers
+        queue_size_limit
+        default_timeout
+        default_retry_attempts
+        rate_limit_global
+        schedule_frequency
+        error_threshold
+        maintenance_mode
+        created_at
+        updated_at
       }
-    },
-    [updateConfig, refetch],
-  );
+    }
+  }
+`;
 
-  const toggleMaintenanceMode = useCallback(
-    async (enabled: boolean) => {
-      try {
-        setUpdateLoading(true);
-        setUpdateError(null);
-        const result = await setMaintenanceMode({ variables: { enabled } });
-        await refetch(); // Refresh the config after update
-        return (result.data as any)?.setMaintenanceMode;
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error
-            ? err.message
-            : "Failed to toggle maintenance mode";
-        setUpdateError(errorMessage);
-        throw err;
-      } finally {
-        setUpdateLoading(false);
+const UPDATE_DATA_SOURCE = `
+  mutation UpdateDataSource($id: ID!, $input: DataSourceInput!) {
+    updateDataSource(id: $id, input: $input) {
+      success
+      message
+      dataSource {
+        id
+        name
+        enabled
+        priority
+        rate_limit
+        retry_attempts
+        timeout_seconds
+        last_success
+        last_error
+        health_status
+        base_url
+        api_key_required
+        created_at
+        updated_at
       }
-    },
-    [setMaintenanceMode, refetch],
-  );
+    }
+  }
+`;
 
-  return {
-    config: data?.crawlerConfig,
-    loading: loading || updateLoading,
-    error: error || updateError,
-    refresh,
-    updateConfiguration,
-    toggleMaintenanceMode,
-  };
+const TEST_DATA_SOURCE_CONNECTION = `
+  mutation TestDataSourceConnection($id: ID!) {
+    testDataSourceConnection(id: $id) {
+      success
+      message
+      connection_status
+      response_time_ms
+    }
+  }
+`;
+
+// Helper function to make GraphQL requests
+const graphqlRequest = async (query: string, variables: any = {}) => {
+  console.log('[useCrawlerConfig] graphqlRequest called with query:', query.substring(0, 50) + '...');
+  console.log('[useCrawlerConfig] About to call fetch with URL: /graphql');
+  const response = await fetch('/graphql', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${localStorage.getItem('admin_token')}`,
+    },
+    body: JSON.stringify({
+      query,
+      variables,
+      operationName: query.includes('GetCrawlerConfig') ? 'GetCrawlerConfig' :
+                     query.includes('GetDataSources') ? 'GetDataSources' :
+                     query.includes('UpdateCrawlerConfig') ? 'UpdateCrawlerConfig' :
+                     query.includes('UpdateDataSource') ? 'UpdateDataSource' :
+                     query.includes('TestDataSourceConnection') ? 'TestDataSourceConnection' :
+                     'Unknown',
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`GraphQL request failed: ${response.statusText}`);
+  }
+
+  const result = await response.json();
+  
+  if (result.errors) {
+    throw new Error(result.errors[0].message);
+  }
+
+  return result.data;
 };
 
-// ============================================================================
-// DATA SOURCES HOOK
-// ============================================================================
+// React Query hooks
+export const useCrawlerConfig = () => {
+  return useQuery({
+    queryKey: ['crawlerConfig'],
+    queryFn: () => graphqlRequest(GET_CRAWLER_CONFIG),
+    staleTime: 2 * 60 * 1000, // 2 minutes
+    gcTime: 5 * 60 * 1000, // 5 minutes
+    retry: (failureCount, error) => {
+      // Don't retry on 4xx errors
+      if (error instanceof Error && error.message.includes('4')) {
+        return false;
+      }
+      return failureCount < 3;
+    },
+  });
+};
 
 export const useDataSources = () => {
-  const { data, loading, error, refetch } = useQuery<{
-    dataSources: DataSource[];
-  }>(GET_DATA_SOURCES, {
-    errorPolicy: "all",
+  return useQuery({
+    queryKey: ['dataSources'],
+    queryFn: () => graphqlRequest(GET_DATA_SOURCES),
+    staleTime: 30 * 1000, // 30 seconds (data sources change more frequently)
+    gcTime: 2 * 60 * 1000, // 2 minutes
+    retry: (failureCount, error) => {
+      if (error instanceof Error && error.message.includes('4')) {
+        return false;
+      }
+      return failureCount < 3;
+    },
   });
-
-  const [createDataSource] = useMutation(CREATE_DATA_SOURCE);
-  const [updateDataSource] = useMutation(UPDATE_DATA_SOURCE);
-  const [deleteDataSource] = useMutation(DELETE_DATA_SOURCE);
-  const [toggleDataSource] = useMutation(TOGGLE_DATA_SOURCE);
-  const [testConnection] = useMutation(TEST_DATA_SOURCE_CONNECTION);
-
-  const [operationLoading, setOperationLoading] = useState(false);
-  const [operationError, setOperationError] = useState<string | null>(null);
-
-  const refresh = useCallback(() => {
-    refetch();
-  }, [refetch]);
-
-  const createNewDataSource = useCallback(
-    async (input: DataSourceInput) => {
-      try {
-        setOperationLoading(true);
-        setOperationError(null);
-        const result = await createDataSource({ variables: { input } });
-        await refetch(); // Refresh the list after creation
-        return (result.data as any)?.createDataSource;
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : "Failed to create data source";
-        setOperationError(errorMessage);
-        throw err;
-      } finally {
-        setOperationLoading(false);
-      }
-    },
-    [createDataSource, refetch],
-  );
-
-  const updateExistingDataSource = useCallback(
-    async (id: string, input: DataSourceInput) => {
-      try {
-        setOperationLoading(true);
-        setOperationError(null);
-        const result = await updateDataSource({ variables: { id, input } });
-        await refetch(); // Refresh the list after update
-        return (result.data as any)?.updateDataSource;
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : "Failed to update data source";
-        setOperationError(errorMessage);
-        throw err;
-      } finally {
-        setOperationLoading(false);
-      }
-    },
-    [updateDataSource, refetch],
-  );
-
-  const removeDataSource = useCallback(
-    async (id: string) => {
-      try {
-        setOperationLoading(true);
-        setOperationError(null);
-        const result = await deleteDataSource({ variables: { id } });
-        await refetch(); // Refresh the list after deletion
-        return (result.data as any)?.deleteDataSource;
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : "Failed to delete data source";
-        setOperationError(errorMessage);
-        throw err;
-      } finally {
-        setOperationLoading(false);
-      }
-    },
-    [deleteDataSource, refetch],
-  );
-
-  const toggleDataSourceStatus = useCallback(
-    async (id: string, enabled: boolean) => {
-      try {
-        setOperationLoading(true);
-        setOperationError(null);
-        const result = await toggleDataSource({ variables: { id, enabled } });
-        await refetch(); // Refresh the list after toggle
-        return (result.data as any)?.toggleDataSource;
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : "Failed to toggle data source";
-        setOperationError(errorMessage);
-        throw err;
-      } finally {
-        setOperationLoading(false);
-      }
-    },
-    [toggleDataSource, refetch],
-  );
-
-  const testDataSourceConnection = useCallback(
-    async (id: string) => {
-      try {
-        setOperationLoading(true);
-        setOperationError(null);
-        const result = await testConnection({ variables: { id } });
-        return (result.data as any)?.testDataSourceConnection;
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : "Failed to test connection";
-        setOperationError(errorMessage);
-        throw err;
-      } finally {
-        setOperationLoading(false);
-      }
-    },
-    [testConnection],
-  );
-
-  return {
-    dataSources: data?.dataSources || [],
-    loading: loading || operationLoading,
-    error: error || operationError,
-    refresh,
-    actions: {
-      create: createNewDataSource,
-      update: updateExistingDataSource,
-      delete: removeDataSource,
-      toggle: toggleDataSourceStatus,
-      testConnection: testDataSourceConnection,
-    },
-  };
 };
 
-// ============================================================================
-// SINGLE DATA SOURCE HOOK
-// ============================================================================
-
-export const useDataSource = (id: string) => {
-  const { data, loading, error, refetch } = useQuery<{
-    dataSource: DataSource;
-  }>(GET_DATA_SOURCE_BY_ID, {
-    variables: { id },
-    errorPolicy: "all",
-    skip: !id,
+export const useUpdateCrawlerConfig = () => {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (input: Partial<CrawlerConfigData>) => 
+      graphqlRequest(UPDATE_CRAWLER_CONFIG, { input }),
+    onSuccess: () => {
+      // Invalidate and refetch crawler config
+      queryClient.invalidateQueries({ queryKey: ['crawlerConfig'] });
+    },
+    onError: (error) => {
+      console.error('Failed to update crawler config:', error);
+    },
   });
-
-  const refresh = useCallback(() => {
-    if (id) {
-      refetch();
-    }
-  }, [id, refetch]);
-
-  return {
-    dataSource: data?.dataSource,
-    loading,
-    error,
-    refresh,
-  };
 };
 
-// ============================================================================
-// COMBINED CONFIGURATION HOOK
-// ============================================================================
+export const useUpdateDataSource = () => {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: Partial<DataSource> }) => 
+      graphqlRequest(UPDATE_DATA_SOURCE, { id, input }),
+    onSuccess: () => {
+      // Invalidate and refetch data sources
+      queryClient.invalidateQueries({ queryKey: ['dataSources'] });
+    },
+    onError: (error) => {
+      console.error('Failed to update data source:', error);
+    },
+  });
+};
 
-export const useCrawlerConfiguration = () => {
-  const config = useCrawlerConfig();
-  const dataSources = useDataSources();
-
-  const refreshAll = useCallback(() => {
-    config.refresh();
-    dataSources.refresh();
-  }, [config, dataSources]);
-
-  return {
-    config,
-    dataSources,
-    refreshAll,
-    loading: config.loading || dataSources.loading,
-    error: config.error || dataSources.error,
-  };
+export const useTestDataSourceConnection = () => {
+  return useMutation({
+    mutationFn: (id: string) => 
+      graphqlRequest(TEST_DATA_SOURCE_CONNECTION, { id }),
+    onError: (error) => {
+      console.error('Failed to test data source connection:', error);
+    },
+  });
 };
