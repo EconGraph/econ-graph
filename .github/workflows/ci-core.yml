@@ -1885,77 +1885,45 @@ jobs:
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:global-analysis
 
-    - name: Copy Playwright test artifacts from container
+    - name: Copy Playwright test artifacts from runner filesystem
       if: always()
       run: |
-        echo "📋 Copying Playwright test artifacts from container..."
+        echo "📋 Copying Playwright test artifacts from runner filesystem..."
+        echo "⚠️  FIXED: Playwright artifacts are on the runner, not in containers!"
 
-        # DEBUG: List all running containers
-        echo "🔍 DEBUG: All running containers:"
-        docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
+        # Playwright artifacts are on the runner, not in containers
+        # They should be in the frontend directory after the test run
+        echo "📋 Current working directory: $(pwd)"
+        echo "📋 Contents of current directory:"
+        ls -la
 
-        # DEBUG: Check if frontend-server container exists and is running
-        echo "🔍 DEBUG: Frontend container status:"
-        if docker ps --filter name=frontend-server --format "{{.Names}}" | grep -q frontend-server; then
-          echo "  ✅ frontend-server container is running"
-        else
-          echo "  ❌ frontend-server container not found or not running"
+        echo "📋 Contents of frontend directory:"
+        ls -la frontend/ || echo "No frontend directory found"
+
+        echo "📋 Searching for test-results in frontend directory:"
+        find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
+
+        echo "📋 Searching for playwright-report in frontend directory:"
+        find frontend -name "playwright-report" -type d 2>/dev/null || echo "No playwright-report directory found"
+
+        # Search for individual Playwright files
+        echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
+        find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
+
+        # Copy artifacts to the root for upload
+        if [ -d "frontend/test-results" ]; then
+          echo "✅ Copying test-results from frontend/test-results"
+          cp -r frontend/test-results ./
         fi
 
-        # DEBUG: Check what's in the frontend container
-        echo "🔍 DEBUG: Contents of frontend-server container:"
-        docker exec frontend-server ls -la /app/ 2>/dev/null || echo "  ❌ Cannot access /app/ in frontend-server"
+        if [ -d "frontend/playwright-report" ]; then
+          echo "✅ Copying playwright-report from frontend/playwright-report"
+          cp -r frontend/playwright-report ./
+        fi
 
-        # Create local directories for artifacts
-        mkdir -p test-results playwright-report
-
-        # MULTI-LOCATION SEARCH: Search for artifacts in multiple containers and locations
-        echo "🔍 DEBUG: Multi-location artifact search:"
-
-        # Search in all running containers
-        for container in $(docker ps --format "{{.Names}}"); do
-          echo "  🔍 Searching in container: $container"
-
-          # Search for test-results directory
-          if docker exec $container test -d /app/test-results 2>/dev/null; then
-            echo "    ✅ Found test-results in $container:/app/test-results"
-            docker cp $container:/app/test-results/. ./test-results/ 2>/dev/null && echo "    ✅ Copied test-results from $container" || echo "    ⚠️ Failed to copy from $container"
-          fi
-
-          # Search for playwright-report directory
-          if docker exec $container test -d /app/playwright-report 2>/dev/null; then
-            echo "    ✅ Found playwright-report in $container:/app/playwright-report"
-            docker cp $container:/app/playwright-report/. ./playwright-report/ 2>/dev/null && echo "    ✅ Copied playwright-report from $container" || echo "    ⚠️ Failed to copy from $container"
-          fi
-
-          # Search in frontend subdirectory
-          if docker exec $container test -d /app/frontend/test-results 2>/dev/null; then
-            echo "    ✅ Found test-results in $container:/app/frontend/test-results"
-            docker cp $container:/app/frontend/test-results/. ./test-results/ 2>/dev/null && echo "    ✅ Copied test-results from $container/frontend" || echo "    ⚠️ Failed to copy from $container/frontend"
-          fi
-
-          if docker exec $container test -d /app/frontend/playwright-report 2>/dev/null; then
-            echo "    ✅ Found playwright-report in $container:/app/frontend/playwright-report"
-            docker cp $container:/app/frontend/playwright-report/. ./playwright-report/ 2>/dev/null && echo "    ✅ Copied playwright-report from $container/frontend" || echo "    ⚠️ Failed to copy from $container/frontend"
-          fi
-
-          # Search for any Playwright files anywhere in the container
-          echo "    🔍 Searching for Playwright files in $container:"
-          docker exec $container find /app -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -5 | while read file; do
-            echo "      📄 Found: $file"
-            # Extract directory and copy
-            dir=$(dirname "$file")
-            if [[ "$dir" == *"test-results"* ]]; then
-              echo "      📁 Copying from directory: $dir"
-              docker cp $container:"$dir" ./test-results/ 2>/dev/null || echo "      ⚠️ Failed to copy $dir"
-            fi
-          done
-        done
-
-        # List what we found
-        echo "📋 Artifacts found on host:"
-        ls -la test-results/ 2>/dev/null || echo "  - No test-results directory"
-        ls -la playwright-report/ 2>/dev/null || echo "  - No playwright-report directory"
+        # List what we actually copied
+        echo "📋 Final artifact directories on host:"
+        ls -la test-results* playwright-report* 2>/dev/null || echo "No artifacts found"
 
     - name: Upload Playwright test artifacts
       if: always()
@@ -2094,33 +2062,45 @@ jobs:
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:professional-analysis
 
-    - name: Copy Playwright test artifacts from container
+    - name: Copy Playwright test artifacts from runner filesystem
       if: always()
       run: |
-        echo "📋 Copying Playwright test artifacts from container..."
-        # Create local directories for artifacts
-        mkdir -p test-results playwright-report
+        echo "📋 Copying Playwright test artifacts from runner filesystem..."
+        echo "⚠️  FIXED: Playwright artifacts are on the runner, not in containers!"
 
-        # Copy test results from the container if they exist
-        if docker exec frontend-server test -d /app/test-results 2>/dev/null; then
-          echo "  - Copying test-results from container..."
-          docker cp frontend-server:/app/test-results/. ./test-results/ || echo "    ⚠️ Failed to copy test-results"
-        else
-          echo "  - No test-results directory found in container"
+        # Playwright artifacts are on the runner, not in containers
+        # They should be in the frontend directory after the test run
+        echo "📋 Current working directory: $(pwd)"
+        echo "📋 Contents of current directory:"
+        ls -la
+
+        echo "📋 Contents of frontend directory:"
+        ls -la frontend/ || echo "No frontend directory found"
+
+        echo "📋 Searching for test-results in frontend directory:"
+        find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
+
+        echo "📋 Searching for playwright-report in frontend directory:"
+        find frontend -name "playwright-report" -type d 2>/dev/null || echo "No playwright-report directory found"
+
+        # Search for individual Playwright files
+        echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
+        find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
+
+        # Copy artifacts to the root for upload
+        if [ -d "frontend/test-results" ]; then
+          echo "✅ Copying test-results from frontend/test-results"
+          cp -r frontend/test-results ./
         fi
 
-        # Copy playwright report from the container if it exists
-        if docker exec frontend-server test -d /app/playwright-report 2>/dev/null; then
-          echo "  - Copying playwright-report from container..."
-          docker cp frontend-server:/app/playwright-report/. ./playwright-report/ || echo "    ⚠️ Failed to copy playwright-report"
-        else
-          echo "  - No playwright-report directory found in container"
+        if [ -d "frontend/playwright-report" ]; then
+          echo "✅ Copying playwright-report from frontend/playwright-report"
+          cp -r frontend/playwright-report ./
         fi
 
-        # List what we found
-        echo "📋 Artifacts found on host:"
-        ls -la test-results/ 2>/dev/null || echo "  - No test-results directory"
-        ls -la playwright-report/ 2>/dev/null || echo "  - No playwright-report directory"
+        # List what we actually copied
+        echo "📋 Final artifact directories on host:"
+        ls -la test-results* playwright-report* 2>/dev/null || echo "No artifacts found"
 
     - name: Upload Playwright test artifacts
       if: always()
@@ -2261,33 +2241,45 @@ jobs:
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:comprehensive
 
-    - name: Copy Playwright test artifacts from container
+    - name: Copy Playwright test artifacts from runner filesystem
       if: always()
       run: |
-        echo "📋 Copying Playwright test artifacts from container..."
-        # Create local directories for artifacts
-        mkdir -p test-results playwright-report
+        echo "📋 Copying Playwright test artifacts from runner filesystem..."
+        echo "⚠️  FIXED: Playwright artifacts are on the runner, not in containers!"
 
-        # Copy test results from the container if they exist
-        if docker exec frontend-server test -d /app/test-results 2>/dev/null; then
-          echo "  - Copying test-results from container..."
-          docker cp frontend-server:/app/test-results/. ./test-results/ || echo "    ⚠️ Failed to copy test-results"
-        else
-          echo "  - No test-results directory found in container"
+        # Playwright artifacts are on the runner, not in containers
+        # They should be in the frontend directory after the test run
+        echo "📋 Current working directory: $(pwd)"
+        echo "📋 Contents of current directory:"
+        ls -la
+
+        echo "📋 Contents of frontend directory:"
+        ls -la frontend/ || echo "No frontend directory found"
+
+        echo "📋 Searching for test-results in frontend directory:"
+        find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
+
+        echo "📋 Searching for playwright-report in frontend directory:"
+        find frontend -name "playwright-report" -type d 2>/dev/null || echo "No playwright-report directory found"
+
+        # Search for individual Playwright files
+        echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
+        find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
+
+        # Copy artifacts to the root for upload
+        if [ -d "frontend/test-results" ]; then
+          echo "✅ Copying test-results from frontend/test-results"
+          cp -r frontend/test-results ./
         fi
 
-        # Copy playwright report from the container if it exists
-        if docker exec frontend-server test -d /app/playwright-report 2>/dev/null; then
-          echo "  - Copying playwright-report from container..."
-          docker cp frontend-server:/app/playwright-report/. ./playwright-report/ || echo "    ⚠️ Failed to copy playwright-report"
-        else
-          echo "  - No playwright-report directory found in container"
+        if [ -d "frontend/playwright-report" ]; then
+          echo "✅ Copying playwright-report from frontend/playwright-report"
+          cp -r frontend/playwright-report ./
         fi
 
-        # List what we found
-        echo "📋 Artifacts found on host:"
-        ls -la test-results/ 2>/dev/null || echo "  - No test-results directory"
-        ls -la playwright-report/ 2>/dev/null || echo "  - No playwright-report directory"
+        # List what we actually copied
+        echo "📋 Final artifact directories on host:"
+        ls -la test-results* playwright-report* 2>/dev/null || echo "No artifacts found"
 
     - name: Upload Playwright test artifacts
       if: always()
@@ -2427,33 +2419,45 @@ jobs:
           econ-graph-e2e-mobile-optimized:latest \
           npm run test:e2e:mobile:global-analysis
 
-    - name: Copy Playwright test artifacts from container
+    - name: Copy Playwright test artifacts from runner filesystem
       if: always()
       run: |
-        echo "📋 Copying Playwright test artifacts from container..."
-        # Create local directories for artifacts
-        mkdir -p test-results playwright-report
+        echo "📋 Copying Playwright test artifacts from runner filesystem..."
+        echo "⚠️  FIXED: Playwright artifacts are on the runner, not in containers!"
 
-        # Copy test results from the container if they exist
-        if docker exec frontend-server test -d /app/test-results 2>/dev/null; then
-          echo "  - Copying test-results from container..."
-          docker cp frontend-server:/app/test-results/. ./test-results/ || echo "    ⚠️ Failed to copy test-results"
-        else
-          echo "  - No test-results directory found in container"
+        # Playwright artifacts are on the runner, not in containers
+        # They should be in the frontend directory after the test run
+        echo "📋 Current working directory: $(pwd)"
+        echo "📋 Contents of current directory:"
+        ls -la
+
+        echo "📋 Contents of frontend directory:"
+        ls -la frontend/ || echo "No frontend directory found"
+
+        echo "📋 Searching for test-results in frontend directory:"
+        find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
+
+        echo "📋 Searching for playwright-report in frontend directory:"
+        find frontend -name "playwright-report" -type d 2>/dev/null || echo "No playwright-report directory found"
+
+        # Search for individual Playwright files
+        echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
+        find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
+
+        # Copy artifacts to the root for upload
+        if [ -d "frontend/test-results" ]; then
+          echo "✅ Copying test-results from frontend/test-results"
+          cp -r frontend/test-results ./
         fi
 
-        # Copy playwright report from the container if it exists
-        if docker exec frontend-server test -d /app/playwright-report 2>/dev/null; then
-          echo "  - Copying playwright-report from container..."
-          docker cp frontend-server:/app/playwright-report/. ./playwright-report/ || echo "    ⚠️ Failed to copy playwright-report"
-        else
-          echo "  - No playwright-report directory found in container"
+        if [ -d "frontend/playwright-report" ]; then
+          echo "✅ Copying playwright-report from frontend/playwright-report"
+          cp -r frontend/playwright-report ./
         fi
 
-        # List what we found
-        echo "📋 Artifacts found on host:"
-        ls -la test-results/ 2>/dev/null || echo "  - No test-results directory"
-        ls -la playwright-report/ 2>/dev/null || echo "  - No playwright-report directory"
+        # List what we actually copied
+        echo "📋 Final artifact directories on host:"
+        ls -la test-results* playwright-report* 2>/dev/null || echo "No artifacts found"
 
     - name: Upload Playwright test artifacts
       if: always()
@@ -2593,33 +2597,45 @@ jobs:
           econ-graph-e2e-mobile-optimized:latest \
           npm run test:e2e:mobile:professional-analysis
 
-    - name: Copy Playwright test artifacts from container
+    - name: Copy Playwright test artifacts from runner filesystem
       if: always()
       run: |
-        echo "📋 Copying Playwright test artifacts from container..."
-        # Create local directories for artifacts
-        mkdir -p test-results playwright-report
+        echo "📋 Copying Playwright test artifacts from runner filesystem..."
+        echo "⚠️  FIXED: Playwright artifacts are on the runner, not in containers!"
 
-        # Copy test results from the container if they exist
-        if docker exec frontend-server test -d /app/test-results 2>/dev/null; then
-          echo "  - Copying test-results from container..."
-          docker cp frontend-server:/app/test-results/. ./test-results/ || echo "    ⚠️ Failed to copy test-results"
-        else
-          echo "  - No test-results directory found in container"
+        # Playwright artifacts are on the runner, not in containers
+        # They should be in the frontend directory after the test run
+        echo "📋 Current working directory: $(pwd)"
+        echo "📋 Contents of current directory:"
+        ls -la
+
+        echo "📋 Contents of frontend directory:"
+        ls -la frontend/ || echo "No frontend directory found"
+
+        echo "📋 Searching for test-results in frontend directory:"
+        find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
+
+        echo "📋 Searching for playwright-report in frontend directory:"
+        find frontend -name "playwright-report" -type d 2>/dev/null || echo "No playwright-report directory found"
+
+        # Search for individual Playwright files
+        echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
+        find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
+
+        # Copy artifacts to the root for upload
+        if [ -d "frontend/test-results" ]; then
+          echo "✅ Copying test-results from frontend/test-results"
+          cp -r frontend/test-results ./
         fi
 
-        # Copy playwright report from the container if it exists
-        if docker exec frontend-server test -d /app/playwright-report 2>/dev/null; then
-          echo "  - Copying playwright-report from container..."
-          docker cp frontend-server:/app/playwright-report/. ./playwright-report/ || echo "    ⚠️ Failed to copy playwright-report"
-        else
-          echo "  - No playwright-report directory found in container"
+        if [ -d "frontend/playwright-report" ]; then
+          echo "✅ Copying playwright-report from frontend/playwright-report"
+          cp -r frontend/playwright-report ./
         fi
 
-        # List what we found
-        echo "📋 Artifacts found on host:"
-        ls -la test-results/ 2>/dev/null || echo "  - No test-results directory"
-        ls -la playwright-report/ 2>/dev/null || echo "  - No playwright-report directory"
+        # List what we actually copied
+        echo "📋 Final artifact directories on host:"
+        ls -la test-results* playwright-report* 2>/dev/null || echo "No artifacts found"
 
     - name: Upload Playwright test artifacts
       if: always()
@@ -2759,33 +2775,45 @@ jobs:
           econ-graph-e2e-mobile-optimized:latest \
           npm run test:e2e:mobile:core
 
-    - name: Copy Playwright test artifacts from container
+    - name: Copy Playwright test artifacts from runner filesystem
       if: always()
       run: |
-        echo "📋 Copying Playwright test artifacts from container..."
-        # Create local directories for artifacts
-        mkdir -p test-results playwright-report
+        echo "📋 Copying Playwright test artifacts from runner filesystem..."
+        echo "⚠️  FIXED: Playwright artifacts are on the runner, not in containers!"
 
-        # Copy test results from the container if they exist
-        if docker exec frontend-server test -d /app/test-results 2>/dev/null; then
-          echo "  - Copying test-results from container..."
-          docker cp frontend-server:/app/test-results/. ./test-results/ || echo "    ⚠️ Failed to copy test-results"
-        else
-          echo "  - No test-results directory found in container"
+        # Playwright artifacts are on the runner, not in containers
+        # They should be in the frontend directory after the test run
+        echo "📋 Current working directory: $(pwd)"
+        echo "📋 Contents of current directory:"
+        ls -la
+
+        echo "📋 Contents of frontend directory:"
+        ls -la frontend/ || echo "No frontend directory found"
+
+        echo "📋 Searching for test-results in frontend directory:"
+        find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
+
+        echo "📋 Searching for playwright-report in frontend directory:"
+        find frontend -name "playwright-report" -type d 2>/dev/null || echo "No playwright-report directory found"
+
+        # Search for individual Playwright files
+        echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
+        find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
+
+        # Copy artifacts to the root for upload
+        if [ -d "frontend/test-results" ]; then
+          echo "✅ Copying test-results from frontend/test-results"
+          cp -r frontend/test-results ./
         fi
 
-        # Copy playwright report from the container if it exists
-        if docker exec frontend-server test -d /app/playwright-report 2>/dev/null; then
-          echo "  - Copying playwright-report from container..."
-          docker cp frontend-server:/app/playwright-report/. ./playwright-report/ || echo "    ⚠️ Failed to copy playwright-report"
-        else
-          echo "  - No playwright-report directory found in container"
+        if [ -d "frontend/playwright-report" ]; then
+          echo "✅ Copying playwright-report from frontend/playwright-report"
+          cp -r frontend/playwright-report ./
         fi
 
-        # List what we found
-        echo "📋 Artifacts found on host:"
-        ls -la test-results/ 2>/dev/null || echo "  - No test-results directory"
-        ls -la playwright-report/ 2>/dev/null || echo "  - No playwright-report directory"
+        # List what we actually copied
+        echo "📋 Final artifact directories on host:"
+        ls -la test-results* playwright-report* 2>/dev/null || echo "No artifacts found"
 
     - name: Upload Playwright test artifacts
       if: always()
