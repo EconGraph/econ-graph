@@ -93,6 +93,31 @@ The EconGraph CI/CD pipeline consists of 5 main phases with 20+ individual jobs 
 
 *Figure 3: E2E test group architecture showing all test categories and infrastructure*
 
+### E2E Test Service Health Verification
+
+The E2E test pipeline now includes comprehensive service health verification to ensure tests run against properly functioning services:
+
+#### Service Startup Process
+1. **Health-Check-Based Startup**: Services start with retry logic (30 attempts, 2-second intervals)
+2. **Backend Health Verification**: Tests `/health` endpoint until responsive
+3. **Frontend Health Verification**: Tests main page and static file serving (JS, CSS)
+4. **Service Connectivity Testing**: Verifies frontend-backend communication
+5. **Final Verification**: Confirms both services are ready before test execution
+
+#### Debugging Infrastructure
+- **Continuous Log Tailing**: Real-time logging from both frontend and backend services during test execution
+- **Network Request Monitoring**: Captures all network requests and responses for debugging
+- **Service Status Monitoring**: Tracks service health throughout test execution
+- **Exit Code Propagation**: Ensures test failures properly turn CI jobs red
+
+#### Common E2E Test Failure Patterns
+- **Service Startup Failures**: Most common cause - services not starting properly
+- **Port Configuration Mismatches**: Services running on unexpected ports
+- **Database Authentication Issues**: Backend unable to connect to database
+- **Static File Serving Problems**: Frontend unable to serve JavaScript bundles
+- **Docker Networking Issues**: Services unable to communicate
+- **Exit Code Masking**: Test failures not propagating to CI job status
+
 ## Docker Architecture
 
 ![Docker Architecture](charts/docker-architecture.svg)
@@ -369,8 +394,11 @@ Enhanced caching for system packages and Rust toolchain:
 ### End-to-End Tests
 
 #### Comprehensive E2E Tests
-- **Purpose**: Complete application workflow testing
+- **Purpose**: Complete application workflow testing with robust service health verification
 - **Duration**: ~20-25 minutes
+- **Service Health Verification**: All E2E tests now use health-check-based service startup
+- **Debugging Infrastructure**: Continuous log tailing for both frontend and backend services
+- **Exit Code Propagation**: Proper exit code handling ensures CI jobs turn red when tests fail
 - **Test Groups**:
   - **Core Tests**: Authentication, navigation, basic features
   - **Analysis Tests**: Professional analysis, global analysis
@@ -526,6 +554,23 @@ This ensures that documentation stays up-to-date with the actual CI/CD implement
 
 ### Common Issues and Solutions
 
+#### E2E Test Failures
+**Symptoms**: E2E tests failing with `net::ERR_CONNECTION_REFUSED` or service startup issues
+**Root Causes**:
+- Services not starting properly (most common)
+- Port configuration mismatches between services and tests
+- Database authentication failures preventing backend startup
+- Frontend unable to serve static files (JavaScript bundles)
+- Docker networking issues preventing service communication
+- Exit code propagation problems masking test failures
+
+**Solutions**:
+1. **Implement Health-Check-Based Service Startup**: Use retry logic (30 attempts, 2-second intervals) to ensure services are ready
+2. **Add Continuous Log Tailing**: Monitor both frontend and backend logs during test execution
+3. **Verify Service Health**: Test both `/health` endpoints and static file serving before running tests
+4. **Fix Exit Code Propagation**: Use `exec "$@"` in all wrapper scripts to ensure proper exit code handling
+5. **Test Service Connectivity**: Verify frontend-backend communication before test execution
+
 #### Workflow Parsing Failures (0s Duration)
 **Symptoms**: Workflows fail immediately with 0s duration and "workflow file issue" error
 **Root Causes**:
@@ -586,7 +631,53 @@ gh run view <run-id>
 
 # View job details
 gh run view --job <job-id>
+
+# E2E Test Debugging Commands
+# Test service health locally
+curl -f http://localhost:3000/health  # Frontend health
+curl -f http://localhost:51249/health  # Backend health
+
+# Test static file serving
+curl -f http://localhost:3000/static/js/main.*.js  # Frontend JS bundle
+curl -f http://localhost:3000/static/css/main.*.css  # Frontend CSS
+
+# Test service connectivity
+curl -f -X POST -H "Content-Type: application/json" \
+  -d '{"query":"query { __typename }"}' \
+  http://localhost:51249/graphql  # GraphQL endpoint
+
+# Run E2E tests with debugging
+./scripts/start-services-with-health-checks.sh
+./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm --network host -w /app/frontend -e BASE_URL=http://localhost:3000 econ-graph-e2e-optimized:latest npm run test:e2e:core
 ```
+
+## E2E Test Debugging Infrastructure
+
+### Service Health Verification Scripts
+- `scripts/start-services-with-health-checks.sh` - Comprehensive service startup with health verification
+- `scripts/verify-frontend-connectivity.sh` - Frontend connectivity and static file serving verification
+- `scripts/run-e2e-with-backend-logs.sh` - Backend log tailing during E2E test execution
+- `scripts/run-e2e-with-frontend-logs.sh` - Frontend log tailing during E2E test execution
+- `scripts/debug-backend-startup.sh` - Backend startup debugging with comprehensive logging
+
+### Health Check Configuration
+- `ci-ports.env` - CI-specific port configuration for E2E tests
+- Port 51249 for backend (non-standard to avoid conflicts)
+- Port 3000 for frontend
+- Health check retry logic: 30 attempts with 2-second intervals
+
+### Exit Code Propagation
+All E2E test scripts use `exec "$@"` to ensure proper exit code propagation:
+- `verify-frontend-connectivity.sh` → `run-e2e-with-frontend-logs.sh` → `run-e2e-with-backend-logs.sh` → Playwright tests
+- CI jobs now properly turn red when E2E tests fail
+- No more false green jobs when tests actually fail
+
+### Debugging Features
+- **Continuous Log Tailing**: Real-time logs from both frontend and backend services
+- **Network Request Monitoring**: Captures all HTTP requests and responses
+- **Service Status Monitoring**: Tracks service health throughout test execution
+- **Static File Verification**: Tests JavaScript bundle and CSS serving
+- **API Connectivity Testing**: Verifies GraphQL endpoint accessibility
 
 ## Related Files
 
@@ -596,3 +687,8 @@ gh run view --job <job-id>
 - `frontend/package.json` - Node.js dependencies
 - `frontend/.license-checker.json` - Frontend license compliance configuration
 - `docs/development/CI_OPTIMIZATION_NOTES.md` - Detailed optimization strategies
+- `scripts/start-services-with-health-checks.sh` - E2E service health verification
+- `scripts/verify-frontend-connectivity.sh` - Frontend connectivity testing
+- `scripts/run-e2e-with-backend-logs.sh` - Backend log tailing for E2E tests
+- `scripts/run-e2e-with-frontend-logs.sh` - Frontend log tailing for E2E tests
+- `ci-ports.env` - CI-specific port configuration

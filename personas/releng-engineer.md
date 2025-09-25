@@ -31,6 +31,9 @@ A Release Engineer (RelEng) is responsible for maintaining and improving the CI/
 - **Mobile Testing**: Separate mobile browser testing from desktop testing for better stability
 - **Database Health Checks**: Implement robust database connection health checks for test reliability
 - **Service Dependencies**: Ensure proper service startup order and health verification
+- **E2E Test Debugging Infrastructure**: Implement comprehensive debugging tools for E2E test failures
+- **Service Health Verification**: Ensure all services are actually running and healthy before executing tests
+- **Exit Code Propagation**: Implement proper exit code propagation through script chains to ensure CI jobs reflect test results
 
 ### Quality Assurance
 - **Code Quality Gates**: Implement and maintain code quality checks (linting, formatting, security scans)
