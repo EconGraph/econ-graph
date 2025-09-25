@@ -3,6 +3,8 @@
 // expect(element).toHaveTextContent(/react/i)
 // learn more: https://github.com/testing-library/jest-dom
 import "@testing-library/jest-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ReactNode } from "react";
 
 // Mock timers globally to prevent resource leaks in all tests
 jest.useFakeTimers();
@@ -32,33 +34,9 @@ jest.spyOn(global, "clearTimeout").mockImplementation(() => {});
 
 jest.spyOn(global, "clearInterval").mockImplementation(() => {});
 
-// Mock the contexts globally to prevent resource leaks
-jest.mock("./contexts/AuthContext", () => ({
-  AuthProvider: ({ children }: any) => children,
-  useAuth: () => ({
-    user: {
-      id: "test-user",
-      username: "Test Admin",
-      role: "super_admin",
-      sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
-    },
-    isAuthenticated: true,
-    login: jest.fn(),
-    logout: jest.fn(),
-    refreshSession: jest.fn(),
-    extendSession: jest.fn(),
-  }),
-}));
+// Note: Context mocks are handled per-test-file to avoid conflicts
 
-jest.mock("./contexts/SecurityContext", () => ({
-  SecurityProvider: ({ children }: any) => children,
-  useSecurity: () => ({
-    checkAccess: jest.fn(() => true),
-    logSecurityEvent: jest.fn(),
-    securityEvents: [],
-    sessionRemainingTime: 3661, // 61 minutes and 1 second in seconds
-  }),
-}));
+// Note: React Query mocks are handled per-test-file to avoid conflicts
 
 // Set timeout for CI
 if (process.env.CI) {

@@ -35,7 +35,30 @@ jest.mock("../../contexts/SecurityContext", () => ({
     checkAccess: jest.fn(() => true),
     logSecurityEvent: jest.fn(),
     securityEvents: [],
+    sessionRemainingTime: 3661, // 61 minutes and 1 second in seconds
   }),
+}));
+
+// Mock React Query to prevent "No QueryClient set" errors
+jest.mock("@tanstack/react-query", () => ({
+  ...jest.requireActual("@tanstack/react-query"),
+  QueryClientProvider: ({ children }: any) => children,
+  useQuery: jest.fn(() => ({
+    data: undefined,
+    isLoading: false,
+    error: null,
+    refetch: jest.fn(),
+  })),
+  useMutation: jest.fn(() => ({
+    mutate: jest.fn(),
+    mutateAsync: jest.fn(),
+    isLoading: false,
+    error: null,
+  })),
+  useQueryClient: jest.fn(() => ({
+    invalidateQueries: jest.fn(),
+    setQueryData: jest.fn(),
+  })),
 }));
 
 // Mock timers to prevent resource leaks
