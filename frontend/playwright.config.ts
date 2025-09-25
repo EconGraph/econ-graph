@@ -24,6 +24,7 @@ export default defineConfig({
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: process.env.CI ? [
     ['line'], // Use line reporter for CI - designed for CI environments with good color support
+    ['list'], // Add list reporter for better test summary display
     ['html', { open: 'never' }]
   ] : [
     ['html', { open: 'never' }]

@@ -34,6 +34,8 @@ env:
   TERM: xterm-256color
   FORCE_COLOR: true
   CI: true
+  # Set PLAYWRIGHT_DEBUG_NETWORK=true to enable verbose HTTP debugging (disabled by default)
+  # PLAYWRIGHT_DEBUG_NETWORK: true
 
 jobs:
   backend-build-cache:

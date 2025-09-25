@@ -22,6 +22,7 @@ export CI=true
 echo "  - TERM: $TERM"
 echo "  - FORCE_COLOR: $FORCE_COLOR"
 echo "  - CI: $CI"
+echo "  - PLAYWRIGHT_DEBUG_NETWORK: $PLAYWRIGHT_DEBUG_NETWORK"
 
 # Test 3: Run a simple Playwright command to see color output
 echo ""
@@ -39,5 +40,7 @@ echo ""
 echo "✅ Color configuration test complete!"
 echo "   - TERM=xterm-256color enables 256-color support"
 echo "   - FORCE_COLOR=true forces color output"
-echo "   - CI=true enables CI-specific reporter (line reporter)"
+echo "   - CI=true enables CI-specific reporter (line + list reporters)"
 echo "   - Line reporter is designed for CI environments with good color support"
+echo "   - List reporter provides better test summaries"
+echo "   - Network debugging is disabled by default (set PLAYWRIGHT_DEBUG_NETWORK=true to enable)"

@@ -42,6 +42,30 @@ The `line` reporter is specifically designed for CI environments and provides:
 - Clear distinction between pass/fail/skip states
 - Optimized for CI log viewing
 
+## Network Debugging
+
+By default, verbose HTTP request/response logging is disabled to keep CI logs clean. To enable detailed network debugging:
+
+### Enable Network Debugging in CI
+Add this environment variable to your CI workflow:
+```yaml
+env:
+  PLAYWRIGHT_DEBUG_NETWORK: true
+```
+
+### Enable Network Debugging Locally
+```bash
+export PLAYWRIGHT_DEBUG_NETWORK=true
+npx playwright test
+```
+
+### What Network Debugging Shows
+When enabled, you'll see:
+- 🌐 All HTTP requests with method and URL
+- 📡 All HTTP responses with status codes
+- 💥 Failed requests with detailed error analysis
+- 🚨 Specific error type detection (connection refused, timeouts, DNS errors)
+
 ## Testing
 
 Use the `test-playwright-colors.sh` script to verify the configuration:
