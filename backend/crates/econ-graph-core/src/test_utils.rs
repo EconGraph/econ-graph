@@ -31,9 +31,7 @@ impl TestContainer {
                 .await
                 .expect("Failed to connect to test database");
 
-            crate::database::run_migrations(&database_url)
-                .await
-                .expect("Failed to run database migrations for tests");
+            // Don't run migrations automatically - let tests handle this after cleaning
 
             // Create a dummy container for the struct
             let postgres_image = GenericImage::new("postgres", "17")
@@ -82,10 +80,7 @@ impl TestContainer {
                 .await
                 .expect("Failed to connect to testcontainer database");
 
-            // Run migrations
-            crate::database::run_migrations(&database_url)
-                .await
-                .expect("Failed to run database migrations for tests");
+            // Don't run migrations automatically - let tests handle this after cleaning
 
             Self {
                 pool,
@@ -104,10 +99,7 @@ impl TestContainer {
             .await
             .expect("Failed to connect to test database. Set DATABASE_URL to a reachable Postgres instance.");
 
-        crate::database::run_migrations(&database_url)
-            .await
-            .expect("Failed to run database migrations for tests");
-
+        // Don't run migrations automatically - let tests handle this after cleaning
         Self { pool }
     }
 
@@ -124,35 +116,25 @@ impl TestContainer {
 
         let mut conn = self.pool.get().await?;
 
-        // Disable foreign key checks temporarily
-        diesel::sql_query("SET session_replication_role = replica;")
+        // Drop the entire public schema and recreate it
+        // This ensures a completely fresh database state for each test
+        diesel::sql_query("DROP SCHEMA IF EXISTS public CASCADE;")
             .execute(&mut conn)
             .await?;
 
-        // Clean all tables in the correct order (respecting foreign key constraints)
-        let tables = vec![
-            "crawl_attempts",
-            "crawl_queue",
-            "data_points",
-            "economic_series",
-            "data_sources",
-            "users",
-            "global_events",
-            "countries",
-            "series_metadata",
-        ];
-
-        for table in tables {
-            diesel::sql_query(format!("TRUNCATE TABLE {} CASCADE;", table))
-                .execute(&mut conn)
-                .await
-                .unwrap_or(0);
-        }
-
-        // Re-enable foreign key checks
-        diesel::sql_query("SET session_replication_role = DEFAULT;")
+        diesel::sql_query("CREATE SCHEMA public;")
             .execute(&mut conn)
             .await?;
+
+        // Grant permissions on the public schema
+        diesel::sql_query("GRANT ALL ON SCHEMA public TO public;")
+            .execute(&mut conn)
+            .await?;
+
+        // Run migrations after cleaning to ensure database is ready
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+        crate::database::run_migrations(&database_url).await?;
 
         Ok(())
     }

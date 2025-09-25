@@ -590,7 +590,39 @@ test: add unit tests for world map
 4. **Performance**: Implement proper memoization and cleanup
 5. **Accessibility**: Build accessibility features from the start, not as an afterthought
 
-## 🧪 **General Testing Principles & Component Testability**
+## 🧪 **Testing Standards**
+
+### **Accessibility and Testing Attribute Guidelines**
+
+For comprehensive guidance on choosing between `aria-label`, `role`, and `data-testid` attributes, see our detailed [Accessibility Testing Guidelines](../docs/technical/accessibility-testing-guidelines.md). This covers when to use each attribute, common anti-patterns to avoid, and best practices for Material-UI component testing.
+
+### **Recommended Accessibility Testing Tools**
+
+#### **Static Analysis: eslint-plugin-jsx-a11y**
+- **Purpose**: Catches accessibility issues during development
+- **Installation**: `npm install --save-dev eslint-plugin-jsx-a11y`
+- **Coverage**: 50+ accessibility rules for JSX/React components
+- **Integration**: Add to ESLint config for automatic linting
+
+#### **Runtime Testing: axe-core-react**
+- **Purpose**: Automated WCAG compliance testing
+- **Installation**: `npm install --save-dev @axe-core/react`
+- **Usage**: Integrates with Jest and React Testing Library
+- **Benefits**: Comprehensive accessibility violation detection
+
+#### **Testing Strategy**
+```typescript
+// Example accessibility test with axe-core
+import { axe, toHaveNoViolations } from 'jest-axe';
+
+expect.extend(toHaveNoViolations);
+
+test('should not have accessibility violations', async () => {
+  const { container } = render(<MyComponent />);
+  const results = await axe(container);
+  expect(results).toHaveNoViolations();
+});
+```
 
 ### **Core Testing Philosophy**
 1. **Test Behavior, Not Implementation**: Focus on what users can see and do, not internal component structure
@@ -599,9 +631,31 @@ test: add unit tests for world map
 4. **Use the Testing Pyramid**: Unit tests for logic, integration tests for interactions, E2E tests for user flows
 5. **Test Accessibility**: Ensure components work for all users, including those using assistive technologies
 
+### **Key Testing Principles**
+
+#### **ARIA Labels Are Essential for Both Accessibility and Testing**
+- **Principle**: Every interactive element should have proper ARIA labels
+- **Why**: ARIA labels provide the most reliable way to find elements in tests
+- **Implementation**: Add `inputProps={{ 'aria-label': 'Descriptive label' }}` to Material-UI Select components
+- **Testing**: Use `screen.getByLabelText('Descriptive label')` instead of fragile selectors
+- **Benefit**: Tests become more robust and components become more accessible
+
+#### **CRITICAL: user.type() vs fireEvent.change() for Material-UI TextField Components**
+- **Discovery**: `user.type()` hangs indefinitely with Material-UI TextField components in Jest/jsdom
+- **Root Cause**: Material-UI's controlled components don't properly handle `user.type()` simulation
+- **Solution**: Always use `fireEvent.change()` for Material-UI TextField components
+- **Pattern**: `fireEvent.change(field, { target: { value: 'text' } })` instead of `await user.type(field, 'text')`
+- **Impact**: This can fix 50%+ of Material-UI test failures and prevent test suite hanging
+
+#### **Material-UI Components Need Special Test Setup**
+- **Portal Issues**: Use `MenuProps={{ disablePortal: true }}` for Select components
+- **Provider Setup**: Always include all required Material-UI providers in test environment
+- **Timing**: Use appropriate `waitFor` timeouts for portal content rendering
+- **Cleanup**: Clean up portal containers between tests to prevent DOM pollution
+
 ### **Component Testability Design Patterns**
 
-#### **1. Separation of Concerns**
+#### **Separation of Concerns**
 ```typescript
 // ❌ BAD: Mixed concerns make testing difficult
 const ComplexComponent = () => {
@@ -651,7 +705,7 @@ const SimpleComponent = () => {
 };
 ```
 
-#### **2. Pure Function Extraction**
+#### **Pure Function Extraction**
 ```typescript
 // ❌ BAD: Business logic embedded in component
 const ChartComponent = ({ data }) => {
@@ -682,16 +736,6 @@ const ChartComponent = ({ data }) => {
   const transformedData = useMemo(() => transformChartData(data), [data]);
   return <Chart data={transformedData} />;
 };
-
-// utils/__tests__/chartUtils.test.ts
-describe('transformChartData', () => {
-  it('should transform raw values to percentages', () => {
-    const input = [{ rawValue: 0.15, label: 'Test' }];
-    const result = transformChartData(input);
-    expect(result[0].value).toBe(15);
-    expect(result[0].formatted).toBe('15.00%');
-  });
-});
 ```
 
 #### **3. Dependency Injection for Testability**
@@ -1021,7 +1065,7 @@ test('should call onDataPointClick when point is clicked', async () => {
 
 ### **Testing Anti-Patterns to Avoid**
 
-#### **1. Testing Implementation Details**
+#### **Testing Implementation Details**
 ```typescript
 // ❌ BAD: Testing internal state or methods
 test('should update internal state', () => {
@@ -1043,7 +1087,7 @@ test('should open dialog when button is clicked', async () => {
 });
 ```
 
-#### **2. Over-Mocking**
+#### **Over-Mocking**
 ```typescript
 // ❌ BAD: Mocking everything makes tests brittle
 jest.mock('react', () => ({
@@ -1058,7 +1102,7 @@ jest.mock('../api/userService', () => ({
 }));
 ```
 
-#### **3. Ignoring Accessibility**
+#### **Ignoring Accessibility**
 ```typescript
 // ❌ BAD: Not testing accessibility
 test('should display user name', () => {
@@ -1075,35 +1119,5 @@ test('should display user name with proper semantics', () => {
   expect(nameElement).toHaveAttribute('aria-label', 'User name: John');
 });
 ```
-
-### **Performance Testing Considerations**
-
-#### **1. Testing Render Performance**
-```typescript
-test('should render large datasets efficiently', () => {
-  const largeDataset = generateLargeDataset(10000);
-  const startTime = performance.now();
-  
-  render(<DataTable data={largeDataset} />);
-  
-  const endTime = performance.now();
-  expect(endTime - startTime).toBeLessThan(1000); // Should render in < 1s
-});
-```
-
-#### **2. Testing Memory Usage**
-```typescript
-test('should not leak memory on unmount', () => {
-  const { unmount } = render(<ComplexComponent />);
-  
-  // Simulate component lifecycle
-  unmount();
-  
-  // Check that event listeners are cleaned up
-  expect(mockRemoveEventListener).toHaveBeenCalled();
-});
-```
-
-This comprehensive testing approach ensures components are reliable, maintainable, and accessible while providing confidence in the codebase's quality and user experience.
 
 This persona provides comprehensive guidance for frontend development in the EconGraph project, with a focus on creating world-class data visualization interfaces.

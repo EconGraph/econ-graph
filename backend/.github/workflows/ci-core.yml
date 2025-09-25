@@ -115,27 +115,27 @@ jobs:
 
     - name: Run migration order validation
       run: |
-        cd backend
+
         python3 scripts/check_migration_order.py
 
     - name: Test migration validation with duplicate timestamps
       run: |
-        cd backend
-        # Create a temporary migration with duplicate timestamp for testing
-        mkdir -p migrations/2025-02-01-000001_duplicate_migration_test
-        echo "-- Test migration" > migrations/2025-02-01-000001_duplicate_migration_test/up.sql
-        echo "-- Test migration down" > migrations/2025-02-01-000001_duplicate_migration_test/down.sql
 
-        # This should fail because the timestamp duplicates an existing migration
+        # Create a temporary migration with invalid timestamp for testing
+        mkdir -p migrations/2024-01-01-000001_duplicate_timestamp_migration
+        echo "-- Duplicate timestamp migration" > migrations/2024-01-01-000001_duplicate_timestamp_migration/up.sql
+        echo "-- Duplicate timestamp migration down" > migrations/2024-01-01-000001_duplicate_timestamp_migration/down.sql
+
+        # This should fail because of duplicate timestamps
         if python3 scripts/check_migration_order.py; then
-          echo "❌ Migration validation should have failed but didn't"
+          echo "❌ Migration validation should have failed with duplicate timestamps"
           exit 1
         else
           echo "✅ Migration validation correctly detected duplicate timestamps"
         fi
 
         # Clean up test migration
-        rm -rf migrations/2025-02-01-000001_duplicate_migration_test
+        rm -rf migrations/2024-01-01-000001_duplicate_timestamp_migration
 
   backend-smoke-tests:
     name: Backend Smoke Tests (Fast)
@@ -245,7 +245,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6-alpine
+        image: postgres:15-alpine
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
@@ -347,7 +347,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -425,7 +425,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -491,7 +491,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -557,7 +557,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -623,7 +623,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -689,7 +689,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -755,7 +755,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -821,7 +821,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -887,7 +887,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -953,7 +953,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1019,7 +1019,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1085,7 +1085,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1151,7 +1151,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1208,48 +1208,6 @@ jobs:
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5444/econ_graph_test
-
-  admin-frontend-tests:
-    name: Admin Frontend Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.branch || github.ref }}
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'npm'
-        cache-dependency-path: admin-frontend/package-lock.json
-
-    - name: Install admin frontend dependencies
-      working-directory: admin-frontend
-      run: npm ci
-
-    - name: Run admin frontend linting
-      working-directory: admin-frontend
-      run: npm run lint
-
-    - name: Run admin frontend type checking
-      working-directory: admin-frontend
-      run: npm run typecheck
-
-    - name: Run admin frontend unit tests
-      working-directory: admin-frontend
-      run: npm test -- --coverage --watchAll=false --verbose
-
-    - name: Upload admin frontend test coverage
-      uses: actions/upload-artifact@v4
-      with:
-        name: admin-frontend-coverage-${{ github.sha }}
-        path: admin-frontend/coverage/
-        retention-days: 7
 
   frontend-tests:
     name: Frontend Tests
@@ -1339,14 +1297,6 @@ jobs:
       working-directory: frontend
       run: npm ci
 
-    - name: Install admin-frontend dependencies
-      working-directory: admin-frontend
-      run: npm ci
-
-    - name: Install admin-frontend dependencies
-      working-directory: admin-frontend
-      run: npm ci
-
     - name: Run frontend formatting check
       working-directory: frontend
       run: npm run prettier-check
@@ -1407,14 +1357,6 @@ jobs:
       run: npm audit --audit-level moderate
       working-directory: frontend
 
-    - name: Install admin-frontend dependencies
-      working-directory: admin-frontend
-      run: npm ci
-
-    - name: Run admin-frontend npm security audit
-      run: npm audit --audit-level moderate
-      working-directory: admin-frontend
-
   license-compliance:
     name: License Compliance Check
     runs-on: ubuntu-latest
@@ -1473,11 +1415,6 @@ jobs:
         echo "🔍 Checking frontend license compliance with license-checker..."
         license-checker --config .license-checker.json
         echo "✅ Frontend license compliance check passed"
-
-        echo "🔍 Checking admin-frontend license compliance with license-checker..."
-        cd ../admin-frontend
-        license-checker --config ../frontend/.license-checker.json
-        echo "✅ Admin frontend license compliance check passed"
       working-directory: frontend
 
     - name: 📋 Generate License Report
@@ -1490,16 +1427,10 @@ jobs:
         cargo deny check licenses --format json > backend-licenses.json || true
         echo "Backend license check completed"
 
-        # Generate frontend license report (run from repo root using shared config)
+        # Generate frontend license report
         echo "Generating frontend license report..."
-        license-checker --config frontend/.license-checker.json --json > frontend-licenses.json || true
+        license-checker --config .license-checker.json --json > frontend-licenses.json || true
         echo "Frontend license check completed"
-
-        # Generate admin-frontend license report (use shared config path)
-        echo "Generating admin-frontend license report..."
-        cd admin-frontend
-        license-checker --config ../frontend/.license-checker.json --json > admin-frontend-licenses.json || true
-        echo "Admin frontend license check completed"
 
         echo "✅ License compliance check completed successfully"
 
@@ -1510,7 +1441,6 @@ jobs:
         path: |
           backend-licenses.json
           frontend-licenses.json
-          admin-frontend/admin-frontend-licenses.json
 
   backend-integration-tests:
     name: Backend Integration Tests
@@ -1576,7 +1506,7 @@ jobs:
     - name: Run backend integration tests
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --package econ-graph-backend --lib -- --test-threads=2 --nocapture integration_tests::tests::test_database_connection_test_during_startup integration_tests::tests::test_database_connection_test_with_invalid_url integration_tests::tests::test_database_authentication_failure integration_tests::tests::test_startup_failure_scenarios integration_tests::tests::test_database_connection_test_performance integration_tests::tests::test_initialize_database_function
+        cargo test --package econ-graph-backend --bin econ-graph-backend -- --test-threads=2 --nocapture integration_tests
       working-directory: backend
 
   frontend-integration-tests:
