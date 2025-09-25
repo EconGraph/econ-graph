@@ -1901,6 +1901,10 @@ jobs:
         echo "📋 Contents of frontend directory:"
         ls -la frontend/ || echo "No frontend directory found"
 
+        echo "📋 COMPREHENSIVE ARTIFACT SEARCH:"
+        echo "================================="
+
+        # Search in frontend directory
         echo "📋 Searching for test-results in frontend directory:"
         find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
 
@@ -1910,6 +1914,29 @@ jobs:
         # Search for individual Playwright files
         echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
         find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
+
+        # COMPREHENSIVE SEARCH: Look everywhere on the runner
+        echo "📋 COMPREHENSIVE SEARCH - Looking for test-results anywhere on runner:"
+        find / -type d -name "test-results" 2>/dev/null | head -20 || echo "No test-results directories found anywhere"
+
+        echo "📋 COMPREHENSIVE SEARCH - Looking for playwright-report anywhere on runner:"
+        find / -type d -name "playwright-report" 2>/dev/null | head -20 || echo "No playwright-report directories found anywhere"
+
+        echo "📋 COMPREHENSIVE SEARCH - Looking for any Playwright files anywhere on runner:"
+        find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -20 || echo "No Playwright files found anywhere"
+
+        # Search in Docker containers
+        echo "📋 DOCKER CONTAINER SEARCH:"
+        echo "=========================="
+        for container in $(docker ps --format "{{.Names}}"); do
+          echo "📋 Searching in container: $container"
+          echo "  - Looking for test-results:"
+          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
+          echo "  - Looking for playwright-report:"
+          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
+          echo "  - Looking for Playwright files:"
+          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
+        done
 
         # Copy artifacts to the root for upload
         if [ -d "frontend/test-results" ]; then
@@ -2078,6 +2105,10 @@ jobs:
         echo "📋 Contents of frontend directory:"
         ls -la frontend/ || echo "No frontend directory found"
 
+        echo "📋 COMPREHENSIVE ARTIFACT SEARCH:"
+        echo "================================="
+
+        # Search in frontend directory
         echo "📋 Searching for test-results in frontend directory:"
         find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
 
@@ -2087,6 +2118,29 @@ jobs:
         # Search for individual Playwright files
         echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
         find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
+
+        # COMPREHENSIVE SEARCH: Look everywhere on the runner
+        echo "📋 COMPREHENSIVE SEARCH - Looking for test-results anywhere on runner:"
+        find / -type d -name "test-results" 2>/dev/null | head -20 || echo "No test-results directories found anywhere"
+
+        echo "📋 COMPREHENSIVE SEARCH - Looking for playwright-report anywhere on runner:"
+        find / -type d -name "playwright-report" 2>/dev/null | head -20 || echo "No playwright-report directories found anywhere"
+
+        echo "📋 COMPREHENSIVE SEARCH - Looking for any Playwright files anywhere on runner:"
+        find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -20 || echo "No Playwright files found anywhere"
+
+        # Search in Docker containers
+        echo "📋 DOCKER CONTAINER SEARCH:"
+        echo "=========================="
+        for container in $(docker ps --format "{{.Names}}"); do
+          echo "📋 Searching in container: $container"
+          echo "  - Looking for test-results:"
+          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
+          echo "  - Looking for playwright-report:"
+          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
+          echo "  - Looking for Playwright files:"
+          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
+        done
 
         # Copy artifacts to the root for upload
         if [ -d "frontend/test-results" ]; then
@@ -2257,6 +2311,10 @@ jobs:
         echo "📋 Contents of frontend directory:"
         ls -la frontend/ || echo "No frontend directory found"
 
+        echo "📋 COMPREHENSIVE ARTIFACT SEARCH:"
+        echo "================================="
+
+        # Search in frontend directory
         echo "📋 Searching for test-results in frontend directory:"
         find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
 
@@ -2266,6 +2324,29 @@ jobs:
         # Search for individual Playwright files
         echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
         find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
+
+        # COMPREHENSIVE SEARCH: Look everywhere on the runner
+        echo "📋 COMPREHENSIVE SEARCH - Looking for test-results anywhere on runner:"
+        find / -type d -name "test-results" 2>/dev/null | head -20 || echo "No test-results directories found anywhere"
+
+        echo "📋 COMPREHENSIVE SEARCH - Looking for playwright-report anywhere on runner:"
+        find / -type d -name "playwright-report" 2>/dev/null | head -20 || echo "No playwright-report directories found anywhere"
+
+        echo "📋 COMPREHENSIVE SEARCH - Looking for any Playwright files anywhere on runner:"
+        find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -20 || echo "No Playwright files found anywhere"
+
+        # Search in Docker containers
+        echo "📋 DOCKER CONTAINER SEARCH:"
+        echo "=========================="
+        for container in $(docker ps --format "{{.Names}}"); do
+          echo "📋 Searching in container: $container"
+          echo "  - Looking for test-results:"
+          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
+          echo "  - Looking for playwright-report:"
+          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
+          echo "  - Looking for Playwright files:"
+          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
+        done
 
         # Copy artifacts to the root for upload
         if [ -d "frontend/test-results" ]; then
@@ -2435,6 +2516,10 @@ jobs:
         echo "📋 Contents of frontend directory:"
         ls -la frontend/ || echo "No frontend directory found"
 
+        echo "📋 COMPREHENSIVE ARTIFACT SEARCH:"
+        echo "================================="
+
+        # Search in frontend directory
         echo "📋 Searching for test-results in frontend directory:"
         find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
 
@@ -2444,6 +2529,29 @@ jobs:
         # Search for individual Playwright files
         echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
         find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
+
+        # COMPREHENSIVE SEARCH: Look everywhere on the runner
+        echo "📋 COMPREHENSIVE SEARCH - Looking for test-results anywhere on runner:"
+        find / -type d -name "test-results" 2>/dev/null | head -20 || echo "No test-results directories found anywhere"
+
+        echo "📋 COMPREHENSIVE SEARCH - Looking for playwright-report anywhere on runner:"
+        find / -type d -name "playwright-report" 2>/dev/null | head -20 || echo "No playwright-report directories found anywhere"
+
+        echo "📋 COMPREHENSIVE SEARCH - Looking for any Playwright files anywhere on runner:"
+        find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -20 || echo "No Playwright files found anywhere"
+
+        # Search in Docker containers
+        echo "📋 DOCKER CONTAINER SEARCH:"
+        echo "=========================="
+        for container in $(docker ps --format "{{.Names}}"); do
+          echo "📋 Searching in container: $container"
+          echo "  - Looking for test-results:"
+          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
+          echo "  - Looking for playwright-report:"
+          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
+          echo "  - Looking for Playwright files:"
+          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
+        done
 
         # Copy artifacts to the root for upload
         if [ -d "frontend/test-results" ]; then
@@ -2613,6 +2721,10 @@ jobs:
         echo "📋 Contents of frontend directory:"
         ls -la frontend/ || echo "No frontend directory found"
 
+        echo "📋 COMPREHENSIVE ARTIFACT SEARCH:"
+        echo "================================="
+
+        # Search in frontend directory
         echo "📋 Searching for test-results in frontend directory:"
         find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
 
@@ -2622,6 +2734,29 @@ jobs:
         # Search for individual Playwright files
         echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
         find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
+
+        # COMPREHENSIVE SEARCH: Look everywhere on the runner
+        echo "📋 COMPREHENSIVE SEARCH - Looking for test-results anywhere on runner:"
+        find / -type d -name "test-results" 2>/dev/null | head -20 || echo "No test-results directories found anywhere"
+
+        echo "📋 COMPREHENSIVE SEARCH - Looking for playwright-report anywhere on runner:"
+        find / -type d -name "playwright-report" 2>/dev/null | head -20 || echo "No playwright-report directories found anywhere"
+
+        echo "📋 COMPREHENSIVE SEARCH - Looking for any Playwright files anywhere on runner:"
+        find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -20 || echo "No Playwright files found anywhere"
+
+        # Search in Docker containers
+        echo "📋 DOCKER CONTAINER SEARCH:"
+        echo "=========================="
+        for container in $(docker ps --format "{{.Names}}"); do
+          echo "📋 Searching in container: $container"
+          echo "  - Looking for test-results:"
+          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
+          echo "  - Looking for playwright-report:"
+          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
+          echo "  - Looking for Playwright files:"
+          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
+        done
 
         # Copy artifacts to the root for upload
         if [ -d "frontend/test-results" ]; then
@@ -2791,6 +2926,10 @@ jobs:
         echo "📋 Contents of frontend directory:"
         ls -la frontend/ || echo "No frontend directory found"
 
+        echo "📋 COMPREHENSIVE ARTIFACT SEARCH:"
+        echo "================================="
+
+        # Search in frontend directory
         echo "📋 Searching for test-results in frontend directory:"
         find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
 
@@ -2800,6 +2939,29 @@ jobs:
         # Search for individual Playwright files
         echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
         find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
+
+        # COMPREHENSIVE SEARCH: Look everywhere on the runner
+        echo "📋 COMPREHENSIVE SEARCH - Looking for test-results anywhere on runner:"
+        find / -type d -name "test-results" 2>/dev/null | head -20 || echo "No test-results directories found anywhere"
+
+        echo "📋 COMPREHENSIVE SEARCH - Looking for playwright-report anywhere on runner:"
+        find / -type d -name "playwright-report" 2>/dev/null | head -20 || echo "No playwright-report directories found anywhere"
+
+        echo "📋 COMPREHENSIVE SEARCH - Looking for any Playwright files anywhere on runner:"
+        find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -20 || echo "No Playwright files found anywhere"
+
+        # Search in Docker containers
+        echo "📋 DOCKER CONTAINER SEARCH:"
+        echo "=========================="
+        for container in $(docker ps --format "{{.Names}}"); do
+          echo "📋 Searching in container: $container"
+          echo "  - Looking for test-results:"
+          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
+          echo "  - Looking for playwright-report:"
+          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
+          echo "  - Looking for Playwright files:"
+          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
+        done
 
         # Copy artifacts to the root for upload
         if [ -d "frontend/test-results" ]; then
