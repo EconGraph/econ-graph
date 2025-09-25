@@ -1,7 +1,10 @@
 // Polyfills for MSW in Node.js environment
 import { TextEncoder, TextDecoder } from "util";
+import { TransformStream as NodeTransformStream } from "stream/web";
+
 global.TextEncoder = TextEncoder;
 global.TextDecoder = TextDecoder as any;
+global.TransformStream = NodeTransformStream as any;
 
 // jest-dom adds custom jest matchers for asserting on DOM nodes.
 // allows you to do things like:
@@ -9,33 +12,8 @@ global.TextDecoder = TextDecoder as any;
 // learn more: https://github.com/testing-library/jest-dom
 import "@testing-library/jest-dom";
 
-// Mock timers globally to prevent resource leaks in all tests
-jest.useFakeTimers();
-
-// Mock setTimeout to run immediately in tests
-jest
-  .spyOn(global, "setTimeout")
-  .mockImplementation((fn: any, delay?: number) => {
-    if (typeof fn === "function") {
-      fn();
-    }
-    return 1 as any;
-  });
-
-// Mock setInterval to prevent resource leaks
-jest
-  .spyOn(global, "setInterval")
-  .mockImplementation((fn: any, delay?: number) => {
-    if (typeof fn === "function") {
-      fn();
-    }
-    return 1 as any;
-  });
-
-// Mock clearTimeout and clearInterval to prevent errors
-jest.spyOn(global, "clearTimeout").mockImplementation(() => {});
-
-jest.spyOn(global, "clearInterval").mockImplementation(() => {});
+// Note: Timer mocking is now handled per-test to avoid interfering with async operations
+// Individual tests can use jest.useFakeTimers() if needed for specific timer testing
 
 // Note: Context mocks are handled per-test-file to avoid conflicts
 
@@ -145,8 +123,13 @@ afterAll(() => {
   console.warn = originalConsoleWarn;
 });
 
-// Clean up after each test
+// Clean up after each test - but don't clear all mocks as it breaks MSW
 afterEach(() => {
-  jest.clearAllMocks();
-  jest.clearAllTimers();
+  // Don't clear all mocks - this breaks MSW fetch interception
+  // jest.clearAllMocks();
+
+  // Only clear timers if they were mocked in the test
+  if (jest.isMockFunction(setTimeout)) {
+    jest.clearAllTimers();
+  }
 });
