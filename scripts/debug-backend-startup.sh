@@ -9,8 +9,8 @@ echo "  - Current directory: $(pwd)"
 echo "  - Docker version: $(docker --version)"
 echo "  - Available images:"
 docker images | grep econ-graph || echo "    No econ-graph images found"
-echo "  - Port 8080 status:"
-netstat -tlnp | grep :8080 || echo "    Port 8080 is free"
+echo "  - Port $BACKEND_PORT status:"
+netstat -tlnp | grep :$BACKEND_PORT || echo "    Port $BACKEND_PORT is free"
 
 echo "🔍 Docker network debugging:"
 echo "  - Available networks:"
@@ -45,10 +45,28 @@ echo "  - DATABASE_URL: ${DATABASE_URL}"
 echo "  - All environment variables containing 'DATABASE' or 'PG':"
 env | grep -i -E "(DATABASE|PG)" || echo "    No DATABASE/PG environment variables found"
 
+# Load CI port configuration if available
+if [ -f "ci-ports.env" ]; then
+  echo "📋 Loading CI port configuration from ci-ports.env..."
+  set -a  # automatically export all variables
+  source ci-ports.env
+  set +a  # stop automatically exporting
+  echo "  - BACKEND_PORT: $BACKEND_PORT"
+  echo "  - FRONTEND_PORT: $FRONTEND_PORT"
+  echo "  - CORS_ALLOWED_ORIGINS: $CORS_ALLOWED_ORIGINS"
+else
+  echo "⚠️  ci-ports.env not found, using defaults"
+  BACKEND_PORT=${BACKEND_PORT:-9876}
+  FRONTEND_PORT=${FRONTEND_PORT:-3000}
+  CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-"http://localhost:3000"}
+fi
+
 # Environment variables debugging
 echo "📋 Environment variables being passed to container:"
-echo "  - DATABASE_URL: postgresql://postgres:password@host.docker.internal:5432/econ_graph_test"
-echo "  - BACKEND_PORT: 8080"
+echo "  - DATABASE_URL: $DATABASE_URL"
+echo "  - BACKEND_PORT: $BACKEND_PORT"
+echo "  - FRONTEND_PORT: $FRONTEND_PORT"
+echo "  - CORS_ALLOWED_ORIGINS: $CORS_ALLOWED_ORIGINS"
 echo "  - Container image: econ-graph-e2e-optimized:latest"
 echo "  - Binary path: ./backend/econ-graph-backend"
 
@@ -60,7 +78,9 @@ LOCAL_DATABASE_URL=$(echo "${DATABASE_URL}" | sed 's/host\.docker\.internal/loca
 echo "  - Using DATABASE_URL: $LOCAL_DATABASE_URL"
 docker run --rm -d --name backend-server \
   -e DATABASE_URL="$LOCAL_DATABASE_URL" \
-  -e BACKEND_PORT=8080 \
+  -e BACKEND_PORT="$BACKEND_PORT" \
+  -e FRONTEND_PORT="$FRONTEND_PORT" \
+  -e CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS" \
   -e USER=postgres \
   --network host \
   econ-graph-e2e-optimized:latest \
@@ -114,14 +134,14 @@ for i in {1..30}; do
   fi
 
   # Check if port is listening
-  if netstat -tlnp | grep -q :8080; then
-    echo "  ✅ Port 8080 is listening"
+  if netstat -tlnp | grep -q :$BACKEND_PORT; then
+    echo "  ✅ Port $BACKEND_PORT is listening"
   else
-    echo "  ❌ Port 8080 not listening"
+    echo "  ❌ Port $BACKEND_PORT not listening"
   fi
 
   # Check health endpoint
-  if curl -f http://localhost:8080/health 2>/dev/null; then
+  if curl -f http://localhost:$BACKEND_PORT/health 2>/dev/null; then
     echo "  ✅ Health endpoint responding"
     echo "✅ Backend is ready!"
     BACKEND_READY=true
@@ -158,8 +178,8 @@ if [ "$BACKEND_READY" = false ]; then
 
   # Network debugging
   echo "📋 Network Debugging:"
-  echo "  - Port 8080 status:"
-  netstat -tlnp | grep :8080 || echo "    Port 8080 not listening"
+  echo "  - Port $BACKEND_PORT status:"
+  netstat -tlnp | grep :$BACKEND_PORT || echo "    Port $BACKEND_PORT not listening"
   echo "  - Docker network info:"
   docker network ls
   echo "  - Container network:"

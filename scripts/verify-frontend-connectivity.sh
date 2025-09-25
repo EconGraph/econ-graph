@@ -8,15 +8,29 @@ set -e
 echo "🔍 FRONTEND CONNECTIVITY VERIFICATION"
 echo "====================================="
 
+# Load CI port configuration if available
+if [ -f "ci-ports.env" ]; then
+  set -a  # automatically export all variables
+  source ci-ports.env
+  set +a  # stop automatically exporting
+  echo "📋 Loaded CI port configuration"
+  echo "  - FRONTEND_URL: $FRONTEND_URL"
+  echo "  - BACKEND_URL: $BACKEND_URL"
+else
+  echo "⚠️  ci-ports.env not found, using defaults"
+  FRONTEND_URL="http://localhost:3000"
+  BACKEND_URL="http://localhost:9876"
+fi
+
 # Check if frontend is running and accessible
 echo "📋 Verifying frontend connectivity..."
 
 # Test basic frontend accessibility
 echo "  - Testing frontend HTTP response..."
-if curl -f -s http://localhost:3000 > /dev/null; then
-  echo "    ✅ Frontend is accessible on localhost:3000"
+if curl -f -s $FRONTEND_URL > /dev/null; then
+  echo "    ✅ Frontend is accessible on $FRONTEND_URL"
 else
-  echo "    ❌ Frontend is NOT accessible on localhost:3000"
+  echo "    ❌ Frontend is NOT accessible on $FRONTEND_URL"
   echo "    📋 Available services on localhost:"
   netstat -tlnp | grep :3000 || echo "      No service on port 3000"
   echo "    📋 All listening ports:"
@@ -34,24 +48,24 @@ fi
 
 # Test if frontend can reach backend
 echo "  - Testing backend connectivity from frontend perspective..."
-if curl -f -s http://localhost:8080/health > /dev/null; then
-  echo "    ✅ Backend is accessible on localhost:8080"
+if curl -f -s $BACKEND_URL/health > /dev/null; then
+  echo "    ✅ Backend is accessible on $BACKEND_URL"
 else
-  echo "    ❌ Backend is NOT accessible on localhost:8080"
+  echo "    ❌ Backend is NOT accessible on $BACKEND_URL"
   echo "    📋 Backend container status:"
   docker ps --filter name=backend-server --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" || echo "      No backend container found"
   echo "    📋 Available services on localhost:"
-  netstat -tlnp | grep :8080 || echo "      No service on port 8080"
+  netstat -tlnp | grep :$BACKEND_PORT || echo "      No service on port $BACKEND_PORT"
 fi
 
 # Test network connectivity between containers
 echo "  - Testing frontend-backend container network connectivity..."
-if docker exec frontend-server curl -f -s http://localhost:8080/health > /dev/null 2>&1; then
-  echo "    ✅ Frontend container can reach backend on localhost:8080"
+if docker exec frontend-server curl -f -s $BACKEND_URL/health > /dev/null 2>&1; then
+  echo "    ✅ Frontend container can reach backend on $BACKEND_URL"
 else
-  echo "    ❌ Frontend container CANNOT reach backend on localhost:8080"
+  echo "    ❌ Frontend container CANNOT reach backend on $BACKEND_URL"
   echo "    📋 Frontend container network test:"
-  docker exec frontend-server curl -v http://localhost:8080/health 2>&1 || echo "      Network test failed"
+  docker exec frontend-server curl -v $BACKEND_URL/health 2>&1 || echo "      Network test failed"
   echo "    📋 Frontend container network interfaces:"
   docker exec frontend-server ip addr show 2>/dev/null || echo "      Cannot get network interfaces"
   echo "    📋 Backend container network interfaces:"

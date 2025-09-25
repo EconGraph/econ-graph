@@ -1536,7 +1536,7 @@ jobs:
       working-directory: frontend
       run: npm test -- --coverage --watchAll=false
       env:
-        REACT_APP_GRAPHQL_ENDPOINT: http://localhost:8080/graphql
+        REACT_APP_GRAPHQL_ENDPOINT: http://localhost:51249/graphql
 
   e2e-container-build:
     name: Build E2E Test Containers
@@ -1621,6 +1621,33 @@ jobs:
     # Note: PostgreSQL environment variables removed to prevent conflicts with DATABASE_URL
     # The DATABASE_URL in Docker containers should handle authentication
 
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Load CI port configuration
+      run: |
+        echo "Loading CI port configuration from ci-ports.env..."
+        set -a  # automatically export all variables
+        source ci-ports.env
+        set +a  # stop automatically exporting
+        echo "Backend port: $BACKEND_PORT"
+        echo "Frontend port: $FRONTEND_PORT"
+        echo "Backend URL: $BACKEND_URL"
+        echo "Frontend URL: $FRONTEND_URL"
+        echo "REACT_APP_GRAPHQL_ENDPOINT: $REACT_APP_GRAPHQL_ENDPOINT"
+        echo "CORS_ALLOWED_ORIGINS: $CORS_ALLOWED_ORIGINS"
+        # Export variables for subsequent steps
+        echo "BACKEND_PORT=$BACKEND_PORT" >> $GITHUB_ENV
+        echo "FRONTEND_PORT=$FRONTEND_PORT" >> $GITHUB_ENV
+        echo "BACKEND_URL=$BACKEND_URL" >> $GITHUB_ENV
+        echo "FRONTEND_URL=$FRONTEND_URL" >> $GITHUB_ENV
+        echo "REACT_APP_GRAPHQL_ENDPOINT=$REACT_APP_GRAPHQL_ENDPOINT" >> $GITHUB_ENV
+        echo "REACT_APP_API_URL=$REACT_APP_API_URL" >> $GITHUB_ENV
+        echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS" >> $GITHUB_ENV
+
     services:
       postgres:
         image: postgres:17.6
@@ -1636,12 +1663,8 @@ jobs:
         ports:
           - 5432:5432
 
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.branch || github.ref }}
 
+    steps:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
 
