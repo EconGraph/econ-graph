@@ -287,6 +287,39 @@ BACKEND_INTEGRATION_DB_PORT=5447
 * ✅ **Verifiable Fixes**: You can explain exactly how each fix addresses a specific problem
 * ✅ **Honest Communication**: You accurately represent what you know and what you don't know
 
+## E2E Test Debugging Best Practices
+
+**CRITICAL: E2E test failures often have complex root causes that require systematic debugging.**
+
+### E2E Test Failure Analysis
+* **Start with Service Health**: Always verify that both frontend and backend services are actually running and healthy before analyzing test failures
+* **Use Health Checks with Retry Logic**: Implement proper health checks with retry logic (30 attempts, 2-second intervals) to ensure services are ready before running tests
+* **Log Tailing for Real-time Debugging**: Use continuous log tailing for both frontend and backend services during E2E test execution to capture real-time debugging information
+* **Exit Code Propagation**: Ensure all script chains properly propagate exit codes using `exec "$@"` so CI jobs turn red when tests actually fail
+
+### Common E2E Test Failure Patterns
+* **Service Startup Issues**: Frontend or backend services failing to start properly (most common)
+* **Port Configuration Mismatches**: Services running on different ports than expected by tests
+* **Database Connection Failures**: Backend unable to connect to database due to authentication or network issues
+* **Static File Serving Problems**: Frontend server unable to serve JavaScript bundles or CSS files
+* **Network Connectivity Issues**: Services unable to communicate due to Docker networking problems
+* **Exit Code Masking**: Test failures not properly propagating to CI job status
+
+### E2E Test Debugging Methodology
+1. **Verify Service Health**: Check that both frontend and backend services are running and responding to health checks
+2. **Test Static File Serving**: Verify frontend can serve its JavaScript bundles and CSS files
+3. **Test API Connectivity**: Verify backend API endpoints are reachable from frontend
+4. **Check Network Configuration**: Ensure Docker networking allows service-to-service communication
+5. **Implement Comprehensive Logging**: Add real-time log tailing for both services during test execution
+6. **Verify Exit Code Propagation**: Ensure test failures properly turn CI jobs red
+
+### E2E Test Infrastructure Requirements
+* **Health Check Scripts**: Implement robust health checks with retry logic for all services
+* **Log Tailing Scripts**: Create scripts that continuously tail service logs during test execution
+* **Exit Code Propagation**: Use `exec "$@"` in all wrapper scripts to ensure proper exit code handling
+* **Service Startup Verification**: Verify services are actually ready before proceeding with tests
+* **Network Connectivity Testing**: Test service-to-service communication before running E2E tests
+
 ## Root Cause Analysis and Systematic Debugging
 
 **CRITICAL: Stop jumping between different approaches. Dig deeper to find the actual root cause.**

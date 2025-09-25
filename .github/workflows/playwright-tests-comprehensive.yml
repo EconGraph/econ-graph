@@ -81,14 +81,14 @@ jobs:
         sleep 10
       env:
         DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
-        BACKEND_PORT: 9876
+        BACKEND_PORT: 8080
         FRONTEND_PORT: 3000
 
     - name: Build frontend
       working-directory: ./frontend
       run: npm run build
       env:
-        REACT_APP_API_URL: http://localhost:9876
+        REACT_APP_API_URL: http://localhost:8080
 
     - name: Start frontend server
       working-directory: ./frontend
@@ -97,11 +97,11 @@ jobs:
         sleep 30
       env:
         PORT: 3000
-        REACT_APP_API_URL: http://localhost:9876
+        REACT_APP_API_URL: http://localhost:8080
 
     - name: Wait for services to be ready
       run: |
-        timeout 60 bash -c 'until curl -f http://localhost:9876/health; do sleep 2; done'
+        timeout 60 bash -c 'until curl -f http://localhost:8080/health; do sleep 2; done'
         timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
 
     - name: Run Playwright tests

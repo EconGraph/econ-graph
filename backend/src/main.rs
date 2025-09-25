@@ -226,10 +226,41 @@ async fn main() -> AppResult<()> {
     info!("  - Server host: {}", config.server.host);
     info!("  - Server port: {}", config.server.port);
     info!("  - CORS origins: {:?}", config.cors.allowed_origins);
+
+    // Debug: Show CORS environment variables
+    info!("🔧 CORS Environment Variables:");
+    info!("  - CORS_ALLOWED_ORIGINS: {:?}", std::env::var("CORS_ALLOWED_ORIGINS").ok());
+    info!("  - FRONTEND_PORT: {:?}", std::env::var("FRONTEND_PORT").ok());
+    info!("  - Final CORS origins that will be used: {:?}", config.cors.allowed_origins);
     info!("  - Database URL: {}", config.database_url);
 
+    // Debug: Check environment variables that could affect database connection
+    info!("🔍 Database connection environment variables:");
+    info!("  - USER: {:?}", std::env::var("USER").ok());
+    info!("  - PGUSER: {:?}", std::env::var("PGUSER").ok());
+    info!("  - PGPASSWORD: {:?}", std::env::var("PGPASSWORD").is_ok());
+    info!("  - PGDATABASE: {:?}", std::env::var("PGDATABASE").ok());
+    info!("  - PGHOST: {:?}", std::env::var("PGHOST").ok());
+    info!("  - PGPORT: {:?}", std::env::var("PGPORT").ok());
+
+    // Debug: Network and container information
+    info!("🔍 Network debugging:");
+    info!("  - Container hostname: {:?}", std::env::var("HOSTNAME").ok());
+    info!("  - Container environment: {:?}", std::env::var("CONTAINER").ok());
+
+    // Debug: All environment variables containing DATABASE or PG
+    info!("🔍 All environment variables containing 'DATABASE' or 'PG':");
+    for (key, value) in std::env::vars() {
+        if key.contains("DATABASE") || key.contains("PG") {
+            info!("  - {}: {:?}", key, value);
+        }
+    }
+
     // Initialize database with connection testing
-    let pool = initialize_database(&config.database_url).await?;
+    let pool = initialize_database(&config.database_url).await.map_err(|e| {
+        eprintln!("❌ Failed to initialize database: {}", e);
+        e
+    })?;
 
     // Create GraphQL schema
     let schema = create_schema_with_data(pool.clone());
@@ -282,11 +313,27 @@ async fn main() -> AppResult<()> {
     // }
     info!("⚠️  Background crawler startup temporarily disabled");
 
-    // Create Warp filters with configured CORS origins
+    // TEMPORARY: Disable CORS entirely for debugging
+    info!("⚠️  TEMPORARY: CORS disabled for debugging - this should NOT be in production!");
     let cors = warp::cors()
-        .allow_origins(config.cors.allowed_origins.clone())
+        .allow_any_origin()
         .allow_headers(vec!["content-type", "authorization"])
         .allow_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"]);
+
+    // Add request logging to see what requests are coming in
+    let request_logger = warp::log::custom(|info| {
+        info!("🌐 Incoming request: {} {} from {}",
+              info.method(),
+              info.path(),
+              info.remote_addr().unwrap_or("unknown".parse().unwrap())
+        );
+        if let Some(origin) = info.request_headers().get("origin") {
+            info!("  - Origin header: {:?}", origin);
+        }
+        if let Some(user_agent) = info.request_headers().get("user-agent") {
+            info!("  - User-Agent: {:?}", user_agent);
+        }
+    });
 
     // GraphQL endpoint with authentication
     let pool_for_graphql = pool.clone();
@@ -400,6 +447,7 @@ async fn main() -> AppResult<()> {
         .or(auth_filter)
         .or(mcp_filter)
         .with(cors)
+        .with(request_logger)
         .with(warp::trace::request());
 
     // Initialize metrics
