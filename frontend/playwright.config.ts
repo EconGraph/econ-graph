@@ -7,6 +7,8 @@ import { defineConfig, devices } from '@playwright/test';
 console.log('🔧 Playwright Configuration:');
 console.log('  - FRONTEND_URL:', process.env.FRONTEND_URL);
 console.log('  - CI:', process.env.CI);
+console.log('  - TERM:', process.env.TERM);
+console.log('  - FORCE_COLOR:', process.env.FORCE_COLOR);
 console.log('  - Final baseURL:', process.env.FRONTEND_URL || (process.env.CI ? 'http://localhost:3000' : 'http://localhost:18473'));
 
 export default defineConfig({
@@ -20,7 +22,13 @@ export default defineConfig({
   /* Opt out of parallel tests on CI. */
   workers: process.env.CI ? 1 : undefined,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-  reporter: [['html', { open: 'never' }]],
+  reporter: process.env.CI ? [
+    ['line'], // Use line reporter for CI - designed for CI environments with good color support
+    ['list'], // Add list reporter for better test summary display
+    ['html', { open: 'never' }]
+  ] : [
+    ['html', { open: 'never' }]
+  ],
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
