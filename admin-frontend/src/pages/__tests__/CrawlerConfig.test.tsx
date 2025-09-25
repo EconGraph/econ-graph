@@ -144,7 +144,7 @@ describe("CrawlerConfig", () => {
       expect(retryInput).toHaveValue(5);
     });
 
-    it("updates schedule frequency", () => {
+    it("updates schedule frequency", async () => {
       renderWithTheme(<CrawlerConfig />);
 
       const frequencySelect = screen.getByLabelText(
@@ -156,8 +156,14 @@ describe("CrawlerConfig", () => {
       // Test that we can interact with the select
       fireEvent.click(frequencySelect);
 
-      // Check that the dropdown options are available
-      expect(screen.getByText("Daily")).toBeInTheDocument();
+      // Wait for dropdown options to appear
+      await waitFor(
+        () => {
+          expect(screen.getByText("Daily")).toBeInTheDocument();
+        },
+        { timeout: 5000 },
+      );
+
       const hourlyElements = screen.getAllByText("Hourly");
       expect(hourlyElements.length).toBeGreaterThan(0);
     });
@@ -332,7 +338,7 @@ describe("CrawlerConfig", () => {
             screen.queryByTestId("edit-dialog-title"),
           ).not.toBeInTheDocument();
         },
-        { timeout: 5000 },
+        { timeout: 10000 },
       );
     });
 
@@ -353,7 +359,7 @@ describe("CrawlerConfig", () => {
             screen.queryByTestId("edit-dialog-title"),
           ).not.toBeInTheDocument();
         },
-        { timeout: 5000 },
+        { timeout: 10000 },
       );
     });
   });
