@@ -65,7 +65,6 @@
 
 ### **🎤 Audio & Narration Files**
 - `professional-business-impact-narration.txt` - Business narration script
-- Various audio files and segments in demo-videos/
 
 ### **🛠️ Production Tools**
 - `professional-demo-orchestrator.sh` - Demo orchestration
@@ -113,7 +112,7 @@
 2. **Run the script** - it will guide you through setup
 3. **Follow the instructions** for recording
 4. **Record your screen** showing real UI interactions
-5. **Save the result** in `../demo-videos/`
+5. **Save the result** in your preferred location
 
 ---
 

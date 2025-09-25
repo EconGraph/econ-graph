@@ -97,3 +97,7 @@ codebase-analysis-report.md
 
 # Analysis configuration (customizable)
 codebase-analysis-config*.env
+
+# Demo videos and audio files
+demo-videos/
+*.aiff
