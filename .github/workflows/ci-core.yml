@@ -1861,6 +1861,32 @@ jobs:
       if: always()
       run: |
         echo "📋 Copying Playwright test artifacts from container..."
+
+        # DEBUG: List all running containers
+        echo "🔍 DEBUG: All running containers:"
+        docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
+
+        # DEBUG: Check if frontend-server container exists and is running
+        echo "🔍 DEBUG: Frontend container status:"
+        if docker ps --filter name=frontend-server --format "{{.Names}}" | grep -q frontend-server; then
+          echo "  ✅ frontend-server container is running"
+        else
+          echo "  ❌ frontend-server container not found or not running"
+        fi
+
+        # DEBUG: Check what's in the frontend container
+        echo "🔍 DEBUG: Contents of frontend-server container:"
+        docker exec frontend-server ls -la /app/ 2>/dev/null || echo "  ❌ Cannot access /app/ in frontend-server"
+
+        # DEBUG: Check for test-results in various locations
+        echo "🔍 DEBUG: Searching for test-results in frontend-server:"
+        docker exec frontend-server find /app -name "test-results" -type d 2>/dev/null || echo "  ❌ No test-results directory found"
+        docker exec frontend-server find /app -name "playwright-report" -type d 2>/dev/null || echo "  ❌ No playwright-report directory found"
+
+        # DEBUG: Check for any Playwright-related files
+        echo "🔍 DEBUG: Searching for Playwright files in frontend-server:"
+        docker exec frontend-server find /app -name "*.webm" -o -name "*.png" -o -name "*.md" | head -10 2>/dev/null || echo "  ❌ No Playwright files found"
+
         # Create local directories for artifacts
         mkdir -p test-results playwright-report
 
