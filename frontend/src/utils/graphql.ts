@@ -6,6 +6,11 @@
 
 const GRAPHQL_ENDPOINT = process.env.REACT_APP_GRAPHQL_URL || '/graphql';
 
+// Debug: Log the GraphQL endpoint being used
+console.log('🔧 Frontend GraphQL Configuration:');
+console.log('  - REACT_APP_GRAPHQL_URL:', process.env.REACT_APP_GRAPHQL_URL);
+console.log('  - Final GRAPHQL_ENDPOINT:', GRAPHQL_ENDPOINT);
+
 export interface GraphQLResponse<T = any> {
   data?: T;
   errors?: Array<{

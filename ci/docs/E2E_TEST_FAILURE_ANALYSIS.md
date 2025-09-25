@@ -3,6 +3,8 @@
 ## Overview
 The E2E Comprehensive Tests are failing with "Process completed with exit code 1" in the "Run end-to-end tests" step. This analysis identifies the root causes and provides fixes.
 
+**🎯 E2E Testing Philosophy**: E2E tests are designed to test the **ENTIRE system end-to-end, including real network calls to external services. NOT mocking external services is their fundamental purpose.**
+
 ## Root Causes Identified
 
 ### 1. Flaky Test Assertions
@@ -23,6 +25,12 @@ The E2E Comprehensive Tests are failing with "Process completed with exit code 1
 ### 4. Environment Dependencies
 - **Issue**: Tests assume specific data is present in the database
 - **Impact**: Tests fail if the test database doesn't have expected economic data
+
+### 5. External Service Dependencies (Expected Behavior)
+- **Issue**: Tests make real network calls to external services (Grafana, monitoring)
+- **Impact**: Tests fail when external services are not available in CI environment
+- **Note**: This is **EXPECTED E2E behavior** - real network calls are the point of E2E testing
+- **Solution**: Skip tests when external services unavailable, don't mock them
 
 ## Test Files with Issues
 
@@ -55,6 +63,12 @@ The E2E Comprehensive Tests are failing with "Process completed with exit code 1
 ### 4. Enhanced Debugging
 - Add better error messages and screenshots on failure
 - Improve test reporting
+
+### 5. Proper External Service Handling
+- **DO**: Skip tests when external services (Grafana) are unavailable
+- **DO**: Test actual network calls when services are available
+- **DON'T**: Mock external services in E2E tests (defeats the purpose)
+- **DON'T**: Treat external service failures as test failures
 
 ## Implementation Plan
 
