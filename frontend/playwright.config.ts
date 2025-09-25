@@ -46,6 +46,9 @@ export default defineConfig({
     /* Add network error interception */
     actionTimeout: 10000,
     navigationTimeout: 10000,
+
+    /* Add network request logging to all tests */
+    // This will be handled by the global setup
   },
 
   /* Configure projects for major browsers */

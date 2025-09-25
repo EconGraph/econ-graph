@@ -7,18 +7,20 @@ async function globalSetup(config: FullConfig) {
   const browser = await chromium.launch();
   const context = await browser.newContext();
 
-  // Add network error interception
+  // Add network request logging (ALL requests, not just failures)
   context.on('request', (request) => {
     console.log(`🌐 Playwright Network Request: ${request.method()} ${request.url()}`);
+    console.log(`   📋 Request headers: ${JSON.stringify(request.headers())}`);
   });
 
   context.on('response', (response) => {
     const status = response.status();
     const url = response.url();
+    console.log(`📡 Playwright Network Response: ${status} ${url}`);
     if (status >= 400) {
-      console.log(`❌ Playwright Network Error: ${status} ${url}`);
+      console.log(`   ❌ Error response: ${status} ${url}`);
     } else {
-      console.log(`✅ Playwright Network Success: ${status} ${url}`);
+      console.log(`   ✅ Success response: ${status} ${url}`);
     }
   });
 
