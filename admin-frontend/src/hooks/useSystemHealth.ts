@@ -17,7 +17,7 @@ import {
 // GraphQL client function - this will be mocked in tests
 const graphqlClient = async (query: string | any, variables?: any) => {
   // Convert GraphQL query to string if it's a DocumentNode
-  const queryString = typeof query === 'string' ? query : String(query);
+  const queryString = typeof query === "string" ? query : String(query);
   // This will be replaced by actual GraphQL client in production
   // For now, we'll use fetch to make GraphQL requests
   const response = await fetch("/graphql", {
