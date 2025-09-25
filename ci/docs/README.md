@@ -21,11 +21,57 @@ This directory contains documentation for the Continuous Integration and Continu
 The CI pipeline includes multiple specialized test suites that run in parallel:
 
 ### E2E Test Suites
+
+**🎯 Core E2E Testing Philosophy**: E2E tests are designed to test the **ENTIRE system end-to-end, including real network calls to external services. NOT mocking external services is their fundamental purpose.**
+
+#### **Test Suite Descriptions**
 - **Core Tests**: Basic functionality (navigation, authentication, dashboard)
 - **Global Analysis Tests**: World map, country selection, economic indicators (162 tests)
 - **Professional Analysis Tests**: Advanced charting, technical indicators (39 tests)
 - **Mobile Tests**: Mobile versions of all test suites
 - **Comprehensive Tests**: Integration/workflow tests (excludes specialized suites)
+
+#### **What E2E Tests Do**
+- **Make real HTTP requests** to backend APIs
+- **Connect to real databases** (test databases, not production)
+- **Test complete user workflows** from frontend to backend
+- **Verify actual network communication** between services
+- **Test with real data flows** and transformations
+- **Validate actual authentication flows** and security
+
+#### **⚠️ Practical Limitations in CI Environments**
+- **External Services**: Grafana, monitoring dashboards may not be running
+- **Third-party APIs**: FRED, BLS, World Bank APIs may have rate limits or require authentication
+- **Network Dependencies**: Tests may fail if external services are down
+- **Timeouts**: Network calls may take longer than unit test timeouts
+
+#### **🔧 Handling External Service Dependencies**
+```typescript
+// ✅ GOOD: Test the actual network call when possible
+test('grafana dashboard access', async () => {
+  // This test WILL make a real HTTP request to Grafana
+  const response = await page.goto('http://localhost:30001/health');
+  expect(response?.status()).toBe(200);
+});
+
+// ⚠️ ACCEPTABLE: Skip tests when external services unavailable
+test.skip('grafana dashboard integration', async () => {
+  // Only run when Grafana is actually running
+  // Skip in CI if Grafana not available
+});
+
+// ❌ WRONG: Don't mock external services in E2E tests
+test('grafana dashboard with mock', async () => {
+  // This defeats the purpose of E2E testing!
+  // Use integration tests instead if you need to mock
+});
+```
+
+#### **🏗️ E2E Test Environment Strategy**
+- **Local Development**: All external services running (Grafana, monitoring, etc.)
+- **CI Environment**: Core services only (backend, frontend, database)
+- **Staging Environment**: Full external service integration
+- **Production**: Full end-to-end validation
 
 ### CI Pipeline Jobs
 - `e2e-core-tests`: Basic functionality tests

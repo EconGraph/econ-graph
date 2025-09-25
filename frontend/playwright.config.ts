@@ -3,6 +3,12 @@ import { defineConfig, devices } from '@playwright/test';
 /**
  * @see https://playwright.dev/docs/test-configuration
  */
+// Debug: Log Playwright configuration
+console.log('🔧 Playwright Configuration:');
+console.log('  - FRONTEND_URL:', process.env.FRONTEND_URL);
+console.log('  - CI:', process.env.CI);
+console.log('  - Final baseURL:', process.env.FRONTEND_URL || (process.env.CI ? 'http://localhost:3000' : 'http://localhost:18473'));
+
 export default defineConfig({
   testDir: './tests/e2e',
   /* Run tests in files in parallel */
@@ -18,7 +24,7 @@ export default defineConfig({
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: 'http://localhost:18473',
+    baseURL: process.env.FRONTEND_URL || (process.env.CI ? 'http://localhost:3000' : 'http://localhost:18473'),
 
     /* Run in headless mode by default */
     headless: true,
@@ -31,6 +37,18 @@ export default defineConfig({
 
     /* Record video on failure */
     video: 'retain-on-failure',
+
+    /* Add network debugging */
+    extraHTTPHeaders: {
+      'X-Debug': 'playwright-test',
+    },
+
+    /* Add network error interception */
+    actionTimeout: 10000,
+    navigationTimeout: 10000,
+
+    /* Add network request logging to all tests */
+    // This will be handled by the global setup
   },
 
   /* Configure projects for major browsers */
@@ -62,10 +80,13 @@ export default defineConfig({
   ],
 
   /* Run your local dev server before starting the tests */
-  webServer: {
+  webServer: process.env.CI ? undefined : {
     command: 'cd dev-server && npm start',
     url: 'http://localhost:18473',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
   },
+
+  /* Global setup to add network error interception */
+  globalSetup: require.resolve('./tests/e2e/global-setup.ts'),
 });

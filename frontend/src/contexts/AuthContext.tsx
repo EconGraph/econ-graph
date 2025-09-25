@@ -52,6 +52,26 @@ const API_BASE_URL =
   process.env.REACT_APP_API_URL ||
   `http://localhost:${process.env.REACT_APP_BACKEND_PORT || '9876'}`;
 
+// Debug: Log the API URL being used
+console.log('🔧 Frontend API Configuration:');
+console.log('  - REACT_APP_API_URL:', process.env.REACT_APP_API_URL);
+console.log('  - REACT_APP_BACKEND_PORT:', process.env.REACT_APP_BACKEND_PORT);
+console.log('  - Final API_BASE_URL:', API_BASE_URL);
+
+// Debug: Test backend connectivity
+console.log('🔧 Testing backend connectivity...');
+fetch(`${API_BASE_URL}/health`)
+  .then(response => {
+    console.log('  - Backend health check response:', response.status, response.statusText);
+    return response.text();
+  })
+  .then(data => {
+    console.log('  - Backend health check data:', data);
+  })
+  .catch(error => {
+    console.error('  - Backend health check failed:', error);
+  });
+
 // Facebook SDK initialization
 declare global {
   interface Window {

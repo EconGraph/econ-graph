@@ -97,46 +97,6 @@ jobs:
         cargo build --verbose
       working-directory: backend
 
-  backend-migration-validation-tests:
-    name: Backend Migration Validation Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.branch || github.ref }}
-
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-
-    - name: Run migration order validation
-      run: |
-        cd backend
-        python3 scripts/check_migration_order.py
-
-    - name: Test migration validation with duplicate timestamps
-      run: |
-        cd backend
-        # Create a temporary migration with duplicate timestamp for testing
-        mkdir -p migrations/2025-02-01-000001_duplicate_migration_test
-        echo "-- Test migration" > migrations/2025-02-01-000001_duplicate_migration_test/up.sql
-        echo "-- Test migration down" > migrations/2025-02-01-000001_duplicate_migration_test/down.sql
-
-        # This should fail because the timestamp duplicates an existing migration
-        if python3 scripts/check_migration_order.py; then
-          echo "❌ Migration validation should have failed but didn't"
-          exit 1
-        else
-          echo "✅ Migration validation correctly detected duplicate timestamps"
-        fi
-
-        # Clean up test migration
-        rm -rf migrations/2025-02-01-000001_duplicate_migration_test
-
   backend-smoke-tests:
     name: Backend Smoke Tests (Fast)
     runs-on: ubuntu-latest
@@ -245,7 +205,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6-alpine
+        image: postgres:15-alpine
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
@@ -347,7 +307,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -425,7 +385,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -491,7 +451,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -557,7 +517,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -623,7 +583,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -689,7 +649,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -755,7 +715,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -821,7 +781,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -887,7 +847,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -953,7 +913,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1019,7 +979,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1085,7 +1045,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1151,7 +1111,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:15
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1506,7 +1466,7 @@ jobs:
     - name: Run backend integration tests
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --package econ-graph-backend --lib -- --test-threads=2 --nocapture integration_tests::tests::test_database_connection_test_during_startup integration_tests::tests::test_database_connection_test_with_invalid_url integration_tests::tests::test_database_authentication_failure integration_tests::tests::test_startup_failure_scenarios integration_tests::tests::test_database_connection_test_performance integration_tests::tests::test_initialize_database_function
+        cargo test --package econ-graph-backend --bin econ-graph-backend -- --test-threads=2 --nocapture integration_tests
       working-directory: backend
 
   frontend-integration-tests:
@@ -1536,7 +1496,7 @@ jobs:
       working-directory: frontend
       run: npm test -- --coverage --watchAll=false
       env:
-        REACT_APP_GRAPHQL_ENDPOINT: http://localhost:51249/graphql
+        REACT_APP_GRAPHQL_ENDPOINT: http://localhost:8080/graphql
 
   e2e-container-build:
     name: Build E2E Test Containers
@@ -1642,34 +1602,6 @@ jobs:
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
-    - name: Load CI port configuration
-      run: |
-        echo "⚠️  TEMPORARY: Using second source of truth (ci-ports.env)"
-        echo "TODO: Fix CI to use existing load-env.sh + ports.env system"
-        echo "See: GitHub issue #XXX - 'CI should use existing single source of truth'"
-        echo "Loading CI port configuration from ci-ports.env..."
-        set -a  # automatically export all variables
-        source ci-ports.env
-        set +a  # stop automatically exporting
-        echo "Backend port: $BACKEND_PORT"
-        echo "Frontend port: $FRONTEND_PORT"
-        echo "Backend URL: $BACKEND_URL"
-        echo "Frontend URL: $FRONTEND_URL"
-        echo "REACT_APP_GRAPHQL_ENDPOINT: $REACT_APP_GRAPHQL_ENDPOINT"
-        echo "REACT_APP_GRAPHQL_URL: $REACT_APP_GRAPHQL_URL"
-        echo "REACT_APP_BACKEND_PORT: $REACT_APP_BACKEND_PORT"
-        echo "CORS_ALLOWED_ORIGINS: $CORS_ALLOWED_ORIGINS"
-        # Export variables for subsequent steps
-        echo "BACKEND_PORT=$BACKEND_PORT" >> $GITHUB_ENV
-        echo "FRONTEND_PORT=$FRONTEND_PORT" >> $GITHUB_ENV
-        echo "BACKEND_URL=$BACKEND_URL" >> $GITHUB_ENV
-        echo "FRONTEND_URL=$FRONTEND_URL" >> $GITHUB_ENV
-        echo "REACT_APP_GRAPHQL_ENDPOINT=$REACT_APP_GRAPHQL_ENDPOINT" >> $GITHUB_ENV
-        echo "REACT_APP_API_URL=$REACT_APP_API_URL" >> $GITHUB_ENV
-        echo "REACT_APP_GRAPHQL_URL=$REACT_APP_GRAPHQL_URL" >> $GITHUB_ENV
-        echo "REACT_APP_BACKEND_PORT=$REACT_APP_BACKEND_PORT" >> $GITHUB_ENV
-        echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS" >> $GITHUB_ENV
-
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.89.0
 
@@ -1721,11 +1653,43 @@ jobs:
 
     # Backend is already built in the optimized container, no need to build it again
 
-    - name: Start services with health checks
+    - name: Start backend service
       run: |
-        # Start both frontend and backend services with proper health checks
-        chmod +x scripts/start-services-with-health-checks.sh
-        ./scripts/start-services-with-health-checks.sh
+        # Use the pre-built backend binary from the optimized container
+        docker run --rm -d --name backend-server \
+          -p 8080:8080 \
+          -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
+          econ-graph-e2e-optimized:latest \
+          ./backend/econ-graph-backend
+
+        # Wait for backend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:8080/health 2>/dev/null; then
+            echo "Backend is ready!"
+            break
+          fi
+          echo "Waiting for backend... ($i/30)"
+          sleep 2
+        done
+
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
+
+    - name: Start frontend service
+      run: |
+        # Use the pre-built frontend from the container
+        docker run --rm -d --name frontend-server \
+          -p 3000:3000 \
+          econ-graph-e2e-optimized:latest \
+          npx serve -s build -l 3000
 
         # Wait for frontend to be ready
         for i in {1..30}; do
@@ -1739,19 +1703,12 @@ jobs:
 
     - name: Run E2E Core Tests
       run: |
-        # Verify frontend connectivity and capture both backend and frontend logs during test execution
-        chmod +x scripts/verify-frontend-connectivity.sh
-        chmod +x scripts/run-e2e-with-backend-logs.sh
-        chmod +x scripts/run-e2e-with-frontend-logs.sh
-        # Execute E2E tests with proper exit code propagation
-        set -e  # Exit on any command failure
-        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:core
-
 
     - name: Stop services
       if: always()
@@ -1844,11 +1801,43 @@ jobs:
         docker load < e2e-container-optimized.tar.gz
         docker load < e2e-mobile-container-optimized.tar.gz
 
-    - name: Start services with health checks
+    - name: Start backend service
       run: |
-        # Start both frontend and backend services with proper health checks
-        chmod +x scripts/start-services-with-health-checks.sh
-        ./scripts/start-services-with-health-checks.sh
+        # Use the pre-built backend binary from the optimized container
+        docker run --rm -d --name backend-server \
+          -p 8080:8080 \
+          -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
+          econ-graph-e2e-optimized:latest \
+          ./backend/econ-graph-backend
+
+        # Wait for backend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:8080/health 2>/dev/null; then
+            echo "Backend is ready!"
+            break
+          fi
+          echo "Waiting for backend... ($i/30)"
+          sleep 2
+        done
+
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
+
+    - name: Start frontend service
+      run: |
+        # Use the pre-built frontend from the container
+        docker run --rm -d --name frontend-server \
+          -p 3000:3000 \
+          econ-graph-e2e-optimized:latest \
+          npx serve -s build -l 3000
 
         # Wait for frontend to be ready
         for i in {1..30}; do
@@ -1862,119 +1851,12 @@ jobs:
 
     - name: Run Global Analysis E2E Tests
       run: |
-        # Debug: Validate ports before running tests
-        echo "🔧 Port Validation Before E2E Tests:"
-        echo "  - Checking what ports are listening:"
-        netstat -tlnp | grep -E ":(3000|51249|8080|9876)" || echo "    No expected ports found"
-        echo "  - Testing URL reachability:"
-        curl -f -s --connect-timeout 5 http://localhost:3000 > /dev/null && echo "    ✅ Frontend (3000) reachable" || echo "    ❌ Frontend (3000) NOT reachable"
-        curl -f -s --connect-timeout 5 http://localhost:51249/health > /dev/null && echo "    ✅ Backend (51249) reachable" || echo "    ❌ Backend (51249) NOT reachable"
-        echo ""
-
-        # Debug: Frontend server detailed analysis
-        echo "🔧 Frontend Server Detailed Analysis:"
-        echo "  - Testing frontend HTML response:"
-        curl -v http://localhost:3000/ 2>&1 | head -20 || echo "    ❌ Cannot get frontend HTML"
-        echo "  - Testing frontend static files:"
-        curl -f -s --connect-timeout 5 http://localhost:3000/static/js/main.6b919b30.js > /dev/null && echo "    ✅ Frontend JS bundle reachable" || echo "    ❌ Frontend JS bundle NOT reachable"
-        echo "  - Testing frontend health endpoint:"
-        curl -f -s --connect-timeout 5 http://localhost:3000/health > /dev/null && echo "    ✅ Frontend health endpoint reachable" || echo "    ❌ Frontend health endpoint NOT reachable"
-        echo "  - Frontend container status:"
-        docker ps --filter name=frontend-server --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" || echo "    No frontend container found"
-        echo "  - Frontend container logs (last 20 lines):"
-        docker logs --tail 20 frontend-server 2>/dev/null || echo "    Cannot get frontend logs"
-        echo ""
-
-        # Verify frontend connectivity and capture both backend and frontend logs during test execution
-        chmod +x scripts/verify-frontend-connectivity.sh
-        chmod +x scripts/run-e2e-with-backend-logs.sh
-        chmod +x scripts/run-e2e-with-frontend-logs.sh
-        # Execute E2E tests with proper exit code propagation
-        set -e  # Exit on any command failure
-        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
-          -e DEBUG="pw:api,pw:browser*" \
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:global-analysis
-
-    - name: Copy Playwright test artifacts from runner filesystem
-      if: always()
-      run: |
-        echo "📋 Copying Playwright test artifacts from runner filesystem..."
-        echo "⚠️  FIXED: Playwright artifacts are on the runner, not in containers!"
-
-        # Playwright artifacts are on the runner, not in containers
-        # They should be in the frontend directory after the test run
-        echo "📋 Current working directory: $(pwd)"
-        echo "📋 Contents of current directory:"
-        ls -la
-
-        echo "📋 Contents of frontend directory:"
-        ls -la frontend/ || echo "No frontend directory found"
-
-        echo "📋 COMPREHENSIVE ARTIFACT SEARCH:"
-        echo "================================="
-
-        # Search in frontend directory
-        echo "📋 Searching for test-results in frontend directory:"
-        find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
-
-        echo "📋 Searching for playwright-report in frontend directory:"
-        find frontend -name "playwright-report" -type d 2>/dev/null || echo "No playwright-report directory found"
-
-        # Search for individual Playwright files
-        echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
-        find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
-
-        # COMPREHENSIVE SEARCH: Look everywhere on the runner
-        echo "📋 COMPREHENSIVE SEARCH - Looking for test-results anywhere on runner:"
-        find / -type d -name "test-results" 2>/dev/null | head -20 || echo "No test-results directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for playwright-report anywhere on runner:"
-        find / -type d -name "playwright-report" 2>/dev/null | head -20 || echo "No playwright-report directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for any Playwright files anywhere on runner:"
-        find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -20 || echo "No Playwright files found anywhere"
-
-        # Search in Docker containers
-        echo "📋 DOCKER CONTAINER SEARCH:"
-        echo "=========================="
-        for container in $(docker ps --format "{{.Names}}"); do
-          echo "📋 Searching in container: $container"
-          echo "  - Looking for test-results:"
-          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
-          echo "  - Looking for playwright-report:"
-          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
-          echo "  - Looking for Playwright files:"
-          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
-        done
-
-        # Copy artifacts to the root for upload
-        if [ -d "frontend/test-results" ]; then
-          echo "✅ Copying test-results from frontend/test-results"
-          cp -r frontend/test-results ./
-        fi
-
-        if [ -d "frontend/playwright-report" ]; then
-          echo "✅ Copying playwright-report from frontend/playwright-report"
-          cp -r frontend/playwright-report ./
-        fi
-
-        # List what we actually copied
-        echo "📋 Final artifact directories on host:"
-        ls -la test-results* playwright-report* 2>/dev/null || echo "No artifacts found"
-
-    - name: Upload Playwright test artifacts
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: playwright-test-results-e2e-global-analysis
-        path: |
-          test-results/
-          playwright-report/
-        retention-days: 7
 
     - name: Stop services
       if: always()
@@ -2067,11 +1949,43 @@ jobs:
         docker load < e2e-container-optimized.tar.gz
         docker load < e2e-mobile-container-optimized.tar.gz
 
-    - name: Start services with health checks
+    - name: Start backend service
       run: |
-        # Start both frontend and backend services with proper health checks
-        chmod +x scripts/start-services-with-health-checks.sh
-        ./scripts/start-services-with-health-checks.sh
+        # Use the pre-built backend binary from the optimized container
+        docker run --rm -d --name backend-server \
+          -p 8080:8080 \
+          -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
+          econ-graph-e2e-optimized:latest \
+          ./backend/econ-graph-backend
+
+        # Wait for backend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:8080/health 2>/dev/null; then
+            echo "Backend is ready!"
+            break
+          fi
+          echo "Waiting for backend... ($i/30)"
+          sleep 2
+        done
+
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
+
+    - name: Start frontend service
+      run: |
+        # Use the pre-built frontend from the container
+        docker run --rm -d --name frontend-server \
+          -p 3000:3000 \
+          econ-graph-e2e-optimized:latest \
+          npx serve -s build -l 3000
 
         # Wait for frontend to be ready
         for i in {1..30}; do
@@ -2085,95 +1999,12 @@ jobs:
 
     - name: Run Professional Analysis E2E Tests
       run: |
-        # Verify frontend connectivity and capture both backend and frontend logs during test execution
-        chmod +x scripts/verify-frontend-connectivity.sh
-        chmod +x scripts/run-e2e-with-backend-logs.sh
-        chmod +x scripts/run-e2e-with-frontend-logs.sh
-        # Execute E2E tests with proper exit code propagation
-        set -e  # Exit on any command failure
-        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:professional-analysis
-
-    - name: Copy Playwright test artifacts from runner filesystem
-      if: always()
-      run: |
-        echo "📋 Copying Playwright test artifacts from runner filesystem..."
-        echo "⚠️  FIXED: Playwright artifacts are on the runner, not in containers!"
-
-        # Playwright artifacts are on the runner, not in containers
-        # They should be in the frontend directory after the test run
-        echo "📋 Current working directory: $(pwd)"
-        echo "📋 Contents of current directory:"
-        ls -la
-
-        echo "📋 Contents of frontend directory:"
-        ls -la frontend/ || echo "No frontend directory found"
-
-        echo "📋 COMPREHENSIVE ARTIFACT SEARCH:"
-        echo "================================="
-
-        # Search in frontend directory
-        echo "📋 Searching for test-results in frontend directory:"
-        find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
-
-        echo "📋 Searching for playwright-report in frontend directory:"
-        find frontend -name "playwright-report" -type d 2>/dev/null || echo "No playwright-report directory found"
-
-        # Search for individual Playwright files
-        echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
-        find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
-
-        # COMPREHENSIVE SEARCH: Look everywhere on the runner
-        echo "📋 COMPREHENSIVE SEARCH - Looking for test-results anywhere on runner:"
-        find / -type d -name "test-results" 2>/dev/null | head -20 || echo "No test-results directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for playwright-report anywhere on runner:"
-        find / -type d -name "playwright-report" 2>/dev/null | head -20 || echo "No playwright-report directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for any Playwright files anywhere on runner:"
-        find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -20 || echo "No Playwright files found anywhere"
-
-        # Search in Docker containers
-        echo "📋 DOCKER CONTAINER SEARCH:"
-        echo "=========================="
-        for container in $(docker ps --format "{{.Names}}"); do
-          echo "📋 Searching in container: $container"
-          echo "  - Looking for test-results:"
-          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
-          echo "  - Looking for playwright-report:"
-          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
-          echo "  - Looking for Playwright files:"
-          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
-        done
-
-        # Copy artifacts to the root for upload
-        if [ -d "frontend/test-results" ]; then
-          echo "✅ Copying test-results from frontend/test-results"
-          cp -r frontend/test-results ./
-        fi
-
-        if [ -d "frontend/playwright-report" ]; then
-          echo "✅ Copying playwright-report from frontend/playwright-report"
-          cp -r frontend/playwright-report ./
-        fi
-
-        # List what we actually copied
-        echo "📋 Final artifact directories on host:"
-        ls -la test-results* playwright-report* 2>/dev/null || echo "No artifacts found"
-
-    - name: Upload Playwright test artifacts
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: playwright-test-results-e2e-professional-analysis
-        path: |
-          test-results/
-          playwright-report/
-        retention-days: 7
 
     - name: Stop services
       if: always()
@@ -2268,11 +2099,43 @@ jobs:
 
     # Backend is already built in the optimized container, no need to build it again
 
-    - name: Start services with health checks
+    - name: Start backend service
       run: |
-        # Start both frontend and backend services with proper health checks
-        chmod +x scripts/start-services-with-health-checks.sh
-        ./scripts/start-services-with-health-checks.sh
+        # Use the pre-built backend binary from the optimized container
+        docker run --rm -d --name backend-server \
+          -p 8080:8080 \
+          -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
+          econ-graph-e2e-optimized:latest \
+          ./backend/econ-graph-backend
+
+        # Wait for backend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:8080/health 2>/dev/null; then
+            echo "Backend is ready!"
+            break
+          fi
+          echo "Waiting for backend... ($i/30)"
+          sleep 2
+        done
+
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
+
+    - name: Start frontend service
+      run: |
+        # Use the pre-built frontend from the container
+        docker run --rm -d --name frontend-server \
+          -p 3000:3000 \
+          econ-graph-e2e-optimized:latest \
+          npx serve -s build -l 3000
 
         # Wait for frontend to be ready
         for i in {1..30}; do
@@ -2286,95 +2149,12 @@ jobs:
 
     - name: Run end-to-end tests
       run: |
-        # Verify frontend connectivity and capture both backend and frontend logs during test execution
-        chmod +x scripts/verify-frontend-connectivity.sh
-        chmod +x scripts/run-e2e-with-backend-logs.sh
-        chmod +x scripts/run-e2e-with-frontend-logs.sh
-        # Execute E2E tests with proper exit code propagation
-        set -e  # Exit on any command failure
-        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-optimized:latest \
           npm run test:e2e:comprehensive
-
-    - name: Copy Playwright test artifacts from runner filesystem
-      if: always()
-      run: |
-        echo "📋 Copying Playwright test artifacts from runner filesystem..."
-        echo "⚠️  FIXED: Playwright artifacts are on the runner, not in containers!"
-
-        # Playwright artifacts are on the runner, not in containers
-        # They should be in the frontend directory after the test run
-        echo "📋 Current working directory: $(pwd)"
-        echo "📋 Contents of current directory:"
-        ls -la
-
-        echo "📋 Contents of frontend directory:"
-        ls -la frontend/ || echo "No frontend directory found"
-
-        echo "📋 COMPREHENSIVE ARTIFACT SEARCH:"
-        echo "================================="
-
-        # Search in frontend directory
-        echo "📋 Searching for test-results in frontend directory:"
-        find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
-
-        echo "📋 Searching for playwright-report in frontend directory:"
-        find frontend -name "playwright-report" -type d 2>/dev/null || echo "No playwright-report directory found"
-
-        # Search for individual Playwright files
-        echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
-        find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
-
-        # COMPREHENSIVE SEARCH: Look everywhere on the runner
-        echo "📋 COMPREHENSIVE SEARCH - Looking for test-results anywhere on runner:"
-        find / -type d -name "test-results" 2>/dev/null | head -20 || echo "No test-results directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for playwright-report anywhere on runner:"
-        find / -type d -name "playwright-report" 2>/dev/null | head -20 || echo "No playwright-report directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for any Playwright files anywhere on runner:"
-        find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -20 || echo "No Playwright files found anywhere"
-
-        # Search in Docker containers
-        echo "📋 DOCKER CONTAINER SEARCH:"
-        echo "=========================="
-        for container in $(docker ps --format "{{.Names}}"); do
-          echo "📋 Searching in container: $container"
-          echo "  - Looking for test-results:"
-          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
-          echo "  - Looking for playwright-report:"
-          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
-          echo "  - Looking for Playwright files:"
-          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
-        done
-
-        # Copy artifacts to the root for upload
-        if [ -d "frontend/test-results" ]; then
-          echo "✅ Copying test-results from frontend/test-results"
-          cp -r frontend/test-results ./
-        fi
-
-        if [ -d "frontend/playwright-report" ]; then
-          echo "✅ Copying playwright-report from frontend/playwright-report"
-          cp -r frontend/playwright-report ./
-        fi
-
-        # List what we actually copied
-        echo "📋 Final artifact directories on host:"
-        ls -la test-results* playwright-report* 2>/dev/null || echo "No artifacts found"
-
-    - name: Upload Playwright test artifacts
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: playwright-test-results-e2e-comprehensive
-        path: |
-          test-results/
-          playwright-report/
-        retention-days: 7
 
     - name: Stop services
       if: always()
@@ -2471,15 +2251,39 @@ jobs:
 
     - name: Start backend service
       run: |
-        # Use comprehensive debugging script to diagnose all possible backend startup issues
-        chmod +x scripts/debug-backend-startup.sh
-        ./scripts/debug-backend-startup.sh
+        # Use the pre-built backend binary from the optimized container
+        docker run --rm -d --name backend-server \
+          -p 8080:8080 \
+          -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
+          econ-graph-e2e-optimized:latest \
+          ./backend/econ-graph-backend
+
+        # Wait for backend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:8080/health 2>/dev/null; then
+            echo "Backend is ready!"
+            break
+          fi
+          echo "Waiting for backend... ($i/30)"
+          sleep 2
+        done
+
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
 
     - name: Start frontend service
       run: |
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
-          --network host \
+          -p 3000:3000 \
           econ-graph-e2e-mobile-optimized:latest \
           npx serve -s build -l 3000
 
@@ -2495,93 +2299,12 @@ jobs:
 
     - name: Run Mobile Global Analysis E2E Tests
       run: |
-        # Use our log tailing script to capture backend logs during test execution
-        # Ensure proper exit code propagation from Playwright tests
-        set -e  # Exit on any command failure
-        chmod +x scripts/run-e2e-with-backend-logs.sh
-        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-mobile-optimized:latest \
           npm run test:e2e:mobile:global-analysis
-
-    - name: Copy Playwright test artifacts from runner filesystem
-      if: always()
-      run: |
-        echo "📋 Copying Playwright test artifacts from runner filesystem..."
-        echo "⚠️  FIXED: Playwright artifacts are on the runner, not in containers!"
-
-        # Playwright artifacts are on the runner, not in containers
-        # They should be in the frontend directory after the test run
-        echo "📋 Current working directory: $(pwd)"
-        echo "📋 Contents of current directory:"
-        ls -la
-
-        echo "📋 Contents of frontend directory:"
-        ls -la frontend/ || echo "No frontend directory found"
-
-        echo "📋 COMPREHENSIVE ARTIFACT SEARCH:"
-        echo "================================="
-
-        # Search in frontend directory
-        echo "📋 Searching for test-results in frontend directory:"
-        find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
-
-        echo "📋 Searching for playwright-report in frontend directory:"
-        find frontend -name "playwright-report" -type d 2>/dev/null || echo "No playwright-report directory found"
-
-        # Search for individual Playwright files
-        echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
-        find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
-
-        # COMPREHENSIVE SEARCH: Look everywhere on the runner
-        echo "📋 COMPREHENSIVE SEARCH - Looking for test-results anywhere on runner:"
-        find / -type d -name "test-results" 2>/dev/null | head -20 || echo "No test-results directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for playwright-report anywhere on runner:"
-        find / -type d -name "playwright-report" 2>/dev/null | head -20 || echo "No playwright-report directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for any Playwright files anywhere on runner:"
-        find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -20 || echo "No Playwright files found anywhere"
-
-        # Search in Docker containers
-        echo "📋 DOCKER CONTAINER SEARCH:"
-        echo "=========================="
-        for container in $(docker ps --format "{{.Names}}"); do
-          echo "📋 Searching in container: $container"
-          echo "  - Looking for test-results:"
-          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
-          echo "  - Looking for playwright-report:"
-          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
-          echo "  - Looking for Playwright files:"
-          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
-        done
-
-        # Copy artifacts to the root for upload
-        if [ -d "frontend/test-results" ]; then
-          echo "✅ Copying test-results from frontend/test-results"
-          cp -r frontend/test-results ./
-        fi
-
-        if [ -d "frontend/playwright-report" ]; then
-          echo "✅ Copying playwright-report from frontend/playwright-report"
-          cp -r frontend/playwright-report ./
-        fi
-
-        # List what we actually copied
-        echo "📋 Final artifact directories on host:"
-        ls -la test-results* playwright-report* 2>/dev/null || echo "No artifacts found"
-
-    - name: Upload Playwright test artifacts
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: playwright-test-results-mobile-e2e-global-analysis
-        path: |
-          test-results/
-          playwright-report/
-        retention-days: 7
 
     - name: Stop services
       if: always()
@@ -2678,15 +2401,39 @@ jobs:
 
     - name: Start backend service
       run: |
-        # Use comprehensive debugging script to diagnose all possible backend startup issues
-        chmod +x scripts/debug-backend-startup.sh
-        ./scripts/debug-backend-startup.sh
+        # Use the pre-built backend binary from the optimized container
+        docker run --rm -d --name backend-server \
+          -p 8080:8080 \
+          -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
+          econ-graph-e2e-optimized:latest \
+          ./backend/econ-graph-backend
+
+        # Wait for backend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:8080/health 2>/dev/null; then
+            echo "Backend is ready!"
+            break
+          fi
+          echo "Waiting for backend... ($i/30)"
+          sleep 2
+        done
+
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
 
     - name: Start frontend service
       run: |
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
-          --network host \
+          -p 3000:3000 \
           econ-graph-e2e-mobile-optimized:latest \
           npx serve -s build -l 3000
 
@@ -2702,93 +2449,12 @@ jobs:
 
     - name: Run Mobile Professional Analysis E2E Tests
       run: |
-        # Use our log tailing script to capture backend logs during test execution
-        # Ensure proper exit code propagation from Playwright tests
-        set -e  # Exit on any command failure
-        chmod +x scripts/run-e2e-with-backend-logs.sh
-        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-mobile-optimized:latest \
           npm run test:e2e:mobile:professional-analysis
-
-    - name: Copy Playwright test artifacts from runner filesystem
-      if: always()
-      run: |
-        echo "📋 Copying Playwright test artifacts from runner filesystem..."
-        echo "⚠️  FIXED: Playwright artifacts are on the runner, not in containers!"
-
-        # Playwright artifacts are on the runner, not in containers
-        # They should be in the frontend directory after the test run
-        echo "📋 Current working directory: $(pwd)"
-        echo "📋 Contents of current directory:"
-        ls -la
-
-        echo "📋 Contents of frontend directory:"
-        ls -la frontend/ || echo "No frontend directory found"
-
-        echo "📋 COMPREHENSIVE ARTIFACT SEARCH:"
-        echo "================================="
-
-        # Search in frontend directory
-        echo "📋 Searching for test-results in frontend directory:"
-        find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
-
-        echo "📋 Searching for playwright-report in frontend directory:"
-        find frontend -name "playwright-report" -type d 2>/dev/null || echo "No playwright-report directory found"
-
-        # Search for individual Playwright files
-        echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
-        find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
-
-        # COMPREHENSIVE SEARCH: Look everywhere on the runner
-        echo "📋 COMPREHENSIVE SEARCH - Looking for test-results anywhere on runner:"
-        find / -type d -name "test-results" 2>/dev/null | head -20 || echo "No test-results directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for playwright-report anywhere on runner:"
-        find / -type d -name "playwright-report" 2>/dev/null | head -20 || echo "No playwright-report directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for any Playwright files anywhere on runner:"
-        find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -20 || echo "No Playwright files found anywhere"
-
-        # Search in Docker containers
-        echo "📋 DOCKER CONTAINER SEARCH:"
-        echo "=========================="
-        for container in $(docker ps --format "{{.Names}}"); do
-          echo "📋 Searching in container: $container"
-          echo "  - Looking for test-results:"
-          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
-          echo "  - Looking for playwright-report:"
-          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
-          echo "  - Looking for Playwright files:"
-          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
-        done
-
-        # Copy artifacts to the root for upload
-        if [ -d "frontend/test-results" ]; then
-          echo "✅ Copying test-results from frontend/test-results"
-          cp -r frontend/test-results ./
-        fi
-
-        if [ -d "frontend/playwright-report" ]; then
-          echo "✅ Copying playwright-report from frontend/playwright-report"
-          cp -r frontend/playwright-report ./
-        fi
-
-        # List what we actually copied
-        echo "📋 Final artifact directories on host:"
-        ls -la test-results* playwright-report* 2>/dev/null || echo "No artifacts found"
-
-    - name: Upload Playwright test artifacts
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: playwright-test-results-mobile-e2e-professional-analysis
-        path: |
-          test-results/
-          playwright-report/
-        retention-days: 7
 
     - name: Stop services
       if: always()
@@ -2885,15 +2551,39 @@ jobs:
 
     - name: Start backend service
       run: |
-        # Use comprehensive debugging script to diagnose all possible backend startup issues
-        chmod +x scripts/debug-backend-startup.sh
-        ./scripts/debug-backend-startup.sh
+        # Use the pre-built backend binary from the optimized container
+        docker run --rm -d --name backend-server \
+          -p 8080:8080 \
+          -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
+          -e BACKEND_PORT=8080 \
+          econ-graph-e2e-optimized:latest \
+          ./backend/econ-graph-backend
+
+        # Wait for backend to be ready
+        for i in {1..30}; do
+          if curl -f http://localhost:8080/health 2>/dev/null; then
+            echo "Backend is ready!"
+            break
+          fi
+          echo "Waiting for backend... ($i/30)"
+          sleep 2
+        done
+
+        # Check if backend actually started
+        if ! curl -f http://localhost:8080/health 2>/dev/null; then
+          echo "❌ Backend failed to start after 30 attempts!"
+          echo "📋 Backend container logs:"
+          docker logs backend-server || echo "No logs available"
+          echo "📋 Backend container status:"
+          docker ps -a --filter name=backend-server || echo "Container not found"
+          exit 1
+        fi
 
     - name: Start frontend service
       run: |
         # Use the pre-built frontend from the container
         docker run --rm -d --name frontend-server \
-          --network host \
+          -p 3000:3000 \
           econ-graph-e2e-mobile-optimized:latest \
           npx serve -s build -l 3000
 
@@ -2909,93 +2599,12 @@ jobs:
 
     - name: Run mobile end-to-end tests (core only)
       run: |
-        # Use our log tailing script to capture backend logs during test execution
-        # Ensure proper exit code propagation from Playwright tests
-        set -e  # Exit on any command failure
-        chmod +x scripts/run-e2e-with-backend-logs.sh
-        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
+        docker run --rm \
           --network host \
           -w /app/frontend \
           -e BASE_URL=http://localhost:3000 \
           econ-graph-e2e-mobile-optimized:latest \
           npm run test:e2e:mobile:core
-
-    - name: Copy Playwright test artifacts from runner filesystem
-      if: always()
-      run: |
-        echo "📋 Copying Playwright test artifacts from runner filesystem..."
-        echo "⚠️  FIXED: Playwright artifacts are on the runner, not in containers!"
-
-        # Playwright artifacts are on the runner, not in containers
-        # They should be in the frontend directory after the test run
-        echo "📋 Current working directory: $(pwd)"
-        echo "📋 Contents of current directory:"
-        ls -la
-
-        echo "📋 Contents of frontend directory:"
-        ls -la frontend/ || echo "No frontend directory found"
-
-        echo "📋 COMPREHENSIVE ARTIFACT SEARCH:"
-        echo "================================="
-
-        # Search in frontend directory
-        echo "📋 Searching for test-results in frontend directory:"
-        find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
-
-        echo "📋 Searching for playwright-report in frontend directory:"
-        find frontend -name "playwright-report" -type d 2>/dev/null || echo "No playwright-report directory found"
-
-        # Search for individual Playwright files
-        echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
-        find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
-
-        # COMPREHENSIVE SEARCH: Look everywhere on the runner
-        echo "📋 COMPREHENSIVE SEARCH - Looking for test-results anywhere on runner:"
-        find / -type d -name "test-results" 2>/dev/null | head -20 || echo "No test-results directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for playwright-report anywhere on runner:"
-        find / -type d -name "playwright-report" 2>/dev/null | head -20 || echo "No playwright-report directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for any Playwright files anywhere on runner:"
-        find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -20 || echo "No Playwright files found anywhere"
-
-        # Search in Docker containers
-        echo "📋 DOCKER CONTAINER SEARCH:"
-        echo "=========================="
-        for container in $(docker ps --format "{{.Names}}"); do
-          echo "📋 Searching in container: $container"
-          echo "  - Looking for test-results:"
-          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
-          echo "  - Looking for playwright-report:"
-          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
-          echo "  - Looking for Playwright files:"
-          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
-        done
-
-        # Copy artifacts to the root for upload
-        if [ -d "frontend/test-results" ]; then
-          echo "✅ Copying test-results from frontend/test-results"
-          cp -r frontend/test-results ./
-        fi
-
-        if [ -d "frontend/playwright-report" ]; then
-          echo "✅ Copying playwright-report from frontend/playwright-report"
-          cp -r frontend/playwright-report ./
-        fi
-
-        # List what we actually copied
-        echo "📋 Final artifact directories on host:"
-        ls -la test-results* playwright-report* 2>/dev/null || echo "No artifacts found"
-
-    - name: Upload Playwright test artifacts
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: playwright-test-results-mobile-e2e-core
-        path: |
-          test-results/
-          playwright-report/
-        retention-days: 7
 
     - name: Stop services
       if: always()

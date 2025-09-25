@@ -16,6 +16,24 @@ pub type PooledConn<'a> = PooledConnection<'a, AsyncPgConnection>;
 
 /// Create a database connection pool
 pub async fn create_pool(database_url: &str) -> AppResult<DatabasePool> {
+    info!("🔍 Database connection debugging:");
+    info!("  - Raw DATABASE_URL: {}", database_url);
+
+    // Debug: Parse and log DATABASE_URL components
+    if let Ok(url) = url::Url::parse(database_url) {
+        info!("  - Parsed DATABASE_URL components:");
+        info!("    - Scheme: {:?}", url.scheme());
+        info!("    - Host: {:?}", url.host());
+        info!("    - Port: {:?}", url.port());
+        info!("    - Username: {:?}", url.username());
+        info!("    - Path: {:?}", url.path());
+    } else {
+        info!("  - Failed to parse DATABASE_URL as URL");
+    }
+
+    // Debug: PostgreSQL client library information
+    info!("  - PostgreSQL client library version: {}", env!("CARGO_PKG_VERSION"));
+
     let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
 
     let pool = Pool::builder()
@@ -80,6 +98,13 @@ pub async fn run_migrations(database_url: &str) -> AppResult<()> {
             "Attempting to connect to database for migrations: {}",
             formatted_url
         );
+
+        // Debug: Check environment variables that could affect database connection
+        info!("🔍 Migration connection environment variables:");
+        info!("  - USER: {:?}", std::env::var("USER").ok());
+        info!("  - PGUSER: {:?}", std::env::var("PGUSER").ok());
+        info!("  - PGPASSWORD: {:?}", std::env::var("PGPASSWORD").is_ok());
+        info!("  - PGDATABASE: {:?}", std::env::var("PGDATABASE").ok());
 
         // Try to establish connection
         let mut conn = diesel::PgConnection::establish(&formatted_url).map_err(|e| {

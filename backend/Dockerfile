@@ -59,12 +59,12 @@ RUN chown econuser:econuser /app/econ-graph-backend
 # Switch to non-root user
 USER econuser
 
-# Expose port
-EXPOSE 8080
+# Expose port (default, can be overridden at runtime)
+EXPOSE 9876
 
-# Health check
+# Health check (uses default port, should be overridden for different ports)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD curl -f http://localhost:${BACKEND_PORT:-9876}/health || exit 1
 
 # Run the application
 CMD ["./econ-graph-backend"]
