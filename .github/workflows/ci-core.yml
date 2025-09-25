@@ -1721,47 +1721,11 @@ jobs:
 
     # Backend is already built in the optimized container, no need to build it again
 
-    - name: Start backend service
+    - name: Start services with health checks
       run: |
-        # Use comprehensive debugging script to diagnose all possible backend startup issues
-        chmod +x scripts/debug-backend-startup.sh
-        ./scripts/debug-backend-startup.sh
-
-    - name: Start frontend service
-      run: |
-        # Use the pre-built frontend from the container
-        echo "🚀 Starting frontend service..."
-        echo "  - Using container: econ-graph-e2e-optimized:latest"
-        echo "  - Command: npx serve -s build -l 3000"
-        echo "  - Network: host"
-
-        # Start frontend server
-        docker run --rm -d --name frontend-server \
-          --network host \
-          econ-graph-e2e-optimized:latest \
-          npx serve -s build -l 3000
-
-        # Debug: Check if frontend container started
-        echo "📋 Frontend container status:"
-        docker ps --filter name=frontend-server --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-
-        # Debug: Check frontend container logs
-        echo "📋 Frontend container logs:"
-        sleep 2  # Give it a moment to start
-        docker logs frontend-server 2>&1 || echo "    Cannot get frontend logs"
-
-        # Debug: Test if frontend is accessible
-        echo "📋 Testing frontend accessibility:"
-        for i in {1..5}; do
-          echo "  - Attempt $i/5: Testing http://localhost:3000"
-          if curl -f -s --connect-timeout 5 http://localhost:3000 > /dev/null; then
-            echo "    ✅ Frontend is accessible!"
-            break
-          else
-            echo "    ⏳ Frontend not yet accessible, waiting 2s..."
-            sleep 2
-          fi
-        done
+        # Start both frontend and backend services with proper health checks
+        chmod +x scripts/start-services-with-health-checks.sh
+        ./scripts/start-services-with-health-checks.sh
 
         # Wait for frontend to be ready
         for i in {1..30}; do
@@ -1878,47 +1842,11 @@ jobs:
         docker load < e2e-container-optimized.tar.gz
         docker load < e2e-mobile-container-optimized.tar.gz
 
-    - name: Start backend service
+    - name: Start services with health checks
       run: |
-        # Use comprehensive debugging script to diagnose all possible backend startup issues
-        chmod +x scripts/debug-backend-startup.sh
-        ./scripts/debug-backend-startup.sh
-
-    - name: Start frontend service
-      run: |
-        # Use the pre-built frontend from the container
-        echo "🚀 Starting frontend service..."
-        echo "  - Using container: econ-graph-e2e-optimized:latest"
-        echo "  - Command: npx serve -s build -l 3000"
-        echo "  - Network: host"
-
-        # Start frontend server
-        docker run --rm -d --name frontend-server \
-          --network host \
-          econ-graph-e2e-optimized:latest \
-          npx serve -s build -l 3000
-
-        # Debug: Check if frontend container started
-        echo "📋 Frontend container status:"
-        docker ps --filter name=frontend-server --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-
-        # Debug: Check frontend container logs
-        echo "📋 Frontend container logs:"
-        sleep 2  # Give it a moment to start
-        docker logs frontend-server 2>&1 || echo "    Cannot get frontend logs"
-
-        # Debug: Test if frontend is accessible
-        echo "📋 Testing frontend accessibility:"
-        for i in {1..5}; do
-          echo "  - Attempt $i/5: Testing http://localhost:3000"
-          if curl -f -s --connect-timeout 5 http://localhost:3000 > /dev/null; then
-            echo "    ✅ Frontend is accessible!"
-            break
-          else
-            echo "    ⏳ Frontend not yet accessible, waiting 2s..."
-            sleep 2
-          fi
-        done
+        # Start both frontend and backend services with proper health checks
+        chmod +x scripts/start-services-with-health-checks.sh
+        ./scripts/start-services-with-health-checks.sh
 
         # Wait for frontend to be ready
         for i in {1..30}; do
@@ -2135,47 +2063,11 @@ jobs:
         docker load < e2e-container-optimized.tar.gz
         docker load < e2e-mobile-container-optimized.tar.gz
 
-    - name: Start backend service
+    - name: Start services with health checks
       run: |
-        # Use comprehensive debugging script to diagnose all possible backend startup issues
-        chmod +x scripts/debug-backend-startup.sh
-        ./scripts/debug-backend-startup.sh
-
-    - name: Start frontend service
-      run: |
-        # Use the pre-built frontend from the container
-        echo "🚀 Starting frontend service..."
-        echo "  - Using container: econ-graph-e2e-optimized:latest"
-        echo "  - Command: npx serve -s build -l 3000"
-        echo "  - Network: host"
-
-        # Start frontend server
-        docker run --rm -d --name frontend-server \
-          --network host \
-          econ-graph-e2e-optimized:latest \
-          npx serve -s build -l 3000
-
-        # Debug: Check if frontend container started
-        echo "📋 Frontend container status:"
-        docker ps --filter name=frontend-server --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-
-        # Debug: Check frontend container logs
-        echo "📋 Frontend container logs:"
-        sleep 2  # Give it a moment to start
-        docker logs frontend-server 2>&1 || echo "    Cannot get frontend logs"
-
-        # Debug: Test if frontend is accessible
-        echo "📋 Testing frontend accessibility:"
-        for i in {1..5}; do
-          echo "  - Attempt $i/5: Testing http://localhost:3000"
-          if curl -f -s --connect-timeout 5 http://localhost:3000 > /dev/null; then
-            echo "    ✅ Frontend is accessible!"
-            break
-          else
-            echo "    ⏳ Frontend not yet accessible, waiting 2s..."
-            sleep 2
-          fi
-        done
+        # Start both frontend and backend services with proper health checks
+        chmod +x scripts/start-services-with-health-checks.sh
+        ./scripts/start-services-with-health-checks.sh
 
         # Wait for frontend to be ready
         for i in {1..30}; do
@@ -2370,47 +2262,11 @@ jobs:
 
     # Backend is already built in the optimized container, no need to build it again
 
-    - name: Start backend service
+    - name: Start services with health checks
       run: |
-        # Use comprehensive debugging script to diagnose all possible backend startup issues
-        chmod +x scripts/debug-backend-startup.sh
-        ./scripts/debug-backend-startup.sh
-
-    - name: Start frontend service
-      run: |
-        # Use the pre-built frontend from the container
-        echo "🚀 Starting frontend service..."
-        echo "  - Using container: econ-graph-e2e-optimized:latest"
-        echo "  - Command: npx serve -s build -l 3000"
-        echo "  - Network: host"
-
-        # Start frontend server
-        docker run --rm -d --name frontend-server \
-          --network host \
-          econ-graph-e2e-optimized:latest \
-          npx serve -s build -l 3000
-
-        # Debug: Check if frontend container started
-        echo "📋 Frontend container status:"
-        docker ps --filter name=frontend-server --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-
-        # Debug: Check frontend container logs
-        echo "📋 Frontend container logs:"
-        sleep 2  # Give it a moment to start
-        docker logs frontend-server 2>&1 || echo "    Cannot get frontend logs"
-
-        # Debug: Test if frontend is accessible
-        echo "📋 Testing frontend accessibility:"
-        for i in {1..5}; do
-          echo "  - Attempt $i/5: Testing http://localhost:3000"
-          if curl -f -s --connect-timeout 5 http://localhost:3000 > /dev/null; then
-            echo "    ✅ Frontend is accessible!"
-            break
-          else
-            echo "    ⏳ Frontend not yet accessible, waiting 2s..."
-            sleep 2
-          fi
-        done
+        # Start both frontend and backend services with proper health checks
+        chmod +x scripts/start-services-with-health-checks.sh
+        ./scripts/start-services-with-health-checks.sh
 
         # Wait for frontend to be ready
         for i in {1..30}; do
