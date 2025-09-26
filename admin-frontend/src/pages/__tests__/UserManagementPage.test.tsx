@@ -6,13 +6,14 @@ import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
+import { vi } from "vitest";
 import UserManagementPage from "../UserManagementPage";
 
 // Set timeout for all tests in this file due to performance characteristics
 // TODO: Optimize UserManagementPage component performance to reduce test timeouts
-jest.setTimeout(60000);
+vi.setConfig({ testTimeout: 60000 });
 // Mock the contexts to prevent resource leaks
-jest.mock("../../contexts/AuthContext", () => ({
+vi.mock("../../contexts/AuthContext", () => ({
   AuthProvider: ({ children }: any) => children,
   useAuth: () => ({
     user: {
@@ -22,52 +23,52 @@ jest.mock("../../contexts/AuthContext", () => ({
       sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
     },
     isAuthenticated: true,
-    login: jest.fn(),
-    logout: jest.fn(),
-    refreshSession: jest.fn(),
-    extendSession: jest.fn(),
+    login: vi.fn(),
+    logout: vi.fn(),
+    refreshSession: vi.fn(),
+    extendSession: vi.fn(),
   }),
 }));
 
-jest.mock("../../contexts/SecurityContext", () => ({
+vi.mock("../../contexts/SecurityContext", () => ({
   SecurityProvider: ({ children }: any) => children,
   useSecurity: () => ({
-    checkAccess: jest.fn(() => true),
-    logSecurityEvent: jest.fn(),
+    checkAccess: vi.fn(() => true),
+    logSecurityEvent: vi.fn(),
     securityEvents: [],
     sessionRemainingTime: 3661, // 61 minutes and 1 second in seconds
   }),
 }));
 
 // Mock React Query to prevent "No QueryClient set" errors
-jest.mock("@tanstack/react-query", () => ({
-  ...jest.requireActual("@tanstack/react-query"),
+vi.mock("@tanstack/react-query", () => ({
+  ...vi.requireActual("@tanstack/react-query"),
   QueryClientProvider: ({ children }: any) => children,
-  useQuery: jest.fn(() => ({
+  useQuery: vi.fn(() => ({
     data: undefined,
     isLoading: false,
     error: null,
-    refetch: jest.fn(),
+    refetch: vi.fn(),
   })),
-  useMutation: jest.fn(() => ({
-    mutate: jest.fn(),
-    mutateAsync: jest.fn(),
+  useMutation: vi.fn(() => ({
+    mutate: vi.fn(),
+    mutateAsync: vi.fn(),
     isLoading: false,
     error: null,
   })),
-  useQueryClient: jest.fn(() => ({
-    invalidateQueries: jest.fn(),
-    setQueryData: jest.fn(),
+  useQueryClient: vi.fn(() => ({
+    invalidateQueries: vi.fn(),
+    setQueryData: vi.fn(),
   })),
 }));
 
 // Mock timers to prevent resource leaks
-jest.useFakeTimers();
+vi.useFakeTimers();
 
 // Mock setTimeout to run immediately in tests
-jest
+vi
   .spyOn(global, "setTimeout")
-  .mockImplementation((fn: any, delay?: number) => {
+  .mockImplementation((fn: any, _delay?: number) => {
     if (typeof fn === "function") {
       fn();
     }
@@ -75,9 +76,9 @@ jest
   });
 
 // Mock setInterval to prevent resource leaks
-jest
+vi
   .spyOn(global, "setInterval")
-  .mockImplementation((fn: any, delay?: number) => {
+  .mockImplementation((fn: any, _delay?: number) => {
     if (typeof fn === "function") {
       fn();
     }
@@ -91,17 +92,17 @@ jest
 //     email: "admin@test.com",
 //     role: "admin",
 //   },
-//   login: jest.fn(),
-//   logout: jest.fn(),
+//   login: vi.fn(),
+//   logout: vi.fn(),
 //   isAuthenticated: true,
 //   loading: false,
 // };
 
 // const mockSecurityContext = {
-//   checkAccess: jest.fn((role: string) => role === "super_admin"),
+//   checkAccess: vi.fn((role: string) => role === "super_admin"),
 //   sessionRemainingTime: 3600,
 //   securityEvents: [],
-//   refreshSecurityContext: jest.fn(),
+//   refreshSecurityContext: vi.fn(),
 // };
 
 // Create a test theme
@@ -116,10 +117,10 @@ const mockSuperAdminContext = {
     sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
   },
   isAuthenticated: true,
-  login: jest.fn(),
-  logout: jest.fn(),
-  refreshSession: jest.fn(),
-  extendSession: jest.fn(),
+  login: vi.fn(),
+  logout: vi.fn(),
+  refreshSession: vi.fn(),
+  extendSession: vi.fn(),
 };
 
 // Test wrapper component
@@ -134,7 +135,7 @@ const TestWrapper: React.FC<{
 
 describe("UserManagementPage", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe("Access Control", () => {

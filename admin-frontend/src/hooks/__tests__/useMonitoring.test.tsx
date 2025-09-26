@@ -8,6 +8,7 @@
 import { renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactNode } from "react";
+import { vi } from "vitest";
 import {
   useDashboards,
   useSystemStatus,
@@ -15,10 +16,10 @@ import {
 } from "../useMonitoring";
 
 // Mock the hooks to avoid the delay issues
-jest.mock("../useMonitoring", () => ({
-  useDashboards: jest.fn(),
-  useSystemStatus: jest.fn(),
-  useMonitoringMetrics: jest.fn(),
+vi.mock("../useMonitoring", () => ({
+  useDashboards: vi.fn(),
+  useSystemStatus: vi.fn(),
+  useMonitoringMetrics: vi.fn(),
 }));
 
 // Test wrapper with QueryClient
@@ -42,12 +43,12 @@ const createWrapper = () => {
 
 describe("React Query Monitoring Benefits", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it("demonstrates real-time data management", () => {
     // Mock real-time dashboard data
-    (useDashboards as jest.Mock).mockReturnValue({
+    (useDashboards as any).mockReturnValue({
       data: [
         {
           id: "dashboard-1",
@@ -64,7 +65,7 @@ describe("React Query Monitoring Benefits", () => {
       ],
       isLoading: false,
       error: null,
-      refetch: jest.fn(),
+      refetch: vi.fn(),
     });
 
     const { result } = renderHook(() => useDashboards(), {
@@ -80,7 +81,7 @@ describe("React Query Monitoring Benefits", () => {
 
   it("demonstrates system status monitoring", () => {
     // Mock system status data
-    (useSystemStatus as jest.Mock).mockReturnValue({
+    (useSystemStatus as any).mockReturnValue({
       data: {
         overall: "healthy",
         services: {
@@ -107,7 +108,7 @@ describe("React Query Monitoring Benefits", () => {
 
   it("demonstrates aggregated metrics calculation", () => {
     // Mock aggregated metrics
-    (useMonitoringMetrics as jest.Mock).mockReturnValue({
+    (useMonitoringMetrics as any).mockReturnValue({
       totalSeries: 1250,
       activeCrawlers: 3,
       totalDataPoints: 45000,
@@ -128,11 +129,11 @@ describe("React Query Monitoring Benefits", () => {
 
   it("demonstrates background refresh capabilities", () => {
     // Mock background refresh
-    (useDashboards as jest.Mock).mockReturnValue({
+    (useDashboards as any).mockReturnValue({
       data: [],
       isLoading: false,
       error: null,
-      refetch: jest.fn(),
+      refetch: vi.fn(),
       // React Query provides these automatically
       isRefetching: true,
       isStale: false,

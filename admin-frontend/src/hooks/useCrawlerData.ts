@@ -9,16 +9,12 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   GET_CRAWLER_STATUS,
   GET_QUEUE_STATISTICS,
   GET_PERFORMANCE_METRICS,
   GET_CRAWLER_LOGS,
-  type CrawlerStatus,
-  type QueueStatistics,
-  type PerformanceMetrics,
-  type LogEntry,
 } from "../services/graphql/queries";
 import {
   TRIGGER_CRAWL,

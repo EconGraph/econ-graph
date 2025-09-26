@@ -39,27 +39,7 @@ import {
 } from "@mui/icons-material";
 import { useSystemHealth } from "../hooks/useSystemHealth";
 
-interface HealthMetric {
-  name: string;
-  status: "healthy" | "warning" | "error" | "unknown";
-  value: string;
-  description: string;
-  trend?: "up" | "down" | "stable";
-  lastCheck: string;
-  grafanaUrl?: string;
-}
-
-interface ServiceStatus {
-  name: string;
-  status: "running" | "stopped" | "degraded" | "unknown";
-  uptime: string;
-  version: string;
-  resources: {
-    cpu: number;
-    memory: number;
-    disk: number;
-  };
-}
+// Removed unused interface definitions
 
 // Memoized component for expensive date formatting operations
 const FormattedDate = React.memo(({ date }: { date: Date }) => {
@@ -191,9 +171,9 @@ export default function SystemHealthPage() {
       uptime: `${Math.floor(systemHealth.uptime_seconds / 86400)}d ${Math.floor((systemHealth.uptime_seconds % 86400) / 3600)}h`,
       version: systemHealth.version || "unknown",
       resources: {
-        cpu: Math.floor(Math.random() * 100), // TODO: Get real resource data from GraphQL
-        memory: Math.floor(Math.random() * 100),
-        disk: Math.floor(Math.random() * 100),
+        cpu: systemHealth.cpu_usage || 0,
+        memory: systemHealth.memory_usage || 0,
+        disk: systemHealth.disk_usage || 0,
       },
     }));
   }, [systemHealth]);

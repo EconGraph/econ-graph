@@ -154,7 +154,10 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
     setFilteredLogs(filtered);
   }, [logs, searchResults, levelFilter, sourceFilter, searchTerm]);
 
-  // Mock performance metrics (TODO: Replace with real GraphQL call)
+  // Mock performance metrics - KEPT for UI demonstration purposes
+  // NOTE: This component is disabled due to missing backend implementation (see GitHub issue)
+  // The mock data is intentionally preserved to show the intended UI behavior
+  // until the backend crawler logs implementation is complete
   useEffect(() => {
     const updateMetrics = () => {
       setPerformanceMetrics({

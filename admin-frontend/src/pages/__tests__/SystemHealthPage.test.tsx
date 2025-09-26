@@ -10,23 +10,25 @@ import SystemHealthPage from "../SystemHealthPage";
 import { AuthProvider } from "../../contexts/AuthContext";
 import { SecurityProvider } from "../../contexts/SecurityContext";
 
+import { vi } from "vitest";
+
 // Mock fetch to prevent network requests to Grafana
-global.fetch = jest.fn(() =>
+global.fetch = vi.fn(() =>
   Promise.resolve({
     ok: true,
     status: 200,
     json: () => Promise.resolve({}),
     text: () => Promise.resolve(""),
   }),
-) as jest.Mock;
+) as any;
 
 // Mock setTimeout to run immediately in tests
-jest.useFakeTimers();
+vi.useFakeTimers();
 
 // Mock all timers to run immediately
-jest
+vi
   .spyOn(global, "setTimeout")
-  .mockImplementation((fn: any, delay?: number) => {
+  .mockImplementation((fn: any, _delay?: number) => {
     if (typeof fn === "function") {
       // Run the function immediately for tests
       fn();
@@ -35,9 +37,9 @@ jest
   });
 
 // Mock setInterval to prevent resource leaks
-jest
+vi
   .spyOn(global, "setInterval")
-  .mockImplementation((fn: any, delay?: number) => {
+  .mockImplementation((fn: any, _delay?: number) => {
     if (typeof fn === "function") {
       // Run the function immediately for tests
       fn();
@@ -50,12 +52,12 @@ jest
 
 // Mock window.open to prevent actual navigation
 Object.defineProperty(window, "open", {
-  value: jest.fn(),
+  value: vi.fn(),
   writable: true,
 });
 
 // Mock the contexts to prevent network requests
-jest.mock("../../contexts/AuthContext", () => ({
+vi.mock("../../contexts/AuthContext", () => ({
   AuthProvider: ({ children }: any) => children,
   useAuth: () => ({
     user: {
@@ -64,20 +66,20 @@ jest.mock("../../contexts/AuthContext", () => ({
       email: "admin@test.com",
       role: "admin",
     },
-    login: jest.fn(),
-    logout: jest.fn(),
+    login: vi.fn(),
+    logout: vi.fn(),
     isAuthenticated: true,
     loading: false,
   }),
 }));
 
-jest.mock("../../contexts/SecurityContext", () => ({
+vi.mock("../../contexts/SecurityContext", () => ({
   SecurityProvider: ({ children }: any) => children,
   useSecurity: () => ({
-    checkAccess: jest.fn(() => true),
+    checkAccess: vi.fn(() => true),
     sessionRemainingTime: 3600,
     securityEvents: [],
-    refreshSecurityContext: jest.fn(),
+    refreshSecurityContext: vi.fn(),
   }),
 }));
 
@@ -97,18 +99,18 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 describe("SystemHealthPage", () => {
   // Set a generous timeout for this component due to complex initialization
-  jest.setTimeout(5000);
+  vi.setConfig({ testTimeout: 5000 });
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    jest.clearAllTimers();
+    vi.clearAllMocks();
+    vi.clearAllTimers();
     // Run all pending timers immediately to prevent timeouts
-    jest.runAllTimers();
+    vi.runAllTimers();
   });
 
   afterEach(() => {
-    jest.runAllTimers();
-    jest.clearAllTimers();
+    vi.runAllTimers();
+    vi.clearAllTimers();
   });
 
   describe("Rendering", () => {

@@ -13,7 +13,6 @@ import { useCallback } from "react";
 import {
   GET_CRAWLER_LOGS,
   SEARCH_LOGS,
-  type LogEntry,
 } from "../services/graphql/queries";
 
 // GraphQL client function - this will be mocked in tests

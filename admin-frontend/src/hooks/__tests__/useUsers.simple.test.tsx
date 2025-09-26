@@ -8,13 +8,14 @@
 import { renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactNode } from "react";
+import { vi } from "vitest";
 import { useUsers } from "../useUsers";
 
 // Mock the hooks to avoid the delay issues
-jest.mock("../useUsers", () => ({
-  useUsers: jest.fn(),
-  useOnlineUsers: jest.fn(),
-  useUser: jest.fn(),
+vi.mock("../useUsers", () => ({
+  useUsers: vi.fn(),
+  useOnlineUsers: vi.fn(),
+  useUser: vi.fn(),
 }));
 
 // Test wrapper with QueryClient
@@ -38,19 +39,19 @@ const createWrapper = () => {
 
 describe("React Query Testability Benefits", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it("demonstrates simplified state management", () => {
     // Mock the hook to return predictable data
-    (useUsers as jest.Mock).mockReturnValue({
+    (useUsers as any).mockReturnValue({
       data: [
         { id: "1", name: "John", role: "admin" },
         { id: "2", name: "Jane", role: "user" },
       ],
       isLoading: false,
       error: null,
-      refetch: jest.fn(),
+      refetch: vi.fn(),
     });
 
     const { result } = renderHook(() => useUsers(), {
@@ -66,11 +67,11 @@ describe("React Query Testability Benefits", () => {
 
   it("demonstrates easy error state testing", () => {
     // Mock error state
-    (useUsers as jest.Mock).mockReturnValue({
+    (useUsers as any).mockReturnValue({
       data: undefined,
       isLoading: false,
       error: new Error("Network error"),
-      refetch: jest.fn(),
+      refetch: vi.fn(),
     });
 
     const { result } = renderHook(() => useUsers(), {
@@ -84,11 +85,11 @@ describe("React Query Testability Benefits", () => {
 
   it("demonstrates loading state testing", () => {
     // Mock loading state
-    (useUsers as jest.Mock).mockReturnValue({
+    (useUsers as any).mockReturnValue({
       data: undefined,
       isLoading: true,
       error: null,
-      refetch: jest.fn(),
+      refetch: vi.fn(),
     });
 
     const { result } = renderHook(() => useUsers(), {
@@ -102,7 +103,7 @@ describe("React Query Testability Benefits", () => {
 
   it("demonstrates query key-based caching", () => {
     // Mock different queries with different keys
-    (useUsers as jest.Mock).mockReturnValue({
+    (useUsers as any).mockReturnValue({
       data: [{ id: "1", name: "John", role: "admin" }],
       isLoading: false,
       error: null,
