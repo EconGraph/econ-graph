@@ -7,6 +7,7 @@
 
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
+import { vi } from 'vitest';
 import '@testing-library/jest-dom';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { BrowserRouter } from 'react-router-dom';
@@ -18,7 +19,7 @@ import { BenchmarkComparison } from '../../components/financial/BenchmarkCompari
 import { TrendAnalysisChart } from '../../components/financial/TrendAnalysisChart';
 
 // Mock the API calls
-const mockFetch = jest.fn();
+const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 // Mock financial data
@@ -220,18 +221,22 @@ const createTestWrapper = () => {
     },
   });
 
-  return ({ children }: { children: React.ReactNode }) => (
+  const TestWrapper = ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         {children}
       </BrowserRouter>
     </QueryClientProvider>
   );
+
+  TestWrapper.displayName = 'TestWrapper';
+
+  return TestWrapper;
 };
 
 describe('XBRL Financial Integration Tests', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     // Mock successful API responses
     mockFetch.mockImplementation((url: string) => {

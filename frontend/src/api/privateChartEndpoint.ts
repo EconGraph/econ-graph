@@ -58,8 +58,8 @@ export async function handlePrivateChartRequest(req: Request, res: Response): Pr
     // Return successful response
     res.status(200).json({
       success: true,
-      chartConfig: chartResponse.chartConfig,
-      chartData: chartResponse.chartData,
+      chartConfig: chartResponse.config,
+      chartData: chartResponse.config,
       metadata: chartResponse.metadata,
       message: 'Chart configuration generated successfully',
     });
