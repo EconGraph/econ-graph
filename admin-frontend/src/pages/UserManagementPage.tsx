@@ -640,17 +640,20 @@ export default function UserManagementPage() {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Typography
-                          variant="caption"
-                          fontFamily="monospace"
-                          sx={{
-                            maxWidth: 200,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {user.userAgent}
-                        </Typography>
+                        <Tooltip title={user.userAgent} placement="top">
+                          <Typography
+                            variant="caption"
+                            fontFamily="monospace"
+                            sx={{
+                              maxWidth: 200,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              cursor: "help",
+                            }}
+                          >
+                            {user.userAgent}
+                          </Typography>
+                        </Tooltip>
                       </TableCell>
                       <TableCell>
                         <FormattedDateTime dateString={user.lastLogin} />
