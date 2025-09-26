@@ -16,47 +16,47 @@ Build a financial data service as an experimental branch that can be optionally 
 
 ### **Financial Data Service (New)**
 ```
-┌─────────────────────────────────────────┐
-│           Financial Data Service        │
-├─────────────────────────────────────────┤
+┌────────────────────────────────────────┐
+│          Financial Data Service        │
+├────────────────────────────────────────┤
 │  GraphQL Read API (Apollo Server)      │
 │  Clean Data Write API (REST/GraphQL)   │
 │  Apache Parquet + Iceberg + Arrow      │
 │  Clean Financial Time Series Data      │
-└─────────────────────────────────────────┘
+└────────────────────────────────────────┘
 ```
 
 ### **Crawler Service (New)**
 ```
-┌─────────────────────────────────────────┐
-│             Crawler Service              │
-├─────────────────────────────────────────┤
+┌────────────────────────────────────────┐
+│             Crawler Service            │
+├────────────────────────────────────────┤
 │  Raw Data Archive (Iceberg)            │
 │  Job Management & Scheduling           │
 │  Data Validation & Transformation      │
 │  Error Handling & Retry Logic          │
-└─────────────────────────────────────────┘
+└────────────────────────────────────────┘
 ```
 
 ### **Existing Monolithic Backend (Unchanged)**
 ```
-┌─────────────────────────────────────────┐
-│         Monolithic Backend              │
-├─────────────────────────────────────────┤
+┌────────────────────────────────────────┐
+│         Monolithic Backend             │
+├────────────────────────────────────────┤
 │  GraphQL API (Existing)                │
 │  PostgreSQL Database                   │
 │  All Current Functionality             │
-└─────────────────────────────────────────┘
+└────────────────────────────────────────┘
 ```
 
 ### **Optional Federation (Experimental)**
 ```
-┌─────────────────────────────────────────┐
-│           Apollo Gateway                │
-├─────────────────────────────────────────┤
+┌────────────────────────────────────────┐
+│           Apollo Gateway               │
+├────────────────────────────────────────┤
 │  Monolithic Backend (User Data)        │
 │  Financial Data Service (Financial)    │
-└─────────────────────────────────────────┘
+└────────────────────────────────────────┘
 ```
 
 ## Implementation Steps
@@ -83,42 +83,85 @@ backend/
 **Technology Stack:**
 - **Rust**: Same language as existing backend
 - **GraphQL**: Apollo Server for read API
-- **Database**: Apache Parquet + Iceberg + Arrow
+- **Storage**: Apache Arrow Flight + Parquet (V1) → Arrow Flight + Iceberg (V2)
 - **Crawler API**: REST or GraphQL mutations
 
-### **Step 2: Time Series Database Setup**
+### **Step 2: Arrow Flight Storage Layer**
 
-**Apache Parquet + Iceberg + Arrow Integration:**
+**Arrow Flight + Parquet Integration (V1):**
 ```rust
-// Example structure
+// Storage abstraction using Arrow Flight
 pub struct FinancialDataService {
-    parquet_storage: ParquetStorage,
-    iceberg_manager: IcebergManager,
-    arrow_processor: ArrowProcessor,
+    arrow_flight_client: ArrowFlightClient,
+    storage_backend: Box<dyn FinancialDataStorage>,
 }
 
-impl FinancialDataService {
-    pub async fn write_financial_data(&self, data: FinancialData) -> Result<()> {
-        // Write to Parquet with Iceberg metadata
-        // Process with Arrow for analytics
-    }
-    
-    pub async fn query_financial_data(&self, query: GraphQLQuery) -> Result<FinancialData> {
-        // Query using Arrow for fast analytics
-        // Return structured data
-    }
+// Storage trait - same interface for V1 and V2
+#[async_trait]
+pub trait FinancialDataStorage: Send + Sync {
+    async fn write_series(&self, series: &EconomicSeries) -> Result<()>;
+    async fn read_series(&self, id: Uuid) -> Result<Option<EconomicSeries>>;
+    async fn write_data_points(&self, series_id: Uuid, points: &[DataPoint]) -> Result<()>;
+    async fn read_data_points(&self, series_id: Uuid, start: Option<NaiveDate>, end: Option<NaiveDate>) -> Result<Vec<DataPoint>>;
+}
+
+// V1: Direct Parquet files via Arrow Flight
+pub struct ParquetStorage {
+    flight_server: ArrowFlightServer,
+    data_dir: PathBuf,
+}
+
+// V2: Iceberg-managed Parquet files via Arrow Flight  
+pub struct IcebergStorage {
+    flight_server: ArrowFlightServer,
+    iceberg_catalog: IcebergCatalog,
 }
 ```
 
-**Database Schema:**
+**Benefits of Arrow Flight Approach:**
+- **Zero-copy data transfer**: Direct memory-to-memory operations
+- **Sub-millisecond latency**: No SQL parsing overhead
+- **Future-proof**: Same API for V1 (Parquet) and V2 (Iceberg)
+- **Standard protocol**: Arrow Flight is a standard, not custom code
+- **No throwaway work**: V1 implementation directly evolves to V2
+
+**Arrow Flight Schema (V1):**
+```rust
+// Arrow schema for financial series
+let series_schema = Schema::new(vec![
+    Field::new("id", DataType::Utf8, false),
+    Field::new("source_id", DataType::Utf8, false),
+    Field::new("external_id", DataType::Utf8, false),
+    Field::new("title", DataType::Utf8, false),
+    Field::new("description", DataType::Utf8, true),
+    Field::new("frequency", DataType::Utf8, false),
+    Field::new("is_active", DataType::Boolean, false),
+    Field::new("created_at", DataType::Timestamp(TimeUnit::Nanosecond, None), false),
+]);
+
+// Arrow schema for data points
+let data_points_schema = Schema::new(vec![
+    Field::new("id", DataType::Utf8, false),
+    Field::new("series_id", DataType::Utf8, false),
+    Field::new("date", DataType::Date32, false),
+    Field::new("value", DataType::Float64, true),
+    Field::new("revision_date", DataType::Date32, false),
+    Field::new("is_original_release", DataType::Boolean, false),
+]);
+```
+
+**V2 Iceberg Schema (Future):**
 ```sql
--- Iceberg table for financial time series
+-- Same data, but managed by Iceberg
 CREATE TABLE financial_series (
     id UUID,
-    series_id VARCHAR,
-    timestamp TIMESTAMP,
-    value DECIMAL,
-    metadata JSONB
+    source_id UUID,
+    external_id VARCHAR,
+    title VARCHAR,
+    description VARCHAR,
+    frequency VARCHAR,
+    is_active BOOLEAN,
+    created_at TIMESTAMP
 ) USING ICEBERG;
 ```
 

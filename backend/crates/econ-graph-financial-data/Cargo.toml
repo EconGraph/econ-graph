@@ -18,8 +18,14 @@ tower-http = { version = "0.5", features = ["cors", "trace"] }
 apache-avro = "0.14"
 parquet = "56.0"
 arrow = "56.0"
+arrow-flight = "56.0"
 object_store = "0.12"
 minio = "0.3"
+
+# Arrow Flight dependencies
+tonic = "0.13"
+prost = "0.13"
+bytes = "1.0"
 
 # Serialization
 serde = { workspace = true }
@@ -44,7 +50,11 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 
+# Async traits
+async-trait = "0.1"
+
 # Testing
 [dev-dependencies]
 tokio-test = { workspace = true }
 tempfile = { workspace = true }
+reqwest = { version = "0.12", features = ["json"] }

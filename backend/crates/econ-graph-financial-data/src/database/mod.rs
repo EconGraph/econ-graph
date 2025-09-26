@@ -1,76 +1,76 @@
 use anyhow::Result;
-use std::collections::HashMap;
+use chrono::NaiveDate;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use uuid::Uuid;
+
+use crate::models::{DataPoint, EconomicSeries};
+use crate::storage::{FinancialDataStorage, InMemoryStorage, ParquetStorage};
 
 /// Database abstraction for financial data service
+///
+/// This uses the storage abstraction to provide a clean interface
+/// that can work with both Parquet (V1) and Iceberg (V2) backends
 #[derive(Clone)]
 pub struct Database {
-    // In a real implementation, this would contain the actual database connections
-    // For now, we'll use in-memory storage for testing
-    series_cache: Arc<Mutex<HashMap<uuid::Uuid, crate::models::EconomicSeries>>>,
-    data_points_cache: Arc<Mutex<HashMap<uuid::Uuid, Vec<crate::models::DataPoint>>>>,
+    storage: Arc<dyn FinancialDataStorage + Send + Sync>,
 }
 
 impl Database {
-    pub async fn new() -> Result<Self> {
-        tracing::info!("Initializing database connection");
+    /// Create a new database with Parquet storage (V1)
+    pub async fn new_with_parquet(data_dir: impl Into<String>) -> Result<Self> {
+        tracing::info!("Initializing database with Parquet storage");
 
-        // In a real implementation, this would:
-        // 1. Connect to MinIO instances for different storage tiers
-        // 2. Set up Iceberg tables
-        // 3. Configure storage tiering policies
-
+        let storage = ParquetStorage::new(data_dir.into());
         Ok(Self {
-            series_cache: Arc::new(Mutex::new(HashMap::new())),
-            data_points_cache: Arc::new(Mutex::new(HashMap::new())),
+            storage: Arc::new(storage),
         })
     }
 
-    pub async fn get_series(
-        &self,
-        id: uuid::Uuid,
-    ) -> Result<Option<crate::models::EconomicSeries>> {
-        let cache = self.series_cache.lock().await;
-        Ok(cache.get(&id).cloned())
+    /// Create a new database with in-memory storage (for testing)
+    pub async fn new_in_memory() -> Result<Self> {
+        tracing::info!("Initializing database with in-memory storage for testing");
+
+        // For testing, we'll use a simple in-memory implementation
+        // This will be replaced with the storage abstraction
+        use std::collections::HashMap;
+        use std::sync::Mutex;
+
+        let storage = InMemoryStorage::new();
+        Ok(Self {
+            storage: Arc::new(storage),
+        })
+    }
+
+    pub async fn get_series(&self, id: Uuid) -> Result<Option<EconomicSeries>> {
+        self.storage.read_series(id).await
     }
 
     pub async fn get_data_points(
         &self,
-        series_id: uuid::Uuid,
-        start_date: Option<chrono::NaiveDate>,
-        end_date: Option<chrono::NaiveDate>,
-    ) -> Result<Vec<crate::models::DataPoint>> {
-        let cache = self.data_points_cache.lock().await;
-        let points = cache.get(&series_id).cloned().unwrap_or_default();
+        series_id: Uuid,
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
+    ) -> Result<Vec<DataPoint>> {
+        self.storage
+            .read_data_points(series_id, start_date, end_date)
+            .await
+    }
 
-        // Filter by date range if provided
-        let filtered_points = if let (Some(start), Some(end)) = (start_date, end_date) {
-            points
-                .into_iter()
-                .filter(|point| point.date >= start && point.date <= end)
-                .collect()
+    pub async fn create_series(&self, series: EconomicSeries) -> Result<()> {
+        self.storage.write_series(&series).await
+    }
+
+    pub async fn create_data_points(&self, points: Vec<DataPoint>) -> Result<()> {
+        if let Some(first_point) = points.first() {
+            self.storage
+                .write_data_points(first_point.series_id, &points)
+                .await
         } else {
-            points
-        };
-
-        Ok(filtered_points)
-    }
-
-    pub async fn create_series(&self, series: crate::models::EconomicSeries) -> Result<()> {
-        let mut cache = self.series_cache.lock().await;
-        cache.insert(series.id, series);
-        Ok(())
-    }
-
-    pub async fn create_data_points(&self, points: Vec<crate::models::DataPoint>) -> Result<()> {
-        let mut cache = self.data_points_cache.lock().await;
-        for point in points {
-            cache
-                .entry(point.series_id)
-                .or_insert_with(Vec::new)
-                .push(point);
+            Ok(())
         }
-        Ok(())
+    }
+
+    pub async fn list_series(&self) -> Result<Vec<EconomicSeries>> {
+        self.storage.list_series().await
     }
 }

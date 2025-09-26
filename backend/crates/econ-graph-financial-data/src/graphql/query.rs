@@ -33,6 +33,15 @@ impl Query {
             .map_err(|e| async_graphql::Error::new(e.to_string()))
     }
 
+    /// List all economic series
+    async fn list_series(&self, ctx: &Context<'_>) -> Result<Vec<EconomicSeries>> {
+        let database = ctx.data::<Database>()?;
+        database
+            .list_series()
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))
+    }
+
     /// Health check endpoint
     async fn health(&self) -> Result<String> {
         Ok("Financial Data Service is healthy".to_string())

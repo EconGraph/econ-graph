@@ -8,7 +8,9 @@ use uuid::Uuid;
 #[tokio::test]
 async fn test_crate_initialization() {
     // Test that we can create the basic components
-    let database = Database::new().await.expect("Database should initialize");
+    let database = Database::new_in_memory()
+        .await
+        .expect("Database should initialize");
     let crawler_api = CrawlerWriteApi::new();
 
     // Test that we can create data models
@@ -51,7 +53,9 @@ async fn test_crate_initialization() {
 
 #[tokio::test]
 async fn test_database_operations() {
-    let mut database = Database::new().await.expect("Database should initialize");
+    let mut database = Database::new_in_memory()
+        .await
+        .expect("Database should initialize");
 
     let series = EconomicSeries {
         id: Uuid::new_v4(),

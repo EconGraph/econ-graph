@@ -5,6 +5,7 @@ mod crawler;
 mod database;
 mod graphql;
 mod models;
+mod storage;
 
 use crate::database::Database;
 use crate::graphql::create_schema;
@@ -16,8 +17,8 @@ async fn main() -> Result<()> {
 
     info!("Starting EconGraph Financial Data Service");
 
-    // Initialize database
-    let database = Database::new().await?;
+    // Initialize database with in-memory storage for now
+    let database = Database::new_in_memory().await?;
     info!("Database initialized successfully");
 
     // Create GraphQL schema

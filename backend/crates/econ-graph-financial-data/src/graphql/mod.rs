@@ -10,6 +10,8 @@ pub use query::Query;
 pub async fn create_schema(
     database: Database,
 ) -> anyhow::Result<Schema<Query, Mutation, EmptySubscription>> {
-    let schema = Schema::new(Query, Mutation, EmptySubscription);
+    let schema = Schema::build(Query, Mutation, EmptySubscription)
+        .data(database)
+        .finish();
     Ok(schema)
 }

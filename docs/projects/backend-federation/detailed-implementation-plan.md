@@ -26,27 +26,28 @@ This document breaks down the V1 implementation into specific, actionable todos 
 - [ ] **Tests**: Unit test for crate initialization
 - [ ] **Docs**: README.md for the new crate
 
-#### **1.2 Database Models & Schema**
-- [ ] Create clean data models (`EconomicSeries`, `DataPoint`) without crawler fields
-- [ ] Define GraphQL schema for financial data service
-- [ ] Create Iceberg table schemas for financial data
-- [ ] **Tests**: Unit tests for data model serialization/deserialization
-- [ ] **Docs**: API documentation for data models
+#### **1.2 Arrow Flight Storage Abstraction**
+- [ ] Create `FinancialDataStorage` trait for storage abstraction
+- [ ] Implement `ParquetStorage` (V1) using Arrow Flight
+- [ ] Create Arrow schemas for `EconomicSeries` and `DataPoint`
+- [ ] Implement zero-copy data transfer with Arrow Flight
+- [ ] **Tests**: Unit tests for Arrow Flight operations
+- [ ] **Docs**: Arrow Flight API documentation
 
-#### **1.3 Iceberg Integration**
-- [ ] Set up Apache Iceberg client configuration
-- [ ] Create Iceberg table management (create, update, query)
-- [ ] Implement Parquet file storage and retrieval
-- [ ] **Tests**: Integration tests for Iceberg operations
-- [ ] **Docs**: Iceberg configuration and usage guide
+#### **1.3 Parquet File Operations (V1)**
+- [ ] Implement direct Parquet file reading/writing via Arrow Flight
+- [ ] Create Arrow RecordBatch operations for financial data
+- [ ] Add memory-mapped file support for hot data
+- [ ] Implement time series indexing for fast queries
+- [ ] **Tests**: Integration tests for Parquet operations
+- [ ] **Docs**: Parquet storage configuration guide
 
-#### **1.4 Storage Tiering Infrastructure**
-- [ ] Set up MinIO for local object storage with tiering support
-- [ ] Create configurable storage tiers (NVMe, SSD, HDD, S3)
-- [ ] Implement automatic tiering based on access patterns
-- [ ] Add manual tiering controls for administrators
-- [ ] **Tests**: Storage tiering tests with different access patterns
-- [ ] **Docs**: Storage tiering configuration and management guide
+#### **1.4 Future Iceberg Integration (V2)**
+- [ ] Design `IcebergStorage` implementation using same `FinancialDataStorage` trait
+- [ ] Plan Iceberg table schema evolution from Arrow schemas
+- [ ] Design migration path from Parquet files to Iceberg tables
+- [ ] **Tests**: Future compatibility tests
+- [ ] **Docs**: V2 migration planning document
 
 ### **Phase 2: Core Financial Data Service**
 

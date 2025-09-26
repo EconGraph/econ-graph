@@ -9,7 +9,9 @@ use uuid::Uuid;
 #[tokio::test]
 async fn test_complete_service_workflow() {
     // Initialize the service components
-    let database = Database::new().await.expect("Database should initialize");
+    let database = Database::new_in_memory()
+        .await
+        .expect("Database should initialize");
     let crawler_api = CrawlerWriteApi::new();
 
     // Test 1: Create a series through the database
@@ -121,7 +123,9 @@ async fn test_complete_service_workflow() {
 
 #[tokio::test]
 async fn test_data_validation() {
-    let database = Database::new().await.expect("Database should initialize");
+    let database = Database::new_in_memory()
+        .await
+        .expect("Database should initialize");
 
     // Test creating series with minimal required fields
     let series = EconomicSeries {
@@ -167,7 +171,9 @@ async fn test_data_validation() {
 
 #[tokio::test]
 async fn test_concurrent_operations() {
-    let database = Database::new().await.expect("Database should initialize");
+    let database = Database::new_in_memory()
+        .await
+        .expect("Database should initialize");
 
     // Test concurrent series creation
     let mut handles = vec![];
