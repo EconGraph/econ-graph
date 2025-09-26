@@ -442,7 +442,7 @@ describe("UserManagementPage", () => {
       fireEvent.click(addButton);
 
       await waitFor(() => {
-        expect(screen.getByText("Add New User")).toBeInTheDocument();
+        expect(screen.getByText("Create New User")).toBeInTheDocument();
       });
     });
 
