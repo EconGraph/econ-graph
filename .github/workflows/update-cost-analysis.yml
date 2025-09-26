@@ -1,0 +1,83 @@
+name: Update Cost Analysis
+
+on:
+  schedule:
+    # Run daily at 6 AM UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    # Allow manual triggering
+  push:
+    paths:
+      - 'data/usage-events-*.csv'
+      - 'scripts/codebase-stats-corrected.sh'
+      - 'backend/src/**'
+      - 'frontend/src/**'
+
+jobs:
+  update-costs:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+
+    - name: Install dependencies
+      run: |
+        # Install any required dependencies
+        sudo apt-get update
+        sudo apt-get install -y bc
+
+    - name: Update cost analysis
+      run: |
+        chmod +x scripts/update-cost-analysis.sh
+        ./scripts/update-cost-analysis.sh
+
+    - name: Check for changes
+      id: changes
+      run: |
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "changes=true" >> $GITHUB_OUTPUT
+        else
+          echo "changes=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Commit and push changes
+      if: steps.changes.outputs.changes == 'true'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add -A
+        git commit -m "🤖 Auto-update cost analysis from source data
+
+        - Updated cost figures from latest codebase statistics
+        - Updated AI usage costs from CSV data
+        - Recalculated ROI and savings percentages
+        - Updated all business documentation with latest figures"
+        git push
+
+    - name: Create summary
+      if: steps.changes.outputs.changes == 'true'
+      run: |
+        echo "## 📊 Cost Analysis Updated" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Successfully updated cost analysis with latest data:" >> $GITHUB_STEP_SUMMARY
+        echo "- Codebase statistics" >> $GITHUB_STEP_SUMMARY
+        echo "- AI usage costs" >> $GITHUB_STEP_SUMMARY
+        echo "- ROI calculations" >> $GITHUB_STEP_SUMMARY
+        echo "- All business documentation" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "📁 Updated files:" >> $GITHUB_STEP_SUMMARY
+        git diff --name-only HEAD~1 HEAD >> $GITHUB_STEP_SUMMARY

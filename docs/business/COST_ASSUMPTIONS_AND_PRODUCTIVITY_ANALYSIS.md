@@ -6,6 +6,10 @@
 
 This document provides detailed cost assumptions and productivity analysis for the EconGraph project, with specific citations to industry sources and academic research. All cost estimates are based on current market data and industry benchmarks.
 
+**📊 Live Cost Data**: This document is automatically updated from source data. See [data/cost-analysis.json](../data/cost-analysis.json) for the latest figures.
+
+**🔄 Auto-Update**: Run `./scripts/update-cost-analysis.sh` to update all cost figures from source data.
+
 ## Software Development Cost Assumptions
 
 ### 1. Developer Hourly Rates by Region and Experience Level
@@ -48,75 +52,29 @@ Beyond hourly rates, total employment costs include:
 
 ### 3. Project Complexity Cost Ranges
 
-- **Basic Applications**: $20,000–$75,000 (3–5 months)
-- **Medium Complexity**: $75,000–$175,000 (6–9 months)
-- **Advanced Solutions**: $175,000–$500,000+ (6+ months)
-- **Enterprise Solutions**: $500,000–$100M+
+#### Simple Applications
+- **Cost Range**: $10,000–$50,000
+- **Timeline**: 1–3 months
+- **Team Size**: 1–2 developers
+- **Examples**: Basic CRUD apps, simple websites
 
-*Source: [Altumind Global Comprehensive Software Development Costs](https://resources.altumindglobal.com/comprehensive-software-development-costs/)*
+#### Medium Complexity Applications
+- **Cost Range**: $50,000–$200,000
+- **Timeline**: 3–6 months
+- **Team Size**: 2–4 developers
+- **Examples**: E-commerce platforms, SaaS applications
 
-## Developer Productivity Analysis
+#### Complex Enterprise Applications
+- **Cost Range**: $200,000–$1,000,000+
+- **Timeline**: 6–18 months
+- **Team Size**: 4–10+ developers
+- **Examples**: Financial systems, healthcare platforms, large-scale SaaS
 
-### 1. Traditional Productivity Metrics
-
-**Lines of Code per Day**: While this metric is widely debated, industry studies suggest:
-- **Average Range**: 10–50 lines of code per day
-- **High-Performance Developers**: 50–100 lines of code per day
-- **Note**: LOC metrics are considered inadequate for measuring true productivity
-
-*Source: Multiple industry studies and academic research*
-
-### 2. Modern Productivity Frameworks
-
-#### DORA (DevOps Research and Assessment) Metrics
-- **Deployment Frequency**: How often code is deployed
-- **Lead Time**: Time from commit to production
-- **Mean Time to Recovery**: Time to recover from failures
-- **Change Failure Rate**: Percentage of changes that cause failures
-
-*Source: [Atlassian Developer Productivity Guide](https://www.atlassian.com/blog/loom/developer-productivity)*
-
-#### SPACE Framework
-- **Satisfaction**: Developer job satisfaction
-- **Performance**: Individual and team performance
-- **Activity**: Development activity metrics
-- **Communication**: Team communication effectiveness
-- **Efficiency**: Resource utilization efficiency
-
-*Source: [McKinsey Developer Productivity Analysis](https://www.mckinsey.com/industries/technology-media-and-telecommunications/our-insights/yes-you-can-measure-software-developer-productivity/)*
-
-### 3. AI-Assisted Development Productivity
-
-#### GitHub Copilot Impact
-- **Productivity Increase**: 55% faster code completion
-- **Code Quality**: Improved code quality and consistency
-- **Learning Acceleration**: Faster onboarding for new technologies
-
-*Source: [Microsoft GitHub Copilot Research](https://github.blog/2023-06-13-github-copilot-research-findings/)*
-
-#### Enterprise AI Development Tools
-- **PR Review Cycle Time**: 31.8% reduction
-- **Code Shipment Volume**: 28% increase
-- **Developer Satisfaction**: Significant improvement in job satisfaction
-
-*Source: [ArXiv: "Intuition to Evidence: Measuring AI's True Impact on Developer Productivity"](https://arxiv.org/abs/2509.19708)*
+*Source: [Clutch Software Development Cost Survey 2024](https://clutch.co/developers/software-development-cost)*
 
 ## EconGraph Project Cost Analysis
 
-### 1. Traditional Development Cost Estimate
-
-Based on our project scope and complexity:
-
-**Team Composition**:
-- 1 Senior Full-Stack Developer (Rust/React): $100/hour
-- 1 Mid-Level Frontend Developer: $70/hour
-- 1 Mid-Level Backend Developer: $70/hour
-- 1 DevOps Engineer: $80/hour
-
-**Development Timeline**: 6-12 months
-**Total Estimated Cost**: $4.8M (corrected for manually written code only)
-
-### 2. AI-Assisted Development Cost (Actual)
+### 1. Traditional Development Cost Estimation
 
 **Cursor AI Usage**:
 - **Total AI Interactions**: 347 requests
@@ -306,61 +264,32 @@ Based on our project scope and complexity:
 - **Enterprise-Quality Results**: Professional testing, documentation, security
 - **Reduced Learning Curve**: AI assistance with new technologies
 
-### 2. Quality Metrics Achieved
+### 2. Traditional Development Challenges
 
-- **Test Coverage**: 157+ passing tests
-- **Documentation**: Comprehensive Google-style documentation
-- **Security**: Automated security scanning and compliance
-- **CI/CD**: Automated deployment and testing pipelines
+- **Coordination Overhead**: Team communication and knowledge transfer
+- **Context Switching**: Multiple developers working on different components
+- **Integration Complexity**: Merging code from multiple developers
+- **Knowledge Silos**: Specialized expertise in different team members
 
-## Range of Differences and Considerations
+### 3. Cost-Benefit Analysis
 
-### 1. Geographic Cost Variations
+#### When to Use AI-Assisted Development
+- **Solo or Small Team Projects**: 1-2 developers
+- **Rapid Prototyping**: Fast iteration requirements
+- **Learning New Technologies**: AI assistance with unfamiliar frameworks
+- **Cost-Sensitive Projects**: Budget constraints requiring efficiency
 
-**High-Cost Regions** (US, Western Europe):
-- **Advantages**: High-quality talent, strong IP protection
-- **Disadvantages**: High costs, competitive market
+#### When to Use Traditional Development
+- **Large Team Projects**: 5+ developers with clear specialization
+- **Complex Enterprise Systems**: Extensive business logic and integration
+- **Regulatory Requirements**: Compliance-heavy industries
+- **Long-term Maintenance**: Established teams with domain expertise
 
-**Mid-Cost Regions** (Eastern Europe, Latin America):
-- **Advantages**: Good quality-to-cost ratio, time zone compatibility
-- **Disadvantages**: Language barriers, cultural differences
-
-**Low-Cost Regions** (Asia, Africa):
-- **Advantages**: Very low costs, large talent pool
-- **Disadvantages**: Quality concerns, communication challenges
-
-### 2. Productivity Variations
-
-**Factors Affecting Productivity**:
-- **Experience Level**: Senior developers 2-3x more productive than juniors
-- **Technology Stack**: Modern stacks (React, Rust) vs legacy systems
-- **Team Size**: Optimal team size vs coordination overhead
-- **Project Complexity**: Simple CRUD vs complex algorithms
-
-### 3. AI Tool Effectiveness
-
-**Tool-Specific Productivity Gains**:
-- **GitHub Copilot**: 55% faster code completion
-- **Cursor AI**: 10-20x faster development cycles
-- **ChatGPT/Claude**: Variable based on task complexity
-- **Code Review Tools**: 31.8% faster review cycles
-
-## Recommendations for Cost Assumptions
-
-### 1. Conservative Estimates
-- Use mid-range hourly rates for your region
-- Add 20-30% buffer for unexpected complexity
-- Include overhead costs (benefits, equipment, management)
-
-### 2. Optimistic Estimates
-- Use AI-assisted development multipliers
-- Consider 10-20x productivity gains
-- Factor in reduced learning curve time
-
-### 3. Realistic Project Planning
-- Start with AI-assisted development
-- Fall back to traditional development for complex features
-- Hybrid approach for optimal cost-benefit ratio
+#### Hybrid Approach Recommendations
+- **Start with AI-Assisted**: Rapid prototyping and initial development
+- **Transition to Traditional**: For complex features requiring team collaboration
+- **Use AI for Documentation**: Automated technical writing and API docs
+- **Fall back to traditional**: For complex features requiring deep domain expertise
 
 ## Conclusion
 
@@ -379,3 +308,5 @@ This analysis supports the cost assumptions used in EconGraph project documentat
 *Last Updated: September 2025*
 *Document Version: 1.0*
 *Prepared by: Product Manager*
+
+**📊 Source Data**: [data/cost-analysis.json](../data/cost-analysis.json) | **🔄 Update Script**: [scripts/update-cost-analysis.sh](../scripts/update-cost-analysis.sh)
