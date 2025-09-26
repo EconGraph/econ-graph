@@ -69,14 +69,14 @@ describe.skip("CrawlerLogs", () => {
       "../../__mocks__/graphql/getCrawlerLogs/success.json"
     );
 
-    useCrawlerLogs.mockReturnValue({
+    (useCrawlerLogs as any).mockReturnValue({
       logs: getCrawlerLogsSuccess.default.data.crawlerLogs,
       loading: false,
       error: null,
       refresh: vi.fn(),
     });
 
-    useLogSearch.mockReturnValue({
+    (useLogSearch as any).mockReturnValue({
       searchResults: [],
       loading: false,
       error: null,
@@ -358,7 +358,7 @@ describe.skip("CrawlerLogs", () => {
       const getCrawlerLogsError = await import(
         "../../__mocks__/graphql/getCrawlerLogs/error.json"
       );
-      useCrawlerLogs.mockReturnValue({
+      (useCrawlerLogs as any).mockReturnValue({
         data: getCrawlerLogsError.default,
         isLoading: false,
         error: new Error("GraphQL error"),
@@ -380,7 +380,7 @@ describe.skip("CrawlerLogs", () => {
     it("displays loading state when GraphQL request is loading", async () => {
       // Mock the hooks to return loading state
       const { useCrawlerLogs } = await import("../../hooks/useCrawlerLogs");
-      useCrawlerLogs.mockReturnValue({
+      (useCrawlerLogs as any).mockReturnValue({
         data: null,
         isLoading: true,
         error: null,

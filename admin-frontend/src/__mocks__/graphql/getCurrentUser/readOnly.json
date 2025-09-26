@@ -1,0 +1,13 @@
+{
+  "data": {
+    "currentUser": {
+      "id": "2",
+      "username": "Read Only User",
+      "email": "readonly@test.com",
+      "role": "read_only",
+      "permissions": ["view_dashboard"],
+      "lastLogin": "2024-01-15T09:30:00Z",
+      "sessionExpiry": "2024-01-15T10:30:00Z"
+    }
+  }
+}

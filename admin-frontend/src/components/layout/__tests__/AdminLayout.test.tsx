@@ -70,8 +70,11 @@ describe("AdminLayout", () => {
       },
       login: vi.fn(),
       logout: vi.fn(),
+      refreshSession: vi.fn(),
+      extendSession: vi.fn(),
       isAuthenticated: true,
       loading: false,
+      sessionWarning: false,
     });
 
     vi.mocked(useSecurity).mockReturnValue({
@@ -228,6 +231,9 @@ describe("AdminLayout", () => {
         },
         login: vi.fn(),
         logout: mockLogout,
+        refreshSession: vi.fn(),
+        extendSession: vi.fn(),
+        sessionWarning: false,
         isAuthenticated: true,
         loading: false,
       });
@@ -273,6 +279,8 @@ describe("AdminLayout", () => {
       vi.mocked(useSecurity).mockReturnValue({
         checkAccess: vi.fn(() => true),
         logSecurityEvent: vi.fn(),
+        getSecurityEvents: vi.fn(),
+        isSecureConnection: true,
         securityEvents: [
           {
             id: "1",
@@ -280,6 +288,7 @@ describe("AdminLayout", () => {
             severity: "high",
             timestamp: new Date().toISOString(),
             userId: "test-user",
+            message: "Failed login attempt",
             metadata: { reason: "Failed login attempt" },
           },
           {
@@ -288,6 +297,7 @@ describe("AdminLayout", () => {
             severity: "medium",
             timestamp: new Date().toISOString(),
             userId: "test-user",
+            message: "Suspicious activity detected",
             metadata: { reason: "Suspicious activity detected" },
           },
         ],
@@ -319,6 +329,8 @@ describe("AdminLayout", () => {
       vi.mocked(useSecurity).mockReturnValue({
         checkAccess: vi.fn(() => true),
         logSecurityEvent: vi.fn(),
+        getSecurityEvents: vi.fn(),
+        isSecureConnection: true,
         securityEvents: [
           {
             id: "1",
@@ -326,6 +338,7 @@ describe("AdminLayout", () => {
             severity: "critical",
             timestamp: new Date().toISOString(),
             userId: "test-user",
+            message: "Attempted access to admin functions",
             metadata: { reason: "Attempted access to admin functions" },
           },
           {
@@ -334,6 +347,7 @@ describe("AdminLayout", () => {
             severity: "high",
             timestamp: new Date().toISOString(),
             userId: "test-user",
+            message: "Multiple failed login attempts detected",
             metadata: { reason: "Multiple failed login attempts detected" },
           },
         ],
@@ -379,6 +393,8 @@ describe("AdminLayout", () => {
       vi.mocked(useSecurity).mockReturnValue({
         checkAccess: vi.fn(() => true),
         logSecurityEvent: vi.fn(),
+        getSecurityEvents: vi.fn(),
+        isSecureConnection: true,
         securityEvents: [],
         sessionRemainingTime: 300, // 5 minutes remaining
       });
@@ -436,6 +452,8 @@ describe("AdminLayout", () => {
         logout: vi.fn(),
         refreshSession: vi.fn(),
         extendSession: vi.fn(),
+        sessionWarning: false,
+        loading: false,
       });
 
       vi.mocked(useSecurity).mockReturnValue({
@@ -501,6 +519,8 @@ describe("AdminLayout", () => {
         logout: vi.fn(),
         refreshSession: vi.fn(),
         extendSession: vi.fn(),
+        sessionWarning: false,
+        loading: false,
       });
 
       vi.mocked(useSecurity).mockReturnValue({
@@ -552,11 +572,15 @@ describe("AdminLayout", () => {
         logout: vi.fn(),
         refreshSession: vi.fn(),
         extendSession: vi.fn(),
+        sessionWarning: false,
+        loading: false,
       });
 
       vi.mocked(useSecurity).mockReturnValue({
         checkAccess: vi.fn(() => true), // Super admin can access everything
         logSecurityEvent: vi.fn(),
+        getSecurityEvents: vi.fn(),
+        isSecureConnection: true,
         securityEvents: [],
         sessionRemainingTime: 3600,
       });
@@ -611,6 +635,8 @@ describe("AdminLayout", () => {
         logout: vi.fn(),
         refreshSession: vi.fn(),
         extendSession: vi.fn(),
+        sessionWarning: false,
+        loading: false,
       });
 
       vi.mocked(useSecurity).mockReturnValue({
@@ -685,6 +711,8 @@ describe("AdminLayout", () => {
         logout: vi.fn(),
         refreshSession: vi.fn(),
         extendSession: vi.fn(),
+        sessionWarning: false,
+        loading: false,
       });
 
       render(
@@ -719,6 +747,8 @@ describe("AdminLayout", () => {
         logout: vi.fn(),
         refreshSession: vi.fn(),
         extendSession: vi.fn(),
+        sessionWarning: false,
+        loading: false,
       });
 
       render(
@@ -753,6 +783,8 @@ describe("AdminLayout", () => {
         logout: vi.fn(),
         refreshSession: vi.fn(),
         extendSession: vi.fn(),
+        sessionWarning: false,
+        loading: false,
       });
 
       render(
@@ -788,6 +820,8 @@ describe("AdminLayout", () => {
         logout: vi.fn(),
         refreshSession: vi.fn(),
         extendSession: vi.fn(),
+        sessionWarning: false,
+        loading: false,
       });
 
       vi.mocked(useSecurity).mockReturnValue({
@@ -832,6 +866,8 @@ describe("AdminLayout", () => {
         logout: vi.fn(),
         refreshSession: vi.fn(),
         extendSession: vi.fn(),
+        sessionWarning: false,
+        loading: false,
       });
 
       vi.mocked(useSecurity).mockReturnValue({
@@ -883,6 +919,8 @@ describe("AdminLayout", () => {
         logout: vi.fn(),
         refreshSession: vi.fn(),
         extendSession: vi.fn(),
+        sessionWarning: false,
+        loading: false,
       });
 
       vi.mocked(useSecurity).mockReturnValue({

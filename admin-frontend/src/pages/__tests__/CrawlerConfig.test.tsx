@@ -98,31 +98,31 @@ describe("CrawlerConfig", () => {
       "../../__mocks__/graphql/getDataSources/success.json"
     );
 
-    useCrawlerConfig.mockReturnValue({
+    (useCrawlerConfig as any).mockReturnValue({
       data: getCrawlerConfigSuccess.default,
       isLoading: false,
       error: null,
     });
 
-    useDataSources.mockReturnValue({
+    (useDataSources as any).mockReturnValue({
       data: getDataSourcesSuccess.default,
       isLoading: false,
       error: null,
     });
 
-    useUpdateCrawlerConfig.mockReturnValue({
+    (useUpdateCrawlerConfig as any).mockReturnValue({
       mutateAsync: vi.fn(),
       isLoading: false,
       error: null,
     });
 
-    useUpdateDataSource.mockReturnValue({
+    (useUpdateDataSource as any).mockReturnValue({
       mutateAsync: vi.fn(),
       isLoading: false,
       error: null,
     });
 
-    useTestDataSourceConnection.mockReturnValue({
+    (useTestDataSourceConnection as any).mockReturnValue({
       mutateAsync: vi.fn(),
       isLoading: false,
       error: null,
@@ -156,7 +156,7 @@ describe("CrawlerConfig", () => {
       const getCrawlerConfigError = await import(
         "../../__mocks__/graphql/getCrawlerConfig/error.json"
       );
-      useCrawlerConfig.mockReturnValue({
+      (useCrawlerConfig as any).mockReturnValue({
         data: getCrawlerConfigError.default,
         isLoading: false,
         error: null,
@@ -182,7 +182,7 @@ describe("CrawlerConfig", () => {
       const getDataSourcesError = await import(
         "../../__mocks__/graphql/getDataSources/error.json"
       );
-      useDataSources.mockReturnValue({
+      (useDataSources as any).mockReturnValue({
         data: getDataSourcesError.default,
         isLoading: false,
         error: null,

@@ -108,7 +108,7 @@ describe("CrawlerDashboard", () => {
     );
 
     // Mock useCrawlerData to return combined mock data with correct structure
-    useCrawlerData.mockReturnValue({
+    (useCrawlerData as any).mockReturnValue({
       status: {
         status: getCrawlerStatusSuccess.default.data.crawlerStatus,
         loading: false,
@@ -129,7 +129,7 @@ describe("CrawlerDashboard", () => {
       performance: {
         metrics: getPerformanceMetricsSuccess.default.data.performanceMetrics,
         latestMetrics:
-          getPerformanceMetricsSuccess.default.data.performanceMetrics[0],
+          getPerformanceMetricsSuccess.default.data.performanceMetrics,
         loading: false,
         error: null,
         refresh: vi.fn(),
@@ -157,14 +157,14 @@ describe("CrawlerDashboard", () => {
     });
 
     // Mock individual hooks
-    useCrawlerStatus.mockReturnValue({
+    (useCrawlerStatus as any).mockReturnValue({
       status: getCrawlerStatusSuccess.data.crawlerStatus,
       loading: false,
       error: null,
       refresh: vi.fn(),
     });
 
-    useQueueStatistics.mockReturnValue({
+    (useQueueStatistics as any).mockReturnValue({
       statistics: getQueueStatisticsSuccess.data.queueStatistics,
       loading: false,
       error: null,
@@ -176,9 +176,9 @@ describe("CrawlerDashboard", () => {
       },
     });
 
-    usePerformanceMetrics.mockReturnValue({
+    (usePerformanceMetrics as any).mockReturnValue({
       metrics: getPerformanceMetricsSuccess.data.performanceMetrics,
-      latestMetrics: getPerformanceMetricsSuccess.data.performanceMetrics[0],
+      latestMetrics: getPerformanceMetricsSuccess.data.performanceMetrics,
       loading: false,
       error: null,
       refresh: vi.fn(),
@@ -236,7 +236,7 @@ describe("CrawlerDashboard", () => {
     it("handles GraphQL error scenarios", async () => {
       // Mock useCrawlerData to return error
       const { useCrawlerData } = await import("../../hooks/useCrawlerData");
-      useCrawlerData.mockReturnValue({
+      (useCrawlerData as any).mockReturnValue({
         status: {
           data: null,
           loading: false,
@@ -376,7 +376,7 @@ describe("CrawlerDashboard", () => {
 
     it("handles trigger crawl button click", async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation();
+      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
       renderWithTheme(<CrawlerDashboard />);
 
@@ -395,7 +395,7 @@ describe("CrawlerDashboard", () => {
 
     it("handles stop crawler button click", async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation();
+      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
       renderWithTheme(<CrawlerDashboard />);
 

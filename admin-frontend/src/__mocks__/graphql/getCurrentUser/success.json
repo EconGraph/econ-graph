@@ -1,0 +1,13 @@
+{
+  "data": {
+    "currentUser": {
+      "id": "1",
+      "username": "Test Admin",
+      "email": "admin@test.com",
+      "role": "super_admin",
+      "permissions": ["view_dashboard", "manage_users"],
+      "lastLogin": "2024-01-15T10:30:00Z",
+      "sessionExpiry": "2024-01-15T11:30:00Z"
+    }
+  }
+}
