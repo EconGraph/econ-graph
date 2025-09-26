@@ -12,7 +12,9 @@ vi.mock("date-fns", () => ({
 
 // Mock console methods
 const mockConsoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
-const mockConsoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+const mockConsoleError = vi
+  .spyOn(console, "error")
+  .mockImplementation(() => {});
 
 // Mock the useCrawlerLogs hooks
 vi.mock("../../hooks/useCrawlerLogs", () => ({
@@ -60,9 +62,13 @@ describe.skip("CrawlerLogs", () => {
     testQueryClient.clear();
 
     // Setup default mocks for hooks
-    const { useCrawlerLogs, useLogSearch } = await import("../../hooks/useCrawlerLogs");
-    const getCrawlerLogsSuccess = await import("../../__mocks__/graphql/getCrawlerLogs/success.json");
-    
+    const { useCrawlerLogs, useLogSearch } = await import(
+      "../../hooks/useCrawlerLogs"
+    );
+    const getCrawlerLogsSuccess = await import(
+      "../../__mocks__/graphql/getCrawlerLogs/success.json"
+    );
+
     useCrawlerLogs.mockReturnValue({
       logs: getCrawlerLogsSuccess.default.data.crawlerLogs,
       loading: false,
@@ -349,7 +355,9 @@ describe.skip("CrawlerLogs", () => {
     it("displays error when GraphQL request fails", async () => {
       // Mock the hooks to return error data
       const { useCrawlerLogs } = await import("../../hooks/useCrawlerLogs");
-      const getCrawlerLogsError = await import("../../__mocks__/graphql/getCrawlerLogs/error.json");
+      const getCrawlerLogsError = await import(
+        "../../__mocks__/graphql/getCrawlerLogs/error.json"
+      );
       useCrawlerLogs.mockReturnValue({
         data: getCrawlerLogsError.default,
         isLoading: false,

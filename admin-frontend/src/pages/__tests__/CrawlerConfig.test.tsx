@@ -91,8 +91,12 @@ describe("CrawlerConfig", () => {
     } = await import("../../hooks/useCrawlerConfig");
 
     // Import mock data dynamically
-    const getCrawlerConfigSuccess = await import("../../__mocks__/graphql/getCrawlerConfig/success.json");
-    const getDataSourcesSuccess = await import("../../__mocks__/graphql/getDataSources/success.json");
+    const getCrawlerConfigSuccess = await import(
+      "../../__mocks__/graphql/getCrawlerConfig/success.json"
+    );
+    const getDataSourcesSuccess = await import(
+      "../../__mocks__/graphql/getDataSources/success.json"
+    );
 
     useCrawlerConfig.mockReturnValue({
       data: getCrawlerConfigSuccess.default,
@@ -149,7 +153,9 @@ describe("CrawlerConfig", () => {
 
       // Mock the hook to return error data
       const { useCrawlerConfig } = await import("../../hooks/useCrawlerConfig");
-      const getCrawlerConfigError = await import("../../__mocks__/graphql/getCrawlerConfig/error.json");
+      const getCrawlerConfigError = await import(
+        "../../__mocks__/graphql/getCrawlerConfig/error.json"
+      );
       useCrawlerConfig.mockReturnValue({
         data: getCrawlerConfigError.default,
         isLoading: false,
@@ -173,7 +179,9 @@ describe("CrawlerConfig", () => {
 
       // Mock the hook to return error data
       const { useDataSources } = await import("../../hooks/useCrawlerConfig");
-      const getDataSourcesError = await import("../../__mocks__/graphql/getDataSources/error.json");
+      const getDataSourcesError = await import(
+        "../../__mocks__/graphql/getDataSources/error.json"
+      );
       useDataSources.mockReturnValue({
         data: getDataSourcesError.default,
         isLoading: false,

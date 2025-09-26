@@ -67,24 +67,22 @@ vi.mock("@tanstack/react-query", () => ({
 vi.useFakeTimers();
 
 // Mock setTimeout to run immediately in tests
-vi
-  .spyOn(global, "setTimeout")
-  .mockImplementation((fn: any, delay?: number) => {
-    if (typeof fn === "function") {
-      fn();
-    }
-    return 1 as any;
-  });
+vi.spyOn(global, "setTimeout").mockImplementation((fn: any, delay?: number) => {
+  if (typeof fn === "function") {
+    fn();
+  }
+  return 1 as any;
+});
 
 // Mock setInterval to prevent resource leaks
-vi
-  .spyOn(global, "setInterval")
-  .mockImplementation((fn: any, delay?: number) => {
+vi.spyOn(global, "setInterval").mockImplementation(
+  (fn: any, delay?: number) => {
     if (typeof fn === "function") {
       fn();
     }
     return 1 as any;
-  });
+  },
+);
 
 // Create a test theme
 const theme = createTheme();

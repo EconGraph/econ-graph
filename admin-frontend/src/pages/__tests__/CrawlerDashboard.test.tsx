@@ -97,9 +97,15 @@ describe("CrawlerDashboard", () => {
     } = await import("../../hooks/useCrawlerData");
 
     // Import mock data dynamically
-    const getCrawlerStatusSuccess = await import("../../__mocks__/graphql/getCrawlerStatus/success.json");
-    const getQueueStatisticsSuccess = await import("../../__mocks__/graphql/getQueueStatistics/success.json");
-    const getPerformanceMetricsSuccess = await import("../../__mocks__/graphql/getPerformanceMetrics/success.json");
+    const getCrawlerStatusSuccess = await import(
+      "../../__mocks__/graphql/getCrawlerStatus/success.json"
+    );
+    const getQueueStatisticsSuccess = await import(
+      "../../__mocks__/graphql/getQueueStatistics/success.json"
+    );
+    const getPerformanceMetricsSuccess = await import(
+      "../../__mocks__/graphql/getPerformanceMetrics/success.json"
+    );
 
     // Mock useCrawlerData to return combined mock data with correct structure
     useCrawlerData.mockReturnValue({
@@ -122,7 +128,8 @@ describe("CrawlerDashboard", () => {
       },
       performance: {
         metrics: getPerformanceMetricsSuccess.default.data.performanceMetrics,
-        latestMetrics: getPerformanceMetricsSuccess.default.data.performanceMetrics[0],
+        latestMetrics:
+          getPerformanceMetricsSuccess.default.data.performanceMetrics[0],
         loading: false,
         error: null,
         refresh: vi.fn(),

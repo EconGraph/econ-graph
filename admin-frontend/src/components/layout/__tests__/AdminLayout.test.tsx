@@ -110,9 +110,7 @@ describe("AdminLayout", () => {
       // Use within() to target the desktop drawer to avoid duplicate element issues
       const desktopDrawer = screen.getByRole("navigation");
 
-      expect(
-        within(desktopDrawer).getByText("Test Admin"),
-      ).toBeInTheDocument();
+      expect(within(desktopDrawer).getByText("Test Admin")).toBeInTheDocument();
       expect(
         within(desktopDrawer).getByText("super_admin"),
       ).toBeInTheDocument();
@@ -697,9 +695,7 @@ describe("AdminLayout", () => {
 
       const desktopDrawer = screen.getByRole("navigation");
 
-      expect(
-        within(desktopDrawer).getByText("testuser"),
-      ).toBeInTheDocument();
+      expect(within(desktopDrawer).getByText("testuser")).toBeInTheDocument();
       expect(within(desktopDrawer).getByText("read_only")).toBeInTheDocument();
     });
   });
