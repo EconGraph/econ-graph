@@ -118,8 +118,8 @@ const ProfessionalChart: React.FC<ProfessionalChartProps> = ({
   height = 600,
   showTechnicalAnalysis = true,
   showEconomicEvents = true,
-  allowAnnotations = true,
-  onAnnotationAdd,
+  allowAnnotations: _allowAnnotations = true,
+  onAnnotationAdd: _onAnnotationAdd,
   onSeriesAdd,
 }) => {
   const [taSettings, setTASettings] = useState<TechnicalAnalysisSettings>({
@@ -506,7 +506,7 @@ const ProfessionalChart: React.FC<ProfessionalChartProps> = ({
 
   const exportChart = useCallback(() => {
     // Implementation for chart export (PNG, PDF, SVG)
-    console.log('Export chart functionality');
+    // TODO: Implement actual chart export functionality
   }, []);
 
   return (
