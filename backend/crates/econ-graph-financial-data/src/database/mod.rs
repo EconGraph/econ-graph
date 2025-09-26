@@ -32,8 +32,6 @@ impl Database {
 
         // For testing, we'll use a simple in-memory implementation
         // This will be replaced with the storage abstraction
-        use std::collections::HashMap;
-        use std::sync::Mutex;
 
         let storage = InMemoryStorage::new();
         Ok(Self {

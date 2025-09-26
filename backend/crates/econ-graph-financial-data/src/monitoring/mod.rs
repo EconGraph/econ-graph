@@ -1,10 +1,8 @@
-use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
 
 /// Metrics collection for financial data service
 ///

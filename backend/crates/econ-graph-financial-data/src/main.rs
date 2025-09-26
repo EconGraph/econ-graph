@@ -37,9 +37,10 @@ async fn main() -> Result<()> {
 
     info!("Monitoring initialized");
 
-    // Initialize database with in-memory storage for now
-    let database = Database::new_in_memory().await?;
-    info!("Database initialized successfully");
+    // Initialize database with Parquet storage and Arrow Flight
+    let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "./data".to_string());
+    let database = Database::new_with_parquet(data_dir).await?;
+    info!("Database initialized with Parquet storage and Arrow Flight");
 
     // Create GraphQL schema
     let schema = create_schema(database.clone()).await?;
