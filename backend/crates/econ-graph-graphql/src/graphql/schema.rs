@@ -6,6 +6,7 @@
 use async_graphql::{EmptySubscription, Schema};
 use std::sync::Arc;
 
+use crate::graphql::dataloaders::DataLoaders;
 use crate::graphql::{mutation::Mutation, query::Query};
 use econ_graph_core::database::DatabasePool;
 
@@ -14,6 +15,8 @@ use econ_graph_core::database::DatabasePool;
 pub struct GraphQLContext {
     /// Database connection pool
     pub pool: Arc<DatabasePool>,
+    /// DataLoaders for efficient N+1 query prevention
+    pub data_loaders: Arc<DataLoaders>,
 }
 
 /// Create a new GraphQL schema with the provided context
@@ -39,7 +42,8 @@ pub struct GraphQLContext {
 /// }
 /// ```
 pub fn create_schema(pool: Arc<DatabasePool>) -> Schema<Query, Mutation, EmptySubscription> {
-    let context = GraphQLContext { pool };
+    let data_loaders = Arc::new(DataLoaders::new((*pool).clone()));
+    let context = GraphQLContext { pool, data_loaders };
 
     Schema::build(Query, Mutation, EmptySubscription)
         .data(context)
@@ -58,7 +62,8 @@ pub fn create_schema_with_data<T: Send + Sync + 'static>(
     pool: Arc<DatabasePool>,
     additional_data: T,
 ) -> Schema<Query, Mutation, EmptySubscription> {
-    let context = GraphQLContext { pool };
+    let data_loaders = Arc::new(DataLoaders::new((*pool).clone()));
+    let context = GraphQLContext { pool, data_loaders };
 
     Schema::build(Query, Mutation, EmptySubscription)
         .data(context)
