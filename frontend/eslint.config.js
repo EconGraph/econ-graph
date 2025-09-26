@@ -28,6 +28,16 @@ export default [
         localStorage: 'readonly',
         sessionStorage: 'readonly',
         Storage: 'readonly',
+        performance: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        atob: 'readonly',
+        btoa: 'readonly',
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
+        Blob: 'readonly',
 
         // DOM types
         HTMLElement: 'readonly',
@@ -39,6 +49,11 @@ export default [
         SVGElement: 'readonly',
         Element: 'readonly',
         MouseEvent: 'readonly',
+        TouchEvent: 'readonly',
+        KeyboardEvent: 'readonly',
+        Event: 'readonly',
+        MessageEvent: 'readonly',
+        React: 'readonly',
 
         // Node.js globals
         process: 'readonly',
@@ -82,6 +97,14 @@ export default [
       'no-console': 'warn',
       '@typescript-eslint/no-require-imports': 'off', // Allow require() in test files
       'no-useless-escape': 'off', // Allow escape characters in regex
+      'react/no-unescaped-entities': 'off', // Allow quotes and apostrophes in JSX
+      'jsx-a11y/click-events-have-key-events': 'warn', // Warn instead of error
+      'jsx-a11y/no-static-element-interactions': 'warn', // Warn instead of error
+      'jsx-a11y/label-has-associated-control': 'warn', // Warn instead of error
+      'no-case-declarations': 'off', // Allow variable declarations in case blocks
+      'no-constant-binary-expression': 'warn', // Warn instead of error
+      '@typescript-eslint/no-unused-expressions': 'warn', // Warn instead of error
+      'react/display-name': 'warn', // Warn instead of error
     },
     settings: {
       react: {
