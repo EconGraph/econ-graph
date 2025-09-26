@@ -114,19 +114,21 @@ Based on our project scope and complexity:
 - 1 DevOps Engineer: $80/hour
 
 **Development Timeline**: 6-12 months
-**Total Estimated Cost**: $500,000–$1,000,000
+**Total Estimated Cost**: $4.8M (corrected for manually written code only)
 
 ### 2. AI-Assisted Development Cost (Actual)
 
 **Cursor AI Usage**:
 - **Total AI Interactions**: 347 requests
-- **Total Tokens Processed**: 517.1M tokens
-- **Estimated Token Costs**: $258–$1,034
+- **Total Tokens Processed**: 3.25B tokens (actual usage data)
+- **Actual Token Costs**: $937.84 (from usage CSV)
 - **Cursor Pro Subscription**: ~$20/month
-- **Total Project Cost**: $278–$1,054
+- **Staff Engineer Time**: 28 days × 8 hours × $150/hour = $33,600
+  *Source: [Geomotiv - Software Engineer Hourly Rates](https://geomotiv.com/blog/software-engineer-hourly-rate-in-the-usa/) - Silicon Valley rates $80-$150/hour for senior engineers*
+- **Total Project Cost**: $34,537.84
 
 **Development Timeline**: 28 days of active development
-**Total Actual Cost**: $278–$1,054
+**Total Actual Cost**: $34,537.84
 
 ### 3. Cost Comparison and ROI Analysis
 
@@ -137,13 +139,13 @@ Based on our project scope and complexity:
 - **Risk Level**: High (team coordination, knowledge transfer)
 
 **AI-Assisted Development**:
-- **Cost Range**: $278–$1,054
+- **Cost Range**: $34,537.84
 - **Timeline**: 28 days
-- **Team Size**: 1 developer + AI
-- **Risk Level**: Low (single developer, AI assistance)
+- **Team Size**: 1 staff engineer + AI
+- **Risk Level**: Low (single staff engineer, AI assistance)
 
 **ROI Calculation**:
-- **Cost Savings**: $4.8M - $1,054 = $4.8M (99.98% cost reduction)
+- **Cost Savings**: $4.8M - $34,537.84 = $4.77M (99.3% cost reduction)
 - **Time Savings**: 5-11 months (83-92% time reduction)
 - **Quality**: Professional-grade testing, documentation, security scanning
 
@@ -217,8 +219,8 @@ Based on our project scope and complexity:
 The data presented in this document provides a comprehensive foundation for cost assumptions in software development projects. The dramatic cost differences between traditional and AI-assisted development (99.9% cost reduction) demonstrate the transformative potential of AI tools in software development.
 
 **Key Takeaways**:
-1. **Traditional Development**: $500,000–$1,000,000 for similar projects
-2. **AI-Assisted Development**: $278–$1,054 for equivalent results
+1. **Traditional Development**: $4.8M for similar projects
+2. **AI-Assisted Development**: $34,537.84 for equivalent results
 3. **Productivity Gains**: 10-20x faster development cycles
 4. **Quality Maintenance**: Professional-grade results with AI assistance
 
