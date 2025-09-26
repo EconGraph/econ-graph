@@ -20,12 +20,46 @@ export default [
         },
       },
       globals: {
+        // Browser globals
         window: 'readonly',
         document: 'readonly',
         console: 'readonly',
+        fetch: 'readonly',
+        localStorage: 'readonly',
+        sessionStorage: 'readonly',
+        Storage: 'readonly',
+
+        // DOM types
+        HTMLElement: 'readonly',
+        HTMLDivElement: 'readonly',
+        HTMLButtonElement: 'readonly',
+        HTMLInputElement: 'readonly',
+        HTMLHeadingElement: 'readonly',
+        SVGSVGElement: 'readonly',
+        SVGElement: 'readonly',
+        Element: 'readonly',
+        MouseEvent: 'readonly',
+
+        // Node.js globals
         process: 'readonly',
+        global: 'readonly',
+        module: 'readonly',
+        require: 'readonly',
+
+        // Vite globals
         import: 'readonly',
         importMeta: 'readonly',
+
+        // Jest globals
+        jest: 'readonly',
+        describe: 'readonly',
+        it: 'readonly',
+        test: 'readonly',
+        expect: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        beforeAll: 'readonly',
+        afterAll: 'readonly',
       },
     },
     plugins: {
@@ -46,6 +80,8 @@ export default [
       '@typescript-eslint/no-unused-vars': 'warn',
       '@typescript-eslint/no-explicit-any': 'warn',
       'no-console': 'warn',
+      '@typescript-eslint/no-require-imports': 'off', // Allow require() in test files
+      'no-useless-escape': 'off', // Allow escape characters in regex
     },
     settings: {
       react: {
