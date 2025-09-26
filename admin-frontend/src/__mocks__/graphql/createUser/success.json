@@ -1,0 +1,17 @@
+{
+  "data": {
+    "createUser": {
+      "id": "5",
+      "name": "New User",
+      "email": "new.user@company.com",
+      "role": "read_only",
+      "status": "active",
+      "lastLogin": null,
+      "createdAt": "2024-01-15T10:30:00Z",
+      "isOnline": false,
+      "sessionId": null,
+      "ipAddress": null,
+      "userAgent": null
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "data": {
+    "securityEvents": [
+      {
+        "id": "1",
+        "type": "login_failed",
+        "timestamp": "2024-01-15T10:30:00Z",
+        "details": "Failed login attempt from 192.168.1.200",
+        "severity": "high",
+        "userId": "5",
+        "ipAddress": "192.168.1.200",
+        "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"
+      },
+      {
+        "id": "2",
+        "type": "suspicious_activity",
+        "timestamp": "2024-01-15T10:25:00Z",
+        "details": "Multiple failed login attempts detected",
+        "severity": "critical",
+        "userId": null,
+        "ipAddress": "192.168.1.200",
+        "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"
+      },
+      {
+        "id": "3",
+        "type": "privilege_escalation",
+        "timestamp": "2024-01-15T10:20:00Z",
+        "details": "Attempted access to admin functions",
+        "severity": "high",
+        "userId": "3",
+        "ipAddress": "192.168.1.102",
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+      },
+      {
+        "id": "4",
+        "type": "session_timeout",
+        "timestamp": "2024-01-15T10:15:00Z",
+        "details": "Session expired for user",
+        "severity": "medium",
+        "userId": "2",
+        "ipAddress": "192.168.1.101",
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+      }
+    ]
+  }
+}

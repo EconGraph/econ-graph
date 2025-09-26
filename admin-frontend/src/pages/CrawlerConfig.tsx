@@ -58,7 +58,7 @@ import {
   Edit,
   Add,
   CheckCircle,
-  Error,
+  Error as ErrorIcon,
   Warning,
   Info,
   Speed,
@@ -246,7 +246,7 @@ const CrawlerConfig: React.FC = () => {
       case "warning":
         return <Warning />;
       case "error":
-        return <Error />;
+        return <ErrorIcon />;
       default:
         return <Info />;
     }

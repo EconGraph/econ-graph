@@ -19,7 +19,8 @@ import {
 // GraphQL client function - this will be mocked in tests
 const graphqlClient = async (query: string | any, variables?: any) => {
   // Convert GraphQL query to string if it's a DocumentNode
-  const queryString = typeof query === 'string' ? query : String(query);
+  const queryString = typeof query === "string" ? query : String(query);
+
   // This will be replaced by actual GraphQL client in production
   // For now, we'll use fetch to make GraphQL requests
   const response = await fetch("/graphql", {
@@ -59,21 +60,22 @@ export const useCrawlerLogs = (
   intervalMs: number = 5000,
 ) => {
   const queryClient = useQueryClient();
-  
+
   const query = useQuery({
-    queryKey: ['crawlerLogs', { limit, offset, level, source }],
-    queryFn: () => graphqlClient(GET_CRAWLER_LOGS.loc?.source?.body || GET_CRAWLER_LOGS, { 
-      limit, 
-      offset, 
-      level, 
-      source 
-    }),
+    queryKey: ["crawlerLogs", { limit, offset, level, source }],
+    queryFn: () =>
+      graphqlClient(GET_CRAWLER_LOGS, {
+        limit,
+        offset,
+        level,
+        source,
+      }),
     refetchInterval: autoRefresh ? intervalMs : false,
     refetchIntervalInBackground: false,
   });
 
   const refresh = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['crawlerLogs'] });
+    queryClient.invalidateQueries({ queryKey: ["crawlerLogs"] });
   }, [queryClient]);
 
   return {
@@ -94,20 +96,21 @@ export const useLogSearch = (
   enabled: boolean = true,
 ) => {
   const queryClient = useQueryClient();
-  
+
   const query = useQuery({
-    queryKey: ['logSearch', searchQuery, filters],
-    queryFn: () => graphqlClient(SEARCH_LOGS.loc?.source?.body || SEARCH_LOGS, { 
-      query: searchQuery, 
-      filters 
-    }),
+    queryKey: ["logSearch", searchQuery, filters],
+    queryFn: () =>
+      graphqlClient(SEARCH_LOGS, {
+        query: searchQuery,
+        filters,
+      }),
     enabled: enabled && searchQuery.length > 0,
     refetchInterval: false,
     refetchIntervalInBackground: false,
   });
 
   const refresh = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['logSearch'] });
+    queryClient.invalidateQueries({ queryKey: ["logSearch"] });
   }, [queryClient]);
 
   return {

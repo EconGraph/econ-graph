@@ -12,7 +12,6 @@
 import React, {
   useState,
   useEffect,
-  useRef,
   useCallback,
   useMemo,
 } from "react";
@@ -119,28 +118,44 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  const autoRefreshRef = useRef<NodeJS.Timeout | null>(null);
-
   // Use real GraphQL data
-  const { logs, loading, error, refresh } = useCrawlerLogs(50, 0, levelFilter === "all" ? undefined : levelFilter, sourceFilter === "all" ? undefined : sourceFilter, autoRefresh, 5000);
-  
+  const { logs, loading, error, refresh } = useCrawlerLogs(
+    50,
+    0,
+    levelFilter === "all" ? undefined : levelFilter,
+    sourceFilter === "all" ? undefined : sourceFilter,
+    autoRefresh,
+    5000,
+  );
+
   // Use log search for search functionality
-  const { searchResults, loading: searchLoading, error: searchError, refresh: refreshSearch } = useLogSearch(searchTerm, { level: levelFilter, source: sourceFilter }, searchTerm.length > 0);
+  const {
+    searchResults,
+    loading: searchLoading,
+    error: searchError,
+    refresh: refreshSearch,
+  } = useLogSearch(
+    searchTerm,
+    { level: levelFilter, source: sourceFilter },
+    searchTerm.length > 0,
+  );
 
   // Filter logs based on search term and filters
   useEffect(() => {
     let logsToFilter = searchTerm.length > 0 ? searchResults : logs;
-    
-    const filtered = logsToFilter.filter((log) => {
+
+    const filtered = logsToFilter.filter((log: any) => {
       const matchesLevel = levelFilter === "all" || log.level === levelFilter;
-      const matchesSource = sourceFilter === "all" || log.source === sourceFilter;
-      const matchesSearch = searchTerm.length === 0 || 
+      const matchesSource =
+        sourceFilter === "all" || log.source === sourceFilter;
+      const matchesSearch =
+        searchTerm.length === 0 ||
         log.message.toLowerCase().includes(searchTerm.toLowerCase()) ||
         log.source.toLowerCase().includes(searchTerm.toLowerCase());
-      
+
       return matchesLevel && matchesSource && matchesSearch;
     });
-    
+
     setFilteredLogs(filtered);
   }, [logs, searchResults, levelFilter, sourceFilter, searchTerm]);
 
@@ -177,7 +192,6 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
   }, []);
 
   const handleClearLogs = useCallback(() => {
-    setLogs([]);
     setFilteredLogs([]);
   }, []);
 
@@ -230,7 +244,7 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
             onClick={handleRefresh}
             disabled={loading || searchLoading}
           >
-            {(loading || searchLoading) ? "Refreshing..." : "Refresh"}
+            {loading || searchLoading ? "Refreshing..." : "Refresh"}
           </Button>
           <Button
             variant="outlined"
@@ -255,7 +269,7 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
           {error.message || error.toString()}
         </Alert>
       )}
-      
+
       {searchError && (
         <Alert severity="warning" sx={{ mb: 3 }}>
           Search error: {searchError.message || searchError.toString()}

@@ -14,18 +14,19 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import CrawlerConfig from "../CrawlerConfig";
+import { vi } from "vitest";
 // GraphQL mock responses will be imported dynamically in tests
 
 // Mock Material-UI theme
 const theme = createTheme();
 
 // Mock the useCrawlerConfig hooks to return our GraphQL mock data
-jest.mock("../../hooks/useCrawlerConfig", () => ({
-  useCrawlerConfig: jest.fn(),
-  useDataSources: jest.fn(),
-  useUpdateCrawlerConfig: jest.fn(),
-  useUpdateDataSource: jest.fn(),
-  useTestDataSourceConnection: jest.fn(),
+vi.mock("../../hooks/useCrawlerConfig", () => ({
+  useCrawlerConfig: vi.fn(),
+  useDataSources: vi.fn(),
+  useUpdateCrawlerConfig: vi.fn(),
+  useUpdateDataSource: vi.fn(),
+  useTestDataSourceConnection: vi.fn(),
 }));
 
 // Mock console methods to avoid noise in tests
@@ -33,8 +34,8 @@ const originalConsoleError = console.error;
 const originalConsoleWarn = console.warn;
 
 beforeAll(() => {
-  console.error = jest.fn();
-  console.warn = jest.fn();
+  console.error = vi.fn();
+  console.warn = vi.fn();
 });
 
 afterAll(() => {
@@ -106,19 +107,19 @@ describe("CrawlerConfig", () => {
     });
 
     useUpdateCrawlerConfig.mockReturnValue({
-      mutateAsync: jest.fn(),
+      mutateAsync: vi.fn(),
       isLoading: false,
       error: null,
     });
 
     useUpdateDataSource.mockReturnValue({
-      mutateAsync: jest.fn(),
+      mutateAsync: vi.fn(),
       isLoading: false,
       error: null,
     });
 
     useTestDataSourceConnection.mockReturnValue({
-      mutateAsync: jest.fn(),
+      mutateAsync: vi.fn(),
       isLoading: false,
       error: null,
     });
@@ -142,7 +143,9 @@ describe("CrawlerConfig", () => {
     });
 
     it("logs error when receiving invalid config data", async () => {
-      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
+      const consoleSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
 
       // Mock the hook to return error data
       const { useCrawlerConfig } = require("../../hooks/useCrawlerConfig");
@@ -164,7 +167,9 @@ describe("CrawlerConfig", () => {
     });
 
     it("logs error when receiving invalid data sources data", async () => {
-      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
+      const consoleSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
 
       // Mock the hook to return error data
       const { useDataSources } = require("../../hooks/useCrawlerConfig");
@@ -438,7 +443,7 @@ describe("CrawlerConfig", () => {
     // Related GitHub Issue: #88 - CrawlerDashboard Jest mock resolution issues
     // This performance issue was identified during debugging of similar timeout
     // problems in the admin frontend test suite.
-    jest.setTimeout(30000); // 30 seconds - increased timeout for dialog operations
+    vi.setConfig({ testTimeout: 30000 }); // 30 seconds - increased timeout for dialog operations
     it("opens edit dialog when edit button is clicked", () => {
       renderWithTheme(<CrawlerConfig />);
 

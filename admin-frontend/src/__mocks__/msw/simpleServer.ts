@@ -87,21 +87,21 @@ export const mockResponses = {
     error: getPerformanceMetricsError,
   },
 
-    GetSystemHealth: {
-      success: getSystemHealthSuccess,
-      error: getSystemHealthError,
-      loading: getSystemHealthLoading,
-    },
-    GetCrawlerLogs: {
-      success: getCrawlerLogsSuccess,
-      error: getCrawlerLogsError,
-      loading: getCrawlerLogsLoading,
-    },
-    SearchLogs: {
-      success: searchLogsSuccess,
-      error: searchLogsError,
-    },
-  };
+  GetSystemHealth: {
+    success: getSystemHealthSuccess,
+    error: getSystemHealthError,
+    loading: getSystemHealthLoading,
+  },
+  GetCrawlerLogs: {
+    success: getCrawlerLogsSuccess,
+    error: getCrawlerLogsError,
+    loading: getCrawlerLogsLoading,
+  },
+  SearchLogs: {
+    success: searchLogsSuccess,
+    error: searchLogsError,
+  },
+};
 
 // Simple scenario management
 let currentScenario = "default";

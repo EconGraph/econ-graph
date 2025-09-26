@@ -1,56 +1,54 @@
-// jest-dom adds custom jest matchers for asserting on DOM nodes.
-// allows you to do things like:
-// expect(element).toHaveTextContent(/react/i)
-// learn more: https://github.com/testing-library/jest-dom
+// Vitest setup file for MSW integration
+import { beforeAll, afterEach, afterAll, vi } from "vitest";
 import "@testing-library/jest-dom";
 
-// Polyfills for MSW in Node.js environment
-import { TextEncoder, TextDecoder } from "util";
-import { TransformStream as NodeTransformStream } from "stream/web";
+// MSW setup - based on MSW examples
+import "whatwg-fetch";
 
-global.TextEncoder = TextEncoder;
-global.TextDecoder = TextDecoder as any;
-global.TransformStream = NodeTransformStream as any;
+// Lazy load MSW server to avoid polyfill issues
+let server: any;
 
-// Note: Timer mocking is now handled per-test to avoid interfering with async operations
-// Individual tests can use jest.useFakeTimers() if needed for specific timer testing
+beforeAll(async () => {
+  const { server: mswServer } = await import("./mocks/server");
+  server = mswServer;
+  server.listen();
+});
 
-// Note: Context mocks are handled per-test-file to avoid conflicts
+// Reset any request handlers that we may add during the tests,
+// so they don't affect other tests.
+afterEach(() => {
+  if (server) {
+    server.resetHandlers();
+  }
+});
 
-// Note: React Query mocks are handled per-test-file to avoid conflicts
-
-// Set timeout for CI
-if (process.env.CI) {
-  jest.setTimeout(15000);
-} else {
-  jest.setTimeout(5000);
-}
-
-// MSW setup is now handled per-test to avoid conflicts
-// Individual tests should call setupSimpleMSW() and cleanupSimpleMSW() as needed
-
-// Fetch mocking is now handled by MSW
+// Clean up after the tests are finished.
+afterAll(() => {
+  if (server) {
+    server.close();
+  }
+});
 
 // Mock window.matchMedia
 Object.defineProperty(window, "matchMedia", {
   writable: true,
-  value: jest.fn().mockImplementation((query) => ({
+  value: vi.fn().mockImplementation((query) => ({
     matches: false,
     media: query,
     onchange: null,
-    addListener: jest.fn(), // Deprecated
-    removeListener: jest.fn(), // Deprecated
-    addEventListener: jest.fn(),
-    removeEventListener: jest.fn(),
-    dispatchEvent: jest.fn(),
+    addListener: vi.fn(), // Deprecated
+    removeListener: vi.fn(), // Deprecated
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
   })),
 });
 
 // Mock ResizeObserver - must be done before any imports
 class MockResizeObserver {
-  observe = jest.fn();
-  unobserve = jest.fn();
-  disconnect = jest.fn();
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
 }
 
 // Mock ResizeObserver globally
@@ -69,23 +67,33 @@ Object.defineProperty(globalThis, "ResizeObserver", {
 });
 
 // Mock IntersectionObserver
-global.IntersectionObserver = jest.fn().mockImplementation(() => ({
-  observe: jest.fn(),
-  unobserve: jest.fn(),
-  disconnect: jest.fn(),
+global.IntersectionObserver = vi.fn().mockImplementation(() => ({
+  observe: vi.fn(),
+  unobserve: vi.fn(),
+  disconnect: vi.fn(),
 }));
 
 // Mock crypto.randomUUID
 Object.defineProperty(global, "crypto", {
   value: {
-    randomUUID: jest.fn(() => "mock-uuid-1234"),
+    randomUUID: vi.fn(() => "mock-uuid-1234"),
   },
 });
+
+// Mock BroadcastChannel for MSW
+class MockBroadcastChannel {
+  constructor(_name: string) {}
+  postMessage = vi.fn();
+  addEventListener = vi.fn();
+  removeEventListener = vi.fn();
+  close = vi.fn();
+}
+global.BroadcastChannel = MockBroadcastChannel as any;
 
 // Mock window.open
 Object.defineProperty(window, "open", {
   writable: true,
-  value: jest.fn(),
+  value: vi.fn(),
 });
 
 // Mock console methods to reduce noise in tests
@@ -123,13 +131,15 @@ afterAll(() => {
   console.warn = originalConsoleWarn;
 });
 
+// MSW server lifecycle is managed by jest.setup.js
+
 // Clean up after each test - but don't clear all mocks as it breaks MSW
 afterEach(() => {
   // Don't clear all mocks - this breaks MSW fetch interception
-  // jest.clearAllMocks();
+  // vi.clearAllMocks();
 
   // Only clear timers if they were mocked in the test
-  if (jest.isMockFunction(setTimeout)) {
-    jest.clearAllTimers();
+  if (vi.isMockFunction(setTimeout)) {
+    vi.clearAllTimers();
   }
 });

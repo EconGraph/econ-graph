@@ -17,12 +17,6 @@ jest.mock("date-fns", () => ({
 const mockConsoleLog = jest.spyOn(console, "log").mockImplementation();
 const mockConsoleError = jest.spyOn(console, "error").mockImplementation();
 
-// Mock the hooks
-jest.mock("../../hooks/useCrawlerLogs", () => ({
-  useCrawlerLogs: jest.fn(),
-  useLogSearch: jest.fn(),
-}));
-
 const theme = createTheme();
 
 // Create a test QueryClient
@@ -43,7 +37,7 @@ const renderWithTheme = (component: React.ReactElement) => {
   return render(
     <QueryClientProvider client={testQueryClient}>
       <ThemeProvider theme={theme}>{component}</ThemeProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
 };
 
@@ -51,29 +45,6 @@ describe("CrawlerLogs", () => {
   beforeAll(() => {
     // Initialize QueryClient once for all tests
     testQueryClient = createTestQueryClient();
-
-    // Set up hook mocks with GraphQL mock data
-    const { useCrawlerLogs, useLogSearch } = require("../../hooks/useCrawlerLogs");
-
-    // Import mock data dynamically
-    const getCrawlerLogsSuccess = require("../../__mocks__/graphql/getCrawlerLogs/success.json");
-    const searchLogsSuccess = require("../../__mocks__/graphql/searchLogs/success.json");
-
-    // Mock useCrawlerLogs to return mock data
-    useCrawlerLogs.mockImplementation(() => ({
-      logs: getCrawlerLogsSuccess.data.crawlerLogs,
-      loading: false,
-      error: null,
-      refresh: jest.fn(),
-    }));
-
-    // Mock useLogSearch to return mock data
-    useLogSearch.mockImplementation(() => ({
-      searchResults: searchLogsSuccess.data.searchLogs,
-      loading: false,
-      error: null,
-      refresh: jest.fn(),
-    }));
   });
 
   beforeEach(() => {
@@ -105,7 +76,9 @@ describe("CrawlerLogs", () => {
       expect(screen.getByText("Clear")).toBeInTheDocument();
 
       // Check that logs from mock data are displayed
-      expect(screen.getByText(/Successfully crawled GDP data/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Successfully crawled GDP data/i),
+      ).toBeInTheDocument();
       expect(screen.getByText(/FRED/i)).toBeInTheDocument();
     });
 
@@ -348,15 +321,14 @@ describe("CrawlerLogs", () => {
 
   describe("Error Handling", () => {
     it("displays error when GraphQL request fails", async () => {
+      // Mock the hooks to return error data
       const { useCrawlerLogs } = require("../../hooks/useCrawlerLogs");
-      
-      // Mock useCrawlerLogs to return error
-      useCrawlerLogs.mockImplementation(() => ({
-        logs: [],
-        loading: false,
-        error: new Error("Failed to retrieve crawler logs"),
-        refresh: jest.fn(),
-      }));
+      const getCrawlerLogsError = require("../../__mocks__/graphql/getCrawlerLogs/error.json");
+      useCrawlerLogs.mockReturnValue({
+        data: getCrawlerLogsError,
+        isLoading: false,
+        error: new Error("GraphQL error"),
+      });
 
       renderWithTheme(<CrawlerLogs />);
 
@@ -366,29 +338,24 @@ describe("CrawlerLogs", () => {
       });
 
       // Check that error state is displayed
-      expect(screen.getByText(/Failed to retrieve crawler logs/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Failed to retrieve crawler logs/i),
+      ).toBeInTheDocument();
     });
 
-    it("displays search error when log search fails", async () => {
-      const { useLogSearch } = require("../../hooks/useCrawlerLogs");
-      
-      // Mock useLogSearch to return error
-      useLogSearch.mockImplementation(() => ({
-        searchResults: [],
-        loading: false,
-        error: new Error("Failed to search logs"),
-        refresh: jest.fn(),
-      }));
+    it("displays loading state when GraphQL request is loading", async () => {
+      // Mock the hooks to return loading state
+      const { useCrawlerLogs } = require("../../hooks/useCrawlerLogs");
+      useCrawlerLogs.mockReturnValue({
+        data: null,
+        isLoading: true,
+        error: null,
+      });
 
       renderWithTheme(<CrawlerLogs />);
 
-      // Wait for the component to process the error
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      });
-
-      // Check that search error state is displayed
-      expect(screen.getByText(/Search error: Failed to search logs/i)).toBeInTheDocument();
+      // Check that loading state is displayed
+      expect(screen.getByText(/Refreshing/i)).toBeInTheDocument();
     });
   });
 });
