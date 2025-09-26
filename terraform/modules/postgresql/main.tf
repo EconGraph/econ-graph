@@ -107,7 +107,7 @@ resource "kubernetes_stateful_set" "postgresql" {
     namespace = var.namespace
     labels = {
       app     = "postgresql"
-      version = "15"
+      version = "18"
     }
   }
 
@@ -125,14 +125,14 @@ resource "kubernetes_stateful_set" "postgresql" {
       metadata {
         labels = {
           app     = "postgresql"
-          version = "15"
+          version = "18"
         }
       }
 
       spec {
         container {
           name  = "postgresql"
-          image = "postgres:15-alpine"
+          image = "postgres:18-alpine"
 
           port {
             container_port = 5432
