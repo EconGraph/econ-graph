@@ -10,6 +10,7 @@ on:
     paths:
       - 'data/usage-events-*.csv'
       - 'scripts/codebase-stats-corrected.sh'
+      - 'scripts/update-cost-analysis.sh'
       - 'backend/src/**'
       - 'frontend/src/**'
 
