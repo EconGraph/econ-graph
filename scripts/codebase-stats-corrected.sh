@@ -17,7 +17,7 @@ echo -e "${BLUE}=====================================${NC}"
 # Change to project root
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-echo -e "${YELLOW}Methodology: Only counting files tracked by git (respects .gitignore)${NC}"
+echo -e "${YELLOW}Methodology: Only counting manually written code (excludes auto-generated lock files)${NC}"
 echo ""
 
 # Count lines by category using git ls-files to respect .gitignore
@@ -25,7 +25,7 @@ BACKEND_PROD=$(git ls-files 'backend/src/*.rs' | grep -v test | grep -v _test.rs
 BACKEND_TESTS=$(git ls-files 'backend/src/*.rs' | grep -E "(test|_test\.rs)" | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
 FRONTEND_PROD=$(git ls-files 'frontend/src/*.ts' 'frontend/src/*.tsx' 'frontend/src/*.js' 'frontend/src/*.jsx' | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
 FRONTEND_TESTS=$(git ls-files 'frontend/tests/*.ts' 'frontend/tests/*.tsx' 'frontend/tests/*.js' 'frontend/tests/*.jsx' | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
-CONFIG=$(git ls-files '*.yaml' '*.yml' '*.json' '*.toml' 'Dockerfile*' '*.tf' | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
+CONFIG=$(git ls-files '*.yaml' '*.yml' '*.json' '*.toml' 'Dockerfile*' '*.tf' | grep -v package-lock.json | grep -v Cargo.lock | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
 DOCS=$(git ls-files '*.md' 'README*' '*.txt' | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
 SCRIPTS=$(git ls-files '*.sh' | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
 
@@ -69,4 +69,4 @@ echo -e "  Infrastructure:     \$$(printf "%'d" $INFRA_COST)"
 echo -e "${GREEN}  TOTAL:              \$$(printf "%'d" $TOTAL_COST)${NC}"
 
 echo ""
-echo -e "${BLUE}💡 This corrected count excludes node_modules, target/, and other ignored files${NC}"
+echo -e "${BLUE}💡 This corrected count excludes node_modules, target/, package-lock.json, and Cargo.lock files${NC}"
