@@ -87,69 +87,41 @@ impl EconomicSeriesType {
         self.updated_at
     }
 
-    /// Fetch the data source using direct database query
+    /// Fetch the data source using DataLoader for efficient batching
     async fn source(&self, ctx: &Context<'_>) -> Result<Option<DataSourceType>> {
-        let pool = ctx.data::<econ_graph_core::database::DatabasePool>()?;
+        let data_loaders = ctx.data::<crate::graphql::dataloaders::DataLoaders>()?;
         let source_uuid = Uuid::parse_str(&self.source_id)?;
 
-        use diesel::{ExpressionMethods, OptionalExtension, QueryDsl};
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::data_sources::dsl;
-
-        let mut conn = pool.get().await?;
-        let source = dsl::data_sources
-            .filter(dsl::id.eq(source_uuid))
-            .select(econ_graph_core::models::DataSource::as_select())
-            .first::<econ_graph_core::models::DataSource>(&mut conn)
-            .await
-            .optional()?;
-
+        let source = data_loaders.data_source_loader.load(source_uuid).await;
         Ok(source.map(|s| s.into()))
     }
 
-    /// Fetch recent data points using direct database query
+    /// Fetch recent data points using DataLoader for efficient batching
     async fn recent_data_points(
         &self,
         ctx: &Context<'_>,
         #[graphql(default = 100)] limit: i32,
     ) -> Result<Vec<DataPointType>> {
-        let pool = ctx.data::<econ_graph_core::database::DatabasePool>()?;
+        let data_loaders = ctx.data::<crate::graphql::dataloaders::DataLoaders>()?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
-        use diesel::{ExpressionMethods, QueryDsl};
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::data_points::dsl;
-
-        let mut conn = pool.get().await?;
-        let data_points = dsl::data_points
-            .filter(dsl::series_id.eq(series_uuid))
-            .order(dsl::date.desc())
-            .limit(limit as i64)
-            .load::<econ_graph_core::models::DataPoint>(&mut conn)
-            .await?;
-
-        let limited_points = data_points.into_iter().map(DataPointType::from).collect();
+        let data_points = data_loaders.data_points_by_series_loader.load(series_uuid).await;
+        let limited_points = data_points
+            .into_iter()
+            .take(limit as usize)
+            .map(DataPointType::from)
+            .collect();
 
         Ok(limited_points)
     }
 
-    /// Get data point count using direct database query
+    /// Get data point count using DataLoader for efficient batching
     async fn data_point_count(&self, ctx: &Context<'_>) -> Result<i32> {
-        let pool = ctx.data::<econ_graph_core::database::DatabasePool>()?;
+        let data_loaders = ctx.data::<crate::graphql::dataloaders::DataLoaders>()?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
-        use diesel::{ExpressionMethods, QueryDsl};
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::data_points::dsl;
-
-        let mut conn = pool.get().await?;
-        let count = dsl::data_points
-            .filter(dsl::series_id.eq(series_uuid))
-            .count()
-            .get_result::<i64>(&mut conn)
-            .await?;
-
-        Ok(count as i32)
+        let count = data_loaders.data_point_count_loader.load(series_uuid).await;
+        Ok(count)
     }
 
     /// Fetch data points with filters using a custom DataLoader
@@ -326,27 +298,17 @@ impl DataSourceType {
         self.updated_at
     }
 
-    /// Fetch all series for this data source using DataLoader
+    /// Fetch all series for this data source using DataLoader for efficient batching
     async fn series(
         &self,
         ctx: &Context<'_>,
         #[graphql(default = 50)] first: i32,
         after: Option<String>,
     ) -> Result<SeriesConnection> {
-        let pool = ctx.data::<econ_graph_core::database::DatabasePool>()?;
+        let data_loaders = ctx.data::<crate::graphql::dataloaders::DataLoaders>()?;
         let source_uuid = Uuid::parse_str(&self.id)?;
 
-        use diesel::{ExpressionMethods, QueryDsl};
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::economic_series::dsl;
-
-        let mut conn = pool.get().await?;
-        let all_series = dsl::economic_series
-            .filter(dsl::source_id.eq(source_uuid))
-            .filter(dsl::is_active.eq(true))
-            .select(econ_graph_core::models::EconomicSeries::as_select())
-            .load::<econ_graph_core::models::EconomicSeries>(&mut conn)
-            .await?;
+        let all_series = data_loaders.series_by_source_loader.load(source_uuid).await;
 
         // Apply pagination (simplified - in production you'd want cursor-based pagination)
         let start_index = after
@@ -384,22 +346,11 @@ impl DataSourceType {
 
     /// Get count of active series for this data source
     async fn series_count(&self, ctx: &Context<'_>) -> Result<i32> {
-        let pool = ctx.data::<econ_graph_core::database::DatabasePool>()?;
+        let data_loaders = ctx.data::<crate::graphql::dataloaders::DataLoaders>()?;
         let source_uuid = Uuid::parse_str(&self.id)?;
 
-        use diesel::{ExpressionMethods, QueryDsl};
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::economic_series::dsl;
-
-        let mut conn = pool.get().await?;
-        let count = dsl::economic_series
-            .filter(dsl::source_id.eq(source_uuid))
-            .filter(dsl::is_active.eq(true))
-            .count()
-            .get_result::<i64>(&mut conn)
-            .await?;
-
-        Ok(count as i32)
+        let count = data_loaders.series_count_loader.load(source_uuid).await;
+        Ok(count)
     }
 }
 
