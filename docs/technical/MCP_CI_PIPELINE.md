@@ -225,7 +225,7 @@ backend-mcp-integration-tests:
   needs: [backend-smoke-tests, chart-api-integration-tests]
   services:
     postgres:
-      image: postgres:18-alpine
+      image: postgres:15-alpine
       ports:
         - 5445:5432  # Isolated port
   steps:

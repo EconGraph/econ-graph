@@ -294,7 +294,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:18
+        image: postgres:17
         env:
           POSTGRES_PASSWORD: postgres
         options: >-

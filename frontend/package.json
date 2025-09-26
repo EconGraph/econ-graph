@@ -69,8 +69,7 @@
     "react-test-renderer": "18.3.1",
     "resize-observer-polyfill": "1.5.1",
     "supertest": "^7.1.4",
-    "typescript": "^4.9.5",
-    "typescript-eslint": "^8.44.1"
+    "typescript": "^4.9.5"
   },
   "jest": {
     "moduleNameMapper": {
