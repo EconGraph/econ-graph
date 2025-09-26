@@ -21,6 +21,26 @@ on:
       - '.github/workflows/README.md'
   workflow_dispatch:
     inputs:
+      run_e2e_tests:
+        description: 'Run E2E tests (disabled by default)'
+        required: false
+        default: false
+        type: boolean
+      e2e_test_suite:
+        description: 'E2E Test Suite to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - core
+          - global-analysis
+          - professional-analysis
+          - comprehensive
+          - mobile-core
+          - mobile-global-analysis
+          - mobile-professional-analysis
+          - mobile-comprehensive
       branch:
         description: 'Branch to run CI on (leave empty for current branch)'
         required: false
@@ -32,9 +52,34 @@ env:
   DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_only: ${{ steps.filter.outputs.frontend == 'true' && steps.filter.outputs.backend == 'false' }}
+    steps:
+    - uses: dorny/paths-filter@v3
+      id: filter
+      with:
+        filters: |
+          frontend:
+            - 'frontend/**'
+            - 'admin-frontend/**'
+          backend:
+            - 'backend/**'
+            - 'chart-api-service/**'
+            - 'ci/**'
+            - '.github/**'
+            - 'k8s/**'
+            - 'terraform/**'
+            - 'scripts/**'
+            - 'docker-compose.yml'
+            - 'package.json'
   backend-build-cache:
     name: Backend Build Cache
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.frontend_only != 'true'
     timeout-minutes: 90
 
     steps:
@@ -1580,6 +1625,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     needs: [frontend-integration-tests]
+    if: ${{ github.event.inputs.run_e2e_tests == true }}
 
     steps:
     - name: Checkout code
@@ -1618,6 +1664,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
+    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'core' || github.event.inputs.e2e_test_suite == '') }}
     # Note: PostgreSQL environment variables removed to prevent conflicts with DATABASE_URL
     # The DATABASE_URL in Docker containers should handle authentication
 
@@ -1764,6 +1811,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
+    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'global-analysis' || github.event.inputs.e2e_test_suite == '') }}
 
     services:
       postgres:
@@ -1987,6 +2035,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
+    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'professional-analysis' || github.event.inputs.e2e_test_suite == '') }}
 
     services:
       postgres:
@@ -2186,6 +2235,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
+    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'comprehensive' || github.event.inputs.e2e_test_suite == '') }}
 
     services:
       postgres:
@@ -2387,6 +2437,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
+    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'mobile-global-analysis' || github.event.inputs.e2e_test_suite == '') }}
 
     services:
       postgres:
@@ -2594,6 +2645,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
+    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'mobile-professional-analysis' || github.event.inputs.e2e_test_suite == '') }}
 
     services:
       postgres:
@@ -2801,6 +2853,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
+    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'mobile-core' || github.event.inputs.e2e_test_suite == 'mobile-comprehensive' || github.event.inputs.e2e_test_suite == '') }}
 
     services:
       postgres:
