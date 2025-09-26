@@ -87,63 +87,64 @@ jobs:
       with:
         sarif_file: 'trivy-results.sarif'
 
-  update-dependencies:
-    name: Update Dependencies
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
+  # DISABLED: Automated dependency updates to prevent breaking changes
+  # update-dependencies:
+  #   name: Update Dependencies
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: write
+  #     pull-requests: write
 
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+  #   steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v4
+  #     with:
+  #       token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+  #   - name: Install Rust toolchain
+  #     uses: dtolnay/rust-toolchain@stable
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
+  #   - name: Setup Node.js
+  #     uses: actions/setup-node@v4
+  #     with:
+  #       node-version: '18'
 
-    - name: Update Rust dependencies
-      run: |
-        cargo update
-        cargo check
-      working-directory: backend
+  #   - name: Update Rust dependencies
+  #     run: |
+  #       cargo update
+  #       cargo check
+  #     working-directory: backend
 
-    - name: Update npm dependencies
-      run: |
-        npm update
-        npm audit fix --audit-level moderate
-      working-directory: frontend
+  #   - name: Update npm dependencies
+  #     run: |
+  #       npm update
+  #       npm audit fix --audit-level moderate
+  #     working-directory: frontend
 
-    - name: Create Pull Request for dependency updates
-      uses: peter-evans/create-pull-request@v5
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        commit-message: 'chore: update dependencies'
-        title: 'Automated Dependency Updates'
-        body: |
-          ## Automated Dependency Updates
+  #   - name: Create Pull Request for dependency updates
+  #     uses: peter-evans/create-pull-request@v5
+  #     with:
+  #       token: ${{ secrets.GITHUB_TOKEN }}
+  #       commit-message: 'chore: update dependencies'
+  #       title: 'Automated Dependency Updates'
+  #       body: |
+  #         ## Automated Dependency Updates
 
-          This PR contains automated updates to project dependencies.
+  #         This PR contains automated updates to project dependencies.
 
-          ### Changes:
-          - Updated Rust crates to latest compatible versions
-          - Updated npm packages to latest compatible versions
-          - Applied security fixes where available
+  #         ### Changes:
+  #         - Updated Rust crates to latest compatible versions
+  #         - Updated npm packages to latest compatible versions
+  #         - Applied security fixes where available
 
-          ### Testing:
-          - [ ] Backend tests pass
-          - [ ] Frontend tests pass
-          - [ ] Security audits clean
+  #         ### Testing:
+  #         - [ ] Backend tests pass
+  #         - [ ] Frontend tests pass
+  #         - [ ] Security audits clean
 
-          Please review and merge if all checks pass.
-        branch: automated-dependency-updates
-        delete-branch: true
+  #         Please review and merge if all checks pass.
+  #       branch: automated-dependency-updates
+  #       delete-branch: true
 
   codeql-analysis:
     name: CodeQL Security Analysis

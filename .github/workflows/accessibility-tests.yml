@@ -159,15 +159,15 @@ jobs:
       working-directory: frontend
       run: |
         echo "Running accessibility linting on frontend..."
-        npx eslint src --config .eslintrc.accessibility.js --ext .js,.jsx,.ts,.tsx --format=json > accessibility-lint-results.json || true
-        npx eslint src --config .eslintrc.accessibility.js --ext .js,.jsx,.ts,.tsx
+        npx eslint src --config .eslintrc.accessibility.js --format=json > accessibility-lint-results.json || true
+        npx eslint src --config .eslintrc.accessibility.js
 
     - name: Run accessibility linting on admin-frontend
       working-directory: admin-frontend
       run: |
         echo "Running accessibility linting on admin-frontend..."
-        npx eslint src --config .eslintrc.accessibility.js --ext .js,.jsx,.ts,.tsx --format=json > accessibility-lint-results.json || true
-        npx eslint src --config .eslintrc.accessibility.js --ext .js,.jsx,.ts,.tsx
+        npx eslint src --config .eslintrc.accessibility.js --format=json > accessibility-lint-results.json || true
+        npx eslint src --config .eslintrc.accessibility.js
 
     - name: Upload accessibility lint results
       uses: actions/upload-artifact@v4
