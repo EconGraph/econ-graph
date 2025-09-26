@@ -31,6 +31,7 @@ use crate::models::{DataPoint, DecimalScalar, EconomicSeries};
 /// - Time series indexing for fast queries
 ///
 /// Future V2 will use the same Arrow Flight interface but with Iceberg backend
+#[derive(Clone)]
 pub struct ParquetStorage {
     data_dir: PathBuf,
     flight_server: Arc<RwLock<Option<FlightServiceServer<ParquetFlightService>>>>,

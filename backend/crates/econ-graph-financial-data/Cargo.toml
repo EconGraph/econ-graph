@@ -58,3 +58,12 @@ async-trait = "0.1"
 tokio-test = { workspace = true }
 tempfile = { workspace = true }
 reqwest = { version = "0.12", features = ["json"] }
+
+# Benchmarking
+[[bench]]
+name = "performance"
+harness = false
+
+[dev-dependencies.criterion]
+version = "0.5"
+features = ["html_reports"]
