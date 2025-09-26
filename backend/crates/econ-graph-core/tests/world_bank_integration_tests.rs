@@ -7,6 +7,7 @@ use diesel::Connection;
 use econ_graph_core::models::DataSource;
 use serial_test::serial;
 use testcontainers::runners::AsyncRunner;
+use testcontainers::{ContainerAsync, ImageExt};
 use testcontainers_modules::postgres::Postgres;
 
 /// Test World Bank data source database integration
@@ -18,7 +19,8 @@ async fn test_world_bank_data_source_database_integration() -> Result<(), Box<dy
     let postgres = Postgres::default()
         .with_db_name("econ_graph_test")
         .with_user("postgres")
-        .with_password("password");
+        .with_password("password")
+        .with_tag("postgres:18-alpine");
 
     let container = postgres.start().await.unwrap();
     let connection_string = format!(
@@ -65,7 +67,8 @@ async fn test_world_bank_data_source_persistence() -> Result<(), Box<dyn std::er
     let postgres = Postgres::default()
         .with_db_name("econ_graph_test")
         .with_user("postgres")
-        .with_password("password");
+        .with_password("password")
+        .with_tag("postgres:18-alpine");
 
     let container = postgres.start().await.unwrap();
     let connection_string = format!(

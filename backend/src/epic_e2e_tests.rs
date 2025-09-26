@@ -42,6 +42,7 @@ mod tests {
     use async_graphql::Request;
     use serial_test::serial;
     use testcontainers::runners::AsyncRunner;
+    use testcontainers::{ImageExt, ContainerAsync};
     use testcontainers_modules::postgres::Postgres;
 
     #[tokio::test]
@@ -56,7 +57,9 @@ mod tests {
 
         // Phase 1: Infrastructure Setup with TestContainers
         println!("📦 Phase 1: Setting up TestContainers infrastructure...");
-        let postgres_container = Postgres::default().start().await.unwrap();
+        let postgres_container = Postgres::default()
+            .with_tag("postgres:18-alpine")
+            .start().await.unwrap();
         let connection_string = format!(
             "postgres://postgres:postgres@127.0.0.1:{}/postgres",
             postgres_container.get_host_port_ipv4(5432).await.unwrap()
