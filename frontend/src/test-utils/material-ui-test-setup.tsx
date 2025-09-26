@@ -45,14 +45,14 @@ export const customRender = (ui: React.ReactElement, options: RenderOptions = {}
   portalContainer.setAttribute('data-testid', 'material-ui-portal-container');
   document.body.appendChild(portalContainer);
 
-  const renderResult = render(ui, {
+  const view = render(ui, {
     wrapper: MaterialUITestWrapper,
     container: container, // Use proper container instead of document.body
     ...options,
   });
 
   return {
-    ...renderResult,
+    ...view,
     portalContainer,
     cleanup: () => {
       // Clean up portal container
@@ -70,46 +70,56 @@ export const customRender = (ui: React.ReactElement, options: RenderOptions = {}
 // Test cleanup utilities
 export const setupTestEnvironment = () => {
   // Clean up any existing portal containers
+  // eslint-disable-next-line testing-library/no-node-access
   const existingContainers = document.querySelectorAll(
     '[data-testid="material-ui-portal-container"]'
   );
   existingContainers.forEach(container => container.remove());
 
   // Clean up any existing test containers
+  // eslint-disable-next-line testing-library/no-node-access
   const existingTestContainers = document.querySelectorAll('[data-testid="test-container"]');
   existingTestContainers.forEach(container => container.remove());
 
   // Clean up any portal containers with different testid
+  // eslint-disable-next-line testing-library/no-node-access
   const portalContainers = document.querySelectorAll('[data-testid="portal-container"]');
   portalContainers.forEach(container => container.remove());
 
   // Clean up any remaining React roots
+  // eslint-disable-next-line testing-library/no-node-access
   const reactRoots = document.querySelectorAll('[data-reactroot]');
   reactRoots.forEach(root => root.remove());
 
   // Clean up any remaining dialogs
+  // eslint-disable-next-line testing-library/no-node-access
   const dialogs = document.querySelectorAll('[role="dialog"]');
   dialogs.forEach(dialog => dialog.remove());
 };
 
 export const cleanupTestEnvironment = () => {
   // Clean up all portal containers
+  // eslint-disable-next-line testing-library/no-node-access
   const containers = document.querySelectorAll('[data-testid="material-ui-portal-container"]');
   containers.forEach(container => container.remove());
 
   // Clean up all test containers
+  // eslint-disable-next-line testing-library/no-node-access
   const testContainers = document.querySelectorAll('[data-testid="test-container"]');
   testContainers.forEach(container => container.remove());
 
   // Clean up all portal containers with different testid
+  // eslint-disable-next-line testing-library/no-node-access
   const portalContainers = document.querySelectorAll('[data-testid="portal-container"]');
   portalContainers.forEach(container => container.remove());
 
   // Clean up any remaining React roots
+  // eslint-disable-next-line testing-library/no-node-access
   const reactRoots = document.querySelectorAll('[data-reactroot]');
   reactRoots.forEach(root => root.remove());
 
   // Clean up any remaining dialogs
+  // eslint-disable-next-line testing-library/no-node-access
   const dialogs = document.querySelectorAll('[role="dialog"]');
   dialogs.forEach(dialog => dialog.remove());
 };
@@ -121,9 +131,11 @@ export const waitForDialog = async (dialogTitle?: string) => {
   await waitFor(
     () => {
       if (dialogTitle) {
+        // eslint-disable-next-line testing-library/no-node-access
         const dialog = document.querySelector(`[role="dialog"]`);
         expect(dialog).toBeInTheDocument();
         // Check if dialog title matches (flexible matching)
+        // eslint-disable-next-line testing-library/no-node-access
         const titleElement = document.querySelector(
           '[role="dialog"] h2, [role="dialog"] h1, [role="dialog"] [class*="DialogTitle"]'
         );
@@ -131,6 +143,7 @@ export const waitForDialog = async (dialogTitle?: string) => {
           expect(titleElement.textContent).toContain(dialogTitle);
         }
       } else {
+        // eslint-disable-next-line testing-library/no-node-access
         expect(document.querySelector('[role="dialog"]')).toBeInTheDocument();
       }
     },
@@ -143,19 +156,23 @@ export const findFormFieldInDialog = (
   fieldType: 'input' | 'textarea' | 'select',
   fieldName: string
 ) => {
+  // eslint-disable-next-line testing-library/no-node-access
   const dialog = document.querySelector('[role="dialog"]');
   if (!dialog) return null;
 
   // Try different strategies to find the field
   // 1. By aria-label
+  // eslint-disable-next-line testing-library/no-node-access
   let field = dialog.querySelector(`${fieldType}[aria-label*="${fieldName}"]`);
   if (field) return field;
 
   // 2. By placeholder
+  // eslint-disable-next-line testing-library/no-node-access
   field = dialog.querySelector(`${fieldType}[placeholder*="${fieldName}"]`);
   if (field) return field;
 
   // 3. By associated label
+  // eslint-disable-next-line testing-library/no-node-access
   const labels = dialog.querySelectorAll('label');
   for (const label of labels) {
     if (label.textContent?.toLowerCase().includes(fieldName.toLowerCase())) {
@@ -163,6 +180,7 @@ export const findFormFieldInDialog = (
       if (labelFor) {
         // Escape special characters in the ID for CSS selector
         const escapedId = labelFor.replace(/[!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~]/g, '\\$&');
+        // eslint-disable-next-line testing-library/no-node-access
         field = dialog.querySelector(`#${escapedId}`);
         if (field) return field;
       }
@@ -170,6 +188,7 @@ export const findFormFieldInDialog = (
   }
 
   // 4. By data-testid
+  // eslint-disable-next-line testing-library/no-node-access
   field = dialog.querySelector(`${fieldType}[data-testid*="${fieldName.toLowerCase()}"]`);
   if (field) return field;
 
