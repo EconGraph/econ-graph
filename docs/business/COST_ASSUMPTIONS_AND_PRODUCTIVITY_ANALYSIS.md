@@ -228,6 +228,6 @@ This analysis supports the cost assumptions used in EconGraph project documentat
 
 ---
 
-*Last Updated: January 2025*
+*Last Updated: September 2025*
 *Document Version: 1.0*
 *Prepared by: Product Manager*

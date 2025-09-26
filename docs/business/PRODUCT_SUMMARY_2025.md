@@ -296,6 +296,6 @@ The platform is positioned to capture significant market share in the $8.2B econ
 
 ---
 
-*Last Updated: January 2025*
+*Last Updated: September 2025*
 *Document Version: 1.0*
 *Prepared by: Product Manager*
