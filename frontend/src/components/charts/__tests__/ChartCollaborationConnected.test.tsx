@@ -7,6 +7,8 @@
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, StyledEngineProvider } from '@mui/material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -16,19 +18,19 @@ import { ChartAnnotationType } from '../../../utils/graphql';
 import { useCollaboration } from '../../../hooks/useCollaboration';
 
 // Mock the useCollaboration hook
-jest.mock('../../../hooks/useCollaboration', () => ({
-  useCollaboration: jest.fn(),
+vi.mock('../../../hooks/useCollaboration', () => ({
+  useCollaboration: vi.fn(),
 }));
 
 // Mock the useAuth hook
-const mockUseAuth = jest.fn();
-jest.mock('../../../contexts/AuthContext', () => ({
+const mockUseAuth = vi.fn();
+vi.mock('../../../contexts/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
 }));
 
 // Mock date-fns format function
-jest.mock('date-fns', () => ({
-  format: jest.fn((date) => 'Jan 15, 2:30 PM'),
+vi.mock('date-fns', () => ({
+  format: vi.fn((date) => 'Jan 15, 2:30 PM'),
 }));
 
 const theme = createTheme();
@@ -130,20 +132,20 @@ const mockCollaborationHook = {
   users: mockUsers,
   loading: false,
   error: null,
-  createAnnotation: jest.fn().mockResolvedValue(undefined),
-  addComment: jest.fn().mockResolvedValue(undefined),
-  shareChart: jest.fn().mockResolvedValue(undefined),
-  deleteAnnotation: jest.fn().mockResolvedValue(undefined),
-  toggleAnnotationVisibility: jest.fn().mockResolvedValue(undefined),
-  toggleAnnotationPin: jest.fn().mockResolvedValue(undefined),
-  loadComments: jest.fn().mockResolvedValue(undefined),
-  getUserById: jest.fn((id: string) => {
+  createAnnotation: vi.fn().mockResolvedValue(undefined),
+  addComment: vi.fn().mockResolvedValue(undefined),
+  shareChart: vi.fn().mockResolvedValue(undefined),
+  deleteAnnotation: vi.fn().mockResolvedValue(undefined),
+  toggleAnnotationVisibility: vi.fn().mockResolvedValue(undefined),
+  toggleAnnotationPin: vi.fn().mockResolvedValue(undefined),
+  loadComments: vi.fn().mockResolvedValue(undefined),
+  getUserById: vi.fn((id: string) => {
     console.log('getUserById called with:', id);
     const user = mockUsers[id as keyof typeof mockUsers];
     console.log('getUserById returning:', user);
     return user;
   }),
-  getCommentsForAnnotation: jest.fn((annotationId) => {
+  getCommentsForAnnotation: vi.fn((annotationId) => {
     console.log('getCommentsForAnnotation called with:', annotationId);
     const comments = mockComments.filter(comment => comment.annotationId === annotationId);
     console.log('getCommentsForAnnotation returning:', comments);
@@ -203,21 +205,21 @@ describe('ChartCollaborationConnected', () => {
     portalContainers.forEach(container => container.remove());
   });
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     mockUseAuth.mockReturnValue({ user: mockUser });
 
     // Re-setup the mock implementation after clearing
-    mockCollaborationHook.getUserById = jest.fn((id: string) => {
+    mockCollaborationHook.getUserById = vi.fn((id: string) => {
       const user = mockUsers[id as keyof typeof mockUsers];
       return user;
     });
 
-    mockCollaborationHook.getCommentsForAnnotation = jest.fn((annotationId) => {
+    mockCollaborationHook.getCommentsForAnnotation = vi.fn((annotationId) => {
       const comments = mockComments.filter(comment => comment.annotationId === annotationId);
       return comments;
     });
 
-    (useCollaboration as jest.Mock).mockReturnValue(mockCollaborationHook);
+    (useCollaboration as Mock).mockReturnValue(mockCollaborationHook);
 
     // Clean up any existing portal containers
     const existingContainers = document.querySelectorAll('[data-testid="portal-container"]');
@@ -235,8 +237,8 @@ describe('ChartCollaborationConnected', () => {
       seriesId: 'series-1',
       chartId: 'chart-1',
       isOpen: true,
-      onToggle: jest.fn(),
-      onAnnotationClick: jest.fn(),
+      onToggle: vi.fn(),
+      onAnnotationClick: vi.fn(),
       ...props,
     };
 
@@ -307,7 +309,7 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Loading States', () => {
     it('should show loading indicator when data is loading', () => {
-      (useCollaboration as jest.Mock).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         loading: true,
       });
@@ -318,7 +320,7 @@ describe('ChartCollaborationConnected', () => {
     });
 
     it('should disable add annotation button when loading', () => {
-      (useCollaboration as jest.Mock).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         loading: true,
       });
@@ -332,7 +334,7 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Error Handling', () => {
     it('should display error message when there is an error', () => {
-      (useCollaboration as jest.Mock).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         error: 'Failed to load collaboration data',
       });
@@ -562,9 +564,9 @@ describe('ChartCollaborationConnected', () => {
 
     it('should show error snackbar on creation failure', async () => {
       const user = userEvent.setup();
-      (useCollaboration as jest.Mock).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
-        createAnnotation: jest.fn().mockRejectedValue(new Error('Creation failed')),
+        createAnnotation: vi.fn().mockRejectedValue(new Error('Creation failed')),
       });
 
       renderChartCollaborationConnected();
@@ -612,7 +614,7 @@ describe('ChartCollaborationConnected', () => {
       const user = userEvent.setup();
 
       // Mock window.confirm
-      window.confirm = jest.fn().mockReturnValue(true);
+      window.confirm = vi.fn().mockReturnValue(true);
 
       renderChartCollaborationConnected();
 
@@ -627,7 +629,7 @@ describe('ChartCollaborationConnected', () => {
       const user = userEvent.setup();
 
       // Mock window.confirm to return false
-      window.confirm = jest.fn().mockReturnValue(false);
+      window.confirm = vi.fn().mockReturnValue(false);
 
       renderChartCollaborationConnected();
 
@@ -774,7 +776,7 @@ describe('ChartCollaborationConnected', () => {
   describe('Annotation Selection', () => {
     it('should call onAnnotationClick when annotation is selected', async () => {
       const user = userEvent.setup();
-      const mockOnAnnotationClick = jest.fn();
+      const mockOnAnnotationClick = vi.fn();
       renderChartCollaborationConnected({ onAnnotationClick: mockOnAnnotationClick });
 
       // Click on an annotation - look for the annotation text content
@@ -798,7 +800,7 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Empty States', () => {
     it('should show empty state when no annotations', () => {
-      (useCollaboration as jest.Mock).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         annotations: [],
       });
@@ -815,7 +817,7 @@ describe('ChartCollaborationConnected', () => {
         userId: 'other-user'
       }));
 
-      (useCollaboration as jest.Mock).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         annotations: otherUserAnnotations,
       });
@@ -852,7 +854,7 @@ describe('ChartCollaborationConnected', () => {
         updatedAt: '2024-01-15T10:00:00Z',
       }));
 
-      (useCollaboration as jest.Mock).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         collaborators: manyCollaborators,
       });

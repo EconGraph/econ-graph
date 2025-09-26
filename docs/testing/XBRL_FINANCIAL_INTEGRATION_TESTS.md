@@ -184,10 +184,10 @@ cd frontend
 ./scripts/run-integration-tests.sh
 
 # Run specific test file
-npm test -- --testPathPattern="xbrl-financial-integration.test.tsx" --watchAll=false
+npm test -- --testNamePattern="xbrl-financial-integration"
 
 # Run specific test suite
-npm test -- --testPathPattern="xbrl-financial-integration.test.tsx" --testNamePattern="Financial Dashboard Integration" --watchAll=false
+npm test -- --testNamePattern="Financial Dashboard Integration"
 ```
 
 ## Test Environment Setup
@@ -288,7 +288,7 @@ The integration tests are designed to run in CI/CD pipelines:
 Run tests with verbose output for debugging:
 ```bash
 cargo test -- --nocapture --test-threads=1
-npm test -- --verbose --watchAll=false
+npm test -- --verbose
 ```
 
 ## Future Enhancements

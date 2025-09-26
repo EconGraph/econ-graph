@@ -3,6 +3,8 @@
  * PURPOSE: Provide predictable test data and behavior for components
  */
 
+import { vi } from 'vitest';
+
 // Mock data for testing
 export const mockDataSources = [
   {
@@ -55,7 +57,7 @@ export const mockSearchResults = [
 ];
 
 // Mock hook implementations
-export const useDataSources = jest.fn(() => ({
+export const useDataSources = vi.fn(() => ({
   data: mockDataSources,
   isLoading: false,
   error: null,
@@ -63,7 +65,7 @@ export const useDataSources = jest.fn(() => ({
   isSuccess: true,
 }));
 
-export const useSeriesSearch = jest.fn(() => ({
+export const useSeriesSearch = vi.fn(() => ({
   data: mockSearchResults,
   isLoading: false,
   error: null,
@@ -71,7 +73,7 @@ export const useSeriesSearch = jest.fn(() => ({
   isSuccess: true,
 }));
 
-export const useSeriesDetail = jest.fn(() => ({
+export const useSeriesDetail = vi.fn(() => ({
   data: mockSearchResults[0],
   isLoading: false,
   error: null,
@@ -79,7 +81,7 @@ export const useSeriesDetail = jest.fn(() => ({
   isSuccess: true,
 }));
 
-export const useSeriesData = jest.fn(() => ({
+export const useSeriesData = vi.fn(() => ({
   data: {
     series: mockSearchResults[0],
     dataPoints: [
@@ -94,7 +96,7 @@ export const useSeriesData = jest.fn(() => ({
   isSuccess: true,
 }));
 
-export const useSearchSuggestions = jest.fn(() => ({
+export const useSearchSuggestions = vi.fn(() => ({
   data: ['GDP', 'unemployment', 'inflation', 'federal funds rate'],
   isLoading: false,
   error: null,
@@ -102,7 +104,7 @@ export const useSearchSuggestions = jest.fn(() => ({
   isSuccess: true,
 }));
 
-export const useCrawlerStatus = jest.fn(() => ({
+export const useCrawlerStatus = vi.fn(() => ({
   data: {
     status: 'running',
     lastRun: '2024-12-15T10:00:00Z',
