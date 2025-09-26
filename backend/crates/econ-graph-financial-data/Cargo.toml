@@ -1,0 +1,50 @@
+[package]
+name = "econ_graph_financial_data"
+version = "0.1.0"
+edition = "2021"
+authors = ["EconGraph Team"]
+description = "Financial data service with Iceberg storage and GraphQL API"
+
+[dependencies]
+# GraphQL and Web Framework
+async-graphql = { workspace = true }
+async-graphql-axum = "7.0"
+axum = "0.8"
+tokio = { workspace = true }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Database and Storage
+apache-avro = "0.14"
+parquet = "56.0"
+arrow = "56.0"
+object_store = "0.12"
+minio = "0.3"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# UUID and Time
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Decimal for financial data
+rust_decimal = { workspace = true }
+
+# Configuration
+config = { workspace = true }
+clap = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Testing
+[dev-dependencies]
+tokio-test = { workspace = true }
+tempfile = { workspace = true }
