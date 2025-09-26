@@ -7,7 +7,7 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use imara_diff::{Algorithm, UnifiedDiffBuilder};
 use std::fs;
 use std::process::Command;
-use testcontainers::{runners::AsyncRunner, ContainerAsync};
+use testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
 use testcontainers_modules::postgres::Postgres;
 
 // Embed migrations at compile time
@@ -27,7 +27,8 @@ async fn test_schema_compatibility() {
     let postgres_image = Postgres::default()
         .with_db_name("test_econ_graph")
         .with_user("test_user")
-        .with_password("test_password");
+        .with_password("test_password")
+        .with_tag("postgres:18-alpine");
     let container: ContainerAsync<Postgres> = postgres_image
         .start()
         .await
@@ -183,7 +184,8 @@ async fn test_schema_generation_process() {
     let postgres_image = Postgres::default()
         .with_db_name("test_econ_graph")
         .with_user("test_user")
-        .with_password("test_password");
+        .with_password("test_password")
+        .with_tag("postgres:18-alpine");
     let container: ContainerAsync<Postgres> = postgres_image
         .start()
         .await
@@ -240,7 +242,8 @@ async fn test_migration_application() {
     let postgres_image = Postgres::default()
         .with_db_name("test_econ_graph")
         .with_user("test_user")
-        .with_password("test_password");
+        .with_password("test_password")
+        .with_tag("postgres:18-alpine");
     let container: ContainerAsync<Postgres> = postgres_image
         .start()
         .await
@@ -283,7 +286,8 @@ async fn test_schema_compatibility_comparison() {
     let postgres_image = Postgres::default()
         .with_db_name("test_econ_graph")
         .with_user("test_user")
-        .with_password("test_password");
+        .with_password("test_password")
+        .with_tag("postgres:18-alpine");
     let container: ContainerAsync<Postgres> = postgres_image
         .start()
         .await

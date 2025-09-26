@@ -19,7 +19,7 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 // Deadpool-diesel replaced with bb8 and diesel-async
 // use deadpool_diesel::postgres::{Manager, Pool};
 use once_cell::sync::Lazy;
-use testcontainers::{runners::AsyncRunner, ContainerAsync, Image};
+use testcontainers::{runners::AsyncRunner, ContainerAsync, Image, ImageExt};
 use testcontainers_modules::postgres::Postgres;
 use tokio::sync::Mutex;
 
@@ -49,6 +49,7 @@ impl TestContainer {
         // REQUIREMENT: Use testcontainers for database testing
         // Create PostgreSQL container with specific configuration
         let postgres = Postgres::default()
+            .with_tag("postgres:18-alpine")
             .with_db_name("test_econ_graph")
             .with_user("test_user")
             .with_password("test_password");
