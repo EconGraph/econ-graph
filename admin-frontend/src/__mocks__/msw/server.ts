@@ -30,6 +30,17 @@ import getCrawlerLogsError from "../graphql/getCrawlerLogs/error.json";
 import getCrawlerLogsLoading from "../graphql/getCrawlerLogs/loading.json";
 import searchLogsSuccess from "../graphql/searchLogs/success.json";
 import searchLogsError from "../graphql/searchLogs/error.json";
+import getUsersSuccess from "../graphql/getUsers/success.json";
+import getUsersError from "../graphql/getUsers/error.json";
+import getUsersLoading from "../graphql/getUsers/loading.json";
+import getOnlineUsersSuccess from "../graphql/getOnlineUsers/success.json";
+import getOnlineUsersError from "../graphql/getOnlineUsers/error.json";
+import createUserSuccess from "../graphql/createUser/success.json";
+import createUserError from "../graphql/createUser/error.json";
+import updateUserSuccess from "../graphql/updateUser/success.json";
+import updateUserError from "../graphql/updateUser/error.json";
+import deleteUserSuccess from "../graphql/deleteUser/success.json";
+import deleteUserError from "../graphql/deleteUser/error.json";
 
 // Track current scenario for dynamic responses
 let currentScenario = "success";
@@ -153,6 +164,59 @@ const handlers = [
               break;
             default:
               response = searchLogsSuccess;
+          }
+          break;
+
+        case "GetUsers":
+          switch (currentScenario) {
+            case "error":
+              response = getUsersError;
+              break;
+            case "loading":
+              response = getUsersLoading;
+              break;
+            default:
+              response = getUsersSuccess;
+          }
+          break;
+
+        case "GetOnlineUsers":
+          switch (currentScenario) {
+            case "error":
+              response = getOnlineUsersError;
+              break;
+            default:
+              response = getOnlineUsersSuccess;
+          }
+          break;
+
+        case "CreateUser":
+          switch (currentScenario) {
+            case "error":
+              response = createUserError;
+              break;
+            default:
+              response = createUserSuccess;
+          }
+          break;
+
+        case "UpdateUser":
+          switch (currentScenario) {
+            case "error":
+              response = updateUserError;
+              break;
+            default:
+              response = updateUserSuccess;
+          }
+          break;
+
+        case "DeleteUser":
+          switch (currentScenario) {
+            case "error":
+              response = deleteUserError;
+              break;
+            default:
+              response = deleteUserSuccess;
           }
           break;
 

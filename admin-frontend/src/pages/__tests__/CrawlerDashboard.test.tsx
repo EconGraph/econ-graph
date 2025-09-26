@@ -15,14 +15,15 @@ import { render, screen, act } from "@testing-library/react";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
+import { vi } from "vitest";
 import CrawlerDashboard from "../CrawlerDashboard";
 
 // Mock Material-UI theme
 const theme = createTheme();
 
 // Mock date-fns format function
-jest.mock("date-fns", () => ({
-  format: jest.fn((date, formatStr) => {
+vi.mock("date-fns", () => ({
+  format: vi.fn((date, formatStr) => {
     if (formatStr === "MMM dd, HH:mm") {
       return "Jan 01, 12:00";
     }
@@ -35,8 +36,8 @@ const originalConsoleError = console.error;
 const originalConsoleWarn = console.warn;
 
 beforeAll(() => {
-  console.error = jest.fn();
-  console.warn = jest.fn();
+  console.error = vi.fn();
+  console.warn = vi.fn();
 });
 
 afterAll(() => {
@@ -45,11 +46,11 @@ afterAll(() => {
 });
 
 // Mock the useCrawlerData hooks to return our GraphQL mock data
-jest.mock("../../hooks/useCrawlerData", () => ({
-  useCrawlerData: jest.fn(),
-  useCrawlerStatus: jest.fn(),
-  useQueueStatistics: jest.fn(),
-  usePerformanceMetrics: jest.fn(),
+vi.mock("../../hooks/useCrawlerData", () => ({
+  useCrawlerData: vi.fn(),
+  useCrawlerStatus: vi.fn(),
+  useQueueStatistics: vi.fn(),
+  usePerformanceMetrics: vi.fn(),
 }));
 
 // Create a single QueryClient for all tests to avoid performance issues
@@ -84,33 +85,35 @@ describe("CrawlerDashboard", () => {
   beforeAll(() => {
     // Initialize QueryClient once for all tests
     testQueryClient = createTestQueryClient();
+  });
 
+  beforeEach(async () => {
     // Set up hook mocks with GraphQL mock data
     const {
       useCrawlerData,
       useCrawlerStatus,
       useQueueStatistics,
       usePerformanceMetrics,
-    } = require("../../hooks/useCrawlerData");
+    } = await import("../../hooks/useCrawlerData");
 
     // Import mock data dynamically
-    const getCrawlerStatusSuccess = require("../../__mocks__/graphql/getCrawlerStatus/success.json");
-    const getQueueStatisticsSuccess = require("../../__mocks__/graphql/getQueueStatistics/success.json");
-    const getPerformanceMetricsSuccess = require("../../__mocks__/graphql/getPerformanceMetrics/success.json");
+    const getCrawlerStatusSuccess = await import("../../__mocks__/graphql/getCrawlerStatus/success.json");
+    const getQueueStatisticsSuccess = await import("../../__mocks__/graphql/getQueueStatistics/success.json");
+    const getPerformanceMetricsSuccess = await import("../../__mocks__/graphql/getPerformanceMetrics/success.json");
 
     // Mock useCrawlerData to return combined mock data with correct structure
     useCrawlerData.mockReturnValue({
       status: {
-        status: getCrawlerStatusSuccess.data.crawlerStatus,
+        status: getCrawlerStatusSuccess.default.data.crawlerStatus,
         loading: false,
         error: null,
-        refresh: jest.fn(),
+        refresh: vi.fn(),
       },
       queueStats: {
-        statistics: getQueueStatisticsSuccess.data.queueStatistics,
+        statistics: getQueueStatisticsSuccess.default.data.queueStatistics,
         loading: false,
         error: null,
-        refresh: jest.fn(),
+        refresh: vi.fn(),
         derived: {
           progressPercentage: 66.7,
           successRate: 66.7,
@@ -118,30 +121,30 @@ describe("CrawlerDashboard", () => {
         },
       },
       performance: {
-        metrics: getPerformanceMetricsSuccess.data.performanceMetrics,
-        latestMetrics: getPerformanceMetricsSuccess.data.performanceMetrics[0],
+        metrics: getPerformanceMetricsSuccess.default.data.performanceMetrics,
+        latestMetrics: getPerformanceMetricsSuccess.default.data.performanceMetrics[0],
         loading: false,
         error: null,
-        refresh: jest.fn(),
+        refresh: vi.fn(),
       },
       logs: {
         logs: [],
         loading: false,
         error: null,
-        refresh: jest.fn(),
+        refresh: vi.fn(),
       },
       control: {
         loading: false,
         error: null,
         actions: {
-          triggerCrawl: jest.fn(),
-          startCrawler: jest.fn(),
-          stopCrawler: jest.fn(),
-          pauseCrawler: jest.fn(),
-          resumeCrawler: jest.fn(),
+          triggerCrawl: vi.fn(),
+          startCrawler: vi.fn(),
+          stopCrawler: vi.fn(),
+          pauseCrawler: vi.fn(),
+          resumeCrawler: vi.fn(),
         },
       },
-      refreshAll: jest.fn(),
+      refreshAll: vi.fn(),
       loading: false,
       error: null,
     });
@@ -151,14 +154,14 @@ describe("CrawlerDashboard", () => {
       status: getCrawlerStatusSuccess.data.crawlerStatus,
       loading: false,
       error: null,
-      refresh: jest.fn(),
+      refresh: vi.fn(),
     });
 
     useQueueStatistics.mockReturnValue({
       statistics: getQueueStatisticsSuccess.data.queueStatistics,
       loading: false,
       error: null,
-      refresh: jest.fn(),
+      refresh: vi.fn(),
       derived: {
         progressPercentage: 66.7,
         successRate: 66.7,
@@ -171,7 +174,7 @@ describe("CrawlerDashboard", () => {
       latestMetrics: getPerformanceMetricsSuccess.data.performanceMetrics[0],
       loading: false,
       error: null,
-      refresh: jest.fn(),
+      refresh: vi.fn(),
     });
   });
 
@@ -180,13 +183,13 @@ describe("CrawlerDashboard", () => {
     testQueryClient.clear();
 
     // Mock timers for consistent testing
-    jest.useFakeTimers();
+    vi.useFakeTimers();
   });
 
   afterEach(() => {
     // Clean up timers
-    jest.runOnlyPendingTimers();
-    jest.useRealTimers();
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
   });
 
   afterAll(() => {
@@ -225,34 +228,34 @@ describe("CrawlerDashboard", () => {
 
     it("handles GraphQL error scenarios", async () => {
       // Mock useCrawlerData to return error
-      const { useCrawlerData } = require("../../hooks/useCrawlerData");
+      const { useCrawlerData } = await import("../../hooks/useCrawlerData");
       useCrawlerData.mockReturnValue({
         status: {
           data: null,
           loading: false,
           error: new Error("Failed to retrieve crawler status"),
-          refresh: jest.fn(),
+          refresh: vi.fn(),
         },
         queueStats: {
           data: null,
           loading: false,
           error: null,
-          refresh: jest.fn(),
+          refresh: vi.fn(),
         },
         performance: {
           data: null,
           loading: false,
           error: null,
-          refresh: jest.fn(),
+          refresh: vi.fn(),
         },
         control: {
-          triggerCrawl: jest.fn(),
-          startCrawler: jest.fn(),
-          stopCrawler: jest.fn(),
-          pauseCrawler: jest.fn(),
-          resumeCrawler: jest.fn(),
+          triggerCrawl: vi.fn(),
+          startCrawler: vi.fn(),
+          stopCrawler: vi.fn(),
+          pauseCrawler: vi.fn(),
+          resumeCrawler: vi.fn(),
         },
-        refreshAll: jest.fn(),
+        refreshAll: vi.fn(),
         loading: false,
         error: new Error("Failed to retrieve crawler status"),
       });
@@ -273,7 +276,7 @@ describe("CrawlerDashboard", () => {
 
       // Wait for loading to complete
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       expect(screen.getByText("🕷️ Crawler Administration")).toBeInTheDocument();
@@ -285,7 +288,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       // Check status chip
@@ -302,7 +305,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       expect(screen.getByText("Total Items")).toBeInTheDocument();
@@ -321,7 +324,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       expect(screen.getByText("Queue Progress")).toBeInTheDocument();
@@ -333,7 +336,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       expect(screen.getByText("Recent Activity")).toBeInTheDocument();
@@ -348,11 +351,11 @@ describe("CrawlerDashboard", () => {
 
   describe("User Interactions", () => {
     it("handles refresh button click", async () => {
-      const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       const refreshButton = screen.getByText("Refresh");
@@ -365,13 +368,13 @@ describe("CrawlerDashboard", () => {
     });
 
     it("handles trigger crawl button click", async () => {
-      const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
-      const consoleSpy = jest.spyOn(console, "log").mockImplementation();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const consoleSpy = vi.spyOn(console, "log").mockImplementation();
 
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       const triggerButton = screen.getByText("Trigger Crawl");
@@ -384,13 +387,13 @@ describe("CrawlerDashboard", () => {
     });
 
     it("handles stop crawler button click", async () => {
-      const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
-      const consoleSpy = jest.spyOn(console, "log").mockImplementation();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const consoleSpy = vi.spyOn(console, "log").mockImplementation();
 
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       const stopButton = screen.getByText("Stop Crawler");
@@ -406,7 +409,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       // Simulate error state - this test assumes error alert exists
@@ -422,7 +425,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       // Check for status chip with success color
@@ -434,7 +437,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       // Check specific metric values
@@ -448,7 +451,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       const progressBar = screen.getByRole("progressbar");
@@ -462,7 +465,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       // Check for proper heading structure
@@ -485,11 +488,11 @@ describe("CrawlerDashboard", () => {
     });
 
     it("supports keyboard navigation", async () => {
-      const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       const refreshButton = screen.getByText("Refresh");
@@ -504,7 +507,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       // Check that status chips have proper color attributes
@@ -518,7 +521,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       // Should render without performance issues
@@ -529,7 +532,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       // Component should be stable
@@ -542,7 +545,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       // Error handling is tested through the error state simulation
@@ -554,7 +557,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       // Component should be able to recover from errors
@@ -578,7 +581,7 @@ describe("CrawlerDashboard", () => {
 
       // After timeout, should be loaded
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       expect(
@@ -593,7 +596,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       // Should use theme colors and styling
@@ -605,7 +608,7 @@ describe("CrawlerDashboard", () => {
       renderWithTheme(<CrawlerDashboard />);
 
       await act(async () => {
-        jest.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1000);
       });
 
       expect(screen.getByText("Crawler Status")).toBeInTheDocument();
