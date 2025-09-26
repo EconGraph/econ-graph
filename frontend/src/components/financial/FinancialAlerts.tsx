@@ -673,15 +673,6 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
         </CardContent>
       </Card>
 
-      {/* Loading State Placeholder - disabled for now */}
-      {process.env.NODE_ENV === 'development' && false && (
-        <Card>
-          <CardContent className='p-8 text-center'>
-            <p>Loading alerts...</p>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Alert Notifications */}
       <Card>
         <CardHeader>
