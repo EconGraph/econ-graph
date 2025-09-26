@@ -20,7 +20,7 @@ async fn test_world_bank_data_source_database_integration() -> Result<(), Box<dy
         .with_db_name("econ_graph_test")
         .with_user("postgres")
         .with_password("password")
-        .with_tag("postgres:18-alpine");
+        .with_tag("postgres:18");
 
     let container = postgres.start().await.unwrap();
     let connection_string = format!(
@@ -68,7 +68,7 @@ async fn test_world_bank_data_source_persistence() -> Result<(), Box<dyn std::er
         .with_db_name("econ_graph_test")
         .with_user("postgres")
         .with_password("password")
-        .with_tag("postgres:18-alpine");
+        .with_tag("postgres:18");
 
     let container = postgres.start().await.unwrap();
     let connection_string = format!(

@@ -28,7 +28,7 @@ async fn test_schema_compatibility() {
         .with_db_name("test_econ_graph")
         .with_user("test_user")
         .with_password("test_password")
-        .with_tag("postgres:18-alpine");
+        .with_tag("postgres:18");
     let container: ContainerAsync<Postgres> = postgres_image
         .start()
         .await
@@ -185,7 +185,7 @@ async fn test_schema_generation_process() {
         .with_db_name("test_econ_graph")
         .with_user("test_user")
         .with_password("test_password")
-        .with_tag("postgres:18-alpine");
+        .with_tag("postgres:18");
     let container: ContainerAsync<Postgres> = postgres_image
         .start()
         .await
@@ -243,7 +243,7 @@ async fn test_migration_application() {
         .with_db_name("test_econ_graph")
         .with_user("test_user")
         .with_password("test_password")
-        .with_tag("postgres:18-alpine");
+        .with_tag("postgres:18");
     let container: ContainerAsync<Postgres> = postgres_image
         .start()
         .await
@@ -287,7 +287,7 @@ async fn test_schema_compatibility_comparison() {
         .with_db_name("test_econ_graph")
         .with_user("test_user")
         .with_password("test_password")
-        .with_tag("postgres:18-alpine");
+        .with_tag("postgres:18");
     let container: ContainerAsync<Postgres> = postgres_image
         .start()
         .await

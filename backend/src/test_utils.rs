@@ -49,7 +49,7 @@ impl TestContainer {
         // REQUIREMENT: Use testcontainers for database testing
         // Create PostgreSQL container with specific configuration
         let postgres = Postgres::default()
-            .with_tag("postgres:18-alpine")
+            .with_tag("postgres:18")
             .with_db_name("test_econ_graph")
             .with_user("test_user")
             .with_password("test_password");
