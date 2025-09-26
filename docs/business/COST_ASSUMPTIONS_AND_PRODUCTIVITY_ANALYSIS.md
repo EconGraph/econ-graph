@@ -125,10 +125,10 @@ Based on our project scope and complexity:
 - **Cursor Pro Subscription**: ~$20/month
 - **Staff Engineer Time**: 28 days × 8 hours × $150/hour = $33,600
   *Source: [Geomotiv - Software Engineer Hourly Rates](https://geomotiv.com/blog/software-engineer-hourly-rate-in-the-usa/) - Silicon Valley rates $80-$150/hour for senior engineers*
-- **Total Project Cost**: $34,537.84
+- **Total Project Cost**: ~$35,000
 
 **Development Timeline**: 28 days of active development
-**Total Actual Cost**: $34,537.84
+**Total Actual Cost**: ~$35,000
 
 ### 3. Cost Comparison and ROI Analysis
 
@@ -139,13 +139,13 @@ Based on our project scope and complexity:
 - **Risk Level**: High (team coordination, knowledge transfer)
 
 **AI-Assisted Development**:
-- **Cost Range**: $34,537.84
+- **Cost Range**: ~$35,000
 - **Timeline**: 28 days
 - **Team Size**: 1 staff engineer + AI
 - **Risk Level**: Low (single staff engineer, AI assistance)
 
 **ROI Calculation**:
-- **Cost Savings**: $4.8M - $34,537.84 = $4.77M (99.3% cost reduction)
+- **Cost Savings**: $4.8M - ~$35,000 = $4.77M (99.3% cost reduction)
 - **Time Savings**: 5-11 months (83-92% time reduction)
 - **Quality**: Professional-grade testing, documentation, security scanning
 
@@ -220,7 +220,7 @@ The data presented in this document provides a comprehensive foundation for cost
 
 **Key Takeaways**:
 1. **Traditional Development**: $4.8M for similar projects
-2. **AI-Assisted Development**: $34,537.84 for equivalent results
+2. **AI-Assisted Development**: ~$35,000 for equivalent results
 3. **Productivity Gains**: 10-20x faster development cycles
 4. **Quality Maintenance**: Professional-grade results with AI assistance
 
