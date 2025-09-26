@@ -58,7 +58,7 @@ mod tests {
         // Phase 1: Infrastructure Setup with TestContainers
         println!("📦 Phase 1: Setting up TestContainers infrastructure...");
         let postgres_container = Postgres::default()
-            .with_tag("postgres:18-alpine")
+            .with_tag("postgres:18")
             .start().await.unwrap();
         let connection_string = format!(
             "postgres://postgres:postgres@127.0.0.1:{}/postgres",

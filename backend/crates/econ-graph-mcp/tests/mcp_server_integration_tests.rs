@@ -18,7 +18,7 @@ async fn create_test_database_pool() -> econ_graph_core::database::DatabasePool 
         .with_db_name("econ_graph_test")
         .with_user("postgres")
         .with_password("password")
-        .with_tag("postgres:18-alpine");
+        .with_tag("postgres:18");
 
     let container = postgres.start().await.expect("Failed to start container");
     let port = container
