@@ -26,6 +26,29 @@
         "sessionId": "sess_def456",
         "ipAddress": "192.168.1.101",
         "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+      },
+      {
+        "id": "3",
+        "name": "Bob Analyst",
+        "email": "bob.analyst@company.com",
+        "role": "read_only",
+        "status": "active",
+        "lastLogin": "2024-01-14T16:45:00Z",
+        "createdAt": "2023-09-20T00:00:00Z",
+        "isOnline": false,
+        "sessionId": "sess_ghi789",
+        "ipAddress": "192.168.1.102",
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64)"
+      },
+      {
+        "id": "4",
+        "name": "Alice Developer",
+        "email": "alice.dev@company.com",
+        "role": "admin",
+        "status": "inactive",
+        "lastLogin": "2024-01-10T14:20:00Z",
+        "createdAt": "2023-07-10T00:00:00Z",
+        "isOnline": false
       }
     ]
   }

@@ -35,6 +35,12 @@ import searchLogsSuccess from "../graphql/searchLogs/success.json";
 import searchLogsError from "../graphql/searchLogs/error.json";
 import getUsersSuccess from "../graphql/getUsers/success.json";
 import getOnlineUsersSuccess from "../graphql/getOnlineUsers/success.json";
+import createUserSuccess from "../graphql/createUser/success.json";
+import createUserError from "../graphql/createUser/error.json";
+import updateUserSuccess from "../graphql/updateUser/success.json";
+import updateUserError from "../graphql/updateUser/error.json";
+import deleteUserSuccess from "../graphql/deleteUser/success.json";
+import deleteUserError from "../graphql/deleteUser/error.json";
 
 // Mock scenarios for testing different states
 export enum MockScenarios {
@@ -110,6 +116,21 @@ export const mockResponses = {
 
   GetOnlineUsers: {
     success: getOnlineUsersSuccess,
+  },
+
+  CreateUser: {
+    success: createUserSuccess,
+    error: createUserError,
+  },
+
+  UpdateUser: {
+    success: updateUserSuccess,
+    error: updateUserError,
+  },
+
+  DeleteUser: {
+    success: deleteUserSuccess,
+    error: deleteUserError,
   },
 };
 
