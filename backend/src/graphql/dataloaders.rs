@@ -259,6 +259,11 @@ impl DataLoaders {
 mod tests {
     use super::*;
     use crate::test_utils::get_test_pool;
+    use std::sync::Arc;
+    use uuid::Uuid;
+    use chrono::Utc;
+    use diesel::prelude::*;
+    use diesel_async::RunQueryDsl;
 
     #[tokio::test]
     async fn test_data_loaders_creation() {
@@ -272,19 +277,86 @@ mod tests {
         // Basic creation test - more functionality will be added when DataLoader is re-enabled
     }
 
+    /// Test DataSourceLoader with real database operations
+    ///
+    /// # Test Scenario
+    /// - Create test data sources in database
+    /// - Use DataSourceLoader to batch load data sources
+    /// - Verify correct data sources are returned
+    ///
+    /// # Expected Behavior
+    /// - DataSourceLoader returns correct data sources by ID
+    /// - Batch loading works efficiently
+    /// - Handles missing data sources gracefully
+    ///
+    /// # Test Data
+    /// - Multiple test data sources with different attributes
+    ///
+    /// # Dependencies
+    /// - Test database with data_sources table
     #[tokio::test]
-    async fn test_data_source_loader() {
-        // Test DataSourceLoader functionality
-        // REQUIREMENT: DataLoader should efficiently batch database queries
-        // PURPOSE: Verify that DataSourceLoader can load multiple data sources in a single query
+    async fn test_data_source_loader_with_real_data() {
+        // REQUIREMENT: DataLoader should efficiently batch database queries for data sources
+        // PURPOSE: Verify that DataSourceLoader can load data sources by ID with real database operations
 
         let pool = get_test_pool().await;
-        let loader = DataSourceLoader { pool };
 
-        // Test with empty keys - should return empty HashMap
-        let result = loader.load(&[]).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_empty());
+        // Create test data sources
+        let source1_id = Uuid::new_v4();
+        let source2_id = Uuid::new_v4();
+        let source3_id = Uuid::new_v4(); // This one won't exist in database
+
+        let conn = pool.get().await.expect("Failed to get database connection");
+
+        // Insert test data sources
+        let _ = conn.interact(|conn| {
+            use crate::schema::data_sources::dsl;
+            use crate::models::data_source::NewDataSource;
+
+            let new_source1 = NewDataSource {
+                id: source1_id,
+                name: "Test Source 1".to_string(),
+                base_url: "https://test1.example.com".to_string(),
+                description: Some("Test source 1".to_string()),
+                is_active: true,
+                created_at: Utc::now().naive_utc(),
+                updated_at: Utc::now().naive_utc(),
+            };
+
+            let new_source2 = NewDataSource {
+                id: source2_id,
+                name: "Test Source 2".to_string(),
+                base_url: "https://test2.example.com".to_string(),
+                description: Some("Test source 2".to_string()),
+                is_active: true,
+                created_at: Utc::now().naive_utc(),
+                updated_at: Utc::now().naive_utc(),
+            };
+
+            diesel::insert_into(dsl::data_sources)
+                .values(&[new_source1, new_source2])
+                .execute(conn)
+        }).await.expect("Failed to insert test data sources");
+
+        // Test DataSourceLoader
+        let loader = DataSourceLoader { pool: pool.clone() };
+        let keys = vec![source1_id, source2_id, source3_id];
+        let result = loader.load(&keys).await.expect("Failed to load data sources");
+
+        // Verify results
+        assert_eq!(result.len(), 2); // Only 2 sources exist
+        assert!(result.contains_key(&source1_id));
+        assert!(result.contains_key(&source2_id));
+        assert!(!result.contains_key(&source3_id)); // This one doesn't exist
+
+        // Verify data integrity
+        let source1 = result.get(&source1_id).unwrap();
+        assert_eq!(source1.name, "Test Source 1");
+        assert_eq!(source1.base_url, "https://test1.example.com");
+
+        let source2 = result.get(&source2_id).unwrap();
+        assert_eq!(source2.name, "Test Source 2");
+        assert_eq!(source2.base_url, "https://test2.example.com");
     }
 
     #[tokio::test]
