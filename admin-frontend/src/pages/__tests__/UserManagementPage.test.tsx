@@ -6,6 +6,7 @@ import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { vi } from "vitest";
 import UserManagementPage from "../UserManagementPage";
 
@@ -40,106 +41,22 @@ vi.mock("../../contexts/SecurityContext", () => ({
   }),
 }));
 
-// Mock React Query to prevent "No QueryClient set" errors
-vi.mock("@tanstack/react-query", () => ({
-  ...vi.importActual("@tanstack/react-query"),
-  QueryClientProvider: ({ children }: any) => children,
-  useQuery: vi.fn(() => ({
-    data: undefined,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  })),
-  useMutation: vi.fn(() => ({
-    mutate: vi.fn(),
-    mutateAsync: vi.fn(),
-    isLoading: false,
-    error: null,
-  })),
-  useQueryClient: vi.fn(() => ({
-    invalidateQueries: vi.fn(),
-    setQueryData: vi.fn(),
-  })),
-}));
+// Import MSW setup
+import {
+  setupSimpleMSW,
+  cleanupSimpleMSW,
+  setMockScenario,
+} from "../../__mocks__/msw/simpleServer";
 
-// Mock the useUsers hook specifically
-vi.mock("../../hooks/useUsers", () => ({
-  useUsers: vi.fn(() => ({
-    data: [
-      {
-        id: "1",
-        name: "John Administrator",
-        email: "john.admin@company.com",
-        role: "super_admin",
-        status: "active",
-        lastLogin: "2024-01-15T10:30:00Z",
-        createdAt: "2023-06-01T00:00:00Z",
-        isOnline: true,
-        sessionId: "sess_abc123",
-        ipAddress: "192.168.1.100",
-        userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-      },
-      {
-        id: "2",
-        name: "Jane Manager",
-        email: "jane.manager@company.com",
-        role: "admin",
-        status: "active",
-        lastLogin: "2024-01-15T09:15:00Z",
-        createdAt: "2023-08-15T00:00:00Z",
-        isOnline: true,
-        sessionId: "sess_def456",
-        ipAddress: "192.168.1.101",
-        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-      },
-    ],
-    isLoading: false,
-    error: null,
-  })),
-  useOnlineUsers: vi.fn(() => ({
-    data: [
-      {
-        id: "1",
-        name: "John Administrator",
-        email: "john.admin@company.com",
-        role: "super_admin",
-        status: "active",
-        lastLogin: "2024-01-15T10:30:00Z",
-        createdAt: "2023-06-01T00:00:00Z",
-        isOnline: true,
-        sessionId: "sess_abc123",
-        ipAddress: "192.168.1.100",
-        userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-      },
-    ],
-    isLoading: false,
-    error: null,
-  })),
-  useCreateUser: vi.fn(() => ({
-    mutate: vi.fn(),
-    mutateAsync: vi.fn(),
-    isPending: false,
-    error: null,
-  })),
-  useUpdateUser: vi.fn(() => ({
-    mutate: vi.fn(),
-    mutateAsync: vi.fn(),
-    isPending: false,
-    error: null,
-  })),
-  useDeleteUser: vi.fn(() => ({
-    mutate: vi.fn(),
-    mutateAsync: vi.fn(),
-    isPending: false,
-    error: null,
-  })),
-  useRefreshUsers: vi.fn(() => ({
-    mutate: vi.fn(),
-    mutateAsync: vi.fn(),
-    isPending: false,
-    error: null,
-  })),
-}));
+// Setup MSW for GraphQL requests
+beforeAll(async () => {
+  await setupSimpleMSW();
+  setMockScenario("success");
+});
+
+afterAll(async () => {
+  await cleanupSimpleMSW();
+});
 
 // Mock timers to prevent resource leaks - use more targeted approach
 // Note: We don't mock global timers as they interfere with waitFor
@@ -173,11 +90,28 @@ const theme = createTheme();
 const TestWrapper: React.FC<{
   children: React.ReactNode;
   authContext?: any;
-}> = ({ children }) => (
-  <BrowserRouter>
-    <ThemeProvider theme={theme}>{children}</ThemeProvider>
-  </BrowserRouter>
-);
+}> = ({ children }) => {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        refetchOnWindowFocus: false,
+        refetchOnMount: false,
+        refetchOnReconnect: false,
+        staleTime: Infinity,
+        gcTime: 0,
+      },
+    },
+  });
+
+  return (
+    <BrowserRouter>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider theme={theme}>{children}</ThemeProvider>
+      </QueryClientProvider>
+    </BrowserRouter>
+  );
+};
 
 describe("UserManagementPage", () => {
   beforeEach(() => {
@@ -230,13 +164,9 @@ describe("UserManagementPage", () => {
       ).toBeInTheDocument();
     });
 
-    it.skip("displays statistics cards", async () => {
-      // DISABLED: Test hangs due to infinite re-render loop in UserManagementPage component
-      // The component renders successfully and elements are found, but waitFor never resolves
-      // This suggests ongoing async operations or timers preventing DOM stability
-      //
-      // GitHub Issue: #103 - UserManagementPage infinite re-render loop in tests
-      // https://github.com/jmalicki/econ-graph/issues/103
+    it("displays statistics cards", async () => {
+      // Previously disabled due to infinite re-render loop caused by refetchInterval
+      // Fixed by disabling refetchInterval in test environments
       //
       // TODO: Fix component performance issues and re-enable this test
 
@@ -248,16 +178,15 @@ describe("UserManagementPage", () => {
 
       await waitFor(() => {
         expect(screen.getByText("Total Users")).toBeInTheDocument();
+        expect(screen.getByText("Active Users")).toBeInTheDocument();
         expect(screen.getByText("Online Now")).toBeInTheDocument();
-        expect(screen.getByText("Suspended")).toBeInTheDocument();
-        expect(screen.getByText("Admins")).toBeInTheDocument();
+        expect(screen.getByText("Current User")).toBeInTheDocument();
       });
     });
 
-    it.skip("shows correct user counts in statistics", async () => {
-      // DISABLED: Same infinite re-render issue as displays statistics cards
-      // GitHub Issue: #103 - UserManagementPage infinite re-render loop in tests
-      // https://github.com/jmalicki/econ-graph/issues/103
+    it("shows correct user counts in statistics", async () => {
+      // Previously disabled due to infinite re-render loop caused by refetchInterval
+      // Fixed by disabling refetchInterval in test environments
 
       render(
         <TestWrapper>
@@ -266,10 +195,12 @@ describe("UserManagementPage", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText("4")).toBeInTheDocument(); // Total users
-        expect(screen.getByText("2")).toBeInTheDocument(); // Online users
-        expect(screen.getByText("1")).toBeInTheDocument(); // Suspended users
-        expect(screen.getByText("3")).toBeInTheDocument(); // Admin users
+        // Check that we have the expected number of "2" values (Total Users and Active Users)
+        expect(screen.getAllByText("2")).toHaveLength(2);
+        // Check that we have the expected number of "1" values (Online Users)
+        expect(screen.getByText("1")).toBeInTheDocument(); // Online users
+        // Check that we have multiple "admin" values (Current User card and user table)
+        expect(screen.getAllByText("admin")).toHaveLength(2);
       });
     });
   });

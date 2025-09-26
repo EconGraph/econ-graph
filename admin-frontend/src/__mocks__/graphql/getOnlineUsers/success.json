@@ -8,24 +8,11 @@
         "role": "super_admin",
         "status": "active",
         "lastLogin": "2024-01-15T10:30:00Z",
-        "createdAt": "2023-06-01T08:00:00Z",
+        "createdAt": "2023-06-01T00:00:00Z",
         "isOnline": true,
         "sessionId": "sess_abc123",
         "ipAddress": "192.168.1.100",
-        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-      },
-      {
-        "id": "2",
-        "name": "Jane Manager",
-        "email": "jane.manager@company.com",
-        "role": "admin",
-        "status": "active",
-        "lastLogin": "2024-01-15T09:15:00Z",
-        "createdAt": "2023-07-15T10:30:00Z",
-        "isOnline": true,
-        "sessionId": "sess_def456",
-        "ipAddress": "192.168.1.101",
-        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
       }
     ]
   }

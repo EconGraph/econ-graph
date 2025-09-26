@@ -1,42 +1,18 @@
 {
   "data": {
     "systemHealth": {
-      "overall_status": "healthy",
-      "components": [
-        {
-          "name": "Backend API",
-          "status": "healthy",
-          "last_check": "2024-01-15T10:30:00Z",
-          "message": "All systems operational"
-        },
-        {
-          "name": "PostgreSQL",
-          "status": "healthy",
-          "last_check": "2024-01-15T10:30:00Z",
-          "message": "Database running normally"
-        },
-        {
-          "name": "Data Crawler",
-          "status": "warning",
-          "last_check": "2024-01-15T10:30:00Z",
-          "message": "High CPU usage detected"
-        },
-        {
-          "name": "Grafana",
-          "status": "healthy",
-          "last_check": "2024-01-15T10:30:00Z",
-          "message": "Monitoring active"
-        },
-        {
-          "name": "NGINX",
-          "status": "healthy",
-          "last_check": "2024-01-15T10:30:00Z",
-          "message": "Load balancer operational"
-        }
-      ],
-      "uptime_seconds": 648000,
-      "version": "v1.2.3",
-      "environment": "production"
+      "status": "healthy",
+      "metrics": {
+        "total_users": 150,
+        "active_users": 45,
+        "total_sessions": 89,
+        "active_sessions": 23,
+        "database_size_mb": 1024.5,
+        "queue_items": 12,
+        "api_requests_per_minute": 125.3,
+        "average_response_time_ms": 45.2
+      },
+      "last_updated": "2024-01-15T10:30:00Z"
     }
   }
 }

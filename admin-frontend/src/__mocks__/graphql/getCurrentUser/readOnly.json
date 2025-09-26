@@ -2,12 +2,15 @@
   "data": {
     "currentUser": {
       "id": "2",
-      "username": "Read Only User",
+      "username": "readonly_user",
       "email": "readonly@test.com",
       "role": "read_only",
-      "permissions": ["view_dashboard"],
-      "lastLogin": "2024-01-15T09:30:00Z",
-      "sessionExpiry": "2024-01-15T10:30:00Z"
+      "organization": "Analytics",
+      "is_active": true,
+      "email_verified": true,
+      "created_at": "2023-08-20T14:20:00Z",
+      "updated_at": "2024-01-15T09:30:00Z",
+      "last_login_at": "2024-01-15T09:30:00Z"
     }
   }
 }

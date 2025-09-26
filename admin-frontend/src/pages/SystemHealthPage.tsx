@@ -134,48 +134,92 @@ export default function SystemHealthPage() {
 
   const overallStatus = useMemo(() => {
     if (!systemHealth) return "unknown";
-    return systemHealth.overall_status || "unknown";
+    return systemHealth.status || "unknown";
   }, [systemHealth]);
 
-  // Convert GraphQL data to component format
+  // Convert GraphQL data to component format based on actual backend schema
+  // Note: This is a simplified implementation until backend provides service-level data
+  // See GitHub issue #126 for the full feature request
   const healthMetrics = useMemo(() => {
-    if (!systemHealth?.components) return [];
+    if (!systemHealth?.metrics) return [];
 
-    return systemHealth.components.map((component: any) => ({
-      name: component.name,
-      status:
-        component.status === "healthy"
-          ? "healthy"
-          : component.status === "warning"
-            ? "warning"
-            : "error",
-      value: component.message || "N/A",
-      description: `${component.name} status`,
-      trend: "stable" as const,
-      lastCheck: component.last_check,
-      grafanaUrl: `http://localhost:30001/d/econgraph-overview/econgraph-platform-overview?orgId=1&from=now-1h&to=now&var-service=${component.name}`,
-    }));
+    // Create basic health metrics based on available backend data
+    return [
+      {
+        name: "System Status",
+        status: systemHealth.status === "healthy" ? "healthy" : "warning",
+        value:
+          systemHealth.status === "healthy"
+            ? "All systems operational"
+            : "System issues detected",
+        description: "Overall system health",
+        trend: "stable" as const,
+        lastCheck: systemHealth.last_updated,
+        grafanaUrl:
+          "http://localhost:30001/d/econgraph-overview/econgraph-platform-overview?orgId=1&from=now-1h&to=now",
+      },
+      {
+        name: "User Activity",
+        status: "healthy",
+        value: `${systemHealth.metrics.active_users} active users`,
+        description: "Current user activity",
+        trend: "stable" as const,
+        lastCheck: systemHealth.last_updated,
+        grafanaUrl:
+          "http://localhost:30001/d/econgraph-overview/econgraph-platform-overview?orgId=1&from=now-1h&to=now&var-metric=users",
+      },
+      {
+        name: "Database",
+        status: "healthy",
+        value: `${systemHealth.metrics.database_size_mb.toFixed(1)} MB`,
+        description: "Database size",
+        trend: "stable" as const,
+        lastCheck: systemHealth.last_updated,
+        grafanaUrl:
+          "http://localhost:30001/d/econgraph-overview/econgraph-platform-overview?orgId=1&from=now-1h&to=now&var-metric=database",
+      },
+    ];
   }, [systemHealth]);
 
   const services = useMemo(() => {
-    if (!systemHealth?.components) return [];
+    if (!systemHealth?.metrics) return [];
 
-    return systemHealth.components.map((component: any) => ({
-      name: component.name,
-      status:
-        component.status === "healthy"
-          ? "running"
-          : component.status === "warning"
-            ? "degraded"
-            : "stopped",
-      uptime: `${Math.floor(systemHealth.uptime_seconds / 86400)}d ${Math.floor((systemHealth.uptime_seconds % 86400) / 3600)}h`,
-      version: systemHealth.version || "unknown",
-      resources: {
-        cpu: systemHealth.cpu_usage || 0,
-        memory: systemHealth.memory_usage || 0,
-        disk: systemHealth.disk_usage || 0,
+    // Create basic service information based on available backend data
+    return [
+      {
+        name: "Backend API",
+        status: "running",
+        uptime: "Unknown", // Not available in current schema
+        version: "Unknown", // Not available in current schema
+        resources: {
+          cpu: 0, // Not available in current schema
+          memory: 0, // Not available in current schema
+          disk: 0, // Not available in current schema
+        },
       },
-    }));
+      {
+        name: "PostgreSQL",
+        status: "running",
+        uptime: "Unknown", // Not available in current schema
+        version: "Unknown", // Not available in current schema
+        resources: {
+          cpu: 0, // Not available in current schema
+          memory: 0, // Not available in current schema
+          disk: 0, // Not available in current schema
+        },
+      },
+      {
+        name: "Data Crawler",
+        status: "running",
+        uptime: "Unknown", // Not available in current schema
+        version: "Unknown", // Not available in current schema
+        resources: {
+          cpu: 0, // Not available in current schema
+          memory: 0, // Not available in current schema
+          disk: 0, // Not available in current schema
+        },
+      },
+    ];
   }, [systemHealth]);
 
   return (

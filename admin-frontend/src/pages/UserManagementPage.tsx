@@ -231,6 +231,9 @@ export default function UserManagementPage() {
       <Typography variant="h4" gutterBottom>
         User Management
       </Typography>
+      <Typography variant="subtitle1" color="text.secondary" sx={{ mb: 3 }}>
+        Manage registered users, active sessions, and access controls
+      </Typography>
 
       {/* Summary Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }}>

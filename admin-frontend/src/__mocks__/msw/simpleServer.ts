@@ -33,6 +33,8 @@ import getCrawlerLogsError from "../graphql/getCrawlerLogs/error.json";
 import getCrawlerLogsLoading from "../graphql/getCrawlerLogs/loading.json";
 import searchLogsSuccess from "../graphql/searchLogs/success.json";
 import searchLogsError from "../graphql/searchLogs/error.json";
+import getUsersSuccess from "../graphql/getUsers/success.json";
+import getOnlineUsersSuccess from "../graphql/getOnlineUsers/success.json";
 
 // Mock scenarios for testing different states
 export enum MockScenarios {
@@ -101,6 +103,21 @@ export const mockResponses = {
     success: searchLogsSuccess,
     error: searchLogsError,
   },
+
+  GetUsers: {
+    success: getUsersSuccess,
+  },
+
+  GetOnlineUsers: {
+    success: getOnlineUsersSuccess,
+  },
+};
+
+// Helper function to extract operation name from GraphQL query
+const extractOperationName = (query: string): string => {
+  // Match patterns like "query GetUsers" or "mutation UpdateUser"
+  const match = query.match(/(?:query|mutation|subscription)\s+(\w+)/);
+  return match ? match[1] : "Unknown";
 };
 
 // Simple scenario management
@@ -186,7 +203,8 @@ export const setupSimpleMSW = async () => {
         console.log(`[Simple MSW] *** GRAPHQL REQUEST DETECTED ***`);
         try {
           const body = JSON.parse(options.body);
-          const operationName = body.operationName;
+          const operationName =
+            body.operationName || extractOperationName(body.query);
           const variables = body.variables || {};
 
           console.log(`[Simple MSW] Operation: ${operationName}`);

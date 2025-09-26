@@ -7,6 +7,7 @@ This document outlines the comprehensive plan for implementing a full-featured c
 ## 🎯 Project Goals
 
 ### Primary Objectives
+
 - **Operational Control**: Complete management of crawler operations (start, stop, pause, resume)
 - **Real-time Monitoring**: Live status monitoring with performance metrics and health indicators
 - **Configuration Management**: Centralized configuration for all data sources and crawler settings
@@ -15,6 +16,7 @@ This document outlines the comprehensive plan for implementing a full-featured c
 - **Security & Access Control**: Role-based access control with audit logging
 
 ### Success Metrics
+
 - **Admin Efficiency**: Reduce crawler management time by 80%
 - **System Reliability**: Achieve 99.9% crawler uptime with proactive monitoring
 - **Error Resolution**: Reduce mean time to resolution (MTTR) by 60%
@@ -24,6 +26,7 @@ This document outlines the comprehensive plan for implementing a full-featured c
 ## 🏗️ Architecture Overview
 
 ### Frontend Architecture
+
 ```
 admin-frontend/
 ├── src/
@@ -60,6 +63,7 @@ admin-frontend/
 ```
 
 ### Backend Integration
+
 ```
 backend/
 ├── src/
@@ -87,9 +91,11 @@ backend/
 ## 📊 Feature Breakdown
 
 ### Phase 1: Core Dashboard (Weeks 1-2)
+
 **Priority: Critical**
 
 #### 1.1 Main Dashboard (`CrawlerDashboard.tsx`)
+
 - **Real-time Status Display**
   - Crawler running/stopped status with visual indicators
   - Active worker count and queue depth
@@ -115,6 +121,7 @@ backend/
   - Filterable by source, status, and time range
 
 #### 1.2 Status Monitoring Components
+
 - **StatusCard Component**
   - Configurable status indicators
   - Color-coded health states
@@ -128,9 +135,11 @@ backend/
   - Export capabilities
 
 ### Phase 2: Configuration Management (Weeks 3-4)
+
 **Priority: High**
 
 #### 2.1 Data Source Configuration (`CrawlerConfig.tsx`)
+
 - **Source Management**
   - Add/edit/remove data sources (FRED, BLS, Census, World Bank, etc.)
   - Source-specific configuration (API keys, endpoints, rate limits)
@@ -150,6 +159,7 @@ backend/
   - Holiday and maintenance scheduling
 
 #### 2.2 Configuration Components
+
 - **ConfigForm Component**
   - Dynamic form generation based on source type
   - Validation and error handling
@@ -163,9 +173,11 @@ backend/
   - Historical health trends
 
 ### Phase 3: Logging & Monitoring (Weeks 5-6)
+
 **Priority: High**
 
 #### 3.1 Log Management (`CrawlerLogs.tsx`)
+
 - **Real-time Log Streaming**
   - Live log tail with auto-scroll
   - Log level filtering (debug, info, warn, error, fatal)
@@ -185,6 +197,7 @@ backend/
   - Integration with external logging systems
 
 #### 3.2 Monitoring Components
+
 - **LogViewer Component**
   - Syntax highlighting for different log formats
   - Collapsible log entries with details
@@ -198,9 +211,11 @@ backend/
   - Alert history and acknowledgment
 
 ### Phase 4: Analytics & Performance (Weeks 7-8)
+
 **Priority: Medium**
 
 #### 4.1 Performance Analytics (`CrawlerAnalytics.tsx`)
+
 - **Performance Metrics**
   - Crawl success rates and error patterns
   - Processing time trends and optimization opportunities
@@ -220,6 +235,7 @@ backend/
   - ROI calculations and reporting
 
 #### 4.2 Analytics Components
+
 - **MetricsChart Component**
   - Interactive charts with drill-down capabilities
   - Customizable dashboards and widgets
@@ -233,9 +249,11 @@ backend/
   - Capacity planning tools
 
 ### Phase 5: Security & Access Control (Weeks 9-10)
+
 **Priority: Medium**
 
 #### 5.1 Security Management (`CrawlerSecurity.tsx`)
+
 - **Access Control**
   - Role-based permissions (admin, operator, viewer)
   - User management and authentication
@@ -249,6 +267,7 @@ backend/
   - Security policy enforcement
 
 #### 5.2 Security Components
+
 - **PermissionManager Component**
   - Granular permission configuration
   - Role templates and inheritance
@@ -264,6 +283,7 @@ backend/
 ## 🔧 Technical Implementation
 
 ### Frontend Technology Stack
+
 - **Framework**: React 18+ with TypeScript
 - **UI Library**: Material-UI (MUI) v5+
 - **State Management**: React Query for server state, Context API for local state
@@ -273,6 +293,7 @@ backend/
 - **Build**: Vite for fast development and building
 
 ### Backend Integration
+
 - **API**: GraphQL with real-time subscriptions
 - **Authentication**: JWT with role-based access control
 - **Database**: PostgreSQL with optimized queries for metrics
@@ -280,6 +301,7 @@ backend/
 - **Monitoring**: Prometheus metrics with Grafana dashboards
 
 ### Key Technical Features
+
 - **Real-time Updates**: WebSocket connections for live status updates
 - **Offline Support**: Service worker for offline functionality
 - **Performance**: Virtual scrolling for large datasets
@@ -290,24 +312,28 @@ backend/
 ## 🧪 Testing Strategy
 
 ### Unit Testing
+
 - **Component Testing**: Individual component functionality
 - **Hook Testing**: Custom hooks for data management
 - **Service Testing**: API service layer testing
 - **Utility Testing**: Helper functions and utilities
 
 ### Integration Testing
+
 - **API Integration**: GraphQL query and mutation testing
 - **WebSocket Testing**: Real-time update functionality
 - **Authentication**: Role-based access control testing
 - **Data Flow**: End-to-end data flow testing
 
 ### End-to-End Testing
+
 - **User Workflows**: Complete admin workflows
 - **Cross-browser**: Chrome, Firefox, Safari, Edge
 - **Mobile Testing**: Responsive design validation
 - **Performance**: Load testing and optimization
 
 ### Test Coverage Goals
+
 - **Unit Tests**: 95% code coverage
 - **Integration Tests**: 90% API coverage
 - **E2E Tests**: 100% critical path coverage
@@ -316,18 +342,21 @@ backend/
 ## 📈 Performance Requirements
 
 ### Response Time Targets
+
 - **Dashboard Load**: < 2 seconds initial load
 - **Real-time Updates**: < 500ms update latency
 - **Search/Filter**: < 200ms response time
 - **Export Operations**: < 5 seconds for 10MB logs
 
 ### Scalability Targets
+
 - **Concurrent Users**: Support 50+ admin users
 - **Data Volume**: Handle 1M+ log entries
 - **Real-time Updates**: 100+ updates per second
 - **Export Capacity**: 100MB+ log exports
 
 ### Resource Optimization
+
 - **Bundle Size**: < 500KB initial bundle
 - **Memory Usage**: < 100MB browser memory
 - **Network**: Efficient data compression
@@ -336,18 +365,21 @@ backend/
 ## 🔒 Security Requirements
 
 ### Authentication & Authorization
+
 - **Multi-factor Authentication**: Required for admin access
 - **Session Management**: Secure session handling with timeout
 - **Role-based Access**: Granular permission system
 - **Audit Logging**: Complete audit trail for all actions
 
 ### Data Protection
+
 - **Encryption**: All data encrypted in transit and at rest
 - **API Security**: Rate limiting and request validation
 - **Input Sanitization**: XSS and injection prevention
 - **CORS Configuration**: Secure cross-origin requests
 
 ### Compliance
+
 - **GDPR**: Data privacy and user rights
 - **SOC 2**: Security and availability controls
 - **ISO 27001**: Information security management
@@ -356,18 +388,21 @@ backend/
 ## 🚀 Deployment Strategy
 
 ### Development Environment
+
 - **Local Development**: Docker Compose setup
 - **Hot Reload**: Fast development iteration
 - **Mock Services**: Simulated backend services
 - **Debug Tools**: Comprehensive debugging tools
 
 ### Staging Environment
+
 - **Production-like**: Identical to production setup
 - **Integration Testing**: Full system integration
 - **Performance Testing**: Load and stress testing
 - **User Acceptance**: Stakeholder testing and feedback
 
 ### Production Deployment
+
 - **Blue-Green**: Zero-downtime deployments
 - **Rollback Strategy**: Quick rollback capabilities
 - **Monitoring**: Comprehensive monitoring and alerting
@@ -376,6 +411,7 @@ backend/
 ## 📋 Success Criteria
 
 ### Functional Requirements
+
 - ✅ Complete crawler operational control
 - ✅ Real-time monitoring and alerting
 - ✅ Comprehensive configuration management
@@ -384,6 +420,7 @@ backend/
 - ✅ Performance optimization tools
 
 ### Non-Functional Requirements
+
 - ✅ < 2 second page load times
 - ✅ 99.9% uptime and availability
 - ✅ WCAG 2.1 AA accessibility compliance
@@ -392,6 +429,7 @@ backend/
 - ✅ 95% test coverage
 
 ### User Experience Requirements
+
 - ✅ Intuitive and user-friendly interface
 - ✅ Comprehensive help and documentation
 - ✅ Efficient workflows and shortcuts
@@ -402,36 +440,42 @@ backend/
 ## 📅 Timeline & Milestones
 
 ### Week 1-2: Foundation
+
 - [ ] Project setup and architecture
 - [ ] Core dashboard implementation
 - [ ] Basic status monitoring
 - [ ] Initial testing framework
 
 ### Week 3-4: Configuration
+
 - [ ] Configuration management interface
 - [ ] Data source management
 - [ ] Global settings and scheduling
 - [ ] Configuration testing
 
 ### Week 5-6: Monitoring
+
 - [ ] Log management system
 - [ ] Real-time monitoring
 - [ ] Alert system implementation
 - [ ] Monitoring testing
 
 ### Week 7-8: Analytics
+
 - [ ] Performance analytics
 - [ ] Metrics visualization
 - [ ] Optimization tools
 - [ ] Analytics testing
 
 ### Week 9-10: Security
+
 - [ ] Security management
 - [ ] Access control implementation
 - [ ] Audit logging
 - [ ] Security testing
 
 ### Week 11-12: Polish & Launch
+
 - [ ] Performance optimization
 - [ ] User experience improvements
 - [ ] Documentation and training
@@ -466,12 +510,14 @@ backend/
 ## 📞 Stakeholder Communication
 
 ### Regular Updates
+
 - **Weekly Progress Reports**: Status updates and blockers
 - **Demo Sessions**: Bi-weekly feature demonstrations
 - **Stakeholder Reviews**: Monthly comprehensive reviews
 - **User Feedback**: Continuous feedback collection and integration
 
 ### Documentation
+
 - **Technical Documentation**: API docs, architecture guides
 - **User Documentation**: Admin guides, troubleshooting
 - **Training Materials**: Video tutorials, best practices

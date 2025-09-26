@@ -98,34 +98,48 @@ export const useUsers = (filters?: {
   return useQuery({
     queryKey: ["users", filters],
     queryFn: async (): Promise<User[]> => {
-      // Simulate API delay
-      await delay(500);
+      const response = await fetch("/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query: `
+            query GetUsers($role: String, $status: String, $search: String) {
+              users(role: $role, status: $status, search: $search) {
+                id
+                name
+                email
+                role
+                status
+                lastLogin
+                createdAt
+                isOnline
+                sessionId
+                ipAddress
+                userAgent
+              }
+            }
+          `,
+          variables: {
+            role: filters?.role !== "all" ? filters?.role : undefined,
+            status: filters?.status !== "all" ? filters?.status : undefined,
+            search: filters?.search || undefined,
+          },
+        }),
+      });
 
-      let filteredUsers = [...mockUsers];
-
-      // Apply filters
-      if (filters?.role && filters.role !== "all") {
-        filteredUsers = filteredUsers.filter(
-          (user) => user.role === filters.role,
-        );
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      if (filters?.status && filters.status !== "all") {
-        filteredUsers = filteredUsers.filter(
-          (user) => user.status === filters.status,
-        );
+      const result = await response.json();
+
+      if (result.errors) {
+        throw new Error(result.errors[0].message);
       }
 
-      if (filters?.search) {
-        const searchLower = filters.search.toLowerCase();
-        filteredUsers = filteredUsers.filter(
-          (user) =>
-            user.name.toLowerCase().includes(searchLower) ||
-            user.email.toLowerCase().includes(searchLower),
-        );
-      }
-
-      return filteredUsers;
+      return result.data.users;
     },
     staleTime: 2 * 60 * 1000, // 2 minutes for user data
     gcTime: 5 * 60 * 1000, // 5 minutes cache
@@ -136,17 +150,53 @@ export const useUsers = (filters?: {
  * Fetch online users only
  */
 export const useOnlineUsers = () => {
+  // Disable refetch interval in test environments to prevent infinite loops
+  const isTestEnv = process.env.NODE_ENV === "test" || process.env.VITEST;
+
   return useQuery({
     queryKey: ["users", "online"],
     queryFn: async (): Promise<User[]> => {
-      // Simulate API delay
-      await delay(300);
+      const response = await fetch("/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query: `
+            query GetOnlineUsers {
+              onlineUsers {
+                id
+                name
+                email
+                role
+                status
+                lastLogin
+                createdAt
+                isOnline
+                sessionId
+                ipAddress
+                userAgent
+              }
+            }
+          `,
+        }),
+      });
 
-      return mockUsers.filter((user) => user.isOnline);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      if (result.errors) {
+        throw new Error(result.errors[0].message);
+      }
+
+      return result.data.onlineUsers;
     },
     staleTime: 30 * 1000, // 30 seconds for online status (changes frequently)
     gcTime: 2 * 60 * 1000, // 2 minutes cache
-    refetchInterval: 30 * 1000, // Refetch every 30 seconds for real-time updates
+    refetchInterval: isTestEnv ? false : 30 * 1000, // Disable refetch in tests to prevent infinite loops
   });
 };
 
