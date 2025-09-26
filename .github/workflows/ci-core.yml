@@ -1287,7 +1287,7 @@ jobs:
 
     - name: Run admin frontend unit tests
       working-directory: admin-frontend
-      run: npm test -- --coverage --watchAll=false --verbose
+      run: npm run test:run -- --coverage --reporter=verbose
 
     - name: Upload admin frontend test coverage
       uses: actions/upload-artifact@v4
