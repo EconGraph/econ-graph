@@ -106,13 +106,27 @@ COMMENT ON COLUMN annotation_templates.id IS 'Primary key using UUIDv7 format fo
 DO $$
 DECLARE
     test_uuid UUID;
+    uuid_text TEXT;
+    version_char CHAR(1);
     uuid_version INTEGER;
 BEGIN
     -- Generate a test UUID
     test_uuid := gen_random_uuid();
+    uuid_text := test_uuid::text;
 
-    -- Extract version from UUID (bits 12-15 of the time_high field)
-    uuid_version := (test_uuid::text::bit(128) >> 76)::bit(4)::int;
+    -- Extract version from UUID (character at position 15 in UUID string)
+    -- UUID format: xxxxxxxx-xxxx-Vxxx-xxxx-xxxxxxxxxxxx
+    -- Version is at position 15 (0-indexed), which is the first character after the second dash
+    version_char := substring(uuid_text from 15 for 1);
+
+    -- Convert hex character to integer
+    uuid_version := CASE version_char
+        WHEN '0' THEN 0 WHEN '1' THEN 1 WHEN '2' THEN 2 WHEN '3' THEN 3
+        WHEN '4' THEN 4 WHEN '5' THEN 5 WHEN '6' THEN 6 WHEN '7' THEN 7
+        WHEN '8' THEN 8 WHEN '9' THEN 9 WHEN 'a' THEN 10 WHEN 'b' THEN 11
+        WHEN 'c' THEN 12 WHEN 'd' THEN 13 WHEN 'e' THEN 14 WHEN 'f' THEN 15
+        ELSE 0
+    END;
 
     -- Log the result (this will appear in PostgreSQL logs)
     RAISE NOTICE 'Generated UUID: %, Version: %', test_uuid, uuid_version;
