@@ -45,8 +45,8 @@
     "build": "REACT_APP_ENV=admin react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "lint": "eslint src --ext .ts,.tsx",
-    "lint:fix": "eslint src --ext .ts,.tsx --fix"
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix"
   },
   "eslintConfig": {
     "extends": [
