@@ -348,6 +348,7 @@ impl BatchFn<Uuid, Option<User>> for UserBatcher {
 }
 
 /// Comprehensive DataLoaders struct with all specialized loaders
+#[derive(Clone)]
 pub struct DataLoaders {
     pub data_source_loader: Loader<Uuid, Option<DataSource>, DataSourceBatcher>,
     pub data_points_by_series_loader: Loader<Uuid, Vec<DataPoint>, DataPointsBySeriesBatcher>,
