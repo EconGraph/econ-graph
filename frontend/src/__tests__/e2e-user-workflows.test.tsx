@@ -7,13 +7,14 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { vi } from 'vitest';
 import { TestProviders } from '../test-utils/test-providers';
 import App from '../App';
 
 
 // Mock the InteractiveChartWithCollaboration component
-jest.mock('../components/charts/InteractiveChartWithCollaboration', () => {
-  return function MockInteractiveChartWithCollaboration({ seriesData, onDataTransform }: any) {
+vi.mock('../components/charts/InteractiveChartWithCollaboration', () => ({
+  default: function MockInteractiveChartWithCollaboration({ seriesData, onDataTransform }: any) {
     return (
       <div data-testid="interactive-chart">
         <div data-testid="chart-title">{seriesData?.title}</div>
@@ -52,19 +53,19 @@ jest.mock('../components/charts/InteractiveChartWithCollaboration', () => {
         </button>
       </div>
     );
-  };
-});
+  }
+}));
 
 // Mock authentication context
 const mockAuthContext = {
-  signInWithGoogle: jest.fn(),
-  signInWithFacebook: jest.fn(),
-  signInWithEmail: jest.fn(),
-  signUp: jest.fn(),
-  signOut: jest.fn(),
-  updateProfile: jest.fn(),
-  refreshUser: jest.fn(),
-  clearError: jest.fn(),
+  signInWithGoogle: vi.fn(),
+  signInWithFacebook: vi.fn(),
+  signInWithEmail: vi.fn(),
+  signUp: vi.fn(),
+  signOut: vi.fn(),
+  updateProfile: vi.fn(),
+  refreshUser: vi.fn(),
+  clearError: vi.fn(),
   user: {
     id: 'test-user-1',
     email: 'test@example.com',
@@ -91,7 +92,7 @@ const mockAuthContext = {
 };
 
 // Mock the AuthContext
-jest.mock('../contexts/AuthContext', () => ({
+vi.mock('../contexts/AuthContext', () => ({
   AuthProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   useAuth: () => mockAuthContext,
 }));
@@ -105,11 +106,9 @@ function renderApp() {
 }
 
 describe('End-to-End User Workflows', () => {
-  // Increase timeout for all tests in this suite
-  jest.setTimeout(60000);
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('Complete Search to Analysis Workflow', () => {

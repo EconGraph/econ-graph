@@ -11,7 +11,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import InteractiveChartWithCollaboration from '../InteractiveChartWithCollaboration';
 
 // Mock Chart.js to avoid canvas rendering issues in tests
-jest.mock('react-chartjs-2', () => ({
+vi.mock('react-chartjs-2', () => ({
   Line: ({ data, options, ...props }: any) => (
     <div
       data-testid="line-chart"
@@ -25,8 +25,8 @@ jest.mock('react-chartjs-2', () => ({
 }));
 
 // Mock the collaboration component
-jest.mock('../ChartCollaborationConnected', () => {
-  return function MockChartCollaborationConnected({ isOpen, onToggle, collaborationEnabled }: any) {
+vi.mock('../ChartCollaborationConnected', () => ({
+  default: function MockChartCollaborationConnected({ isOpen, onToggle, collaborationEnabled }: any) {
     return (
       <div data-testid="chart-collaboration">
         <button data-testid="toggle-collaboration" onClick={onToggle}>
@@ -40,11 +40,11 @@ jest.mock('../ChartCollaborationConnected', () => {
         )}
       </div>
     );
-  };
-});
+  }
+}));
 
 // Mock chart.js
-jest.mock('chartjs-adapter-date-fns', () => ({}));
+vi.mock('chartjs-adapter-date-fns', () => ({}));
 
 const theme = createTheme();
 
@@ -66,8 +66,8 @@ const defaultProps = {
   yAxisLabel: 'Billions of Dollars',
   units: 'Billions of Dollars',
   frequency: 'Monthly',
-  onDataPointClick: jest.fn(),
-  onTransformationChange: jest.fn(),
+  onDataPointClick: vi.fn(),
+  onTransformationChange: vi.fn(),
   collaborationEnabled: true,
 };
 
@@ -79,7 +79,7 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 describe('InteractiveChartWithCollaboration', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   const renderInteractiveChartWithCollaboration = (props = {}) => {
@@ -268,7 +268,7 @@ describe('InteractiveChartWithCollaboration', () => {
   describe('Data Point Interactions', () => {
     it('should handle data point clicks', async () => {
       const user = userEvent.setup();
-      const mockOnDataPointClick = jest.fn();
+      const mockOnDataPointClick = vi.fn();
 
       renderInteractiveChartWithCollaboration({
         onDataPointClick: mockOnDataPointClick,

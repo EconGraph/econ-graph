@@ -61,8 +61,8 @@ const mockSearchResults = [
   },
 ];
 
-jest.mock('../../hooks/useSeriesData', () => ({
-  useDataSources: jest.fn(() => ({
+vi.mock('../../hooks/useSeriesData', () => ({
+  useDataSources: vi.fn(() => ({
     data: mockDataSources,
     isLoading: false,
     error: null,
@@ -76,10 +76,10 @@ jest.mock('../../hooks/useSeriesData', () => ({
     dataUpdatedAt: Date.now(),
     errorUpdatedAt: 0,
     failureCount: 0,
-    refetch: jest.fn(),
-    remove: jest.fn(),
+    refetch: vi.fn(),
+    remove: vi.fn(),
   })),
-  useSeriesSearch: jest.fn(() => ({
+  useSeriesSearch: vi.fn(() => ({
     data: mockSearchResults,
     isLoading: false,
     error: null,
@@ -93,10 +93,10 @@ jest.mock('../../hooks/useSeriesData', () => ({
     dataUpdatedAt: Date.now(),
     errorUpdatedAt: 0,
     failureCount: 0,
-    refetch: jest.fn(),
-    remove: jest.fn(),
+    refetch: vi.fn(),
+    remove: vi.fn(),
   })),
-  useSeriesDetail: jest.fn(() => ({
+  useSeriesDetail: vi.fn(() => ({
     data: null,
     isLoading: false,
     error: null,
@@ -110,10 +110,10 @@ jest.mock('../../hooks/useSeriesData', () => ({
     dataUpdatedAt: Date.now(),
     errorUpdatedAt: 0,
     failureCount: 0,
-    refetch: jest.fn(),
-    remove: jest.fn(),
+    refetch: vi.fn(),
+    remove: vi.fn(),
   })),
-  useSeriesData: jest.fn(() => ({
+  useSeriesData: vi.fn(() => ({
     data: null,
     isLoading: false,
     error: null,
@@ -127,10 +127,10 @@ jest.mock('../../hooks/useSeriesData', () => ({
     dataUpdatedAt: Date.now(),
     errorUpdatedAt: 0,
     failureCount: 0,
-    refetch: jest.fn(),
-    remove: jest.fn(),
+    refetch: vi.fn(),
+    remove: vi.fn(),
   })),
-  useSearchSuggestions: jest.fn(() => ({
+  useSearchSuggestions: vi.fn(() => ({
     data: [],
     isLoading: false,
     error: null,
@@ -144,10 +144,10 @@ jest.mock('../../hooks/useSeriesData', () => ({
     dataUpdatedAt: Date.now(),
     errorUpdatedAt: 0,
     failureCount: 0,
-    refetch: jest.fn(),
-    remove: jest.fn(),
+    refetch: vi.fn(),
+    remove: vi.fn(),
   })),
-  useCrawlerStatus: jest.fn(() => ({
+  useCrawlerStatus: vi.fn(() => ({
     data: null,
     isLoading: false,
     error: null,
@@ -161,8 +161,8 @@ jest.mock('../../hooks/useSeriesData', () => ({
     dataUpdatedAt: Date.now(),
     errorUpdatedAt: 0,
     failureCount: 0,
-    refetch: jest.fn(),
-    remove: jest.fn(),
+    refetch: vi.fn(),
+    remove: vi.fn(),
   })),
 }));
 

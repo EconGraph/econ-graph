@@ -10,8 +10,8 @@
 export {};
 
 // Mock the GraphQL utility completely to avoid network calls
-jest.mock('../../utils/graphql', () => ({
-  executeGraphQL: jest.fn().mockResolvedValue({
+vi.mock('../../utils/graphql', () => ({
+  executeGraphQL: vi.fn().mockResolvedValue({
     data: {
       seriesDetail: { id: 'test-series-1', title: 'Test Series' },
       seriesData: { dataPoints: [] },

@@ -292,9 +292,9 @@ describe('End-to-End Frontend Integration Tests', () => {
 export const createMockGraphQLClient = () => {
   // This would create a mock GraphQL client for testing
   return {
-    query: jest.fn(() => Promise.resolve({ data: MOCK_SERIES_LIST })),
-    mutate: jest.fn(() => Promise.resolve({ data: { success: true } })),
-    subscribe: jest.fn(() => ({ unsubscribe: jest.fn() }))
+    query: vi.fn(() => Promise.resolve({ data: MOCK_SERIES_LIST })),
+    mutate: vi.fn(() => Promise.resolve({ data: { success: true } })),
+    subscribe: vi.fn(() => ({ unsubscribe: vi.fn() }))
   };
 };
 

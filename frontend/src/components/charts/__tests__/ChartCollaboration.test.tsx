@@ -11,8 +11,8 @@ import { render, setupTestEnvironment, cleanupTestEnvironment, waitForDialog, fi
 import ChartCollaboration, { ChartAnnotation } from '../ChartCollaboration';
 
 // Mock date-fns format function
-jest.mock('date-fns', () => ({
-  format: jest.fn((date) => 'Jan 15, 2:30 PM'),
+vi.mock('date-fns', () => ({
+  format: vi.fn((date) => 'Jan 15, 2:30 PM'),
 }));
 
 // Mock data for testing
@@ -96,11 +96,11 @@ const mockAnnotations: ChartAnnotation[] = [
 
 // Mock handlers
 const mockHandlers = {
-  onAnnotationAdd: jest.fn(),
-  onAnnotationUpdate: jest.fn(),
-  onAnnotationDelete: jest.fn(),
-  onCommentAdd: jest.fn(),
-  onToggle: jest.fn(),
+  onAnnotationAdd: vi.fn(),
+  onAnnotationUpdate: vi.fn(),
+  onAnnotationDelete: vi.fn(),
+  onCommentAdd: vi.fn(),
+  onToggle: vi.fn(),
 };
 
 // Custom render function that handles Material-UI portals properly
@@ -112,7 +112,7 @@ const customRender = (ui: React.ReactElement, options = {}) => {
 
 describe('ChartCollaboration', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     setupTestEnvironment();
   });
 

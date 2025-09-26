@@ -10,7 +10,7 @@ import InteractiveChart from '../InteractiveChart';
 import { createMockDataPoints } from '../../../test-utils/mocks/data';
 
 // Mock Chart.js to avoid canvas rendering issues in tests
-jest.mock('react-chartjs-2', () => ({
+vi.mock('react-chartjs-2', () => ({
   Line: ({ data, options, ...props }: any) => (
     <div
       data-testid="line-chart"

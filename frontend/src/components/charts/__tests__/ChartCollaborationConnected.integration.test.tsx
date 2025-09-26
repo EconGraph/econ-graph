@@ -16,19 +16,19 @@ import { ChartAnnotationType } from '../../../utils/graphql';
 import { useCollaboration } from '../../../hooks/useCollaboration';
 
 // Mock the useCollaboration hook
-jest.mock('../../../hooks/useCollaboration', () => ({
-  useCollaboration: jest.fn(),
+vi.mock('../../../hooks/useCollaboration', () => ({
+  useCollaboration: vi.fn(),
 }));
 
 // Mock the useAuth hook
-const mockUseAuth = jest.fn();
-jest.mock('../../../contexts/AuthContext', () => ({
+const mockUseAuth = vi.fn();
+vi.mock('../../../contexts/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
 }));
 
 // Mock date-fns format function
-jest.mock('date-fns', () => ({
-  format: jest.fn((date) => 'Jan 15, 2:30 PM'),
+vi.mock('date-fns', () => ({
+  format: vi.fn((date) => 'Jan 15, 2:30 PM'),
 }));
 
 const theme = createTheme();
@@ -81,15 +81,15 @@ const mockUsers = {
 };
 
 // Mock collaboration hook functions
-const mockCreateAnnotation = jest.fn();
-const mockAddComment = jest.fn();
-const mockShareChart = jest.fn();
-const mockDeleteAnnotation = jest.fn();
-const mockToggleAnnotationVisibility = jest.fn();
-const mockToggleAnnotationPin = jest.fn();
-const mockLoadComments = jest.fn();
-const mockGetUserById = jest.fn();
-const mockGetCommentsForAnnotation = jest.fn();
+const mockCreateAnnotation = vi.fn();
+const mockAddComment = vi.fn();
+const mockShareChart = vi.fn();
+const mockDeleteAnnotation = vi.fn();
+const mockToggleAnnotationVisibility = vi.fn();
+const mockToggleAnnotationPin = vi.fn();
+const mockLoadComments = vi.fn();
+const mockGetUserById = vi.fn();
+const mockGetCommentsForAnnotation = vi.fn();
 
 const mockCollaborationHook = {
   annotations: mockAnnotations,
@@ -121,16 +121,16 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 describe('ChartCollaborationConnected - Integration Tests', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     mockUseAuth.mockReturnValue({ user: mockUser });
-    (useCollaboration as jest.Mock).mockReturnValue(mockCollaborationHook);
+    (useCollaboration as vi.Mock).mockReturnValue(mockCollaborationHook);
 
     // Mock window.confirm
-    window.confirm = jest.fn(() => true);
+    window.confirm = vi.fn(() => true);
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   const renderChartCollaborationConnected = (props = {}) => {
@@ -138,8 +138,8 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
       seriesId: 'series-1',
       chartId: 'chart-1',
       isOpen: true,
-      onToggle: jest.fn(),
-      onAnnotationClick: jest.fn(),
+      onToggle: vi.fn(),
+      onAnnotationClick: vi.fn(),
       ...props,
     };
 
@@ -354,7 +354,7 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
 
     it('should not call deleteAnnotation when cancelled', async () => {
       const user = userEvent.setup();
-      window.confirm = jest.fn(() => false); // User cancels
+      window.confirm = vi.fn(() => false); // User cancels
       renderChartCollaborationConnected();
 
       // Find and click delete button for annotation
@@ -385,7 +385,7 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
   describe('handleAnnotationSelect', () => {
     it('should call loadComments and onAnnotationClick when annotation is selected', async () => {
       const user = userEvent.setup();
-      const mockOnAnnotationClick = jest.fn();
+      const mockOnAnnotationClick = vi.fn();
       mockLoadComments.mockResolvedValue(undefined);
       renderChartCollaborationConnected({ onAnnotationClick: mockOnAnnotationClick });
 
@@ -405,7 +405,7 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
 
   describe('Loading and Error States', () => {
     it('should handle loading state', () => {
-      (useCollaboration as jest.Mock).mockReturnValue({
+      (useCollaboration as vi.Mock).mockReturnValue({
         ...mockCollaborationHook,
         loading: true,
       });
@@ -417,7 +417,7 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
     });
 
     it('should handle error state', () => {
-      (useCollaboration as jest.Mock).mockReturnValue({
+      (useCollaboration as vi.Mock).mockReturnValue({
         ...mockCollaborationHook,
         error: 'Failed to load data',
       });

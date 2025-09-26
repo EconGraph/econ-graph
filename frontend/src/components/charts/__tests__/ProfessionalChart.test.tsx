@@ -11,7 +11,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import ProfessionalChart, { SeriesData } from '../ProfessionalChart';
 
 // Mock Chart.js
-jest.mock('react-chartjs-2', () => ({
+vi.mock('react-chartjs-2', () => ({
   Line: ({ data, options }: any) => (
     <div data-testid="professional-chart">
       <div data-testid="chart-data">{JSON.stringify(data)}</div>
@@ -63,11 +63,11 @@ const mockSecondarySeries: SeriesData[] = [
 
 
 describe('ProfessionalChart', () => {
-  const mockOnAnnotationAdd = jest.fn();
-  const mockOnSeriesAdd = jest.fn();
+  const mockOnAnnotationAdd = vi.fn();
+  const mockOnSeriesAdd = vi.fn();
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('Basic Rendering', () => {
