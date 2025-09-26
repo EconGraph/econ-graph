@@ -13,7 +13,7 @@ EconGraph is a production-ready economic data intelligence platform that transfo
 - **Production Code**: 72,610 lines (Rust backend, React frontend)
 - **Test Coverage**: 7,457 lines of comprehensive testing
 - **Infrastructure**: 79,268 lines of configuration and deployment
-- **Development Cost**: ~$35,000 (AI-assisted) vs $4.8M (traditional)
+- **Development Cost**: ~$35,000 (AI-assisted) vs $456,000 (traditional)
 
 ### Technical Stack
 - **Backend**: Rust with Axum, GraphQL, PostgreSQL, Diesel ORM

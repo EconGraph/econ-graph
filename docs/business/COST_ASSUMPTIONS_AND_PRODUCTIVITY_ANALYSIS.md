@@ -133,9 +133,9 @@ Based on our project scope and complexity:
 ### 3. Cost Comparison and ROI Analysis
 
 **Traditional Development**:
-- **Cost Range**: $4.8M (corrected for manually written code only)
+- **Cost Range**: $456,000 (6-person team over 6-12 months)
 - **Timeline**: 6-12 months
-- **Team Size**: 4+ developers
+- **Team Size**: 6 developers
 - **Risk Level**: High (team coordination, knowledge transfer)
 
 **AI-Assisted Development**:
@@ -144,8 +144,16 @@ Based on our project scope and complexity:
 - **Team Size**: 1 staff engineer + AI
 - **Risk Level**: Low (single staff engineer, AI assistance)
 
+#### Cost Comparison Summary
+
+| Development Approach | Total Cost | Timeline | Team Size | Cost per Line |
+|---------------------|------------|----------|-----------|---------------|
+| Traditional Development | $456,000 | 6-12 months | 6 people | $2.87/line |
+| AI-Assisted Development | ~$35,000 | 28 days | 1 person + AI | $0.22/line |
+| **Savings** | **$421,000** | **5-11 months** | **5 fewer people** | **92.3% reduction** |
+
 **ROI Calculation**:
-- **Cost Savings**: $4.8M - ~$35,000 = $4.77M (99.3% cost reduction)
+- **Cost Savings**: $456,000 - ~$35,000 = $421,000 (92.3% cost reduction)
 - **Time Savings**: 5-11 months (83-92% time reduction)
 - **Quality**: Professional-grade testing, documentation, security scanning
 
@@ -200,66 +208,81 @@ Based on our project scope and complexity:
 ### Cost Calculation Methodology
 
 #### Traditional Development Cost Breakdown
-- **Production Code**: 72,610 lines × $2.50/line = $181,525
-- **Test Code**: 7,457 lines × $1.25/line = $9,321
-- **Infrastructure**: 43,068 lines × $1.00/line = $43,068
-- **Documentation**: 35,200 lines × $0.75/line = $26,400
-- **Total Base Cost**: $260,314
 
-#### Additional Traditional Development Costs
-- **Project Management**: 20% overhead = $52,063
-- **Code Reviews**: 15% overhead = $39,047
-- **Testing and QA**: 25% overhead = $65,078
-- **Integration and Deployment**: 15% overhead = $39,047
-- **Total Overhead**: $195,235
+| Code Type | Lines | Rate/Line | Base Cost |
+|-----------|-------|-----------|-----------|
+| Production Code | 72,610 | $2.50 | $181,525 |
+| Test Code | 7,457 | $1.25 | $9,321 |
+| Infrastructure | 43,068 | $1.00 | $43,068 |
+| Documentation | 35,200 | $0.75 | $26,400 |
+| **Total Base Cost** | **158,335** | | **$260,314** |
 
-**Total Traditional Development Cost**: $455,549
+#### Traditional Development Overhead Costs
+
+| Overhead Category | Percentage | Amount |
+|------------------|------------|--------|
+| Project Management | 20% | $52,063 |
+| Code Reviews | 15% | $39,047 |
+| Testing and QA | 25% | $65,078 |
+| Integration and Deployment | 15% | $39,047 |
+| **Total Overhead** | **75%** | **$195,235** |
+
+#### Traditional Development Total Cost
+
+| Cost Category | Amount |
+|--------------|--------|
+| Base Development Cost | $260,314 |
+| Overhead Costs | $195,235 |
+| **Total Traditional Cost** | **$455,549** |
 
 #### Team Composition for Traditional Development
-- **1 Senior Backend Developer** (Rust/PostgreSQL): $125/hour × 1,200 hours = $150,000
-- **1 Senior Frontend Developer** (React/TypeScript): $125/hour × 1,000 hours = $125,000
-- **1 DevOps Engineer** (Kubernetes/Docker): $110/hour × 600 hours = $66,000
-- **1 QA Engineer** (Testing/Automation): $90/hour × 500 hours = $45,000
-- **1 Technical Writer** (Documentation): $75/hour × 400 hours = $30,000
-- **1 Project Manager** (Coordination): $100/hour × 400 hours = $40,000
 
-**Total Team Cost**: $456,000
+| Role | Hourly Rate | Hours | Total Cost |
+|------|-------------|-------|------------|
+| Senior Backend Developer (Rust/PostgreSQL) | $125 | 1,200 | $150,000 |
+| Senior Frontend Developer (React/TypeScript) | $125 | 1,000 | $125,000 |
+| DevOps Engineer (Kubernetes/Docker) | $110 | 600 | $66,000 |
+| QA Engineer (Testing/Automation) | $90 | 500 | $45,000 |
+| Technical Writer (Documentation) | $75 | 400 | $30,000 |
+| Project Manager (Coordination) | $100 | 400 | $40,000 |
+| **Total Team Cost** | | **4,100 hours** | **$456,000** |
 
 ### AI-Assisted Development Cost Breakdown
 
-#### Staff Engineer Time (28 days × 8 hours = 224 hours)
-- **Rate**: $150/hour (Silicon Valley staff engineer rate)
-- **Total**: $33,600
-- **Source**: [Geomotiv - Software Engineer Hourly Rates](https://geomotiv.com/blog/software-engineer-hourly-rate-in-the-usa/)
+#### Staff Engineer Costs
+
+| Component | Rate | Hours/Duration | Total Cost |
+|-----------|------|----------------|------------|
+| Staff Engineer (Silicon Valley) | $150/hour | 224 hours (28 days × 8 hours) | $33,600 |
+| **Total Staff Cost** | | | **$33,600** |
+
+*Source: [Geomotiv - Software Engineer Hourly Rates](https://geomotiv.com/blog/software-engineer-hourly-rate-in-the-usa/)*
 
 #### AI Tool Costs
-- **Cursor Pro Subscription**: $20/month × 1 month = $20
-- **Token Usage**: $937.84 (actual usage from CSV data)
-- **Total AI Costs**: $957.84
 
-#### Total AI-Assisted Cost: ~$35,000
+| Tool/Service | Cost | Duration | Total Cost |
+|--------------|------|----------|------------|
+| Cursor Pro Subscription | $20/month | 1 month | $20 |
+| Token Usage (Actual) | $937.84 | 28 days | $937.84 |
+| **Total AI Costs** | | | **$957.84** |
+
+#### AI-Assisted Development Total Cost
+
+| Cost Category | Amount |
+|---------------|--------|
+| Staff Engineer Time | $33,600 |
+| AI Tool Costs | $957.84 |
+| **Total AI-Assisted Cost** | **~$35,000** |
 
 ### Productivity Analysis by Code Type
 
-#### Production Code Productivity
-- **Traditional**: 15-20 lines/day for complex business logic
-- **AI-Assisted**: 60-80 lines/day with AI code generation and review
-- **Multiplier**: 4x productivity improvement
-
-#### Test Code Productivity  
-- **Traditional**: 30-40 lines/day for comprehensive testing
-- **AI-Assisted**: 100-120 lines/day with AI test generation
-- **Multiplier**: 3x productivity improvement
-
-#### Infrastructure Code Productivity
-- **Traditional**: 50-75 lines/day for configuration and scripts
-- **AI-Assisted**: 150-200 lines/day with AI template generation
-- **Multiplier**: 2.5x productivity improvement
-
-#### Documentation Productivity
-- **Traditional**: 40-60 lines/day for technical and business documentation
-- **AI-Assisted**: 120-150 lines/day with AI content generation and formatting
-- **Multiplier**: 2.5x productivity improvement
+| Code Type | Traditional (lines/day) | AI-Assisted (lines/day) | Productivity Multiplier |
+|-----------|------------------------|-------------------------|------------------------|
+| Production Code | 15-20 | 60-80 | 4x |
+| Test Code | 30-40 | 100-120 | 3x |
+| Infrastructure Code | 50-75 | 150-200 | 2.5x |
+| Documentation | 40-60 | 120-150 | 2.5x |
+| **Average** | **34-49** | **108-138** | **3x** |
 
 ### Quality Metrics Comparison
 
@@ -341,10 +364,10 @@ Based on our project scope and complexity:
 
 ## Conclusion
 
-The data presented in this document provides a comprehensive foundation for cost assumptions in software development projects. The dramatic cost differences between traditional and AI-assisted development (99.9% cost reduction) demonstrate the transformative potential of AI tools in software development.
+The data presented in this document provides a comprehensive foundation for cost assumptions in software development projects. The dramatic cost differences between traditional and AI-assisted development (92.3% cost reduction) demonstrate the transformative potential of AI tools in software development.
 
 **Key Takeaways**:
-1. **Traditional Development**: $4.8M for similar projects
+1. **Traditional Development**: $456,000 for similar projects
 2. **AI-Assisted Development**: ~$35,000 for equivalent results
 3. **Productivity Gains**: 10-20x faster development cycles
 4. **Quality Maintenance**: Professional-grade results with AI assistance

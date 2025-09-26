@@ -68,7 +68,7 @@ EconGraph is a **production-ready economic data intelligence platform** that tra
 - **Documentation**: Google-style comments, comprehensive README, investor pitch
 - **Features**: Real-time collaboration, economic data visualization, transformations
 
-> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The ~$35,000 total investment produced a full-stack application that would typically require $4.8M in development costs and 6-12 months with a traditional team.  
+> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The ~$35,000 total investment produced a full-stack application that would typically require $456,000 in development costs and 6-12 months with a traditional team.  
 > **📊 DETAILED COST ANALYSIS**: For comprehensive cost assumptions, productivity metrics, and industry benchmarks with cited sources, see [Cost Assumptions and Productivity Analysis](docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md).
 
 ---
@@ -311,7 +311,7 @@ EconGraph maintains the highest standards of quality and reliability expected by
 - **Documentation**: Google-style comments, comprehensive README, investor pitch
 - **Features**: Real-time collaboration, economic data visualization, transformations
 
-> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The ~$35,000 total investment produced a full-stack application that would typically require $4.8M in development costs and 6-12 months with a traditional team.  
+> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The ~$35,000 total investment produced a full-stack application that would typically require $456,000 in development costs and 6-12 months with a traditional team.  
 > **📊 DETAILED COST ANALYSIS**: For comprehensive cost assumptions, productivity metrics, and industry benchmarks with cited sources, see [Cost Assumptions and Productivity Analysis](docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md).
 
 ---
