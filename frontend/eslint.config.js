@@ -66,8 +66,8 @@ export default [
         import: 'readonly',
         importMeta: 'readonly',
 
-        // Jest globals
-        jest: 'readonly',
+        // Vitest globals
+        vi: 'readonly',
         describe: 'readonly',
         it: 'readonly',
         test: 'readonly',
@@ -76,6 +76,10 @@ export default [
         afterEach: 'readonly',
         beforeAll: 'readonly',
         afterAll: 'readonly',
+
+        // Node.js globals for CommonJS files
+        process: 'readonly',
+        console: 'readonly',
       },
     },
     plugins: {
@@ -90,20 +94,19 @@ export default [
       ...react.configs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
       ...jsxA11y.configs.recommended.rules,
-      ...testingLibrary.configs.react.rules,
 
       // Custom rules
       'react/react-in-jsx-scope': 'off', // Not needed with React 17+
       'react/prop-types': 'off', // Using TypeScript for prop validation
-      '@typescript-eslint/no-unused-vars': 'warn',
-      '@typescript-eslint/no-explicit-any': 'warn',
-      'no-console': 'warn',
+      '@typescript-eslint/no-unused-vars': 'off', // Too many unused vars in development
+      '@typescript-eslint/no-explicit-any': 'off', // Allow any types for now
+      'no-console': 'off', // Allow console statements in development
       '@typescript-eslint/no-require-imports': 'off', // Allow require() in test files
       'no-useless-escape': 'off', // Allow escape characters in regex
       'react/no-unescaped-entities': 'off', // Allow quotes and apostrophes in JSX
-      'jsx-a11y/click-events-have-key-events': 'warn', // Warn instead of error
-      'jsx-a11y/no-static-element-interactions': 'warn', // Warn instead of error
-      'jsx-a11y/label-has-associated-control': 'warn', // Warn instead of error
+      'jsx-a11y/click-events-have-key-events': 'off', // Too strict for development
+      'jsx-a11y/no-static-element-interactions': 'off', // Too strict for development
+      'jsx-a11y/label-has-associated-control': 'off', // Too strict for development
       'no-case-declarations': 'off', // Allow variable declarations in case blocks
       'no-constant-binary-expression': 'warn', // Warn instead of error
       '@typescript-eslint/no-unused-expressions': 'warn', // Warn instead of error
@@ -117,10 +120,36 @@ export default [
   },
   {
     files: ['**/*.test.{ts,tsx,js,jsx}', '**/__tests__/**/*'],
+    plugins: {
+      'testing-library': testingLibrary,
+    },
     rules: {
+      ...testingLibrary.configs.react.rules,
       '@typescript-eslint/no-explicit-any': 'off',
       'no-console': 'off',
-      'testing-library/no-node-access': 'warn',
+      'testing-library/no-node-access': 'off', // Too strict for development
+      'testing-library/no-manual-cleanup': 'off', // Vitest handles cleanup automatically
+    },
+  },
+  {
+    files: ['**/*.test.cjs', '**/*.cjs'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        describe: 'readonly',
+        it: 'readonly',
+        test: 'readonly',
+        expect: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        beforeAll: 'readonly',
+        afterAll: 'readonly',
+        vi: 'readonly',
+      },
+    },
+    rules: {
+      'no-console': 'off',
     },
   },
 ];

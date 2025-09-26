@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import React from 'react';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { FinancialExport } from '../FinancialExport';
 import { FinancialStatement, Company, FinancialRatio } from '../../../types/financial';
@@ -77,7 +77,6 @@ describe('FinancialExport', () => {
   });
 
   afterEach(() => {
-    cleanup();
     // Clear all timers to prevent window errors
     vi.clearAllTimers();
   });
