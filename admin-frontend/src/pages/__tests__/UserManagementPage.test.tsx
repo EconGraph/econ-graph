@@ -42,7 +42,7 @@ vi.mock("../../contexts/SecurityContext", () => ({
 
 // Mock React Query to prevent "No QueryClient set" errors
 vi.mock("@tanstack/react-query", () => ({
-  ...vi.requireActual("@tanstack/react-query"),
+  ...vi.importActual("@tanstack/react-query"),
   QueryClientProvider: ({ children }: any) => children,
   useQuery: vi.fn(() => ({
     data: undefined,
@@ -66,24 +66,24 @@ vi.mock("@tanstack/react-query", () => ({
 vi.useFakeTimers();
 
 // Mock setTimeout to run immediately in tests
-vi
-  .spyOn(global, "setTimeout")
-  .mockImplementation((fn: any, _delay?: number) => {
+vi.spyOn(global, "setTimeout").mockImplementation(
+  (fn: any, _delay?: number) => {
     if (typeof fn === "function") {
       fn();
     }
     return 1 as any;
-  });
+  },
+);
 
 // Mock setInterval to prevent resource leaks
-vi
-  .spyOn(global, "setInterval")
-  .mockImplementation((fn: any, _delay?: number) => {
+vi.spyOn(global, "setInterval").mockImplementation(
+  (fn: any, _delay?: number) => {
     if (typeof fn === "function") {
       fn();
     }
     return 1 as any;
-  });
+  },
+);
 
 // const mockAdminContext = {
 //   user: {
@@ -127,7 +127,7 @@ const mockSuperAdminContext = {
 const TestWrapper: React.FC<{
   children: React.ReactNode;
   authContext?: any;
-}> = ({ children, authContext = mockSuperAdminContext }) => (
+}> = ({ children }) => (
   <BrowserRouter>
     <ThemeProvider theme={theme}>{children}</ThemeProvider>
   </BrowserRouter>

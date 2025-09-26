@@ -10,10 +10,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
-import {
-  GET_CRAWLER_LOGS,
-  SEARCH_LOGS,
-} from "../services/graphql/queries";
+import { GET_CRAWLER_LOGS, SEARCH_LOGS } from "../services/graphql/queries";
 
 // GraphQL client function - this will be mocked in tests
 const graphqlClient = async (query: string | any, variables?: any) => {

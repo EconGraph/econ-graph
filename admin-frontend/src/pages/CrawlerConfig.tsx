@@ -154,7 +154,7 @@ const CrawlerConfig: React.FC = () => {
         });
         setEditDialogOpen(false);
         setEditingSource(null);
-      } catch (error) {
+      } catch {
         setError("Failed to save data source configuration");
       } finally {
         setSaving(false);
@@ -174,7 +174,7 @@ const CrawlerConfig: React.FC = () => {
             : source,
         ),
       );
-    } catch (error) {
+    } catch {
       setError("Connection test failed");
     }
   }, []);

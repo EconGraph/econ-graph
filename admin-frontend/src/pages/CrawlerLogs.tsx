@@ -81,6 +81,7 @@ interface PerformanceMetrics {
 
 interface CrawlerLogsProps {
   // Props can be added as needed
+  className?: string;
 }
 
 // Memoized component for expensive date formatting operations
@@ -137,7 +138,7 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
 
   // Filter logs based on search term and filters
   useEffect(() => {
-    let logsToFilter = searchTerm.length > 0 ? searchResults : logs;
+    const logsToFilter = searchTerm.length > 0 ? searchResults : logs;
 
     const filtered = logsToFilter.filter((log: any) => {
       const matchesLevel = levelFilter === "all" || log.level === levelFilter;

@@ -111,7 +111,7 @@ export default function MonitoringPage() {
   }, []);
 
   const handleTabChange = useCallback(
-    (event: React.SyntheticEvent, newValue: number) => {
+    (_event: React.SyntheticEvent, newValue: number) => {
       setTabValue(newValue);
     },
     [],

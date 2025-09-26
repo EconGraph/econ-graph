@@ -26,26 +26,26 @@ global.fetch = vi.fn(() =>
 vi.useFakeTimers();
 
 // Mock all timers to run immediately
-vi
-  .spyOn(global, "setTimeout")
-  .mockImplementation((fn: any, _delay?: number) => {
+vi.spyOn(global, "setTimeout").mockImplementation(
+  (fn: any, _delay?: number) => {
     if (typeof fn === "function") {
       // Run the function immediately for tests
       fn();
     }
     return 1 as any;
-  });
+  },
+);
 
 // Mock setInterval to prevent resource leaks
-vi
-  .spyOn(global, "setInterval")
-  .mockImplementation((fn: any, _delay?: number) => {
+vi.spyOn(global, "setInterval").mockImplementation(
+  (fn: any, _delay?: number) => {
     if (typeof fn === "function") {
       // Run the function immediately for tests
       fn();
     }
     return 1 as any;
-  });
+  },
+);
 
 // Don't mock Date - let it work normally with the mock data
 // The component uses mock data with hardcoded timestamps, so we don't need to mock Date

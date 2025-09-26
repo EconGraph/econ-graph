@@ -9,9 +9,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
-import {
-  GET_SYSTEM_HEALTH,
-} from "../services/graphql/queries";
+import { GET_SYSTEM_HEALTH } from "../services/graphql/queries";
 
 // GraphQL client function - this will be mocked in tests
 const graphqlClient = async (query: string | any, variables?: any) => {

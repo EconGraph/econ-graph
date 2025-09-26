@@ -2,7 +2,7 @@
 // PURPOSE: Provide administrators with system status and key metrics
 // This ensures administrators can monitor system health and performance
 
-import React from "react";
+// import React from "react"; // Not needed in modern React
 import {
   Box,
   Typography,

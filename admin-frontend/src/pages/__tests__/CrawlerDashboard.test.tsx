@@ -23,7 +23,7 @@ const theme = createTheme();
 
 // Mock date-fns format function
 vi.mock("date-fns", () => ({
-  format: vi.fn((date, formatStr) => {
+    format: vi.fn((_date, formatStr) => {
     if (formatStr === "MMM dd, HH:mm") {
       return "Jan 01, 12:00";
     }

@@ -47,6 +47,7 @@ import { useCrawlerData } from "../hooks/useCrawlerData";
 
 interface CrawlerDashboardProps {
   // Props can be added as needed for configuration
+  className?: string;
 }
 
 // Memoized component for expensive date formatting operations
@@ -94,7 +95,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
     try {
       await refreshAll();
       showNotification("Data refreshed successfully", "success");
-    } catch (err) {
+    } catch {
       showNotification("Failed to refresh data", "error");
     }
   }, [refreshAll, showNotification]);
@@ -108,7 +109,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
         priority: 1,
       });
       showNotification("Crawl triggered successfully", "success");
-    } catch (err) {
+    } catch {
       showNotification("Failed to trigger crawl", "error");
     }
   }, [control.actions, showNotification]);
@@ -118,7 +119,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
     try {
       await control.actions.stopCrawler();
       showNotification("Crawler stopped successfully", "success");
-    } catch (err) {
+    } catch {
       showNotification("Failed to stop crawler", "error");
     }
   }, [control.actions, showNotification]);
