@@ -28,6 +28,11 @@ import getPerformanceMetricsError from "../graphql/getPerformanceMetrics/error.j
 import getSystemHealthSuccess from "../graphql/getSystemHealth/success.json";
 import getSystemHealthError from "../graphql/getSystemHealth/error.json";
 import getSystemHealthLoading from "../graphql/getSystemHealth/loading.json";
+import getCrawlerLogsSuccess from "../graphql/getCrawlerLogs/success.json";
+import getCrawlerLogsError from "../graphql/getCrawlerLogs/error.json";
+import getCrawlerLogsLoading from "../graphql/getCrawlerLogs/loading.json";
+import searchLogsSuccess from "../graphql/searchLogs/success.json";
+import searchLogsError from "../graphql/searchLogs/error.json";
 
 // Mock scenarios for testing different states
 export enum MockScenarios {
@@ -82,12 +87,21 @@ export const mockResponses = {
     error: getPerformanceMetricsError,
   },
 
-  GetSystemHealth: {
-    success: getSystemHealthSuccess,
-    error: getSystemHealthError,
-    loading: getSystemHealthLoading,
-  },
-};
+    GetSystemHealth: {
+      success: getSystemHealthSuccess,
+      error: getSystemHealthError,
+      loading: getSystemHealthLoading,
+    },
+    GetCrawlerLogs: {
+      success: getCrawlerLogsSuccess,
+      error: getCrawlerLogsError,
+      loading: getCrawlerLogsLoading,
+    },
+    SearchLogs: {
+      success: searchLogsSuccess,
+      error: searchLogsError,
+    },
+  };
 
 // Simple scenario management
 let currentScenario = "default";

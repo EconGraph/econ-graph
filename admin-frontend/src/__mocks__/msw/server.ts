@@ -25,6 +25,11 @@ import getPerformanceMetricsError from "../graphql/getPerformanceMetrics/error.j
 import getSystemHealthSuccess from "../graphql/getSystemHealth/success.json";
 import getSystemHealthError from "../graphql/getSystemHealth/error.json";
 import getSystemHealthLoading from "../graphql/getSystemHealth/loading.json";
+import getCrawlerLogsSuccess from "../graphql/getCrawlerLogs/success.json";
+import getCrawlerLogsError from "../graphql/getCrawlerLogs/error.json";
+import getCrawlerLogsLoading from "../graphql/getCrawlerLogs/loading.json";
+import searchLogsSuccess from "../graphql/searchLogs/success.json";
+import searchLogsError from "../graphql/searchLogs/error.json";
 
 // Track current scenario for dynamic responses
 let currentScenario = "success";
@@ -125,6 +130,29 @@ const handlers = [
               break;
             default:
               response = getSystemHealthSuccess;
+          }
+          break;
+
+        case "GetCrawlerLogs":
+          switch (currentScenario) {
+            case "error":
+              response = getCrawlerLogsError;
+              break;
+            case "loading":
+              response = getCrawlerLogsLoading;
+              break;
+            default:
+              response = getCrawlerLogsSuccess;
+          }
+          break;
+
+        case "SearchLogs":
+          switch (currentScenario) {
+            case "error":
+              response = searchLogsError;
+              break;
+            default:
+              response = searchLogsSuccess;
           }
           break;
 

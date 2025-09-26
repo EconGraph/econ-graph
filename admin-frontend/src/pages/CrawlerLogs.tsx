@@ -60,6 +60,7 @@ import {
   NetworkCheck,
 } from "@mui/icons-material";
 import { format } from "date-fns";
+import { useCrawlerLogs, useLogSearch } from "../hooks/useCrawlerLogs";
 
 // Types for log entries and monitoring data
 interface LogEntry {
@@ -100,7 +101,6 @@ const FormattedTimestamp = React.memo(
 );
 
 const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
-  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [filteredLogs, setFilteredLogs] = useState<LogEntry[]>([]);
   const [performanceMetrics, setPerformanceMetrics] =
     useState<PerformanceMetrics>({
@@ -118,66 +118,33 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
   const [levelFilter, setLevelFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const autoRefreshRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Mock log data for development
+  // Use real GraphQL data
+  const { logs, loading, error, refresh } = useCrawlerLogs(50, 0, levelFilter === "all" ? undefined : levelFilter, sourceFilter === "all" ? undefined : sourceFilter, autoRefresh, 5000);
+  
+  // Use log search for search functionality
+  const { searchResults, loading: searchLoading, error: searchError, refresh: refreshSearch } = useLogSearch(searchTerm, { level: levelFilter, source: sourceFilter }, searchTerm.length > 0);
+
+  // Filter logs based on search term and filters
   useEffect(() => {
-    const generateMockLogs = () => {
-      const mockLogs: LogEntry[] = [
-        {
-          id: "1",
-          timestamp: new Date(Date.now() - 1000).toISOString(),
-          level: "info",
-          source: "FRED",
-          message: "Successfully crawled GDP data",
-          duration: 2.3,
-          status: "success",
-        },
-        {
-          id: "2",
-          timestamp: new Date(Date.now() - 2000).toISOString(),
-          level: "error",
-          source: "BLS",
-          message: "Connection timeout while fetching unemployment data",
-          details: { timeout: 30, retry_count: 2 },
-          status: "failed",
-        },
-        {
-          id: "3",
-          timestamp: new Date(Date.now() - 3000).toISOString(),
-          level: "warn",
-          source: "Census",
-          message: "Rate limit approaching for Census API",
-          details: { current_rate: 8, limit: 10 },
-        },
-        {
-          id: "4",
-          timestamp: new Date(Date.now() - 4000).toISOString(),
-          level: "info",
-          source: "WorldBank",
-          message: "Starting scheduled crawl for World Bank data",
-          status: "pending",
-        },
-        {
-          id: "5",
-          timestamp: new Date(Date.now() - 5000).toISOString(),
-          level: "debug",
-          source: "FRED",
-          message: "Parsing JSON response for series GDP",
-          duration: 0.1,
-        },
-      ];
+    let logsToFilter = searchTerm.length > 0 ? searchResults : logs;
+    
+    const filtered = logsToFilter.filter((log) => {
+      const matchesLevel = levelFilter === "all" || log.level === levelFilter;
+      const matchesSource = sourceFilter === "all" || log.source === sourceFilter;
+      const matchesSearch = searchTerm.length === 0 || 
+        log.message.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        log.source.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      return matchesLevel && matchesSource && matchesSearch;
+    });
+    
+    setFilteredLogs(filtered);
+  }, [logs, searchResults, levelFilter, sourceFilter, searchTerm]);
 
-      setLogs((prevLogs) => [...mockLogs, ...prevLogs.slice(0, 95)]); // Keep last 100 logs
-    };
-
-    generateMockLogs();
-  }, []);
-
-  // Mock performance metrics
+  // Mock performance metrics (TODO: Replace with real GraphQL call)
   useEffect(() => {
     const updateMetrics = () => {
       setPerformanceMetrics({
@@ -197,56 +164,12 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Auto-refresh logs
-  useEffect(() => {
-    if (autoRefresh) {
-      autoRefreshRef.current = setInterval(() => {
-        // TODO: Implement actual log fetching
-        console.log("Auto-refreshing logs...");
-      }, 5000);
-    } else {
-      if (autoRefreshRef.current) {
-        clearInterval(autoRefreshRef.current);
-      }
-    }
-
-    return () => {
-      if (autoRefreshRef.current) {
-        clearInterval(autoRefreshRef.current);
-      }
-    };
-  }, [autoRefresh]);
-
-  // Filter logs based on search and filters
-  useEffect(() => {
-    let filtered = logs;
-
-    if (searchTerm) {
-      filtered = filtered.filter(
-        (log) =>
-          log.message.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          log.source.toLowerCase().includes(searchTerm.toLowerCase()),
-      );
-    }
-
-    if (levelFilter !== "all") {
-      filtered = filtered.filter((log) => log.level === levelFilter);
-    }
-
-    if (sourceFilter !== "all") {
-      filtered = filtered.filter((log) => log.source === sourceFilter);
-    }
-
-    setFilteredLogs(filtered);
-  }, [logs, searchTerm, levelFilter, sourceFilter]);
-
   const handleRefresh = useCallback(() => {
-    setLoading(true);
-    // TODO: Implement actual refresh
-    setTimeout(() => {
-      setLoading(false);
-    }, 1000);
-  }, []);
+    refresh();
+    if (searchTerm.length > 0) {
+      refreshSearch();
+    }
+  }, [refresh, refreshSearch, searchTerm]);
 
   const handleExportLogs = useCallback(() => {
     // TODO: Implement actual export
@@ -305,9 +228,9 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
             variant="outlined"
             startIcon={<Refresh />}
             onClick={handleRefresh}
-            disabled={loading}
+            disabled={loading || searchLoading}
           >
-            {loading ? "Refreshing..." : "Refresh"}
+            {(loading || searchLoading) ? "Refreshing..." : "Refresh"}
           </Button>
           <Button
             variant="outlined"
@@ -328,8 +251,14 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
       </Box>
 
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
-          {error}
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error.message || error.toString()}
+        </Alert>
+      )}
+      
+      {searchError && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          Search error: {searchError.message || searchError.toString()}
         </Alert>
       )}
 
