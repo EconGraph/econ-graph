@@ -290,7 +290,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
@@ -392,7 +392,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -470,7 +470,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -536,7 +536,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -602,7 +602,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -668,7 +668,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -734,7 +734,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -800,7 +800,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -866,7 +866,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -932,7 +932,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -998,7 +998,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1064,7 +1064,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1130,7 +1130,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1196,7 +1196,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1328,11 +1328,11 @@ jobs:
 
     - name: Run tests (parallel)
       working-directory: frontend
-      run: npm test -- --coverage --watchAll=false --testPathIgnorePatterns="ChartCollaborationConnected|ChartCollaboration|ProfessionalChart|InteractiveChartWithCollaboration"
+      run: npm test -- --coverage
 
     - name: Run problematic tests (serial)
       working-directory: frontend
-      run: npm run test:serial -- --testPathPattern="ChartCollaborationConnected|ChartCollaboration|ProfessionalChart|InteractiveChartWithCollaboration" --coverage
+      run: npm run test:serial -- --testNamePattern="ChartCollaborationConnected|ChartCollaboration|ProfessionalChart|InteractiveChartWithCollaboration" --coverage
 
   quality-checks:
     name: Quality Checks
@@ -1565,7 +1565,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
@@ -1649,7 +1649,7 @@ jobs:
 
     - name: Run frontend integration tests
       working-directory: frontend
-      run: npm test -- --coverage --watchAll=false
+      run: npm test -- --coverage
       env:
         REACT_APP_GRAPHQL_ENDPOINT: http://localhost:51249/graphql
 
@@ -1740,7 +1740,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
@@ -1885,7 +1885,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
@@ -2109,7 +2109,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
@@ -2309,7 +2309,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
@@ -2511,7 +2511,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
@@ -2719,7 +2719,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
@@ -2927,7 +2927,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres

@@ -296,7 +296,7 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
   seriesTitle,
   units,
   frequency,
-  loading = false,
+  loading: _loading = false,
   collaborationEnabled = true,
 }) => {
   const theme = useTheme();
