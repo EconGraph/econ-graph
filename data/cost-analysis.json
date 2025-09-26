@@ -1,0 +1,33 @@
+{
+  "last_updated": "2025-09-26T05:53:39Z",
+  "codebase_stats": {
+    "total_lines": 0,
+    "backend_production": 33756,
+    "backend_tests": 2788,
+    "frontend_production": 38854,
+    "frontend_tests": 4669,
+    "infrastructure": 38408,
+    "documentation": 41108,
+    "scripts": 16500
+  },
+  "cost_analysis": {
+    "traditional_development": {
+      "base_cost": 260085.25,
+      "overhead_cost": 195063.93,
+      "total_cost": 455149.18
+    },
+    "ai_assisted_development": {
+      "staff_engineer_cost": 33600,
+      "ai_tool_cost": 957.836,
+      "total_cost": 34557.836
+    },
+    "savings": {
+      "dollar_amount": 420591.344,
+      "percentage": 0
+    }
+  },
+  "ai_usage": {
+    "total_cost": 937.836,
+    "total_tokens": 3252650146
+  }
+}
