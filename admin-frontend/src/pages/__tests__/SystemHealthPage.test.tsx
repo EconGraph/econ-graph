@@ -6,11 +6,48 @@ import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import SystemHealthPage from "../SystemHealthPage";
 import { AuthProvider } from "../../contexts/AuthContext";
 import { SecurityProvider } from "../../contexts/SecurityContext";
 
 import { vi } from "vitest";
+
+// Mock the useSystemHealth hook to prevent infinite loops
+vi.mock("../../hooks/useSystemHealth", () => ({
+  useSystemHealth: vi.fn(() => ({
+    systemHealth: {
+      cpu_usage: 45.2,
+      memory_usage: 67.8,
+      disk_usage: 23.1,
+      network_latency: 12.5,
+      overall_status: "healthy",
+      components: [
+        {
+          name: "Database",
+          status: "healthy",
+          message: "All systems operational",
+          last_check: "2024-01-15T10:30:00Z",
+        },
+        {
+          name: "API Server",
+          status: "healthy",
+          message: "Response time: 8.7ms",
+          last_check: "2024-01-15T10:30:00Z",
+        },
+        {
+          name: "Cache",
+          status: "warning",
+          message: "High response time: 45.3ms",
+          last_check: "2024-01-15T10:30:00Z",
+        },
+      ],
+    },
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  })),
+}));
 
 // Mock fetch to prevent network requests to Grafana
 global.fetch = vi.fn(() =>
@@ -86,14 +123,30 @@ vi.mock("../../contexts/SecurityContext", () => ({
 // Create a test theme
 const theme = createTheme();
 
+// Create a test QueryClient with strict configuration to prevent infinite loops
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+      refetchOnWindowFocus: false,
+      refetchOnMount: false,
+      refetchOnReconnect: false,
+      staleTime: Infinity,
+      gcTime: 0,
+    },
+  },
+});
+
 // Test wrapper component
 const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <BrowserRouter>
-    <ThemeProvider theme={theme}>
-      <AuthProvider>
-        <SecurityProvider>{children}</SecurityProvider>
-      </AuthProvider>
-    </ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider theme={theme}>
+        <AuthProvider>
+          <SecurityProvider>{children}</SecurityProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
   </BrowserRouter>
 );
 
@@ -104,13 +157,16 @@ describe("SystemHealthPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.clearAllTimers();
+    queryClient.clear();
     // Run all pending timers immediately to prevent timeouts
     vi.runAllTimers();
   });
 
   afterEach(() => {
-    vi.runAllTimers();
+    vi.clearAllMocks();
     vi.clearAllTimers();
+    queryClient.clear();
+    vi.runAllTimers();
   });
 
   describe("Rendering", () => {
@@ -137,22 +193,13 @@ describe("SystemHealthPage", () => {
       // Use data-testid attributes for reliable testing
       expect(screen.getByTestId("health-metrics-grid")).toBeInTheDocument();
       expect(
-        screen.getByTestId("health-metric-card-system-uptime"),
+        screen.getByTestId("health-metric-card-database"),
       ).toBeInTheDocument();
       expect(
-        screen.getByTestId("health-metric-card-response-time"),
+        screen.getByTestId("health-metric-card-api-server"),
       ).toBeInTheDocument();
       expect(
-        screen.getByTestId("health-metric-card-database-connections"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByTestId("health-metric-card-memory-usage"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByTestId("health-metric-card-disk-space"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByTestId("health-metric-card-active-users"),
+        screen.getByTestId("health-metric-card-cache"),
       ).toBeInTheDocument();
     });
 

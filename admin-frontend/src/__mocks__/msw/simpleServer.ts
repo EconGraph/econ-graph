@@ -159,15 +159,16 @@ export const getMockResponse = (
 // Store original fetch to properly restore it
 let originalFetch: typeof global.fetch;
 
-export const setupSimpleMSW = () => {
+export const setupSimpleMSW = async () => {
   console.log("[Simple MSW] Setting up MSW...");
   console.log("[Simple MSW] Original fetch type:", typeof global.fetch);
   originalFetch = global.fetch;
 
-  // Use jest.spyOn instead of direct assignment to ensure proper mocking
-  jest
-    .spyOn(global, "fetch")
-    .mockImplementation((input: string | URL | Request, options?: any) => {
+  // Use vi.spyOn for Vitest instead of jest.spyOn
+  const vitestModule = await import("vitest");
+  const vi = vitestModule.vi;
+  vi.spyOn(global, "fetch").mockImplementation(
+    (input: string | URL | Request, options?: any) => {
       const url = typeof input === "string" ? input : input.toString();
       console.log(`[Simple MSW] ===== FETCH INTERCEPTED =====`);
       console.log(`[Simple MSW] URL: "${url}"`);
@@ -212,17 +213,22 @@ export const setupSimpleMSW = () => {
       // For non-GraphQL requests, pass through to original fetch
       console.log(`[Simple MSW] Passing through request: ${url}`);
       return originalFetch(url, options);
-    });
+    },
+  );
 
   console.log("[Simple MSW] MSW setup complete");
   console.log("[Simple MSW] Fetch mock applied:", typeof global.fetch);
+  const vitestModule2 = await import("vitest");
+  const vi2 = vitestModule2.vi;
   console.log(
-    "[Simple MSW] Jest mock function:",
-    jest.isMockFunction(global.fetch),
+    "[Simple MSW] Vitest mock function:",
+    vi2.isMockFunction(global.fetch),
   );
 };
 
-export const cleanupSimpleMSW = () => {
-  // Restore original fetch using jest.restoreAllMocks()
-  jest.restoreAllMocks();
+export const cleanupSimpleMSW = async () => {
+  // Restore original fetch using vi.restoreAllMocks()
+  const vitestModule3 = await import("vitest");
+  const vi3 = vitestModule3.vi;
+  vi3.restoreAllMocks();
 };
