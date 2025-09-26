@@ -1,7 +1,34 @@
 #!/bin/bash
 
 # EconGraph Cost Analysis Auto-Update Script
-# This script automatically updates cost figures in documentation based on source data
+# ==========================================
+#
+# PURPOSE:
+#   This script automatically updates cost figures in documentation based on source data.
+#   It extracts current codebase statistics, calculates development costs, and updates
+#   all business documentation with the latest figures.
+#
+# USAGE:
+#   ./scripts/update-cost-analysis.sh
+#
+# DEPENDENCIES:
+#   - scripts/codebase-stats-corrected.sh (for codebase statistics - the only stats script)
+#   - data/usage-events-2025-09-26.csv (for AI usage costs)
+#   - bc (for mathematical calculations)
+#
+# OUTPUT:
+#   - Updates all documentation files with latest cost figures
+#   - Creates data/cost-analysis.json with structured cost data
+#   - Provides summary of changes made
+#
+# AUTOMATION:
+#   - Called by GitHub Actions workflow (.github/workflows/update-cost-analysis.yml)
+#   - Can be triggered manually or via webhook
+#   - Runs daily at 6 AM UTC via GitHub Actions
+#
+# AUTHOR: EconGraph Development Team
+# VERSION: 1.0
+# LAST UPDATED: September 2025
 
 set -e
 
@@ -27,14 +54,20 @@ CODEBASE_STATS_FILE="scripts/codebase-stats-corrected.sh"
 mkdir -p data
 
 # Function to get current codebase stats
+# ======================================
+# Extracts current codebase statistics by running the corrected stats script
+# and parsing the output to get line counts for different code categories.
+# This ensures we're always working with the latest codebase metrics.
 get_codebase_stats() {
     echo -e "${YELLOW}📈 Getting current codebase statistics...${NC}"
 
-    # Run the corrected stats script
+    # Run the corrected stats script to get current codebase metrics
+    # The script uses git ls-files to respect .gitignore and exclude auto-generated files
     if [ -f "$CODEBASE_STATS_FILE" ]; then
         bash "$CODEBASE_STATS_FILE" > /tmp/codebase_stats.txt
 
-        # Extract key metrics
+        # Extract key metrics from the stats script output
+        # Each grep command extracts the number from the formatted output
         BACKEND_PROD=$(grep "Backend Production:" /tmp/codebase_stats.txt | awk '{print $3}' | tr -d ',')
         BACKEND_TESTS=$(grep "Backend Tests:" /tmp/codebase_stats.txt | awk '{print $3}' | tr -d ',')
         FRONTEND_PROD=$(grep "Frontend Production:" /tmp/codebase_stats.txt | awk '{print $3}' | tr -d ',')
