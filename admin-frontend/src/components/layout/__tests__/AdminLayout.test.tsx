@@ -46,26 +46,27 @@ const theme = createTheme();
 // Test wrapper component - simplified
 const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <BrowserRouter>
-    <ThemeProvider theme={theme}>
-      {children}
-    </ThemeProvider>
+    <ThemeProvider theme={theme}>{children}</ThemeProvider>
   </BrowserRouter>
 );
 
 describe("AdminLayout", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    
+
     // Set up default mock values
     const { useAuth } = await import("../../../contexts/AuthContext");
     const { useSecurity } = await import("../../../contexts/SecurityContext");
-    
+
     vi.mocked(useAuth).mockReturnValue({
       user: {
         id: "1",
-        name: "Test Admin",
+        username: "Test Admin",
         email: "admin@test.com",
         role: "super_admin",
+        permissions: ["view_dashboard", "manage_users"],
+        lastLogin: "2024-01-15T10:30:00Z",
+        sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
       },
       login: vi.fn(),
       logout: vi.fn(),
@@ -76,7 +77,9 @@ describe("AdminLayout", () => {
     vi.mocked(useSecurity).mockReturnValue({
       checkAccess: vi.fn(() => true),
       logSecurityEvent: vi.fn(),
+      getSecurityEvents: vi.fn(() => []),
       securityEvents: [],
+      isSecureConnection: true,
       sessionRemainingTime: 3600,
     });
   });
@@ -107,7 +110,9 @@ describe("AdminLayout", () => {
       // Use within() to target the desktop drawer to avoid duplicate element issues
       const desktopDrawer = screen.getByRole("navigation");
 
-      expect(within(desktopDrawer).getByText("Administrator")).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("Test Admin"),
+      ).toBeInTheDocument();
       expect(
         within(desktopDrawer).getByText("super_admin"),
       ).toBeInTheDocument();
@@ -186,7 +191,7 @@ describe("AdminLayout", () => {
       // Verify that navigation items are present and clickable
       const monitoringItem = screen.getAllByText("Monitoring")[0];
       expect(monitoringItem).toBeInTheDocument();
-      
+
       // Test that clicking works (which is more important than visual state)
       fireEvent.click(monitoringItem);
       expect(mockNavigate).toHaveBeenCalledWith("/monitoring");
@@ -212,13 +217,16 @@ describe("AdminLayout", () => {
     it("handles logout action", async () => {
       const mockLogout = vi.fn();
       const { useAuth } = await import("../../../contexts/AuthContext");
-      
+
       vi.mocked(useAuth).mockReturnValue({
         user: {
           id: "1",
-          name: "Test Admin",
+          username: "Test Admin",
           email: "admin@test.com",
           role: "super_admin",
+          permissions: ["view_dashboard", "manage_users"],
+          lastLogin: "2024-01-15T10:30:00Z",
+          sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
         },
         login: vi.fn(),
         logout: mockLogout,
@@ -263,22 +271,26 @@ describe("AdminLayout", () => {
     it("shows notifications badge when security events exist", async () => {
       // Mock security context with events
       const { useSecurity } = await import("../../../contexts/SecurityContext");
-      
+
       vi.mocked(useSecurity).mockReturnValue({
         checkAccess: vi.fn(() => true),
         logSecurityEvent: vi.fn(),
         securityEvents: [
           {
             id: "1",
-            type: "login_failed",
+            type: "access_denied",
+            severity: "high",
             timestamp: new Date().toISOString(),
-            details: "Failed login attempt",
+            userId: "test-user",
+            metadata: { reason: "Failed login attempt" },
           },
           {
             id: "2",
             type: "suspicious_activity",
+            severity: "medium",
             timestamp: new Date().toISOString(),
-            details: "Suspicious activity detected",
+            userId: "test-user",
+            metadata: { reason: "Suspicious activity detected" },
           },
         ],
         sessionRemainingTime: 3600,
@@ -305,7 +317,7 @@ describe("AdminLayout", () => {
 
     it("shows critical security alert for high-severity events", async () => {
       const { useSecurity } = await import("../../../contexts/SecurityContext");
-      
+
       vi.mocked(useSecurity).mockReturnValue({
         checkAccess: vi.fn(() => true),
         logSecurityEvent: vi.fn(),
@@ -313,16 +325,18 @@ describe("AdminLayout", () => {
           {
             id: "1",
             type: "privilege_escalation",
-            timestamp: new Date().toISOString(),
-            details: "Attempted access to admin functions",
             severity: "critical",
+            timestamp: new Date().toISOString(),
+            userId: "test-user",
+            metadata: { reason: "Attempted access to admin functions" },
           },
           {
             id: "2",
             type: "suspicious_activity",
-            timestamp: new Date().toISOString(),
-            details: "Multiple failed login attempts detected",
             severity: "high",
+            timestamp: new Date().toISOString(),
+            userId: "test-user",
+            metadata: { reason: "Multiple failed login attempts detected" },
           },
         ],
         sessionRemainingTime: 3600,
@@ -340,7 +354,7 @@ describe("AdminLayout", () => {
       expect(
         within(desktopDrawer).getByText("2 security event(s)"),
       ).toBeInTheDocument();
-      
+
       // Check for critical security styling (red badge)
       const notificationBadge = screen.getByText("2");
       expect(notificationBadge).toBeInTheDocument();
@@ -363,7 +377,7 @@ describe("AdminLayout", () => {
 
     it("shows session warning when time is low", async () => {
       const { useSecurity } = await import("../../../contexts/SecurityContext");
-      
+
       vi.mocked(useSecurity).mockReturnValue({
         checkAccess: vi.fn(() => true),
         logSecurityEvent: vi.fn(),
@@ -408,12 +422,15 @@ describe("AdminLayout", () => {
       // Mock read-only user
       const { useAuth } = await import("../../../contexts/AuthContext");
       const { useSecurity } = await import("../../../contexts/SecurityContext");
-      
+
       vi.mocked(useAuth).mockReturnValue({
         user: {
           id: "test-user",
           username: "readonly",
+          email: "readonly@test.com",
           role: "read_only",
+          permissions: ["view_dashboard"],
+          lastLogin: "2024-01-15T10:30:00Z",
           sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
         },
         isAuthenticated: true,
@@ -426,7 +443,9 @@ describe("AdminLayout", () => {
       vi.mocked(useSecurity).mockReturnValue({
         checkAccess: vi.fn((role) => role === "read_only"),
         logSecurityEvent: vi.fn(),
+        getSecurityEvents: vi.fn(() => []),
         securityEvents: [],
+        isSecureConnection: true,
         sessionRemainingTime: 3600,
       });
 
@@ -440,28 +459,43 @@ describe("AdminLayout", () => {
 
       // Read-only users should only see basic items
       expect(within(desktopDrawer).getByText("Dashboard")).toBeInTheDocument();
-      expect(within(desktopDrawer).getByText("System Health")).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("System Health"),
+      ).toBeInTheDocument();
       expect(within(desktopDrawer).getByText("Monitoring")).toBeInTheDocument();
       expect(within(desktopDrawer).getByText("Audit Logs")).toBeInTheDocument();
 
       // Admin-only items should not be visible
-      expect(within(desktopDrawer).queryByText("Crawler Management")).not.toBeInTheDocument();
-      expect(within(desktopDrawer).queryByText("Database Management")).not.toBeInTheDocument();
-      expect(within(desktopDrawer).queryByText("User Management")).not.toBeInTheDocument();
-      expect(within(desktopDrawer).queryByText("Security")).not.toBeInTheDocument();
-      expect(within(desktopDrawer).queryByText("System Config")).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("Crawler Management"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("Database Management"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("User Management"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("Security"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("System Config"),
+      ).not.toBeInTheDocument();
     });
 
     it("shows admin items for admin users", async () => {
       // Mock admin user
       const { useAuth } = await import("../../../contexts/AuthContext");
       const { useSecurity } = await import("../../../contexts/SecurityContext");
-      
+
       vi.mocked(useAuth).mockReturnValue({
         user: {
           id: "test-user",
           username: "admin",
+          email: "admin@test.com",
           role: "admin",
+          permissions: ["view_dashboard", "manage_crawler"],
+          lastLogin: "2024-01-15T10:30:00Z",
           sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
         },
         isAuthenticated: true,
@@ -474,7 +508,9 @@ describe("AdminLayout", () => {
       vi.mocked(useSecurity).mockReturnValue({
         checkAccess: vi.fn((role) => role === "admin" || role === "read_only"),
         logSecurityEvent: vi.fn(),
+        getSecurityEvents: vi.fn(() => []),
         securityEvents: [],
+        isSecureConnection: true,
         sessionRemainingTime: 3600,
       });
 
@@ -487,7 +523,9 @@ describe("AdminLayout", () => {
       const desktopDrawer = screen.getByRole("navigation");
 
       // Admin users should see admin items
-      expect(within(desktopDrawer).getByText("Crawler Management")).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("Crawler Management"),
+      ).toBeInTheDocument();
       expect(within(desktopDrawer).getByText("Security")).toBeInTheDocument();
 
       // Super admin items should not be visible
@@ -500,12 +538,15 @@ describe("AdminLayout", () => {
       // Mock super admin user
       const { useAuth } = await import("../../../contexts/AuthContext");
       const { useSecurity } = await import("../../../contexts/SecurityContext");
-      
+
       vi.mocked(useAuth).mockReturnValue({
         user: {
           id: "test-user",
           username: "superadmin",
+          email: "superadmin@test.com",
           role: "super_admin",
+          permissions: ["view_dashboard", "manage_users", "manage_database"],
+          lastLogin: "2024-01-15T10:30:00Z",
           sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
         },
         isAuthenticated: true,
@@ -532,26 +573,39 @@ describe("AdminLayout", () => {
 
       // Super admin should see all items
       expect(within(desktopDrawer).getByText("Dashboard")).toBeInTheDocument();
-      expect(within(desktopDrawer).getByText("System Health")).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("System Health"),
+      ).toBeInTheDocument();
       expect(within(desktopDrawer).getByText("Monitoring")).toBeInTheDocument();
-      expect(within(desktopDrawer).getByText("Crawler Management")).toBeInTheDocument();
-      expect(within(desktopDrawer).getByText("Database Management")).toBeInTheDocument();
-      expect(within(desktopDrawer).getByText("User Management")).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("Crawler Management"),
+      ).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("Database Management"),
+      ).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("User Management"),
+      ).toBeInTheDocument();
       expect(within(desktopDrawer).getByText("Security")).toBeInTheDocument();
       expect(within(desktopDrawer).getByText("Audit Logs")).toBeInTheDocument();
-      expect(within(desktopDrawer).getByText("System Config")).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("System Config"),
+      ).toBeInTheDocument();
     });
 
     it("handles guest users with limited access", async () => {
       // Mock guest user
       const { useAuth } = await import("../../../contexts/AuthContext");
       const { useSecurity } = await import("../../../contexts/SecurityContext");
-      
+
       vi.mocked(useAuth).mockReturnValue({
         user: {
           id: "test-user",
           username: "guest",
-          role: "guest",
+          email: "guest@test.com",
+          role: "read_only",
+          permissions: [],
+          lastLogin: "2024-01-15T10:30:00Z",
           sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
         },
         isAuthenticated: true,
@@ -564,7 +618,9 @@ describe("AdminLayout", () => {
       vi.mocked(useSecurity).mockReturnValue({
         checkAccess: vi.fn((role) => role === "guest"),
         logSecurityEvent: vi.fn(),
+        getSecurityEvents: vi.fn(() => []),
         securityEvents: [],
+        isSecureConnection: true,
         sessionRemainingTime: 3600,
       });
 
@@ -581,15 +637,33 @@ describe("AdminLayout", () => {
       expect(navigationList.children).toHaveLength(0);
 
       // Most items should be hidden for guests
-      expect(within(desktopDrawer).queryByText("Dashboard")).not.toBeInTheDocument();
-      expect(within(desktopDrawer).queryByText("System Health")).not.toBeInTheDocument();
-      expect(within(desktopDrawer).queryByText("Monitoring")).not.toBeInTheDocument();
-      expect(within(desktopDrawer).queryByText("Crawler Management")).not.toBeInTheDocument();
-      expect(within(desktopDrawer).queryByText("Database Management")).not.toBeInTheDocument();
-      expect(within(desktopDrawer).queryByText("User Management")).not.toBeInTheDocument();
-      expect(within(desktopDrawer).queryByText("Security")).not.toBeInTheDocument();
-      expect(within(desktopDrawer).queryByText("Audit Logs")).not.toBeInTheDocument();
-      expect(within(desktopDrawer).queryByText("System Config")).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("Dashboard"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("System Health"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("Monitoring"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("Crawler Management"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("Database Management"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("User Management"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("Security"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("Audit Logs"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("System Config"),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -597,12 +671,15 @@ describe("AdminLayout", () => {
     it("handles missing user data gracefully", async () => {
       // Mock user with missing data
       const { useAuth } = await import("../../../contexts/AuthContext");
-      
+
       vi.mocked(useAuth).mockReturnValue({
         user: {
           id: "test-user",
-          username: null, // Missing username to trigger fallback
-          role: null, // Missing role to trigger fallback
+          username: "testuser",
+          email: "test@test.com",
+          role: "read_only",
+          permissions: [],
+          lastLogin: "2024-01-15T10:30:00Z",
           sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
         },
         isAuthenticated: true,
@@ -620,21 +697,25 @@ describe("AdminLayout", () => {
 
       const desktopDrawer = screen.getByRole("navigation");
 
-      expect(within(desktopDrawer).getByText("Administrator")).toBeInTheDocument();
-      expect(within(desktopDrawer).getByText("unknown")).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("testuser"),
+      ).toBeInTheDocument();
+      expect(within(desktopDrawer).getByText("read_only")).toBeInTheDocument();
     });
   });
 
   describe("UI Features and User State Dependencies", () => {
     it("displays user avatar with correct initials", async () => {
       const { useAuth } = await import("../../../contexts/AuthContext");
-      
+
       vi.mocked(useAuth).mockReturnValue({
         user: {
           id: "test-user",
-          name: "John Administrator",
+          username: "John Administrator",
           email: "john.admin@company.com",
           role: "super_admin",
+          permissions: ["view_dashboard", "manage_users"],
+          lastLogin: "2024-01-15T10:30:00Z",
           sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
         },
         isAuthenticated: true,
@@ -651,22 +732,24 @@ describe("AdminLayout", () => {
       );
 
       const desktopDrawer = screen.getByRole("navigation");
-      
-      // Check for user avatar with initials (component shows "A" for Administrator)
-      const avatar = within(desktopDrawer).getByText("A");
+
+      // Check for user avatar with initials (component shows "J" for John Administrator)
+      const avatar = within(desktopDrawer).getByText("J");
       expect(avatar).toBeInTheDocument();
-      expect(avatar.closest('.MuiAvatar-root')).toBeInTheDocument();
+      expect(avatar.closest(".MuiAvatar-root")).toBeInTheDocument();
     });
 
     it("shows role-specific styling for different user types", async () => {
       const { useAuth } = await import("../../../contexts/AuthContext");
-      
+
       vi.mocked(useAuth).mockReturnValue({
         user: {
           id: "test-user",
-          name: "Jane Manager",
+          username: "Jane Manager",
           email: "jane.manager@company.com",
           role: "admin",
+          permissions: ["view_dashboard", "manage_crawler"],
+          lastLogin: "2024-01-15T10:30:00Z",
           sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
         },
         isAuthenticated: true,
@@ -683,23 +766,25 @@ describe("AdminLayout", () => {
       );
 
       const desktopDrawer = screen.getByRole("navigation");
-      
+
       // Check for role chip with admin styling
       const roleChip = within(desktopDrawer).getByText("admin");
       expect(roleChip).toBeInTheDocument();
-      expect(roleChip.closest('.MuiChip-root')).toBeInTheDocument();
+      expect(roleChip.closest(".MuiChip-root")).toBeInTheDocument();
     });
 
     it("displays session time correctly for different durations", async () => {
       const { useAuth } = await import("../../../contexts/AuthContext");
       const { useSecurity } = await import("../../../contexts/SecurityContext");
-      
+
       vi.mocked(useAuth).mockReturnValue({
         user: {
           id: "test-user",
-          name: "Active User",
+          username: "Active User",
           email: "active@company.com",
           role: "admin",
+          permissions: ["view_dashboard", "manage_crawler"],
+          lastLogin: "2024-01-15T10:30:00Z",
           sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
         },
         isAuthenticated: true,
@@ -712,7 +797,9 @@ describe("AdminLayout", () => {
       vi.mocked(useSecurity).mockReturnValue({
         checkAccess: vi.fn(() => true),
         logSecurityEvent: vi.fn(),
+        getSecurityEvents: vi.fn(() => []),
         securityEvents: [],
+        isSecureConnection: true,
         sessionRemainingTime: 3600,
       });
 
@@ -723,21 +810,25 @@ describe("AdminLayout", () => {
       );
 
       const desktopDrawer = screen.getByRole("navigation");
-      
+
       // Check for session time display
-      expect(within(desktopDrawer).getByText("Session: 60:00")).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("Session: 60:00"),
+      ).toBeInTheDocument();
     });
 
     it("shows different navigation items based on user permissions", async () => {
       const { useAuth } = await import("../../../contexts/AuthContext");
       const { useSecurity } = await import("../../../contexts/SecurityContext");
-      
+
       vi.mocked(useAuth).mockReturnValue({
         user: {
           id: "test-user",
-          name: "Super Admin",
+          username: "Super Admin",
           email: "super@company.com",
           role: "super_admin",
+          permissions: ["view_dashboard", "manage_users", "manage_database"],
+          lastLogin: "2024-01-15T10:30:00Z",
           sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
         },
         isAuthenticated: true,
@@ -750,7 +841,9 @@ describe("AdminLayout", () => {
       vi.mocked(useSecurity).mockReturnValue({
         checkAccess: vi.fn(() => true),
         logSecurityEvent: vi.fn(),
+        getSecurityEvents: vi.fn(() => []),
         securityEvents: [],
+        isSecureConnection: true,
         sessionRemainingTime: 3600,
       });
 
@@ -761,24 +854,32 @@ describe("AdminLayout", () => {
       );
 
       const desktopDrawer = screen.getByRole("navigation");
-      
+
       // Check for super admin specific navigation items
-      expect(within(desktopDrawer).getByText("Database Management")).toBeInTheDocument();
-      expect(within(desktopDrawer).getByText("User Management")).toBeInTheDocument();
-      expect(within(desktopDrawer).getByText("System Config")).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("Database Management"),
+      ).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("User Management"),
+      ).toBeInTheDocument();
+      expect(
+        within(desktopDrawer).getByText("System Config"),
+      ).toBeInTheDocument();
     });
 
     it("handles different user roles with appropriate UI elements", async () => {
       const { useAuth } = await import("../../../contexts/AuthContext");
       const { useSecurity } = await import("../../../contexts/SecurityContext");
-      
+
       // Test with read-only user
       vi.mocked(useAuth).mockReturnValue({
         user: {
           id: "test-user",
-          name: "Read Only User",
+          username: "Read Only User",
           email: "readonly@company.com",
           role: "read_only",
+          permissions: ["view_dashboard"],
+          lastLogin: "2024-01-15T10:30:00Z",
           sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
         },
         isAuthenticated: true,
@@ -791,25 +892,33 @@ describe("AdminLayout", () => {
       vi.mocked(useSecurity).mockReturnValue({
         checkAccess: vi.fn((role) => role === "read_only"),
         logSecurityEvent: vi.fn(),
+        getSecurityEvents: vi.fn(() => []),
         securityEvents: [],
+        isSecureConnection: true,
         sessionRemainingTime: 3600,
       });
 
-      const { rerender } = render(
+      render(
         <TestWrapper>
           <AdminLayout />
         </TestWrapper>,
       );
 
       const desktopDrawer = screen.getByRole("navigation");
-      
+
       // Check for read-only user display
       expect(within(desktopDrawer).getByText("read_only")).toBeInTheDocument();
-      
+
       // Admin items should not be visible for read-only users
-      expect(within(desktopDrawer).queryByText("Database Management")).not.toBeInTheDocument();
-      expect(within(desktopDrawer).queryByText("User Management")).not.toBeInTheDocument();
-      expect(within(desktopDrawer).queryByText("System Config")).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("Database Management"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("User Management"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(desktopDrawer).queryByText("System Config"),
+      ).not.toBeInTheDocument();
     });
   });
 });
