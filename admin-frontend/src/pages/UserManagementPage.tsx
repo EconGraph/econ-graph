@@ -39,7 +39,16 @@ import {
   Badge,
   CircularProgress,
 } from "@mui/material";
-import { PersonAdd, Edit, Delete, Refresh, Search } from "@mui/icons-material";
+import {
+  PersonAdd,
+  Edit,
+  Delete,
+  Refresh,
+  Search,
+  Block,
+  CheckCircle,
+  Logout,
+} from "@mui/icons-material";
 import { useAuth } from "../contexts/AuthContext";
 import { useSecurity } from "../contexts/SecurityContext";
 import {
@@ -99,6 +108,12 @@ export default function UserManagementPage() {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    role: "read_only" as "read_only" | "admin" | "super_admin",
+    status: "active" as "active" | "inactive" | "suspended",
+  });
   const { user: currentUser } = useAuth();
   const { checkAccess } = useSecurity();
 
@@ -140,12 +155,12 @@ export default function UserManagementPage() {
   const refreshUsersMutation = useRefreshUsers();
 
   // Memoized calculated values
-  const totalUsers = useMemo(() => users.length, [users]);
+  const totalUsers = useMemo(() => users?.length || 0, [users]);
   const activeUsers = useMemo(
-    () => users.filter((u) => u.status === "active").length,
+    () => users?.filter((u) => u.status === "active").length || 0,
     [users],
   );
-  const onlineCount = useMemo(() => onlineUsers.length, [onlineUsers]);
+  const onlineCount = useMemo(() => onlineUsers?.length || 0, [onlineUsers]);
 
   const getStatusColor = useCallback((status: string) => {
     switch (status) {
@@ -182,11 +197,23 @@ export default function UserManagementPage() {
 
   const handleCreateUser = useCallback(() => {
     setEditingUser(null);
+    setFormData({
+      name: "",
+      email: "",
+      role: "read_only",
+      status: "active",
+    });
     setOpenDialog(true);
   }, []);
 
   const handleEditUser = useCallback((user: User) => {
     setEditingUser(user);
+    setFormData({
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+    });
     setOpenDialog(true);
   }, []);
 
@@ -203,27 +230,67 @@ export default function UserManagementPage() {
     [deleteUserMutation],
   );
 
-  const handleSaveUser = useCallback(
-    async (userData: Partial<User>) => {
-      try {
-        if (editingUser) {
+  const handleToggleUserStatus = useCallback(
+    async (user: User) => {
+      const newStatus = user.status === "active" ? "suspended" : "active";
+      const action = newStatus === "suspended" ? "suspend" : "activate";
+
+      if (window.confirm(`Are you sure you want to ${action} this user?`)) {
+        try {
           await updateUserMutation.mutateAsync({
-            id: editingUser.id,
-            ...userData,
+            id: user.id,
+            status: newStatus,
           });
-        } else {
-          await createUserMutation.mutateAsync(
-            userData as Omit<User, "id" | "createdAt" | "lastLogin">,
-          );
+        } catch (error) {
+          console.error(`Failed to ${action} user:`, error);
         }
-        setOpenDialog(false);
-        setEditingUser(null);
-      } catch (error) {
-        console.error("Failed to save user:", error);
       }
     },
-    [editingUser, updateUserMutation, createUserMutation],
+    [updateUserMutation],
   );
+
+  const handleForceLogout = useCallback(async (userId: string) => {
+    if (window.confirm("Are you sure you want to force logout this user?")) {
+      try {
+        // This would need to be implemented in the backend
+        console.log("Force logout user:", userId);
+      } catch (error) {
+        console.error("Failed to force logout user:", error);
+      }
+    }
+  }, []);
+
+  const handleSaveUser = useCallback(async () => {
+    try {
+      if (editingUser) {
+        await updateUserMutation.mutateAsync({
+          id: editingUser.id,
+          ...formData,
+        });
+      } else {
+        await createUserMutation.mutateAsync(
+          formData as Omit<User, "id" | "createdAt" | "lastLogin">,
+        );
+      }
+      setOpenDialog(false);
+      setEditingUser(null);
+      setFormData({
+        name: "",
+        email: "",
+        role: "read_only",
+        status: "active",
+      });
+    } catch (error) {
+      console.error("Failed to save user:", error);
+    }
+  }, [editingUser, formData, updateUserMutation, createUserMutation]);
+
+  const handleFormChange = useCallback((field: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value as any,
+    }));
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     try {
@@ -392,7 +459,7 @@ export default function UserManagementPage() {
                       <CircularProgress />
                     </TableCell>
                   </TableRow>
-                ) : (
+                ) : users && users.length > 0 ? (
                   users.map((user) => (
                     <TableRow key={user.id}>
                       <TableCell>
@@ -441,16 +508,44 @@ export default function UserManagementPage() {
                             <IconButton
                               size="small"
                               onClick={() => handleEditUser(user)}
-                              disabled={updateUserMutation.isPending}
+                              disabled={
+                                updateUserMutation.isPending ||
+                                user.id === currentUser?.id
+                              }
                             >
                               <Edit />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip
+                            title={
+                              user.status === "active"
+                                ? "Suspend User"
+                                : "Activate User"
+                            }
+                          >
+                            <IconButton
+                              size="small"
+                              onClick={() => handleToggleUserStatus(user)}
+                              disabled={
+                                updateUserMutation.isPending ||
+                                user.id === currentUser?.id
+                              }
+                            >
+                              {user.status === "active" ? (
+                                <Block />
+                              ) : (
+                                <CheckCircle />
+                              )}
                             </IconButton>
                           </Tooltip>
                           <Tooltip title="Delete User">
                             <IconButton
                               size="small"
                               onClick={() => handleDeleteUser(user.id)}
-                              disabled={deleteUserMutation.isPending}
+                              disabled={
+                                deleteUserMutation.isPending ||
+                                user.id === currentUser?.id
+                              }
                             >
                               <Delete />
                             </IconButton>
@@ -459,6 +554,14 @@ export default function UserManagementPage() {
                       </TableCell>
                     </TableRow>
                   ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center">
+                      <Typography color="text.secondary">
+                        {usersError ? "Failed to load users" : "No users found"}
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
                 )}
               </TableBody>
             </Table>
@@ -474,17 +577,19 @@ export default function UserManagementPage() {
                   <TableCell>Role</TableCell>
                   <TableCell>Session</TableCell>
                   <TableCell>IP Address</TableCell>
+                  <TableCell>User Agent</TableCell>
                   <TableCell>Last Activity</TableCell>
+                  <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {onlineUsersLoading ? (
                   <TableRow>
-                    <TableCell colSpan={5} align="center">
+                    <TableCell colSpan={7} align="center">
                       <CircularProgress />
                     </TableCell>
                   </TableRow>
-                ) : (
+                ) : onlineUsers && onlineUsers.length > 0 ? (
                   onlineUsers.map((user) => (
                     <TableRow key={user.id}>
                       <TableCell>
@@ -535,10 +640,42 @@ export default function UserManagementPage() {
                         </Typography>
                       </TableCell>
                       <TableCell>
+                        <Typography
+                          variant="caption"
+                          fontFamily="monospace"
+                          sx={{
+                            maxWidth: 200,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {user.userAgent}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
                         <FormattedDateTime dateString={user.lastLogin} />
+                      </TableCell>
+                      <TableCell>
+                        <Tooltip title="Force Logout">
+                          <IconButton
+                            size="small"
+                            onClick={() => handleForceLogout(user.id)}
+                            disabled={user.id === currentUser?.id}
+                          >
+                            <Logout />
+                          </IconButton>
+                        </Tooltip>
                       </TableCell>
                     </TableRow>
                   ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={7} align="center">
+                      <Typography color="text.secondary">
+                        No online users found
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
                 )}
               </TableBody>
             </Table>
@@ -560,19 +697,22 @@ export default function UserManagementPage() {
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
             <TextField
               label="Name"
-              defaultValue={editingUser?.name || ""}
+              value={formData.name}
+              onChange={(e) => handleFormChange("name", e.target.value)}
               fullWidth
             />
             <TextField
               label="Email"
               type="email"
-              defaultValue={editingUser?.email || ""}
+              value={formData.email}
+              onChange={(e) => handleFormChange("email", e.target.value)}
               fullWidth
             />
             <FormControl fullWidth>
               <InputLabel>Role</InputLabel>
               <Select
-                defaultValue={editingUser?.role || "read_only"}
+                value={formData.role}
+                onChange={(e) => handleFormChange("role", e.target.value)}
                 label="Role"
               >
                 <MenuItem value="read_only">Read Only</MenuItem>
@@ -583,7 +723,8 @@ export default function UserManagementPage() {
             <FormControl fullWidth>
               <InputLabel>Status</InputLabel>
               <Select
-                defaultValue={editingUser?.status || "active"}
+                value={formData.status}
+                onChange={(e) => handleFormChange("status", e.target.value)}
                 label="Status"
               >
                 <MenuItem value="active">Active</MenuItem>
@@ -597,12 +738,12 @@ export default function UserManagementPage() {
           <Button onClick={() => setOpenDialog(false)}>Cancel</Button>
           <Button
             variant="contained"
-            onClick={() => handleSaveUser({})}
+            onClick={handleSaveUser}
             disabled={
               createUserMutation.isPending || updateUserMutation.isPending
             }
           >
-            {editingUser ? "Update" : "Create"}
+            {editingUser ? "Save" : "Create"}
           </Button>
         </DialogActions>
       </Dialog>
