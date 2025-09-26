@@ -295,10 +295,12 @@ describe("UserManagementPage", () => {
       );
 
       // Should start with "All Users" tab
-      expect(screen.getByText("All Users")).toBeInTheDocument();
+      expect(
+        screen.getByRole("tab", { name: "All Users" }),
+      ).toBeInTheDocument();
 
       // Switch to "Online Users" tab
-      fireEvent.click(screen.getByText("Online Users"));
+      fireEvent.click(screen.getByRole("tab", { name: "Online Users" }));
 
       await waitFor(() => {
         expect(
@@ -307,7 +309,7 @@ describe("UserManagementPage", () => {
       });
 
       // Switch to "Online Users" tab
-      fireEvent.click(screen.getByText("Online Users"));
+      fireEvent.click(screen.getByRole("tab", { name: "Online Users" }));
 
       await waitFor(() => {
         expect(screen.getByText("Recent Online Users")).toBeInTheDocument();
@@ -321,7 +323,7 @@ describe("UserManagementPage", () => {
         </TestWrapper>,
       );
 
-      fireEvent.click(screen.getByText("Online Users"));
+      fireEvent.click(screen.getByRole("tab", { name: "Online Users" }));
 
       await waitFor(() => {
         expect(screen.getByText("192.168.1.100")).toBeInTheDocument();
@@ -337,7 +339,7 @@ describe("UserManagementPage", () => {
         </TestWrapper>,
       );
 
-      fireEvent.click(screen.getByText("Online Users"));
+      fireEvent.click(screen.getByRole("tab", { name: "Online Users" }));
 
       await waitFor(() => {
         expect(
@@ -442,6 +444,7 @@ describe("UserManagementPage", () => {
       fireEvent.click(addButton);
 
       await waitFor(() => {
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
         expect(screen.getByText("Create New User")).toBeInTheDocument();
       });
     });
@@ -525,7 +528,7 @@ describe("UserManagementPage", () => {
       });
 
       await waitFor(() => {
-        const saveButton = screen.getByText("Save");
+        const saveButton = screen.getByRole("button", { name: "Save" });
         fireEvent.click(saveButton);
       });
 
@@ -546,7 +549,7 @@ describe("UserManagementPage", () => {
       fireEvent.click(addButton);
 
       await waitFor(() => {
-        const cancelButton = screen.getByText("Cancel");
+        const cancelButton = screen.getByRole("button", { name: "Cancel" });
         fireEvent.click(cancelButton);
       });
 
@@ -631,7 +634,7 @@ describe("UserManagementPage", () => {
         </TestWrapper>,
       );
 
-      fireEvent.click(screen.getByText("Online Users"));
+      fireEvent.click(screen.getByRole("tab", { name: "Online Users" }));
 
       await waitFor(() => {
         expect(screen.getByText("John Administrator")).toBeInTheDocument();
@@ -648,7 +651,7 @@ describe("UserManagementPage", () => {
         </TestWrapper>,
       );
 
-      fireEvent.click(screen.getByText("Online Users"));
+      fireEvent.click(screen.getByRole("tab", { name: "Online Users" }));
 
       await waitFor(() => {
         expect(screen.getByText("192.168.1.100")).toBeInTheDocument();
