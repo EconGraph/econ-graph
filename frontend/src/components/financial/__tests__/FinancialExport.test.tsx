@@ -1,8 +1,18 @@
+import { vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { FinancialExport } from '../FinancialExport';
 import { FinancialStatement, Company, FinancialRatio } from '../../../types/financial';
+
+// Mock window object
+Object.defineProperty(window, 'location', {
+  value: {
+    href: 'http://localhost:3000',
+    origin: 'http://localhost:3000'
+  },
+  writable: true
+});
 
 // Mock financial data
 const mockFinancialStatements: FinancialStatement[] = [
@@ -63,7 +73,12 @@ const mockFinancialRatios: FinancialRatio[] = [
 
 describe('FinancialExport', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    // Clear all timers to prevent window errors
+    vi.clearAllTimers();
   });
 
   it('renders the financial export component', () => {

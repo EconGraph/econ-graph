@@ -1,8 +1,9 @@
-// jest-dom adds custom jest matchers for asserting on DOM nodes.
+// vitest-dom adds custom vitest matchers for asserting on DOM nodes.
 // allows you to do things like:
 // expect(element).toHaveTextContent(/react/i)
 // learn more: https://github.com/testing-library/jest-dom
 import '@testing-library/jest-dom';
+import { vi } from 'vitest';
 
 // Polyfill for Node.js environment
 const { TextEncoder, TextDecoder } = require('util');
@@ -11,11 +12,11 @@ global.TextDecoder = TextDecoder;
 
 // Mock localStorage
 const localStorageMock: Storage = {
-  getItem: jest.fn(),
-  setItem: jest.fn(),
-  removeItem: jest.fn(),
-  clear: jest.fn(),
-  key: jest.fn(),
+  getItem: vi.fn(),
+  setItem: vi.fn(),
+  removeItem: vi.fn(),
+  clear: vi.fn(),
+  key: vi.fn(),
   length: 0,
 };
 (global as any).localStorage = localStorageMock;
@@ -24,25 +25,36 @@ Object.defineProperty(window, 'localStorage', {
 });
 
 // Mock Chart.js and related modules
-jest.mock('chart.js', () => ({
+vi.mock('chart.js', () => ({
   Chart: {
-    register: jest.fn(),
+    register: vi.fn(),
   },
   registerables: [],
+  CategoryScale: vi.fn(),
+  LinearScale: vi.fn(),
+  PointElement: vi.fn(),
+  LineElement: vi.fn(),
+  BarElement: vi.fn(),
+  ArcElement: vi.fn(),
+  Title: vi.fn(),
+  Tooltip: vi.fn(),
+  Legend: vi.fn(),
+  Filler: vi.fn(),
+  TimeScale: vi.fn(),
 }));
 
-jest.mock('chartjs-adapter-date-fns', () => ({}));
+vi.mock('chartjs-adapter-date-fns', () => ({}));
 
-jest.mock('react-chartjs-2', () => ({
-  Line: jest.fn(() => 'Mock Chart'),
-  Bar: jest.fn(() => 'Mock Chart'),
-  Pie: jest.fn(() => 'Mock Chart'),
+vi.mock('react-chartjs-2', () => ({
+  Line: vi.fn(() => 'Mock Chart'),
+  Bar: vi.fn(() => 'Mock Chart'),
+  Pie: vi.fn(() => 'Mock Chart'),
 }));
 
 // Mock chartjs-plugin-annotation to avoid plugin runtime issues in tests
-jest.mock('chartjs-plugin-annotation', () => ({
+vi.mock('chartjs-plugin-annotation', () => ({
   __esModule: true,
-  default: { id: 'annotation', beforeDraw: jest.fn(), afterDraw: jest.fn() },
+  default: { id: 'annotation', beforeDraw: vi.fn(), afterDraw: vi.fn() },
 }));
 
 // Mock the hooks module globally
@@ -120,43 +132,43 @@ const mockSearchResults = [
   },
 ];
 
-jest.mock('./hooks/useSeriesData', () => ({
-  useDataSources: jest.fn().mockImplementation(() => ({
+vi.mock('./hooks/useSeriesData', () => ({
+  useDataSources: vi.fn().mockImplementation(() => ({
     data: mockDataSources,
     isLoading: false,
     error: null,
     isError: false,
     isSuccess: true,
   })),
-  useSeriesSearch: jest.fn().mockImplementation(() => ({
+  useSeriesSearch: vi.fn().mockImplementation(() => ({
     data: mockSearchResults,
     isLoading: false,
     error: null,
     isError: false,
     isSuccess: true,
   })),
-  useSeriesDetail: jest.fn().mockImplementation(() => ({
+  useSeriesDetail: vi.fn().mockImplementation(() => ({
     data: null,
     isLoading: false,
     error: null,
     isError: false,
     isSuccess: true,
   })),
-  useSeriesData: jest.fn().mockImplementation(() => ({
+  useSeriesData: vi.fn().mockImplementation(() => ({
     data: null,
     isLoading: false,
     error: null,
     isError: false,
     isSuccess: true,
   })),
-  useSearchSuggestions: jest.fn().mockImplementation(() => ({
+  useSearchSuggestions: vi.fn().mockImplementation(() => ({
     data: [],
     isLoading: false,
     error: null,
     isError: false,
     isSuccess: true,
   })),
-  useCrawlerStatus: jest.fn().mockImplementation(() => ({
+  useCrawlerStatus: vi.fn().mockImplementation(() => ({
     data: null,
     isLoading: false,
     error: null,
@@ -166,31 +178,31 @@ jest.mock('./hooks/useSeriesData', () => ({
 }));
 
 // Mock D3 modules
-jest.mock('d3-geo', () => ({
-  geoPath: jest.fn(() => ({
-    projection: jest.fn(),
-    pointRadius: jest.fn(),
+vi.mock('d3-geo', () => ({
+  geoPath: vi.fn(() => ({
+    projection: vi.fn(),
+    pointRadius: vi.fn(),
   })),
-  geoNaturalEarth1: jest.fn(() => ({
-    scale: jest.fn().mockReturnThis(),
-    translate: jest.fn().mockReturnThis(),
-    center: jest.fn().mockReturnThis(),
+  geoNaturalEarth1: vi.fn(() => ({
+    scale: vi.fn().mockReturnThis(),
+    translate: vi.fn().mockReturnThis(),
+    center: vi.fn().mockReturnThis(),
   })),
-  geoMercator: jest.fn(() => ({
-    scale: jest.fn().mockReturnThis(),
-    translate: jest.fn().mockReturnThis(),
-    center: jest.fn().mockReturnThis(),
+  geoMercator: vi.fn(() => ({
+    scale: vi.fn().mockReturnThis(),
+    translate: vi.fn().mockReturnThis(),
+    center: vi.fn().mockReturnThis(),
   })),
-  geoOrthographic: jest.fn(() => ({
-    scale: jest.fn().mockReturnThis(),
-    translate: jest.fn().mockReturnThis(),
-    center: jest.fn().mockReturnThis(),
+  geoOrthographic: vi.fn(() => ({
+    scale: vi.fn().mockReturnThis(),
+    translate: vi.fn().mockReturnThis(),
+    center: vi.fn().mockReturnThis(),
   })),
 }));
 
-jest.mock('d3-zoom', () => ({
-  zoom: jest.fn(() => ({
-    scaleExtent: jest.fn().mockReturnThis(),
-    on: jest.fn().mockReturnThis(),
+vi.mock('d3-zoom', () => ({
+  zoom: vi.fn(() => ({
+    scaleExtent: vi.fn().mockReturnThis(),
+    on: vi.fn().mockReturnThis(),
   })),
 }));

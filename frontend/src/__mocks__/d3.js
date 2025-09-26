@@ -3,63 +3,65 @@
  * PURPOSE: Provide predictable test behavior for D3 components
  */
 
+const { vi } = require('vitest');
+
 module.exports = {
-  select: jest.fn(() => ({
-    selectAll: jest.fn(() => ({
-      data: jest.fn(() => ({
-        enter: jest.fn(() => ({
-          append: jest.fn(() => ({
-            attr: jest.fn(() => ({
-              style: jest.fn(() => ({})),
+  select: vi.fn(() => ({
+    selectAll: vi.fn(() => ({
+      data: vi.fn(() => ({
+        enter: vi.fn(() => ({
+          append: vi.fn(() => ({
+            attr: vi.fn(() => ({
+              style: vi.fn(() => ({})),
             })),
-            style: jest.fn(() => ({})),
+            style: vi.fn(() => ({})),
           })),
         })),
       })),
     })),
-    attr: jest.fn(() => ({})),
-    style: jest.fn(() => ({})),
-    append: jest.fn(() => ({
-      attr: jest.fn(() => ({})),
-      style: jest.fn(() => ({})),
+    attr: vi.fn(() => ({})),
+    style: vi.fn(() => ({})),
+    append: vi.fn(() => ({
+      attr: vi.fn(() => ({})),
+      style: vi.fn(() => ({})),
     })),
   })),
-  scaleLinear: jest.fn(() => ({
-    domain: jest.fn(() => ({
-      range: jest.fn(() => ({
-        interpolate: jest.fn(() => jest.fn()),
+  scaleLinear: vi.fn(() => ({
+    domain: vi.fn(() => ({
+      range: vi.fn(() => ({
+        interpolate: vi.fn(() => vi.fn()),
       })),
     })),
-    interpolate: jest.fn(() => jest.fn()),
+    interpolate: vi.fn(() => vi.fn()),
   })),
-  scaleTime: jest.fn(() => ({
-    domain: jest.fn(() => ({
-      range: jest.fn(() => ({
-        interpolate: jest.fn(() => jest.fn()),
+  scaleTime: vi.fn(() => ({
+    domain: vi.fn(() => ({
+      range: vi.fn(() => ({
+        interpolate: vi.fn(() => vi.fn()),
       })),
     })),
-    interpolate: jest.fn(() => jest.fn()),
+    interpolate: vi.fn(() => vi.fn()),
   })),
-  line: jest.fn(() => ({
-    x: jest.fn(() => ({
-      y: jest.fn(() => jest.fn()),
+  line: vi.fn(() => ({
+    x: vi.fn(() => ({
+      y: vi.fn(() => vi.fn()),
     })),
-    y: jest.fn(() => jest.fn()),
+    y: vi.fn(() => vi.fn()),
   })),
-  area: jest.fn(() => ({
-    x: jest.fn(() => ({
-      y0: jest.fn(() => ({
-        y1: jest.fn(() => jest.fn()),
+  area: vi.fn(() => ({
+    x: vi.fn(() => ({
+      y0: vi.fn(() => ({
+        y1: vi.fn(() => vi.fn()),
       })),
     })),
-    y1: jest.fn(() => jest.fn()),
+    y1: vi.fn(() => vi.fn()),
   })),
-  axisBottom: jest.fn(() => jest.fn()),
-  axisLeft: jest.fn(() => jest.fn()),
-  extent: jest.fn(() => [0, 100]),
-  max: jest.fn(() => 100),
-  min: jest.fn(() => 0),
-  format: jest.fn(() => jest.fn(d => d.toString())),
-  timeParse: jest.fn(() => jest.fn()),
-  timeFormat: jest.fn(() => jest.fn()),
+  axisBottom: vi.fn(() => vi.fn()),
+  axisLeft: vi.fn(() => vi.fn()),
+  extent: vi.fn(() => [0, 100]),
+  max: vi.fn(() => 100),
+  min: vi.fn(() => 0),
+  format: vi.fn(() => vi.fn(d => d.toString())),
+  timeParse: vi.fn(() => vi.fn()),
+  timeFormat: vi.fn(() => vi.fn()),
 };
