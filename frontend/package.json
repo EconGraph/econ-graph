@@ -3,6 +3,7 @@
   "name": "econ-graph-frontend",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "dependencies": {
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
@@ -61,7 +62,13 @@
     "@types/express": "^5.0.3",
     "@types/jest": "^29.5.14",
     "@types/node": "^24.5.2",
+    "@typescript-eslint/eslint-plugin": "^8.44.1",
+    "@typescript-eslint/parser": "^8.44.1",
     "@vitejs/plugin-react": "^5.0.3",
+    "eslint": "^9.36.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "identity-obj-proxy": "^3.0.0",
     "jest": "^27.5.1",
     "jest-environment-jsdom": "^29.7.0",
@@ -130,29 +137,6 @@
     "test:e2e:professional-analysis": "playwright test --config=ci/configs/playwright-professional-analysis.config.ts",
     "test:e2e:mobile:global-analysis": "playwright test --config=ci/configs/playwright-mobile-global-analysis.config.ts",
     "test:e2e:mobile:professional-analysis": "playwright test --config=ci/configs/playwright-mobile-professional-analysis.config.ts"
-  },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ],
-    "rules": {
-      "jest/no-conditional-expect": "off",
-      "testing-library/no-node-access": "off"
-    },
-    "overrides": [
-      {
-        "files": [
-          "**/*.test.ts",
-          "**/*.test.tsx",
-          "**/__tests__/**/*"
-        ],
-        "rules": {
-          "jest/no-conditional-expect": "off",
-          "testing-library/no-node-access": "off"
-        }
-      }
-    ]
   },
   "browserslist": {
     "production": [
