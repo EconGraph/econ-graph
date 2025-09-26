@@ -42,7 +42,6 @@ jest.mock('../../components/charts/InteractiveChartWithCollaboration', () => {
 // Helper function to check for skeleton loading states
 const checkSkeletonLoading = (container: HTMLElement) => {
   // Check for skeleton elements by class name (Material-UI Skeleton components)
-  // eslint-disable-next-line testing-library/no-node-access
   const skeletons = container.querySelectorAll('.MuiSkeleton-root');
   expect(skeletons.length).toBeGreaterThan(0);
 };
