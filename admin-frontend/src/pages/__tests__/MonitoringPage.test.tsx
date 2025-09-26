@@ -12,7 +12,7 @@ import { vi } from "vitest";
 
 // Set timeout for all tests in this file due to performance characteristics
 // TODO: Optimize MonitoringPage component performance to reduce test timeouts
-vi.setConfig({ testTimeout: 60000 });
+vi.setConfig({ testTimeout: 10000 });
 
 // Mock the contexts to prevent resource leaks
 vi.mock("../../contexts/AuthContext", () => ({
@@ -63,28 +63,8 @@ vi.mock("@tanstack/react-query", () => ({
   })),
 }));
 
-// Mock timers to prevent resource leaks
-vi.useFakeTimers();
-
-// Mock setTimeout to run immediately in tests
-vi.spyOn(global, "setTimeout").mockImplementation(
-  (fn: any, _delay?: number) => {
-    if (typeof fn === "function") {
-      fn();
-    }
-    return 1 as any;
-  },
-);
-
-// Mock setInterval to prevent resource leaks
-vi.spyOn(global, "setInterval").mockImplementation(
-  (fn: any, _delay?: number) => {
-    if (typeof fn === "function") {
-      fn();
-    }
-    return 1 as any;
-  },
-);
+// Mock timers to prevent resource leaks - use more targeted approach
+// Note: We don't mock global timers as they interfere with waitFor
 
 // Create a test theme
 const theme = createTheme();

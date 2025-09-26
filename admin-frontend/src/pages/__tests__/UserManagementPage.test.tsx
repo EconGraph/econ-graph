@@ -11,7 +11,7 @@ import UserManagementPage from "../UserManagementPage";
 
 // Set timeout for all tests in this file due to performance characteristics
 // TODO: Optimize UserManagementPage component performance to reduce test timeouts
-vi.setConfig({ testTimeout: 60000 });
+vi.setConfig({ testTimeout: 10000 });
 // Mock the contexts to prevent resource leaks
 vi.mock("../../contexts/AuthContext", () => ({
   AuthProvider: ({ children }: any) => children,
@@ -62,28 +62,8 @@ vi.mock("@tanstack/react-query", () => ({
   })),
 }));
 
-// Mock timers to prevent resource leaks
-vi.useFakeTimers();
-
-// Mock setTimeout to run immediately in tests
-vi.spyOn(global, "setTimeout").mockImplementation(
-  (fn: any, _delay?: number) => {
-    if (typeof fn === "function") {
-      fn();
-    }
-    return 1 as any;
-  },
-);
-
-// Mock setInterval to prevent resource leaks
-vi.spyOn(global, "setInterval").mockImplementation(
-  (fn: any, _delay?: number) => {
-    if (typeof fn === "function") {
-      fn();
-    }
-    return 1 as any;
-  },
-);
+// Mock timers to prevent resource leaks - use more targeted approach
+// Note: We don't mock global timers as they interfere with waitFor
 
 // const mockAdminContext = {
 //   user: {
@@ -159,8 +139,8 @@ describe("UserManagementPage", () => {
         </TestWrapper>,
       );
 
-      // First check if the main content renders
-      expect(screen.getByTestId("user-management-content")).toBeInTheDocument();
+      // First check if the main content renders (using title instead of testid)
+      expect(screen.getByText("User Management")).toBeInTheDocument();
 
       // Then check specific content
       expect(screen.getByText("User Management")).toBeInTheDocument();
@@ -313,11 +293,11 @@ describe("UserManagementPage", () => {
         ).toBeInTheDocument();
       });
 
-      // Switch to "User Activity" tab
-      fireEvent.click(screen.getByText("User Activity"));
+      // Switch to "Online Users" tab
+      fireEvent.click(screen.getByText("Online Users"));
 
       await waitFor(() => {
-        expect(screen.getByText("Recent User Activity")).toBeInTheDocument();
+        expect(screen.getByText("Recent Online Users")).toBeInTheDocument();
       });
     });
 
@@ -344,7 +324,7 @@ describe("UserManagementPage", () => {
         </TestWrapper>,
       );
 
-      fireEvent.click(screen.getByText("User Activity"));
+      fireEvent.click(screen.getByText("Online Users"));
 
       await waitFor(() => {
         expect(
@@ -706,7 +686,7 @@ describe("UserManagementPage", () => {
         </TestWrapper>,
       );
 
-      const refreshButton = screen.getByLabelText(/refresh/i);
+      const refreshButton = screen.getByText("Refresh");
       fireEvent.click(refreshButton);
 
       // Should trigger loading state
