@@ -100,13 +100,17 @@ const SeriesExplorer: React.FC = () => {
   const { data: dataSources } = dataSourcesResult || {};
 
   // Use real search functionality
-  const searchResult = useSeriesSearch({
-    query: searchQuery,
-    sourceId: selectedSource && selectedSource !== 'All Sources' ? selectedSource : undefined,
-    frequency:
-      selectedFrequency && selectedFrequency !== 'All Frequencies' ? selectedFrequency : undefined,
-    enabled: true,
-  });
+  const searchResult = useSeriesSearch(
+    searchQuery,
+    {
+      sourceId: selectedSource && selectedSource !== 'All Sources' ? selectedSource : undefined,
+      frequency:
+        selectedFrequency && selectedFrequency !== 'All Frequencies'
+          ? selectedFrequency
+          : undefined,
+    },
+    true
+  );
   const { data: searchResults, isLoading: isSearchLoading } = searchResult || {};
 
   // Transform search results to match the expected format

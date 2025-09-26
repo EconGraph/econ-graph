@@ -7,6 +7,8 @@
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, StyledEngineProvider } from '@mui/material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -217,7 +219,7 @@ describe('ChartCollaborationConnected', () => {
       return comments;
     });
 
-    (useCollaboration as vi.Mock).mockReturnValue(mockCollaborationHook);
+    (useCollaboration as Mock).mockReturnValue(mockCollaborationHook);
 
     // Clean up any existing portal containers
     const existingContainers = document.querySelectorAll('[data-testid="portal-container"]');
@@ -307,7 +309,7 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Loading States', () => {
     it('should show loading indicator when data is loading', () => {
-      (useCollaboration as vi.Mock).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         loading: true,
       });
@@ -318,7 +320,7 @@ describe('ChartCollaborationConnected', () => {
     });
 
     it('should disable add annotation button when loading', () => {
-      (useCollaboration as vi.Mock).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         loading: true,
       });
@@ -332,7 +334,7 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Error Handling', () => {
     it('should display error message when there is an error', () => {
-      (useCollaboration as vi.Mock).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         error: 'Failed to load collaboration data',
       });
@@ -562,7 +564,7 @@ describe('ChartCollaborationConnected', () => {
 
     it('should show error snackbar on creation failure', async () => {
       const user = userEvent.setup();
-      (useCollaboration as vi.Mock).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         createAnnotation: vi.fn().mockRejectedValue(new Error('Creation failed')),
       });
@@ -798,7 +800,7 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Empty States', () => {
     it('should show empty state when no annotations', () => {
-      (useCollaboration as vi.Mock).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         annotations: [],
       });
@@ -815,7 +817,7 @@ describe('ChartCollaborationConnected', () => {
         userId: 'other-user'
       }));
 
-      (useCollaboration as vi.Mock).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         annotations: otherUserAnnotations,
       });
@@ -852,7 +854,7 @@ describe('ChartCollaborationConnected', () => {
         updatedAt: '2024-01-15T10:00:00Z',
       }));
 
-      (useCollaboration as vi.Mock).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         collaborators: manyCollaborators,
       });

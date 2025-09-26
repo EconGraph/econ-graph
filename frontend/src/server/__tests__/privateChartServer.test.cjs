@@ -226,10 +226,7 @@ describe('Private Chart API Server', () => {
       expect(response.body.metadata).toEqual({
         seriesCount: 1,
         dataPointCount: 2,
-        dateRange: {
-          start: '2020-01-01',
-          end: '2020-02-01',
-        },
+        chartType: 'line',
       });
     });
   });

@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import type { Mock } from 'vitest';
 /**
  * REQUIREMENT: Test user profile preferences functionality
  * PURPOSE: Verify user preferences can be edited and saved correctly
@@ -37,7 +38,7 @@ global.fetch = vi.fn();
 // localStorage mock is now handled globally in setupTests.ts
 
 // Mock fetch to return user data
-(fetch as vi.Mock).mockImplementation((url) => {
+(fetch as Mock).mockImplementation((url: string) => {
   if (url.includes('/auth/me')) {
     return Promise.resolve({
       ok: true,
@@ -92,7 +93,7 @@ describe('UserProfile Preferences', () => {
     vi.clearAllMocks();
 
     // Setup localStorage mock for this test
-    (window.localStorage.getItem as vi.Mock).mockImplementation((key) => {
+    (window.localStorage.getItem as Mock).mockImplementation((key: string) => {
       if (key === 'auth_token') return 'mock-token';
       if (key === 'theme') return 'light';
       return null;

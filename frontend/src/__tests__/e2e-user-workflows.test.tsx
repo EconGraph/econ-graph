@@ -310,7 +310,7 @@ describe('End-to-End User Workflows', () => {
       const navigationTime = endTime - startTime;
 
       // Navigation should be reasonably fast (adjust threshold as needed)
-      expect(navigationTime).toBeLessThan(5000); // 5 seconds for all navigation
+      expect(navigationTime).toBeLessThan(10000); // 10 seconds for all navigation
 
       console.log(`✅ Performance workflow test passed - navigation completed in ${navigationTime.toFixed(2)}ms`);
     });

@@ -7,6 +7,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { vi } from 'vitest';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import InteractiveChartWithCollaboration from '../InteractiveChartWithCollaboration';
 

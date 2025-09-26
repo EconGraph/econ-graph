@@ -4,6 +4,7 @@
 
 import React from 'react';
 import { render, screen } from '@testing-library/react';
+import { vi } from 'vitest';
 import { TestProviders } from '../test-utils/test-providers';
 
 // Mock components for e2e testing (since we're testing integration concepts)

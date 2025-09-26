@@ -7,6 +7,7 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { vi } from 'vitest';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import ProfessionalChart, { SeriesData } from '../ProfessionalChart';
 
