@@ -1,61 +1,61 @@
 -- Upgrade to PostgreSQL 18 and UUIDv7 Migration
 -- This migration ensures all UUID primary keys use UUIDv7 format
--- PostgreSQL 18's gen_random_uuid() function now generates UUIDv7 by default
+-- PostgreSQL 18's uuidv7() function now generates UUIDv7 by default
 
 -- ============================================================================
 -- 1. UPDATE DEFAULT VALUES FOR ALL UUID PRIMARY KEYS
 -- ============================================================================
 
 -- Core economic data tables
-ALTER TABLE data_sources ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE economic_series ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE data_points ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE crawl_queue ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE data_sources ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE economic_series ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE data_points ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE crawl_queue ALTER COLUMN id SET DEFAULT uuidv7();
 
 -- Global analysis tables
-ALTER TABLE countries ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE global_economic_indicators ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE global_indicator_data ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE country_correlations ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE trade_relationships ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE global_economic_events ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE event_country_impacts ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE leading_indicators ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE countries ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE global_economic_indicators ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE global_indicator_data ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE country_correlations ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE trade_relationships ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE global_economic_events ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE event_country_impacts ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE leading_indicators ALTER COLUMN id SET DEFAULT uuidv7();
 
 -- Authentication and collaboration tables
-ALTER TABLE users ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE user_sessions ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE chart_annotations ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE annotation_comments ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE chart_collaborators ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE users ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE user_sessions ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE chart_annotations ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE annotation_comments ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE chart_collaborators ALTER COLUMN id SET DEFAULT uuidv7();
 
 -- Audit and security tables
-ALTER TABLE audit_logs ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE security_events ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE audit_logs ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE security_events ALTER COLUMN id SET DEFAULT uuidv7();
 
 -- User preferences and metadata tables
-ALTER TABLE user_data_source_preferences ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE series_metadata ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE crawl_attempts ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE user_data_source_preferences ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE series_metadata ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE crawl_attempts ALTER COLUMN id SET DEFAULT uuidv7();
 
 -- XBRL financial tables
-ALTER TABLE companies ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE financial_statements ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE financial_line_items ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE financial_ratios ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE companies ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE financial_statements ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE financial_line_items ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE financial_ratios ALTER COLUMN id SET DEFAULT uuidv7();
 
 -- XBRL taxonomy tables
-ALTER TABLE xbrl_taxonomy_schemas ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE xbrl_taxonomy_linkbases ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE xbrl_dts_dependencies ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE xbrl_instance_dts_references ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE xbrl_taxonomy_concepts ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE xbrl_taxonomy_schemas ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE xbrl_taxonomy_linkbases ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE xbrl_dts_dependencies ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE xbrl_instance_dts_references ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE xbrl_taxonomy_concepts ALTER COLUMN id SET DEFAULT uuidv7();
 
 -- Collaborative annotation tables
-ALTER TABLE financial_annotations ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE annotation_assignments ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE annotation_replies ALTER COLUMN id SET DEFAULT gen_random_uuid();
-ALTER TABLE annotation_templates ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE financial_annotations ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE annotation_assignments ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE annotation_replies ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE annotation_templates ALTER COLUMN id SET DEFAULT uuidv7();
 
 -- ============================================================================
 -- 2. ADD COMMENTS FOR DOCUMENTATION
@@ -101,8 +101,8 @@ COMMENT ON COLUMN annotation_templates.id IS 'Primary key using UUIDv7 format fo
 -- 3. VERIFY POSTGRESQL 18 FEATURES
 -- ============================================================================
 
--- Test that gen_random_uuid() now generates UUIDv7 format
--- This is automatically handled by PostgreSQL 18, but we can verify
+-- Test that uuidv7() generates UUIDv7 format
+-- This is the correct function for UUIDv7 in PostgreSQL 18
 DO $$
 DECLARE
     test_uuid UUID;
@@ -111,7 +111,7 @@ DECLARE
     uuid_version INTEGER;
 BEGIN
     -- Generate a test UUID
-    test_uuid := gen_random_uuid();
+    test_uuid := uuidv7();
     uuid_text := test_uuid::text;
 
     -- Extract version from UUID (character at position 15 in UUID string)
@@ -146,18 +146,9 @@ END $$;
 -- UUIDv7 is naturally sortable by creation time, so we can optimize some indexes
 -- The existing indexes should work well with UUIDv7, but we can add some optimizations
 
--- Add partial indexes for recently created records (common query pattern)
-CREATE INDEX IF NOT EXISTS idx_data_points_recent_created
-    ON data_points(created_at)
-    WHERE created_at > NOW() - INTERVAL '30 days';
-
-CREATE INDEX IF NOT EXISTS idx_economic_series_recent_created
-    ON economic_series(created_at)
-    WHERE created_at > NOW() - INTERVAL '30 days';
-
-CREATE INDEX IF NOT EXISTS idx_crawl_queue_recent_created
-    ON crawl_queue(created_at)
-    WHERE created_at > NOW() - INTERVAL '7 days';
+-- Note: Partial indexes with NOW() are not supported as NOW() is not IMMUTABLE
+-- Regular indexes on created_at columns will provide good performance for UUIDv7
+-- UUIDv7 is naturally sortable by creation time, so existing indexes work well
 
 -- ============================================================================
 -- 5. MIGRATION COMPLETION LOG
