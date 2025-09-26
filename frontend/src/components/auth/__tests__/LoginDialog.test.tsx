@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 /**
  * REQUIREMENT: Comprehensive unit tests for authentication dialog
  * PURPOSE: Test LoginDialog component behavior including error handling and user interactions
@@ -17,14 +18,14 @@ process.env.REACT_APP_FACEBOOK_APP_ID = 'test-facebook-app-id';
 
 // Mock the auth context
 const mockAuthContext = {
-  signInWithGoogle: jest.fn(),
-  signInWithFacebook: jest.fn(),
-  signInWithEmail: jest.fn(),
-  signUp: jest.fn(),
-  signOut: jest.fn(),
-  updateProfile: jest.fn(),
-  refreshUser: jest.fn(),
-  clearError: jest.fn(),
+  signInWithGoogle: vi.fn(),
+  signInWithFacebook: vi.fn(),
+  signInWithEmail: vi.fn(),
+  signUp: vi.fn(),
+  signOut: vi.fn(),
+  updateProfile: vi.fn(),
+  refreshUser: vi.fn(),
+  clearError: vi.fn(),
   user: null,
   isAuthenticated: false,
   isLoading: false,
@@ -32,8 +33,8 @@ const mockAuthContext = {
 };
 
 // Mock the useAuth hook
-jest.mock('../../../contexts/AuthContext', () => ({
-  ...jest.requireActual('../../../contexts/AuthContext'),
+vi.mock('../../../contexts/AuthContext', async () => ({
+  ...(await vi.importActual('../../../contexts/AuthContext')),
   useAuth: () => mockAuthContext,
 }));
 
@@ -50,11 +51,11 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 );
 
 describe('LoginDialog', () => {
-  const mockOnClose = jest.fn();
-  const mockOnSuccess = jest.fn();
+  const mockOnClose = vi.fn();
+  const mockOnSuccess = vi.fn();
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     mockAuthContext.error = null;
     mockAuthContext.isLoading = false;
   });
@@ -467,7 +468,7 @@ describe('LoginDialog', () => {
   });
 
   it('should clear error when dialog closes', () => {
-    const mockClearError = jest.fn();
+    const mockClearError = vi.fn();
     mockAuthContext.clearError = mockClearError;
     mockAuthContext.error = 'Previous error';
 
