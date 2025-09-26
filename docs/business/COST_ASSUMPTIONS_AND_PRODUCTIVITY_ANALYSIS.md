@@ -131,7 +131,7 @@ Based on our project scope and complexity:
 ### 3. Cost Comparison and ROI Analysis
 
 **Traditional Development**:
-- **Cost Range**: $500,000–$1,000,000
+- **Cost Range**: $5.6M (corrected for git-tracked files only)
 - **Timeline**: 6-12 months
 - **Team Size**: 4+ developers
 - **Risk Level**: High (team coordination, knowledge transfer)
@@ -143,7 +143,7 @@ Based on our project scope and complexity:
 - **Risk Level**: Low (single developer, AI assistance)
 
 **ROI Calculation**:
-- **Cost Savings**: $499,722–$998,946 (99.9% cost reduction)
+- **Cost Savings**: $5.6M - $1,054 = $5.6M (99.98% cost reduction)
 - **Time Savings**: 5-11 months (83-92% time reduction)
 - **Quality**: Professional-grade testing, documentation, security scanning
 

@@ -54,7 +54,7 @@ EconGraph is a **production-ready economic data intelligence platform** that tra
 
 ### ⚡ **ROI & Efficiency Analysis**
 - **🏗️ Features Delivered**: 15+ major components (React frontend, Rust backend, GraphQL API, collaboration features, global analysis, CI/CD pipelines)
-- **📝 Lines of Code**: 504,579 total (58,646 production code, 321,941 test code, 123,992 infrastructure)
+- **📝 Lines of Code**: 211,084 total (72,610 production code, 7,457 test code, 131,017 infrastructure)
 - **⏰ Time Saved**: Estimated 200+ hours vs traditional solo development
 - **🚀 Development Speed**: 10-20x faster iteration cycles
 - **✅ Quality Achieved**: Professional-grade testing, documentation, security scanning
@@ -67,7 +67,7 @@ EconGraph is a **production-ready economic data intelligence platform** that tra
 - **Documentation**: Google-style comments, comprehensive README, investor pitch
 - **Features**: Real-time collaboration, economic data visualization, transformations
 
-> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The $278-$1,054 total investment produced a full-stack application that would typically require $500,000-$1,000,000 in development costs and 6-12 months with a traditional team.  
+> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The $278-$1,054 total investment produced a full-stack application that would typically require $5.6M in development costs and 6-12 months with a traditional team.  
 > **📊 DETAILED COST ANALYSIS**: For comprehensive cost assumptions, productivity metrics, and industry benchmarks with cited sources, see [Cost Assumptions and Productivity Analysis](docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md).
 
 ---
@@ -296,7 +296,7 @@ EconGraph maintains the highest standards of quality and reliability expected by
 
 ### ⚡ **ROI & Efficiency Analysis**
 - **🏗️ Features Delivered**: 15+ major components (React frontend, Rust backend, GraphQL API, collaboration features, global analysis, CI/CD pipelines)
-- **📝 Lines of Code**: 504,579 total (58,646 production code, 321,941 test code, 123,992 infrastructure)
+- **📝 Lines of Code**: 211,084 total (72,610 production code, 7,457 test code, 131,017 infrastructure)
 - **⏰ Time Saved**: Estimated 200+ hours vs traditional solo development
 - **🚀 Development Speed**: 10-20x faster iteration cycles
 - **✅ Quality Achieved**: Professional-grade testing, documentation, security scanning
@@ -309,7 +309,7 @@ EconGraph maintains the highest standards of quality and reliability expected by
 - **Documentation**: Google-style comments, comprehensive README, investor pitch
 - **Features**: Real-time collaboration, economic data visualization, transformations
 
-> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The $278-$1,054 total investment produced a full-stack application that would typically require $500,000-$1,000,000 in development costs and 6-12 months with a traditional team.  
+> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The $278-$1,054 total investment produced a full-stack application that would typically require $5.6M in development costs and 6-12 months with a traditional team.  
 > **📊 DETAILED COST ANALYSIS**: For comprehensive cost assumptions, productivity metrics, and industry benchmarks with cited sources, see [Cost Assumptions and Productivity Analysis](docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md).
 
 ---
