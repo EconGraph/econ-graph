@@ -108,20 +108,7 @@ vi.spyOn(global, "setInterval").mockImplementation(
 // Create a test theme
 const theme = createTheme();
 
-// Mock super admin context
-const mockSuperAdminContext = {
-  user: {
-    id: "test-user",
-    username: "admin",
-    role: "super_admin",
-    sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
-  },
-  isAuthenticated: true,
-  login: vi.fn(),
-  logout: vi.fn(),
-  refreshSession: vi.fn(),
-  extendSession: vi.fn(),
-};
+// Mock super admin context - removed as it's not used
 
 // Test wrapper component
 const TestWrapper: React.FC<{

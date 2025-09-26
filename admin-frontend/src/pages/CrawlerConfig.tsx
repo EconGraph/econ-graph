@@ -163,21 +163,24 @@ const CrawlerConfig: React.FC = () => {
     [updateDataSourceMutation],
   );
 
-  const handleTestConnection = useCallback(async (sourceId: string) => {
-    try {
-      await testConnectionMutation.mutateAsync(sourceId);
-      // Update health status
-      setDataSources((prev: DataSource[]) =>
-        prev.map((source: DataSource) =>
-          source.id === sourceId
-            ? { ...source, health_status: "healthy" as const }
-            : source,
-        ),
-      );
-    } catch {
-      setError("Connection test failed");
-    }
-  }, []);
+  const handleTestConnection = useCallback(
+    async (sourceId: string) => {
+      try {
+        await testConnectionMutation.mutateAsync(sourceId);
+        // Update health status
+        setDataSources((prev: DataSource[]) =>
+          prev.map((source: DataSource) =>
+            source.id === sourceId
+              ? { ...source, health_status: "healthy" as const }
+              : source,
+          ),
+        );
+      } catch {
+        setError("Connection test failed");
+      }
+    },
+    [testConnectionMutation],
+  );
 
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -224,7 +227,7 @@ const CrawlerConfig: React.FC = () => {
       setError((err as Error)?.message || "Failed to save configuration");
       setSaving(false);
     }
-  }, []);
+  }, [config, updateConfigMutation]);
 
   const getHealthStatusColor = useCallback((status: string) => {
     switch (status) {
