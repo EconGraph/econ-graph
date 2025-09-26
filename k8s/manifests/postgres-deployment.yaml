@@ -6,7 +6,7 @@ metadata:
   namespace: econ-graph
   labels:
     app: postgresql
-    version: "15"
+    version: "18"
 spec:
   serviceName: postgresql
   replicas: 1
@@ -17,11 +17,11 @@ spec:
     metadata:
       labels:
         app: postgresql
-        version: "15"
+        version: "18"
     spec:
       containers:
       - name: postgresql
-        image: postgres:15-alpine
+        image: postgres:18-alpine
         ports:
         - containerPort: 5432
           name: postgresql
