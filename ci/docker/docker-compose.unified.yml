@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # PostgreSQL database
   postgres:
-    image: postgres:18
+    image: postgres:17
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password
