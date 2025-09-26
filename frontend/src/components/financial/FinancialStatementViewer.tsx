@@ -812,8 +812,8 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
         </CardContent>
       </Card>
 
-      {/* Loading State Placeholder */}
-      {false && (
+      {/* Loading State Placeholder - disabled for now */}
+      {process.env.NODE_ENV === 'development' && false && (
         <Card>
           <CardContent className='p-8 text-center'>
             <p>Loading financial statements...</p>
