@@ -10,7 +10,7 @@ import { TestProviders } from '../../test-utils/test-providers';
 import SeriesDetail from '../SeriesDetail';
 
 // Mock the InteractiveChartWithCollaboration component
-jest.mock('../../components/charts/InteractiveChartWithCollaboration', () => {
+vi.mock('../../components/charts/InteractiveChartWithCollaboration', () => {
   return function MockInteractiveChartWithCollaboration({ seriesData, onDataTransform }: any) {
     return (
       <div data-testid="interactive-chart">
@@ -48,10 +48,10 @@ const checkSkeletonLoading = (container: HTMLElement) => {
 };
 
 // Mock useParams and useNavigate
-const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
-  useParams: jest.fn(),
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => ({
+  ...(await vi.importActual('react-router-dom')),
+  useParams: vi.fn(),
   useNavigate: () => mockNavigate,
 }));
 
@@ -69,7 +69,7 @@ function renderSeriesDetail(seriesId = 'gdp-real') {
 
 describe('SeriesDetail', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('Loading and Error States', () => {
@@ -289,7 +289,7 @@ describe('SeriesDetail', () => {
     test('should handle network errors gracefully', () => {
       // Mock fetch to reject
       const originalFetch = global.fetch;
-      global.fetch = jest.fn().mockRejectedValue(new Error('Network error'));
+      global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
 
       const { container } = renderSeriesDetail('gdp-real');
 

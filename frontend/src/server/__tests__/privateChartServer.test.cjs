@@ -9,7 +9,7 @@
 process.env.NODE_ENV = 'test';
 
 const request = require('supertest');
-const app = require('../../server/privateChartServer');
+const app = require('../privateChartServer.cjs');
 
 describe('Private Chart API Server', () => {
   const validChartRequest = {

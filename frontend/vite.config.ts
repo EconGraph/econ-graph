@@ -103,10 +103,42 @@ export default defineConfig({
     exclude: ['@testing-library/react', '@testing-library/jest-dom'],
   },
 
-  // Test configuration (for Vitest if we decide to use it)
+  // Test configuration for Vitest
   test: {
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/setupTests.ts'],
+    // Exclude Playwright tests and other non-unit tests
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/cypress/**',
+      '**/.{idea,git,cache,output,temp}/**',
+      '**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*',
+      '**/tests/e2e/**',
+      '**/tests/playwright/**',
+      '**/playwright.config.*',
+      '**/tests/**/*.spec.ts',
+      '**/tests/**/*.spec.js',
+    ],
+    // Module name mapping
+    alias: {
+      '@': resolve(__dirname, 'src'),
+    },
+    // Increase timeout for slow tests
+    testTimeout: 30000,
+    // Coverage configuration
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      exclude: [
+        'node_modules/',
+        'src/setupTests.ts',
+        'src/**/__mocks__/**',
+        'src/**/__tests__/**',
+        '**/*.d.ts',
+        'tests/**',
+      ],
+    },
   },
 });

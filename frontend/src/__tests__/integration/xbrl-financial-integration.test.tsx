@@ -18,7 +18,7 @@ import { BenchmarkComparison } from '../../components/financial/BenchmarkCompari
 import { TrendAnalysisChart } from '../../components/financial/TrendAnalysisChart';
 
 // Mock the API calls
-const mockFetch = jest.fn();
+const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 // Mock financial data
@@ -231,7 +231,7 @@ const createTestWrapper = () => {
 
 describe('XBRL Financial Integration Tests', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     // Mock successful API responses
     mockFetch.mockImplementation((url: string) => {

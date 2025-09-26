@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
@@ -65,7 +66,7 @@ const mockAlerts = [
 
 describe('FinancialAlerts', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('renders the financial alerts component', () => {
