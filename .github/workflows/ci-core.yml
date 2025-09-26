@@ -290,7 +290,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
@@ -392,7 +392,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -470,7 +470,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -536,7 +536,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -602,7 +602,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -668,7 +668,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -734,7 +734,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -800,7 +800,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -866,7 +866,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -932,7 +932,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -998,7 +998,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1064,7 +1064,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1130,7 +1130,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1196,7 +1196,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: econ_graph_test
@@ -1495,7 +1495,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
@@ -1670,7 +1670,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
@@ -1815,7 +1815,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
@@ -2039,7 +2039,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
@@ -2239,7 +2239,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
@@ -2441,7 +2441,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
@@ -2649,7 +2649,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
@@ -2857,7 +2857,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17.6
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: postgres
