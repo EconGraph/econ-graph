@@ -27,11 +27,11 @@ pub struct DataSourceBatcher {
     pub pool: DatabasePool,
 }
 
-impl BatchFn<Uuid, DataSource> for DataSourceBatcher {
+impl BatchFn<Uuid, Option<DataSource>> for DataSourceBatcher {
     fn load(
         &mut self,
         keys: &[Uuid],
-    ) -> impl std::future::Future<Output = HashMap<Uuid, DataSource>> {
+    ) -> impl std::future::Future<Output = HashMap<Uuid, Option<DataSource>>> {
         let pool = self.pool.clone();
         let keys = keys.to_vec();
         async move {
@@ -59,7 +59,18 @@ impl BatchFn<Uuid, DataSource> for DataSourceBatcher {
                 }
             };
 
-            sources.into_iter().map(|s| (s.id, s)).collect()
+            let mut result = HashMap::new();
+
+            // Create a map of found sources
+            let found_sources: HashMap<Uuid, DataSource> =
+                sources.into_iter().map(|s| (s.id, s)).collect();
+
+            // Ensure all requested keys are in the result
+            for key in keys {
+                result.insert(key, found_sources.get(&key).cloned());
+            }
+
+            result
         }
     }
 }
@@ -103,8 +114,15 @@ impl BatchFn<Uuid, Vec<DataPoint>> for DataPointsBySeriesBatcher {
             };
 
             let mut result: HashMap<Uuid, Vec<DataPoint>> = HashMap::new();
+
+            // Populate with data points
             for point in data_points {
                 result.entry(point.series_id).or_default().push(point);
+            }
+
+            // Ensure all requested keys are in the result (empty vec for missing)
+            for key in keys {
+                result.entry(key).or_default();
             }
 
             result
@@ -148,10 +166,20 @@ impl BatchFn<Uuid, i32> for DataPointCountBatcher {
                 }
             };
 
-            counts
+            let mut result = HashMap::new();
+
+            // Create a map of found counts
+            let found_counts: HashMap<Uuid, i32> = counts
                 .into_iter()
                 .map(|(id, count)| (id, count as i32))
-                .collect()
+                .collect();
+
+            // Ensure all requested keys are in the result (default to 0 for missing)
+            for key in keys {
+                result.insert(key, found_counts.get(&key).copied().unwrap_or(0));
+            }
+
+            result
         }
     }
 }
@@ -196,8 +224,15 @@ impl BatchFn<Uuid, Vec<EconomicSeries>> for SeriesBySourceBatcher {
             };
 
             let mut result: HashMap<Uuid, Vec<EconomicSeries>> = HashMap::new();
+
+            // Populate with series
             for s in series {
                 result.entry(s.source_id).or_default().push(s);
+            }
+
+            // Ensure all requested keys are in the result (empty vec for missing)
+            for key in keys {
+                result.entry(key).or_default();
             }
 
             result
@@ -242,10 +277,20 @@ impl BatchFn<Uuid, i32> for SeriesCountBatcher {
                 }
             };
 
-            counts
+            let mut result = HashMap::new();
+
+            // Create a map of found counts
+            let found_counts: HashMap<Uuid, i32> = counts
                 .into_iter()
                 .map(|(id, count)| (id, count as i32))
-                .collect()
+                .collect();
+
+            // Ensure all requested keys are in the result (default to 0 for missing)
+            for key in keys {
+                result.insert(key, found_counts.get(&key).copied().unwrap_or(0));
+            }
+
+            result
         }
     }
 }
@@ -255,8 +300,11 @@ pub struct UserBatcher {
     pub pool: DatabasePool,
 }
 
-impl BatchFn<Uuid, User> for UserBatcher {
-    fn load(&mut self, keys: &[Uuid]) -> impl std::future::Future<Output = HashMap<Uuid, User>> {
+impl BatchFn<Uuid, Option<User>> for UserBatcher {
+    fn load(
+        &mut self,
+        keys: &[Uuid],
+    ) -> impl std::future::Future<Output = HashMap<Uuid, Option<User>>> {
         let pool = self.pool.clone();
         let keys = keys.to_vec();
         async move {
@@ -284,19 +332,29 @@ impl BatchFn<Uuid, User> for UserBatcher {
                 }
             };
 
-            users.into_iter().map(|u| (u.id, u)).collect()
+            let mut result = HashMap::new();
+
+            // Create a map of found users
+            let found_users: HashMap<Uuid, User> = users.into_iter().map(|u| (u.id, u)).collect();
+
+            // Ensure all requested keys are in the result
+            for key in keys {
+                result.insert(key, found_users.get(&key).cloned());
+            }
+
+            result
         }
     }
 }
 
 /// Comprehensive DataLoaders struct with all specialized loaders
 pub struct DataLoaders {
-    pub data_source_loader: Loader<Uuid, DataSource, DataSourceBatcher>,
+    pub data_source_loader: Loader<Uuid, Option<DataSource>, DataSourceBatcher>,
     pub data_points_by_series_loader: Loader<Uuid, Vec<DataPoint>, DataPointsBySeriesBatcher>,
     pub data_point_count_loader: Loader<Uuid, i32, DataPointCountBatcher>,
     pub series_by_source_loader: Loader<Uuid, Vec<EconomicSeries>, SeriesBySourceBatcher>,
     pub series_count_loader: Loader<Uuid, i32, SeriesCountBatcher>,
-    pub user_loader: Loader<Uuid, User, UserBatcher>,
+    pub user_loader: Loader<Uuid, Option<User>, UserBatcher>,
 }
 
 impl DataLoaders {
