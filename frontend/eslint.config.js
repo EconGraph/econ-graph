@@ -76,10 +76,6 @@ export default [
         afterEach: 'readonly',
         beforeAll: 'readonly',
         afterAll: 'readonly',
-
-        // Node.js globals for CommonJS files
-        process: 'readonly',
-        console: 'readonly',
       },
     },
     plugins: {

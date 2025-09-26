@@ -72,7 +72,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
   company,
   statements,
   ratios,
-  userType = 'intermediate',
+  userType: _userType = 'intermediate',
 }) => {
   const [exportOptions, setExportOptions] = useState<ExportOptions>({
     format: 'pdf',
@@ -262,7 +262,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
   const downloadExport = (job: ExportJob) => {
     if (job.downloadUrl) {
       // In real implementation, this would trigger actual download
-      console.log('Downloading:', job.downloadUrl);
+      // TODO: Implement actual download functionality
     }
   };
 

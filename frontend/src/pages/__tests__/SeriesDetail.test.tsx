@@ -43,7 +43,6 @@ vi.mock('../../components/charts/InteractiveChartWithCollaboration', () => ({
 // Helper function to check for skeleton loading states
 const checkSkeletonLoading = (container: HTMLElement) => {
   // Check for skeleton elements by class name (Material-UI Skeleton components)
-
   const skeletons = container.querySelectorAll('.MuiSkeleton-root');
   expect(skeletons.length).toBeGreaterThan(0);
 };
