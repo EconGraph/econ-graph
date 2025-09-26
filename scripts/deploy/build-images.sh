@@ -21,11 +21,11 @@ echo "✅ Backend image built successfully"
 echo "📦 Building frontend image..."
 cd ../frontend
 docker build \
-  --build-arg REACT_APP_API_URL="http://localhost" \
-  --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
-  --build-arg REACT_APP_WS_URL="ws://localhost/graphql" \
-  --build-arg REACT_APP_FACEBOOK_APP_ID="demo-facebook-app-id" \
-  --build-arg REACT_APP_GOOGLE_CLIENT_ID="80227441551-3dv05tkflnfrjpqv5fgii7b8br0brt7m.apps.googleusercontent.com" \
+  --build-arg VITE_API_URL="http://localhost" \
+  --build-arg VITE_GRAPHQL_URL="/graphql" \
+  --build-arg VITE_WS_URL="ws://localhost/graphql" \
+  --build-arg VITE_FACEBOOK_APP_ID="demo-facebook-app-id" \
+  --build-arg VITE_GOOGLE_CLIENT_ID="80227441551-3dv05tkflnfrjpqv5fgii7b8br0brt7m.apps.googleusercontent.com" \
   --build-arg NODE_ENV="production" \
   -t econ-graph-frontend:v3.7.2 .
 echo "✅ Frontend image built successfully"
