@@ -367,7 +367,7 @@ impl DataLoaders {
         let data_point_count_loader = Loader::new(DataPointCountBatcher { pool: pool.clone() });
         let series_by_source_loader = Loader::new(SeriesBySourceBatcher { pool: pool.clone() });
         let series_count_loader = Loader::new(SeriesCountBatcher { pool: pool.clone() });
-        let user_loader = Loader::new(UserBatcher { pool });
+        let user_loader = Loader::new(UserBatcher { pool: pool.clone() });
 
         Self {
             data_source_loader,
