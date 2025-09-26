@@ -83,21 +83,21 @@ Beyond hourly rates, total employment costs include:
 - **Cursor Pro Subscription**: ~$20/month
 - **Staff Engineer Time**: 28 days × 8 hours × $150/hour = $33,600
   *Source: [Geomotiv - Software Engineer Hourly Rates](https://geomotiv.com/blog/software-engineer-hourly-rate-in-the-usa/) - Silicon Valley rates $80-$150/hour for senior engineers*
-- **Total Project Cost**: ~$35,000
+- **Total Project Cost**: ~$34557.836
 
 **Development Timeline**: 28 days of active development
-**Total Actual Cost**: ~$35,000
+**Total Actual Cost**: ~$34557.836
 
 ### 3. Cost Comparison and ROI Analysis
 
 **Traditional Development**:
-- **Cost Range**: $456,000 (6-person team over 6-12 months)
+- **Cost Range**: $455142.18 (6-person team over 6-12 months)
 - **Timeline**: 6-12 months
 - **Team Size**: 6 developers
 - **Risk Level**: High (team coordination, knowledge transfer)
 
 **AI-Assisted Development**:
-- **Cost Range**: ~$35,000
+- **Cost Range**: ~$34557.836
 - **Timeline**: 28 days
 - **Team Size**: 1 staff engineer + AI
 - **Risk Level**: Low (single staff engineer, AI assistance)
@@ -106,12 +106,12 @@ Beyond hourly rates, total employment costs include:
 
 | Development Approach | Total Cost | Timeline | Team Size | Cost per Line |
 |---------------------|------------|----------|-----------|---------------|
-| Traditional Development | $456,000 | 6-12 months | 6 people | $2.87/line |
-| AI-Assisted Development | ~$35,000 | 28 days | 1 person + AI | $0.22/line |
+| Traditional Development | $455142.18 | 6-12 months | 6 people | $2.87/line |
+| AI-Assisted Development | ~$34557.836 | 28 days | 1 person + AI | $0.22/line |
 | **Savings** | **$421,000** | **5-11 months** | **5 fewer people** | **92.3% reduction** |
 
 **ROI Calculation**:
-- **Cost Savings**: $456,000 - ~$35,000 = $421,000 (92.3% cost reduction)
+- **Cost Savings**: $455142.18 - ~$34557.836 = $421,000 (92.4% cost reduction)
 - **Time Savings**: 5-11 months (83-92% time reduction)
 - **Quality**: Professional-grade testing, documentation, security scanning
 
@@ -119,9 +119,9 @@ Beyond hourly rates, total employment costs include:
 
 ### Codebase Composition Breakdown
 
-**Total Codebase**: 159,335 lines of manually written code (excluding auto-generated files)
+**Total Codebase**: 0 lines of manually written code (excluding auto-generated files)
 
-#### Production Code (72,610 lines - 45.6%)
+#### Production Code (72610 lines - %)
 - **Backend Production**: 45,200 lines (Rust)
   - Core business logic and API endpoints
   - Database models and migrations
@@ -203,7 +203,7 @@ Beyond hourly rates, total employment costs include:
 | QA Engineer (Testing/Automation) | $90 | 500 | $45,000 |
 | Technical Writer (Documentation) | $75 | 400 | $30,000 |
 | Project Manager (Coordination) | $100 | 400 | $40,000 |
-| **Total Team Cost** | | **4,100 hours** | **$456,000** |
+| **Total Team Cost** | | **4,100 hours** | **$455142.18** |
 
 ### AI-Assisted Development Cost Breakdown
 
@@ -230,7 +230,7 @@ Beyond hourly rates, total employment costs include:
 |---------------|--------|
 | Staff Engineer Time | $33,600 |
 | AI Tool Costs | $957.84 |
-| **Total AI-Assisted Cost** | **~$35,000** |
+| **Total AI-Assisted Cost** | **~$34557.836** |
 
 ### Productivity Analysis by Code Type
 
@@ -293,11 +293,11 @@ Beyond hourly rates, total employment costs include:
 
 ## Conclusion
 
-The data presented in this document provides a comprehensive foundation for cost assumptions in software development projects. The dramatic cost differences between traditional and AI-assisted development (92.3% cost reduction) demonstrate the transformative potential of AI tools in software development.
+The data presented in this document provides a comprehensive foundation for cost assumptions in software development projects. The dramatic cost differences between traditional and AI-assisted development (92.4% cost reduction) demonstrate the transformative potential of AI tools in software development.
 
 **Key Takeaways**:
-1. **Traditional Development**: $456,000 for similar projects
-2. **AI-Assisted Development**: ~$35,000 for equivalent results
+1. **Traditional Development**: $455142.18 for similar projects
+2. **AI-Assisted Development**: ~$34557.836 for equivalent results
 3. **Productivity Gains**: 10-20x faster development cycles
 4. **Quality Maintenance**: Professional-grade results with AI assistance
 

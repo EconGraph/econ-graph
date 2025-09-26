@@ -67,15 +67,23 @@ get_codebase_stats() {
         bash "$CODEBASE_STATS_FILE" > /tmp/codebase_stats.txt
 
         # Extract key metrics from the stats script output
-        # Each grep command extracts the number from the formatted output
-        BACKEND_PROD=$(grep "Backend Production:" /tmp/codebase_stats.txt | awk '{print $3}' | tr -d ',')
-        BACKEND_TESTS=$(grep "Backend Tests:" /tmp/codebase_stats.txt | awk '{print $3}' | tr -d ',')
-        FRONTEND_PROD=$(grep "Frontend Production:" /tmp/codebase_stats.txt | awk '{print $3}' | tr -d ',')
-        FRONTEND_TESTS=$(grep "Frontend Tests:" /tmp/codebase_stats.txt | awk '{print $3}' | tr -d ',')
-        CONFIG=$(grep "Configuration:" /tmp/codebase_stats.txt | awk '{print $3}' | tr -d ',')
-        DOCS=$(grep "Documentation:" /tmp/codebase_stats.txt | awk '{print $3}' | tr -d ',')
-        SCRIPTS=$(grep "Scripts:" /tmp/codebase_stats.txt | awk '{print $3}' | tr -d ',')
-        TOTAL=$(grep "TOTAL:" /tmp/codebase_stats.txt | awk '{print $2}' | tr -d ',')
+        # Use a more robust approach to handle ANSI color codes
+        BACKEND_PROD=$(grep "Backend Production:" /tmp/codebase_stats.txt | grep -o '[0-9]\+' | head -1)
+        BACKEND_TESTS=$(grep "Backend Tests:" /tmp/codebase_stats.txt | grep -o '[0-9]\+' | head -1)
+        FRONTEND_PROD=$(grep "Frontend Production:" /tmp/codebase_stats.txt | grep -o '[0-9]\+' | head -1)
+        FRONTEND_TESTS=$(grep "Frontend Tests:" /tmp/codebase_stats.txt | grep -o '[0-9]\+' | head -1)
+        CONFIG=$(grep "Configuration:" /tmp/codebase_stats.txt | grep -o '[0-9]\+' | head -1)
+        DOCS=$(grep "Documentation:" /tmp/codebase_stats.txt | grep -o '[0-9]\+' | head -1)
+        SCRIPTS=$(grep "Scripts:" /tmp/codebase_stats.txt | grep -o '[0-9]\+' | head -1)
+        TOTAL=$(grep "TOTAL:" /tmp/codebase_stats.txt | head -1 | grep -o '[0-9]\+' | tail -1)
+
+        # Validate that we got numbers, not text
+        if ! [[ "$TOTAL" =~ ^[0-9]+$ ]]; then
+            echo -e "${RED}❌ Failed to parse TOTAL from stats output${NC}"
+            echo "Debug: TOTAL='$TOTAL'"
+            cat /tmp/codebase_stats.txt
+            exit 1
+        fi
 
         echo "Extracted stats: Total=$TOTAL, Backend=$BACKEND_PROD, Frontend=$FRONTEND_PROD"
     else
@@ -136,7 +144,11 @@ calculate_costs() {
 
     # Cost savings
     SAVINGS=$(echo "scale=0; $TRADITIONAL_COST - $AI_TOTAL" | bc)
-    SAVINGS_PERCENT=$(echo "scale=1; $SAVINGS * 100 / $TRADITIONAL_COST" | bc)
+    if [ $(echo "$TRADITIONAL_COST > 0" | bc) -eq 1 ]; then
+        SAVINGS_PERCENT=$(echo "scale=1; $SAVINGS * 100 / $TRADITIONAL_COST" | bc)
+    else
+        SAVINGS_PERCENT="0"
+    fi
 
     echo "Calculated: Traditional=\$${TRADITIONAL_COST}, AI=\$${AI_TOTAL}, Savings=${SAVINGS_PERCENT}%"
 }
