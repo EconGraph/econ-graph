@@ -46,6 +46,7 @@ import {
   setupSimpleMSW,
   cleanupSimpleMSW,
   setMockScenario,
+  resetMockScenario,
 } from "../../__mocks__/msw/simpleServer";
 
 // Setup MSW for GraphQL requests
@@ -639,6 +640,8 @@ describe("UserManagementPage", () => {
         </TestWrapper>,
       );
 
+      // Set MSW scenario to return both users for the Online Users tab
+      setMockScenario("both-users");
       fireEvent.click(screen.getByRole("tab", { name: "Online Users" }));
 
       await waitFor(() => {
@@ -647,6 +650,9 @@ describe("UserManagementPage", () => {
         expect(screen.queryByText("Bob Analyst")).not.toBeInTheDocument();
         expect(screen.queryByText("Alice Developer")).not.toBeInTheDocument();
       });
+
+      // Reset MSW scenario for other tests
+      resetMockScenario();
     });
 
     it("displays session information for online users", async () => {

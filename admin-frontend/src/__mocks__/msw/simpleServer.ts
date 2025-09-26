@@ -35,6 +35,7 @@ import searchLogsSuccess from "../graphql/searchLogs/success.json";
 import searchLogsError from "../graphql/searchLogs/error.json";
 import getUsersSuccess from "../graphql/getUsers/success.json";
 import getOnlineUsersSuccess from "../graphql/getOnlineUsers/success.json";
+import getOnlineUsersBothUsers from "../graphql/getOnlineUsers/both-users.json";
 import createUserSuccess from "../graphql/createUser/success.json";
 import createUserError from "../graphql/createUser/error.json";
 import updateUserSuccess from "../graphql/updateUser/success.json";
@@ -116,6 +117,7 @@ export const mockResponses = {
 
   GetOnlineUsers: {
     success: getOnlineUsersSuccess,
+    "both-users": getOnlineUsersBothUsers,
   },
 
   CreateUser: {
