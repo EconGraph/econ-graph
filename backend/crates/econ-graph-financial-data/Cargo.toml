@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["EconGraph Team"]
 description = "Financial data service with Iceberg storage and GraphQL API"
+license = "MS-PL"
 
 [dependencies]
 # GraphQL and Web Framework
