@@ -109,6 +109,7 @@ export async function waitForLoadingToFinish() {
   const { waitFor } = await import('@testing-library/react');
   await waitFor(
     () => {
+      // eslint-disable-next-line testing-library/no-node-access
       expect(document.querySelector('[data-testid="loading"]')).not.toBeInTheDocument();
     },
     { timeout: 3000 }
