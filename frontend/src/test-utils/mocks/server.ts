@@ -102,9 +102,7 @@ function createHandlers() {
       const { partialQuery, limit = 10 } = variables as any;
 
       const filteredSuggestions = mockSuggestions
-        .filter(suggestion =>
-          suggestion.suggestion.toLowerCase().startsWith(partialQuery.toLowerCase())
-        )
+        .filter(suggestion => suggestion.toLowerCase().startsWith(partialQuery.toLowerCase()))
         .slice(0, limit);
 
       return HttpResponse.json({

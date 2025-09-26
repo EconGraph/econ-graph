@@ -7,6 +7,7 @@
 import React from 'react';
 import { render, screen, act, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { ThemeProvider, useTheme } from '../ThemeContext';
 
 // Mock the AuthContext
@@ -52,14 +53,14 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 describe('ThemeContext', () => {
   beforeEach(() => {
     // Reset localStorage mock for each test
-    (window.localStorage.getItem as vi.Mock).mockClear();
-    (window.localStorage.setItem as vi.Mock).mockClear();
-    (window.localStorage.removeItem as vi.Mock).mockClear();
-    (window.localStorage.clear as vi.Mock).mockClear();
+    (window.localStorage.getItem as Mock).mockClear();
+    (window.localStorage.setItem as Mock).mockClear();
+    (window.localStorage.removeItem as Mock).mockClear();
+    (window.localStorage.clear as Mock).mockClear();
   });
 
   it('should initialize with light theme by default', () => {
-    (window.localStorage.getItem as vi.Mock).mockReturnValue(null);
+    (window.localStorage.getItem as Mock).mockReturnValue(null);
     vi.clearAllMocks();
 
     // Clear any existing localStorage state
@@ -69,7 +70,7 @@ describe('ThemeContext', () => {
   });
 
   it('should initialize with light theme when localStorage is null', () => {
-    (window.localStorage.getItem as vi.Mock).mockReturnValue(null);
+    (window.localStorage.getItem as Mock).mockReturnValue(null);
 
     render(
       <TestWrapper>
@@ -81,7 +82,7 @@ describe('ThemeContext', () => {
   });
 
   it('should load theme from localStorage', async () => {
-    (window.localStorage.getItem as vi.Mock).mockReturnValue('dark');
+    (window.localStorage.getItem as Mock).mockReturnValue('dark');
 
     render(
       <TestWrapper>
@@ -96,7 +97,7 @@ describe('ThemeContext', () => {
   });
 
   it('should toggle theme correctly', async () => {
-    (window.localStorage.getItem as vi.Mock).mockReturnValue('light');
+    (window.localStorage.getItem as Mock).mockReturnValue('light');
 
     render(
       <TestWrapper>
@@ -121,7 +122,7 @@ describe('ThemeContext', () => {
   });
 
   it('should set theme to light', async () => {
-    (window.localStorage.getItem as vi.Mock).mockReturnValue('dark');
+    (window.localStorage.getItem as Mock).mockReturnValue('dark');
 
     render(
       <TestWrapper>
@@ -146,7 +147,7 @@ describe('ThemeContext', () => {
   });
 
   it('should set theme to dark', async () => {
-    (window.localStorage.getItem as vi.Mock).mockReturnValue('light');
+    (window.localStorage.getItem as Mock).mockReturnValue('light');
 
     render(
       <TestWrapper>

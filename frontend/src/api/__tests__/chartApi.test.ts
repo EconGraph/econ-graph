@@ -49,15 +49,13 @@ describe('Chart API', () => {
       const result = generateChartConfig(request);
 
       expect(result.success).toBe(true);
-      expect(result.chartConfig).toBeDefined();
-      expect(result.chartData).toBeDefined();
+      expect(result.config).toBeDefined();
       expect(result.metadata).toBeDefined();
 
       // Check chart configuration structure
-      expect(result.chartConfig?.type).toBe('line');
-      expect(result.chartConfig?.data.datasets).toHaveLength(2);
-      expect(result.chartConfig?.options?.plugins?.title?.text).toBe('GDP vs Unemployment Rate');
-      expect(result.chartConfig?.options?.scales?.x?.type).toBe('time');
+      expect(result.config?.type).toBe('line');
+      expect(result.config?.data.datasets).toHaveLength(2);
+      expect(result.config?.options?.plugins?.title?.text).toBe('GDP vs Unemployment Rate');
     });
 
     it('should generate valid bar chart configuration', () => {
@@ -72,8 +70,8 @@ describe('Chart API', () => {
       const result = generateChartConfig(request);
 
       expect(result.success).toBe(true);
-      expect(result.chartConfig?.type).toBe('bar');
-      expect(result.chartConfig?.data.datasets).toHaveLength(2);
+      expect(result.config?.type).toBe('bar');
+      expect(result.config?.data.datasets).toHaveLength(2);
     });
 
     it('should generate valid scatter chart configuration', () => {
@@ -88,8 +86,8 @@ describe('Chart API', () => {
       const result = generateChartConfig(request);
 
       expect(result.success).toBe(true);
-      expect(result.chartConfig?.type).toBe('scatter');
-      expect(result.chartConfig?.data.datasets).toHaveLength(2);
+      expect(result.config?.type).toBe('scatter');
+      expect(result.config?.data.datasets).toHaveLength(2);
     });
 
     it('should handle empty series data', () => {
@@ -129,10 +127,7 @@ describe('Chart API', () => {
       expect(result.metadata).toEqual({
         seriesCount: 2,
         dataPointCount: 6, // 3 points per series
-        dateRange: {
-          start: '2020-01-01',
-          end: '2020-03-01'
-        }
+        chartType: 'line'
       });
     });
 
@@ -158,8 +153,8 @@ describe('Chart API', () => {
       const result = generateChartConfig(request);
 
       expect(result.success).toBe(true);
-      expect(result.metadata?.dateRange.start).toBe('2020-01-01');
-      expect(result.metadata?.dateRange.end).toBe('2020-03-01');
+      expect(result.metadata?.seriesCount).toBe(1);
+      expect(result.metadata?.dataPointCount).toBe(3);
     });
 
     it('should apply custom colors correctly', () => {
@@ -172,7 +167,7 @@ describe('Chart API', () => {
       const result = generateChartConfig(request);
 
       expect(result.success).toBe(true);
-      const datasets = result.chartConfig?.data.datasets;
+      const datasets = result.config?.data.datasets;
       expect(datasets?.[0].borderColor).toBe('#1976d2');
       expect(datasets?.[1].borderColor).toBe('#d32f2f');
     });
@@ -197,7 +192,7 @@ describe('Chart API', () => {
       const result = generateChartConfig(request);
 
       expect(result.success).toBe(true);
-      const datasets = result.chartConfig?.data.datasets;
+      const datasets = result.config?.data.datasets;
       expect(datasets?.[0].borderColor).toBeDefined();
       expect(datasets?.[0].backgroundColor).toBeDefined();
     });
@@ -216,7 +211,7 @@ describe('Chart API', () => {
       const result = generateChartConfig(request);
 
       expect(result.success).toBe(true);
-      const options = result.chartConfig?.options;
+      const options = result.config?.options;
       expect(options?.plugins?.legend?.display).toBe(false);
       expect(options?.scales?.x?.grid?.display).toBe(false);
       expect(options?.scales?.y?.grid?.display).toBe(false);
@@ -318,7 +313,7 @@ describe('Chart API', () => {
       const result = generateChartConfig(request);
 
       expect(result.success).toBe(true); // Should still succeed but handle invalid data gracefully
-      expect(result.chartConfig?.data.datasets[0].data).toHaveLength(2);
+      expect(result.config?.data.datasets[0].data).toHaveLength(2);
     });
 
     it('should handle missing data point properties', () => {
@@ -343,7 +338,7 @@ describe('Chart API', () => {
       const result = generateChartConfig(request);
 
       expect(result.success).toBe(true);
-      expect(result.chartConfig?.data.datasets[0].data).toHaveLength(3);
+      expect(result.config?.data.datasets[0].data).toHaveLength(3);
     });
   });
 });

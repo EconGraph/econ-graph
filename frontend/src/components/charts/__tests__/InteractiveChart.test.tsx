@@ -5,6 +5,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { vi } from 'vitest';
 import { TestProviders } from '../../../test-utils/test-providers';
 import InteractiveChart from '../InteractiveChart';
 import { createMockDataPoints } from '../../../test-utils/mocks/data';

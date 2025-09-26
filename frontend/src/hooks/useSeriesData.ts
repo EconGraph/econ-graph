@@ -30,12 +30,15 @@ export interface SeriesSearchResult {
   id: string;
   title: string;
   description: string;
+  externalId?: string;
   sourceId: string;
   frequency: string;
   units: string;
   lastUpdated: string;
   startDate: string;
   endDate: string;
+  isActive?: boolean;
+  rank?: number;
   similarityScore: number;
 }
 
@@ -66,7 +69,10 @@ export const useSeriesDetail = (seriesId: string | null, enabled: boolean = true
     async () => {
       if (!seriesId) return null;
 
-      const result = await executeGraphQL(QUERIES.GET_SERIES_DETAIL);
+      const result = await executeGraphQL({
+        query: QUERIES.GET_SERIES_DETAIL,
+        variables: { id: seriesId },
+      });
       return result.data?.seriesDetail || null;
     },
     {
@@ -90,7 +96,10 @@ export const useSeriesData = (
     async () => {
       if (!seriesId) return null;
 
-      const result = await executeGraphQL(QUERIES.GET_SERIES_DATA);
+      const result = await executeGraphQL({
+        query: QUERIES.GET_SERIES_DATA,
+        variables: { id: seriesId, startDate, endDate, transformation, originalOnly },
+      });
       return result.data?.seriesData || null;
     },
     {
@@ -115,7 +124,10 @@ export const useSeriesSearch = (
     async () => {
       if (!query || query.length < 2) return [];
 
-      const result = await executeGraphQL(QUERIES.SEARCH_SERIES);
+      const result = await executeGraphQL({
+        query: QUERIES.SEARCH_SERIES,
+        variables: { query, filters },
+      });
       return result.data?.searchSeries || [];
     },
     {
@@ -132,7 +144,10 @@ export const useSearchSuggestions = (partialQuery: string, enabled: boolean = tr
     async () => {
       if (!partialQuery || partialQuery.trim().length < 2) return [];
 
-      const result = await executeGraphQL(QUERIES.GET_SEARCH_SUGGESTIONS);
+      const result = await executeGraphQL({
+        query: QUERIES.GET_SEARCH_SUGGESTIONS,
+        variables: { partialQuery },
+      });
       return result.data?.searchSuggestions || [];
     },
     {
@@ -147,7 +162,9 @@ export const useDataSources = (enabled: boolean = true) => {
   return useQuery(
     ['dataSources'],
     async () => {
-      const result = await executeGraphQL(QUERIES.GET_DATA_SOURCES);
+      const result = await executeGraphQL({
+        query: QUERIES.GET_DATA_SOURCES,
+      });
       return result.data?.dataSources || [];
     },
     {
@@ -162,7 +179,9 @@ export const useCrawlerStatus = (enabled: boolean = true) => {
   return useQuery(
     ['crawlerStatus'],
     async () => {
-      const result = await executeGraphQL(QUERIES.GET_CRAWLER_STATUS);
+      const result = await executeGraphQL({
+        query: QUERIES.GET_CRAWLER_STATUS,
+      });
       return result.data?.crawlerStatus || null;
     },
     {
