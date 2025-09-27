@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
 
-use crate::catalog::{CatalogStats, ScanResult, ValidationResult};
+use crate::catalog::CatalogStats;
 use crate::models::{DataPoint, EconomicSeries};
-use crate::storage::{FinancialDataStorage, IcebergStorage, InMemoryStorage, ParquetStorage};
+use crate::storage::{FinancialDataStorage, InMemoryStorage, ParquetStorage};
 
 /// Database abstraction for financial data service
 ///
@@ -23,16 +23,6 @@ impl Database {
         tracing::info!("Initializing database with Parquet storage");
 
         let storage = ParquetStorage::new(data_dir.into());
-        Ok(Self {
-            storage: Arc::new(storage),
-        })
-    }
-
-    /// Create a new database with custom partitioning storage (V2)
-    pub async fn new_with_custom_partitioning(data_dir: impl Into<String>) -> Result<Self> {
-        tracing::info!("Initializing database with custom partitioning storage");
-
-        let storage = IcebergStorage::new(data_dir.into())?;
         Ok(Self {
             storage: Arc::new(storage),
         })
@@ -206,30 +196,5 @@ impl Database {
         Ok(all_series
             .into_iter()
             .find(|series| series.external_id == external_id))
-    }
-
-    /// Scan data directory for new files
-    pub async fn scan_data_directory(&self) -> Result<ScanResult> {
-        // For now, return a placeholder scan result
-        // In a full implementation, this would scan the actual data directory
-        Ok(ScanResult {
-            files_discovered: 0,
-            series_discovered: 0,
-            partitions_discovered: 0,
-            errors: vec!["Scan functionality not yet implemented".to_string()],
-        })
-    }
-
-    /// Validate catalog consistency
-    pub async fn validate_catalog(&self) -> Result<ValidationResult> {
-        // For now, return a placeholder validation result
-        // In a full implementation, this would validate the actual catalog
-        Ok(ValidationResult {
-            is_valid: true,
-            missing_files: Vec::new(),
-            orphaned_files: Vec::new(),
-            inconsistent_metadata: Vec::new(),
-            errors: vec!["Validation functionality not yet implemented".to_string()],
-        })
     }
 }

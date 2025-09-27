@@ -23,6 +23,9 @@ arrow-flight = "56.0"
 object_store = "0.12"
 minio = "0.3"
 
+# Note: Iceberg integration will be added in a future iteration
+# to avoid dependency conflicts with workspace bigdecimal version
+
 # Arrow Flight dependencies
 tonic = "0.13"
 prost = "0.13"
@@ -39,6 +42,9 @@ chrono = { workspace = true }
 # Decimal for financial data
 rust_decimal = { workspace = true }
 
+# Validation and Error Handling
+regex = "1.0"
+
 # Configuration
 config = { workspace = true }
 clap = { workspace = true }
@@ -53,6 +59,9 @@ thiserror = { workspace = true }
 
 # Async traits
 async-trait = "0.1"
+
+# File locking and atomic operations
+fs2 = "0.4"
 
 # Testing
 [dev-dependencies]

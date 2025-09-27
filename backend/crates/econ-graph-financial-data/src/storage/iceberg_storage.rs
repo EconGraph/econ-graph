@@ -2,13 +2,12 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{Datelike, NaiveDate, Utc};
 use rust_decimal::prelude::ToPrimitive;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use uuid::Uuid;
 
 use super::FinancialDataStorage;
-use crate::catalog::{DataCatalog, SeriesMetadata as CatalogSeriesMetadata};
+use crate::catalog::{IcebergCatalog, SeriesMetadata as CatalogSeriesMetadata};
 use crate::models::{DataPoint, EconomicSeries};
 
 /// Custom Time-Based Partitioning for Financial Data
@@ -33,8 +32,7 @@ use crate::models::{DataPoint, EconomicSeries};
 ///     └── partition_index.json
 pub struct IcebergStorage {
     data_dir: PathBuf,
-    catalog: PartitionCatalog,
-    data_catalog: DataCatalog,
+    catalog: IcebergCatalog,
 }
 
 /// Partition information for time-based organization
@@ -66,79 +64,15 @@ impl Partition {
     }
 }
 
-/// Simple catalog for tracking series metadata and partitions
-#[derive(Debug, Clone)]
-pub struct PartitionCatalog {
-    series_index: HashMap<Uuid, CatalogSeriesMetadata>,
-    partition_index: HashMap<Partition, Vec<Uuid>>,
-}
-
-impl Default for PartitionCatalog {
-    fn default() -> Self {
-        Self {
-            series_index: HashMap::new(),
-            partition_index: HashMap::new(),
-        }
-    }
-}
-
-impl PartitionCatalog {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn add_series(&mut self, series: &EconomicSeries) {
-        let metadata = CatalogSeriesMetadata::new(
-            series.id,
-            series.external_id.clone(),
-            series.title.clone(),
-            series.frequency.clone(),
-            "Financial Data Service".to_string(),
-        );
-        self.series_index.insert(series.id, metadata);
-    }
-
-    pub fn add_series_to_partition(&mut self, series_id: Uuid, partition: Partition) {
-        self.partition_index
-            .entry(partition)
-            .or_default()
-            .push(series_id);
-    }
-
-    pub fn get_series(&self, series_id: &Uuid) -> Option<&CatalogSeriesMetadata> {
-        self.series_index.get(series_id)
-    }
-
-    pub fn list_series(&self) -> Vec<CatalogSeriesMetadata> {
-        self.series_index.values().cloned().collect()
-    }
-
-    pub fn get_partitions_for_series(&self, series_id: &Uuid) -> Vec<Partition> {
-        self.partition_index
-            .iter()
-            .filter(|(_, series_list)| series_list.contains(series_id))
-            .map(|(partition, _)| partition.clone())
-            .collect()
-    }
-}
-
 impl IcebergStorage {
-    pub fn new(data_dir: impl Into<PathBuf>) -> Result<Self> {
+    pub async fn new(data_dir: impl Into<PathBuf>) -> Result<Self> {
         let data_dir = data_dir.into();
         std::fs::create_dir_all(&data_dir)?;
 
-        // Create metadata directory
-        let metadata_dir = data_dir.join("metadata");
-        std::fs::create_dir_all(&metadata_dir)?;
+        // Initialize the Iceberg catalog
+        let catalog = IcebergCatalog::new(data_dir.clone()).await?;
 
-        // Create data catalog
-        let data_catalog = DataCatalog::new(&metadata_dir)?;
-
-        Ok(Self {
-            data_dir,
-            catalog: PartitionCatalog::new(),
-            data_catalog,
-        })
+        Ok(Self { data_dir, catalog })
     }
 
     /// Get partition path for a given date
@@ -451,53 +385,54 @@ impl IcebergStorage {
     }
 }
 
-impl Default for IcebergStorage {
-    fn default() -> Self {
-        Self::new("./data").expect("Failed to create default IcebergStorage")
-    }
-}
+// Note: Default implementation removed because IcebergStorage::new is async
 
 #[async_trait]
 impl FinancialDataStorage for IcebergStorage {
     async fn write_series(&self, series: &EconomicSeries) -> Result<()> {
-        // Add series to data catalog
-        tracing::info!("Adding series to catalog: {}", series.id);
+        tracing::info!("Writing series to Iceberg storage: {}", series.id);
 
-        let mut metadata = CatalogSeriesMetadata::new(
-            series.id,
-            series.external_id.clone(),
-            series.title.clone(),
-            series.frequency.clone(),
-            "Financial Data Service".to_string(), // Default source
-        );
+        // Convert EconomicSeries to CatalogSeriesMetadata
+        let metadata = CatalogSeriesMetadata {
+            series_id: series.id,
+            external_id: series.external_id.clone(),
+            title: series.title.clone(),
+            description: series.description.clone(),
+            units: series.units.clone(),
+            frequency: series.frequency.clone(),
+            seasonal_adjustment: series.seasonal_adjustment.clone(),
+            source: "Financial Data Service".to_string(), // TODO: Get from series
+            is_active: series.is_active,
+            start_date: series.start_date,
+            end_date: series.end_date,
+            total_points: 0, // TODO: Calculate from actual data points
+            created_at: series.created_at,
+            updated_at: series.updated_at,
+        };
 
-        // Update data range if available
-        if let (Some(start_date), Some(end_date)) = (series.start_date, series.end_date) {
-            // Note: We don't have actual data point counts here, so we'll use placeholder values
-            // These will be updated when actual data points are written
-            metadata.update_data_range(Some(start_date), Some(end_date), 0, 0);
-        }
-
-        self.data_catalog.add_series(metadata).await?;
-        std::fs::create_dir_all(&self.data_dir)?;
+        // Add to catalog
+        self.catalog.add_series(metadata).await?;
 
         Ok(())
     }
 
     async fn read_series(&self, series_id: Uuid) -> Result<Option<EconomicSeries>> {
-        // Read series from data catalog
-        if let Some(metadata) = self.data_catalog.get_series(series_id).await? {
+        tracing::info!("Reading series from Iceberg storage: {}", series_id);
+
+        // Get series from catalog
+        if let Some(metadata) = self.catalog.get_series(series_id).await? {
+            // Convert CatalogSeriesMetadata back to EconomicSeries
             let series = EconomicSeries {
                 id: metadata.series_id,
                 source_id: Uuid::new_v4(), // TODO: Map from catalog metadata
                 external_id: metadata.external_id,
                 title: metadata.title,
-                description: None, // TODO: Add to catalog metadata
-                units: None,       // TODO: Add to catalog metadata
+                description: metadata.description,
+                units: metadata.units,
                 frequency: metadata.frequency,
-                seasonal_adjustment: None, // TODO: Add to catalog metadata
-                start_date: metadata.data_range.start_date,
-                end_date: metadata.data_range.end_date,
+                seasonal_adjustment: metadata.seasonal_adjustment,
+                start_date: metadata.start_date,
+                end_date: metadata.end_date,
                 is_active: metadata.is_active,
                 created_at: metadata.created_at,
                 updated_at: metadata.updated_at,
@@ -526,26 +461,31 @@ impl FinancialDataStorage for IcebergStorage {
     }
 
     async fn list_series(&self) -> Result<Vec<EconomicSeries>> {
-        // List series from the data catalog
-        let metadata_list = self.data_catalog.list_series().await?;
+        tracing::info!("Listing series from Iceberg storage");
 
-        Ok(metadata_list
+        // Get all series from catalog
+        let metadata_list = self.catalog.list_series().await?;
+
+        // Convert to EconomicSeries
+        let series_list = metadata_list
             .into_iter()
             .map(|metadata| EconomicSeries {
                 id: metadata.series_id,
                 source_id: Uuid::new_v4(), // TODO: Map from catalog metadata
                 external_id: metadata.external_id,
                 title: metadata.title,
-                description: None, // TODO: Add to catalog metadata
-                units: None,       // TODO: Add to catalog metadata
+                description: metadata.description,
+                units: metadata.units,
                 frequency: metadata.frequency,
-                seasonal_adjustment: None, // TODO: Add to catalog metadata
-                start_date: metadata.data_range.start_date,
-                end_date: metadata.data_range.end_date,
+                seasonal_adjustment: metadata.seasonal_adjustment,
+                start_date: metadata.start_date,
+                end_date: metadata.end_date,
                 is_active: metadata.is_active,
                 created_at: metadata.created_at,
                 updated_at: metadata.updated_at,
             })
-            .collect())
+            .collect();
+
+        Ok(series_list)
     }
 }

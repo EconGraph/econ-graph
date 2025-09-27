@@ -193,63 +193,6 @@ impl Query {
         }))
     }
 
-    /// Scan data directory for new files
-    async fn scan_data_directory(&self, ctx: &Context<'_>) -> Result<ScanResultResponse> {
-        let database = ctx.data::<Database>()?;
-        let metrics = ctx.data::<MetricsCollector>()?;
-
-        let start_time = Instant::now();
-        let result = database
-            .scan_data_directory()
-            .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        let duration = start_time.elapsed();
-
-        metrics
-            .record_graphql_operation("scan_data_directory", duration, true)
-            .await;
-
-        Ok(ScanResultResponse {
-            files_discovered: result.files_discovered,
-            series_discovered: result.series_discovered,
-            partitions_discovered: result.partitions_discovered,
-            errors: result.errors,
-        })
-    }
-
-    /// Validate catalog consistency
-    async fn validate_catalog(&self, ctx: &Context<'_>) -> Result<ValidationResultResponse> {
-        let database = ctx.data::<Database>()?;
-        let metrics = ctx.data::<MetricsCollector>()?;
-
-        let start_time = Instant::now();
-        let result = database
-            .validate_catalog()
-            .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
-        let duration = start_time.elapsed();
-
-        metrics
-            .record_graphql_operation("validate_catalog", duration, true)
-            .await;
-
-        Ok(ValidationResultResponse {
-            is_valid: result.is_valid,
-            missing_files: result
-                .missing_files
-                .into_iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect(),
-            orphaned_files: result
-                .orphaned_files
-                .into_iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect(),
-            inconsistent_metadata: result.inconsistent_metadata,
-            errors: result.errors,
-        })
-    }
-
     /// Get data freshness information
     async fn data_freshness(&self, ctx: &Context<'_>) -> Result<DataFreshnessResponse> {
         let database = ctx.data::<Database>()?;
@@ -301,25 +244,6 @@ pub struct SeriesInfo {
     pub data_points: u64,
     pub completeness: f64,
     pub last_updated: chrono::DateTime<chrono::Utc>,
-}
-
-/// Response type for scan results
-#[derive(async_graphql::SimpleObject)]
-pub struct ScanResultResponse {
-    pub files_discovered: usize,
-    pub series_discovered: usize,
-    pub partitions_discovered: usize,
-    pub errors: Vec<String>,
-}
-
-/// Response type for validation results
-#[derive(async_graphql::SimpleObject)]
-pub struct ValidationResultResponse {
-    pub is_valid: bool,
-    pub missing_files: Vec<String>,
-    pub orphaned_files: Vec<String>,
-    pub inconsistent_metadata: Vec<Uuid>,
-    pub errors: Vec<String>,
 }
 
 /// Response type for data freshness
