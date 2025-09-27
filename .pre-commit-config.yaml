@@ -16,7 +16,7 @@ repos:
 
       - id: rust-clippy
         name: Rust Clippy Lints
-        entry: bash -c 'cd backend && cargo clippy --all-targets --all-features -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls -D clippy::missing_docs_in_private_items -D clippy::missing_errors_doc -D clippy::missing_panics_doc -D clippy::missing_safety_doc -D clippy::doc_markdown -D clippy::doc_link_with_quotes -D clippy::doc_link_without_quotes'
+        entry: bash -c './scripts/run-clippy.sh'
         language: system
         files: '^backend/.*\.rs$'
         pass_filenames: false
