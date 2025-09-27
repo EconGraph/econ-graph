@@ -55,13 +55,13 @@ fi
 has_crate_changed() {
     local crate_path="$1"
     local crate_name=$(basename "$crate_path")
-    
+
     # Check if any files in this crate have changed (staged or unstaged)
     if git diff --cached --name-only | grep -q "^backend/crates/$crate_name/" || \
        git diff --name-only | grep -q "^backend/crates/$crate_name/"; then
         return 0
     fi
-    
+
     # Also check if we're in a specific file mode (when called with filenames)
     if [[ $# -gt 0 ]]; then
         for file in "$@"; do
@@ -70,7 +70,7 @@ has_crate_changed() {
             fi
         done
     fi
-    
+
     return 1
 }
 
@@ -78,7 +78,7 @@ has_crate_changed() {
 run_clippy_on_crate() {
     local crate_path="$1"
     local crate_name=$(basename "$crate_path")
-    
+
     echo "Running clippy on changed crate: $crate_name"
     cd "$crate_path"
     cargo clippy "${CLIPPY_ARGS[@]}"
