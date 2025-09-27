@@ -1,5 +1,8 @@
 # Backend Federation Architecture
 
+**Created**: September 25, 2025  
+**Last Updated**: September 26, 2025  
+
 ## Overview
 
 This project refactors the monolithic backend into a federated architecture using Apollo GraphQL Federation. The core motivation is to separate user interaction/data from financial series data, which is expensive to re-populate and frequently reset by developers.
