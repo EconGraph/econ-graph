@@ -42,8 +42,12 @@ async fn main() -> Result<()> {
     let database = Database::new_with_parquet(data_dir).await?;
     info!("Database initialized with Parquet storage and Arrow Flight");
 
+    // Register initial health checks
+    health_checker.check_database_health(&database).await;
+    info!("Health checks registered");
+
     // Create GraphQL schema
-    let schema = create_schema(database.clone()).await?;
+    let schema = create_schema(database.clone(), metrics.clone(), health_checker.clone()).await?;
     info!("GraphQL schema created successfully");
 
     // Start the server

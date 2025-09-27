@@ -1,9 +1,11 @@
 use async_graphql::{Context, Object, Result};
+use std::time::Instant;
 use uuid::Uuid;
 
 use crate::database::Database;
 use crate::models::input::{CreateDataPointInput, CreateEconomicSeriesInput};
 use crate::models::{DataPoint, EconomicSeries};
+use crate::monitoring::MetricsCollector;
 
 pub struct Mutation;
 
@@ -15,7 +17,9 @@ impl Mutation {
         ctx: &Context<'_>,
         input: CreateEconomicSeriesInput,
     ) -> Result<EconomicSeries> {
+        let start_time = Instant::now();
         let database = ctx.data::<Database>()?;
+        let metrics = ctx.data::<MetricsCollector>()?;
 
         // Convert input to full model
         let series = EconomicSeries {
@@ -34,10 +38,19 @@ impl Mutation {
             updated_at: chrono::Utc::now(),
         };
 
-        database
+        let result = database
             .create_series(series.clone())
             .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            .map_err(|e| async_graphql::Error::new(e.to_string()));
+
+        let duration = start_time.elapsed();
+        let success = result.is_ok();
+
+        metrics
+            .record_graphql_operation("mutation_create_series", duration, success)
+            .await;
+
+        result?;
         Ok(series)
     }
 
@@ -47,7 +60,9 @@ impl Mutation {
         ctx: &Context<'_>,
         inputs: Vec<CreateDataPointInput>,
     ) -> Result<Vec<DataPoint>> {
+        let start_time = Instant::now();
         let database = ctx.data::<Database>()?;
+        let metrics = ctx.data::<MetricsCollector>()?;
 
         // Convert inputs to full models
         let points: Vec<DataPoint> = inputs
@@ -64,10 +79,19 @@ impl Mutation {
             })
             .collect();
 
-        database
+        let result = database
             .create_data_points(points.clone())
             .await
-            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            .map_err(|e| async_graphql::Error::new(e.to_string()));
+
+        let duration = start_time.elapsed();
+        let success = result.is_ok();
+
+        metrics
+            .record_graphql_operation("mutation_create_data_points", duration, success)
+            .await;
+
+        result?;
         Ok(points)
     }
 }

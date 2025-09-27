@@ -13,7 +13,7 @@ use rust_decimal::prelude::ToPrimitive;
 async fn test_comprehensive_integration() -> Result<(), Box<dyn std::error::Error>> {
     use chrono::{NaiveDate, Utc};
     use econ_graph_financial_data::database::Database;
-    use econ_graph_financial_data::graphql::create_schema;
+    use econ_graph_financial_data::graphql::create_test_schema;
     use econ_graph_financial_data::models::{DataPoint, DecimalScalar, EconomicSeries};
     use uuid::Uuid;
 
@@ -26,7 +26,7 @@ async fn test_comprehensive_integration() -> Result<(), Box<dyn std::error::Erro
 
     // Step 2: Create GraphQL schema
     println!("🔧 Creating GraphQL schema...");
-    let _schema = create_schema(database.clone()).await?;
+    let _schema = create_test_schema(database.clone()).await?;
     println!("✅ GraphQL schema created successfully");
 
     // Step 3: Test series creation
@@ -191,13 +191,13 @@ async fn test_comprehensive_integration() -> Result<(), Box<dyn std::error::Erro
 #[tokio::test]
 async fn test_graphql_schema_introspection() -> Result<(), Box<dyn std::error::Error>> {
     use econ_graph_financial_data::database::Database;
-    use econ_graph_financial_data::graphql::create_schema;
+    use econ_graph_financial_data::graphql::create_test_schema;
 
     println!("🔍 Testing GraphQL schema introspection...");
 
     // Initialize database and schema
     let database = Database::new_in_memory().await?;
-    let schema = create_schema(database).await?;
+    let schema = create_test_schema(database).await?;
 
     // Test schema introspection
     let introspection_query = r#"
