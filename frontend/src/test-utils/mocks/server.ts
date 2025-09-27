@@ -246,6 +246,9 @@ function createHandlers() {
 
     // Handle GraphQL POST requests
     http.post('/graphql', async ({ request }: { request: any }) => {
+      if (process.env.MSW_DEBUG) {
+        console.log('🔧 MSW GraphQL POST handler called!');
+      }
       const body = await request.json();
       const { query, variables, operationName } = body;
 
@@ -253,7 +256,9 @@ function createHandlers() {
       const operationMatch = query.match(/(?:query|mutation|subscription)\s+(\w+)/);
       const extractedOperationName = operationMatch ? operationMatch[1] : operationName;
 
-      console.log('🔧 MSW GraphQL Request:', { query: query.substring(0, 100) + '...', variables, operationName: extractedOperationName });
+      if (process.env.MSW_DEBUG) {
+        console.log('🔧 MSW GraphQL Request:', { query: query.substring(0, 100) + '...', variables, operationName: extractedOperationName });
+      }
 
       // Route to appropriate handler based on operation name
       if (extractedOperationName === 'GetFinancialStatement') {

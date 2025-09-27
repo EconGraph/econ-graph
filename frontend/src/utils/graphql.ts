@@ -32,6 +32,9 @@ export interface GraphQLRequest {
 export async function executeGraphQL<T = any>(
   request: GraphQLRequest
 ): Promise<GraphQLResponse<T>> {
+  if (process.env.MSW_DEBUG) {
+    console.log('🔧 executeGraphQL called with:', { endpoint: GRAPHQL_ENDPOINT, request });
+  }
   const response = await fetch(GRAPHQL_ENDPOINT, {
     method: 'POST',
     headers: {
