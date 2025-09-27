@@ -94,7 +94,7 @@ impl PartitionCatalog {
             series.title.clone(),
             series.frequency.clone(),
             "Financial Data Service".to_string(),
-        );
+        };
         self.series_index.insert(series.id, metadata);
     }
 
@@ -493,7 +493,7 @@ impl FinancialDataStorage for IcebergStorage {
                 external_id: metadata.external_id,
                 title: metadata.title,
                 description: None, // TODO: Add to catalog metadata
-                units: None,       // TODO: Add to catalog metadata
+                units: None, // TODO: Add to catalog metadata
                 frequency: metadata.frequency,
                 seasonal_adjustment: None, // TODO: Add to catalog metadata
                 start_date: metadata.data_range.start_date,
@@ -529,23 +529,20 @@ impl FinancialDataStorage for IcebergStorage {
         // List series from the data catalog
         let metadata_list = self.data_catalog.list_series().await?;
 
-        Ok(metadata_list
-            .into_iter()
-            .map(|metadata| EconomicSeries {
-                id: metadata.series_id,
-                source_id: Uuid::new_v4(), // TODO: Map from catalog metadata
-                external_id: metadata.external_id,
-                title: metadata.title,
-                description: None, // TODO: Add to catalog metadata
-                units: None,       // TODO: Add to catalog metadata
-                frequency: metadata.frequency,
-                seasonal_adjustment: None, // TODO: Add to catalog metadata
-                start_date: metadata.data_range.start_date,
-                end_date: metadata.data_range.end_date,
-                is_active: metadata.is_active,
-                created_at: metadata.created_at,
-                updated_at: metadata.updated_at,
-            })
-            .collect())
+        Ok(metadata_list.into_iter().map(|metadata| EconomicSeries {
+            id: metadata.series_id,
+            source_id: Uuid::new_v4(), // TODO: Map from catalog metadata
+            external_id: metadata.external_id,
+            title: metadata.title,
+            description: None, // TODO: Add to catalog metadata
+            units: None, // TODO: Add to catalog metadata
+            frequency: metadata.frequency,
+            seasonal_adjustment: None, // TODO: Add to catalog metadata
+            start_date: metadata.data_range.start_date,
+            end_date: metadata.data_range.end_date,
+            is_active: metadata.is_active,
+            created_at: metadata.created_at,
+            updated_at: metadata.updated_at,
+        }).collect())
     }
 }

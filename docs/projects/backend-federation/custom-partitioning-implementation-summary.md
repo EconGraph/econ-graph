@@ -1,5 +1,8 @@
 # Custom Time-Based Partitioning Implementation Summary
 
+**Created**: September 26, 2025  
+**Last Updated**: September 26, 2025  
+
 ## 🎯 Overview
 
 This document summarizes the completion of the **custom time-based partitioning system** for the financial data service, which replaces the originally planned Iceberg integration with a simpler, more performant solution optimized for financial time series data.

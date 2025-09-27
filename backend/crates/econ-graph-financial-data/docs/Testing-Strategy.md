@@ -1,5 +1,8 @@
 # Iceberg Integration Testing Strategy
 
+**Created**: September 25, 2025  
+**Last Updated**: September 26, 2025  
+
 ## Overview
 
 This document outlines a comprehensive testing strategy for the Iceberg integration in the financial data service. The strategy is designed to exercise the full power of Iceberg's capabilities while addressing the unique requirements of financial time series data.
