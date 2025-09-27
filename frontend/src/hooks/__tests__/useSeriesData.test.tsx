@@ -4,14 +4,17 @@
 
 // import { renderHook, waitFor } from '@testing-library/react';
 // import { QueryClient, QueryClientProvider } from 'react-query';
+// import { vi } from 'vitest';
 // import { useSeriesData, useSeriesDetail } from '../useSeriesData';
 
 // Make this a module to satisfy TypeScript isolatedModules
+import { vi } from 'vitest';
+
 export {};
 
 // Mock the GraphQL utility completely to avoid network calls
-jest.mock('../../utils/graphql', () => ({
-  executeGraphQL: jest.fn().mockResolvedValue({
+vi.mock('../../utils/graphql', () => ({
+  executeGraphQL: vi.fn().mockResolvedValue({
     data: {
       seriesDetail: { id: 'test-series-1', title: 'Test Series' },
       seriesData: { dataPoints: [] },

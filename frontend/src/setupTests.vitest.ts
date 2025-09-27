@@ -204,3 +204,20 @@ vi.mock('d3-zoom', () => ({
     on: vi.fn().mockReturnThis(),
   })),
 }));
+
+// Mock react-router-dom
+vi.mock('react-router-dom', () => ({
+  BrowserRouter: ({ children }: { children: React.ReactNode }) => children,
+  useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: '/test', search: '', hash: '', state: null }),
+  useParams: () => ({}),
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
+  Link: ({ children, to, ...props }: any) => {
+    const React = require('react');
+    return React.createElement('a', { href: to, ...props }, children);
+  },
+  NavLink: ({ children, to, ...props }: any) => {
+    const React = require('react');
+    return React.createElement('a', { href: to, ...props }, children);
+  },
+}));

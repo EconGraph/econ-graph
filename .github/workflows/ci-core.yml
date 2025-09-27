@@ -269,7 +269,7 @@ jobs:
 
     - name: Run chart API tests
       working-directory: chart-api-service
-      run: npm test
+      run: npm run test:coverage
 
     - name: Test chart API endpoints
       run: |
@@ -1286,11 +1286,11 @@ jobs:
 
     - name: Run tests (parallel)
       working-directory: frontend
-      run: npm test -- --coverage --watchAll=false --testPathIgnorePatterns="ChartCollaborationConnected|ChartCollaboration|ProfessionalChart|InteractiveChartWithCollaboration"
+      run: npm run test:coverage -- --exclude="**/ChartCollaborationConnected*|**/ChartCollaboration*|**/ProfessionalChart*|**/InteractiveChartWithCollaboration*"
 
     - name: Run problematic tests (serial)
       working-directory: frontend
-      run: npm run test:serial -- --testPathPattern="ChartCollaborationConnected|ChartCollaboration|ProfessionalChart|InteractiveChartWithCollaboration" --coverage
+      run: npm run test:coverage -- --include="**/ChartCollaborationConnected*|**/ChartCollaboration*|**/ProfessionalChart*|**/InteractiveChartWithCollaboration*"
 
   quality-checks:
     name: Quality Checks
@@ -1579,7 +1579,7 @@ jobs:
 
     - name: Run frontend integration tests
       working-directory: frontend
-      run: npm test -- --coverage --watchAll=false
+      run: npm run test:coverage
       env:
         REACT_APP_GRAPHQL_ENDPOINT: http://localhost:51249/graphql
 

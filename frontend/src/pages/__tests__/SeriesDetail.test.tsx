@@ -6,12 +6,30 @@
 
 import React from 'react';
 import { render } from '@testing-library/react';
+import { vi } from 'vitest';
+import { useParams } from 'react-router-dom';
 import { TestProviders } from '../../test-utils/test-providers';
 import SeriesDetail from '../SeriesDetail';
 
+// Mock react-router-dom
+vi.mock('react-router-dom', () => ({
+  useParams: vi.fn(),
+  BrowserRouter: ({ children }: { children: React.ReactNode }) => children,
+  useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: '/test', search: '', hash: '', state: null }),
+  Link: ({ children, to, ...props }: any) => {
+    const React = require('react');
+    return React.createElement('a', { href: to, ...props }, children);
+  },
+  NavLink: ({ children, to, ...props }: any) => {
+    const React = require('react');
+    return React.createElement('a', { href: to, ...props }, children);
+  },
+}));
+
 // Mock the InteractiveChartWithCollaboration component
-jest.mock('../../components/charts/InteractiveChartWithCollaboration', () => {
-  return function MockInteractiveChartWithCollaboration({ seriesData, onDataTransform }: any) {
+vi.mock('../../components/charts/InteractiveChartWithCollaboration', () => ({
+  default: function MockInteractiveChartWithCollaboration({ seriesData, onDataTransform }: any) {
     return (
       <div data-testid="interactive-chart">
         <div data-testid="chart-title">{seriesData?.title}</div>
@@ -36,29 +54,29 @@ jest.mock('../../components/charts/InteractiveChartWithCollaboration', () => {
         </button>
       </div>
     );
-  };
-});
+  },
+}));
 
 // Helper function to check for skeleton loading states
 const checkSkeletonLoading = (container: HTMLElement) => {
   // Check for skeleton elements by class name (Material-UI Skeleton components)
-  // eslint-disable-next-line testing-library/no-node-access
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const skeletons = container.querySelectorAll('.MuiSkeleton-root');
   expect(skeletons.length).toBeGreaterThan(0);
 };
 
 // Mock useParams and useNavigate
-const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
-  useParams: jest.fn(),
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', () => ({
+  ...vi.importActual('react-router-dom'),
+  useParams: vi.fn(),
   useNavigate: () => mockNavigate,
 }));
 
-const { useParams } = require('react-router-dom');
+const mockUseParams = vi.mocked(useParams);
 
 function renderSeriesDetail(seriesId = 'gdp-real') {
-  useParams.mockReturnValue({ id: seriesId });
+  mockUseParams.mockReturnValue({ id: seriesId });
 
   return render(
     <TestProviders>
@@ -69,7 +87,7 @@ function renderSeriesDetail(seriesId = 'gdp-real') {
 
 describe('SeriesDetail', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('Loading and Error States', () => {
@@ -88,7 +106,7 @@ describe('SeriesDetail', () => {
     });
 
     test('should show default series data when no series ID provided', () => {
-      useParams.mockReturnValue({ id: undefined });
+      mockUseParams.mockReturnValue({ id: undefined });
 
       const { container } = render(
         <TestProviders>
@@ -289,7 +307,7 @@ describe('SeriesDetail', () => {
     test('should handle network errors gracefully', () => {
       // Mock fetch to reject
       const originalFetch = global.fetch;
-      global.fetch = jest.fn().mockRejectedValue(new Error('Network error'));
+      global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
 
       const { container } = renderSeriesDetail('gdp-real');
 

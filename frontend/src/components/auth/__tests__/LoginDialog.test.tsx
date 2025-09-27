@@ -7,24 +7,25 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { vi } from 'vitest';
 import LoginDialog from '../LoginDialog';
 import { AuthProvider } from '../../../contexts/AuthContext';
 
-// Note: ResizeObserver is mocked in setupTests.ts using resize-observer-polyfill
+// Note: ResizeObserver is mocked in setupTests.vitest.ts using resize-observer-polyfill
 
 // Set up Facebook App ID for testing
 process.env.REACT_APP_FACEBOOK_APP_ID = 'test-facebook-app-id';
 
 // Mock the auth context
 const mockAuthContext = {
-  signInWithGoogle: jest.fn(),
-  signInWithFacebook: jest.fn(),
-  signInWithEmail: jest.fn(),
-  signUp: jest.fn(),
-  signOut: jest.fn(),
-  updateProfile: jest.fn(),
-  refreshUser: jest.fn(),
-  clearError: jest.fn(),
+  signInWithGoogle: vi.fn(),
+  signInWithFacebook: vi.fn(),
+  signInWithEmail: vi.fn(),
+  signUp: vi.fn(),
+  signOut: vi.fn(),
+  updateProfile: vi.fn(),
+  refreshUser: vi.fn(),
+  clearError: vi.fn(),
   user: null,
   isAuthenticated: false,
   isLoading: false,
@@ -32,10 +33,14 @@ const mockAuthContext = {
 };
 
 // Mock the useAuth hook
-jest.mock('../../../contexts/AuthContext', () => ({
-  ...jest.requireActual('../../../contexts/AuthContext'),
-  useAuth: () => mockAuthContext,
-}));
+vi.mock('../../../contexts/AuthContext', async () => {
+  const actual = await vi.importActual('../../../contexts/AuthContext');
+  return {
+    ...actual,
+    useAuth: () => mockAuthContext,
+    AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  };
+});
 
 // Create a test theme
 const theme = createTheme();
@@ -50,11 +55,11 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 );
 
 describe('LoginDialog', () => {
-  const mockOnClose = jest.fn();
-  const mockOnSuccess = jest.fn();
+  const mockOnClose = vi.fn();
+  const mockOnSuccess = vi.fn();
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     mockAuthContext.error = null;
     mockAuthContext.isLoading = false;
   });
@@ -467,7 +472,7 @@ describe('LoginDialog', () => {
   });
 
   it('should clear error when dialog closes', () => {
-    const mockClearError = jest.fn();
+    const mockClearError = vi.fn();
     mockAuthContext.clearError = mockClearError;
     mockAuthContext.error = 'Previous error';
 

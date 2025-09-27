@@ -7,6 +7,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { vi } from 'vitest';
 import UserProfile from '../UserProfile';
 import { AuthProvider } from '../../../contexts/AuthContext';
 import { ThemeProvider } from '../../../contexts/ThemeContext';
@@ -31,12 +32,12 @@ const mockUser = {
 };
 
 // Mock fetch for API calls
-global.fetch = jest.fn();
+global.fetch = vi.fn();
 
-// localStorage mock is now handled globally in setupTests.ts
+// localStorage mock is now handled globally in setupTests.vitest.ts
 
 // Mock fetch to return user data
-(fetch as jest.Mock).mockImplementation((url) => {
+(global.fetch as any).mockImplementation((url: string) => {
   if (url.includes('/auth/me')) {
     return Promise.resolve({
       ok: true,
@@ -56,25 +57,31 @@ global.fetch = jest.fn();
 });
 
 // Create a mock useAuth hook that can be controlled per test
-const mockUseAuth = jest.fn();
+const mockUseAuth = vi.fn();
 
 // Mock the AuthContext module
-jest.mock('../../../contexts/AuthContext', () => ({
-  ...jest.requireActual('../../../contexts/AuthContext'),
-  useAuth: () => mockUseAuth(),
-  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
+vi.mock('../../../contexts/AuthContext', async () => {
+  const actual = await vi.importActual('../../../contexts/AuthContext');
+  return {
+    ...actual,
+    useAuth: () => mockUseAuth(),
+    AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  };
+});
 
 // Mock the useTheme hook
-jest.mock('../../../contexts/ThemeContext', () => ({
-  ...jest.requireActual('../../../contexts/ThemeContext'),
-  useTheme: () => ({
-    theme: {} as any,
-    toggleTheme: jest.fn(),
-    setTheme: jest.fn(),
-    currentTheme: 'light' as const,
-  }),
-}));
+vi.mock('../../../contexts/ThemeContext', async () => {
+  const actual = await vi.importActual('../../../contexts/ThemeContext');
+  return {
+    ...actual,
+    useTheme: () => ({
+      theme: {} as any,
+      toggleTheme: vi.fn(),
+      setTheme: vi.fn(),
+      currentTheme: 'light' as const,
+    }),
+  };
+});
 
 // Wrapper component that provides all necessary contexts
 const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -88,10 +95,10 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 describe('UserProfile Preferences', () => {
   beforeEach(() => {
     // Reset all mocks to prevent test pollution
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     // Setup localStorage mock for this test
-    (window.localStorage.getItem as jest.Mock).mockImplementation((key) => {
+    vi.spyOn(window.localStorage, 'getItem').mockImplementation((key: string) => {
       if (key === 'auth_token') return 'mock-token';
       if (key === 'theme') return 'light';
       return null;
@@ -103,14 +110,14 @@ describe('UserProfile Preferences', () => {
       isAuthenticated: true,
       isLoading: false,
       error: null,
-      signInWithGoogle: jest.fn(),
-      signInWithFacebook: jest.fn(),
-      signInWithEmail: jest.fn(),
-      signUp: jest.fn(),
-      signOut: jest.fn(),
-      updateProfile: jest.fn().mockResolvedValue({}),
-      refreshUser: jest.fn(),
-      clearError: jest.fn(),
+      signInWithGoogle: vi.fn(),
+      signInWithFacebook: vi.fn(),
+      signInWithEmail: vi.fn(),
+      signUp: vi.fn(),
+      signOut: vi.fn(),
+      updateProfile: vi.fn().mockResolvedValue({}),
+      refreshUser: vi.fn(),
+      clearError: vi.fn(),
     });
   });
 
@@ -118,7 +125,7 @@ describe('UserProfile Preferences', () => {
   it('should render preferences section with current values', async () => {
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -136,7 +143,7 @@ describe('UserProfile Preferences', () => {
 
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -156,7 +163,7 @@ describe('UserProfile Preferences', () => {
 
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -176,7 +183,7 @@ describe('UserProfile Preferences', () => {
 
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -193,7 +200,7 @@ describe('UserProfile Preferences', () => {
 
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -207,7 +214,7 @@ describe('UserProfile Preferences', () => {
 
   it('should save preferences when save button is clicked', async () => {
     const user = userEvent.setup();
-    const mockUpdateProfile = jest.fn().mockResolvedValue({});
+    const mockUpdateProfile = vi.fn().mockResolvedValue({});
 
     // Override the mock for this specific test
     mockUseAuth.mockReturnValue({
@@ -215,19 +222,19 @@ describe('UserProfile Preferences', () => {
       isAuthenticated: true,
       isLoading: false,
       error: null,
-      signInWithGoogle: jest.fn(),
-      signInWithFacebook: jest.fn(),
-      signInWithEmail: jest.fn(),
-      signUp: jest.fn(),
-      signOut: jest.fn(),
+      signInWithGoogle: vi.fn(),
+      signInWithFacebook: vi.fn(),
+      signInWithEmail: vi.fn(),
+      signUp: vi.fn(),
+      signOut: vi.fn(),
       updateProfile: mockUpdateProfile,
-      refreshUser: jest.fn(),
-      clearError: jest.fn(),
+      refreshUser: vi.fn(),
+      clearError: vi.fn(),
     });
 
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -243,7 +250,7 @@ describe('UserProfile Preferences', () => {
   it('should show all available theme options', async () => {
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -258,7 +265,7 @@ describe('UserProfile Preferences', () => {
   it('should show all available chart type options', async () => {
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -275,7 +282,7 @@ describe('UserProfile Preferences', () => {
   it('should have save preferences button visible', () => {
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -289,7 +296,7 @@ describe('UserProfile Preferences', () => {
 
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -312,7 +319,7 @@ describe('UserProfile Preferences', () => {
 
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -337,7 +344,7 @@ describe('UserProfile Preferences', () => {
   });
 
   it('should show error message when updateProfile fails', async () => {
-    const mockUpdateProfile = jest.fn().mockRejectedValue(new Error('Update failed'));
+    const mockUpdateProfile = vi.fn().mockRejectedValue(new Error('Update failed'));
 
     // Override the mock for this specific test
     mockUseAuth.mockReturnValue({
@@ -345,19 +352,19 @@ describe('UserProfile Preferences', () => {
       isAuthenticated: true,
       isLoading: false,
       error: null,
-      signInWithGoogle: jest.fn(),
-      signInWithFacebook: jest.fn(),
-      signInWithEmail: jest.fn(),
-      signUp: jest.fn(),
-      signOut: jest.fn(),
+      signInWithGoogle: vi.fn(),
+      signInWithFacebook: vi.fn(),
+      signInWithEmail: vi.fn(),
+      signUp: vi.fn(),
+      signOut: vi.fn(),
       updateProfile: mockUpdateProfile,
-      refreshUser: jest.fn(),
-      clearError: jest.fn(),
+      refreshUser: vi.fn(),
+      clearError: vi.fn(),
     });
 
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -372,7 +379,7 @@ describe('UserProfile Preferences', () => {
   it('should display account information correctly', async () => {
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -402,7 +409,7 @@ describe('UserProfile Preferences', () => {
   it('should display user role and provider badges', async () => {
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -413,8 +420,8 @@ describe('UserProfile Preferences', () => {
 
   it('should handle sign out functionality', async () => {
     const user = userEvent.setup();
-    const mockSignOut = jest.fn().mockResolvedValue({});
-    const mockOnClose = jest.fn();
+    const mockSignOut = vi.fn().mockResolvedValue({});
+    const mockOnClose = vi.fn();
 
     // Override the mock for this specific test
     mockUseAuth.mockReturnValue({
@@ -422,14 +429,14 @@ describe('UserProfile Preferences', () => {
       isAuthenticated: true,
       isLoading: false,
       error: null,
-      signInWithGoogle: jest.fn(),
-      signInWithFacebook: jest.fn(),
-      signInWithEmail: jest.fn(),
-      signUp: jest.fn(),
+      signInWithGoogle: vi.fn(),
+      signInWithFacebook: vi.fn(),
+      signInWithEmail: vi.fn(),
+      signUp: vi.fn(),
       signOut: mockSignOut,
-      updateProfile: jest.fn(),
-      refreshUser: jest.fn(),
-      clearError: jest.fn(),
+      updateProfile: vi.fn(),
+      refreshUser: vi.fn(),
+      clearError: vi.fn(),
     });
 
     render(
@@ -454,19 +461,19 @@ describe('UserProfile Preferences', () => {
       isAuthenticated: false,
       isLoading: false,
       error: null,
-      signInWithGoogle: jest.fn(),
-      signInWithFacebook: jest.fn(),
-      signInWithEmail: jest.fn(),
-      signUp: jest.fn(),
-      signOut: jest.fn(),
-      updateProfile: jest.fn(),
-      refreshUser: jest.fn(),
-      clearError: jest.fn(),
+      signInWithGoogle: vi.fn(),
+      signInWithFacebook: vi.fn(),
+      signInWithEmail: vi.fn(),
+      signUp: vi.fn(),
+      signOut: vi.fn(),
+      updateProfile: vi.fn(),
+      refreshUser: vi.fn(),
+      clearError: vi.fn(),
     });
 
     const { container } = render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -475,7 +482,7 @@ describe('UserProfile Preferences', () => {
   });
 
   it('should display error alert when error is present', async () => {
-    const mockClearError = jest.fn();
+    const mockClearError = vi.fn();
 
     // Override the mock for this specific test
     mockUseAuth.mockReturnValue({
@@ -483,19 +490,19 @@ describe('UserProfile Preferences', () => {
       isAuthenticated: true,
       isLoading: false,
       error: 'Profile update failed',
-      signInWithGoogle: jest.fn(),
-      signInWithFacebook: jest.fn(),
-      signInWithEmail: jest.fn(),
-      signUp: jest.fn(),
-      signOut: jest.fn(),
-      updateProfile: jest.fn(),
-      refreshUser: jest.fn(),
+      signInWithGoogle: vi.fn(),
+      signInWithFacebook: vi.fn(),
+      signInWithEmail: vi.fn(),
+      signUp: vi.fn(),
+      signOut: vi.fn(),
+      updateProfile: vi.fn(),
+      refreshUser: vi.fn(),
       clearError: mockClearError,
     });
 
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -519,7 +526,7 @@ describe('UserProfile Preferences', () => {
 
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -554,7 +561,7 @@ describe('UserProfile Preferences', () => {
   it('should have edit button for basic information', async () => {
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
@@ -566,7 +573,7 @@ describe('UserProfile Preferences', () => {
   it('should display user preferences correctly', async () => {
     render(
       <TestWrapper>
-        <UserProfile open={true} onClose={jest.fn()} />
+        <UserProfile open={true} onClose={vi.fn()} />
       </TestWrapper>
     );
 
