@@ -405,13 +405,15 @@ export default function UserManagementPage() {
           Refresh
         </Button>
         <TextField
-          placeholder="Search users..."
+          label="Search users"
+          placeholder="Enter name or email..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           InputProps={{
             startAdornment: <Search sx={{ mr: 1, color: "text.secondary" }} />,
           }}
           sx={{ minWidth: 200 }}
+          aria-label="Search users by name or email"
         />
         <FormControl sx={{ minWidth: 120 }}>
           <InputLabel>Role Filter</InputLabel>
@@ -419,6 +421,8 @@ export default function UserManagementPage() {
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}
             label="Role Filter"
+            MenuProps={{ disablePortal: true }}
+            data-testid="role-filter-select"
           >
             <MenuItem value="all">All Roles</MenuItem>
             <MenuItem value="super_admin">Super Admin</MenuItem>
@@ -435,8 +439,8 @@ export default function UserManagementPage() {
           onChange={handleTabChange}
           aria-label="user management tabs"
         >
-          <Tab label="All Users" />
-          <Tab label="Online Users" />
+          <Tab label="All Users" id="user-tab-0" />
+          <Tab label="Online Users" id="user-tab-1" />
         </Tabs>
 
         <TabPanel value={tabValue} index={0}>
@@ -512,6 +516,7 @@ export default function UserManagementPage() {
                                 updateUserMutation.isPending ||
                                 user.id === currentUser?.id
                               }
+                              aria-label={`Edit user ${user.name}`}
                             >
                               <Edit />
                             </IconButton>
@@ -530,6 +535,7 @@ export default function UserManagementPage() {
                                 updateUserMutation.isPending ||
                                 user.id === currentUser?.id
                               }
+                              aria-label={`${user.status === "active" ? "Suspend" : "Activate"} user ${user.name}`}
                             >
                               {user.status === "active" ? (
                                 <Block />
@@ -546,6 +552,7 @@ export default function UserManagementPage() {
                                 deleteUserMutation.isPending ||
                                 user.id === currentUser?.id
                               }
+                              aria-label={`Delete user ${user.name}`}
                             >
                               <Delete />
                             </IconButton>
@@ -664,6 +671,7 @@ export default function UserManagementPage() {
                             size="small"
                             onClick={() => handleForceLogout(user.id)}
                             disabled={user.id === currentUser?.id}
+                            aria-label={`Force logout user ${user.name}`}
                           >
                             <Logout />
                           </IconButton>
@@ -717,6 +725,8 @@ export default function UserManagementPage() {
                 value={formData.role}
                 onChange={(e) => handleFormChange("role", e.target.value)}
                 label="Role"
+                MenuProps={{ disablePortal: true }}
+                data-testid="user-role-select"
               >
                 <MenuItem value="read_only">Read Only</MenuItem>
                 <MenuItem value="admin">Admin</MenuItem>
@@ -729,6 +739,8 @@ export default function UserManagementPage() {
                 value={formData.status}
                 onChange={(e) => handleFormChange("status", e.target.value)}
                 label="Status"
+                MenuProps={{ disablePortal: true }}
+                data-testid="user-status-select"
               >
                 <MenuItem value="active">Active</MenuItem>
                 <MenuItem value="inactive">Inactive</MenuItem>

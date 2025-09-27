@@ -175,8 +175,30 @@ const handlers = [
             case "loading":
               response = getUsersLoading;
               break;
-            default:
-              response = getUsersSuccess;
+            default: {
+              // Apply search filtering to mock data
+              const searchParam = (request as any).variables?.search;
+              if (searchParam) {
+                const filteredResponse = {
+                  ...getUsersSuccess,
+                  data: {
+                    ...getUsersSuccess.data,
+                    users: getUsersSuccess.data.users.filter(
+                      (user: any) =>
+                        user.name
+                          .toLowerCase()
+                          .includes(searchParam.toLowerCase()) ||
+                        user.email
+                          .toLowerCase()
+                          .includes(searchParam.toLowerCase()),
+                    ),
+                  },
+                };
+                response = filteredResponse;
+              } else {
+                response = getUsersSuccess;
+              }
+            }
           }
           break;
 
