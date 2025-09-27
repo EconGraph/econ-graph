@@ -106,18 +106,27 @@ export const handlers = [
     const body = await request.json();
     const { query, variables } = body;
 
+    console.log("[MSW] Query:", query);
+    console.log("[MSW] Variables:", variables);
+
     // Handle different GraphQL operations
+    console.log("[MSW] Checking query:", query.includes("GetCrawlerStatus"));
+
     if (query.includes("GetCrawlerStatus")) {
+      console.log("[MSW] Returning crawler status");
       return new Response(
         JSON.stringify({
           data: {
             crawlerStatus: {
-              isRunning: true,
-              isPaused: false,
-              currentTask: "Processing FRED data",
+              is_running: true,
+              is_paused: false,
+              current_task: "Processing FRED data",
               progress: 0.65,
-              lastUpdate: "2024-01-15T10:30:00Z",
+              last_update: "2024-01-15T10:30:00Z",
               error: null,
+              active_workers: 3,
+              last_crawl: "2024-01-15T10:30:00Z",
+              next_scheduled_crawl: "2024-01-15T11:30:00Z",
             },
           },
         }),
@@ -130,16 +139,20 @@ export const handlers = [
     }
 
     if (query.includes("GetQueueStatistics")) {
+      console.log("[MSW] Returning queue statistics");
       return new Response(
         JSON.stringify({
           data: {
             queueStatistics: {
-              totalItems: 150,
-              processedItems: 97,
-              failedItems: 3,
-              pendingItems: 45,
-              processingRate: 12.5,
-              estimatedTimeRemaining: 2400,
+              total_items: 1247,
+              processed_items: 1200,
+              failed_items: 21,
+              pending_items: 23,
+              processing_items: 3,
+              completed_items: 1200,
+              retrying_items: 0,
+              oldest_pending: "2024-01-15T10:30:00Z",
+              average_processing_time: 2.3,
             },
           },
         }),
@@ -152,16 +165,21 @@ export const handlers = [
     }
 
     if (query.includes("GetPerformanceMetrics")) {
+      console.log("[MSW] Returning performance metrics");
       return new Response(
         JSON.stringify({
           data: {
-            performanceMetrics: {
-              averageProcessingTime: 2.3,
-              successRate: 0.97,
-              throughputPerHour: 450,
-              memoryUsage: 2.1,
-              cpuUsage: 45.2,
-            },
+            performanceMetrics: [
+              {
+                timestamp: "2024-01-15T10:30:00Z",
+                cpu_usage_percent: 45.2,
+                memory_usage_percent: 2.1,
+                queue_depth: 23,
+                error_rate_percent: 1.7,
+                throughput_per_minute: 7.5,
+                average_response_time_ms: 2300,
+              },
+            ],
           },
         }),
         {
@@ -173,6 +191,7 @@ export const handlers = [
     }
 
     if (query.includes("GetCrawlerLogs")) {
+      console.log("[MSW] Returning crawler logs");
       return new Response(
         JSON.stringify({
           data: {
@@ -183,15 +202,21 @@ export const handlers = [
                 level: "info",
                 source: "FRED",
                 message: "Successfully crawled GDP data",
-                duration: 2.3,
+                details: null,
+                duration_ms: 2300,
                 status: "success",
+                created_at: "2024-01-15T10:00:00Z",
               },
               {
                 id: "log2",
                 timestamp: "2024-01-15T10:29:45Z",
                 level: "warning",
-                message: "Rate limit approaching for API endpoint",
                 source: "crawler",
+                message: "Rate limit approaching for API endpoint",
+                details: null,
+                duration_ms: null,
+                status: null,
+                created_at: "2024-01-15T10:29:45Z",
               },
             ],
           },
