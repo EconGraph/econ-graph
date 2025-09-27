@@ -1,3 +1,36 @@
+//! # Database Management
+//!
+//! This module provides database connection management and utilities for the `EconGraph` system.
+//! It handles connection pooling, migrations, and database health monitoring.
+//!
+//! ## Features
+//!
+//! - **Connection Pooling**: Efficient database connection management with bb8
+//! - **Async Operations**: Full async/await support with diesel-async
+//! - **Migration Management**: Automated database schema migrations
+//! - **Health Monitoring**: Database connectivity and performance monitoring
+//! - **Error Handling**: Comprehensive error handling with custom error types
+//!
+//! ## Usage
+//!
+//! ```rust,no_run
+//! use econ_graph_core::database::{create_pool, run_migrations, DatabasePool};
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let database_url = "postgresql://user:pass@localhost/econ_graph";
+//!
+//!     // Create connection pool
+//!     let pool = create_pool(database_url).await?;
+//!
+//!     // Run migrations
+//!     run_migrations(database_url).await?;
+//!
+//!     // Use pool for database operations
+//!     Ok(())
+//! }
+//! ```
+
 use diesel_async::pooled_connection::{
     bb8::Pool, bb8::PooledConnection, AsyncDieselConnectionManager,
 };
@@ -15,6 +48,10 @@ pub type DatabasePool = Pool<AsyncPgConnection>;
 pub type PooledConn<'a> = PooledConnection<'a, AsyncPgConnection>;
 
 /// Create a database connection pool
+///
+/// # Errors
+///
+/// Returns an error if the database URL is invalid or connection fails
 pub async fn create_pool(database_url: &str) -> AppResult<DatabasePool> {
     let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
 
@@ -31,6 +68,10 @@ pub async fn create_pool(database_url: &str) -> AppResult<DatabasePool> {
 }
 
 /// Test database connectivity
+///
+/// # Errors
+///
+/// Returns an error if the connection test fails
 pub async fn test_connection(pool: &DatabasePool) -> AppResult<()> {
     let mut conn = pool.get().await.map_err(|e| {
         let error_msg = format!("Failed to get database connection: {}", e);
@@ -58,6 +99,10 @@ pub async fn test_connection(pool: &DatabasePool) -> AppResult<()> {
 
 /// Run database migrations
 /// Note: Migrations require a synchronous connection
+///
+/// # Errors
+///
+/// Returns an error if migrations fail to run
 pub async fn run_migrations(database_url: &str) -> AppResult<()> {
     use diesel::Connection;
     use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
@@ -108,6 +153,10 @@ pub async fn run_migrations(database_url: &str) -> AppResult<()> {
 
 /// Execute a database transaction
 /// Note: Simplified implementation - transactions are complex with current type setup
+///
+/// # Errors
+///
+/// Returns an error if the transaction fails
 pub async fn execute_with_connection<T, E, F, Fut>(pool: &DatabasePool, f: F) -> Result<T, E>
 where
     F: FnOnce(&mut AsyncPgConnection) -> Fut + Send,
@@ -129,6 +178,10 @@ where
 }
 
 /// Check database health
+///
+/// # Errors
+///
+/// Returns an error if the database health check fails
 pub async fn check_database_health(pool: &DatabasePool) -> AppResult<()> {
     test_connection(pool).await
 }

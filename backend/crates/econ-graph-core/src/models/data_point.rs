@@ -7,7 +7,7 @@ use validator::Validate;
 
 use crate::schema::data_points;
 
-/// **DataPoint Model**
+/// **`DataPoint` Model**
 ///
 /// Represents a single observation in an economic time series, containing both the actual
 /// data value and important metadata about data provenance and revisions.
@@ -24,7 +24,7 @@ use crate::schema::data_points;
 /// - Enabling historical analysis of data revision patterns
 ///
 /// # Database Schema
-/// Maps to the `data_points` table in PostgreSQL with full ACID compliance.
+/// Maps to the `data_points` table in `PostgreSQL` with full ACID compliance.
 /// Indexes are maintained on `series_id`, `date`, and `revision_date` for optimal query performance.
 ///
 /// # Examples
@@ -66,7 +66,7 @@ pub struct DataPoint {
     pub date: NaiveDate,
 
     /// The actual numeric value of the economic observation
-    /// Uses BigDecimal for precise financial/economic calculations without floating-point errors
+    /// Uses `BigDecimal` for precise financial/economic calculations without floating-point errors
     /// None indicates missing or unavailable data for this observation period
     pub value: Option<BigDecimal>,
 
@@ -89,17 +89,17 @@ pub struct DataPoint {
     pub updated_at: DateTime<Utc>,
 }
 
-/// **NewDataPoint Model**
+/// **`NewDataPoint` Model**
 ///
 /// Data transfer object for creating new data point records in the database.
 /// Contains only the fields that can be specified during insertion, while
 /// auto-generated fields (id, timestamps) are handled by the database.
 ///
 /// # Validation Rules
-/// - series_id must reference an existing economic series
+/// - `series_id` must reference an existing economic series
 /// - date cannot be in the future beyond reasonable forecast horizons
 /// - value precision is limited to avoid storage issues with extreme decimals
-/// - revision_date should not be before the observation date
+/// - `revision_date` should not be before the observation date
 ///
 /// # Use Cases
 /// - Inserting new economic observations from data feeds
@@ -148,7 +148,7 @@ pub struct NewDataPoint {
     pub is_original_release: bool,
 }
 
-/// **UpdateDataPoint Model**
+/// **`UpdateDataPoint` Model**
 ///
 /// Data transfer object for modifying existing data point records.
 /// Supports partial updates where only specified fields are changed,
@@ -160,7 +160,7 @@ pub struct NewDataPoint {
 /// - Data quality improvements: Correct erroneous values or classifications
 ///
 /// # Audit Trail
-/// The updated_at timestamp is automatically set to track when changes occur,
+/// The `updated_at` timestamp is automatically set to track when changes occur,
 /// supporting compliance and data governance requirements.
 ///
 /// # Examples
@@ -198,7 +198,7 @@ pub struct UpdateDataPoint {
     pub updated_at: DateTime<Utc>,
 }
 
-/// **DataPointWithSeries Model**
+/// **`DataPointWithSeries` Model**
 ///
 /// Enhanced data point model that includes series metadata for API responses.
 /// Combines data point information with series context to provide complete
@@ -248,7 +248,7 @@ pub struct DataPointWithSeries {
     pub units: Option<String>,
 }
 
-/// **DataQueryParams Model**
+/// **`DataQueryParams` Model**
 ///
 /// Parameters for querying data points with filtering, pagination, and data vintage controls.
 /// Provides flexible access to time series data while maintaining performance through
@@ -266,7 +266,7 @@ pub struct DataPointWithSeries {
 /// - Date ranges are validated for logical consistency
 ///
 /// # Performance Optimizations
-/// - Database indexes support efficient filtering on series_id and date ranges
+/// - Database indexes support efficient filtering on `series_id` and date ranges
 /// - Limit and offset enable cursor-based pagination for large result sets
 /// - Optional parameters reduce query complexity when not needed
 ///
@@ -323,7 +323,7 @@ pub struct DataQueryParams {
     pub offset: Option<i64>,
 }
 
-/// **DataTransformation Enum**
+/// **`DataTransformation` Enum**
 ///
 /// Defines the mathematical transformations that can be applied to economic time series data.
 /// These transformations are essential for economic analysis, allowing users to view data
@@ -336,11 +336,11 @@ pub struct DataQueryParams {
 /// - Log differences approximate continuous growth rates
 ///
 /// # Transformation Applications
-/// - **YearOverYear**: Shows annual growth rates, smooths seasonal patterns
-/// - **QuarterOverQuarter**: Reveals quarterly momentum, useful for GDP analysis
-/// - **MonthOverMonth**: Captures short-term changes, sensitive to volatility
-/// - **PercentChange**: General-purpose growth rate calculation
-/// - **LogDifference**: Approximates continuous compounding, useful for modeling
+/// - **`YearOverYear`**: Shows annual growth rates, smooths seasonal patterns
+/// - **`QuarterOverQuarter`**: Reveals quarterly momentum, useful for GDP analysis
+/// - **`MonthOverMonth`**: Captures short-term changes, sensitive to volatility
+/// - **`PercentChange`**: General-purpose growth rate calculation
+/// - **`LogDifference`**: Approximates continuous compounding, useful for modeling
 ///
 /// # Use Cases
 /// - Economic research requiring different data perspectives
@@ -359,15 +359,15 @@ pub enum DataTransformation {
     /// Use for: Absolute levels, when original scale is meaningful
     None,
 
-    /// Year-over-year percentage change: ((current - year_ago) / year_ago) * 100
+    /// Year-over-year percentage change: ((current - `year_ago`) / `year_ago`) * 100
     /// Use for: Annual growth rates, removing seasonal effects
     YearOverYear,
 
-    /// Quarter-over-quarter percentage change: ((current - quarter_ago) / quarter_ago) * 100
+    /// Quarter-over-quarter percentage change: ((current - `quarter_ago`) / `quarter_ago`) * 100
     /// Use for: Quarterly momentum, short-term trend analysis
     QuarterOverQuarter,
 
-    /// Month-over-month percentage change: ((current - month_ago) / month_ago) * 100
+    /// Month-over-month percentage change: ((current - `month_ago`) / `month_ago`) * 100
     /// Use for: Monthly changes, high-frequency analysis
     MonthOverMonth,
 
@@ -380,7 +380,7 @@ pub enum DataTransformation {
     LogDifference,
 }
 
-/// **Display Implementation for DataTransformation**
+/// **Display Implementation for `DataTransformation`**
 ///
 /// Provides human-readable string representations for UI display and logging.
 /// These strings are used in chart labels, API responses, and user interfaces
@@ -398,7 +398,7 @@ impl std::fmt::Display for DataTransformation {
     }
 }
 
-/// **String Conversion Implementation for DataTransformation**
+/// **String Conversion Implementation for `DataTransformation`**
 ///
 /// Enables flexible parsing of transformation types from various string formats.
 /// Supports multiple aliases and formats to accommodate different input sources
@@ -406,7 +406,7 @@ impl std::fmt::Display for DataTransformation {
 ///
 /// # Supported Formats
 /// - Abbreviations: "yoy", "qoq", "mom", "pct", "log"
-/// - Underscore format: "year_over_year", "month_over_month"
+/// - Underscore format: "`year_over_year`", "`month_over_month`"
 /// - Hyphenated format: "year-over-year", "quarter-over-quarter"
 /// - Case insensitive matching for user convenience
 ///
@@ -428,7 +428,7 @@ impl From<String> for DataTransformation {
     }
 }
 
-/// **TransformedDataPoint Model**
+/// **`TransformedDataPoint` Model**
 ///
 /// Represents a data point that has undergone mathematical transformation for analysis.
 /// Contains both the original value and the computed transformation result, enabling
@@ -473,7 +473,7 @@ pub struct TransformedDataPoint {
     pub is_original_release: bool,
 }
 
-/// **DataPoint Implementation**
+/// **`DataPoint` Implementation**
 ///
 /// Provides methods for calculating common economic transformations on individual data points.
 /// These methods form the building blocks for time series transformations and enable
@@ -486,13 +486,13 @@ impl DataPoint {
     /// that smooths out seasonal variations and reveals long-term trends.
     ///
     /// # Formula
-    /// YoY Change = ((Current Value - Previous Year Value) / Previous Year Value) * 100
+    /// `YoY` Change = ((Current Value - Previous Year Value) / Previous Year Value) * 100
     ///
     /// # Parameters
     /// - `previous_year_value`: The value from the same period one year ago
     ///
     /// # Returns
-    /// - `Some(BigDecimal)`: The YoY percentage change if calculation is possible
+    /// - `Some(BigDecimal)`: The `YoY` percentage change if calculation is possible
     /// - `None`: If current value, previous value is missing, or previous value is zero
     ///
     /// # Use Cases
@@ -541,13 +541,13 @@ impl DataPoint {
     /// and is particularly useful for analyzing business cycles.
     ///
     /// # Formula
-    /// QoQ Change = ((Current Value - Previous Quarter Value) / Previous Quarter Value) * 100
+    /// `QoQ` Change = ((Current Value - Previous Quarter Value) / Previous Quarter Value) * 100
     ///
     /// # Parameters
     /// - `previous_quarter_value`: The value from the previous quarter
     ///
     /// # Returns
-    /// - `Some(BigDecimal)`: The QoQ percentage change if calculation is possible
+    /// - `Some(BigDecimal)`: The `QoQ` percentage change if calculation is possible
     /// - `None`: If current value, previous value is missing, or previous value is zero
     ///
     /// # Use Cases
@@ -596,13 +596,13 @@ impl DataPoint {
     /// economic changes but can be volatile due to short-term fluctuations.
     ///
     /// # Formula
-    /// MoM Change = ((Current Value - Previous Month Value) / Previous Month Value) * 100
+    /// `MoM` Change = ((Current Value - Previous Month Value) / Previous Month Value) * 100
     ///
     /// # Parameters
     /// - `previous_month_value`: The value from the previous month
     ///
     /// # Returns
-    /// - `Some(BigDecimal)`: The MoM percentage change if calculation is possible
+    /// - `Some(BigDecimal)`: The `MoM` percentage change if calculation is possible
     /// - `None`: If current value, previous value is missing, or previous value is zero
     ///
     /// # Use Cases

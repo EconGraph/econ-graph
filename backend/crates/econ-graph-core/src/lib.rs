@@ -2,9 +2,9 @@
 // Licensed under the Microsoft Reference Source License (MS-RSL).
 // See LICENSE file for complete terms and conditions.
 
-//! # EconGraph Core
+//! # `EconGraph` Core
 //!
-//! Core data models, database schema, and shared utilities for the EconGraph system.
+//! Core data models, database schema, and shared utilities for the `EconGraph` system.
 //! This crate provides the foundation layer that other crates depend on.
 
 pub mod auth_models;

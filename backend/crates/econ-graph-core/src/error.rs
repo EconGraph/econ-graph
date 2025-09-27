@@ -1,3 +1,29 @@
+//! # Error Handling
+//!
+//! This module provides comprehensive error handling for the `EconGraph` system.
+//! It defines custom error types, logging utilities, and HTTP error responses.
+//!
+//! ## Features
+//!
+//! - **Custom Error Types**: Application-specific error variants with context
+//! - **Error Logging**: Structured logging with context and tracing
+//! - **HTTP Integration**: Automatic conversion to HTTP responses
+//! - **Error Macros**: Convenient macros for error handling and logging
+//! - **Warp Integration**: Seamless integration with Warp web framework
+//!
+//! ## Usage
+//!
+//! ```rust,no_run
+//! use econ_graph_core::error::{AppError, AppResult};
+//! use econ_graph_core::log_and_return;
+//!
+//! async fn example_function() -> AppResult<String> {
+//!     // Create an error with context
+//!     let error = AppError::ValidationError("Invalid input".to_string());
+//!     log_and_return!(error, "Failed to process user input");
+//! }
+//! ```
+
 use serde_json::json;
 use thiserror::Error;
 use warp::{http::StatusCode, reject::Reject, Reply};
@@ -121,7 +147,11 @@ pub enum AppError {
 
 impl Reject for AppError {}
 
-/// Convert AppError to HTTP response
+/// Convert `AppError` to HTTP response
+///
+/// # Errors
+///
+/// This function never returns an error as it converts all errors to HTTP responses
 pub fn handle_rejection(err: warp::Rejection) -> Result<impl Reply, std::convert::Infallible> {
     let (code, message) = if err.is_not_found() {
         tracing::warn!("404 Not Found: {:?}", err);

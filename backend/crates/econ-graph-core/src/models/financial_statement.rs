@@ -8,7 +8,7 @@ use validator::Validate;
 use crate::enums::{CompressionType, ProcessingStatus};
 use crate::schema::financial_statements;
 
-/// **FinancialStatement Model**
+/// **`FinancialStatement` Model**
 ///
 /// Represents a financial statement filing from SEC EDGAR.
 /// This model stores metadata about XBRL financial filings including
@@ -21,7 +21,7 @@ use crate::schema::financial_statements;
 /// - Enabling time-series analysis of financial data
 ///
 /// # Database Schema
-/// Maps to the `financial_statements` table in PostgreSQL with comprehensive filing information.
+/// Maps to the `financial_statements` table in `PostgreSQL` with comprehensive filing information.
 /// Indexes are maintained on `company_id`, `filing_type`, `filing_date`, `period_end_date`,
 /// `fiscal_year`, `fiscal_quarter`, and `accession_number` for optimal query performance.
 ///
@@ -80,7 +80,7 @@ pub struct FinancialStatement {
     pub filing_type: String,
 
     /// Form type as specified in the filing - Required, always available from SEC
-    /// May differ from filing_type in some cases
+    /// May differ from `filing_type` in some cases
     pub form_type: String,
 
     /// SEC accession number - unique identifier for the filing
@@ -106,14 +106,14 @@ pub struct FinancialStatement {
     pub fiscal_quarter: Option<i32>,
 
     /// Document type as specified in the filing - Required, always available
-    /// Additional classification beyond filing_type
+    /// Additional classification beyond `filing_type`
     pub document_type: String,
 
     /// URL to the original filing document on SEC EDGAR - Required, always available from SEC
     /// Direct link to the HTML or PDF version of the filing
     pub document_url: String,
 
-    /// PostgreSQL Large Object OID for XBRL file - Nullable, file may not be downloaded yet
+    /// `PostgreSQL` Large Object OID for XBRL file - Nullable, file may not be downloaded yet
     /// Used for storing large XBRL files as PostgreSQL Large Objects
     pub xbrl_file_oid: Option<u32>,
 
@@ -182,7 +182,7 @@ pub struct FinancialStatement {
     pub updated_at: DateTime<Utc>,
 }
 
-/// **NewFinancialStatement Model**
+/// **`NewFinancialStatement` Model**
 ///
 /// Data transfer object for creating new financial statement records in the database.
 /// Excludes auto-generated fields like `id`, `created_at`, and `updated_at`.
@@ -263,7 +263,7 @@ pub struct NewFinancialStatement {
     #[validate(url)]
     pub document_url: String,
 
-    /// PostgreSQL Large Object OID for XBRL file - Nullable, file may not be downloaded yet
+    /// `PostgreSQL` Large Object OID for XBRL file - Nullable, file may not be downloaded yet
     pub xbrl_file_oid: Option<u32>,
 
     /// XBRL file content stored as bytea - Nullable, file may not be downloaded yet
@@ -310,7 +310,7 @@ pub struct NewFinancialStatement {
     pub restatement_reason: Option<String>,
 }
 
-/// **FinancialStatementWithCompany Model**
+/// **`FinancialStatementWithCompany` Model**
 ///
 /// Extended financial statement model that includes company information.
 /// Used for queries that need both statement and company data.
@@ -340,7 +340,7 @@ pub struct FinancialStatementWithCompany {
     pub company: crate::models::company::Company,
 }
 
-/// **FinancialStatementQueryParams Model**
+/// **`FinancialStatementQueryParams` Model**
 ///
 /// Parameters for querying financial statements with filtering and pagination.
 /// Provides flexible filtering capabilities for statement discovery and analysis.
@@ -429,7 +429,7 @@ pub struct FinancialStatementQueryParams {
     pub offset: Option<i64>,
 }
 
-/// **FinancialStatementSummary Model**
+/// **`FinancialStatementSummary` Model**
 ///
 /// Summary information about financial statements for a company.
 /// Used for company overviews and quick financial data access.

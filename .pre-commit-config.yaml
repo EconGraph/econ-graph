@@ -16,24 +16,24 @@ repos:
 
       - id: rust-clippy
         name: Rust Clippy Lints
-        entry: bash -c './scripts/run-clippy.sh'
+        entry: bash -c './scripts/run-clippy-changed.sh'
         language: system
         files: '^backend/.*\.rs$'
         pass_filenames: false
 
       - id: rust-doc-check
         name: Rust Documentation Check
-        entry: bash -c 'cd backend && cargo doc --no-deps --document-private-items --all-features'
+        entry: bash -c './scripts/run-doc-check-changed.sh'
         language: system
         files: '^backend/.*\.rs$'
         pass_filenames: false
 
       - id: rust-file-headers
         name: Rust File Headers Check
-        entry: bash -c 'cd backend && find . -name "*.rs" -not -path "./target/*" -not -path "./crates/*/target/*" | xargs -I {} sh -c "head -n 5 \"{}\" | grep -q \"//!\" || (echo \"Missing file header in {}\" && exit 1)"'
+        entry: bash -c 'for file in "$@"; do if [[ "$file" =~ ^backend/.*\.rs$ ]]; then if ! head -n 5 "$file" | grep -q "//!"; then echo "Missing file header in $file" && exit 1; fi; fi; done'
         language: system
         files: '^backend/.*\.rs$'
-        pass_filenames: false
+        pass_filenames: true
 
   # Frontend formatting and linting
   - repo: local
