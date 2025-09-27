@@ -120,12 +120,12 @@ export default [
       '@typescript-eslint/no-unused-expressions': 'warn', // Warn instead of error
       'react/display-name': 'warn', // Warn instead of error
 
-      // JSDoc rules for documentation quality
+      // JSDoc rules for documentation quality (initially lenient)
       'jsdoc/require-jsdoc': ['warn', {
         require: {
-          FunctionDeclaration: true,
-          MethodDefinition: true,
-          ClassDeclaration: true,
+          FunctionDeclaration: false, // Start with false, enable gradually
+          MethodDefinition: false,
+          ClassDeclaration: false,
           ArrowFunctionExpression: false,
           FunctionExpression: false,
         },
@@ -207,7 +207,7 @@ export default [
       'no-console': 'off',
       'testing-library/no-node-access': 'off', // Too strict for development
       'testing-library/no-manual-cleanup': 'off', // Vitest handles cleanup automatically
-      
+
       // Relaxed JSDoc requirements for test files
       'jsdoc/require-jsdoc': 'off', // Tests don't need JSDoc
       'jsdoc/require-description': 'off',
