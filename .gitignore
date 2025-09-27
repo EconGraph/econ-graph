@@ -97,7 +97,8 @@ codebase-analysis-report.md
 
 # Analysis configuration (customizable)
 codebase-analysis-config*.env
-
+marketing
+EarningsCalls/
 # Demo videos and audio files
 demo-videos/
 *.aiff

@@ -1,0 +1,17 @@
+{
+  "data": {
+    "updateUser": {
+      "id": "2",
+      "name": "Jane Updated",
+      "email": "jane.manager@company.com",
+      "role": "super_admin",
+      "status": "active",
+      "lastLogin": "2024-01-15T09:15:00Z",
+      "createdAt": "2023-07-15T10:30:00Z",
+      "isOnline": true,
+      "sessionId": "sess_def456",
+      "ipAddress": "192.168.1.101",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+    }
+  }
+}

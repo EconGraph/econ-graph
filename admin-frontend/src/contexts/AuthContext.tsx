@@ -2,13 +2,19 @@
 // PURPOSE: Provide secure authentication and session management for administrators
 // This ensures only authorized personnel can access administrative functions
 
-import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useReducer,
+  useEffect,
+  useCallback,
+} from "react";
 
 interface User {
   id: string;
   username: string;
   email: string;
-  role: 'admin' | 'super_admin' | 'read_only';
+  role: "admin" | "super_admin" | "read_only";
   permissions: string[];
   lastLogin: string;
   sessionExpiry: string;
@@ -22,12 +28,12 @@ interface AuthState {
 }
 
 type AuthAction =
-  | { type: 'LOGIN_START' }
-  | { type: 'LOGIN_SUCCESS'; payload: User }
-  | { type: 'LOGIN_FAILURE' }
-  | { type: 'LOGOUT' }
-  | { type: 'SESSION_WARNING'; payload: boolean }
-  | { type: 'REFRESH_TOKEN'; payload: User };
+  | { type: "LOGIN_START" }
+  | { type: "LOGIN_SUCCESS"; payload: User }
+  | { type: "LOGIN_FAILURE" }
+  | { type: "LOGOUT" }
+  | { type: "SESSION_WARNING"; payload: boolean }
+  | { type: "REFRESH_TOKEN"; payload: User };
 
 const initialState: AuthState = {
   user: null,
@@ -38,10 +44,10 @@ const initialState: AuthState = {
 
 function authReducer(state: AuthState, action: AuthAction): AuthState {
   switch (action.type) {
-    case 'LOGIN_START':
+    case "LOGIN_START":
       return { ...state, loading: true };
 
-    case 'LOGIN_SUCCESS':
+    case "LOGIN_SUCCESS":
       return {
         ...state,
         user: action.payload,
@@ -50,7 +56,7 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         sessionWarning: false,
       };
 
-    case 'LOGIN_FAILURE':
+    case "LOGIN_FAILURE":
       return {
         ...state,
         user: null,
@@ -58,19 +64,19 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         loading: false,
       };
 
-    case 'LOGOUT':
+    case "LOGOUT":
       return {
         ...initialState,
         loading: false,
       };
 
-    case 'SESSION_WARNING':
+    case "SESSION_WARNING":
       return {
         ...state,
         sessionWarning: action.payload,
       };
 
-    case 'REFRESH_TOKEN':
+    case "REFRESH_TOKEN":
       return {
         ...state,
         user: action.payload,
@@ -83,7 +89,11 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
 }
 
 interface AuthContextType extends AuthState {
-  login: (username: string, password: string, mfaCode?: string) => Promise<void>;
+  login: (
+    username: string,
+    password: string,
+    mfaCode?: string,
+  ) => Promise<void>;
   logout: () => void;
   refreshSession: () => Promise<void>;
   extendSession: () => Promise<void>;
@@ -97,96 +107,103 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Logout function
   const logout = useCallback(() => {
     // REQUIREMENT: Secure logout with session cleanup
-    const token = localStorage.getItem('admin_token');
+    const token = localStorage.getItem("admin_token");
 
     if (token) {
       // Notify backend of logout
-      fetch('/api/admin/auth/logout', {
-        method: 'POST',
+      fetch("/api/admin/auth/logout", {
+        method: "POST",
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
       }).catch(console.error);
     }
 
     // Clear local storage
-    localStorage.removeItem('admin_token');
+    localStorage.removeItem("admin_token");
 
     // Log logout
-    console.log('🔒 Admin logout', {
+    console.log("🔒 Admin logout", {
       timestamp: new Date().toISOString(),
     });
 
-    dispatch({ type: 'LOGOUT' });
+    dispatch({ type: "LOGOUT" });
   }, []);
 
   // Session monitoring and warnings
-  const startSessionMonitoring = useCallback((user: User) => {
-    const sessionExpiry = new Date(user.sessionExpiry).getTime();
-    const now = Date.now();
-    const timeToExpiry = sessionExpiry - now;
+  const startSessionMonitoring = useCallback(
+    (user: User) => {
+      const sessionExpiry = new Date(user.sessionExpiry).getTime();
+      const now = Date.now();
+      const timeToExpiry = sessionExpiry - now;
 
-    // Warn 5 minutes before expiry
-    const warningTime = timeToExpiry - (5 * 60 * 1000);
+      // Warn 5 minutes before expiry
+      const warningTime = timeToExpiry - 5 * 60 * 1000;
 
-    if (warningTime > 0) {
-      setTimeout(() => {
-        dispatch({ type: 'SESSION_WARNING', payload: true });
-      }, warningTime);
-    }
+      if (warningTime > 0) {
+        setTimeout(() => {
+          dispatch({ type: "SESSION_WARNING", payload: true });
+        }, warningTime);
+      }
 
-    // Auto-logout at expiry
-    if (timeToExpiry > 0) {
-      setTimeout(() => {
-        logout();
-      }, timeToExpiry);
-    }
-  }, [logout]);
+      // Auto-logout at expiry
+      if (timeToExpiry > 0) {
+        setTimeout(() => {
+          logout();
+        }, timeToExpiry);
+      }
+    },
+    [logout],
+  );
 
   // Check for existing session on mount
   useEffect(() => {
     const checkExistingSession = async () => {
       try {
-        const token = localStorage.getItem('admin_token');
+        const token = localStorage.getItem("admin_token");
         if (!token) {
-          dispatch({ type: 'LOGIN_FAILURE' });
+          dispatch({ type: "LOGIN_FAILURE" });
           return;
         }
 
         // Validate token with backend
-        const response = await fetch('/api/admin/auth/validate', {
+        const response = await fetch("/api/admin/auth/validate", {
           headers: {
-            'Authorization': `Bearer ${token}`,
+            Authorization: `Bearer ${token}`,
           },
         });
 
         if (response.ok) {
           const user = await response.json();
-          dispatch({ type: 'LOGIN_SUCCESS', payload: user });
+          dispatch({ type: "LOGIN_SUCCESS", payload: user });
           startSessionMonitoring(user);
         } else {
-          localStorage.removeItem('admin_token');
-          dispatch({ type: 'LOGIN_FAILURE' });
+          localStorage.removeItem("admin_token");
+          dispatch({ type: "LOGIN_FAILURE" });
         }
       } catch (error) {
-        console.error('Session validation failed:', error);
-        localStorage.removeItem('admin_token');
-        dispatch({ type: 'LOGIN_FAILURE' });
+        console.error("Session validation failed:", error);
+        localStorage.removeItem("admin_token");
+        dispatch({ type: "LOGIN_FAILURE" });
       }
     };
 
     checkExistingSession();
   }, [startSessionMonitoring]);
 
-  const login = async (username: string, password: string, mfaCode?: string) => {
-    dispatch({ type: 'LOGIN_START' });
+  const login = async (
+    username: string,
+    password: string,
+    mfaCode?: string,
+  ) => {
+    dispatch({ type: "LOGIN_START" });
 
     try {
       // REQUIREMENT: Secure admin authentication with MFA support
-      const response = await fetch('/api/admin/auth/login', {
-        method: 'POST',
+      const response = await fetch("/api/admin/auth/login", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           username,
@@ -194,7 +211,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           mfaCode,
           clientInfo: {
             userAgent: navigator.userAgent,
-            ipAddress: 'client-side-unknown', // Backend will capture real IP
+            ipAddress: "client-side-unknown", // Backend will capture real IP
             timestamp: new Date().toISOString(),
           },
         }),
@@ -202,86 +219,82 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.message || 'Authentication failed');
+        throw new Error(error.message || "Authentication failed");
       }
 
       const { user, token } = await response.json();
 
       // Store token securely
-      localStorage.setItem('admin_token', token);
+      localStorage.setItem("admin_token", token);
 
       // Log successful login
-      console.log('🔒 Admin login successful', {
+      console.log("🔒 Admin login successful", {
         user: user.username,
         role: user.role,
         timestamp: new Date().toISOString(),
       });
 
-      dispatch({ type: 'LOGIN_SUCCESS', payload: user });
+      dispatch({ type: "LOGIN_SUCCESS", payload: user });
       startSessionMonitoring(user);
-
     } catch (error) {
-      console.error('🚨 Admin login failed:', error);
-      dispatch({ type: 'LOGIN_FAILURE' });
+      console.error("🚨 Admin login failed:", error);
+      dispatch({ type: "LOGIN_FAILURE" });
       throw error;
     }
   };
 
-
   const refreshSession = async () => {
     try {
-      const token = localStorage.getItem('admin_token');
+      const token = localStorage.getItem("admin_token");
       if (!token) {
-        throw new Error('No token available');
+        throw new Error("No token available");
       }
 
-      const response = await fetch('/api/admin/auth/refresh', {
-        method: 'POST',
+      const response = await fetch("/api/admin/auth/refresh", {
+        method: "POST",
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
       });
 
       if (!response.ok) {
-        throw new Error('Token refresh failed');
+        throw new Error("Token refresh failed");
       }
 
       const { user, token: newToken } = await response.json();
-      localStorage.setItem('admin_token', newToken);
+      localStorage.setItem("admin_token", newToken);
 
-      dispatch({ type: 'REFRESH_TOKEN', payload: user });
+      dispatch({ type: "REFRESH_TOKEN", payload: user });
       startSessionMonitoring(user);
-
     } catch (error) {
-      console.error('Session refresh failed:', error);
+      console.error("Session refresh failed:", error);
       logout();
     }
   };
 
   const extendSession = async () => {
     try {
-      const token = localStorage.getItem('admin_token');
+      const token = localStorage.getItem("admin_token");
       if (!token) {
-        throw new Error('No token available');
+        throw new Error("No token available");
       }
 
-      const response = await fetch('/api/admin/auth/extend', {
-        method: 'POST',
+      const response = await fetch("/api/admin/auth/extend", {
+        method: "POST",
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
       });
 
       if (!response.ok) {
-        throw new Error('Session extension failed');
+        throw new Error("Session extension failed");
       }
 
       const { user } = await response.json();
-      dispatch({ type: 'REFRESH_TOKEN', payload: user });
+      dispatch({ type: "REFRESH_TOKEN", payload: user });
       startSessionMonitoring(user);
-
     } catch (error) {
-      console.error('Session extension failed:', error);
+      console.error("Session extension failed:", error);
       throw error;
     }
   };
@@ -294,17 +307,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     extendSession,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 }

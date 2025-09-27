@@ -1,0 +1,12 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Failed to create user: Email already exists",
+      "extensions": {
+        "code": "DUPLICATE_EMAIL",
+        "timestamp": "2024-01-15T10:30:00Z"
+      }
+    }
+  ]
+}

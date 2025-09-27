@@ -1,0 +1,12 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Failed to update user: User not found",
+      "extensions": {
+        "code": "USER_NOT_FOUND",
+        "timestamp": "2024-01-15T10:30:00Z"
+      }
+    }
+  ]
+}

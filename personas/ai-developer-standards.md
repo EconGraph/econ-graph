@@ -460,3 +460,47 @@ When tests fail because they expect different behavior than what the component i
 * ✅ **You've considered multiple perspectives** - User, business, technical
 * ✅ **Your decision aligns with product goals** - Supports overall vision
 * ✅ **You've documented your reasoning** - Clear for future reference
+
+## Testing Verification and False Confidence Prevention
+
+**CRITICAL: Always verify your fixes work before claiming success. Never assume changes will work without testing.**
+
+### The "I Fixed It" Anti-Pattern
+* ❌ **NEVER** claim to have fixed something without actually running the tests that were failing
+* ❌ **NEVER** assume that fixing one error automatically fixes related errors
+* ❌ **NEVER** push changes without verifying they solve the original problem
+* ❌ **NEVER** test only simple cases when the real issue is in complex scenarios
+
+### Proper Testing Verification Process
+1. **Identify the Specific Failing Test**: Get the exact test name and error message
+2. **Run the Failing Test Locally**: Reproduce the issue in your environment
+3. **Make Your Fix**: Address only the specific root cause
+4. **Test the Exact Same Scenario**: Run the same test that was failing
+5. **Verify the Fix Works**: Confirm the test now passes
+6. **Only Then Push**: Don't push until you've verified the fix works locally
+
+### Common Verification Mistakes
+* ❌ **Testing only simple cases** - The real issue might be in complex component tests
+* ❌ **Assuming related tests will pass** - Each test scenario is different
+* ❌ **Not running the exact failing test** - Generic tests don't catch specific issues
+* ❌ **Pushing without local verification** - CI is not your testing environment
+
+### Verification Requirements
+* **Run the Exact Failing Test**: Use the same test command that was failing in CI
+* **Test the Specific Component**: Don't just test simple utility functions
+* **Verify All Related Tests**: If you fix a context issue, test all components using that context
+* **Wait for CI Results**: Even after local verification, wait for CI to confirm
+
+### Red Flags That You're Not Testing Properly
+* You're only testing simple, isolated functions
+* You're not running the exact test that was failing
+* You're assuming your fix will work for all related scenarios
+* You're pushing changes without local verification
+* You're claiming success based on partial test results
+
+### Success Metrics for Testing Verification
+* ✅ **You can run the exact failing test locally and it passes**
+* ✅ **You've tested all components that use the fixed functionality**
+* ✅ **You've verified the fix works in the same environment where it was failing**
+* ✅ **You can explain exactly why your fix addresses the specific error**
+* ✅ **You're confident the fix will work in CI because you've tested it locally**

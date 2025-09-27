@@ -1,0 +1,12 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Failed to retrieve queue statistics",
+      "extensions": {
+        "code": "DATABASE_ERROR",
+        "details": "Database connection timeout"
+      }
+    }
+  ]
+}
