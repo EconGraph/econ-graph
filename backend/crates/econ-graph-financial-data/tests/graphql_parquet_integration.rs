@@ -30,7 +30,7 @@ async fn test_graphql_parquet_integration() -> Result<()> {
 
     // Step 3: Create GraphQL schema with Parquet storage
     let database = Database::new_with_parquet(data_dir.to_string_lossy()).await?;
-    let schema = econ_graph_financial_data::graphql::create_schema(database.clone()).await?;
+    let schema = econ_graph_financial_data::graphql::create_test_schema(database.clone()).await?;
     println!("🌐 GraphQL schema created with Parquet storage");
 
     // Step 4: Test GraphQL queries at payload level

@@ -6,7 +6,7 @@ use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
 use econ_graph_financial_data::database::Database;
-use econ_graph_financial_data::graphql::create_schema;
+use econ_graph_financial_data::graphql::create_test_schema;
 use econ_graph_financial_data::models::{DataPoint, DecimalScalar, EconomicSeries};
 
 /// Comprehensive Iceberg Multi-File Integration Test
@@ -24,7 +24,7 @@ async fn test_iceberg_multi_file_integration() -> Result<(), Box<dyn std::error:
     use async_graphql::http::playground_source;
     use async_graphql::http::GraphQLPlaygroundConfig;
     use econ_graph_financial_data::database::Database;
-    use econ_graph_financial_data::graphql::create_schema;
+    use econ_graph_financial_data::graphql::create_test_schema;
     use econ_graph_financial_data::models::{DataPoint, DecimalScalar, EconomicSeries};
 
     println!("🧊 Starting Iceberg Multi-File Integration Test...");
@@ -145,7 +145,7 @@ async fn test_iceberg_multi_file_integration() -> Result<(), Box<dyn std::error:
 
     // Step 5: Create GraphQL schema for testing
     println!("🔧 Creating GraphQL schema for testing...");
-    let schema = create_schema(database.clone()).await?;
+    let schema = create_test_schema(database.clone()).await?;
     println!("✅ GraphQL schema created");
 
     // Step 6: Test GraphQL queries that span multiple files
@@ -502,7 +502,7 @@ async fn test_graphql_performance_multi_file() -> Result<(), Box<dyn std::error:
 
     // Test GraphQL query performance
     println!("🌐 Testing GraphQL query performance...");
-    let schema = create_schema(database.clone()).await?;
+    let schema = create_test_schema(database.clone()).await?;
 
     // Test 1: Query single file
     let query_start = Instant::now();

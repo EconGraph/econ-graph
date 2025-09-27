@@ -6,7 +6,7 @@ use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
 use econ_graph_financial_data::database::Database;
-use econ_graph_financial_data::graphql::create_schema;
+use econ_graph_financial_data::graphql::create_test_schema;
 use econ_graph_financial_data::models::{DataPoint, DecimalScalar, EconomicSeries};
 
 /// Advanced Iceberg Integration Test Suite
@@ -30,7 +30,7 @@ use econ_graph_financial_data::models::{DataPoint, DecimalScalar, EconomicSeries
 #[tokio::test]
 async fn test_iceberg_schema_evolution() -> Result<(), Box<dyn std::error::Error>> {
     use econ_graph_financial_data::database::Database;
-    use econ_graph_financial_data::graphql::create_schema;
+    use econ_graph_financial_data::graphql::create_test_schema;
     use econ_graph_financial_data::models::{DataPoint, DecimalScalar, EconomicSeries};
 
     println!("🔄 Testing Iceberg Schema Evolution...");
@@ -99,7 +99,7 @@ async fn test_iceberg_schema_evolution() -> Result<(), Box<dyn std::error::Error
 
     // Phase 3: Test backward compatibility - Query old data
     println!("📊 Phase 3: Testing backward compatibility...");
-    let schema = create_schema(database.clone()).await?;
+    let schema = create_test_schema(database.clone()).await?;
 
     // Query data from before schema evolution
     let query_old_data = format!(
@@ -180,7 +180,7 @@ async fn test_iceberg_schema_evolution() -> Result<(), Box<dyn std::error::Error
 #[tokio::test]
 async fn test_iceberg_time_travel() -> Result<(), Box<dyn std::error::Error>> {
     use econ_graph_financial_data::database::Database;
-    use econ_graph_financial_data::graphql::create_schema;
+    use econ_graph_financial_data::graphql::create_test_schema;
     use econ_graph_financial_data::models::{DataPoint, DecimalScalar, EconomicSeries};
 
     println!("⏰ Testing Iceberg Time Travel...");
@@ -260,7 +260,7 @@ async fn test_iceberg_time_travel() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test time travel queries
     println!("🔍 Testing time travel queries...");
-    let schema = create_schema(database.clone()).await?;
+    let schema = create_test_schema(database.clone()).await?;
 
     // Query data as it existed at snapshot 1
     println!("  🕐 Querying data at snapshot 1...");
@@ -379,7 +379,7 @@ async fn test_iceberg_time_travel() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 async fn test_iceberg_acid_transactions() -> Result<(), Box<dyn std::error::Error>> {
     use econ_graph_financial_data::database::Database;
-    use econ_graph_financial_data::graphql::create_schema;
+    use econ_graph_financial_data::graphql::create_test_schema;
     use econ_graph_financial_data::models::{DataPoint, DecimalScalar, EconomicSeries};
 
     println!("🔒 Testing Iceberg ACID Transactions...");
@@ -466,7 +466,7 @@ async fn test_iceberg_acid_transactions() -> Result<(), Box<dyn std::error::Erro
 
     // Test data consistency after concurrent operations
     println!("🔍 Testing data consistency...");
-    let schema = create_schema(database.clone()).await?;
+    let schema = create_test_schema(database.clone()).await?;
 
     let query = format!(
         r#"
@@ -529,7 +529,7 @@ async fn test_iceberg_acid_transactions() -> Result<(), Box<dyn std::error::Erro
 #[tokio::test]
 async fn test_iceberg_partitioning() -> Result<(), Box<dyn std::error::Error>> {
     use econ_graph_financial_data::database::Database;
-    use econ_graph_financial_data::graphql::create_schema;
+    use econ_graph_financial_data::graphql::create_test_schema;
     use econ_graph_financial_data::models::{DataPoint, DecimalScalar, EconomicSeries};
 
     println!("🗂️  Testing Iceberg Partitioning...");
@@ -604,7 +604,7 @@ async fn test_iceberg_partitioning() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test partition pruning - Query only 2020 data
     println!("🔍 Testing partition pruning - 2020 data only...");
-    let schema = create_schema(database.clone()).await?;
+    let schema = create_test_schema(database.clone()).await?;
 
     let query_2020 = format!(
         r#"
@@ -730,7 +730,7 @@ async fn test_iceberg_partitioning() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 async fn test_iceberg_large_dataset() -> Result<(), Box<dyn std::error::Error>> {
     use econ_graph_financial_data::database::Database;
-    use econ_graph_financial_data::graphql::create_schema;
+    use econ_graph_financial_data::graphql::create_test_schema;
     use econ_graph_financial_data::models::{DataPoint, DecimalScalar, EconomicSeries};
     use std::time::Instant;
 
@@ -809,7 +809,7 @@ async fn test_iceberg_large_dataset() -> Result<(), Box<dyn std::error::Error>> 
 
     // Test query performance on large dataset
     println!("🔍 Testing query performance on large dataset...");
-    let schema = create_schema(database.clone()).await?;
+    let schema = create_test_schema(database.clone()).await?;
 
     // Test 1: Query recent data (should be fast due to partition pruning)
     let query_start = Instant::now();

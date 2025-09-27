@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::NaiveDate;
 use std::sync::Arc;
+use std::time::Instant;
 use uuid::Uuid;
 
 use crate::models::{DataPoint, EconomicSeries};
@@ -40,7 +41,18 @@ impl Database {
     }
 
     pub async fn get_series(&self, id: Uuid) -> Result<Option<EconomicSeries>> {
-        self.storage.read_series(id).await
+        let start_time = Instant::now();
+        let result = self.storage.read_series(id).await;
+        let duration = start_time.elapsed();
+        let success = result.is_ok();
+
+        tracing::debug!(
+            "Database operation: get_series, duration: {:?}, success: {}",
+            duration,
+            success
+        );
+
+        result
     }
 
     pub async fn get_data_points(
@@ -49,26 +61,71 @@ impl Database {
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
     ) -> Result<Vec<DataPoint>> {
-        self.storage
+        let start_time = Instant::now();
+        let result = self
+            .storage
             .read_data_points(series_id, start_date, end_date)
-            .await
+            .await;
+        let duration = start_time.elapsed();
+        let success = result.is_ok();
+
+        tracing::debug!(
+            "Database operation: get_data_points, duration: {:?}, success: {}",
+            duration,
+            success
+        );
+
+        result
     }
 
     pub async fn create_series(&self, series: EconomicSeries) -> Result<()> {
-        self.storage.write_series(&series).await
+        let start_time = Instant::now();
+        let result = self.storage.write_series(&series).await;
+        let duration = start_time.elapsed();
+        let success = result.is_ok();
+
+        tracing::debug!(
+            "Database operation: create_series, duration: {:?}, success: {}",
+            duration,
+            success
+        );
+
+        result
     }
 
     pub async fn create_data_points(&self, points: Vec<DataPoint>) -> Result<()> {
-        if let Some(first_point) = points.first() {
+        let start_time = Instant::now();
+        let result = if let Some(first_point) = points.first() {
             self.storage
                 .write_data_points(first_point.series_id, &points)
                 .await
         } else {
             Ok(())
-        }
+        };
+        let duration = start_time.elapsed();
+        let success = result.is_ok();
+
+        tracing::debug!(
+            "Database operation: create_data_points, duration: {:?}, success: {}",
+            duration,
+            success
+        );
+
+        result
     }
 
     pub async fn list_series(&self) -> Result<Vec<EconomicSeries>> {
-        self.storage.list_series().await
+        let start_time = Instant::now();
+        let result = self.storage.list_series().await;
+        let duration = start_time.elapsed();
+        let success = result.is_ok();
+
+        tracing::debug!(
+            "Database operation: list_series, duration: {:?}, success: {}",
+            duration,
+            success
+        );
+
+        result
     }
 }
