@@ -178,14 +178,16 @@ export const handlers = [
           data: {
             crawlerLogs: [
               {
-                id: "1",
-                timestamp: "2024-01-15T10:30:00Z",
+                id: "log1",
+                timestamp: "2024-01-15T10:00:00Z",
                 level: "info",
-                message: "Started crawling economic indicators",
-                source: "crawler",
+                source: "FRED",
+                message: "Successfully crawled GDP data",
+                duration: 2.3,
+                status: "success",
               },
               {
-                id: "2",
+                id: "log2",
                 timestamp: "2024-01-15T10:29:45Z",
                 level: "warning",
                 message: "Rate limit approaching for API endpoint",
