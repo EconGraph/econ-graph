@@ -97,4 +97,160 @@ impl Query {
             }
         }
     }
+
+    /// Get catalog statistics
+    async fn catalog_stats(&self, ctx: &Context<'_>) -> Result<CatalogStatsResponse> {
+        let database = ctx.data::<Database>()?;
+        let metrics = ctx.data::<MetricsCollector>()?;
+
+        let start_time = Instant::now();
+        let stats = database
+            .get_catalog_stats()
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let duration = start_time.elapsed();
+
+        metrics
+            .record_graphql_operation("catalog_stats", duration, true)
+            .await;
+
+        Ok(CatalogStatsResponse {
+            total_series: stats.total_series,
+            total_data_points: stats.total_data_points,
+            earliest_date: stats.earliest_date,
+            latest_date: stats.latest_date,
+            last_updated: stats.last_updated,
+        })
+    }
+
+    /// Find series by date range
+    async fn find_series_by_date_range(
+        &self,
+        ctx: &Context<'_>,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    ) -> Result<Vec<SeriesInfo>> {
+        let database = ctx.data::<Database>()?;
+        let metrics = ctx.data::<MetricsCollector>()?;
+
+        let start_time = Instant::now();
+        let series_list = database
+            .find_series_by_date_range(start_date, end_date)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let duration = start_time.elapsed();
+
+        metrics
+            .record_graphql_operation("find_series_by_date_range", duration, true)
+            .await;
+
+        Ok(series_list
+            .into_iter()
+            .map(|series| SeriesInfo {
+                id: series.id,
+                external_id: series.external_id,
+                title: series.title,
+                frequency: series.frequency,
+                start_date: series.start_date,
+                end_date: series.end_date,
+                data_points: 0,    // TODO: Get actual count
+                completeness: 1.0, // TODO: Get actual completeness
+                last_updated: series.updated_at,
+            })
+            .collect())
+    }
+
+    /// Find series by external ID
+    async fn find_series_by_external_id(
+        &self,
+        ctx: &Context<'_>,
+        external_id: String,
+    ) -> Result<Option<SeriesInfo>> {
+        let database = ctx.data::<Database>()?;
+        let metrics = ctx.data::<MetricsCollector>()?;
+
+        let start_time = Instant::now();
+        let series = database
+            .find_series_by_external_id(&external_id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let duration = start_time.elapsed();
+
+        metrics
+            .record_graphql_operation("find_series_by_external_id", duration, true)
+            .await;
+
+        Ok(series.map(|series| SeriesInfo {
+            id: series.id,
+            external_id: series.external_id,
+            title: series.title,
+            frequency: series.frequency,
+            start_date: series.start_date,
+            end_date: series.end_date,
+            data_points: 0,    // TODO: Get actual count
+            completeness: 1.0, // TODO: Get actual completeness
+            last_updated: series.updated_at,
+        }))
+    }
+
+    /// Get data freshness information
+    async fn data_freshness(&self, ctx: &Context<'_>) -> Result<DataFreshnessResponse> {
+        let database = ctx.data::<Database>()?;
+        let metrics = ctx.data::<MetricsCollector>()?;
+
+        let start_time = Instant::now();
+        let stats = database
+            .get_catalog_stats()
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let duration = start_time.elapsed();
+
+        metrics
+            .record_graphql_operation("data_freshness", duration, true)
+            .await;
+
+        // Calculate freshness metrics
+        let time_since_update = chrono::Utc::now().signed_duration_since(stats.last_updated);
+        let is_stale = time_since_update.num_seconds() > 86400; // 24 hours in seconds
+
+        Ok(DataFreshnessResponse {
+            last_updated: stats.last_updated,
+            time_since_update_seconds: time_since_update.num_seconds(),
+            is_stale,
+            total_series: stats.total_series,
+        })
+    }
+}
+
+/// Response type for catalog statistics
+#[derive(async_graphql::SimpleObject)]
+pub struct CatalogStatsResponse {
+    pub total_series: usize,
+    pub total_data_points: u64,
+    pub earliest_date: Option<NaiveDate>,
+    pub latest_date: Option<NaiveDate>,
+    pub last_updated: chrono::DateTime<chrono::Utc>,
+}
+
+/// Response type for series information
+#[derive(async_graphql::SimpleObject)]
+pub struct SeriesInfo {
+    pub id: Uuid,
+    pub external_id: String,
+    pub title: String,
+    pub frequency: String,
+    pub start_date: Option<NaiveDate>,
+    pub end_date: Option<NaiveDate>,
+    pub data_points: u64,
+    pub completeness: f64,
+    pub last_updated: chrono::DateTime<chrono::Utc>,
+}
+
+/// Response type for data freshness
+#[derive(async_graphql::SimpleObject)]
+pub struct DataFreshnessResponse {
+    pub last_updated: chrono::DateTime<chrono::Utc>,
+    pub time_since_update_seconds: i64,
+    pub is_stale: bool,
+    pub total_series: usize,
 }

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
 
+use crate::catalog::CatalogStats;
 use crate::models::{DataPoint, EconomicSeries};
 use crate::storage::{FinancialDataStorage, IcebergStorage, InMemoryStorage, ParquetStorage};
 
@@ -137,5 +138,73 @@ impl Database {
         );
 
         result
+    }
+
+    /// Get catalog statistics
+    pub async fn get_catalog_stats(&self) -> Result<CatalogStats> {
+        // For now, we'll return basic stats from the storage
+        // In the future, this could be enhanced with more detailed statistics
+        let series = self.storage.list_series().await?;
+
+        let total_series = series.len();
+        let total_data_points = 0u64;
+        let mut earliest_date = None;
+        let mut latest_date = None;
+
+        for series in &series {
+            // TODO: Get actual data point counts from storage
+            // For now, we'll use placeholder values
+
+            if let Some(start) = series.start_date {
+                earliest_date = Some(earliest_date.map_or(start, |e: NaiveDate| e.min(start)));
+            }
+
+            if let Some(end) = series.end_date {
+                latest_date = Some(latest_date.map_or(end, |l: NaiveDate| l.max(end)));
+            }
+        }
+
+        Ok(CatalogStats {
+            total_series,
+            total_data_points,
+            earliest_date,
+            latest_date,
+            last_updated: chrono::Utc::now(),
+        })
+    }
+
+    /// Find series by date range
+    pub async fn find_series_by_date_range(
+        &self,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    ) -> Result<Vec<EconomicSeries>> {
+        let all_series = self.storage.list_series().await?;
+
+        let matching_series = all_series
+            .into_iter()
+            .filter(|series| match (series.start_date, series.end_date) {
+                (Some(series_start), Some(series_end)) => {
+                    series_start <= end_date && series_end >= start_date
+                }
+                (Some(series_start), None) => series_start <= end_date,
+                (None, Some(series_end)) => series_end >= start_date,
+                (None, None) => false,
+            })
+            .collect();
+
+        Ok(matching_series)
+    }
+
+    /// Find series by external ID
+    pub async fn find_series_by_external_id(
+        &self,
+        external_id: &str,
+    ) -> Result<Option<EconomicSeries>> {
+        let all_series = self.storage.list_series().await?;
+
+        Ok(all_series
+            .into_iter()
+            .find(|series| series.external_id == external_id))
     }
 }
