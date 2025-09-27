@@ -33,7 +33,7 @@ import {
 // import { FinancialRatio } from '@/types/financial'; // Not used in current implementation
 import { RatioExplanationModal } from './RatioExplanationModal';
 import { BenchmarkComparison } from './BenchmarkComparison';
-import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
+import { useSuspenseQuery } from '@tanstack/react-query';
 import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_RATIOS } from '../../test-utils/mocks/graphql/ratio-queries';
 
@@ -55,8 +55,6 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
   // GraphQL query for financial ratios - use Suspense for loading state
   const {
     data: ratiosData,
-    isError,
-    error,
   } = useSuspenseQuery({
     queryKey: ['financial-ratios', statementId],
     queryFn: async () => {
@@ -77,16 +75,6 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
   const ratios = ratiosData?.financialRatios;
 
   // Loading state is now handled by Suspense
-
-  if (isError) {
-    return (
-      <Alert variant='destructive'>
-        <AlertDescription>
-          Failed to load financial ratios: {(error as Error)?.message || 'Unknown error'}
-        </AlertDescription>
-      </Alert>
-    );
-  }
 
   if (!ratios || ratios.length === 0) {
     return (

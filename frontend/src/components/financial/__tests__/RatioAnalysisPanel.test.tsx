@@ -4,6 +4,7 @@ import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RatioAnalysisPanel } from '../RatioAnalysisPanel';
+import { ErrorBoundary } from '../../common/ErrorBoundary';
 
 // Mock the child components
 vi.mock('../RatioExplanationModal', () => ({
@@ -37,9 +38,11 @@ const createTestWrapper = () => {
 
   return ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <Suspense fallback={<div data-testid="loading">Loading...</div>}>
-        {children}
-      </Suspense>
+      <ErrorBoundary>
+        <Suspense fallback={<div data-testid="loading">Loading...</div>}>
+          {children}
+        </Suspense>
+      </ErrorBoundary>
     </QueryClientProvider>
   );
 };
@@ -61,12 +64,12 @@ describe('RatioAnalysisPanel', () => {
 
       render(
         <TestWrapper>
-          <RatioAnalysisPanel {...defaultProps} />
+          <RatioAnalysisPanel {...defaultProps} statementId="loading-statement-id" />
         </TestWrapper>
       );
 
-      expect(screen.getByText('Calculating financial ratios...')).toBeInTheDocument();
-      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+      // With Suspense, we should see the loading fallback immediately
+      expect(screen.getByTestId('loading')).toBeInTheDocument();
     });
   });
 
@@ -197,7 +200,7 @@ describe('RatioAnalysisPanel', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText(/No ratio data available/)).toBeInTheDocument();
+        expect(screen.getByText(/Failed to calculate financial ratios/)).toBeInTheDocument();
       });
     });
 

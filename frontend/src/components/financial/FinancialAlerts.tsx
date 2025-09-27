@@ -99,9 +99,9 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
 
   useEffect(() => {
     if (alertsData) {
-      setAlerts(alertsData.financialAlerts || []);
+      setAlerts(alertsData.company?.alerts || []);
       setIsLoading(false);
-      setIsEmpty((alertsData.financialAlerts || []).length === 0);
+      setIsEmpty((alertsData.company?.alerts || []).length === 0);
     }
   }, [alertsData]);
 

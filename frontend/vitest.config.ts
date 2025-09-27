@@ -8,6 +8,18 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/setupTests.vitest.ts'],
     globals: true,
+    forceRerunTriggers: ['**/package.json/**', '**/vitest.config.*/**', '**/vite.config.*/**'],
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        singleFork: true
+      }
+    },
+    // Force exit after tests complete
+    teardownTimeout: 1000,
+    testTimeout: 10000,
+    hookTimeout: 10000,
+    bail: 0, // Don't bail on first failure
     exclude: [
       '**/node_modules/**',
       '**/dist/**',

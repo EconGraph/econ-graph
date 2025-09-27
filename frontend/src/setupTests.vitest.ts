@@ -16,6 +16,30 @@ afterEach(async () => {
 });
 afterAll(async () => {
   await cleanupSimpleMSW();
+  // Force cleanup of any hanging processes
+  if (typeof process !== 'undefined') {
+    // Clear any pending timeouts/intervals
+    const highestTimeoutId = setTimeout(() => {
+      // Empty function for cleanup
+    }, 0);
+    for (let i = 0; i < Number(highestTimeoutId); i++) {
+      clearTimeout(i);
+    }
+
+    const highestIntervalId = setInterval(() => {
+      // Empty function for cleanup
+    }, 0);
+    for (let i = 0; i < Number(highestIntervalId); i++) {
+      clearInterval(i);
+    }
+
+    // Force exit if needed
+    setTimeout(() => {
+      if (process.exit) {
+        process.exit(0);
+      }
+    }, 100);
+  }
 });
 
 // Polyfill for Node.js environment

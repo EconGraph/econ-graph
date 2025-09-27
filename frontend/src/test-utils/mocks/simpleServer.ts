@@ -36,10 +36,10 @@ const extractOperationName = (query: string): string => {
   return match ? match[1] : "UnknownOperation";
 };
 
-// Get mock response based on operation name and scenario
-const getMockResponse = (operationName: string, scenario: MockScenarios) => {
+// Get mock response based on operation name, scenario, and variables
+const getMockResponse = (operationName: string, scenario: MockScenarios, variables: any = {}) => {
   if (MSW_DEBUG) {
-    console.log(`[Simple MSW] Getting response for ${operationName}/${scenario}`);
+    console.log(`[Simple MSW] Getting response for ${operationName}/${scenario}`, variables);
   }
 
   try {
@@ -66,10 +66,24 @@ const getMockResponse = (operationName: string, scenario: MockScenarios) => {
       };
     }
 
-    const response = loadGraphQLResponse(responseFile, scenario);
+    // Determine scenario based on specific statement IDs for testing
+    let finalScenario = scenario;
+    if (variables.statementId) {
+      if (variables.statementId === 'error-statement-id') {
+        finalScenario = MockScenarios.ERROR;
+      } else if (variables.statementId === 'empty-statement-id') {
+        finalScenario = MockScenarios.EMPTY;
+      } else if (variables.statementId === 'loading-statement-id') {
+        finalScenario = MockScenarios.LOADING;
+      } else if (variables.statementId === 'not-found-statement-id') {
+        finalScenario = MockScenarios.NOT_FOUND;
+      }
+    }
+
+    const response = loadGraphQLResponse(responseFile, finalScenario);
 
     if (MSW_DEBUG) {
-      console.log(`[Simple MSW] Found response for ${operationName}/${scenario}`);
+      console.log(`[Simple MSW] Found response for ${operationName}/${finalScenario}`);
     }
     return response;
   } catch (error) {
@@ -129,7 +143,7 @@ export const setupSimpleMSW = async () => {
             console.log(`[Simple MSW] Current scenario: ${currentScenario}`);
           }
 
-          const response = getMockResponse(operationName, currentScenario);
+          const response = getMockResponse(operationName, currentScenario, variables);
 
           if (MSW_DEBUG) {
             console.log(`[Simple MSW] Returning mock response:`, response);

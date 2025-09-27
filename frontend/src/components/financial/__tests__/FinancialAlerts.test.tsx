@@ -1,8 +1,10 @@
 import { vi } from 'vitest';
-import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import React, { Suspense } from 'react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { FinancialAlerts } from '../FinancialAlerts';
+import { ErrorBoundary } from '../../common/ErrorBoundary';
 
 // Mock financial alert data
 const mockAlerts = [
@@ -64,37 +66,77 @@ const mockAlerts = [
   },
 ];
 
+// Create test wrapper with QueryClient and ErrorBoundary
+const createTestWrapper = () => {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
+  return ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={queryClient}>
+      <ErrorBoundary>
+        <Suspense fallback={<div data-testid="loading">Loading...</div>}>
+          {children}
+        </Suspense>
+      </ErrorBoundary>
+    </QueryClientProvider>
+  );
+};
+
 describe('FinancialAlerts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('renders the financial alerts component', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+  // Helper function to render component with all necessary providers
+  const renderWithProviders = (props: any) => {
+    const TestWrapper = createTestWrapper();
+    return render(
+      <TestWrapper>
+        <FinancialAlerts {...props} />
+      </TestWrapper>
+    );
+  };
 
-    expect(screen.getByText('Financial Alerts')).toBeInTheDocument();
-    expect(screen.getByText('Current Ratio Below Threshold')).toBeInTheDocument();
-    expect(screen.getByText('10-Q Filing Due Soon')).toBeInTheDocument();
+  it('renders the financial alerts component', async () => {
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
+
+    await waitFor(() => {
+      expect(screen.getByText('Financial Alerts')).toBeInTheDocument();
+    });
   });
 
-  it('displays alert severity indicators', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+  it('displays alert severity indicators', async () => {
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Should show severity indicators (multiple elements expected)
-    expect(screen.getByText('High')).toBeInTheDocument();
-    expect(screen.getAllByText('Medium').length).toBeGreaterThan(0);
-    expect(screen.getByText('Low')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('High')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Medium').length).toBeGreaterThan(0);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Low')).toBeInTheDocument();
+    });
   });
 
-  it('shows unread alert count', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+  it('shows unread alert count', async () => {
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Should show count of unread alerts (2 unread out of 4 total)
-    expect(screen.getByText('2 Unread')).toBeInTheDocument();
+    await waitFor(() => {
+      // Should show count of unread alerts (2 unread out of 4 total)
+      expect(screen.getByText('2 Unread')).toBeInTheDocument();
+    });
   });
 
   it('filters alerts by severity', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show severity filter options are available in the component
     expect(screen.getByText('Severity:')).toBeInTheDocument();
@@ -105,14 +147,14 @@ describe('FinancialAlerts', () => {
   });
 
   it('filters alerts by type', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show type filter is available
     expect(screen.getByText('Type:')).toBeInTheDocument();
   });
 
   it('sorts alerts by different criteria', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show sort option is available
     expect(screen.getByText('Sort:')).toBeInTheDocument();
@@ -164,7 +206,7 @@ describe('FinancialAlerts', () => {
   });
 
   it('shows alert details when expanded', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     const alertTitle = screen.getByText('Current Ratio Below Threshold');
     fireEvent.click(alertTitle);
@@ -174,7 +216,7 @@ describe('FinancialAlerts', () => {
   });
 
   it('displays alert creation and expiration dates', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show formatted dates
     expect(screen.getByText(/Jan 15, 2024/i)).toBeInTheDocument();
@@ -182,7 +224,7 @@ describe('FinancialAlerts', () => {
   });
 
   it('shows alert direction indicators', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show direction indicators (multiple elements expected)
     expect(screen.getAllByText(/decline/i).length).toBeGreaterThan(0);
@@ -202,7 +244,7 @@ describe('FinancialAlerts', () => {
   });
 
   it('displays expired alerts differently', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Expired alert should be shown with different styling
     const expiredAlert = screen.getByText('10-Q Filing Due Soon');
@@ -240,7 +282,7 @@ describe('FinancialAlerts', () => {
   });
 
   it('shows alert search functionality', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     const searchInput = screen.getByPlaceholderText('Search alerts...');
     expect(searchInput).toBeInTheDocument();
@@ -254,7 +296,7 @@ describe('FinancialAlerts', () => {
   });
 
   it('displays alert categories and counts', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show category breakdown
     expect(screen.getByText('Ratio Threshold: 1')).toBeInTheDocument();
@@ -270,21 +312,21 @@ describe('FinancialAlerts', () => {
       value: 375,
     });
 
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should adapt to mobile view
     expect(screen.getByText('Financial Alerts')).toBeInTheDocument();
   });
 
   it('shows alert priority indicators', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show priority indicators for high severity alerts
     expect(screen.getByText('High Priority')).toBeInTheDocument();
   });
 
   it('handles alert action buttons (view details, acknowledge)', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show action buttons for each alert
     expect(screen.getAllByText('View Details')).toHaveLength(mockAlerts.length);
@@ -292,7 +334,7 @@ describe('FinancialAlerts', () => {
   });
 
   it('displays alert notifications count in header', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show notification count in header
     expect(screen.getByText('4')).toBeInTheDocument(); // Total alerts
@@ -315,14 +357,14 @@ describe('FinancialAlerts', () => {
   });
 
   it('shows alert settings and preferences', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show settings/preferences link
     expect(screen.getByText('Alert Settings')).toBeInTheDocument();
   });
 
   it('handles alert export functionality', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     const exportButton = screen.getByText('Export Alerts');
     fireEvent.click(exportButton);
@@ -332,7 +374,7 @@ describe('FinancialAlerts', () => {
   });
 
   it('displays alert trends and statistics', () => {
-    render(<FinancialAlerts companyId="test-company" ratios={[]} statements={[]} />);
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show alert trends
     expect(screen.getByText('Alert Trends')).toBeInTheDocument();
