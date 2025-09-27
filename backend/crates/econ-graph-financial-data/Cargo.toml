@@ -1,0 +1,70 @@
+[package]
+name = "econ_graph_financial_data"
+version = "0.1.0"
+edition = "2021"
+authors = ["EconGraph Team"]
+description = "Financial data service with Iceberg storage and GraphQL API"
+license = "MS-PL"
+
+[dependencies]
+# GraphQL and Web Framework
+async-graphql = { workspace = true }
+async-graphql-axum = "7.0"
+axum = "0.8"
+tokio = { workspace = true }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Database and Storage
+apache-avro = "0.14"
+parquet = "56.0"
+arrow = "56.0"
+arrow-flight = "56.0"
+object_store = "0.12"
+minio = "0.3"
+
+# Arrow Flight dependencies
+tonic = "0.13"
+prost = "0.13"
+bytes = "1.0"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# UUID and Time
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Decimal for financial data
+rust_decimal = { workspace = true }
+
+# Configuration
+config = { workspace = true }
+clap = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Async traits
+async-trait = "0.1"
+
+# Testing
+[dev-dependencies]
+tokio-test = { workspace = true }
+tempfile = { workspace = true }
+reqwest = { version = "0.12", features = ["json"] }
+
+# Benchmarking
+[[bench]]
+name = "performance"
+harness = false
+
+[dev-dependencies.criterion]
+version = "0.5"
+features = ["html_reports"]

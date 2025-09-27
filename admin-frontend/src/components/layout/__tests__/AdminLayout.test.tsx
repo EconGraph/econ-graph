@@ -56,8 +56,8 @@ const theme = createTheme();
 const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <BrowserRouter>
     <ThemeProvider theme={theme}>
-      <AuthProvider value={mockAuthContext}>
-        <SecurityProvider value={mockSecurityContext}>
+      <AuthProvider>
+        <SecurityProvider>
           {children}
         </SecurityProvider>
       </AuthProvider>
@@ -217,8 +217,8 @@ describe('AdminLayout', () => {
       render(
         <BrowserRouter>
           <ThemeProvider theme={theme}>
-            <AuthProvider value={mockAuthContext}>
-              <SecurityProvider value={contextWithEvents}>
+            <AuthProvider>
+              <SecurityProvider>
                 <AdminLayout />
               </SecurityProvider>
             </AuthProvider>
@@ -240,8 +240,8 @@ describe('AdminLayout', () => {
       render(
         <BrowserRouter>
           <ThemeProvider theme={theme}>
-            <AuthProvider value={mockAuthContext}>
-              <SecurityProvider value={contextWithCustomTime}>
+            <AuthProvider>
+              <SecurityProvider>
                 <AdminLayout />
               </SecurityProvider>
             </AuthProvider>
@@ -285,8 +285,8 @@ describe('AdminLayout', () => {
       render(
         <BrowserRouter>
           <ThemeProvider theme={theme}>
-            <AuthProvider value={readOnlyUser}>
-              <SecurityProvider value={mockSecurityContext}>
+            <AuthProvider>
+              <SecurityProvider>
                 <AdminLayout />
               </SecurityProvider>
             </AuthProvider>
@@ -320,8 +320,8 @@ describe('AdminLayout', () => {
       render(
         <BrowserRouter>
           <ThemeProvider theme={theme}>
-            <AuthProvider value={adminUser}>
-              <SecurityProvider value={mockSecurityContext}>
+            <AuthProvider>
+              <SecurityProvider>
                 <AdminLayout />
               </SecurityProvider>
             </AuthProvider>
@@ -350,8 +350,8 @@ describe('AdminLayout', () => {
       render(
         <BrowserRouter>
           <ThemeProvider theme={theme}>
-            <AuthProvider value={contextWithoutUser}>
-              <SecurityProvider value={mockSecurityContext}>
+            <AuthProvider>
+              <SecurityProvider>
                 <AdminLayout />
               </SecurityProvider>
             </AuthProvider>

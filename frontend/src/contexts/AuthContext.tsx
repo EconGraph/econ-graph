@@ -46,16 +46,13 @@ interface AuthContextType extends AuthState {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // OAuth Configuration
-const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
-const FACEBOOK_APP_ID = process.env.REACT_APP_FACEBOOK_APP_ID || '';
-const API_BASE_URL =
-  process.env.REACT_APP_API_URL ||
-  `http://localhost:${process.env.REACT_APP_BACKEND_PORT || '9876'}`;
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+const FACEBOOK_APP_ID = import.meta.env.VITE_FACEBOOK_APP_ID || '';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:9876';
 
 // Debug: Log the API URL being used
 console.log('🔧 Frontend API Configuration:');
-console.log('  - REACT_APP_API_URL:', process.env.REACT_APP_API_URL);
-console.log('  - REACT_APP_BACKEND_PORT:', process.env.REACT_APP_BACKEND_PORT);
+console.log('  - VITE_API_URL:', import.meta.env.VITE_API_URL);
 console.log('  - Final API_BASE_URL:', API_BASE_URL);
 
 // Debug: Test backend connectivity

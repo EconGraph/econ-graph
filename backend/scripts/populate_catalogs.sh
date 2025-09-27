@@ -178,7 +178,7 @@ start_database() {
         -e POSTGRES_USER="$DB_USER" \
         -e POSTGRES_PASSWORD="$DB_PASSWORD" \
         -p "$DB_PORT:5432" \
-        postgres:17 > /dev/null
+        postgres:18 > /dev/null
 
     # Wait for database to be ready
     log_info "Waiting for database to be ready..."

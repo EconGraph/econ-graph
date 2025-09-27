@@ -31,10 +31,10 @@ interface TrendAnalysisChartProps {
 
 export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
   ratios,
-  statements,
+  statements: _statements,
   timeRange,
   onTimeRangeChange,
-  selectedRatios = ['returnOnEquity'],
+  selectedRatios: _selectedRatios = ['returnOnEquity'],
   onRatioSelectionChange,
 }) => {
   const [chartType, setChartType] = useState<'line' | 'bar'>('line');
@@ -91,7 +91,7 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
   }, [ratioTrends]);
 
   // Use availableRatios for potential future features
-  console.debug('Available ratios for analysis:', availableRatios.length);
+  // Debug: Available ratios for analysis: ${availableRatios.length}
 
   // Filter ratios based on time range
   const filteredRatioTrends = useMemo(() => {
