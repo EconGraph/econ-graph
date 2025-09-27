@@ -42,8 +42,8 @@ mod tests {
     use async_graphql::Request;
     use serial_test::serial;
     use testcontainers::runners::AsyncRunner;
-    use testcontainers::{ImageExt, ContainerAsync};
-    use testcontainers_modules::postgres::Postgres;
+    use testcontainers::{ContainerAsync, GenericImage, ImageExt};
+    use testcontainers::core::WaitFor;
 
     #[tokio::test]
     #[serial]
@@ -57,8 +57,11 @@ mod tests {
 
         // Phase 1: Infrastructure Setup with TestContainers
         println!("📦 Phase 1: Setting up TestContainers infrastructure...");
-        let postgres_container = Postgres::default()
-            .with_tag("postgres:18")
+        let postgres_container = GenericImage::new("postgres", "18")
+            .with_wait_for(WaitFor::message_on_stdout("database system is ready to accept connections"))
+            .with_env_var("POSTGRES_DB", "postgres")
+            .with_env_var("POSTGRES_USER", "postgres")
+            .with_env_var("POSTGRES_PASSWORD", "postgres")
             .start().await.unwrap();
         let connection_string = format!(
             "postgres://postgres:postgres@127.0.0.1:{}/postgres",

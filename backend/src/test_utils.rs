@@ -19,8 +19,8 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 // Deadpool-diesel replaced with bb8 and diesel-async
 // use deadpool_diesel::postgres::{Manager, Pool};
 use once_cell::sync::Lazy;
-use testcontainers::{runners::AsyncRunner, ContainerAsync, Image, ImageExt};
-use testcontainers_modules::postgres::Postgres;
+use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage, Image, ImageExt};
+use testcontainers::core::WaitFor;
 use tokio::sync::Mutex;
 
 // Config module not needed for basic tests
@@ -48,11 +48,11 @@ impl TestContainer {
     pub async fn new() -> Self {
         // REQUIREMENT: Use testcontainers for database testing
         // Create PostgreSQL container with specific configuration
-        let postgres = Postgres::default()
-            .with_tag("postgres:18")
-            .with_db_name("test_econ_graph")
-            .with_user("test_user")
-            .with_password("test_password");
+        let postgres = GenericImage::new("postgres", "18")
+            .with_wait_for(WaitFor::message_on_stdout("database system is ready to accept connections"))
+            .with_env_var("POSTGRES_DB", "test_econ_graph")
+            .with_env_var("POSTGRES_USER", "test_user")
+            .with_env_var("POSTGRES_PASSWORD", "test_password");
 
         let container = postgres.start().await.expect("Failed to start container");
         let host_port = container
