@@ -62,9 +62,9 @@ interface FinancialAlertsProps {
 
 export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
   companyId,
-  ratios: _ratios,
-  statements: _statements,
-  userType: _userType = 'intermediate',
+  ratios,
+  statements,
+  userType = 'intermediate',
   onAlertClick,
 }) => {
   const [alerts, setAlerts] = useState<FinancialAlert[]>([]);
