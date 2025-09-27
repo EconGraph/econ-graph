@@ -52,12 +52,14 @@ vi.mock("../../hooks/useCrawlerData", () => ({
     return {
       status: {
         status: {
-          isRunning: true,
-          isPaused: false,
-          currentTask: "Processing FRED data",
+          is_running: true,
+          is_paused: false,
+          current_task: "Processing FRED data",
           progress: 0.65,
-          lastUpdate: "2024-01-15T10:30:00Z",
+          last_update: "2024-01-15T10:30:00Z",
           error: null,
+          active_workers: 3,
+          last_crawl: "2024-01-15T10:30:00Z",
         },
         loading: false,
         error: null,
@@ -65,12 +67,14 @@ vi.mock("../../hooks/useCrawlerData", () => ({
       },
       queueStats: {
         statistics: {
-          totalItems: 150,
-          processedItems: 97,
-          failedItems: 3,
-          pendingItems: 45,
-          processingRate: 12.5,
-          estimatedTimeRemaining: 2400,
+          total_items: 1247,
+          processed_items: 1200,
+          failed_items: 21,
+          pending_items: 23,
+          processing_items: 3,
+          completed_items: 1200,
+          processing_rate: 12.5,
+          estimated_time_remaining: 2400,
         },
         loading: false,
         error: null,
@@ -78,11 +82,11 @@ vi.mock("../../hooks/useCrawlerData", () => ({
       },
       performance: {
         metrics: {
-          averageProcessingTime: 2.3,
-          successRate: 0.97,
-          throughputPerHour: 450,
-          memoryUsage: 2.1,
-          cpuUsage: 45.2,
+          average_processing_time: 2.3,
+          success_rate: 0.97,
+          throughput_per_hour: 450,
+          memory_usage: 2.1,
+          cpu_usage: 45.2,
         },
         loading: false,
         error: null,
@@ -278,7 +282,7 @@ describe("CrawlerDashboard", () => {
 
       // Check metrics
       expect(screen.getByText("Active Workers")).toBeInTheDocument();
-      expect(screen.getByText("3")).toBeInTheDocument(); // active_workers
+      expect(screen.getAllByText("3")).toHaveLength(2); // active_workers and other metrics
       expect(screen.getByText("Last Crawl")).toBeInTheDocument();
       expect(screen.getByText("Next Scheduled Crawl")).toBeInTheDocument();
     });
@@ -295,7 +299,7 @@ describe("CrawlerDashboard", () => {
       expect(screen.getByText("Pending")).toBeInTheDocument();
       expect(screen.getByText("23")).toBeInTheDocument(); // pending_items
       expect(screen.getByText("Processing")).toBeInTheDocument();
-      expect(screen.getByText("3")).toBeInTheDocument(); // processing_items
+      expect(screen.getAllByText("3")).toHaveLength(2); // processing_items and active_workers
       expect(screen.getByText("Completed")).toBeInTheDocument();
       expect(screen.getByText("1200")).toBeInTheDocument(); // completed_items
       expect(screen.getByText("Failed")).toBeInTheDocument();
@@ -324,7 +328,7 @@ describe("CrawlerDashboard", () => {
       expect(screen.getByText("Recent Activity")).toBeInTheDocument();
       expect(screen.getByText("Time")).toBeInTheDocument();
       expect(screen.getByText("Source")).toBeInTheDocument();
-      expect(screen.getByText("Series")).toBeInTheDocument();
+      expect(screen.getByText("Message")).toBeInTheDocument();
       expect(screen.getByText("Status")).toBeInTheDocument();
       expect(screen.getByText("Duration")).toBeInTheDocument();
       expect(screen.getByText("Actions")).toBeInTheDocument();
