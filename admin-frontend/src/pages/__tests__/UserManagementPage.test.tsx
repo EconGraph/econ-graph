@@ -55,7 +55,11 @@ vi.mock("../../contexts/AuthContext", () => ({
 vi.mock("../../contexts/SecurityContext", () => ({
   SecurityProvider: ({ children }: any) => children,
   useSecurity: vi.fn(() => ({
-    checkAccess: vi.fn(() => true),
+    checkAccess: vi.fn((_permission: string) => {
+      // Default behavior: allow access for most tests
+      // Individual tests can override this mock as needed
+      return true;
+    }),
     logSecurityEvent: vi.fn(),
     securityEvents: [],
     sessionRemainingTime: 3661, // 61 minutes and 1 second in seconds
@@ -118,6 +122,42 @@ describe("UserManagementPage", () => {
     // Clear QueryClient cache between tests to ensure isolation
     testQueryClient.clear();
 
+    // Clear all mocks to reset any test-specific overrides
+    vi.clearAllMocks();
+
+    // Restore the default mock behavior after clearing
+    vi.mocked(useAuth).mockReturnValue({
+      user: {
+        id: "test-user",
+        username: "admin",
+        role: "super_admin",
+        email: "admin@example.com",
+        permissions: ["read", "write", "admin"],
+        lastLogin: new Date().toISOString(),
+        sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
+      },
+      isAuthenticated: true,
+      loading: false,
+      sessionWarning: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refreshSession: vi.fn(),
+      extendSession: vi.fn(),
+    });
+
+    vi.mocked(useSecurity).mockReturnValue({
+      checkAccess: vi.fn((_permission: string) => {
+        // Default behavior: allow access for most tests
+        // Individual tests can override this mock as needed
+        return true;
+      }),
+      logSecurityEvent: vi.fn(),
+      securityEvents: [],
+      sessionRemainingTime: 3661, // 61 minutes and 1 second in seconds
+      getSecurityEvents: vi.fn(() => []),
+      isSecureConnection: true,
+    });
+
     // MSW is already set up in setupTests.ts
     // The basic handlers will return mock data for GraphQL requests
   });
@@ -160,7 +200,11 @@ describe("UserManagementPage", () => {
       });
 
       // Mock checkAccess to return false for non-super_admin users
-      const mockCheckAccess = vi.fn((role) => role === "super_admin");
+      const mockCheckAccess = vi.fn(() => {
+        // The user's role is "admin", so they should not have "super_admin" access
+        return false;
+      });
+
       vi.mocked(useSecurity).mockReturnValue({
         checkAccess: mockCheckAccess,
         logSecurityEvent: vi.fn(),

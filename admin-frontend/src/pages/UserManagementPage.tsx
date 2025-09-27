@@ -130,24 +130,6 @@ export default function UserManagementPage() {
   const { data: onlineUsers = [], isLoading: onlineUsersLoading } =
     useOnlineUsers();
 
-  // DEBUG: Log data flow and rendering state
-  console.log("🔍 UserManagementPage DEBUG:", {
-    users: {
-      data: users,
-      loading: usersLoading,
-      error: usersError,
-      count: users.length,
-    },
-    onlineUsers: {
-      data: onlineUsers,
-      loading: onlineUsersLoading,
-      count: onlineUsers.length,
-    },
-    tabValue,
-    searchTerm,
-    roleFilter,
-  });
-
   // Mutations
   const createUserMutation = useCreateUser();
   const updateUserMutation = useUpdateUser();
@@ -302,7 +284,6 @@ export default function UserManagementPage() {
 
   // Access control
   if (!checkAccess("super_admin")) {
-    console.log("🚫 Access denied - not super_admin");
     return (
       <Box sx={{ p: 3 }}>
         <Alert severity="error">
@@ -311,8 +292,6 @@ export default function UserManagementPage() {
       </Box>
     );
   }
-
-  console.log("✅ Access granted - rendering main component");
 
   return (
     <Box sx={{ p: 3 }}>

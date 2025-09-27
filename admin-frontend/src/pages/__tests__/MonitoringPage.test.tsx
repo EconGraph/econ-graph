@@ -258,26 +258,18 @@ describe("MonitoringPage", () => {
           screen.getByRole("list", { name: "List of system services" }),
         ).toBeInTheDocument();
 
-        // 4. For service status items, use getByRole with aria-label (most accessible)
+        // 4. For service status items, use getByLabelText since aria-label is on inner div
         expect(
-          screen.getByRole("listitem", {
-            name: /backend service status: healthy/i,
-          }),
+          screen.getByLabelText(/backend service status: healthy/i),
         ).toBeInTheDocument();
         expect(
-          screen.getByRole("listitem", {
-            name: /database service status: healthy/i,
-          }),
+          screen.getByLabelText(/database service status: healthy/i),
         ).toBeInTheDocument();
         expect(
-          screen.getByRole("listitem", {
-            name: /crawler service status: warning/i,
-          }),
+          screen.getByLabelText(/crawler service status: warning/i),
         ).toBeInTheDocument();
         expect(
-          screen.getByRole("listitem", {
-            name: /grafana service status: healthy/i,
-          }),
+          screen.getByLabelText(/grafana service status: healthy/i),
         ).toBeInTheDocument();
       });
     });
