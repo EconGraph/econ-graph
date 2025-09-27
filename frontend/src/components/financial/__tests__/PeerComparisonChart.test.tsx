@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
@@ -5,7 +6,7 @@ import { PeerComparisonChart } from '../PeerComparisonChart';
 import { FinancialRatio } from '../../../types/financial';
 
 // Mock Chart.js
-jest.mock('react-chartjs-2', () => ({
+vi.mock('react-chartjs-2', () => ({
   Bar: ({ data, options, ...props }: any) => (
     <div
       data-testid="peer-comparison-bar-chart"
@@ -89,7 +90,7 @@ const mockCompany = {
 
 describe('PeerComparisonChart', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('renders the peer comparison chart', () => {

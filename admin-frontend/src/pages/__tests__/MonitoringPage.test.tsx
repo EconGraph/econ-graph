@@ -38,8 +38,8 @@ const theme = createTheme();
 const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <BrowserRouter>
     <ThemeProvider theme={theme}>
-      <AuthProvider value={mockAuthContext}>
-        <SecurityProvider value={mockSecurityContext}>
+      <AuthProvider>
+        <SecurityProvider>
           {children}
         </SecurityProvider>
       </AuthProvider>

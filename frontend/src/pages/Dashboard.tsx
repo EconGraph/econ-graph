@@ -44,32 +44,16 @@ const Dashboard: React.FC = () => {
   // const { data: dataSources } = useDataSources();
 
   // Fetch key economic indicators from FRED
-  const gdpQueryResult = useSeriesSearch({
-    query: 'GDP',
-    limit: 1,
-    enabled: true,
-  });
+  const gdpQueryResult = useSeriesSearch('GDP', { limit: 1 }, true);
   const { data: gdpResults } = gdpQueryResult || {};
 
-  const unemploymentQueryResult = useSeriesSearch({
-    query: 'unemployment rate',
-    limit: 1,
-    enabled: true,
-  });
+  const unemploymentQueryResult = useSeriesSearch('unemployment rate', { limit: 1 }, true);
   const { data: unemploymentResults } = unemploymentQueryResult || {};
 
-  const inflationQueryResult = useSeriesSearch({
-    query: 'consumer price index',
-    limit: 1,
-    enabled: true,
-  });
+  const inflationQueryResult = useSeriesSearch('consumer price index', { limit: 1 }, true);
   const { data: inflationResults } = inflationQueryResult || {};
 
-  const fedFundsQueryResult = useSeriesSearch({
-    query: 'federal funds rate',
-    limit: 1,
-    enabled: true,
-  });
+  const fedFundsQueryResult = useSeriesSearch('federal funds rate', { limit: 1 }, true);
   const { data: fedFundsResults } = fedFundsQueryResult || {};
 
   // Transform real data to dashboard format
