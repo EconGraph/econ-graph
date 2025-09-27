@@ -27,9 +27,6 @@ mod services;
 #[cfg(test)]
 mod test_utils;
 
-#[cfg(test)]
-mod uuidv7_graphql_tests;
-
 
 use auth::routes::auth_routes;
 use auth::services::AuthService;

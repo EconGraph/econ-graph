@@ -101,7 +101,7 @@ const InteractiveChart: React.FC<ChartProps> = ({ data, title, units, frequency 
       if (transformation === 'none') return points;
 
       return points
-        .map((point, _index) => {
+        .map((point, index) => {
           if (point.value === null) return point;
 
           let transformedValue: number | null = null;

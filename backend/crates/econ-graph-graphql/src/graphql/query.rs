@@ -30,7 +30,7 @@ impl Query {
         let pool = ctx.data::<DatabasePool>()?;
         let series_uuid = Uuid::parse_str(&id)?;
 
-        match series_service::get_series_by_id(pool, series_uuid).await? {
+        match series_service::get_series_by_id(&pool, series_uuid).await? {
             Some(series) => Ok(Some(series.into())),
             None => Ok(None),
         }
@@ -47,7 +47,7 @@ impl Query {
 
         // Convert GraphQL inputs to service parameters
         let search_params = convert_series_filter_to_params(filter);
-        let series = series_service::list_series(pool, search_params).await?;
+        let series = series_service::list_series(&pool, search_params).await?;
 
         // Apply pagination (simplified implementation)
         let pagination = pagination.unwrap_or_default();
@@ -150,7 +150,7 @@ impl Query {
             offset: after.and_then(|cursor| cursor.parse::<i64>().ok()),
         };
 
-        let data_points = series_service::get_series_data(pool, query_params).await?;
+        let data_points = series_service::get_series_data(&pool, query_params).await?;
         let total_count = data_points.len();
 
         // Apply transformation if requested
@@ -182,7 +182,7 @@ impl Query {
         let pool = ctx.data::<DatabasePool>()?;
 
         // Get queue statistics to determine crawler activity
-        let queue_stats = queue_service::get_queue_statistics(pool).await?;
+        let queue_stats = queue_service::get_queue_statistics(&pool).await?;
 
         // Get actual crawler status from service
         let crawler_service_status = simple_crawler_service::get_crawler_status().await?;
@@ -223,7 +223,7 @@ impl Query {
     async fn queue_statistics(&self, ctx: &Context<'_>) -> Result<QueueStatisticsType> {
         let pool = ctx.data::<DatabasePool>()?;
 
-        let stats = queue_service::get_queue_statistics(pool).await?;
+        let stats = queue_service::get_queue_statistics(&pool).await?;
 
         Ok(QueueStatisticsType {
             total_items: stats.total_items as i32,
@@ -634,7 +634,7 @@ impl Query {
     ) -> Result<Vec<SecurityEventType>> {
         // Require admin role
         let _admin_user = require_admin(ctx)?;
-        let _pool = ctx.data::<DatabasePool>()?;
+        let _context = ctx.data::<crate::graphql::schema::GraphQLContext>()?;
 
         // Get security events logic would go here
         // For now, return empty vector
@@ -650,7 +650,7 @@ impl Query {
     ) -> Result<AuditLogConnection> {
         // Require admin role
         let _admin_user = require_admin(ctx)?;
-        let _pool = ctx.data::<DatabasePool>()?;
+        let _context = ctx.data::<crate::graphql::schema::GraphQLContext>()?;
 
         // Get audit logs logic would go here
         // For now, return empty connection
