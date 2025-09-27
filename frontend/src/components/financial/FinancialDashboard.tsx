@@ -169,7 +169,11 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                   </span>
                   <span className='flex items-center space-x-1'>
                     <span>Industry:</span>
-                    <span>{company.gicsDescription}</span>
+                    <span>{company.industry}</span>
+                  </span>
+                  <span className='flex items-center space-x-1'>
+                    <span>Sector:</span>
+                    <span>{company.sector}</span>
                   </span>
                 </div>
               </div>

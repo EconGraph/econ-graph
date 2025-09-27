@@ -7,14 +7,25 @@ import { executeGraphQL, QUERIES } from '../graphql';
 
 // Mock fetch for testing
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+// Don't assign to global.fetch to avoid interfering with MSW
+// global.fetch = mockFetch;
 
 describe('GraphQL Utilities', () => {
+  let fetchSpy: any;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    // Use vi.spyOn to mock fetch without interfering with MSW
+    fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(mockFetch);
     // Reset fetch mock properly
     mockFetch.mockClear();
     mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    if (fetchSpy) {
+      fetchSpy.mockRestore();
+    }
   });
 
   test('should execute GraphQL query successfully', async () => {

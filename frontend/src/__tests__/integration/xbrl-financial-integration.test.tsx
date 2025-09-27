@@ -26,7 +26,8 @@ afterAll(() => server.close());
 
 // Mock the API calls
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+// Don't assign to global.fetch to avoid interfering with MSW
+// global.fetch = mockFetch;
 
 // Mock financial data
 const mockCompany = {

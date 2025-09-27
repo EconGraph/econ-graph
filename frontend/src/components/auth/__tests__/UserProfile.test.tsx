@@ -32,12 +32,13 @@ const mockUser = {
 };
 
 // Mock fetch for API calls
-global.fetch = vi.fn();
+// Don't assign to global.fetch to avoid interfering with MSW
+// global.fetch = vi.fn();
 
 // localStorage mock is now handled globally in setupTests.vitest.ts
 
 // Mock fetch to return user data
-(global.fetch as any).mockImplementation((url: string) => {
+const mockFetch = vi.fn().mockImplementation((url: string) => {
   if (url.includes('/auth/me')) {
     return Promise.resolve({
       ok: true,
@@ -93,9 +94,13 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 );
 
 describe('UserProfile Preferences', () => {
+  let fetchSpy: any;
+
   beforeEach(() => {
     // Reset all mocks to prevent test pollution
     vi.clearAllMocks();
+    // Use vi.spyOn to mock fetch without interfering with MSW
+    fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(mockFetch);
 
     // Setup localStorage mock for this test
     vi.spyOn(window.localStorage, 'getItem').mockImplementation((key: string) => {
@@ -119,6 +124,12 @@ describe('UserProfile Preferences', () => {
       refreshUser: vi.fn(),
       clearError: vi.fn(),
     });
+  });
+
+  afterEach(() => {
+    if (fetchSpy) {
+      fetchSpy.mockRestore();
+    }
   });
 
 

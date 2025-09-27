@@ -135,176 +135,197 @@ describe('FinancialAlerts', () => {
     });
   });
 
-  it('filters alerts by severity', () => {
+  it('filters alerts by severity', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show severity filter options are available in the component
-    expect(screen.getByText('Severity:')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Severity:')).toBeInTheDocument();
+    });
 
     // Since the options are in SelectContent, they may not be visible until clicked
     // For now, just verify the filter exists
-    expect(screen.getByText('Severity:')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Severity:')).toBeInTheDocument();
+    });
   });
 
-  it('filters alerts by type', () => {
+  it('filters alerts by type', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show type filter is available
-    expect(screen.getByText('Type:')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Type:')).toBeInTheDocument();
+    });
   });
 
-  it('sorts alerts by different criteria', () => {
+  it('sorts alerts by different criteria', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show sort option is available
-    expect(screen.getByText('Sort:')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Sort:')).toBeInTheDocument();
+    });
   });
 
-  it('marks alerts as read when clicked', () => {
-    render(
-      <FinancialAlerts
-        companyId="test-company"
-        ratios={[]}
-        statements={[]}
-      />
-    );
+  it('marks alerts as read when clicked', async () => {
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const unreadAlert = screen.getByText('Current Ratio Below Threshold');
-    fireEvent.click(unreadAlert);
+    await waitFor(() => {
+      const unreadAlert = screen.getByText('Current Ratio Below Threshold');
+      fireEvent.click(unreadAlert);
+    });
 
     // Component should handle the read state internally
   });
 
-  it('marks alerts as unread when clicked again', () => {
-    render(
-      <FinancialAlerts
-        companyId="test-company"
-        ratios={[]}
-        statements={[]}
-      />
-    );
+  it('marks alerts as unread when clicked again', async () => {
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const readAlert = screen.getByText('Data Quality Warning');
-    fireEvent.click(readAlert);
+    await waitFor(() => {
+      const readAlert = screen.getByText('Data Quality Warning');
+      fireEvent.click(readAlert);
+    });
 
     // Component should handle the unread state internally
   });
 
-  it('dismisses alerts when dismiss button is clicked', () => {
-    render(
-      <FinancialAlerts
-        companyId="test-company"
-        ratios={[]}
-        statements={[]}
-      />
-    );
+  it('dismisses alerts when dismiss button is clicked', async () => {
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const dismissButton = screen.getAllByText('Dismiss')[0];
-    fireEvent.click(dismissButton);
+    await waitFor(() => {
+      const dismissButton = screen.getAllByText('Dismiss')[0];
+      fireEvent.click(dismissButton);
+    });
 
     // Component should handle dismiss functionality internally
   });
 
-  it('shows alert details when expanded', () => {
+  it('shows alert details when expanded', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const alertTitle = screen.getByText('Current Ratio Below Threshold');
-    fireEvent.click(alertTitle);
+    await waitFor(() => {
+      const alertTitle = screen.getByText('Current Ratio Below Threshold');
+      fireEvent.click(alertTitle);
+    });
 
     // Should show detailed description
-    expect(screen.getByText('Current ratio of 0.95 is below the recommended threshold of 1.0')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Current ratio of 0.95 is below the recommended threshold of 1.0')).toBeInTheDocument();
+    });
   });
 
-  it('displays alert creation and expiration dates', () => {
+  it('displays alert creation and expiration dates', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show formatted dates
-    expect(screen.getByText(/Jan 15, 2024/i)).toBeInTheDocument();
-    expect(screen.getByText(/Jan 25, 2024/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/Jan 15, 2024/i)).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Jan 25, 2024/i)).toBeInTheDocument();
+    });
   });
 
-  it('shows alert direction indicators', () => {
+  it('shows alert direction indicators', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show direction indicators (multiple elements expected)
-    expect(screen.getAllByText(/decline/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/improvement/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText(/decline/i).length).toBeGreaterThan(0);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/improvement/i)).toBeInTheDocument();
+    });
   });
 
-  it('handles empty alerts array', () => {
-    render(<FinancialAlerts companyId="empty-company" ratios={[]} statements={[]} />);
+  it('handles empty alerts array', async () => {
+    renderWithProviders({ companyId: "empty-company", ratios: [], statements: [] });
 
-    expect(screen.getByText('No alerts available')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('No alerts available')).toBeInTheDocument();
+    });
   });
 
-  it('shows loading state when alerts are being fetched', () => {
-    render(<FinancialAlerts companyId="loading-company" ratios={[]} statements={[]} />);
+  it('shows loading state when alerts are being fetched', async () => {
+    renderWithProviders({ companyId: "loading-company", ratios: [], statements: [] });
 
-    expect(screen.getByText('Loading alerts...')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Loading alerts...')).toBeInTheDocument();
+    });
   });
 
-  it('displays expired alerts differently', () => {
+  it('displays expired alerts differently', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Expired alert should be shown with different styling
-    const expiredAlert = screen.getByText('10-Q Filing Due Soon');
-    expect(expiredAlert).toBeInTheDocument();
+    await waitFor(() => {
+      const expiredAlert = screen.getByText('10-Q Filing Due Soon');
+      expect(expiredAlert).toBeInTheDocument();
+    });
   });
 
-  it('handles bulk actions (mark all as read)', () => {
-    render(
-      <FinancialAlerts
-        companyId="test-company"
-        ratios={[]}
-        statements={[]}
-      />
-    );
+  it('handles bulk actions (mark all as read)', async () => {
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const markAllButton = screen.getByText('Mark All as Read');
-    fireEvent.click(markAllButton);
+    await waitFor(() => {
+      const markAllButton = screen.getByText('Mark All as Read');
+      fireEvent.click(markAllButton);
+    });
 
     // Component should handle bulk actions internally
   });
 
-  it('handles bulk actions (dismiss all)', () => {
-    render(
-      <FinancialAlerts
-        companyId="test-company"
-        ratios={[]}
-        statements={[]}
-      />
-    );
+  it('handles bulk actions (dismiss all)', async () => {
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const dismissAllButton = screen.getByText('Dismiss All');
-    fireEvent.click(dismissAllButton);
+    await waitFor(() => {
+      const dismissAllButton = screen.getByText('Dismiss All');
+      fireEvent.click(dismissAllButton);
+    });
 
     // Component should handle bulk dismiss actions internally
   });
 
-  it('shows alert search functionality', () => {
+  it('shows alert search functionality', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const searchInput = screen.getByPlaceholderText('Search alerts...');
-    expect(searchInput).toBeInTheDocument();
+    await waitFor(() => {
+      const searchInput = screen.getByPlaceholderText('Search alerts...');
+      expect(searchInput).toBeInTheDocument();
+    });
 
     // Test search
-    fireEvent.change(searchInput, { target: { value: 'ratio' } });
+    await waitFor(() => {
+      const searchInput = screen.getByPlaceholderText('Search alerts...');
+      fireEvent.change(searchInput, { target: { value: 'ratio' } });
+    });
 
     // Should filter alerts based on search
-    expect(screen.getByText('Current Ratio Below Threshold')).toBeInTheDocument();
-    expect(screen.queryByText('10-Q Filing Due Soon')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Current Ratio Below Threshold')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.queryByText('10-Q Filing Due Soon')).not.toBeInTheDocument();
+    });
   });
 
-  it('displays alert categories and counts', () => {
+  it('displays alert categories and counts', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show category breakdown
-    expect(screen.getByText('Ratio Threshold: 1')).toBeInTheDocument();
-    expect(screen.getByText('Filing Deadline: 1')).toBeInTheDocument();
-    expect(screen.getByText('Data Quality: 1')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Ratio Threshold: 1')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Filing Deadline: 1')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Data Quality: 1')).toBeInTheDocument();
+    });
   });
 
-  it('handles responsive design for mobile', () => {
+  it('handles responsive design for mobile', async () => {
     // Mock mobile viewport
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
@@ -315,70 +336,90 @@ describe('FinancialAlerts', () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should adapt to mobile view
-    expect(screen.getByText('Financial Alerts')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Financial Alerts')).toBeInTheDocument();
+    });
   });
 
-  it('shows alert priority indicators', () => {
+  it('shows alert priority indicators', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show priority indicators for high severity alerts
-    expect(screen.getByText('High Priority')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('High Priority')).toBeInTheDocument();
+    });
   });
 
-  it('handles alert action buttons (view details, acknowledge)', () => {
+  it('handles alert action buttons (view details, acknowledge)', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show action buttons for each alert
-    expect(screen.getAllByText('View Details')).toHaveLength(mockAlerts.length);
-    expect(screen.getAllByText('Acknowledge')).toHaveLength(mockAlerts.length);
+    await waitFor(() => {
+      expect(screen.getAllByText('View Details')).toHaveLength(mockAlerts.length);
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText('Acknowledge')).toHaveLength(mockAlerts.length);
+    });
   });
 
-  it('displays alert notifications count in header', () => {
+  it('displays alert notifications count in header', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show notification count in header
-    expect(screen.getByText('4')).toBeInTheDocument(); // Total alerts
-    expect(screen.getByText('2')).toBeInTheDocument(); // Unread alerts
+    await waitFor(() => {
+      expect(screen.getByText('4')).toBeInTheDocument(); // Total alerts
+    });
+    await waitFor(() => {
+      expect(screen.getByText('2')).toBeInTheDocument(); // Unread alerts
+    });
   });
 
-  it('handles alert refresh functionality', () => {
-    render(
-      <FinancialAlerts
-        companyId="test-company"
-        ratios={[]}
-        statements={[]}
-      />
-    );
+  it('handles alert refresh functionality', async () => {
+    renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const refreshButton = screen.getByRole('button', { name: /refresh/i });
-    fireEvent.click(refreshButton);
+    await waitFor(() => {
+      const refreshButton = screen.getByRole('button', { name: /refresh/i });
+      fireEvent.click(refreshButton);
+    });
 
     // Component should handle refresh functionality internally
   });
 
-  it('shows alert settings and preferences', () => {
+  it('shows alert settings and preferences', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show settings/preferences link
-    expect(screen.getByText('Alert Settings')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Alert Settings')).toBeInTheDocument();
+    });
   });
 
-  it('handles alert export functionality', () => {
+  it('handles alert export functionality', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const exportButton = screen.getByText('Export Alerts');
-    fireEvent.click(exportButton);
+    await waitFor(() => {
+      const exportButton = screen.getByText('Export Alerts');
+      fireEvent.click(exportButton);
+    });
 
     // Should trigger export functionality
-    expect(exportButton).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Export Alerts')).toBeInTheDocument();
+    });
   });
 
-  it('displays alert trends and statistics', () => {
+  it('displays alert trends and statistics', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     // Should show alert trends
-    expect(screen.getByText('Alert Trends')).toBeInTheDocument();
-    expect(screen.getByText('This Week: 4')).toBeInTheDocument();
-    expect(screen.getByText('Last Week: 2')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Alert Trends')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('This Week: 4')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Last Week: 2')).toBeInTheDocument();
+    });
   });
 });

@@ -16,29 +16,18 @@ afterEach(async () => {
 });
 afterAll(async () => {
   await cleanupSimpleMSW();
-  // Force cleanup of any hanging processes
+  // Simple cleanup without aggressive process.exit
   if (typeof process !== 'undefined') {
-    // Clear any pending timeouts/intervals
+    // Clear any pending timeouts/intervals more safely
     const highestTimeoutId = setTimeout(() => {
       // Empty function for cleanup
     }, 0);
-    for (let i = 0; i < Number(highestTimeoutId); i++) {
-      clearTimeout(i);
-    }
+    clearTimeout(highestTimeoutId);
 
     const highestIntervalId = setInterval(() => {
       // Empty function for cleanup
     }, 0);
-    for (let i = 0; i < Number(highestIntervalId); i++) {
-      clearInterval(i);
-    }
-
-    // Force exit if needed
-    setTimeout(() => {
-      if (process.exit) {
-        process.exit(0);
-      }
-    }, 100);
+    clearInterval(highestIntervalId);
   }
 });
 
@@ -66,9 +55,18 @@ const localStorageMock = {
   key: () => null,
   length: 0,
 };
-(global as any).localStorage = localStorageMock;
+
+// Define localStorage on global and window more safely
+Object.defineProperty(global, 'localStorage', {
+  value: localStorageMock,
+  writable: true,
+  configurable: true,
+});
+
 Object.defineProperty(window, 'localStorage', {
   value: localStorageMock,
+  writable: true,
+  configurable: true,
 });
 
 // Mock Chart.js and related modules
