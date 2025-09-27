@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { vi } from 'vitest';
@@ -105,6 +105,12 @@ describe('InteractiveChartWithCollaboration', () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    // Clean up any rendered components to prevent test pollution
+    // Use cleanup from @testing-library/react instead of direct DOM manipulation
+    cleanup();
+  });
+
   const renderInteractiveChartWithCollaboration = (props = {}) => {
     const combinedProps = { ...defaultProps, ...props };
     return render(
@@ -119,7 +125,10 @@ describe('InteractiveChartWithCollaboration', () => {
       renderInteractiveChartWithCollaboration();
 
       expect(screen.getByTestId('line-chart')).toBeInTheDocument();
-      expect(screen.getByTestId('chart-collaboration')).toBeInTheDocument();
+      // Use getAllByTestId to handle potential multiple matches properly
+      const collaborationElements = screen.getAllByTestId('chart-collaboration');
+      expect(collaborationElements).toHaveLength(1);
+      expect(collaborationElements[0]).toBeInTheDocument();
       expect(screen.getByText('Mock Interactive Chart with Collaboration')).toBeInTheDocument();
     });
 
@@ -353,7 +362,10 @@ describe('InteractiveChartWithCollaboration', () => {
       renderInteractiveChartWithCollaboration();
 
       // The collaboration component should receive the seriesId and chartId
-      expect(screen.getByTestId('chart-collaboration')).toBeInTheDocument();
+      // Use getAllByTestId to handle potential multiple matches properly
+      const collaborationElements = screen.getAllByTestId('chart-collaboration');
+      expect(collaborationElements).toHaveLength(1);
+      expect(collaborationElements[0]).toBeInTheDocument();
     });
   });
 
@@ -534,7 +546,10 @@ describe('InteractiveChartWithCollaboration', () => {
         seriesId: 'custom-series-id',
       });
 
-      expect(screen.getByTestId('chart-collaboration')).toBeInTheDocument();
+      // Use getAllByTestId to handle potential multiple matches properly
+      const collaborationElements = screen.getAllByTestId('chart-collaboration');
+      expect(collaborationElements).toHaveLength(1);
+      expect(collaborationElements[0]).toBeInTheDocument();
     });
 
     it('should handle collaboration events', async () => {
