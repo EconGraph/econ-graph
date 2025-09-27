@@ -1653,43 +1653,6 @@ jobs:
       env:
         REACT_APP_GRAPHQL_ENDPOINT: http://localhost:51249/graphql
 
-  e2e-container-build:
-    name: Build E2E Test Containers
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    needs: [frontend-integration-tests]
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.branch || github.ref }}
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Build standard E2E container
-      run: |
-        docker build -f ci/docker/e2e/Dockerfile -t econ-graph-e2e:latest .
-        docker save econ-graph-e2e:latest | gzip > e2e-container.tar.gz
-
-    - name: Build mobile E2E container
-      run: |
-        # Mobile container depends on the standard container being built first
-        # Verify the standard container is available
-        docker images | grep econ-graph-e2e
-        docker build -f ci/docker/e2e/Dockerfile.mobile -t econ-graph-e2e-mobile:latest .
-        docker save econ-graph-e2e-mobile:latest | gzip > e2e-mobile-container.tar.gz
-
-    - name: Upload E2E containers
-      uses: actions/upload-artifact@v4
-      with:
-        name: e2e-containers-standard
-        path: |
-          e2e-container.tar.gz
-          e2e-mobile-container.tar.gz
-        retention-days: 1
-
   e2e-container-build-optimized:
     name: Build Optimized E2E Test Containers
     runs-on: ubuntu-latest
