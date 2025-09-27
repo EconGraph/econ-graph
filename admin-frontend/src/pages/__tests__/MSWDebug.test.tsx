@@ -6,9 +6,12 @@
 import { server } from "../../mocks/server";
 import { http } from "msw";
 
+// Debug flag - set to true to enable MSW debug output
+const MSW_DEBUG = process.env.MSW_DEBUG === "true" || false;
+
 describe("MSW Debug", () => {
   it("should intercept GraphQL requests with MSW", async () => {
-    console.log("Testing MSW GraphQL interception...");
+    if (MSW_DEBUG) console.log("Testing MSW GraphQL interception...");
 
     const response = await fetch("/graphql", {
       method: "POST",
@@ -21,11 +24,13 @@ describe("MSW Debug", () => {
       }),
     });
 
-    console.log("Response status:", response.status);
-    console.log("Response ok:", response.ok);
+    if (MSW_DEBUG) {
+      console.log("Response status:", response.status);
+      console.log("Response ok:", response.ok);
+    }
 
     const data = await response.json();
-    console.log("Response data:", data);
+    if (MSW_DEBUG) console.log("Response data:", data);
 
     expect(response.ok).toBe(true);
     expect(data.data).toBeDefined();
@@ -39,7 +44,7 @@ describe("MSW Debug", () => {
     // Override the handler to return an error
     server.use(
       http.post("/graphql", () => {
-        console.log("[MSW] Error scenario triggered");
+        if (MSW_DEBUG) console.log("[MSW] Error scenario triggered");
         return new Response(
           JSON.stringify({
             errors: [
@@ -70,9 +75,9 @@ describe("MSW Debug", () => {
       }),
     });
 
-    console.log("Error response status:", response.status);
+    if (MSW_DEBUG) console.log("Error response status:", response.status);
     const data = await response.json();
-    console.log("Error response data:", data);
+    if (MSW_DEBUG) console.log("Error response data:", data);
 
     expect(response.ok).toBe(false);
     expect(data.errors).toBeDefined();

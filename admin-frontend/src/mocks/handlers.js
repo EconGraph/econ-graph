@@ -5,10 +5,13 @@
 
 import { http } from "msw";
 
+// Debug flag - set to true to enable MSW debug output
+const MSW_DEBUG = process.env.MSW_DEBUG === "true" || false;
+
 export const handlers = [
   // Monitoring API endpoints
   http.get("/api/monitoring/system-status", () => {
-    console.log("[MSW] System status request intercepted");
+    if (MSW_DEBUG) console.log("[MSW] System status request intercepted");
     const response = {
       overall: "healthy",
       services: {
@@ -19,7 +22,7 @@ export const handlers = [
       },
       alerts: 2,
     };
-    console.log("[MSW] Returning system status:", response);
+    if (MSW_DEBUG) console.log("[MSW] Returning system status:", response);
     return new Response(JSON.stringify(response), {
       headers: {
         "Content-Type": "application/json",
@@ -101,19 +104,19 @@ export const handlers = [
 
   // GraphQL endpoints
   http.post("/graphql", async ({ request }) => {
-    console.log("[MSW] GraphQL request intercepted");
+    if (MSW_DEBUG) console.log("[MSW] GraphQL request intercepted");
 
     const body = await request.json();
     const { query, variables } = body;
 
-    console.log("[MSW] Query:", query);
-    console.log("[MSW] Variables:", variables);
-
-    // Handle different GraphQL operations
-    console.log("[MSW] Checking query:", query.includes("GetCrawlerStatus"));
+    if (MSW_DEBUG) {
+      console.log("[MSW] Query:", query);
+      console.log("[MSW] Variables:", variables);
+      console.log("[MSW] Checking query:", query.includes("GetCrawlerStatus"));
+    }
 
     if (query.includes("GetCrawlerStatus")) {
-      console.log("[MSW] Returning crawler status");
+      if (MSW_DEBUG) console.log("[MSW] Returning crawler status");
 
       // Add a small delay to let React Query "latch" and be ready to receive data
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -143,7 +146,7 @@ export const handlers = [
     }
 
     if (query.includes("GetQueueStatistics")) {
-      console.log("[MSW] Returning queue statistics");
+      if (MSW_DEBUG) console.log("[MSW] Returning queue statistics");
 
       // Add a small delay to let React Query "latch" and be ready to receive data
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -173,7 +176,7 @@ export const handlers = [
     }
 
     if (query.includes("GetPerformanceMetrics")) {
-      console.log("[MSW] Returning performance metrics");
+      if (MSW_DEBUG) console.log("[MSW] Returning performance metrics");
 
       // Add a small delay to let React Query "latch" and be ready to receive data
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -203,7 +206,7 @@ export const handlers = [
     }
 
     if (query.includes("GetCrawlerLogs")) {
-      console.log("[MSW] Returning crawler logs");
+      if (MSW_DEBUG) console.log("[MSW] Returning crawler logs");
 
       // Add a small delay to let React Query "latch" and be ready to receive data
       await new Promise((resolve) => setTimeout(resolve, 50));

@@ -151,12 +151,12 @@ let currentScenario = "default";
 
 export const setMockScenario = (scenario: string) => {
   currentScenario = scenario;
-  console.log(`[Simple MSW] Set mock scenario to: ${scenario}`);
+  if (MSW_DEBUG) console.log(`[Simple MSW] Set mock scenario to: ${scenario}`);
 };
 
 export const resetMockScenario = () => {
   currentScenario = "default";
-  console.log(`[Simple MSW] Reset mock scenario to default`);
+  if (MSW_DEBUG) console.log(`[Simple MSW] Reset mock scenario to default`);
 };
 
 // Simple GraphQL response handler
@@ -164,10 +164,15 @@ export const getMockResponse = (
   operationName: string,
   scenario: string = currentScenario,
 ) => {
-  console.log(
-    `[Simple MSW] Looking for operation: ${operationName} with scenario: ${scenario}`,
-  );
-  console.log(`[Simple MSW] Available operations:`, Object.keys(mockResponses));
+  if (MSW_DEBUG) {
+    console.log(
+      `[Simple MSW] Looking for operation: ${operationName} with scenario: ${scenario}`,
+    );
+    console.log(
+      `[Simple MSW] Available operations:`,
+      Object.keys(mockResponses),
+    );
+  }
 
   const responses = mockResponses[operationName as keyof typeof mockResponses];
   if (!responses) {
@@ -178,10 +183,12 @@ export const getMockResponse = (
     };
   }
 
-  console.log(
-    `[Simple MSW] Available scenarios for ${operationName}:`,
-    Object.keys(responses),
-  );
+  if (MSW_DEBUG) {
+    console.log(
+      `[Simple MSW] Available scenarios for ${operationName}:`,
+      Object.keys(responses),
+    );
+  }
 
   const response = responses[scenario as keyof typeof responses];
   if (!response) {
@@ -194,7 +201,8 @@ export const getMockResponse = (
     };
   }
 
-  console.log(`[Simple MSW] Found response for ${operationName}/${scenario}`);
+  if (MSW_DEBUG)
+    console.log(`[Simple MSW] Found response for ${operationName}/${scenario}`);
   return response;
 };
 
@@ -203,8 +211,10 @@ export const getMockResponse = (
 let originalFetch: typeof global.fetch;
 
 export const setupSimpleMSW = async () => {
-  console.log("[Simple MSW] Setting up MSW...");
-  console.log("[Simple MSW] Original fetch type:", typeof global.fetch);
+  if (MSW_DEBUG) {
+    console.log("[Simple MSW] Setting up MSW...");
+    console.log("[Simple MSW] Original fetch type:", typeof global.fetch);
+  }
   originalFetch = global.fetch;
 
   // Use vi.spyOn for Vitest instead of jest.spyOn
@@ -213,12 +223,14 @@ export const setupSimpleMSW = async () => {
   vi.spyOn(global, "fetch").mockImplementation(
     (input: string | URL | Request, options?: any) => {
       const url = typeof input === "string" ? input : input.toString();
-      console.log(`[Simple MSW] ===== FETCH INTERCEPTED =====`);
-      console.log(`[Simple MSW] URL: "${url}"`);
-      console.log(`[Simple MSW] Method: ${options?.method || "GET"}`);
-      console.log(`[Simple MSW] Headers:`, options?.headers);
-      console.log(`[Simple MSW] Body:`, options?.body);
-      console.log(`[Simple MSW] ============================`);
+      if (MSW_DEBUG) {
+        console.log(`[Simple MSW] ===== FETCH INTERCEPTED =====`);
+        console.log(`[Simple MSW] URL: "${url}"`);
+        console.log(`[Simple MSW] Method: ${options?.method || "GET"}`);
+        console.log(`[Simple MSW] Headers:`, options?.headers);
+        console.log(`[Simple MSW] Body:`, options?.body);
+        console.log(`[Simple MSW] ============================`);
+      }
 
       // Intercept GraphQL requests - be more flexible with URL matching
       if (
@@ -226,7 +238,8 @@ export const setupSimpleMSW = async () => {
         url === "/graphql" ||
         url.endsWith("/graphql")
       ) {
-        console.log(`[Simple MSW] *** GRAPHQL REQUEST DETECTED ***`);
+        if (MSW_DEBUG)
+          console.log(`[Simple MSW] *** GRAPHQL REQUEST DETECTED ***`);
         try {
           const body = JSON.parse(options.body);
           const operationName =
@@ -259,19 +272,22 @@ export const setupSimpleMSW = async () => {
       }
 
       // For non-GraphQL requests, pass through to original fetch
-      console.log(`[Simple MSW] Passing through request: ${url}`);
+      if (MSW_DEBUG)
+        console.log(`[Simple MSW] Passing through request: ${url}`);
       return originalFetch(url, options);
     },
   );
 
-  console.log("[Simple MSW] MSW setup complete");
-  console.log("[Simple MSW] Fetch mock applied:", typeof global.fetch);
-  const vitestModule2 = await import("vitest");
-  const vi2 = vitestModule2.vi;
-  console.log(
-    "[Simple MSW] Vitest mock function:",
-    vi2.isMockFunction(global.fetch),
-  );
+  if (MSW_DEBUG) {
+    console.log("[Simple MSW] MSW setup complete");
+    console.log("[Simple MSW] Fetch mock applied:", typeof global.fetch);
+    const vitestModule2 = await import("vitest");
+    const vi2 = vitestModule2.vi;
+    console.log(
+      "[Simple MSW] Vitest mock function:",
+      vi2.isMockFunction(global.fetch),
+    );
+  }
 };
 
 export const cleanupSimpleMSW = async () => {
