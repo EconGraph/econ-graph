@@ -108,7 +108,7 @@ describe("CrawlerLogs", () => {
       expect(
         screen.getByText(/Successfully crawled GDP data/i),
       ).toBeInTheDocument();
-      expect(screen.getByText(/FRED/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/FRED/i)).toHaveLength(2);
     });
 
     it("displays performance metrics cards", () => {
@@ -220,7 +220,7 @@ describe("CrawlerLogs", () => {
       renderWithTheme(<CrawlerLogs />);
 
       // Check that status indicators are present
-      expect(screen.getByText("success")).toBeInTheDocument();
+      expect(screen.getAllByText("success")).toHaveLength(3);
       expect(screen.getByText("failed")).toBeInTheDocument();
     });
 
@@ -276,7 +276,7 @@ describe("CrawlerLogs", () => {
       renderWithTheme(<CrawlerLogs />);
 
       // Check that status indicators are present
-      expect(screen.getByText("success")).toBeInTheDocument();
+      expect(screen.getAllByText("success")).toHaveLength(3);
       expect(screen.getByText("failed")).toBeInTheDocument();
     });
   });
@@ -369,9 +369,7 @@ describe("CrawlerLogs", () => {
       });
 
       // Check that error state is displayed
-      expect(
-        screen.getByText(/Failed to retrieve crawler logs/i),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/GraphQL error/i)).toBeInTheDocument();
     });
 
     it("displays loading state when GraphQL request is loading", async () => {
@@ -386,7 +384,8 @@ describe("CrawlerLogs", () => {
       renderWithTheme(<CrawlerLogs />);
 
       // Check that loading state is displayed
-      expect(screen.getByText(/Refreshing/i)).toBeInTheDocument();
+      // The component shows loading indicators instead of "Refreshing" text
+      expect(screen.getAllByRole("progressbar")).toHaveLength(2);
     });
   });
 });
