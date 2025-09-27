@@ -244,6 +244,75 @@ function createHandlers() {
       });
     }),
 
+    // Handle GraphQL POST requests
+    http.post('/graphql', async ({ request }: { request: any }) => {
+      const body = await request.json();
+      const { query, variables, operationName } = body;
+
+      // Extract operation name from query
+      const operationMatch = query.match(/(?:query|mutation|subscription)\s+(\w+)/);
+      const extractedOperationName = operationMatch ? operationMatch[1] : operationName;
+
+      console.log('🔧 MSW GraphQL Request:', { query: query.substring(0, 100) + '...', variables, operationName: extractedOperationName });
+
+      // Route to appropriate handler based on operation name
+      if (extractedOperationName === 'GetFinancialStatement') {
+        const { statementId } = variables || {};
+        let scenario = 'success';
+        if (statementId === 'invalid-statement-id') {
+          scenario = 'not_found';
+        } else if (statementId === 'processing-statement-id') {
+          scenario = 'processing';
+        } else if (statementId === 'error-statement-id') {
+          scenario = 'error';
+        }
+
+        const response = loadGraphQLResponse('get_financial_statement', scenario);
+        return HttpResponse.json(response, {
+          status: response.errors ? 400 : 200,
+        });
+      }
+
+      if (extractedOperationName === 'GetFinancialDashboard') {
+        const { companyId } = variables || {};
+        let scenario = 'success';
+        if (companyId === 'invalid-company-id') {
+          scenario = 'not_found';
+        } else if (companyId === 'error-company-id') {
+          scenario = 'error';
+        }
+
+        const response = loadGraphQLResponse('get_financial_dashboard', scenario);
+        return HttpResponse.json(response, {
+          status: response.errors ? 400 : 200,
+        });
+      }
+
+      if (extractedOperationName === 'GetFinancialRatios') {
+        const { statementId } = variables || {};
+        let scenario = 'success';
+        if (statementId === 'empty-statement-id') {
+          scenario = 'empty';
+        } else if (statementId === 'partial-statement-id') {
+          scenario = 'partial';
+        } else if (statementId === 'error-statement-id') {
+          scenario = 'error';
+        }
+
+        const response = loadGraphQLResponse('get_financial_ratios', scenario);
+        return HttpResponse.json(response, {
+          status: response.errors ? 400 : 200,
+        });
+      }
+
+      // Default fallback
+      console.warn(`Unhandled GraphQL operation: ${extractedOperationName}`);
+      return HttpResponse.json({
+        data: null,
+        errors: [{ message: `Unhandled operation: ${extractedOperationName}` }]
+      }, { status: 400 });
+    }),
+
     // Handle unmatched GraphQL requests
     graphql.operation(({ operationName }: { operationName: any }) => {
       console.warn(`Unhandled GraphQL operation: ${operationName}`);
