@@ -62,9 +62,9 @@ interface FinancialAlertsProps {
 
 export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
   companyId,
-  ratios,
-  statements,
-  userType = 'intermediate',
+  ratios: _ratios,
+  statements: _statements,
+  userType: _userType = 'intermediate',
   onAlertClick,
 }) => {
   const [alerts, setAlerts] = useState<FinancialAlert[]>([]);
@@ -672,15 +672,6 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
           </div>
         </CardContent>
       </Card>
-
-      {/* Loading State Placeholder */}
-      {false && (
-        <Card>
-          <CardContent className='p-8 text-center'>
-            <p>Loading alerts...</p>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Alert Notifications */}
       <Card>

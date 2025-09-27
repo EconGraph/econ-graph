@@ -225,7 +225,16 @@ backend-mcp-integration-tests:
   needs: [backend-smoke-tests, chart-api-integration-tests]
   services:
     postgres:
-      image: postgres:15-alpine
+      image: postgres:18-alpine
+      env:
+        POSTGRES_PASSWORD: postgres
+        POSTGRES_USER: postgres
+        POSTGRES_DB: econ_graph_test
+      options: >-
+        --health-cmd pg_isready
+        --health-interval 10s
+        --health-timeout 5s
+        --health-retries 5
       ports:
         - 5445:5432  # Isolated port
   steps:

@@ -3,6 +3,7 @@
   "name": "econ-graph-frontend",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "dependencies": {
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
@@ -15,7 +16,6 @@
     "@radix-ui/react-switch": "^1.2.6",
     "@types/d3": "7.4.3",
     "@types/lodash": "4.17.20",
-    "@types/node": "^20.19.13",
     "@types/react": "^18.3.24",
     "@types/react-dom": "^18.3.7",
     "@types/topojson-client": "3.1.5",
@@ -47,7 +47,6 @@
     "react-dom": "^18.3.1",
     "react-query": "3.39.3",
     "react-router-dom": "6.30.1",
-    "react-scripts": "^5.0.1",
     "rxjs": "7.8.2",
     "tailwind-merge": "^3.3.1",
     "topojson-client": "^3.1.0",
@@ -60,45 +59,43 @@
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^14.3.1",
     "@testing-library/user-event": "^14.6.1",
+    "@types/express": "^5.0.3",
     "@types/jest": "^29.5.14",
+    "@types/node": "^24.5.2",
+    "@typescript-eslint/eslint-plugin": "^8.44.1",
+    "@typescript-eslint/parser": "^8.44.1",
+    "@vitejs/plugin-react": "^5.0.3",
+    "@vitest/coverage-v8": "^3.2.4",
+    "@vitest/ui": "^3.2.4",
+    "eslint": "^9.36.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-testing-library": "^7.10.0",
     "identity-obj-proxy": "^3.0.0",
-    "jest": "^27.5.1",
-    "jest-environment-jsdom": "^29.7.0",
+    "jsdom": "^27.0.0",
     "msw": "2.11.1",
     "prettier": "3.6.2",
     "react-test-renderer": "18.3.1",
     "resize-observer-polyfill": "1.5.1",
     "supertest": "^7.1.4",
-    "typescript": "^4.9.5"
-  },
-  "jest": {
-    "moduleNameMapper": {
-      "^@/(.*)$": "<rootDir>/src/$1",
-      "^react-app/jest$": "react-app/jest",
-      "^d3$": "<rootDir>/src/__mocks__/d3.js",
-      "^d3-geo$": "<rootDir>/src/__mocks__/d3-geo.js",
-      "^d3-zoom$": "<rootDir>/src/__mocks__/d3-zoom.js",
-      "^d3-scale$": "<rootDir>/src/__mocks__/d3-scale.js",
-      "^d3-scale-chromatic$": "<rootDir>/src/__mocks__/d3-scale-chromatic.js",
-      "^d3-array$": "<rootDir>/src/__mocks__/d3-array.js",
-      "^d3-selection$": "<rootDir>/src/__mocks__/d3-selection.js"
-    },
-    "clearMocks": true,
-    "resetMocks": true,
-    "restoreMocks": true,
-    "transformIgnorePatterns": [
-      "node_modules/(?!(@apollo/client|d3-geo|d3-zoom|d3-scale|d3-scale-chromatic|d3-array|d3-selection)/)"
-    ]
+    "typescript": "^4.9.5",
+    "typescript-eslint": "^8.44.1",
+    "vite": "^7.1.7",
+    "vitest": "^3.2.4"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
-    "test:serial": "react-scripts test --runInBand --watchAll=false",
-    "test:unit": "react-scripts test --testPathIgnorePatterns=src/__tests__/integration --watchAll=false",
-    "test:integration": "react-scripts test src/__tests__/integration --watchAll=false",
-    "test:xbrl-financial:integration": "react-scripts test src/__tests__/integration/xbrl-financial --watchAll=false",
-    "eject": "react-scripts eject",
+    "start": "vite",
+    "build": "vite build",
+    "build:check": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:serial": "vitest run",
+    "test:unit": "vitest run --exclude=**/integration/**",
+    "test:integration": "vitest run src/__tests__/integration",
+    "test:xbrl-financial:integration": "vitest run src/__tests__/integration/xbrl-financial",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "prettier-check": "prettier --check 'src/**/*.{js,ts,tsx,css}'",
@@ -128,29 +125,6 @@
     "test:e2e:mobile:global-analysis": "playwright test --config=ci/configs/playwright-mobile-global-analysis.config.ts",
     "test:e2e:mobile:professional-analysis": "playwright test --config=ci/configs/playwright-mobile-professional-analysis.config.ts"
   },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ],
-    "rules": {
-      "jest/no-conditional-expect": "off",
-      "testing-library/no-node-access": "off"
-    },
-    "overrides": [
-      {
-        "files": [
-          "**/*.test.ts",
-          "**/*.test.tsx",
-          "**/__tests__/**/*"
-        ],
-        "rules": {
-          "jest/no-conditional-expect": "off",
-          "testing-library/no-node-access": "off"
-        }
-      }
-    ]
-  },
   "browserslist": {
     "production": [
       ">0.2%",
@@ -172,6 +146,5 @@
   },
   "resolutions": {
     "@types/d3-dispatch": "3.0.4"
-  },
-  "proxy": "http://localhost:8080"
+  }
 }

@@ -3,26 +3,28 @@
  * PURPOSE: Provide predictable test behavior for D3 zoom components
  */
 
+const { vi } = require('vitest');
+
 module.exports = {
-  zoom: jest.fn(() => ({
-    scaleExtent: jest.fn(() => ({
-      on: jest.fn(() => jest.fn()),
+  zoom: vi.fn(() => ({
+    scaleExtent: vi.fn(() => ({
+      on: vi.fn(() => vi.fn()),
     })),
-    on: jest.fn(() => jest.fn()),
-    transform: jest.fn(() => jest.fn()),
+    on: vi.fn(() => vi.fn()),
+    transform: vi.fn(() => vi.fn()),
   })),
-  zoomTransform: jest.fn(() => ({
+  zoomTransform: vi.fn(() => ({
     x: 0,
     y: 0,
     k: 1,
-    scale: jest.fn(() => 1),
-    translate: jest.fn(() => [0, 0]),
+    scale: vi.fn(() => 1),
+    translate: vi.fn(() => [0, 0]),
   })),
-  zoomIdentity: jest.fn(() => ({
+  zoomIdentity: vi.fn(() => ({
     x: 0,
     y: 0,
     k: 1,
-    scale: jest.fn(() => 1),
-    translate: jest.fn(() => [0, 0]),
+    scale: vi.fn(() => 1),
+    translate: vi.fn(() => [0, 0]),
   })),
 };

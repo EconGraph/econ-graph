@@ -1,0 +1,49 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+docs/
+monitoring/
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+
+# Test files
+tests/
+**/*_test.rs
+**/test_*.rs
+
+# Logs
+*.log
+logs/
+
+# Data files (should be mounted as volumes)
+data/
+*.parquet
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Kubernetes
+k8s/
+
+# Temporary files
+tmp/
+temp/
