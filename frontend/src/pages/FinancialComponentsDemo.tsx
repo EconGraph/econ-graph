@@ -192,7 +192,9 @@ export const FinancialComponentsDemo: React.FC = () => {
           ratios={mockRatios}
           statements={mockStatements}
           timeRange='3Y'
-          onTimeRangeChange={() => {}}
+          onTimeRangeChange={() => {
+            // Mock time range change handler
+          }}
         />
       ),
     },

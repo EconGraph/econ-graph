@@ -73,7 +73,7 @@ export const calculateTotalComments = (
 export const filterActiveCollaborators = (
   collaborators: Collaborator[],
   users: Record<string, User>,
-  activeThresholdMs: number = 300000 // 5 minutes
+  activeThresholdMs = 300000 // 5 minutes
 ): Collaborator[] => {
   const now = Date.now();
   return collaborators.filter(collaborator => {

@@ -1,0 +1,14 @@
+{
+  "data": {
+    "company": null
+  },
+  "errors": [
+    {
+      "message": "Company not found",
+      "extensions": {
+        "code": "NOT_FOUND",
+        "companyId": "invalid-company-id"
+      }
+    }
+  ]
+}

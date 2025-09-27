@@ -85,8 +85,8 @@ export function calculateEMA(data: DataPoint[], period: number): TechnicalIndica
  */
 export function calculateBollingerBands(
   data: DataPoint[],
-  period: number = 20,
-  standardDeviations: number = 2
+  period = 20,
+  standardDeviations = 2
 ): BollingerBands[] {
   if (data.length < period) return [];
 
@@ -118,7 +118,7 @@ export function calculateBollingerBands(
  * Calculate Relative Strength Index (RSI)
  * Momentum oscillator measuring the speed and magnitude of price changes
  */
-export function calculateRSI(data: DataPoint[], period: number = 14): RSIPoint[] {
+export function calculateRSI(data: DataPoint[], period = 14): RSIPoint[] {
   if (data.length < period + 1) return [];
 
   const rsiPoints: RSIPoint[] = [];
@@ -220,7 +220,7 @@ export interface CyclePoint {
   confidence: number;
 }
 
-export function detectEconomicCycles(data: DataPoint[], lookback: number = 6): CyclePoint[] {
+export function detectEconomicCycles(data: DataPoint[], lookback = 6): CyclePoint[] {
   if (data.length < lookback * 2 + 1) return [];
 
   const cycles: CyclePoint[] = [];

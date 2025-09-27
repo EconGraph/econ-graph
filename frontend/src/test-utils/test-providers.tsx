@@ -4,7 +4,6 @@
 
 import React from 'react';
 import { QueryClient, QueryClientProvider } from 'react-query';
-import { BrowserRouter } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline } from '@mui/material';
 import { render } from '@testing-library/react';
@@ -42,14 +41,20 @@ export function TestProviders({ children, queryClient }: TestProvidersProps) {
     },
   });
 
+  // Use a simple div wrapper instead of BrowserRouter for testing
+  const RouterWrapper = ({ children }: { children: React.ReactNode }) => {
+    // In test environment, BrowserRouter is mocked to just return children
+    return <div data-testid='router-wrapper'>{children}</div>;
+  };
+
   return (
     <QueryClientProvider client={testQueryClient}>
-      <BrowserRouter>
+      <RouterWrapper>
         <ThemeProvider theme={testTheme}>
           <CssBaseline />
           {children}
         </ThemeProvider>
-      </BrowserRouter>
+      </RouterWrapper>
     </QueryClientProvider>
   );
 }
