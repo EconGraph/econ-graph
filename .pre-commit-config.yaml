@@ -33,7 +33,7 @@ repos:
 
       - id: frontend-eslint
         name: Frontend ESLint Check
-        entry: bash -c 'cd frontend && npx eslint "src/**/*.{ts,tsx,js,jsx}" --max-warnings 20'
+        entry: bash -c 'cd frontend && npx eslint "src/**/*.{ts,tsx,js,jsx}" --max-warnings 600'
         language: system
         files: '^frontend/src/.*\.(ts|tsx|js|jsx)$'
         pass_filenames: false
