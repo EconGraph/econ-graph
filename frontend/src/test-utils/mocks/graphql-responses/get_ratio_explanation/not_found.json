@@ -1,0 +1,14 @@
+{
+  "data": {
+    "ratioExplanation": null
+  },
+  "errors": [
+    {
+      "message": "Ratio explanation not found",
+      "extensions": {
+        "code": "NOT_FOUND",
+        "ratioName": "unknownRatio"
+      }
+    }
+  ]
+}

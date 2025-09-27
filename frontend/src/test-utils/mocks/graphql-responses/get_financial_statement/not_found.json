@@ -1,0 +1,14 @@
+{
+  "data": {
+    "financialStatement": null
+  },
+  "errors": [
+    {
+      "message": "Financial statement not found",
+      "extensions": {
+        "code": "NOT_FOUND",
+        "statementId": "invalid-statement-id"
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "data": {
+    "ratioBenchmarks": {
+      "ratioName": "returnOnEquity",
+      "industry": "Technology",
+      "percentile25": 0.08,
+      "percentile50": 0.12,
+      "percentile75": 0.18,
+      "percentile90": 0.25,
+      "sampleSize": 1250,
+      "lastUpdated": "2023-12-31T00:00:00Z"
+    }
+  }
+}

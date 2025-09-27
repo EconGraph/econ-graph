@@ -1,0 +1,15 @@
+{
+  "data": {
+    "ratioBenchmarks": null
+  },
+  "errors": [
+    {
+      "message": "Benchmark data not available",
+      "extensions": {
+        "code": "NOT_FOUND",
+        "ratioName": "unknownRatio",
+        "industry": "Technology"
+      }
+    }
+  ]
+}

@@ -437,8 +437,7 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
           {/* Ratios Tab */}
           {activeTab === 'ratios' && (
             <RatioAnalysisPanel
-              ratios={ratios}
-              loading={false}
+              statementId='statement-1'
               userType={userType}
               showEducationalContent={showEducationalContent}
             />
@@ -580,8 +579,7 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
 
                 <TabsContent value='ratios'>
                   <RatioAnalysisPanel
-                    ratios={ratios}
-                    loading={false}
+                    statementId='statement-1'
                     userType={userType}
                     showEducationalContent={showEducationalContent}
                   />

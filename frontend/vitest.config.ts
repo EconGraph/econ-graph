@@ -8,6 +8,21 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/setupTests.vitest.ts'],
     globals: true,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      exclude: [
+        'node_modules/',
+        'src/setupTests.ts',
+        'src/setupTests.vitest.ts',
+        'src/test-utils/',
+        '**/*.d.ts',
+        '**/*.config.*',
+        '**/coverage/**',
+        '**/dist/**',
+        '**/build/**'
+      ]
+    },
     deps: {
       inline: ['d3', 'd3-geo', 'd3-zoom', 'd3-scale', 'd3-scale-chromatic', 'd3-array', 'd3-selection']
     }

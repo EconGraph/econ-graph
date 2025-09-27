@@ -30,26 +30,55 @@ import {
   Target,
   Zap,
 } from 'lucide-react';
-import { FinancialRatio } from '@/types/financial';
+// import { FinancialRatio } from '@/types/financial'; // Not used in current implementation
 import { RatioExplanationModal } from './RatioExplanationModal';
 import { BenchmarkComparison } from './BenchmarkComparison';
+import { useQuery } from 'react-query';
+import { executeGraphQL } from '../../utils/graphql';
+import { GET_FINANCIAL_RATIOS } from '../../test-utils/mocks/graphql/ratio-queries';
 
 interface RatioAnalysisPanelProps {
-  ratios: FinancialRatio[] | undefined;
-  loading: boolean;
+  statementId: string;
   userType: 'beginner' | 'intermediate' | 'advanced' | 'expert';
   showEducationalContent?: boolean;
 }
 
 export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
-  ratios,
-  loading,
+  statementId,
   userType,
   showEducationalContent = true,
 }) => {
   const [selectedRatio, setSelectedRatio] = useState<string | null>(null);
   const [showExplanation, setShowExplanation] = useState(false);
   const [showBenchmarks, setShowBenchmarks] = useState(false);
+
+  // GraphQL query for financial ratios
+  const {
+    data: ratiosData,
+    isLoading: loading,
+    isError,
+    error,
+  } = useQuery(
+    ['financial-ratios', statementId],
+    async () => {
+      try {
+        const result = await executeGraphQL({
+          query: GET_FINANCIAL_RATIOS,
+          variables: { statementId },
+        });
+        return result.data;
+      } catch (error) {
+        console.error('Failed to fetch financial ratios:', error);
+        // Fallback to empty data for development
+        return { financialRatios: [] };
+      }
+    },
+    {
+      staleTime: 5 * 60 * 1000, // 5 minutes
+    }
+  );
+
+  const ratios = ratiosData?.financialRatios;
 
   if (loading) {
     return (
@@ -60,7 +89,17 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
     );
   }
 
-  if (!ratios) {
+  if (isError) {
+    return (
+      <Alert variant='destructive'>
+        <AlertDescription>
+          Failed to load financial ratios: {(error as Error)?.message || 'Unknown error'}
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  if (!ratios || ratios.length === 0) {
     return (
       <Alert>
         <AlertDescription>
@@ -357,7 +396,7 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
     allRatios.forEach(([name, value]) => {
       const category = getRatioCategory(name);
       if (categories[category]) {
-        categories[category].push([name, value.value]);
+        categories[category].push([name, (value as any).value]);
       }
     });
 
@@ -380,8 +419,8 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
             <div className='p-4 border rounded-lg'>
               <h3 className='font-semibold text-green-600'>Profitability</h3>
               <p className='text-2xl font-bold'>
-                {ratios?.find(r => r.ratioName === 'returnOnEquity')?.value
-                  ? `${(ratios.find(r => r.ratioName === 'returnOnEquity')!.value * 100).toFixed(1)}%`
+                {ratios?.find((r: any) => r.ratioName === 'returnOnEquity')?.value
+                  ? `${(ratios.find((r: any) => r.ratioName === 'returnOnEquity')!.value * 100).toFixed(1)}%`
                   : '-'}
               </p>
               <p className='text-sm text-muted-foreground'>Return on Equity</p>
@@ -390,8 +429,8 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
             <div className='p-4 border rounded-lg'>
               <h3 className='font-semibold text-blue-600'>Liquidity</h3>
               <p className='text-2xl font-bold'>
-                {ratios?.find(r => r.ratioName === 'currentRatio')?.value
-                  ? ratios.find(r => r.ratioName === 'currentRatio')!.value.toFixed(2)
+                {ratios?.find((r: any) => r.ratioName === 'currentRatio')?.value
+                  ? ratios.find((r: any) => r.ratioName === 'currentRatio')!.value.toFixed(2)
                   : '-'}
               </p>
               <p className='text-sm text-muted-foreground'>Current Ratio</p>
@@ -400,8 +439,8 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
             <div className='p-4 border rounded-lg'>
               <h3 className='font-semibold text-purple-600'>Valuation</h3>
               <p className='text-2xl font-bold'>
-                {ratios?.find(r => r.ratioName === 'enterpriseValueToEbitda')?.value
-                  ? `${ratios.find(r => r.ratioName === 'enterpriseValueToEbitda')!.value.toFixed(1)}x`
+                {ratios?.find((r: any) => r.ratioName === 'enterpriseValueToEbitda')?.value
+                  ? `${ratios.find((r: any) => r.ratioName === 'enterpriseValueToEbitda')!.value.toFixed(1)}x`
                   : '-'}
               </p>
               <p className='text-sm text-muted-foreground'>EV/EBITDA</p>
@@ -517,7 +556,7 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
       {showBenchmarks && selectedRatio && (
         <BenchmarkComparison
           ratioName={selectedRatio}
-          companyValue={ratios?.find(r => r.ratioName === selectedRatio)?.value || 0}
+          companyValue={ratios?.find((r: any) => r.ratioName === selectedRatio)?.value || 0}
         />
       )}
     </div>

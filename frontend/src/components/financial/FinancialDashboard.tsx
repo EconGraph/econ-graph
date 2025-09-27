@@ -596,8 +596,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         {/* Ratios Tab */}
         <TabsContent value='ratios'>
           <RatioAnalysisPanel
-            ratios={ratios}
-            loading={false}
+            statementId='statement-1'
             userType={userType}
             showEducationalContent={showEducationalContent}
           />

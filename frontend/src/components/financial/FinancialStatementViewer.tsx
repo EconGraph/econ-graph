@@ -21,9 +21,6 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import {
-  GET_FINANCIAL_STATEMENTS,
-  GET_FINANCIAL_RATIOS,
-  GET_FINANCIAL_ANNOTATIONS,
   CREATE_FINANCIAL_ANNOTATION,
   FINANCIAL_ANNOTATION_SUBSCRIPTION,
 } from '@/graphql/financial';
@@ -217,7 +214,7 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
     error: statementError,
   } = useFinancialStatementQuery(statementId);
 
-  const { data: ratiosData, isLoading: ratiosLoading } = useQuery(
+  const { data: ratiosData } = useQuery(
     ['financial-ratios', statementId],
     async () => {
       // Mock ratios data for now
@@ -733,8 +730,7 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
         {/* Financial Ratios Tab */}
         <TabsContent value='ratios'>
           <RatioAnalysisPanel
-            ratios={ratios}
-            loading={ratiosLoading}
+            statementId={statementId}
             userType={userType}
             showEducationalContent={showEducationalContent}
           />

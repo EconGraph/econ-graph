@@ -1,0 +1,18 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Internal server error",
+      "extensions": {
+        "code": "INTERNAL_ERROR",
+        "exception": {
+          "stacktrace": [
+            "Error: Database connection failed",
+            "    at DatabaseService.query (/app/services/database.js:45:12)",
+            "    at FinancialService.getCompany (/app/services/financial.js:23:8)"
+          ]
+        }
+      }
+    }
+  ]
+}
