@@ -1402,7 +1402,7 @@ jobs:
 
     - name: Run frontend JSDoc validation
       working-directory: frontend
-      run: npm run lint -- --ext .ts,.tsx --rule "jsdoc/require-jsdoc:warn"
+      run: npx eslint "src/**/*.{ts,tsx}" --rule "jsdoc/require-jsdoc:warn" --max-warnings 600
 
   security-audit:
     name: Security Audit
