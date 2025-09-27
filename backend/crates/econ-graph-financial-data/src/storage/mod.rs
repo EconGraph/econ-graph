@@ -38,6 +38,6 @@ pub mod in_memory_storage;
 pub mod parquet_storage;
 
 // Re-export the implementations
-// pub use iceberg_storage::IcebergStorage; // TODO: Enable for V2
+pub use iceberg_storage::IcebergStorage;
 pub use in_memory_storage::InMemoryStorage;
 pub use parquet_storage::ParquetStorage;

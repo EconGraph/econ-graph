@@ -347,8 +347,8 @@ async fn test_arrow_flight_performance() -> Result<(), Box<dyn std::error::Error
         .await?;
     let read_duration = read_start.elapsed();
 
-    assert_eq!(retrieved_points.len(), 1000);
-    println!("✅ Read 1000 data points in {:?}", read_duration);
+    assert_eq!(retrieved_points.len(), 366); // 2020 has 366 days (leap year)
+    println!("✅ Read 366 data points in {:?}", read_duration);
 
     let total_duration = start_time.elapsed();
     println!(
