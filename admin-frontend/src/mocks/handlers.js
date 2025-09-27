@@ -6,6 +6,79 @@
 import { http } from "msw";
 
 export const handlers = [
+  // Admin authentication endpoints
+  http.get("/api/admin/auth/validate", () => {
+    return new Response(
+      JSON.stringify({
+        id: "test-user",
+        username: "admin",
+        email: "admin@example.com",
+        role: "super_admin",
+        permissions: ["view_dashboard", "manage_users", "system_config"],
+        lastLogin: "2024-01-15T10:30:00Z",
+        sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    );
+  }),
+
+  http.post("/api/admin/auth/login", () => {
+    return new Response(
+      JSON.stringify({
+        user: {
+          id: "test-user",
+          username: "admin",
+          email: "admin@example.com",
+          role: "super_admin",
+          permissions: ["view_dashboard", "manage_users", "system_config"],
+          lastLogin: "2024-01-15T10:30:00Z",
+          sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
+        },
+        token: "mock-jwt-token",
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    );
+  }),
+
+  http.post("/api/admin/auth/refresh", () => {
+    return new Response(
+      JSON.stringify({
+        user: {
+          id: "test-user",
+          username: "admin",
+          email: "admin@example.com",
+          role: "super_admin",
+          permissions: ["view_dashboard", "manage_users", "system_config"],
+          lastLogin: "2024-01-15T10:30:00Z",
+          sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
+        },
+        token: "mock-refreshed-jwt-token",
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    );
+  }),
+
+  http.post("/api/admin/auth/logout", () => {
+    return new Response(null, { status: 200 });
+  }),
+
+  http.post("/api/admin/security/events", () => {
+    return new Response(null, { status: 200 });
+  }),
+
+  // GraphQL endpoints
   http.post("/graphql", async ({ request }) => {
     console.log("[MSW] GraphQL request intercepted");
 

@@ -33,12 +33,29 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
-// Mock the contexts - simplified with MSW handling GraphQL
+// Mock localStorage at the browser API boundary
+const mockLocalStorage = {
+  getItem: vi.fn(),
+  setItem: vi.fn(),
+  removeItem: vi.fn(),
+  clear: vi.fn(),
+  length: 0,
+  key: vi.fn(),
+};
+
+Object.defineProperty(window, "localStorage", {
+  value: mockLocalStorage,
+  writable: true,
+});
+
+// Mock the contexts - direct mocks to avoid infinite loops and complex dependencies
 vi.mock("../../../contexts/AuthContext", () => ({
+  AuthProvider: ({ children }: any) => children,
   useAuth: vi.fn(),
 }));
 
 vi.mock("../../../contexts/SecurityContext", () => ({
+  SecurityProvider: ({ children }: any) => children,
   useSecurity: vi.fn(),
 }));
 
