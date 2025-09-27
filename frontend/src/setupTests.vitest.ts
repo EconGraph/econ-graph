@@ -8,6 +8,9 @@ import { server } from './test-utils/mocks/server';
 // MSW is disabled by default for unit tests
 // Integration tests will start MSW manually
 
+// Mock fetch globally for unit tests
+global.fetch = vi.fn();
+
 // Polyfill for Node.js environment
 const { TextEncoder, TextDecoder } = require('util');
 global.TextEncoder = TextEncoder;

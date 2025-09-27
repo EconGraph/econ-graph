@@ -49,6 +49,22 @@ const TestWrapper = ({ children }: { children: React.ReactNode }) => {
 describe('FinancialStatementViewer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Mock fetch to return a successful response
+    (global.fetch as any).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          financialStatement: {
+            id: 'statement-1',
+            companyId: 'test-company',
+            statementType: 'INCOME_STATEMENT',
+            fiscalYear: 2023,
+            fiscalQuarter: 4,
+            lineItems: []
+          }
+        }
+      })
+    });
   });
 
   it('renders the financial statement viewer', () => {
