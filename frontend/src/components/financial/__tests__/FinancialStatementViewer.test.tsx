@@ -1,9 +1,10 @@
-import { vi } from 'vitest';
+import { vi, beforeAll, afterEach, afterAll } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { FinancialStatementViewer } from '../FinancialStatementViewer';
+import { server } from '../../../test-utils/mocks/server';
 import { Company } from '../../../types/financial';
 
 const mockCompany: Company = {
@@ -47,24 +48,14 @@ const TestWrapper = ({ children }: { children: React.ReactNode }) => {
 };
 
 describe('FinancialStatementViewer', () => {
+  // Setup MSW server for GraphQL mocking
+  beforeAll(() => server.listen());
+  afterEach(() => server.resetHandlers());
+  afterAll(() => server.close());
+
   beforeEach(() => {
     vi.clearAllMocks();
-    // Mock fetch to return a successful response
-    (global.fetch as any).mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        data: {
-          financialStatement: {
-            id: 'statement-1',
-            companyId: 'test-company',
-            statementType: 'INCOME_STATEMENT',
-            fiscalYear: 2023,
-            fiscalQuarter: 4,
-            lineItems: []
-          }
-        }
-      })
-    });
+    // MSW server handles GraphQL requests, no need for fetch mock
   });
 
   it('renders the financial statement viewer', () => {

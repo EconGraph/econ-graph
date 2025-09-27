@@ -8,7 +8,9 @@
       "percentile75": 0.18,
       "percentile90": 0.25,
       "sampleSize": 1250,
-      "lastUpdated": "2023-12-31T00:00:00Z"
+      "lastUpdated": "2023-12-31T00:00:00Z",
+      "benchmarkText": "Above Average",
+      "performanceLevel": "Above Average"
     }
   }
 }

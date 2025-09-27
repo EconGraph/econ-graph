@@ -55,19 +55,21 @@ console.log('🔧 Frontend API Configuration:');
 console.log('  - VITE_API_URL:', import.meta.env.VITE_API_URL);
 console.log('  - Final API_BASE_URL:', API_BASE_URL);
 
-// Debug: Test backend connectivity
-console.log('🔧 Testing backend connectivity...');
-fetch(`${API_BASE_URL}/health`)
-  .then(response => {
-    console.log('  - Backend health check response:', response.status, response.statusText);
-    return response.text();
-  })
-  .then(data => {
-    console.log('  - Backend health check data:', data);
-  })
-  .catch(error => {
-    console.error('  - Backend health check failed:', error);
-  });
+// Debug: Test backend connectivity (only in development)
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  console.log('🔧 Testing backend connectivity...');
+  fetch(`${API_BASE_URL}/health`)
+    .then(response => {
+      console.log('  - Backend health check response:', response.status, response.statusText);
+      return response.text();
+    })
+    .then(data => {
+      console.log('  - Backend health check data:', data);
+    })
+    .catch(error => {
+      console.error('  - Backend health check failed:', error);
+    });
+}
 
 // Facebook SDK initialization
 declare global {

@@ -12,7 +12,9 @@ global.fetch = mockFetch;
 describe('GraphQL Utilities', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset fetch mock - use vi.clearAllMocks() instead of mockClear()
+    // Reset fetch mock properly
+    mockFetch.mockClear();
+    mockFetch.mockReset();
   });
 
   test('should execute GraphQL query successfully', async () => {
