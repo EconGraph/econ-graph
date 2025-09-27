@@ -43,7 +43,7 @@ interface PeerComparisonChartProps {
 export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
   ratios,
   company,
-  userType: _userType = 'intermediate',
+  userType = 'intermediate',
   selectedRatios = [],
   onRatioSelectionChange,
 }) => {
