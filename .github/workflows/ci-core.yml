@@ -220,7 +220,7 @@ jobs:
     - name: Run Clippy (linting)
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo clippy --all-targets --all-features -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
+        cargo clippy --all-targets --all-features -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls -D clippy::missing_docs_in_private_items -D clippy::missing_errors_doc -D clippy::missing_panics_doc -D clippy::missing_safety_doc -D clippy::doc_markdown -D clippy::doc_link_with_quotes -D clippy::doc_link_without_quotes
       working-directory: backend
 
     - name: Run fast unit tests (no database)
@@ -1329,7 +1329,7 @@ jobs:
       working-directory: backend
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo clippy -- -W clippy::all
+        cargo clippy --all-targets --all-features -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls -D clippy::missing_docs_in_private_items -D clippy::missing_errors_doc -D clippy::missing_panics_doc -D clippy::missing_safety_doc -D clippy::doc_markdown -D clippy::doc_link_with_quotes -D clippy::doc_link_without_quotes
 
     - name: Run Rust documentation check
       working-directory: backend
