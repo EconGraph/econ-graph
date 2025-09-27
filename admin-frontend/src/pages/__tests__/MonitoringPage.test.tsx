@@ -45,63 +45,8 @@ vi.mock("../../contexts/SecurityContext", () => ({
   }),
 }));
 
-// Mock the monitoring hooks
+// Mock the useSystemStatus hook to prevent network requests in tests
 vi.mock("../../hooks/useMonitoring", () => ({
-  useDashboards: vi.fn(() => ({
-    data: [
-      {
-        id: "econgraph-overview",
-        title: "EconGraph Platform Overview",
-        description: "High-level system monitoring and health overview",
-        url: "http://localhost:30001/d/econgraph-overview/econgraph-platform-overview?from=now-1h&to=now",
-        embedUrl:
-          "http://localhost:30001/d-solo/econgraph-overview/econgraph-platform-overview?from=now-1h&to=now",
-        status: "healthy",
-        lastUpdate: new Date().toISOString(),
-        metrics: {
-          totalSeries: 1250,
-          activeCrawlers: 3,
-          dataPoints: 45000,
-          uptime: "99.9%",
-        },
-      },
-      {
-        id: "database-statistics",
-        title: "Database Statistics",
-        description: "Comprehensive PostgreSQL monitoring for time series data",
-        url: "http://localhost:30001/d/database-statistics/database-statistics?from=now-6h&to=now",
-        embedUrl:
-          "http://localhost:30001/d-solo/database-statistics/database-statistics?from=now-6h&to=now",
-        status: "healthy",
-        lastUpdate: new Date().toISOString(),
-        metrics: {
-          totalSeries: 890,
-          activeCrawlers: 0,
-          dataPoints: 32000,
-          uptime: "99.9%",
-        },
-      },
-      {
-        id: "crawler-status",
-        title: "Crawler Status",
-        description: "Data crawler monitoring and queue processing analysis",
-        url: "http://localhost:30001/d/crawler-status/crawler-status?from=now-2h&to=now",
-        embedUrl:
-          "http://localhost:30001/d-solo/crawler-status/crawler-status?from=now-2h&to=now",
-        status: "healthy",
-        lastUpdate: new Date().toISOString(),
-        metrics: {
-          totalSeries: 450,
-          activeCrawlers: 2,
-          dataPoints: 15000,
-          uptime: "98.5%",
-        },
-      },
-    ],
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  })),
   useSystemStatus: vi.fn(() => ({
     data: {
       overall: "healthy",
@@ -115,26 +60,78 @@ vi.mock("../../hooks/useMonitoring", () => ({
     },
     isLoading: false,
     error: null,
-    refetch: vi.fn(),
+  })),
+  useDashboards: vi.fn(() => ({
+    data: [
+      {
+        id: "econgraph-overview",
+        title: "EconGraph Platform Overview",
+        description:
+          "High-level system monitoring and health overview with API metrics, resource utilization, and service availability",
+        url: "http://localhost:30001/d/econgraph-overview/econgraph-platform-overview",
+        embedUrl:
+          "http://localhost:30001/d-solo/econgraph-overview/econgraph-platform-overview?orgId=1&from=now-1h&to=now&panelId=1",
+        status: "healthy",
+        lastUpdate: new Date().toISOString(),
+        metrics: {
+          totalSeries: 1250,
+          activeCrawlers: 3,
+          dataPoints: 45000,
+          uptime: "99.9%",
+        },
+      },
+      {
+        id: "database-statistics",
+        title: "Database Statistics",
+        description:
+          "Comprehensive PostgreSQL monitoring for time series data with performance metrics and growth trends",
+        url: "http://localhost:30001/d/database-statistics/database-statistics",
+        embedUrl:
+          "http://localhost:30001/d-solo/database-statistics/database-statistics?orgId=1&from=now-6h&to=now&panelId=1",
+        status: "healthy",
+        lastUpdate: new Date().toISOString(),
+        metrics: {
+          totalSeries: 890,
+          activeCrawlers: 0,
+          dataPoints: 32000,
+          uptime: "99.8%",
+        },
+      },
+      {
+        id: "crawler-status",
+        title: "Crawler Status",
+        description:
+          "Data crawler monitoring and queue processing analysis with performance metrics and error tracking",
+        url: "http://localhost:30001/d/crawler-status/crawler-status",
+        embedUrl:
+          "http://localhost:30001/d-solo/crawler-status/crawler-status?orgId=1&from=now-2h&to=now&panelId=1",
+        status: "warning",
+        lastUpdate: new Date().toISOString(),
+        metrics: {
+          totalSeries: 450,
+          activeCrawlers: 2,
+          dataPoints: 18000,
+          uptime: "98.5%",
+        },
+      },
+    ],
+    isLoading: false,
+    error: null,
   })),
   useRefreshMonitoring: vi.fn(() => ({
     mutate: vi.fn(),
-    mutateAsync: vi.fn().mockImplementation(() => {
-      // Simulate async operation
-      return new Promise((resolve) => {
-        setTimeout(resolve, 100);
-      });
-    }),
     isPending: false,
-    error: null,
   })),
   useMonitoringMetrics: vi.fn(() => ({
-    totalSeries: 2590,
-    activeCrawlers: 5,
-    totalDataPoints: 92000,
-    averageUptime: 99.4,
-    healthyDashboards: 3,
     totalDashboards: 3,
+    healthyDashboards: 2,
+    activeAlerts: 2,
+    totalSeries: 2590,
+    activeCrawlers: 3,
+    totalDataPoints: 95000,
+    averageUptime: 99.7,
+    systemUptime: "99.9%",
+    lastUpdate: new Date().toISOString(),
   })),
 }));
 
@@ -245,20 +242,43 @@ describe("MonitoringPage", () => {
       );
 
       await waitFor(() => {
-        // Debug: Check if service status section is rendered
-        const serviceStatusSection = screen.queryByText("Service Status");
-        if (!serviceStatusSection) {
-          console.log(
-            "Service Status section not found. Available text:",
-            screen.getByTestId("monitoring-content").textContent,
-          );
-          // Debug: Service status section not found
-        }
-        expect(screen.getByText("Service Status")).toBeInTheDocument();
-        expect(screen.getByText("BACKEND")).toBeInTheDocument();
-        expect(screen.getByText("DATABASE")).toBeInTheDocument();
-        expect(screen.getByText("CRAWLER")).toBeInTheDocument();
-        expect(screen.getByText("GRAFANA")).toBeInTheDocument();
+        // Use Testing Library query priorities:
+        // 1. getByRole for headings (most accessible)
+        expect(
+          screen.getByRole("heading", { name: "Service Status" }),
+        ).toBeInTheDocument();
+
+        // 2. getByRole for regions (accessible to screen readers)
+        expect(
+          screen.getByRole("region", { name: "Service status information" }),
+        ).toBeInTheDocument();
+
+        // 3. getByRole for lists (accessible structure)
+        expect(
+          screen.getByRole("list", { name: "List of system services" }),
+        ).toBeInTheDocument();
+
+        // 4. For service status items, use getByRole with aria-label (most accessible)
+        expect(
+          screen.getByRole("listitem", {
+            name: /backend service status: healthy/i,
+          }),
+        ).toBeInTheDocument();
+        expect(
+          screen.getByRole("listitem", {
+            name: /database service status: healthy/i,
+          }),
+        ).toBeInTheDocument();
+        expect(
+          screen.getByRole("listitem", {
+            name: /crawler service status: warning/i,
+          }),
+        ).toBeInTheDocument();
+        expect(
+          screen.getByRole("listitem", {
+            name: /grafana service status: healthy/i,
+          }),
+        ).toBeInTheDocument();
       });
     });
   });

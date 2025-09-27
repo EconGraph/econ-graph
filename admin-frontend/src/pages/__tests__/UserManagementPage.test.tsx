@@ -26,6 +26,7 @@ import {
 } from "vitest";
 // MSW is already set up in setupTests.ts - no need to import setMockScenario
 import { useAuth } from "../../contexts/AuthContext";
+import { useSecurity } from "../../contexts/SecurityContext";
 import UserManagementPage from "../UserManagementPage";
 
 // Mock Material-UI theme
@@ -36,7 +37,7 @@ const theme = createTheme();
 // Mock the contexts to prevent resource leaks
 vi.mock("../../contexts/AuthContext", () => ({
   AuthProvider: ({ children }: any) => children,
-  useAuth: () => ({
+  useAuth: vi.fn(() => ({
     user: {
       id: "test-user",
       username: "admin",
@@ -48,17 +49,19 @@ vi.mock("../../contexts/AuthContext", () => ({
     logout: vi.fn(),
     refreshSession: vi.fn(),
     extendSession: vi.fn(),
-  }),
+  })),
 }));
 
 vi.mock("../../contexts/SecurityContext", () => ({
   SecurityProvider: ({ children }: any) => children,
-  useSecurity: () => ({
+  useSecurity: vi.fn(() => ({
     checkAccess: vi.fn(() => true),
     logSecurityEvent: vi.fn(),
     securityEvents: [],
     sessionRemainingTime: 3661, // 61 minutes and 1 second in seconds
-  }),
+    getSecurityEvents: vi.fn(() => []),
+    isSecureConnection: true,
+  })),
 }));
 
 // Mock console methods to avoid noise in tests
@@ -129,7 +132,9 @@ describe("UserManagementPage", () => {
 
       expect(screen.getByText("User Management")).toBeInTheDocument();
       expect(
-        screen.getByText("Manage system users and their permissions."),
+        screen.getByText(
+          "Manage registered users, active sessions, and access controls",
+        ),
       ).toBeInTheDocument();
     });
 
@@ -154,12 +159,22 @@ describe("UserManagementPage", () => {
         extendSession: vi.fn(),
       });
 
+      // Mock checkAccess to return false for non-super_admin users
+      const mockCheckAccess = vi.fn((role) => role === "super_admin");
+      vi.mocked(useSecurity).mockReturnValue({
+        checkAccess: mockCheckAccess,
+        logSecurityEvent: vi.fn(),
+        securityEvents: [],
+        sessionRemainingTime: 3661,
+        getSecurityEvents: vi.fn(() => []),
+        isSecureConnection: true,
+      });
+
       renderWithTheme(<UserManagementPage />);
 
-      expect(screen.getByText("Access Denied")).toBeInTheDocument();
       expect(
         screen.getByText(
-          "You need super_admin privileges to access user management.",
+          "Access Denied. This page requires super_admin privileges.",
         ),
       ).toBeInTheDocument();
     });

@@ -6,6 +6,27 @@
 import { http } from "msw";
 
 export const handlers = [
+  // Monitoring API endpoints
+  http.get("/api/monitoring/system-status", () => {
+    console.log("[MSW] System status request intercepted");
+    const response = {
+      overall: "healthy",
+      services: {
+        backend: "healthy",
+        database: "healthy",
+        crawler: "warning",
+        grafana: "healthy",
+      },
+      alerts: 2,
+    };
+    console.log("[MSW] Returning system status:", response);
+    return new Response(JSON.stringify(response), {
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  }),
+
   // Admin authentication endpoints
   http.get("/api/admin/auth/validate", () => {
     return new Response(
@@ -86,6 +107,101 @@ export const handlers = [
     const { query, variables } = body;
 
     // Handle different GraphQL operations
+    if (query.includes("GetCrawlerStatus")) {
+      return new Response(
+        JSON.stringify({
+          data: {
+            crawlerStatus: {
+              isRunning: true,
+              isPaused: false,
+              currentTask: "Processing FRED data",
+              progress: 0.65,
+              lastUpdate: "2024-01-15T10:30:00Z",
+              error: null,
+            },
+          },
+        }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
+    }
+
+    if (query.includes("GetQueueStatistics")) {
+      return new Response(
+        JSON.stringify({
+          data: {
+            queueStatistics: {
+              totalItems: 150,
+              processedItems: 97,
+              failedItems: 3,
+              pendingItems: 45,
+              processingRate: 12.5,
+              estimatedTimeRemaining: 2400,
+            },
+          },
+        }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
+    }
+
+    if (query.includes("GetPerformanceMetrics")) {
+      return new Response(
+        JSON.stringify({
+          data: {
+            performanceMetrics: {
+              averageProcessingTime: 2.3,
+              successRate: 0.97,
+              throughputPerHour: 450,
+              memoryUsage: 2.1,
+              cpuUsage: 45.2,
+            },
+          },
+        }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
+    }
+
+    if (query.includes("GetCrawlerLogs")) {
+      return new Response(
+        JSON.stringify({
+          data: {
+            crawlerLogs: [
+              {
+                id: "1",
+                timestamp: "2024-01-15T10:30:00Z",
+                level: "info",
+                message: "Started crawling economic indicators",
+                source: "crawler",
+              },
+              {
+                id: "2",
+                timestamp: "2024-01-15T10:29:45Z",
+                level: "warning",
+                message: "Rate limit approaching for API endpoint",
+                source: "crawler",
+              },
+            ],
+          },
+        }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
+    }
+
     if (query.includes("GetSystemHealth")) {
       return new Response(
         JSON.stringify({

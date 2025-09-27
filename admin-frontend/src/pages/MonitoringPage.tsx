@@ -258,19 +258,32 @@ export default function MonitoringPage() {
       )}
 
       {/* Service Status */}
-      {systemStatus && (
-        <Paper sx={{ p: 2, mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
+      {systemStatus && systemStatus.services && (
+        <Paper
+          sx={{ p: 2, mb: 3 }}
+          role="region"
+          aria-label="Service status information"
+        >
+          <Typography variant="h6" gutterBottom component="h2">
             Service Status
           </Typography>
-          <Grid container spacing={2}>
+          <Grid
+            container
+            spacing={2}
+            role="list"
+            aria-label="List of system services"
+          >
             {Object.entries(systemStatus.services).map(([service, status]) => (
-              <Grid item xs={6} sm={3} key={service}>
-                <Box sx={{ display: "flex", alignItems: "center" }}>
+              <Grid item xs={6} sm={3} key={service} role="listitem">
+                <Box
+                  sx={{ display: "flex", alignItems: "center" }}
+                  aria-label={`${service} service status: ${status}`}
+                >
                   {getStatusIcon(status)}
                   <Typography
                     variant="body2"
                     sx={{ ml: 1, textTransform: "uppercase" }}
+                    component="span"
                   >
                     {service}
                   </Typography>
@@ -279,6 +292,7 @@ export default function MonitoringPage() {
                     color={getStatusColor(status) as any}
                     size="small"
                     sx={{ ml: 1 }}
+                    aria-label={`${service} status: ${status}`}
                   />
                 </Box>
               </Grid>

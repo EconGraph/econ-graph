@@ -89,17 +89,6 @@ const mockDashboards: DashboardInfo[] = [
   },
 ];
 
-const mockSystemStatus: SystemStatus = {
-  overall: "healthy",
-  services: {
-    backend: "healthy",
-    database: "healthy",
-    crawler: "warning",
-    grafana: "healthy",
-  },
-  alerts: 2,
-};
-
 // Simulate API delay for realistic testing
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -147,17 +136,13 @@ export const useSystemStatus = () => {
   return useQuery({
     queryKey: ["monitoring", "system-status"],
     queryFn: async (): Promise<SystemStatus> => {
-      // Simulate API delay
-      await delay(200);
-
-      // In real implementation, this would fetch from health check endpoints
-      return {
-        ...mockSystemStatus,
-        alerts: Math.max(
-          0,
-          mockSystemStatus.alerts + Math.floor(Math.random() * 3) - 1,
-        ),
-      };
+      const response = await fetch("/api/monitoring/system-status");
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch system status: ${response.statusText}`,
+        );
+      }
+      return response.json();
     },
     staleTime: 15 * 1000, // 15 seconds for system status (changes frequently)
     gcTime: 1 * 60 * 1000, // 1 minute cache
