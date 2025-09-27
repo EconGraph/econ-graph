@@ -73,7 +73,7 @@ impl IcebergCatalog {
     }
 
     /// Initialize the financial data table with custom partitioning
-    pub async fn initialize_table(&mut self) -> Result<()> {
+    pub async fn initialize_table(&self) -> Result<()> {
         // TODO: Initialize actual Iceberg table with custom partitioning
         // For now, we'll just log that this would happen
         tracing::info!("Initializing Iceberg table with custom time-based partitioning");
@@ -83,7 +83,7 @@ impl IcebergCatalog {
     }
 
     /// Add or update a series in the catalog
-    pub async fn add_series(&mut self, metadata: SeriesMetadata) -> Result<()> {
+    pub async fn add_series(&self, metadata: SeriesMetadata) -> Result<()> {
         tracing::info!("Adding series to catalog: {}", metadata.series_id);
 
         // For now, store in memory - will be replaced with actual Iceberg catalog write
@@ -228,7 +228,7 @@ mod tests {
         let temp_dir = TempDir::new()?;
         let data_dir = temp_dir.path().to_path_buf();
 
-        let mut catalog = IcebergCatalog::new(data_dir).await?;
+        let catalog = IcebergCatalog::new(data_dir).await?;
 
         // Test adding a series
         let metadata = SeriesMetadata {

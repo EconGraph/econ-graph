@@ -7,6 +7,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::FinancialDataStorage;
+use crate::catalog::{IcebergCatalog, SeriesMetadata as CatalogSeriesMetadata};
 use crate::models::{DataPoint, EconomicSeries};
 
 /// Custom Time-Based Partitioning for Financial Data
@@ -31,6 +32,7 @@ use crate::models::{DataPoint, EconomicSeries};
 ///     └── partition_index.json
 pub struct IcebergStorage {
     data_dir: PathBuf,
+    catalog: IcebergCatalog,
 }
 
 /// Partition information for time-based organization
@@ -63,11 +65,14 @@ impl Partition {
 }
 
 impl IcebergStorage {
-    pub fn new(data_dir: impl Into<PathBuf>) -> Result<Self> {
+    pub async fn new(data_dir: impl Into<PathBuf>) -> Result<Self> {
         let data_dir = data_dir.into();
         std::fs::create_dir_all(&data_dir)?;
 
-        Ok(Self { data_dir })
+        // Initialize the Iceberg catalog
+        let catalog = IcebergCatalog::new(data_dir.clone()).await?;
+
+        Ok(Self { data_dir, catalog })
     }
 
     /// Get partition path for a given date
@@ -380,26 +385,62 @@ impl IcebergStorage {
     }
 }
 
-impl Default for IcebergStorage {
-    fn default() -> Self {
-        Self::new("./data").expect("Failed to create default IcebergStorage")
-    }
-}
+// Note: Default implementation removed because IcebergStorage::new is async
 
 #[async_trait]
 impl FinancialDataStorage for IcebergStorage {
     async fn write_series(&self, series: &EconomicSeries) -> Result<()> {
-        // TODO: Implement Iceberg catalog integration
-        // For now, just ensure the data directory exists
         tracing::info!("Writing series to Iceberg storage: {}", series.id);
-        std::fs::create_dir_all(&self.data_dir)?;
+
+        // Convert EconomicSeries to CatalogSeriesMetadata
+        let metadata = CatalogSeriesMetadata {
+            series_id: series.id,
+            external_id: series.external_id.clone(),
+            title: series.title.clone(),
+            description: series.description.clone(),
+            units: series.units.clone(),
+            frequency: series.frequency.clone(),
+            seasonal_adjustment: series.seasonal_adjustment.clone(),
+            source: "Financial Data Service".to_string(), // TODO: Get from series
+            is_active: series.is_active,
+            start_date: series.start_date,
+            end_date: series.end_date,
+            total_points: 0, // TODO: Calculate from actual data points
+            created_at: series.created_at,
+            updated_at: series.updated_at,
+        };
+
+        // Add to catalog
+        self.catalog.add_series(metadata).await?;
+
         Ok(())
     }
 
     async fn read_series(&self, series_id: Uuid) -> Result<Option<EconomicSeries>> {
-        // TODO: Implement Iceberg catalog integration
         tracing::info!("Reading series from Iceberg storage: {}", series_id);
-        Ok(None)
+
+        // Get series from catalog
+        if let Some(metadata) = self.catalog.get_series(series_id).await? {
+            // Convert CatalogSeriesMetadata back to EconomicSeries
+            let series = EconomicSeries {
+                id: metadata.series_id,
+                source_id: Uuid::new_v4(), // TODO: Map from catalog metadata
+                external_id: metadata.external_id,
+                title: metadata.title,
+                description: metadata.description,
+                units: metadata.units,
+                frequency: metadata.frequency,
+                seasonal_adjustment: metadata.seasonal_adjustment,
+                start_date: metadata.start_date,
+                end_date: metadata.end_date,
+                is_active: metadata.is_active,
+                created_at: metadata.created_at,
+                updated_at: metadata.updated_at,
+            };
+            Ok(Some(series))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn write_data_points(&self, _series_id: Uuid, _points: &[DataPoint]) -> Result<()> {
@@ -420,8 +461,31 @@ impl FinancialDataStorage for IcebergStorage {
     }
 
     async fn list_series(&self) -> Result<Vec<EconomicSeries>> {
-        // TODO: Implement Iceberg catalog integration
         tracing::info!("Listing series from Iceberg storage");
-        Ok(vec![])
+
+        // Get all series from catalog
+        let metadata_list = self.catalog.list_series().await?;
+
+        // Convert to EconomicSeries
+        let series_list = metadata_list
+            .into_iter()
+            .map(|metadata| EconomicSeries {
+                id: metadata.series_id,
+                source_id: Uuid::new_v4(), // TODO: Map from catalog metadata
+                external_id: metadata.external_id,
+                title: metadata.title,
+                description: metadata.description,
+                units: metadata.units,
+                frequency: metadata.frequency,
+                seasonal_adjustment: metadata.seasonal_adjustment,
+                start_date: metadata.start_date,
+                end_date: metadata.end_date,
+                is_active: metadata.is_active,
+                created_at: metadata.created_at,
+                updated_at: metadata.updated_at,
+            })
+            .collect();
+
+        Ok(series_list)
     }
 }

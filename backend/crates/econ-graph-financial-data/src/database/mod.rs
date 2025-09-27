@@ -31,7 +31,7 @@ impl Database {
     pub async fn new_with_custom_partitioning(data_dir: impl Into<String>) -> Result<Self> {
         tracing::info!("Initializing database with custom partitioning storage");
 
-        let storage = IcebergStorage::new(data_dir.into())?;
+        let storage = IcebergStorage::new(data_dir.into()).await?;
         Ok(Self {
             storage: Arc::new(storage),
         })
