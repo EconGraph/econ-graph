@@ -5,12 +5,13 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { vi } from 'vitest';
 import { TestProviders } from '../../../test-utils/test-providers';
 import InteractiveChart from '../InteractiveChart';
 import { createMockDataPoints } from '../../../test-utils/mocks/data';
 
 // Mock Chart.js to avoid canvas rendering issues in tests
-jest.mock('react-chartjs-2', () => ({
+vi.mock('react-chartjs-2', () => ({
   Line: ({ data, options, ...props }: any) => (
     <div
       data-testid="line-chart"
@@ -21,6 +22,30 @@ jest.mock('react-chartjs-2', () => ({
       Mock Line Chart
     </div>
   ),
+}));
+
+// Mock Chart.js components
+vi.mock('chart.js', () => ({
+  Chart: {
+    register: vi.fn(),
+  },
+  registerables: [],
+  CategoryScale: {},
+  LinearScale: {},
+  TimeScale: {},
+  PointElement: {},
+  LineElement: {},
+  Title: {},
+  Tooltip: {},
+  Legend: {},
+  Filler: {},
+}));
+
+vi.mock('chartjs-adapter-date-fns', () => ({}));
+
+vi.mock('chartjs-plugin-annotation', () => ({
+  __esModule: true,
+  default: { id: 'annotation', beforeDraw: vi.fn(), afterDraw: vi.fn() },
 }));
 
 const defaultProps = {

@@ -2,15 +2,16 @@
 // These handlers provide realistic mock data for financial components
 
 import { graphql, HttpResponse } from 'msw';
-import {
-  GET_FINANCIAL_DASHBOARD,
-  GET_FINANCIAL_STATEMENT,
-  GET_TREND_ANALYSIS,
-  GET_PEER_COMPARISON,
-  GET_BENCHMARK_COMPARISON,
-  GET_FINANCIAL_ALERTS,
-  GET_FINANCIAL_EXPORT,
-} from './financial-queries';
+// GraphQL queries are now loaded dynamically from JSON files
+// import {
+//   GET_FINANCIAL_DASHBOARD,
+//   GET_FINANCIAL_STATEMENT,
+//   GET_TREND_ANALYSIS,
+//   GET_PEER_COMPARISON,
+//   GET_BENCHMARK_COMPARISON,
+//   GET_FINANCIAL_ALERTS,
+//   GET_FINANCIAL_EXPORT,
+// } from './financial-queries';
 
 // Mock financial data
 const mockCompany = {
@@ -180,7 +181,10 @@ export const financialHandlers = [
   }),
 
   graphql.query('GetTrendAnalysis', ({ variables }) => {
-    const { companyId, timeRange } = variables as { companyId: string; timeRange: string };
+    const { companyId, timeRange: _timeRange } = variables as {
+      companyId: string;
+      timeRange: string;
+    };
 
     if (companyId === '0000320193') {
       return HttpResponse.json({
@@ -256,7 +260,7 @@ export const financialHandlers = [
   }),
 
   graphql.query('GetFinancialExport', ({ variables }) => {
-    const { companyId, format } = variables as { companyId: string; format: string };
+    const { companyId, format: _format } = variables as { companyId: string; format: string };
 
     if (companyId === '0000320193') {
       return HttpResponse.json({

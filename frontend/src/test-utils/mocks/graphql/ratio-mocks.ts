@@ -2,7 +2,8 @@
 // These handlers provide realistic mock data for ratio analysis components
 
 import { graphql, HttpResponse } from 'msw';
-import { GET_FINANCIAL_RATIOS, GET_RATIO_BENCHMARKS, GET_RATIO_EXPLANATION } from './ratio-queries';
+// GraphQL queries are now loaded dynamically from JSON files
+// import { GET_FINANCIAL_RATIOS, GET_RATIO_BENCHMARKS, GET_RATIO_EXPLANATION } from './ratio-queries';
 
 // Mock ratio data with comprehensive financial metrics
 const mockFinancialRatios = [
@@ -248,7 +249,10 @@ export const ratioHandlers = [
   }),
 
   graphql.query('GetRatioBenchmarks', ({ variables }) => {
-    const { ratioName, industry } = variables as { ratioName: string; industry?: string };
+    const { ratioName, industry: _industry } = variables as {
+      ratioName: string;
+      industry?: string;
+    };
 
     const benchmark = mockRatioBenchmarks[ratioName as keyof typeof mockRatioBenchmarks];
     if (benchmark) {

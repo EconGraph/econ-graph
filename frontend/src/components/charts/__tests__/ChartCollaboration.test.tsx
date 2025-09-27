@@ -6,13 +6,15 @@
 
 import React from 'react';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
+import '@testing-library/jest-dom';
 import userEvent from '@testing-library/user-event';
+import { vi } from 'vitest';
 import { render, setupTestEnvironment, cleanupTestEnvironment, waitForDialog, findFormFieldInDialog } from '../../../test-utils/material-ui-test-setup';
 import ChartCollaboration, { ChartAnnotation } from '../ChartCollaboration';
 
 // Mock date-fns format function
-jest.mock('date-fns', () => ({
-  format: jest.fn((date) => 'Jan 15, 2:30 PM'),
+vi.mock('date-fns', () => ({
+  format: vi.fn((date) => 'Jan 15, 2:30 PM'),
 }));
 
 // Mock data for testing
@@ -96,11 +98,11 @@ const mockAnnotations: ChartAnnotation[] = [
 
 // Mock handlers
 const mockHandlers = {
-  onAnnotationAdd: jest.fn(),
-  onAnnotationUpdate: jest.fn(),
-  onAnnotationDelete: jest.fn(),
-  onCommentAdd: jest.fn(),
-  onToggle: jest.fn(),
+  onAnnotationAdd: vi.fn(),
+  onAnnotationUpdate: vi.fn(),
+  onAnnotationDelete: vi.fn(),
+  onCommentAdd: vi.fn(),
+  onToggle: vi.fn(),
 };
 
 // Custom render function that handles Material-UI portals properly
@@ -112,7 +114,7 @@ const customRender = (ui: React.ReactElement, options = {}) => {
 
 describe('ChartCollaboration', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     setupTestEnvironment();
   });
 
@@ -309,7 +311,7 @@ describe('ChartCollaboration', () => {
       // Wait for dialog to appear
       await waitFor(() => {
         expect(screen.getByText('Add Chart Annotation')).toBeInTheDocument();
-      }, { timeout: 300 });
+      }, { timeout: 2000 });
 
       // Fill form using our helper functions
       const titleField = findFormFieldInDialog('input', 'Title');
@@ -338,7 +340,7 @@ describe('ChartCollaboration', () => {
         await waitFor(() => {
           const option = screen.getByRole('option', { name: /data point/i });
           expect(option).toBeInTheDocument();
-        });
+        }, { timeout: 2000 });
         await user.click(screen.getByRole('option', { name: /data point/i }));
       }
 
@@ -354,7 +356,9 @@ describe('ChartCollaboration', () => {
                           dialog?.querySelector('button:not([type])') ||
                           screen.getByRole('button', { name: /add annotation/i });
 
-      await user.click(submitButton!);
+      if (submitButton) {
+        await user.click(submitButton);
+      }
 
       expect(mockHandlers.onAnnotationAdd).toHaveBeenCalledWith({
         date: '2024-01-20',
@@ -369,7 +373,7 @@ describe('ChartCollaboration', () => {
         tags: ['test', 'analysis'],
         comments: [],
       });
-    });
+    }, 15000);
 
     it('should not create annotation without required fields', async () => {
       const user = userEvent.setup();

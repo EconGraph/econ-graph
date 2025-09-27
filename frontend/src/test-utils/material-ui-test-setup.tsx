@@ -162,7 +162,7 @@ export const findFormFieldInDialog = (
       const labelFor = label.getAttribute('for');
       if (labelFor) {
         // Escape special characters in the ID for CSS selector
-        const escapedId = labelFor.replace(/[!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~]/g, '\\$&');
+        const escapedId = labelFor.replace(/[!"#$%&'()*+,./:;<=>?@[\\\]^`{|}~]/g, '\\$&');
         field = dialog.querySelector(`#${escapedId}`);
         if (field) return field;
       }

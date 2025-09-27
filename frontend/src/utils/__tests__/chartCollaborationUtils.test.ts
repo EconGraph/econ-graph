@@ -13,7 +13,7 @@ import {
   formatAnnotationForApi,
   getDefaultAnnotationForm,
   getDefaultShareForm,
-  AnnotationFilter,
+  // AnnotationFilter,
   Collaborator,
   User,
 } from '../chartCollaborationUtils';
