@@ -11,11 +11,14 @@
     "grepInvert": null,
     "maxFailures": 0,
     "metadata": {
-      "actualWorkers": 3
+      "actualWorkers": 1
     },
     "preserveOutput": "always",
     "reporter": [
-      ["html", null],
+      [
+        "html",
+        null
+      ],
       [
         "json",
         {
@@ -40,13 +43,15 @@
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
-          "actualWorkers": 3
+          "actualWorkers": 1
         },
         "id": "chromium",
         "name": "chromium",
         "testDir": "/Users/josephmalicki/src/econ-graph3/admin-frontend/tests",
         "testIgnore": [],
-        "testMatch": ["**/*.@(spec|test).?(c|m)[jt]s?(x)"],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
         "timeout": 30000
       },
       {
@@ -54,13 +59,15 @@
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
-          "actualWorkers": 3
+          "actualWorkers": 1
         },
         "id": "firefox",
         "name": "firefox",
         "testDir": "/Users/josephmalicki/src/econ-graph3/admin-frontend/tests",
         "testIgnore": [],
-        "testMatch": ["**/*.@(spec|test).?(c|m)[jt]s?(x)"],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
         "timeout": 30000
       },
       {
@@ -68,13 +75,15 @@
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
-          "actualWorkers": 3
+          "actualWorkers": 1
         },
         "id": "webkit",
         "name": "webkit",
         "testDir": "/Users/josephmalicki/src/econ-graph3/admin-frontend/tests",
         "testIgnore": [],
-        "testMatch": ["**/*.@(spec|test).?(c|m)[jt]s?(x)"],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
         "timeout": 30000
       },
       {
@@ -82,13 +91,15 @@
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
-          "actualWorkers": 3
+          "actualWorkers": 1
         },
         "id": "Mobile Chrome",
         "name": "Mobile Chrome",
         "testDir": "/Users/josephmalicki/src/econ-graph3/admin-frontend/tests",
         "testIgnore": [],
-        "testMatch": ["**/*.@(spec|test).?(c|m)[jt]s?(x)"],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
         "timeout": 30000
       },
       {
@@ -96,13 +107,15 @@
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
-          "actualWorkers": 3
+          "actualWorkers": 1
         },
         "id": "Mobile Safari",
         "name": "Mobile Safari",
         "testDir": "/Users/josephmalicki/src/econ-graph3/admin-frontend/tests",
         "testIgnore": [],
-        "testMatch": ["**/*.@(spec|test).?(c|m)[jt]s?(x)"],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
         "timeout": 30000
       },
       {
@@ -110,138 +123,89 @@
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
-          "actualWorkers": 3
+          "actualWorkers": 1
         },
         "id": "Desktop Edge",
         "name": "Desktop Edge",
         "testDir": "/Users/josephmalicki/src/econ-graph3/admin-frontend/tests",
         "testIgnore": [],
-        "testMatch": ["**/*.@(spec|test).?(c|m)[jt]s?(x)"],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
         "timeout": 30000
       }
     ],
     "shard": null,
     "updateSnapshots": "missing",
     "updateSourceMethod": "patch",
-    "version": "1.55.0",
+    "version": "1.55.1",
     "workers": 6,
     "webServer": null
   },
   "suites": [
     {
-      "title": "demo.spec.ts",
-      "file": "demo.spec.ts",
+      "title": "crawler-admin.spec.ts",
+      "file": "crawler-admin.spec.ts",
       "column": 0,
       "line": 0,
       "specs": [],
       "suites": [
         {
-          "title": "Crawler Admin Demo",
-          "file": "demo.spec.ts",
-          "line": 10,
+          "title": "Crawler Admin Interface",
+          "file": "crawler-admin.spec.ts",
+          "line": 15,
           "column": 6,
-          "specs": [
+          "specs": [],
+          "suites": [
             {
-              "title": "should demonstrate the complete crawler admin interface",
-              "ok": true,
-              "tags": [],
-              "tests": [
+              "title": "Dashboard Navigation",
+              "file": "crawler-admin.spec.ts",
+              "line": 54,
+              "column": 8,
+              "specs": [
                 {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
+                  "title": "should display main navigation tabs",
+                  "ok": false,
+                  "tags": [],
+                  "tests": [
                     {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 15249,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2025-09-23T04:51:31.202Z",
+                      "timeout": 30000,
                       "annotations": [],
-                      "attachments": []
+                      "expectedStatus": "passed",
+                      "projectId": "chromium",
+                      "projectName": "chromium",
+                      "results": [
+                        {
+                          "workerIndex": 0,
+                          "parallelIndex": 0,
+                          "status": "failed",
+                          "duration": 10,
+                          "error": {
+                            "message": "Error: browserType.launch: Executable doesn't exist at /Users/josephmalicki/Library/Caches/ms-playwright/chromium_headless_shell-1193/chrome-mac/headless_shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+                            "stack": "Error: browserType.launch: Executable doesn't exist at /Users/josephmalicki/Library/Caches/ms-playwright/chromium_headless_shell-1193/chrome-mac/headless_shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝"
+                          },
+                          "errors": [
+                            {
+                              "message": "Error: browserType.launch: Executable doesn't exist at /Users/josephmalicki/Library/Caches/ms-playwright/chromium_headless_shell-1193/chrome-mac/headless_shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝"
+                            }
+                          ],
+                          "stdout": [],
+                          "stderr": [],
+                          "retry": 0,
+                          "startTime": "2025-09-27T14:55:51.244Z",
+                          "annotations": [],
+                          "attachments": []
+                        }
+                      ],
+                      "status": "unexpected"
                     }
                   ],
-                  "status": "expected"
+                  "id": "53d76a35b645f2dfc684-16244ffcc69e13108274",
+                  "file": "crawler-admin.spec.ts",
+                  "line": 55,
+                  "column": 5
                 }
-              ],
-              "id": "05384557491ebd602dd7-66e5c69fba4772ddccb5",
-              "file": "demo.spec.ts",
-              "line": 11,
-              "column": 7
-            },
-            {
-              "title": "should demonstrate mobile responsiveness",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 1,
-                      "parallelIndex": 1,
-                      "status": "passed",
-                      "duration": 8309,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2025-09-23T04:51:31.261Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "05384557491ebd602dd7-0fd31e51f78978c0ba9e",
-              "file": "demo.spec.ts",
-              "line": 67,
-              "column": 7
-            },
-            {
-              "title": "should demonstrate tablet responsiveness",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 30000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "chromium",
-                  "projectName": "chromium",
-                  "results": [
-                    {
-                      "workerIndex": 2,
-                      "parallelIndex": 2,
-                      "status": "passed",
-                      "duration": 6896,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2025-09-23T04:51:31.458Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "05384557491ebd602dd7-6d2a1e4178b7b556b0dd",
-              "file": "demo.spec.ts",
-              "line": 81,
-              "column": 7
+              ]
             }
           ]
         }
@@ -250,11 +214,11 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2025-09-23T04:51:26.897Z",
-    "duration": 24694.712,
-    "expected": 3,
+    "startTime": "2025-09-27T14:55:49.733Z",
+    "duration": 1709.9640000000004,
+    "expected": 0,
     "skipped": 0,
-    "unexpected": 0,
+    "unexpected": 1,
     "flaky": 0
   }
 }

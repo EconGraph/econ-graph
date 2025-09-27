@@ -14,6 +14,34 @@ import { test, expect } from "@playwright/test";
 // Test configuration
 test.describe("Crawler Admin Interface", () => {
   test.beforeEach(async ({ page }) => {
+    // Add crypto mock before navigation
+    await page.addInitScript(() => {
+      // Mock crypto functions that might be missing
+      if (!window.crypto?.randomUUID) {
+        Object.defineProperty(window.crypto || {}, 'randomUUID', {
+          value: () => 'mock-uuid-' + Math.random().toString(36).substr(2, 9),
+          writable: false,
+          configurable: false
+        });
+      }
+
+      if (!window.crypto?.random) {
+        Object.defineProperty(window.crypto || {}, 'random', {
+          value: () => new Uint8Array([1, 2, 3, 4, 5]),
+          writable: false,
+          configurable: false
+        });
+      }
+
+      // Ensure crypto object exists
+      if (!window.crypto) {
+        (window as any).crypto = {
+          randomUUID: () => 'mock-uuid-' + Math.random().toString(36).substr(2, 9),
+          random: () => new Uint8Array([1, 2, 3, 4, 5])
+        };
+      }
+    });
+
     // Navigate to the admin interface
     await page.goto("http://localhost:3001");
 

@@ -1,10 +1,20 @@
-<testsuites id="" name="" tests="3" failures="0" skipped="0" errors="0" time="24.694712">
-<testsuite name="demo.spec.ts" timestamp="2025-09-23T04:51:27.569Z" hostname="chromium" tests="3" failures="0" skipped="0" time="30.454" errors="0">
-<testcase name="Crawler Admin Demo › should demonstrate the complete crawler admin interface" classname="demo.spec.ts" time="15.249">
-</testcase>
-<testcase name="Crawler Admin Demo › should demonstrate mobile responsiveness" classname="demo.spec.ts" time="8.309">
-</testcase>
-<testcase name="Crawler Admin Demo › should demonstrate tablet responsiveness" classname="demo.spec.ts" time="6.896">
+<testsuites id="" name="" tests="1" failures="1" skipped="0" errors="0" time="1.7099640000000005">
+<testsuite name="crawler-admin.spec.ts" timestamp="2025-09-27T14:55:50.233Z" hostname="chromium" tests="1" failures="1" skipped="0" time="0.01" errors="0">
+<testcase name="Crawler Admin Interface › Dashboard Navigation › should display main navigation tabs" classname="crawler-admin.spec.ts" time="0.01">
+<failure message="crawler-admin.spec.ts:55:5 should display main navigation tabs" type="FAILURE">
+<![CDATA[  [chromium] › crawler-admin.spec.ts:55:5 › Crawler Admin Interface › Dashboard Navigation › should display main navigation tabs
+
+    Error: browserType.launch: Executable doesn't exist at /Users/josephmalicki/Library/Caches/ms-playwright/chromium_headless_shell-1193/chrome-mac/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     npx playwright install                                              ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+]]>
+</failure>
 </testcase>
 </testsuite>
 </testsuites>
