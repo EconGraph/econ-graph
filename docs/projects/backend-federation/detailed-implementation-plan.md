@@ -81,23 +81,46 @@ This document breaks down the V1 implementation into specific, actionable todos 
 - [ ] **Tests**: Tiering algorithm tests with various access patterns
 - [ ] **Docs**: Storage tiering management and optimization guide
 
-### **Phase 3: Crawler Integration**
+### **Phase 2.5: Crawler File Integration**
 
-#### **3.1 Crawler Service Foundation**
+#### **2.5.1 File-Based Data Catalog**
+- [ ] Create simple JSON/YAML catalog format for tracking series
+- [ ] Implement catalog discovery and updates
+- [ ] Track data ranges, coverage, and metadata
+- [ ] **Tests**: Catalog operations and discovery tests
+- [ ] **Docs**: Data cataloging system documentation
+
+#### **2.5.2 Crawler File Creation**
+- [ ] Enable crawlers to create Parquet files directly
+- [ ] Implement file naming conventions and organization
+- [ ] Add file validation and integrity checks
+- [ ] **Tests**: File creation and validation tests
+- [ ] **Docs**: Crawler file integration guide
+
+#### **2.5.3 Data Discovery API**
+- [ ] GraphQL queries for available series
+- [ ] Date range queries for data availability
+- [ ] Metadata queries for series information
+- [ ] **Tests**: Discovery API tests
+- [ ] **Docs**: Data discovery API documentation
+
+### **Phase 3: Crawler Integration** ⏸️ **DEFERRED**
+
+#### **3.1 Crawler Service Foundation** ⏸️ **NEEDS PLANNING**
 - [ ] Create separate crawler service crate: `backend/crates/econ-graph-crawler-service/`
 - [ ] Set up raw data archive with Iceberg
 - [ ] Implement job management and scheduling
 - [ ] **Tests**: Unit tests for crawler service components
 - [ ] **Docs**: Crawler service architecture documentation
 
-#### **3.2 Raw Data Management**
+#### **3.2 Raw Data Management** ⏸️ **NEEDS PLANNING**
 - [ ] Implement raw data archive storage
 - [ ] Create data validation and transformation pipeline
 - [ ] Add error handling and retry logic
 - [ ] **Tests**: Integration tests for raw data processing
 - [ ] **Docs**: Raw data management workflow documentation
 
-#### **3.3 Data Transformation Pipeline**
+#### **3.3 Data Transformation Pipeline** ⏸️ **NEEDS PLANNING**
 - [ ] Create data validation rules for financial data
 - [ ] Implement transformation from raw to clean data
 - [ ] Add data quality checks and reporting
@@ -263,24 +286,85 @@ storage:
 
 ### **🔄 IN PROGRESS**
 
-**Phase 3: Crawler Integration** - **0% COMPLETE**
-- ⏳ Crawler service foundation
-- ⏳ Raw data management
-- ⏳ Data transformation pipeline
+**Phase 2.5: Crawler File Integration** - **0% COMPLETE**
+- ⏳ Crawler can create Parquet files directly
+- ⏳ File discovery and cataloging system
+- ⏳ Data range tracking and metadata
+- ⏳ Simple file-based data catalog
 
 **Phase 5: Documentation & Deployment** - **25% COMPLETE**
 - ✅ Core documentation completed
 - ⏳ Storage tiering deployment
 - ⏳ Production deployment preparation
 
+### **⏸️ DEFERRED**
+
+**Phase 3: Crawler Integration** - **DEFERRED**
+- ⏸️ **Needs significant planning refinement before implementation**
+- ⏸️ Crawler service foundation
+- ⏸️ Raw data management
+- ⏸️ Data transformation pipeline
+
 ### **📊 OVERALL PROGRESS: 70% COMPLETE**
+
+### **🧹 CLEANUP PHASE (Before Main Branch)**
+
+#### **2.5.1 Crate Organization & Subcrates**
+- [ ] **Analyze standalone components**:
+  - [ ] Parquet file reading/writing (no Iceberg dependency)
+  - [ ] Arrow Flight data transfer
+  - [ ] GraphQL API layer
+  - [ ] Monitoring and health checks
+- [ ] **Identify subcrate opportunities**:
+  - [ ] `econ-graph-storage` - Pure Parquet/Arrow operations
+  - [ ] `econ-graph-graphql` - GraphQL API layer
+  - [ ] `econ-graph-monitoring` - Metrics and health checks
+  - [ ] `econ-graph-catalog` - Data cataloging and discovery
+- [ ] **Refactor into subcrates** for better modularity
+
+#### **2.5.2 Data Cataloging System**
+- [ ] **File-based data catalog**:
+  - [ ] Track available time series
+  - [ ] Record data ranges and coverage
+  - [ ] Metadata about data quality and sources
+  - [ ] Simple JSON/YAML catalog format
+- [ ] **Catalog API**:
+  - [ ] List available series
+  - [ ] Query data availability by date range
+  - [ ] Get series metadata and descriptions
+  - [ ] Check data freshness and updates
+
+#### **2.5.3 Test Strategy Refinement**
+- [ ] **Test organization**:
+  - [ ] Separate unit tests from integration tests
+  - [ ] Create test utilities and fixtures
+  - [ ] Mock external dependencies
+  - [ ] Performance test benchmarks
+- [ ] **Test coverage analysis**:
+  - [ ] Identify gaps in test coverage
+  - [ ] Add tests for edge cases
+  - [ ] Test error handling and recovery
+  - [ ] Test concurrent operations
+
+#### **2.5.4 Code Quality & Documentation**
+- [ ] **Code cleanup**:
+  - [ ] Remove unused imports and dead code
+  - [ ] Fix clippy warnings
+  - [ ] Standardize error handling
+  - [ ] Add comprehensive doc comments
+- [ ] **Documentation**:
+  - [ ] API documentation with examples
+  - [ ] Architecture decision records
+  - [ ] Deployment and operations guide
+  - [ ] Performance tuning guide
 
 ### **🎯 NEXT STEPS**
 
-1. **Complete Phase 3**: Implement crawler service integration
-2. **Finish Phase 4**: Add optional federation with main backend
-3. **Complete Phase 5**: Production deployment and storage tiering
-4. **Performance optimization**: Large dataset handling and query optimization
+1. **Complete Cleanup Phase**: Crate organization, cataloging, test refinement
+2. **Implement Phase 2.5**: Crawler file integration with cataloging
+3. **Finish Phase 4**: Add optional federation with main backend
+4. **Complete Phase 5**: Production deployment and storage tiering
+5. **Performance optimization**: Large dataset handling and query optimization
 
 ### **🔗 KEY FILES & LINKS**
 
