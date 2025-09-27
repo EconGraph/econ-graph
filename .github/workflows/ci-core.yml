@@ -1331,6 +1331,12 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         cargo clippy -- -W clippy::all
 
+    - name: Run Rust documentation check
+      working-directory: backend
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo doc --no-deps --document-private-items --all-features
+
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:

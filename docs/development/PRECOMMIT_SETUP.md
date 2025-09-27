@@ -11,6 +11,7 @@ The pre-commit configuration includes comprehensive checks for:
 ### Rust Backend
 - **Format Check**: Ensures code follows Rust formatting standards
 - **Clippy Lints**: Catches common Rust issues and suggests improvements
+- **Documentation Check**: Verifies that Rust documentation compiles without errors
 - **Security Audit**: Scans for known vulnerabilities in dependencies
 
 ### Frontend (React/TypeScript)
@@ -52,13 +53,16 @@ pre-commit run --all-files
 ### Running Specific Hooks
 ```bash
 # Only Rust checks
-pre-commit run rust-fmt rust-clippy
+pre-commit run rust-fmt rust-clippy rust-doc-check
 
 # Only frontend checks
 pre-commit run frontend-prettier frontend-eslint
 
 # Only security checks
 pre-commit run rust-audit npm-audit
+
+# Only documentation checks
+pre-commit run rust-doc-check markdownlint
 ```
 
 ## 🔧 Configuration
@@ -86,6 +90,18 @@ cd backend && cargo fmt
 cd frontend && npx prettier --write "src/**/*.{ts,tsx,js,jsx,json,css,md}"
 ```
 
+### Fixing Documentation Issues
+```bash
+# Check what documentation issues exist
+cd backend && cargo doc --no-deps --document-private-items --all-features
+
+# Common rustdoc issues and fixes:
+# - Missing doc comments on public items
+# - Broken links in documentation
+# - Invalid markdown in doc comments
+# - Missing examples in documentation
+```
+
 ### Skipping Hooks (Not Recommended)
 ```bash
 git commit --no-verify -m "Emergency commit"
@@ -103,7 +119,7 @@ git commit --no-verify -m "Emergency commit"
 1. **Code Quality**: Consistent formatting and style
 2. **Security**: Automatic vulnerability scanning
 3. **Type Safety**: TypeScript compilation checks
-4. **Documentation**: Consistent markdown formatting
+4. **Documentation**: Consistent markdown formatting and Rust documentation validation
 5. **Team Collaboration**: Standardized code standards
 
 ## 🔄 Updates
