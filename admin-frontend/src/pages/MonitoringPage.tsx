@@ -164,7 +164,7 @@ export default function MonitoringPage() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: 3 }} data-testid="monitoring-content">
       <Box
         sx={{
           display: "flex",
@@ -173,14 +173,18 @@ export default function MonitoringPage() {
           mb: 3,
         }}
       >
-        <Typography variant="h4" gutterBottom>
+        <Typography variant="h4" gutterBottom component="h1">
           System Monitoring
+        </Typography>
+        <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+          Grafana dashboards and system metrics
         </Typography>
         <Box sx={{ display: "flex", gap: 1 }}>
           <Tooltip title="Refresh Data">
             <IconButton
               onClick={handleRefresh}
               disabled={refreshMonitoringMutation.isPending}
+              aria-label="Refresh Data"
             >
               <Refresh />
             </IconButton>
@@ -191,6 +195,7 @@ export default function MonitoringPage() {
             href="http://localhost:30001"
             target="_blank"
             rel="noopener noreferrer"
+            aria-label="Open Grafana dashboard in new tab"
           >
             Open Grafana
           </Button>
@@ -206,7 +211,7 @@ export default function MonitoringPage() {
                 <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
                   {getStatusIcon(systemStatus.overall)}
                   <Typography variant="h6" sx={{ ml: 1 }}>
-                    System Status
+                    Overall Status
                   </Typography>
                 </Box>
                 <Chip
@@ -265,7 +270,7 @@ export default function MonitoringPage() {
                   {getStatusIcon(status)}
                   <Typography
                     variant="body2"
-                    sx={{ ml: 1, textTransform: "capitalize" }}
+                    sx={{ ml: 1, textTransform: "uppercase" }}
                   >
                     {service}
                   </Typography>
@@ -291,9 +296,13 @@ export default function MonitoringPage() {
         >
           <Tab label="Dashboards" />
           <Tab label="Metrics Overview" />
+          <Tab label="Embedded Views" />
         </Tabs>
 
         <TabPanel value={tabValue} index={0}>
+          <Typography variant="h6" gutterBottom>
+            Available Grafana Dashboards
+          </Typography>
           <Grid container spacing={3}>
             {dashboards.map((dashboard) => (
               <Grid item xs={12} md={6} lg={4} key={dashboard.id}>
@@ -329,6 +338,10 @@ export default function MonitoringPage() {
                       sx={{ mb: 2 }}
                     >
                       {dashboard.description}
+                    </Typography>
+
+                    <Typography variant="caption" color="text.secondary">
+                      Last Update: {new Date().toLocaleString()}
                     </Typography>
 
                     <Grid container spacing={1} sx={{ mb: 2 }}>
@@ -381,6 +394,7 @@ export default function MonitoringPage() {
                       rel="noopener noreferrer"
                       fullWidth
                       sx={{ mb: 1 }}
+                      aria-label={`Open ${dashboard.title} dashboard in new tab`}
                     >
                       Open Dashboard
                     </Button>
@@ -391,6 +405,7 @@ export default function MonitoringPage() {
                       target="_blank"
                       rel="noopener noreferrer"
                       fullWidth
+                      aria-label={`Open ${dashboard.title} embedded view in new tab`}
                     >
                       Embed View
                     </Button>
@@ -475,6 +490,98 @@ export default function MonitoringPage() {
                   <Typography variant="body2" color="text.secondary">
                     System reliability
                   </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={2}>
+          <Typography variant="h6" gutterBottom>
+            Embedded Dashboard Views
+          </Typography>
+          <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+            These are embedded views from Grafana dashboards
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Click the fullscreen icon to open in Grafana
+          </Typography>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={4}>
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>
+                    Embedded Grafana Dashboard
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Last Update: {new Date().toLocaleString()}
+                  </Typography>
+                  <Box
+                    sx={{
+                      mt: 2,
+                      height: 200,
+                      bgcolor: "grey.100",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Typography variant="body2" color="text.secondary">
+                      Grafana Dashboard Placeholder
+                    </Typography>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>
+                    Embedded Grafana Dashboard
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Last Update: {new Date().toLocaleString()}
+                  </Typography>
+                  <Box
+                    sx={{
+                      mt: 2,
+                      height: 200,
+                      bgcolor: "grey.100",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Typography variant="body2" color="text.secondary">
+                      Grafana Dashboard Placeholder
+                    </Typography>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>
+                    Embedded Grafana Dashboard
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Last Update: {new Date().toLocaleString()}
+                  </Typography>
+                  <Box
+                    sx={{
+                      mt: 2,
+                      height: 200,
+                      bgcolor: "grey.100",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Typography variant="body2" color="text.secondary">
+                      Grafana Dashboard Placeholder
+                    </Typography>
+                  </Box>
                 </CardContent>
               </Card>
             </Grid>

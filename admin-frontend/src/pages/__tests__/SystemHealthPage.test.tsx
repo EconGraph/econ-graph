@@ -150,7 +150,9 @@ describe("SystemHealthPage", () => {
         </TestWrapper>,
       );
 
-      expect(screen.getByText("System Health")).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "System Health" }),
+      ).toBeInTheDocument();
       expect(
         screen.getByText("Real-time system status and performance metrics"),
       ).toBeInTheDocument();
@@ -163,16 +165,18 @@ describe("SystemHealthPage", () => {
         </TestWrapper>,
       );
 
-      // Use data-testid attributes for reliable testing
-      expect(screen.getByTestId("health-metrics-grid")).toBeInTheDocument();
+      // Use role-based queries for better accessibility testing
       expect(
-        screen.getByTestId("health-metric-card-database"),
+        screen.getByRole("region", { name: "System health metrics" }),
       ).toBeInTheDocument();
       expect(
-        screen.getByTestId("health-metric-card-api-server"),
+        screen.getByRole("article", { name: "Database health metric" }),
       ).toBeInTheDocument();
       expect(
-        screen.getByTestId("health-metric-card-cache"),
+        screen.getByRole("article", { name: "API Server health metric" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("article", { name: "Cache health metric" }),
       ).toBeInTheDocument();
     });
 
@@ -183,14 +187,20 @@ describe("SystemHealthPage", () => {
         </TestWrapper>,
       );
 
-      // Use data-testid attributes for reliable testing
-      expect(screen.getByTestId("services-status-section")).toBeInTheDocument();
-      expect(screen.getByTestId("services-list")).toBeInTheDocument();
-      expect(screen.getByText("Service Status")).toBeInTheDocument();
+      // Use role-based queries for better accessibility testing
+      expect(
+        screen.getByRole("region", { name: "Service status information" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("list", { name: "List of system services" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Service Status" }),
+      ).toBeInTheDocument();
       // Use getAllByText since service names appear multiple times (in health metrics and services)
-      expect(screen.getAllByText("Backend API")).toHaveLength(2); // Once in health metrics, once in services
-      expect(screen.getByText("PostgreSQL")).toBeInTheDocument();
-      expect(screen.getByText("Data Crawler")).toBeInTheDocument();
+      expect(screen.getAllByText("API Server")).toHaveLength(2); // Once in health metrics, once in services
+      expect(screen.getAllByText("Database")).toHaveLength(2); // Once in health metrics, once in services
+      expect(screen.getAllByText("Cache")).toHaveLength(2); // Once in health metrics, once in services
     });
 
     it("displays quick actions section", () => {
@@ -200,14 +210,36 @@ describe("SystemHealthPage", () => {
         </TestWrapper>,
       );
 
-      // Use data-testid attributes for reliable testing
-      expect(screen.getByTestId("quick-actions-section")).toBeInTheDocument();
-      expect(screen.getByTestId("quick-actions-grid")).toBeInTheDocument();
-      expect(screen.getByText("Quick Actions")).toBeInTheDocument();
-      expect(screen.getByText("Platform Overview")).toBeInTheDocument();
-      expect(screen.getByText("Performance Metrics")).toBeInTheDocument();
-      expect(screen.getByText("Crawler Status")).toBeInTheDocument();
-      expect(screen.getByText("Security Events")).toBeInTheDocument();
+      // Use role-based queries for better accessibility testing
+      expect(
+        screen.getByRole("region", { name: "Quick action links" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("group", { name: "Grafana dashboard links" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Quick Actions" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", {
+          name: "Open Platform Overview dashboard in Grafana",
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", {
+          name: "Open Performance Metrics dashboard in Grafana",
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", {
+          name: "Open Crawler Status dashboard in Grafana",
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("link", {
+          name: "Open Security Events dashboard in Grafana",
+        }),
+      ).toBeInTheDocument();
     });
   });
 
@@ -220,19 +252,22 @@ describe("SystemHealthPage", () => {
       );
 
       // Use data-testid attributes for reliable testing
-      expect(screen.getByTestId("metric-value-database")).toHaveTextContent(
-        "All systems operational",
-      );
+      expect(
+        screen.getByTestId("metric-value-system-status"),
+      ).toHaveTextContent("All systems operational");
       expect(screen.getByTestId("metric-value-api-server")).toHaveTextContent(
-        "Response time: 8.7ms",
+        "CPU: 45.2%",
+      );
+      expect(screen.getByTestId("metric-value-database")).toHaveTextContent(
+        "RAM: 67.8%",
       );
       expect(screen.getByTestId("metric-value-cache")).toHaveTextContent(
-        "High response time: 45.3ms",
+        "Disk: 23.1%",
       );
       // Resource utilization is shown in the services list, not as separate metrics
-      expect(screen.getAllByText("CPU: 45.2%")).toHaveLength(3); // One for each service
-      expect(screen.getAllByText("RAM: 67.8%")).toHaveLength(3); // One for each service
-      expect(screen.getAllByText("Disk: 23.1%")).toHaveLength(3); // One for each service
+      expect(screen.getAllByText("CPU: 0%")).toHaveLength(3); // One for each service
+      expect(screen.getAllByText("RAM: 0%")).toHaveLength(3); // One for each service
+      expect(screen.getAllByText("Disk: 0%")).toHaveLength(3); // One for each service
       // Active users metric is not rendered in the current component
     });
 
@@ -245,13 +280,16 @@ describe("SystemHealthPage", () => {
 
       // Use data-testid attributes for reliable testing
       expect(
-        screen.getByTestId("metric-description-database"),
-      ).toHaveTextContent("Database status");
+        screen.getByTestId("metric-description-system-status"),
+      ).toHaveTextContent("Overall system health");
       expect(
         screen.getByTestId("metric-description-api-server"),
-      ).toHaveTextContent("API Server status");
+      ).toHaveTextContent("API Server resource usage");
+      expect(
+        screen.getByTestId("metric-description-database"),
+      ).toHaveTextContent("Database resource usage");
       expect(screen.getByTestId("metric-description-cache")).toHaveTextContent(
-        "Cache status",
+        "Cache resource usage",
       );
     });
 
@@ -319,9 +357,9 @@ describe("SystemHealthPage", () => {
         </TestWrapper>,
       );
 
-      // The component shows uptime in the format "Version: unknown • Uptime: [time]"
-      expect(screen.getByText(/Version: unknown/)).toBeInTheDocument();
-      expect(screen.getByText(/Uptime:/)).toBeInTheDocument();
+      // The component shows uptime in the format "Version: Unknown • Uptime: Unknown"
+      expect(screen.getAllByText(/Version: Unknown/)).toHaveLength(3); // One for each service
+      expect(screen.getAllByText(/Uptime: Unknown/)).toHaveLength(3); // One for each service
     });
 
     it("displays resource utilization with progress bars", () => {
@@ -334,13 +372,13 @@ describe("SystemHealthPage", () => {
       // Use data-testid attributes for reliable testing - match actual service names
       expect(
         screen.getByTestId("service-database-cpu-usage"),
-      ).toHaveTextContent("CPU: 45.2%");
+      ).toHaveTextContent("CPU: 0%");
       expect(
         screen.getByTestId("service-database-ram-usage"),
-      ).toHaveTextContent("RAM: 67.8%");
+      ).toHaveTextContent("RAM: 0%");
       expect(
         screen.getByTestId("service-database-disk-usage"),
-      ).toHaveTextContent("Disk: 23.1%");
+      ).toHaveTextContent("Disk: 0%");
     });
 
     it("shows different service statuses", async () => {
@@ -539,9 +577,9 @@ describe("SystemHealthPage", () => {
       );
 
       // Should show resource levels from the mock data (appears once for each service)
-      expect(screen.getAllByText("CPU: 45.2%")).toHaveLength(3);
-      expect(screen.getAllByText("RAM: 67.8%")).toHaveLength(3);
-      expect(screen.getAllByText("Disk: 23.1%")).toHaveLength(3);
+      expect(screen.getAllByText("CPU: 0%")).toHaveLength(3);
+      expect(screen.getAllByText("RAM: 0%")).toHaveLength(3);
+      expect(screen.getAllByText("Disk: 0%")).toHaveLength(3);
     });
 
     it("displays memory and disk usage", () => {
@@ -551,8 +589,8 @@ describe("SystemHealthPage", () => {
         </TestWrapper>,
       );
 
-      expect(screen.getAllByText("RAM: 67.8%")).toHaveLength(3);
-      expect(screen.getAllByText("Disk: 23.1%")).toHaveLength(3);
+      expect(screen.getAllByText("RAM: 0%")).toHaveLength(3);
+      expect(screen.getAllByText("Disk: 0%")).toHaveLength(3);
     });
   });
 

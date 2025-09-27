@@ -1,18 +1,30 @@
 {
   "data": {
     "systemHealth": {
-      "status": "healthy",
-      "metrics": {
-        "total_users": 150,
-        "active_users": 45,
-        "total_sessions": 89,
-        "active_sessions": 23,
-        "database_size_mb": 1024.5,
-        "queue_items": 12,
-        "api_requests_per_minute": 125.3,
-        "average_response_time_ms": 45.2
-      },
-      "last_updated": "2024-01-15T10:30:00Z"
+      "overall_status": "HEALTHY",
+      "components": [
+        {
+          "name": "Database",
+          "status": "RUNNING",
+          "last_check": "2024-01-15T10:30:00Z",
+          "message": "All connections healthy"
+        },
+        {
+          "name": "API Server",
+          "status": "RUNNING",
+          "last_check": "2024-01-15T10:30:00Z",
+          "message": "All endpoints responding"
+        },
+        {
+          "name": "Cache",
+          "status": "DEGRADED",
+          "last_check": "2024-01-15T10:30:00Z",
+          "message": "High memory usage"
+        }
+      ],
+      "uptime_seconds": 86400,
+      "version": "1.0.0",
+      "environment": "production"
     }
   }
 }

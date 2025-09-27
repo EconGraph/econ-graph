@@ -13,6 +13,46 @@ export const handlers = [
     const { query, variables } = body;
 
     // Handle different GraphQL operations
+    if (query.includes("GetSystemHealth")) {
+      return new Response(
+        JSON.stringify({
+          data: {
+            systemHealth: {
+              overall_status: "HEALTHY",
+              components: [
+                {
+                  name: "Database",
+                  status: "RUNNING",
+                  last_check: "2024-01-15T10:30:00Z",
+                  message: "All connections healthy",
+                },
+                {
+                  name: "API Server",
+                  status: "RUNNING",
+                  last_check: "2024-01-15T10:30:00Z",
+                  message: "All endpoints responding",
+                },
+                {
+                  name: "Cache",
+                  status: "DEGRADED",
+                  last_check: "2024-01-15T10:30:00Z",
+                  message: "High memory usage",
+                },
+              ],
+              uptime_seconds: 86400,
+              version: "1.0.0",
+              environment: "production",
+            },
+          },
+        }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
+    }
+
     if (query.includes("GetUsers")) {
       const mockUsers = [
         {
