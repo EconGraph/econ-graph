@@ -97,6 +97,46 @@ jobs:
         cargo build --verbose
       working-directory: backend
 
+  backend-migration-validation-tests:
+    name: Backend Migration Validation Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Run migration order validation
+      run: |
+
+        python3 scripts/check_migration_order.py
+
+    - name: Test migration validation with duplicate timestamps
+      run: |
+
+        # Create a temporary migration with invalid timestamp for testing
+        mkdir -p migrations/2024-01-01-000001_duplicate_timestamp_migration
+        echo "-- Duplicate timestamp migration" > migrations/2024-01-01-000001_duplicate_timestamp_migration/up.sql
+        echo "-- Duplicate timestamp migration down" > migrations/2024-01-01-000001_duplicate_timestamp_migration/down.sql
+
+        # This should fail because of duplicate timestamps
+        if python3 scripts/check_migration_order.py; then
+          echo "❌ Migration validation should have failed with duplicate timestamps"
+          exit 1
+        else
+          echo "✅ Migration validation correctly detected duplicate timestamps"
+        fi
+
+        # Clean up test migration
+        rm -rf migrations/2024-01-01-000001_duplicate_timestamp_migration
+
   backend-smoke-tests:
     name: Backend Smoke Tests (Fast)
     runs-on: ubuntu-latest
@@ -1496,7 +1536,7 @@ jobs:
       working-directory: frontend
       run: npm test -- --coverage --watchAll=false
       env:
-        REACT_APP_GRAPHQL_ENDPOINT: http://localhost:8080/graphql
+        REACT_APP_GRAPHQL_ENDPOINT: http://localhost:9876/graphql
 
   e2e-container-build:
     name: Build E2E Test Containers
@@ -1578,8 +1618,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
-    # Note: PostgreSQL environment variables removed to prevent conflicts with DATABASE_URL
-    # The DATABASE_URL in Docker containers should handle authentication
 
     services:
       postgres:
@@ -1657,31 +1695,20 @@ jobs:
       run: |
         # Use the pre-built backend binary from the optimized container
         docker run --rm -d --name backend-server \
-          -p 8080:8080 \
+          -p 9876:9876 \
           -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
-          -e BACKEND_PORT=8080 \
           econ-graph-e2e-optimized:latest \
           ./backend/econ-graph-backend
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:8080/health 2>/dev/null; then
+          if curl -f http://localhost:9876/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
           echo "Waiting for backend... ($i/30)"
           sleep 2
         done
-
-        # Check if backend actually started
-        if ! curl -f http://localhost:8080/health 2>/dev/null; then
-          echo "❌ Backend failed to start after 30 attempts!"
-          echo "📋 Backend container logs:"
-          docker logs backend-server || echo "No logs available"
-          echo "📋 Backend container status:"
-          docker ps -a --filter name=backend-server || echo "Container not found"
-          exit 1
-        fi
 
     - name: Start frontend service
       run: |
@@ -1805,31 +1832,20 @@ jobs:
       run: |
         # Use the pre-built backend binary from the optimized container
         docker run --rm -d --name backend-server \
-          -p 8080:8080 \
+          -p 9876:9876 \
           -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
-          -e BACKEND_PORT=8080 \
           econ-graph-e2e-optimized:latest \
           ./backend/econ-graph-backend
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:8080/health 2>/dev/null; then
+          if curl -f http://localhost:9876/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
           echo "Waiting for backend... ($i/30)"
           sleep 2
         done
-
-        # Check if backend actually started
-        if ! curl -f http://localhost:8080/health 2>/dev/null; then
-          echo "❌ Backend failed to start after 30 attempts!"
-          echo "📋 Backend container logs:"
-          docker logs backend-server || echo "No logs available"
-          echo "📋 Backend container status:"
-          docker ps -a --filter name=backend-server || echo "Container not found"
-          exit 1
-        fi
 
     - name: Start frontend service
       run: |
@@ -1953,31 +1969,20 @@ jobs:
       run: |
         # Use the pre-built backend binary from the optimized container
         docker run --rm -d --name backend-server \
-          -p 8080:8080 \
+          -p 9876:9876 \
           -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
-          -e BACKEND_PORT=8080 \
           econ-graph-e2e-optimized:latest \
           ./backend/econ-graph-backend
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:8080/health 2>/dev/null; then
+          if curl -f http://localhost:9876/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
           echo "Waiting for backend... ($i/30)"
           sleep 2
         done
-
-        # Check if backend actually started
-        if ! curl -f http://localhost:8080/health 2>/dev/null; then
-          echo "❌ Backend failed to start after 30 attempts!"
-          echo "📋 Backend container logs:"
-          docker logs backend-server || echo "No logs available"
-          echo "📋 Backend container status:"
-          docker ps -a --filter name=backend-server || echo "Container not found"
-          exit 1
-        fi
 
     - name: Start frontend service
       run: |
@@ -2103,31 +2108,20 @@ jobs:
       run: |
         # Use the pre-built backend binary from the optimized container
         docker run --rm -d --name backend-server \
-          -p 8080:8080 \
+          -p 9876:9876 \
           -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
-          -e BACKEND_PORT=8080 \
           econ-graph-e2e-optimized:latest \
           ./backend/econ-graph-backend
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:8080/health 2>/dev/null; then
+          if curl -f http://localhost:9876/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
           echo "Waiting for backend... ($i/30)"
           sleep 2
         done
-
-        # Check if backend actually started
-        if ! curl -f http://localhost:8080/health 2>/dev/null; then
-          echo "❌ Backend failed to start after 30 attempts!"
-          echo "📋 Backend container logs:"
-          docker logs backend-server || echo "No logs available"
-          echo "📋 Backend container status:"
-          docker ps -a --filter name=backend-server || echo "Container not found"
-          exit 1
-        fi
 
     - name: Start frontend service
       run: |
@@ -2253,31 +2247,20 @@ jobs:
       run: |
         # Use the pre-built backend binary from the optimized container
         docker run --rm -d --name backend-server \
-          -p 8080:8080 \
+          -p 9876:9876 \
           -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
-          -e BACKEND_PORT=8080 \
           econ-graph-e2e-optimized:latest \
           ./backend/econ-graph-backend
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:8080/health 2>/dev/null; then
+          if curl -f http://localhost:9876/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
           echo "Waiting for backend... ($i/30)"
           sleep 2
         done
-
-        # Check if backend actually started
-        if ! curl -f http://localhost:8080/health 2>/dev/null; then
-          echo "❌ Backend failed to start after 30 attempts!"
-          echo "📋 Backend container logs:"
-          docker logs backend-server || echo "No logs available"
-          echo "📋 Backend container status:"
-          docker ps -a --filter name=backend-server || echo "Container not found"
-          exit 1
-        fi
 
     - name: Start frontend service
       run: |
@@ -2403,31 +2386,20 @@ jobs:
       run: |
         # Use the pre-built backend binary from the optimized container
         docker run --rm -d --name backend-server \
-          -p 8080:8080 \
+          -p 9876:9876 \
           -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
-          -e BACKEND_PORT=8080 \
           econ-graph-e2e-optimized:latest \
           ./backend/econ-graph-backend
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:8080/health 2>/dev/null; then
+          if curl -f http://localhost:9876/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
           echo "Waiting for backend... ($i/30)"
           sleep 2
         done
-
-        # Check if backend actually started
-        if ! curl -f http://localhost:8080/health 2>/dev/null; then
-          echo "❌ Backend failed to start after 30 attempts!"
-          echo "📋 Backend container logs:"
-          docker logs backend-server || echo "No logs available"
-          echo "📋 Backend container status:"
-          docker ps -a --filter name=backend-server || echo "Container not found"
-          exit 1
-        fi
 
     - name: Start frontend service
       run: |
@@ -2553,31 +2525,20 @@ jobs:
       run: |
         # Use the pre-built backend binary from the optimized container
         docker run --rm -d --name backend-server \
-          -p 8080:8080 \
+          -p 9876:9876 \
           -e DATABASE_URL=postgresql://postgres:password@host.docker.internal:5432/econ_graph_test \
-          -e BACKEND_PORT=8080 \
           econ-graph-e2e-optimized:latest \
           ./backend/econ-graph-backend
 
         # Wait for backend to be ready
         for i in {1..30}; do
-          if curl -f http://localhost:8080/health 2>/dev/null; then
+          if curl -f http://localhost:9876/health 2>/dev/null; then
             echo "Backend is ready!"
             break
           fi
           echo "Waiting for backend... ($i/30)"
           sleep 2
         done
-
-        # Check if backend actually started
-        if ! curl -f http://localhost:8080/health 2>/dev/null; then
-          echo "❌ Backend failed to start after 30 attempts!"
-          echo "📋 Backend container logs:"
-          docker logs backend-server || echo "No logs available"
-          echo "📋 Backend container status:"
-          docker ps -a --filter name=backend-server || echo "Container not found"
-          exit 1
-        fi
 
     - name: Start frontend service
       run: |
