@@ -1,5 +1,5 @@
 /**
- * Chart API utilities for generating and managing chart data
+ * Chart API utilities for generating and managing chart data.
  */
 
 export interface ChartDataPoint {
@@ -44,7 +44,10 @@ export interface ChartResponse {
 }
 
 /**
- * Generate chart data from series data
+ * Generate chart data from series data.
+ * @param seriesData - Array of series data to convert to chart format.
+ * @param config - Optional chart configuration overrides.
+ * @returns Object containing the formatted series data and chart configuration.
  */
 export function generateChartData(
   seriesData: any[],

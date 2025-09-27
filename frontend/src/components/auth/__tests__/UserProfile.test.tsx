@@ -1,5 +1,3 @@
-import { vi } from 'vitest';
-import type { Mock } from 'vitest';
 /**
  * REQUIREMENT: Test user profile preferences functionality
  * PURPOSE: Verify user preferences can be edited and saved correctly
@@ -9,6 +7,7 @@ import type { Mock } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { vi } from 'vitest';
 import UserProfile from '../UserProfile';
 import { AuthProvider } from '../../../contexts/AuthContext';
 import { ThemeProvider } from '../../../contexts/ThemeContext';
@@ -35,10 +34,10 @@ const mockUser = {
 // Mock fetch for API calls
 global.fetch = vi.fn();
 
-// localStorage mock is now handled globally in setupTests.ts
+// localStorage mock is now handled globally in setupTests.vitest.ts
 
 // Mock fetch to return user data
-(fetch as Mock).mockImplementation((url: string) => {
+(global.fetch as any).mockImplementation((url: string) => {
   if (url.includes('/auth/me')) {
     return Promise.resolve({
       ok: true,
@@ -61,22 +60,28 @@ global.fetch = vi.fn();
 const mockUseAuth = vi.fn();
 
 // Mock the AuthContext module
-vi.mock('../../../contexts/AuthContext', async () => ({
-  ...(await vi.importActual('../../../contexts/AuthContext')),
-  useAuth: () => mockUseAuth(),
-  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
+vi.mock('../../../contexts/AuthContext', async () => {
+  const actual = await vi.importActual('../../../contexts/AuthContext');
+  return {
+    ...actual,
+    useAuth: () => mockUseAuth(),
+    AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  };
+});
 
 // Mock the useTheme hook
-vi.mock('../../../contexts/ThemeContext', async () => ({
-  ...(await vi.importActual('../../../contexts/ThemeContext')),
-  useTheme: () => ({
-    theme: {} as any,
-    toggleTheme: vi.fn(),
-    setTheme: vi.fn(),
-    currentTheme: 'light' as const,
-  }),
-}));
+vi.mock('../../../contexts/ThemeContext', async () => {
+  const actual = await vi.importActual('../../../contexts/ThemeContext');
+  return {
+    ...actual,
+    useTheme: () => ({
+      theme: {} as any,
+      toggleTheme: vi.fn(),
+      setTheme: vi.fn(),
+      currentTheme: 'light' as const,
+    }),
+  };
+});
 
 // Wrapper component that provides all necessary contexts
 const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -93,7 +98,7 @@ describe('UserProfile Preferences', () => {
     vi.clearAllMocks();
 
     // Setup localStorage mock for this test
-    (window.localStorage.getItem as Mock).mockImplementation((key: string) => {
+    vi.spyOn(window.localStorage, 'getItem').mockImplementation((key: string) => {
       if (key === 'auth_token') return 'mock-token';
       if (key === 'theme') return 'light';
       return null;

@@ -1,0 +1,18 @@
+{
+  "data": {
+    "ratioExplanation": {
+      "ratioName": "returnOnEquity",
+      "displayName": "Return on Equity (ROE)",
+      "formula": "Net Income / Shareholders Equity",
+      "description": "Measures how efficiently a company uses shareholders' equity to generate profits.",
+      "interpretation": "Higher ROE indicates better profitability and efficient use of equity capital.",
+      "category": "profitability",
+      "importance": "high",
+      "warrenBuffettFavorite": true,
+      "analystPreferred": true,
+      "calculationMethod": "Annual net income divided by average shareholders' equity",
+      "limitations": "Can be manipulated through share buybacks and debt financing",
+      "relatedRatios": ["returnOnAssets", "returnOnInvestedCapital", "equityMultiplier"]
+    }
+  }
+}

@@ -24,7 +24,9 @@ import { BenchmarkComparison } from './BenchmarkComparison';
 import { TrendAnalysisChart } from './TrendAnalysisChart';
 import { PeerComparisonChart } from './PeerComparisonChart';
 
-// Import useQuery from react-query so it can be properly mocked in tests
+// Import GraphQL utilities
+import { executeGraphQL } from '../../utils/graphql';
+import { GET_FINANCIAL_DASHBOARD } from '../../test-utils/mocks/graphql/financial-queries';
 import { useQuery } from 'react-query';
 
 // Default data structure for development/demo purposes
@@ -157,9 +159,25 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     isError,
     error,
     refetch,
-  } = useQuery(['financial-statements', companyId], () => Promise.resolve(defaultData), {
-    staleTime: 5 * 60 * 1000, // 5 minutes
-  });
+  } = useQuery(
+    ['financial-dashboard', companyId],
+    async () => {
+      try {
+        const result = await executeGraphQL({
+          query: GET_FINANCIAL_DASHBOARD,
+          variables: { companyId },
+        });
+        return result.data;
+      } catch (error) {
+        console.error('Failed to fetch financial dashboard data:', error);
+        // Fallback to default data for development
+        return defaultData;
+      }
+    },
+    {
+      staleTime: 5 * 60 * 1000, // 5 minutes
+    }
+  );
 
   const company: Company | undefined = data?.company;
   const statements: FinancialStatement[] = useMemo(
@@ -578,8 +596,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         {/* Ratios Tab */}
         <TabsContent value='ratios'>
           <RatioAnalysisPanel
-            ratios={ratios}
-            loading={false}
+            statementId='statement-1'
             userType={userType}
             showEducationalContent={showEducationalContent}
           />

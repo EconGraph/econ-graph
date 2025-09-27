@@ -1,7 +1,7 @@
 /**
- * REQUIREMENT: Comprehensive end-to-end user workflow tests
- * PURPOSE: Test complete user journeys from search to analysis and collaboration
- * This ensures the entire application works correctly for real user scenarios
+ * REQUIREMENT: Comprehensive end-to-end user workflow tests.
+ * PURPOSE: Test complete user journeys from search to analysis and collaboration.
+ * This ensures the entire application works correctly for real user scenarios.
  */
 
 import React from 'react';

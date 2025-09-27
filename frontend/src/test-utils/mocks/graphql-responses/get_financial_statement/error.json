@@ -1,0 +1,15 @@
+{
+  "data": {
+    "financialStatement": null
+  },
+  "errors": [
+    {
+      "message": "XBRL processing failed",
+      "extensions": {
+        "code": "PROCESSING_ERROR",
+        "details": "Invalid XBRL taxonomy structure",
+        "statementId": "statement-1"
+      }
+    }
+  ]
+}

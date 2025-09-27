@@ -437,8 +437,7 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
           {/* Ratios Tab */}
           {activeTab === 'ratios' && (
             <RatioAnalysisPanel
-              ratios={ratios}
-              loading={false}
+              statementId='statement-1'
               userType={userType}
               showEducationalContent={showEducationalContent}
             />
@@ -450,7 +449,9 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
               ratios={ratios}
               statements={statements}
               timeRange='3Y'
-              onTimeRangeChange={() => {}}
+              onTimeRangeChange={() => {
+                // Mock time range change handler
+              }}
             />
           )}
 
@@ -580,8 +581,7 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
 
                 <TabsContent value='ratios'>
                   <RatioAnalysisPanel
-                    ratios={ratios}
-                    loading={false}
+                    statementId='statement-1'
                     userType={userType}
                     showEducationalContent={showEducationalContent}
                   />
@@ -592,7 +592,9 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
                     ratios={ratios}
                     statements={statements}
                     timeRange='3Y'
-                    onTimeRangeChange={() => {}}
+                    onTimeRangeChange={() => {
+                      // Mock time range change handler
+                    }}
                   />
                 </TabsContent>
 

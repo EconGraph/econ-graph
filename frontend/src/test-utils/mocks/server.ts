@@ -6,13 +6,16 @@
 
 // Import mock data (doesn't need polyfills)
 import { mockSeriesData, mockDataSources, mockSearchResults, mockSuggestions } from './data';
+import { loadGraphQLResponse } from './graphql-response-loader';
 
 // Lazy import MSW to ensure polyfills are loaded first
 let setupServer: any, graphql: any, http: any, HttpResponse: any;
 
 function ensureMSWImported() {
   if (!setupServer) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const msw = require('msw/node');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const mswCore = require('msw');
     setupServer = msw.setupServer;
     graphql = mswCore.graphql;
@@ -146,6 +149,92 @@ function createHandlers() {
       });
     }),
 
+    // Financial GraphQL handlers using JSON response files
+    graphql.query('GetFinancialDashboard', ({ variables }: { variables: any }) => {
+      const { companyId } = variables as { companyId: string };
+
+      // Use different scenarios based on companyId for testing
+      let scenario = 'success';
+      if (companyId === 'invalid-company-id') {
+        scenario = 'not_found';
+      } else if (companyId === 'loading-company-id') {
+        scenario = 'loading';
+      } else if (companyId === 'partial-company-id') {
+        scenario = 'partial_data';
+      } else if (companyId === 'error-company-id') {
+        scenario = 'error';
+      }
+
+      const response = loadGraphQLResponse('get_financial_dashboard', scenario);
+      return HttpResponse.json(response, {
+        status: response.errors ? 400 : 200,
+      });
+    }),
+
+    graphql.query('GetFinancialStatement', ({ variables }: { variables: any }) => {
+      const { statementId } = variables as { statementId: string };
+
+      let scenario = 'success';
+      if (statementId === 'invalid-statement-id') {
+        scenario = 'not_found';
+      } else if (statementId === 'processing-statement-id') {
+        scenario = 'processing';
+      } else if (statementId === 'error-statement-id') {
+        scenario = 'error';
+      }
+
+      const response = loadGraphQLResponse('get_financial_statement', scenario);
+      return HttpResponse.json(response, {
+        status: response.errors ? 400 : 200,
+      });
+    }),
+
+    graphql.query('GetFinancialRatios', ({ variables }: { variables: any }) => {
+      const { statementId } = variables as { statementId: string };
+
+      let scenario = 'success';
+      if (statementId === 'empty-statement-id') {
+        scenario = 'empty';
+      } else if (statementId === 'partial-statement-id') {
+        scenario = 'partial';
+      } else if (statementId === 'error-statement-id') {
+        scenario = 'error';
+      }
+
+      const response = loadGraphQLResponse('get_financial_ratios', scenario);
+      return HttpResponse.json(response, {
+        status: response.errors ? 400 : 200,
+      });
+    }),
+
+    graphql.query('GetRatioBenchmarks', ({ variables }: { variables: any }) => {
+      const { ratioName } = variables as { ratioName: string };
+
+      let scenario = 'success';
+      if (ratioName === 'unknownRatio') {
+        scenario = 'not_found';
+      }
+
+      const response = loadGraphQLResponse('get_ratio_benchmarks', scenario);
+      return HttpResponse.json(response, {
+        status: response.errors ? 400 : 200,
+      });
+    }),
+
+    graphql.query('GetRatioExplanation', ({ variables }: { variables: any }) => {
+      const { ratioName } = variables as { ratioName: string };
+
+      let scenario = 'success';
+      if (ratioName === 'unknownRatio') {
+        scenario = 'not_found';
+      }
+
+      const response = loadGraphQLResponse('get_ratio_explanation', scenario);
+      return HttpResponse.json(response, {
+        status: response.errors ? 400 : 200,
+      });
+    }),
+
     // REST API fallback handlers
     http.get('/api/health', () => {
       // REQUIREMENT: Mock health check endpoint
@@ -179,6 +268,9 @@ function initializeMSW() {
     server = setupServer(...handlers);
   }
 }
+
+// Initialize immediately for Vitest compatibility
+initializeMSW();
 
 // Export initialization function for setupTests.ts
 export function getMSWServer() {

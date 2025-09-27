@@ -1,5 +1,5 @@
 /**
- * Integration tests for XBRL financial statement features
+ * Integration tests for XBRL financial statement features.
  *
  * These tests verify the complete flow from XBRL data through financial analysis
  * and ensure proper integration between frontend components and backend APIs.
@@ -7,16 +7,22 @@
 
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
-import { vi } from 'vitest';
+import { vi, beforeAll, afterEach, afterAll } from 'vitest';
 import '@testing-library/jest-dom';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { BrowserRouter } from 'react-router-dom';
+import { server } from '../../test-utils/mocks/server';
 
 // Import the components we're testing
 import { FinancialDashboard } from '../../components/financial/FinancialDashboard';
 import { FinancialStatementViewer } from '../../components/financial/FinancialStatementViewer';
 import { BenchmarkComparison } from '../../components/financial/BenchmarkComparison';
 import { TrendAnalysisChart } from '../../components/financial/TrendAnalysisChart';
+
+// Start MSW for integration tests
+beforeAll(() => server.listen({ onUnhandledRequest: 'warn' }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
 
 // Mock the API calls
 const mockFetch = vi.fn();
@@ -494,9 +500,13 @@ describe('XBRL Financial Integration Tests', () => {
                     ratios={mockFinancialRatios}
                     statements={mockFinancialStatements}
                     timeRange="3Y"
-                    onTimeRangeChange={() => {}}
+                    onTimeRangeChange={() => {
+                      // Mock time range change handler
+                    }}
                     selectedRatios={['returnOnEquity']}
-                    onRatioSelectionChange={() => {}}
+                    onRatioSelectionChange={() => {
+                      // Mock ratio selection change handler
+                    }}
                   />
           </TestWrapper>
         );
@@ -515,9 +525,13 @@ describe('XBRL Financial Integration Tests', () => {
                     ratios={mockFinancialRatios}
                     statements={mockFinancialStatements}
                     timeRange="3Y"
-                    onTimeRangeChange={() => {}}
+                    onTimeRangeChange={() => {
+                      // Mock time range change handler
+                    }}
                     selectedRatios={['returnOnEquity']}
-                    onRatioSelectionChange={() => {}}
+                    onRatioSelectionChange={() => {
+                      // Mock ratio selection change handler
+                    }}
                   />
           </TestWrapper>
         );

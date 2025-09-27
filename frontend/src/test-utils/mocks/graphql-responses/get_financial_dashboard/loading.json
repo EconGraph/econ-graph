@@ -1,0 +1,20 @@
+{
+  "data": {
+    "company": {
+      "id": "0000320193",
+      "name": "Apple Inc.",
+      "ticker": "AAPL",
+      "sic": "3571",
+      "sicDescription": "Electronic Computers",
+      "gics": "4520",
+      "gicsDescription": "Technology Hardware & Equipment",
+      "businessStatus": "active",
+      "fiscalYearEnd": "09-30",
+      "createdAt": "2023-01-01T00:00:00Z",
+      "updatedAt": "2023-12-31T00:00:00Z",
+      "financialStatements": [],
+      "financialRatios": [],
+      "alerts": []
+    }
+  }
+}

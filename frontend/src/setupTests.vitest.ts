@@ -1,22 +1,37 @@
-// vitest-dom adds custom vitest matchers for asserting on DOM nodes.
-// allows you to do things like:
-// expect(element).toHaveTextContent(/react/i)
-// learn more: https://github.com/testing-library/jest-dom
+// Vitest setup file for MSW integration
+// This file sets up the test environment for Vitest with MSW support
+
 import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 
+// MSW is disabled by default for unit tests
+// Integration tests will start MSW manually
+
+// Mock fetch globally for unit tests
+global.fetch = vi.fn();
+
 // Polyfill for Node.js environment
-const { TextEncoder, TextDecoder } = require('util');
+import { TextEncoder, TextDecoder } from 'util';
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - Node.js TextEncoder/TextDecoder types differ from browser types
 global.TextEncoder = TextEncoder;
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - Node.js TextEncoder/TextDecoder types differ from browser types
 global.TextDecoder = TextDecoder;
 
 // Mock localStorage
-const localStorageMock: Storage = {
-  getItem: vi.fn(),
-  setItem: vi.fn(),
-  removeItem: vi.fn(),
-  clear: vi.fn(),
-  key: vi.fn(),
+const localStorageMock = {
+  getItem: () => null,
+  setItem: () => {
+    // Mock implementation
+  },
+  removeItem: () => {
+    // Mock implementation
+  },
+  clear: () => {
+    // Mock implementation
+  },
+  key: () => null,
   length: 0,
 };
 (global as any).localStorage = localStorageMock;
@@ -40,7 +55,6 @@ vi.mock('chart.js', () => ({
   Tooltip: vi.fn(),
   Legend: vi.fn(),
   Filler: vi.fn(),
-  TimeScale: vi.fn(),
 }));
 
 vi.mock('chartjs-adapter-date-fns', () => ({}));
@@ -205,4 +219,23 @@ vi.mock('d3-zoom', () => ({
     scaleExtent: vi.fn().mockReturnThis(),
     on: vi.fn().mockReturnThis(),
   })),
+}));
+
+// Mock react-router-dom
+vi.mock('react-router-dom', () => ({
+  BrowserRouter: ({ children }: { children: React.ReactNode }) => children,
+  useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: '/test', search: '', hash: '', state: null }),
+  useParams: () => ({}),
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
+  Link: ({ children, to, ...props }: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const React = require('react');
+    return React.createElement('a', { href: to, ...props }, children);
+  },
+  NavLink: ({ children, to, ...props }: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const React = require('react');
+    return React.createElement('a', { href: to, ...props }, children);
+  },
 }));
