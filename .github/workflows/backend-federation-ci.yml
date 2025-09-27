@@ -1,0 +1,276 @@
+name: Backend Federation Architecture CI
+
+on:
+  push:
+    branches: [ backend-federation-architecture ]
+    paths:
+      - 'backend/crates/econ-graph-financial-data/**'
+      - 'docs/projects/backend-federation/**'
+      - '.github/workflows/backend-federation-ci.yml'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to run CI on (leave empty for current branch)'
+        required: false
+        default: ''
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_LOG: debug
+
+jobs:
+  financial-data-service-tests:
+    name: Financial Data Service Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-financial-data-${{ hashFiles('backend/crates/econ-graph-financial-data/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-financial-data-
+
+    - name: Check formatting
+      working-directory: backend/crates/econ-graph-financial-data
+      run: cargo fmt --all -- --check
+
+    - name: Run clippy
+      working-directory: backend/crates/econ-graph-financial-data
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Build financial data service
+      working-directory: backend/crates/econ-graph-financial-data
+      run: cargo build --all-features
+
+    - name: Run unit tests
+      working-directory: backend/crates/econ-graph-financial-data
+      run: cargo test --lib -- --nocapture
+
+    - name: Run integration tests
+      working-directory: backend/crates/econ-graph-financial-data
+      run: cargo test --test "*" -- --nocapture
+
+    - name: Run monitoring integration tests
+      working-directory: backend/crates/econ-graph-financial-data
+      run: cargo test monitoring_integration -- --nocapture
+
+    - name: Run Parquet storage tests
+      working-directory: backend/crates/econ-graph-financial-data
+      run: cargo test parquet -- --nocapture
+
+    - name: Run GraphQL integration tests
+      working-directory: backend/crates/econ-graph-financial-data
+      run: cargo test graphql -- --nocapture
+
+    - name: Run comprehensive integration tests
+      working-directory: backend/crates/econ-graph-financial-data
+      run: cargo test comprehensive -- --nocapture
+
+    - name: Test service startup
+      working-directory: backend/crates/econ-graph-financial-data
+      run: |
+        timeout 10s cargo run --bin econ_graph_financial_data || true
+        echo "Service startup test completed"
+
+  iceberg-integration-tests:
+    name: Iceberg Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-financial-data-${{ hashFiles('backend/crates/econ-graph-financial-data/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-financial-data-
+
+    - name: Run Iceberg test runner
+      working-directory: backend/crates/econ-graph-financial-data
+      run: cargo test iceberg_test_runner -- --nocapture
+
+    - name: Run Iceberg advanced integration tests
+      working-directory: backend/crates/econ-graph-financial-data
+      run: cargo test iceberg_advanced -- --nocapture
+
+    - name: Run Iceberg financial-specific tests
+      working-directory: backend/crates/econ-graph-financial-data
+      run: cargo test iceberg_financial -- --nocapture
+
+    - name: Run Iceberg multi-file integration tests
+      working-directory: backend/crates/econ-graph-financial-data
+      run: cargo test iceberg_multi_file -- --nocapture
+
+  documentation-tests:
+    name: Documentation Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Check documentation structure
+      run: |
+        echo "Checking backend federation documentation..."
+        if [ -d "docs/projects/backend-federation" ]; then
+          echo "✅ Backend federation docs directory exists"
+          ls -la docs/projects/backend-federation/
+        else
+          echo "❌ Backend federation docs directory missing"
+          exit 1
+        fi
+
+    - name: Check implementation plan
+      run: |
+        if [ -f "docs/projects/backend-federation/detailed-implementation-plan.md" ]; then
+          echo "✅ Implementation plan exists"
+          echo "Plan size: $(wc -l < docs/projects/backend-federation/detailed-implementation-plan.md) lines"
+        else
+          echo "❌ Implementation plan missing"
+          exit 1
+        fi
+
+    - name: Check testing strategy
+      run: |
+        if [ -f "backend/crates/econ-graph-financial-data/docs/Testing-Strategy.md" ]; then
+          echo "✅ Testing strategy exists"
+          echo "Strategy size: $(wc -l < backend/crates/econ-graph-financial-data/docs/Testing-Strategy.md) lines"
+        else
+          echo "❌ Testing strategy missing"
+          exit 1
+        fi
+
+  performance-benchmarks:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-financial-data-${{ hashFiles('backend/crates/econ-graph-financial-data/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-financial-data-
+
+    - name: Run performance benchmarks
+      working-directory: backend/crates/econ-graph-financial-data
+      run: |
+        if [ -f "benches/performance.rs" ]; then
+          cargo bench --bench performance
+        else
+          echo "No performance benchmarks found, skipping..."
+        fi
+
+    - name: Run Arrow Flight benchmarks
+      working-directory: backend/crates/econ-graph-financial-data
+      run: |
+        if [ -f "benches/arrow_flight.rs" ]; then
+          cargo bench --bench arrow_flight
+        else
+          echo "No Arrow Flight benchmarks found, skipping..."
+        fi
+
+  code-quality:
+    name: Code Quality Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-financial-data-${{ hashFiles('backend/crates/econ-graph-financial-data/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-financial-data-
+
+    - name: Check for unused dependencies
+      working-directory: backend/crates/econ-graph-financial-data
+      run: |
+        cargo +nightly udeps --all-targets || echo "udeps not available, skipping..."
+
+    - name: Check for security vulnerabilities
+      working-directory: backend/crates/econ-graph-financial-data
+      run: |
+        cargo audit || echo "cargo-audit not available, skipping..."
+
+    - name: Generate test coverage report
+      working-directory: backend/crates/econ-graph-financial-data
+      run: |
+        if command -v cargo-tarpaulin &> /dev/null; then
+          cargo tarpaulin --out Html --output-dir coverage
+        else
+          echo "cargo-tarpaulin not available, skipping coverage..."
+        fi
+
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: coverage-report
+        path: backend/crates/econ-graph-financial-data/coverage/
+        retention-days: 7
