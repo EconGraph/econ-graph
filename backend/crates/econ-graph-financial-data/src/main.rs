@@ -2,7 +2,6 @@ use anyhow::Result;
 use std::time::Instant;
 use tracing::info;
 
-mod catalog;
 mod crawler;
 mod database;
 mod graphql;

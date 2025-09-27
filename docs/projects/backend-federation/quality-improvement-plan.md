@@ -83,29 +83,46 @@ This document outlines the quality improvement plan for the financial data servi
 - **Evidence**: Leap year edge cases, boundary conditions
 - **Scenario**: Cross-timezone data could return incorrect results
 
+## 🏗️ **Architectural Decision: Iceberg Catalog Integration**
+
+**Decision**: Replace custom `FileCatalog` implementation with Iceberg's catalog system while maintaining custom partitioning.
+
+**Rationale**:
+- **Custom partitioning**: We keep our time-based partitioning scheme (`year=2024/month=01/day=15`) for direct Parquet file access and zero-copy reads
+- **Iceberg catalog**: We leverage Iceberg's robust catalog system for metadata management, ACID transactions, schema evolution, and concurrency control
+- **Best of both worlds**: Custom partitioning + Iceberg's catalog = no need to rebuild catalog functionality
+
+**Benefits**:
+- ✅ Remove ~500+ lines of custom catalog code
+- ✅ Get ACID transactions, schema evolution, time travel for free
+- ✅ Leverage Iceberg's file pruning and statistics
+- ✅ Maintain zero-copy Parquet access
+- ✅ Keep simple, predictable time-based partitioning
+
 ## 📋 **Quality Improvement Roadmap**
 
 ### **Phase 1: Critical Fixes (Week 1-2)**
 
-#### **Priority 1: File System Safety**
-- [ ] **Implement file locking** in `FileCatalog` operations
-  - Add `flock()` or equivalent for catalog file access
-  - Implement read/write lock hierarchy
-  - Add timeout handling for lock acquisition
-- [ ] **Atomic catalog updates**
-  - Write to temporary files, then atomic rename
-  - Implement two-phase commit for catalog + index updates
-  - Add checksum validation for file integrity
+#### **Priority 1: Replace Custom Catalog with Iceberg Catalog**
+- [ ] **Remove custom FileCatalog implementation**
+  - Delete `FileCatalog`, `DataCatalog`, and related custom catalog code
+  - Remove custom file locking and atomic update implementations
+  - Clean up ~500+ lines of custom catalog code
+- [ ] **Integrate Iceberg catalog system**
+  - Use Iceberg's catalog API for metadata management
+  - Leverage Iceberg's ACID transactions and schema evolution
+  - Keep custom partitioning scheme (time-based) while using Iceberg's catalog
+  - Update `IcebergStorage` to use Iceberg catalog instead of custom implementation
 
-#### **Priority 2: Memory Management**
-- [ ] **Streaming catalog loading**
-  - Implement pagination for large catalogs
-  - Add lazy loading for series metadata
-  - Implement LRU cache for frequently accessed series
-- [ ] **Memory usage monitoring**
-  - Add metrics for catalog memory usage
-  - Implement memory pressure handling
-  - Add configuration for memory limits
+#### **Priority 2: Iceberg Catalog Configuration**
+- [ ] **Configure Iceberg with custom partitioning**
+  - Define custom partition key structure (year/month/day)
+  - Configure Iceberg to use our time-based partitioning scheme
+  - Ensure zero-copy Parquet file access is maintained
+- [ ] **Update GraphQL API integration**
+  - Modify catalog-related GraphQL queries to use Iceberg catalog
+  - Update database abstraction layer to use Iceberg catalog
+  - Ensure existing functionality is preserved
 
 #### **Priority 3: Data Validation**
 - [ ] **Schema validation**
