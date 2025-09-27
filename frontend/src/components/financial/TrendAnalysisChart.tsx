@@ -91,7 +91,6 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
   }, [ratioTrends]);
 
   // Use availableRatios for potential future features
-  console.debug('Available ratios for analysis:', availableRatios.length);
 
   // Filter ratios based on time range
   const filteredRatioTrends = useMemo(() => {
