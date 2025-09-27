@@ -231,6 +231,8 @@ vi.mock('d3-zoom', () => ({
 // Mock react-router-dom
 vi.mock('react-router-dom', () => ({
   BrowserRouter: ({ children }: { children: React.ReactNode }) => children,
+  Routes: ({ children }: { children: React.ReactNode }) => children,
+  Route: ({ children }: { children: React.ReactNode }) => children,
   useNavigate: () => vi.fn(),
   useLocation: () => ({ pathname: '/test', search: '', hash: '', state: null }),
   useParams: () => ({}),

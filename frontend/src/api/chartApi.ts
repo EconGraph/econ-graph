@@ -79,7 +79,10 @@ export function generateChartData(
 }
 
 /**
- * Export chart data to various formats
+ * Export chart data to various formats.
+ * @param series - Array of chart series data to export.
+ * @param format - Export format (json, csv, or excel).
+ * @returns Exported data as string or Blob.
  */
 export function exportChartData(
   series: ChartSeries[],
@@ -105,7 +108,9 @@ export function exportChartData(
 }
 
 /**
- * Validate chart configuration
+ * Validate chart configuration.
+ * @param config - Chart configuration object to validate.
+ * @returns Array of validation error messages.
  */
 export function validateChartConfig(config: Partial<ChartConfig>): string[] {
   const errors: string[] = [];
