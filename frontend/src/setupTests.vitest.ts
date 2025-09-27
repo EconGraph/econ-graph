@@ -5,17 +5,10 @@ import '@testing-library/jest-dom';
 import { beforeAll, afterEach, afterAll, vi } from 'vitest';
 import { server } from './test-utils/mocks/server';
 
-// MSW is disabled by default for unit tests
-// Integration tests will start MSW manually
-
-// Mock fetch globally for unit tests
-global.fetch = vi.fn();
-
-// MSW is disabled by default for unit tests
-// Integration tests will start MSW manually
-
-// Mock fetch globally for unit tests
-global.fetch = vi.fn();
+// Start MSW server for all tests
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
 
 // Polyfill for Node.js environment
 import { TextEncoder, TextDecoder } from 'util';

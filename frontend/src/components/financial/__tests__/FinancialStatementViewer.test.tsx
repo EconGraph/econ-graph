@@ -1,10 +1,9 @@
-import { vi, beforeAll, afterEach, afterAll } from 'vitest';
+import { vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { FinancialStatementViewer } from '../FinancialStatementViewer';
-import { server } from '../../../test-utils/mocks/server';
 import { Company } from '../../../types/financial';
 
 const mockCompany: Company = {
@@ -48,14 +47,9 @@ const TestWrapper = ({ children }: { children: React.ReactNode }) => {
 };
 
 describe('FinancialStatementViewer', () => {
-  // Setup MSW server for GraphQL mocking
-  beforeAll(() => server.listen());
-  afterEach(() => server.resetHandlers());
-  afterAll(() => server.close());
-
   beforeEach(() => {
     vi.clearAllMocks();
-    // MSW server handles GraphQL requests, no need for fetch mock
+    // MSW server handles GraphQL requests automatically in Node.js mode
   });
 
   it('renders the financial statement viewer', () => {

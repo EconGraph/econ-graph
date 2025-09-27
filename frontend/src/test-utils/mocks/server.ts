@@ -8,28 +8,15 @@
 import { mockSeriesData, mockDataSources, mockSearchResults, mockSuggestions } from './data';
 import { loadGraphQLResponse } from './graphql-response-loader';
 
-// Lazy import MSW to ensure polyfills are loaded first
-let setupServer: any, graphql: any, http: any, HttpResponse: any;
-
-function ensureMSWImported() {
-  if (!setupServer) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const msw = require('msw/node');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mswCore = require('msw');
-    setupServer = msw.setupServer;
-    graphql = mswCore.graphql;
-    http = mswCore.http;
-    HttpResponse = mswCore.HttpResponse;
-  }
-}
+// Import MSW directly
+import { setupServer } from 'msw/node';
+import { graphql, http, HttpResponse } from 'msw';
 
 // GraphQL endpoint
 // Removed unused GRAPHQL_ENDPOINT
 
-// Create handlers function that ensures MSW is imported
+// Create handlers function
 function createHandlers() {
-  ensureMSWImported();
 
   return [
     // GraphQL handlers
@@ -329,25 +316,25 @@ function createHandlers() {
   ];
 }
 
-// Export handlers and server as getters to ensure lazy loading
-export let handlers: any, server: any;
+// Create handlers and server
+const handlers = createHandlers();
+const server = setupServer(...handlers);
 
-// Initialize handlers and server when first accessed
-function initializeMSW() {
-  if (!handlers) {
-    handlers = createHandlers();
-  }
-  if (!server) {
-    ensureMSWImported();
-    server = setupServer(...handlers);
-  }
-}
+// Configure server to not fallback to network for unhandled requests
+server.use(
+  http.get('*', () => {
+    throw new Error('Unhandled GET request - add handler or check URL');
+  }),
+  http.post('*', () => {
+    throw new Error('Unhandled POST request - add handler or check URL');
+  }),
+  http.put('*', () => {
+    throw new Error('Unhandled PUT request - add handler or check URL');
+  }),
+  http.delete('*', () => {
+    throw new Error('Unhandled DELETE request - add handler or check URL');
+  })
+);
 
-// Initialize immediately for Vitest compatibility
-initializeMSW();
-
-// Export initialization function for setupTests.ts
-export function getMSWServer() {
-  initializeMSW();
-  return server;
-}
+// Export handlers and server
+export { handlers, server };

@@ -1,10 +1,9 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { vi, beforeAll, afterEach, afterAll } from 'vitest';
+import { vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { RatioAnalysisPanel } from '../RatioAnalysisPanel';
-import { server } from '../../../test-utils/mocks/server';
 
 // Mock the child components
 vi.mock('../RatioExplanationModal', () => ({
@@ -44,11 +43,6 @@ const createTestWrapper = () => {
 };
 
 describe('RatioAnalysisPanel', () => {
-  // Setup MSW server for GraphQL mocking
-  beforeAll(() => server.listen());
-  afterEach(() => server.resetHandlers());
-  afterAll(() => server.close());
-
   const defaultProps = {
     statementId: 'statement-1',
     userType: 'intermediate' as const,
