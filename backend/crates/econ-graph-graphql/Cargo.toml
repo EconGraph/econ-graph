@@ -16,6 +16,8 @@ dataloader.workspace = true
 
 # Async runtime
 tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
 
 # Serialization
 serde.workspace = true
@@ -44,3 +46,6 @@ bcrypt.workspace = true
 # Decimal handling
 bigdecimal.workspace = true
 rust_decimal.workspace = true
+
+# Security dependencies
+regex.workspace = true

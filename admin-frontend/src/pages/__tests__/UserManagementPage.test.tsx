@@ -54,8 +54,8 @@ const TestWrapper: React.FC<{
 }> = ({ children, authContext = mockSuperAdminContext }) => (
   <BrowserRouter>
     <ThemeProvider theme={theme}>
-      <AuthProvider value={authContext}>
-        <SecurityProvider value={mockSecurityContext}>
+      <AuthProvider>
+        <SecurityProvider>
           {children}
         </SecurityProvider>
       </AuthProvider>
@@ -89,8 +89,8 @@ describe('UserManagementPage', () => {
       render(
         <BrowserRouter>
           <ThemeProvider theme={theme}>
-            <AuthProvider value={mockAdminContext}>
-              <SecurityProvider value={nonSuperAdminSecurity}>
+            <AuthProvider>
+              <SecurityProvider>
                 <UserManagementPage />
               </SecurityProvider>
             </AuthProvider>

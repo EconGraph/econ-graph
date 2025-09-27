@@ -35,7 +35,7 @@ pub struct EconGraphMcpServer {
 impl EconGraphMcpServer {
     /// Create a new MCP server instance
     pub fn new(pool: Arc<DatabasePool>) -> Self {
-        let schema = create_schema_with_data(pool.clone(), ());
+        let schema = create_schema_with_data((*pool).clone(), ());
         let http_client = Client::new();
         let frontend_chart_api_url = std::env::var("CHART_API_SERVICE_URL").unwrap_or_else(|_| {
             "http://chart-api-service.econ-graph.svc.cluster.local:3001/api/chart".to_string()

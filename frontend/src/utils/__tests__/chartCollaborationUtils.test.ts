@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 /**
  * REQUIREMENT: Unit tests for chart collaboration business logic
  * PURPOSE: Test pure functions extracted from ChartCollaborationConnected component
@@ -137,7 +138,7 @@ describe('chartCollaborationUtils', () => {
 
   describe('calculateTotalComments', () => {
     it('should calculate total comments correctly', () => {
-      const mockGetCommentsForAnnotation = jest.fn()
+      const mockGetCommentsForAnnotation = vi.fn()
         .mockReturnValueOnce([{ id: 'comment-1' }, { id: 'comment-2' }]) // annotation-1: 2 comments
         .mockReturnValueOnce([{ id: 'comment-3' }]) // annotation-2: 1 comment
         .mockReturnValueOnce([]); // annotation-3: 0 comments
@@ -148,7 +149,7 @@ describe('chartCollaborationUtils', () => {
     });
 
     it('should handle undefined comments gracefully', () => {
-      const mockGetCommentsForAnnotation = jest.fn()
+      const mockGetCommentsForAnnotation = vi.fn()
         .mockReturnValueOnce(undefined)
         .mockReturnValueOnce(null);
 
@@ -157,7 +158,7 @@ describe('chartCollaborationUtils', () => {
     });
 
     it('should handle empty annotations array', () => {
-      const mockGetCommentsForAnnotation = jest.fn();
+      const mockGetCommentsForAnnotation = vi.fn();
       const result = calculateTotalComments([], mockGetCommentsForAnnotation);
       expect(result).toBe(0);
       expect(mockGetCommentsForAnnotation).not.toHaveBeenCalled();
