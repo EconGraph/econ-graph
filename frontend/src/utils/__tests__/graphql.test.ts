@@ -260,7 +260,7 @@ describe('GraphQL Utilities', () => {
 
     // Reset and setup fresh mocks
     vi.clearAllMocks();
-    (fetch as Mock)
+    mockFetch
       .mockResolvedValueOnce({
         ok: true,
         json: async () => mockResponse1,

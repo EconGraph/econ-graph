@@ -15,7 +15,9 @@ export default defineConfig({
       '**/.{idea,git,cache,output,temp}/**',
       '**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*',
       '**/server/**/*.test.cjs',
-      '**/__tests__/integration/privateChartServer.test.cjs'
+      '**/__tests__/integration/privateChartServer.test.cjs',
+      '**/tests/**/*.spec.ts',
+      '**/tests/**/*.spec.tsx'
     ],
     coverage: {
       provider: 'v8',

@@ -5,14 +5,8 @@ import '@testing-library/jest-dom';
 import { beforeAll, afterEach, afterAll, vi } from 'vitest';
 import { server } from './test-utils/mocks/server';
 
-// Start MSW server before all tests
-beforeAll(() => server.listen({ onUnhandledRequest: 'warn' }));
-
-// Reset handlers after each test
-afterEach(() => server.resetHandlers());
-
-// Clean up after all tests
-afterAll(() => server.close());
+// MSW is disabled by default for unit tests
+// Integration tests will start MSW manually
 
 // Polyfill for Node.js environment
 const { TextEncoder, TextDecoder } = require('util');
