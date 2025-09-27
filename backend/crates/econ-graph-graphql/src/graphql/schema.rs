@@ -7,6 +7,7 @@ use async_graphql::{EmptySubscription, Schema};
 use std::sync::Arc;
 
 use crate::graphql::{mutation::Mutation, query::Query};
+use crate::security::{SecurityConfig, SecurityMiddleware};
 use econ_graph_core::database::DatabasePool;
 
 /// GraphQL context containing shared resources
@@ -14,6 +15,8 @@ use econ_graph_core::database::DatabasePool;
 pub struct GraphQLContext {
     /// Database connection pool
     pub pool: Arc<DatabasePool>,
+    /// Security middleware
+    pub security: Arc<SecurityMiddleware>,
 }
 
 /// Create a new GraphQL schema with the provided context
@@ -39,7 +42,9 @@ pub struct GraphQLContext {
 /// }
 /// ```
 pub fn create_schema(pool: Arc<DatabasePool>) -> Schema<Query, Mutation, EmptySubscription> {
-    let context = GraphQLContext { pool };
+    let security_config = SecurityConfig::default();
+    let security = Arc::new(SecurityMiddleware::new(security_config));
+    let context = GraphQLContext { pool, security };
 
     Schema::build(Query, Mutation, EmptySubscription)
         .data(context)
@@ -58,7 +63,9 @@ pub fn create_schema_with_data<T: Send + Sync + 'static>(
     pool: Arc<DatabasePool>,
     additional_data: T,
 ) -> Schema<Query, Mutation, EmptySubscription> {
-    let context = GraphQLContext { pool };
+    let security_config = SecurityConfig::default();
+    let security = Arc::new(SecurityMiddleware::new(security_config));
+    let context = GraphQLContext { pool, security };
 
     Schema::build(Query, Mutation, EmptySubscription)
         .data(context)
