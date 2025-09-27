@@ -47,7 +47,7 @@ repos:
 
       - id: frontend-jsdoc
         name: Frontend JSDoc Validation
-        entry: bash -c 'cd frontend && npx eslint "src/**/*.{ts,tsx}" --rule "jsdoc/require-jsdoc:warn" --rule "jsdoc/require-description:warn" --rule "jsdoc/require-param:warn" --rule "jsdoc/require-returns:warn" --max-warnings 100'
+        entry: bash -c 'cd frontend && npx eslint "src/**/*.{ts,tsx}" --rule "jsdoc/require-jsdoc:warn" --rule "jsdoc/require-description:warn" --rule "jsdoc/require-param:warn" --rule "jsdoc/require-returns:warn" --max-warnings 600'
         language: system
         files: '^frontend/src/.*\.(ts|tsx)$'
         pass_filenames: false

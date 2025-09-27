@@ -1,5 +1,5 @@
 /**
- * Integration tests for XBRL financial statement features
+ * Integration tests for XBRL financial statement features.
  *
  * These tests verify the complete flow from XBRL data through financial analysis
  * and ensure proper integration between frontend components and backend APIs.

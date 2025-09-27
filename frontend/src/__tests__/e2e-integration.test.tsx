@@ -299,7 +299,7 @@ export const createMockGraphQLClient = () => {
   };
 };
 
-export const waitForGraphQLOperation = async (operation: string, timeout = 5000) => {
+export const waitForGraphQLOperation = async (operation: string, _timeout = 5000) => {
   // Utility to wait for GraphQL operations in tests
   return new Promise((resolve) => {
     setTimeout(() => {
