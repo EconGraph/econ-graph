@@ -114,6 +114,10 @@ export const handlers = [
 
     if (query.includes("GetCrawlerStatus")) {
       console.log("[MSW] Returning crawler status");
+
+      // Add a small delay to let React Query "latch" and be ready to receive data
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
       return new Response(
         JSON.stringify({
           data: {
@@ -140,6 +144,10 @@ export const handlers = [
 
     if (query.includes("GetQueueStatistics")) {
       console.log("[MSW] Returning queue statistics");
+
+      // Add a small delay to let React Query "latch" and be ready to receive data
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
       return new Response(
         JSON.stringify({
           data: {
@@ -166,6 +174,10 @@ export const handlers = [
 
     if (query.includes("GetPerformanceMetrics")) {
       console.log("[MSW] Returning performance metrics");
+
+      // Add a small delay to let React Query "latch" and be ready to receive data
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
       return new Response(
         JSON.stringify({
           data: {
@@ -192,6 +204,10 @@ export const handlers = [
 
     if (query.includes("GetCrawlerLogs")) {
       console.log("[MSW] Returning crawler logs");
+
+      // Add a small delay to let React Query "latch" and be ready to receive data
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
       return new Response(
         JSON.stringify({
           data: {
