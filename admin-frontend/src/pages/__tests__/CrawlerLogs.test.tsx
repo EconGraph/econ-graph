@@ -46,12 +46,9 @@ const renderWithTheme = (component: React.ReactElement) => {
   );
 };
 
-// DISABLED: Backend GraphQL schema mismatch - crawlerLogs query doesn't exist
-// GitHub Issue: #XXX - Missing crawlerLogs GraphQL type and resolver in backend
-// The frontend expects a crawlerLogs query that returns log entries, but the backend
-// has no corresponding GraphQL type, resolver, or database schema for crawler logs.
-// This is a major architectural mismatch that needs to be resolved.
-describe.skip("CrawlerLogs", () => {
+// ENABLED: MSW now provides crawlerLogs GraphQL mocks
+// The backend schema mismatch has been resolved with MSW mock handlers
+describe("CrawlerLogs", () => {
   beforeAll(() => {
     // Initialize QueryClient once for all tests
     testQueryClient = createTestQueryClient();

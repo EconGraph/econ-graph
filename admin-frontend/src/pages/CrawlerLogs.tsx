@@ -140,7 +140,7 @@ const CrawlerLogs: React.FC<CrawlerLogsProps> = () => {
   useEffect(() => {
     const logsToFilter = searchTerm.length > 0 ? searchResults : logs;
 
-    const filtered = logsToFilter.filter((log: any) => {
+    const filtered = (logsToFilter || []).filter((log: any) => {
       const matchesLevel = levelFilter === "all" || log.level === levelFilter;
       const matchesSource =
         sourceFilter === "all" || log.source === sourceFilter;
