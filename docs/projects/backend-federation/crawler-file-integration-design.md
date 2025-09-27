@@ -37,42 +37,87 @@ Enable crawlers to create Parquet files directly in the financial data service's
 
 ### **Detailed Implementation Plan**
 
-#### **2.5.2.1 Crawler File Creation API**
+#### **2.5.2.1 Crawler Bulk Upload API**
 
-**New GraphQL Mutation**: `createSeriesFromFile`
+**New GraphQL Mutation**: `submitDataBatch`
 ```graphql
-mutation CreateSeriesFromFile($input: CreateSeriesFromFileInput!) {
-  createSeriesFromFile(input: $input) {
-    success
-    seriesId
-    filePath
-    dataPointsProcessed
+mutation SubmitDataBatch($input: DataBatchInput!) {
+  submitDataBatch(input: $input) {
+    batchId
+    status
+    seriesProcessed
+    totalDataPoints
     errors
+    warnings
+    processingTimeMs
   }
 }
 
-input CreateSeriesFromFileInput {
-  externalId: String!
+input DataBatchInput {
+  batchId: String!           # Crawler-generated batch identifier
+  source: String!            # Data source identifier
+  files: [DataFileInput!]!   # Multiple files in this batch
+  metadata: BatchMetadataInput
+}
+
+input DataFileInput {
+  externalId: String!        # Series external identifier
+  seriesMetadata: SeriesMetadataInput!
+  data: DataInput!           # Arrow data or file path
+}
+
+input DataInput {
+  format: DataFormat!        # Data format
+  # Either inline Arrow data or file path
+  arrowData: String          # Base64-encoded Arrow RecordBatch
+  filePath: String           # Path to data file (Parquet or Arrow)
+  # For streaming Arrow data
+  arrowStreamData: String    # Base64-encoded Arrow Stream data
+}
+
+enum DataFormat {
+  ARROW_RECORD_BATCH        # Single Arrow RecordBatch (inline)
+  ARROW_STREAM              # Arrow Stream format (inline)
+  PARQUET_FILE              # Parquet file (file path)
+  ARROW_FILE                # Arrow file (file path)
+}
+
+input SeriesMetadataInput {
   title: String!
   description: String
   units: String
   frequency: String!
   seasonalAdjustment: String
-  source: String!
-  filePath: String!  # Path to Parquet file created by crawler
   expectedDataPoints: Int
   startDate: Date
   endDate: Date
 }
+
+input BatchMetadataInput {
+  crawlerVersion: String
+  processingTimestamp: DateTime
+  sourceApiVersion: String
+  batchSize: Int
+  compressionType: String
+}
 ```
 
 **Implementation Details**:
-- Validate the Parquet file exists and is readable
-- Verify file format and schema compatibility
-- Extract metadata from the file (data point count, date ranges)
-- Register the series in the Iceberg catalog
-- Move the file to the proper partitioned directory structure
-- Validate data integrity and completeness
+- Process multiple series in a single batch operation
+- Support both inline Arrow data and file-based uploads
+- Validate Arrow RecordBatch schemas for inline data
+- Perform minimal schema compatibility checks
+- Register all series in the Iceberg catalog atomically
+- Convert inline Arrow data to Parquet files for storage
+- Provide batch-level success/failure reporting
+- Support partial batch success (some series succeed, others fail)
+
+**Benefits of Arrow Format Support**:
+- **Zero-Copy**: Direct Arrow RecordBatch processing without file I/O
+- **Efficiency**: No need to write temporary files for small datasets
+- **Streaming**: Support for Arrow Stream format for large datasets
+- **Flexibility**: Crawlers can choose between inline data or file uploads
+- **Performance**: Faster processing for real-time data ingestion
 
 #### **2.5.2.2 File Naming Conventions & Organization**
 
@@ -98,34 +143,28 @@ data/
 - **Metadata Files**: `series_{uuid}_{external_id}.metadata.json`
 - **Example**: `series_123e4567-e89b-12d3-a456-426614174000_GDP_Q1_2024.parquet`
 
-#### **2.5.2.3 File Validation & Integrity Checks**
+#### **2.5.2.3 Minimal File Validation**
 
-**Validation Pipeline**:
-1. **File Format Validation**:
+**Basic Schema Validation** (Crawler handles data validation):
+1. **File Format Check**:
    - Verify Parquet file can be opened and read
    - Check required columns exist (date, value, series_id)
-   - Validate data types match expected schema
+   - Validate basic data types (date is date, value is numeric)
 
-2. **Data Integrity Validation**:
-   - Verify date ranges are logical (start ≤ end)
-   - Check for duplicate dates within the file
-   - Validate numeric values are within reasonable bounds
-   - Check for missing values and gaps
+2. **Minimal Schema Compatibility**:
+   - Ensure Parquet schema has expected column names
+   - Verify basic data types match our `DataPoint` model
+   - Reject files with completely incompatible schemas
 
-3. **Schema Compatibility**:
-   - Ensure Parquet schema matches our `DataPoint` model
-   - Verify column names and types
-   - Check for unexpected columns
-
-4. **Metadata Validation**:
-   - Validate external ID format
-   - Check frequency and seasonal adjustment values
-   - Verify source information
+3. **Basic Metadata Validation**:
+   - Validate external ID format (alphanumeric with underscores/hyphens)
+   - Check frequency is one of our supported values
+   - Verify source information is provided
 
 **Error Handling**:
-- Return detailed validation errors
-- Support partial file processing
-- Maintain audit trail of validation failures
+- Return basic validation errors for schema mismatches
+- Trust crawler for data quality validation
+- Focus on system-level compatibility, not data quality
 
 #### **2.5.2.4 File Discovery & Cataloging**
 
@@ -195,12 +234,10 @@ pub struct EnhancedSeriesInfo {
     pub end_date: Option<NaiveDate>,
     pub total_data_points: u64,
     pub expected_data_points: Option<u64>,
-    pub completeness: f64,  // Actual vs expected data points
     
-    // Data Quality
-    pub data_quality_score: f64,  // 0.0 to 1.0
-    pub gaps: Vec<DataGap>,
-    pub outliers: Vec<DataOutlier>,
+    // Gap Tracking (TCP Selective ACK Model)
+    pub known_gaps: Vec<DataGap>,
+    pub gap_count: u32,
     
     // File Information
     pub files: Vec<FileInfo>,
@@ -217,22 +254,27 @@ pub struct DataGap {
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
     pub gap_type: GapType,
-    pub severity: GapSeverity,
+    pub gap_status: GapStatus,
+    pub expected_count: u32,    // How many data points should be here
+    pub actual_count: u32,      // How many we actually have (0 for missing)
+    pub first_reported: DateTime<Utc>,
+    pub last_checked: DateTime<Utc>,
 }
 
 #[derive(async_graphql::Enum)]
 pub enum GapType {
-    MissingData,      // Expected data points are missing
-    DuplicateData,    // Same date appears multiple times
-    InvalidDate,      // Date is outside expected range
-    StaleData,        // Data is older than expected
+    MissingData,      // Expected data points are missing (normal)
+    DuplicateData,    // Same date appears multiple times (error)
+    InvalidDate,      // Date is outside expected range (error)
 }
 
 #[derive(async_graphql::Enum)]
-pub enum GapSeverity {
-    Low,    // Minor gaps that don't affect analysis
-    Medium, // Noticeable gaps that may impact analysis
-    High,   // Significant gaps that affect data quality
+pub enum GapStatus {
+    KnownMissing,     // We know this data is missing (like TCP selective ACK)
+    DataError,        // This is an actual data error (duplicate, invalid)
+    PendingRetry,     // We're going to try to get this data again
+    PermanentlyMissing, // Source confirmed this data doesn't exist
+    RecentlyFilled,   // This gap was recently filled by new data
 }
 
 #[derive(async_graphql::SimpleObject)]
@@ -257,14 +299,15 @@ query DataCoverage($seriesId: UUID!, $startDate: Date, $endDate: Date) {
   dataCoverage(seriesId: $seriesId, startDate: $startDate, endDate: $endDate) {
     totalExpected
     totalActual
-    completeness
-    gaps {
+    knownGaps {
       startDate
       endDate
       gapType
-      severity
+      gapStatus
+      expectedCount
+      actualCount
+      firstReported
     }
-    qualityScore
   }
 }
 ```
@@ -285,58 +328,117 @@ query FindFiles($seriesId: UUID, $dateRange: DateRange, $status: FileStatus) {
 }
 ```
 
-3. **Data Quality Summary**:
+3. **Gap Summary**:
 ```graphql
-query DataQualitySummary($seriesIds: [UUID!]) {
-  dataQualitySummary(seriesIds: $seriesIds) {
+query GapSummary($seriesIds: [UUID!]) {
+  gapSummary(seriesIds: $seriesIds) {
     totalSeries
-    averageQualityScore
+    totalKnownGaps
     seriesWithGaps
     seriesWithErrors
-    qualityDistribution {
-      excellent  # > 0.9
-      good       # 0.7 - 0.9
-      fair       # 0.5 - 0.7
-      poor       # < 0.5
+    gapStatusDistribution {
+      knownMissing
+      dataError
+      pendingRetry
+      permanentlyMissing
+      recentlyFilled
     }
   }
 }
 ```
 
-#### **2.5.3.3 Data Quality Metrics**
+#### **2.5.3.3 Data Availability Monitoring**
 
-**Quality Score Calculation**:
+**Critical Data Availability Tracking**:
 ```rust
-pub struct DataQualityMetrics {
-    pub completeness_score: f64,    // Actual vs expected data points
-    pub consistency_score: f64,     // Frequency consistency
-    pub freshness_score: f64,       // How recent is the data
-    pub accuracy_score: f64,        // Outlier detection
-    pub overall_score: f64,         // Weighted combination
+pub struct DataAvailabilityMetrics {
+    pub data_availability_status: DataAvailabilityStatus,
+    pub last_successful_update: Option<DateTime<Utc>>,
+    pub expected_update_frequency: Duration,
+    pub time_since_last_update: Duration,
+    pub is_stale: bool,                    // Data is older than expected
+    pub is_critical_missing: bool,         // Critical data is missing
+    pub requires_immediate_action: bool,   // Must be addressed ASAP
 }
 
-impl DataQualityMetrics {
-    pub fn calculate(series: &SeriesMetadata, data_points: &[DataPoint]) -> Self {
-        let completeness = self.calculate_completeness(series, data_points);
-        let consistency = self.calculate_consistency(series, data_points);
-        let freshness = self.calculate_freshness(series, data_points);
-        let accuracy = self.calculate_accuracy(data_points);
+#[derive(Debug, Serialize, Deserialize)]
+pub enum DataAvailabilityStatus {
+    Current,           // Data is up-to-date
+    Stale,            // Data is older than expected but not critical
+    Missing,          // Expected data is missing
+    Critical,         // Critical data is missing - immediate action required
+    Error,            // Data source error - immediate action required
+}
+
+impl DataAvailabilityMetrics {
+    pub fn calculate(
+        series: &SeriesMetadata, 
+        last_data_point: Option<DateTime<Utc>>,
+        expected_frequency: &Frequency,
+    ) -> Self {
+        let now = Utc::now();
+        let time_since_last = last_data_point
+            .map(|last| now.signed_duration_since(last))
+            .unwrap_or(Duration::days(365)); // If no data, consider it very stale
         
-        let overall = (completeness * 0.4 + consistency * 0.2 + 
-                      freshness * 0.2 + accuracy * 0.2);
+        let expected_interval = expected_frequency.expected_update_interval();
+        let is_stale = time_since_last > expected_interval * 2; // 2x expected interval
+        let is_critical = time_since_last > expected_interval * 7; // 1 week past expected
+        
+        let status = if is_critical {
+            DataAvailabilityStatus::Critical
+        } else if is_stale {
+            DataAvailabilityStatus::Stale
+        } else {
+            DataAvailabilityStatus::Current
+        };
         
         Self {
-            completeness_score: completeness,
-            consistency_score: consistency,
-            freshness_score: freshness,
-            accuracy_score: accuracy,
-            overall_score: overall,
+            data_availability_status: status,
+            last_successful_update: last_data_point,
+            expected_update_frequency: expected_interval,
+            time_since_last_update: time_since_last,
+            is_stale,
+            is_critical_missing: is_critical,
+            requires_immediate_action: is_critical,
         }
     }
 }
 ```
 
-#### **2.5.3.4 Data Gap Detection**
+**Alert System for Missing Data**:
+```rust
+pub struct DataAvailabilityAlert {
+    pub alert_id: Uuid,
+    pub series_id: Uuid,
+    pub alert_type: AlertType,
+    pub severity: AlertSeverity,
+    pub created_at: DateTime<Utc>,
+    pub acknowledged: bool,
+    pub resolved: bool,
+    pub resolution_notes: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum AlertType {
+    DataMissing,        // Expected data is missing
+    DataStale,         // Data is older than expected
+    SourceError,       // Data source is reporting errors
+    CriticalGap,       // Critical time period has no data
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum AlertSeverity {
+    Info,              // Data is slightly delayed
+    Warning,           // Data is stale but not critical
+    Critical,          // Critical data is missing - immediate action required
+    Emergency,         // System-level data availability issue
+}
+```
+
+#### **2.5.3.4 Data Gap Detection (TCP Selective ACK Model)**
+
+**Philosophy**: Data gaps are acceptable as long as we maintain precise tracking of what's missing. Similar to TCP selective ACK, we can receive future chunks with missing data in the middle, but we need to know exactly what's up with that.
 
 **Gap Detection Algorithm**:
 ```rust
@@ -351,22 +453,33 @@ pub fn detect_gaps(
     let mut sorted_points = data_points.to_vec();
     sorted_points.sort_by_key(|dp| dp.date);
     
-    // Check for gaps between consecutive points
+    // Build a complete expected timeline
+    let expected_timeline = build_expected_timeline(
+        series.start_date, 
+        series.end_date, 
+        expected_frequency
+    );
+    
+    // Find gaps between expected and actual data
     for window in sorted_points.windows(2) {
-        let gap_days = window[1].date.signed_duration_since(window[0].date).num_days();
-        let expected_gap = expected_frequency.days_between_points();
+        let gap_start = window[0].date + expected_frequency.days_between_points();
+        let gap_end = window[1].date - expected_frequency.days_between_points();
         
-        if gap_days > expected_gap * 2 {  // Allow some tolerance
+        // If there's a gap, create a precise gap record
+        if gap_start <= gap_end {
             gaps.push(DataGap {
-                start_date: window[0].date,
-                end_date: window[1].date,
+                start_date: gap_start,
+                end_date: gap_end,
                 gap_type: GapType::MissingData,
-                severity: self.assess_gap_severity(gap_days, expected_gap),
+                severity: GapSeverity::Tracked, // Not an error, just tracked
+                expected_count: count_expected_points(gap_start, gap_end, expected_frequency),
+                actual_count: 0,
+                gap_status: GapStatus::KnownMissing,
             });
         }
     }
     
-    // Check for duplicate dates
+    // Check for duplicate dates (these are actual errors)
     let mut seen_dates = HashSet::new();
     for point in data_points {
         if !seen_dates.insert(point.date) {
@@ -374,12 +487,84 @@ pub fn detect_gaps(
                 start_date: point.date,
                 end_date: point.date,
                 gap_type: GapType::DuplicateData,
-                severity: GapSeverity::High,
+                severity: GapSeverity::High, // This is an actual error
+                expected_count: 1,
+                actual_count: 2, // Duplicate found
+                gap_status: GapStatus::DataError,
             });
         }
     }
     
     gaps
+}
+
+/// Build expected timeline for gap detection
+fn build_expected_timeline(
+    start_date: Option<NaiveDate>,
+    end_date: Option<NaiveDate>, 
+    frequency: &Frequency
+) -> Vec<NaiveDate> {
+    // Implementation depends on frequency type
+    // This creates the "expected" data points timeline
+    todo!("Implement timeline generation based on frequency")
+}
+```
+
+**Enhanced Gap Tracking**:
+```rust
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DataGap {
+    pub start_date: NaiveDate,
+    pub end_date: NaiveDate,
+    pub gap_type: GapType,
+    pub severity: GapSeverity,
+    pub expected_count: u32,    // How many data points should be here
+    pub actual_count: u32,      // How many we actually have
+    pub gap_status: GapStatus,  // Current status of this gap
+    pub first_reported: DateTime<Utc>,  // When we first detected this gap
+    pub last_checked: DateTime<Utc>,    // When we last checked this gap
+    pub resolution_attempts: u32,       // How many times we've tried to fill this gap
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum GapStatus {
+    KnownMissing,     // We know this data is missing (like TCP selective ACK)
+    DataError,        // This is an actual data error (duplicate, invalid)
+    PendingRetry,     // We're going to try to get this data again
+    PermanentlyMissing, // Source confirmed this data doesn't exist
+    RecentlyFilled,   // This gap was recently filled by new data
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum GapSeverity {
+    Tracked,          // Normal gap tracking (not an error)
+    Low,             // Minor issues
+    Medium,          // Noticeable issues  
+    High,            // Significant data problems
+    Critical,        // Data integrity issues
+}
+```
+
+**Gap Resolution Tracking**:
+```rust
+/// Track attempts to resolve gaps (like TCP retry logic)
+pub struct GapResolutionTracker {
+    pub gap_id: Uuid,
+    pub series_id: Uuid,
+    pub gap: DataGap,
+    pub retry_schedule: Vec<DateTime<Utc>>,  // When to retry
+    pub retry_count: u32,
+    pub max_retries: u32,
+    pub last_retry_result: Option<RetryResult>,
+}
+
+#[derive(Debug)]
+pub enum RetryResult {
+    Success,           // Gap was filled
+    PartialSuccess,    // Some data was retrieved
+    Failed,           // No data available
+    SourceError,      // Source had an error
+    DataInvalid,      // Retrieved data was invalid
 }
 ```
 
