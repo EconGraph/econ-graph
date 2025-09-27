@@ -28,7 +28,8 @@ export interface GraphQLRequest {
 
 /**
  * Execute a GraphQL query against the backend.
- * @param request
+ * @param request - The GraphQL request object containing query, variables, and operation name.
+ * @returns Promise that resolves to the GraphQL response.
  */
 export async function executeGraphQL<T = any>(
   request: GraphQLRequest

@@ -268,7 +268,8 @@ export const mockErrors = {
 /**
  * Helper function to create mock data with variations
  * REQUIREMENT: Utility for generating test data with different scenarios.
- * @param overrides
+ * @param overrides - Partial data to override default mock values.
+ * @returns Mock series data with applied overrides.
  */
 export function createMockSeries(overrides: Partial<(typeof mockSeriesData)[0]> = {}) {
   return {
@@ -279,9 +280,11 @@ export function createMockSeries(overrides: Partial<(typeof mockSeriesData)[0]> 
 }
 
 /**
- *
- * @param count
- * @param baseValue
+ * Generate mock data points for testing.
+ * Creates an array of data points with random variations.
+ * @param count - Number of data points to generate.
+ * @param baseValue - Base value for the data points.
+ * @returns Array of mock data points.
  */
 export function createMockDataPoints(count: number, baseValue = 100) {
   return Array.from({ length: count }, (_, index) => ({
@@ -293,9 +296,11 @@ export function createMockDataPoints(count: number, baseValue = 100) {
 }
 
 /**
- *
- * @param query
- * @param count
+ * Generate mock search results for testing.
+ * Creates search results based on a query string.
+ * @param query - Search query string.
+ * @param count - Number of results to generate.
+ * @returns Array of mock search results.
  */
 export function createMockSearchResults(query: string, count = 5) {
   return Array.from({ length: count }, (_, index) => ({

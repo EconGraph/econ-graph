@@ -62,11 +62,12 @@ type TransformationType = 'none' | 'yoy' | 'qoq' | 'mom';
  * REQUIREMENT: Interactive charts with mouse-overs to see individual values and dates in tooltips
  * PURPOSE: Provide rich, interactive visualization of economic time series data
  * This implements the core charting functionality with modern UX patterns.
- * @param root0
- * @param root0.data
- * @param root0.title
- * @param root0.units
- * @param root0.frequency
+ * @param root0 - The component props object.
+ * @param root0.data - The time series data to display.
+ * @param root0.title - The chart title.
+ * @param root0.units - The units for the data values.
+ * @param root0.frequency - The frequency of the data (daily, monthly, etc.).
+ * @returns JSX element representing the interactive chart.
  */
 const InteractiveChart: React.FC<ChartProps> = ({ data, title, units, frequency }) => {
   const theme = useTheme();

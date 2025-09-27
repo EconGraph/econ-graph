@@ -75,6 +75,7 @@ const getDataSourceCategories = (name: string): string[] => {
  * REQUIREMENT: Support for Federal Reserve and BLS data sources with monitoring
  * PURPOSE: Display available data sources and their status for transparency
  * This provides users with information about data sources and system status.
+ * @returns JSX element representing the DataSources page.
  */
 const DataSources: React.FC = () => {
   // Fetch real data sources from backend

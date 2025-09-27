@@ -40,8 +40,10 @@ export interface UseCollaborationOptions {
 }
 
 /**
- *
- * @param options
+ * Hook for managing chart collaboration features.
+ * Provides real-time collaboration capabilities for charts and annotations.
+ * @param options - Configuration options for collaboration features.
+ * @returns Object containing collaboration state and methods.
  */
 export function useCollaboration(options: UseCollaborationOptions = {}) {
   const { seriesId, chartId, autoRefresh = false, refreshInterval = 30000 } = options;

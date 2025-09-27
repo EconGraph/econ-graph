@@ -29,9 +29,10 @@ interface NavigationItem {
  * REQUIREMENT: Modern navigation that's easier to use than FRED
  * PURPOSE: Responsive sidebar navigation with clear categorization
  * This provides intuitive navigation structure that improves on FRED's menu system.
- * @param root0
- * @param root0.open
- * @param root0.onClose
+ * @param root0 - The component props object.
+ * @param root0.open - Whether the sidebar is open.
+ * @param root0.onClose - Callback function to close the sidebar.
+ * @returns JSX element representing the sidebar navigation.
  */
 const Sidebar: React.FC<SidebarProps> = ({ open, onClose }) => {
   const navigate = useNavigate();

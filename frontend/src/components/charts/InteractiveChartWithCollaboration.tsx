@@ -215,7 +215,7 @@ interface InteractiveChartWithCollaborationProps {
  *
  * Defines the available mathematical transformations that can be applied to
  * the time series data for different analytical perspectives.
- * @type TransformationType
+ * @typedef {object} TransformationType
  * @property {'none'} none - No transformation, display raw data values.
  * @property {'growth_rate'} growth_rate - Calculate period-over-period growth rates.
  * @property {'log'} log - Apply natural logarithm for exponential growth visualization.
@@ -282,13 +282,13 @@ type TransformationType =
  * - Fallback rendering for unsupported data formats
  * - Network error recovery for collaboration features.
  * @param props - Component props as defined by InteractiveChartWithCollaborationProps.
- * @param props.data
- * @param props.seriesId
- * @param props.seriesTitle
- * @param props.units
- * @param props.frequency
- * @param props.loading
- * @param props.collaborationEnabled
+ * @param props.data - The time series data to display.
+ * @param props.seriesId - Unique identifier for the data series.
+ * @param props.seriesTitle - Display title for the data series.
+ * @param props.units - Units of measurement for the data.
+ * @param props.frequency - Data collection frequency (daily, monthly, etc.).
+ * @param props.loading - Loading state indicator.
+ * @param props.collaborationEnabled - Whether collaboration features are enabled.
  * @returns JSX.Element - Rendered chart component with full functionality.
  */
 const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborationProps> = ({

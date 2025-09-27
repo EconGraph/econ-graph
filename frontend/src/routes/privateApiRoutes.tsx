@@ -12,6 +12,7 @@ import { Routes, Route } from 'react-router-dom';
 /**
  * Private API Routes Component
  * This component handles private API endpoints that are only accessible from the MCP server.
+ * @returns JSX element representing the private API routes.
  */
 export function PrivateApiRoutes() {
   return (
@@ -25,6 +26,7 @@ export function PrivateApiRoutes() {
 
 /**
  * Private Chart Generation Endpoint Component.
+ * @returns JSX element representing the private chart endpoint.
  */
 function PrivateChartEndpoint() {
   React.useEffect(() => {
@@ -86,6 +88,7 @@ function PrivateChartEndpoint() {
 
 /**
  * Private Chart Health Check Endpoint Component.
+ * @returns JSX element representing the private chart health endpoint.
  */
 function PrivateChartHealthEndpoint() {
   React.useEffect(() => {

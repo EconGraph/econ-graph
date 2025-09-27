@@ -31,8 +31,9 @@ export interface RSIPoint {
 /**
  * Calculate Simple Moving Average
  * Used for trend analysis and smoothing economic data.
- * @param data
- * @param period
+ * @param data - Array of data points to analyze.
+ * @param period - Number of periods for the moving average.
+ * @returns Array of technical indicator values.
  */
 export function calculateSMA(data: DataPoint[], period: number): TechnicalIndicator[] {
   if (data.length < period) return [];
@@ -56,8 +57,9 @@ export function calculateSMA(data: DataPoint[], period: number): TechnicalIndica
 /**
  * Calculate Exponential Moving Average
  * More responsive to recent changes than SMA.
- * @param data
- * @param period
+ * @param data - Array of data points to analyze.
+ * @param period - Number of periods for the moving average.
+ * @returns Array of technical indicator values.
  */
 export function calculateEMA(data: DataPoint[], period: number): TechnicalIndicator[] {
   if (data.length === 0) return [];
@@ -86,9 +88,9 @@ export function calculateEMA(data: DataPoint[], period: number): TechnicalIndica
 /**
  * Calculate Bollinger Bands
  * Statistical measure of volatility and potential support/resistance levels.
- * @param data
- * @param period
- * @param standardDeviations
+ * @param data - Array of data points to analyze.
+ * @param period - Number of periods for the moving average.
+ * @param standardDeviations - Number of standard deviations for the bands.
  */
 export function calculateBollingerBands(
   data: DataPoint[],
@@ -124,8 +126,8 @@ export function calculateBollingerBands(
 /**
  * Calculate Relative Strength Index (RSI)
  * Momentum oscillator measuring the speed and magnitude of price changes.
- * @param data
- * @param period
+ * @param data - Array of data points to analyze.
+ * @param period - Number of periods for the RSI calculation.
  */
 export function calculateRSI(data: DataPoint[], period = 14): RSIPoint[] {
   if (data.length < period + 1) return [];
@@ -168,8 +170,8 @@ export function calculateRSI(data: DataPoint[], period = 14): RSIPoint[] {
 /**
  * Calculate Rate of Change (ROC)
  * Momentum indicator showing percentage change over a specific period.
- * @param data
- * @param period
+ * @param data - Array of data points to analyze.
+ * @param period - Number of periods for the RSI calculation.
  */
 export function calculateROC(data: DataPoint[], period: number): TechnicalIndicator[] {
   if (data.length < period + 1) return [];
@@ -194,8 +196,8 @@ export function calculateROC(data: DataPoint[], period: number): TechnicalIndica
 /**
  * Calculate Standard Deviation
  * Measure of volatility and dispersion.
- * @param data
- * @param period
+ * @param data - Array of data points to analyze.
+ * @param period - Number of periods for the RSI calculation.
  */
 export function calculateStandardDeviation(
   data: DataPoint[],
@@ -234,9 +236,11 @@ export interface CyclePoint {
 }
 
 /**
- *
- * @param data
- * @param lookback
+ * Detect economic cycles in time series data.
+ * Identifies peaks and troughs in economic indicators.
+ * @param data - Array of data points to analyze.
+ * @param lookback - Number of periods to look back for the calculation.
+ * @returns Array of cycle points with peaks and troughs.
  */
 export function detectEconomicCycles(data: DataPoint[], lookback = 6): CyclePoint[] {
   if (data.length < lookback * 2 + 1) return [];
@@ -289,8 +293,8 @@ export function detectEconomicCycles(data: DataPoint[], lookback = 6): CyclePoin
 
 /**
  * Calculate correlation between two economic series.
- * @param series1
- * @param series2
+ * @param series1 - First data series for comparison.
+ * @param series2 - Second data series for comparison.
  */
 export function calculateCorrelation(series1: DataPoint[], series2: DataPoint[]): number {
   if (series1.length !== series2.length || series1.length === 0) return 0;
@@ -386,8 +390,8 @@ export const MAJOR_ECONOMIC_EVENTS: EconomicEvent[] = [
 
 /**
  * Get relevant economic events for a date range.
- * @param startDate
- * @param endDate
+ * @param startDate - Start date for the period.
+ * @param endDate - End date for the period.
  */
 export function getEconomicEventsInRange(startDate: string, endDate: string): EconomicEvent[] {
   const start = new Date(startDate);

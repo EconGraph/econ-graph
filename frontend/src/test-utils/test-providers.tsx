@@ -16,9 +16,10 @@ interface TestProvidersProps {
 /**
  * Test wrapper component that provides all necessary contexts
  * REQUIREMENT: Isolated testing environment with all required providers.
- * @param root0
- * @param root0.children
- * @param root0.queryClient
+ * @param root0 - The component props object.
+ * @param root0.children - Child components to render.
+ * @param root0.queryClient - Optional QueryClient instance.
+ * @returns JSX element with all test providers.
  */
 export function TestProviders({ children, queryClient }: TestProvidersProps) {
   // Create a fresh QueryClient for each test to avoid cache interference
@@ -65,10 +66,11 @@ export function TestProviders({ children, queryClient }: TestProvidersProps) {
 /**
  * Custom render function that includes all providers
  * REQUIREMENT: Simplified testing setup with automatic provider wrapping.
- * @param ui
- * @param options
- * @param options.queryClient
- * @param options.initialEntries
+ * @param ui - The component to render.
+ * @param options - Render options.
+ * @param options.queryClient - Optional QueryClient instance.
+ * @param options.initialEntries - Optional initial router entries.
+ * @returns Render result with all providers.
  */
 export function renderWithProviders(
   ui: React.ReactElement,
@@ -96,7 +98,8 @@ export * from '@testing-library/react';
 /**
  * Create a mock QueryClient with custom configuration
  * REQUIREMENT: Configurable query client for different test scenarios.
- * @param overrides
+ * @param overrides - Partial QueryClient configuration to override defaults.
+ * @returns Configured QueryClient instance.
  */
 export function createMockQueryClient(overrides: Partial<QueryClient> = {}) {
   return new QueryClient({
