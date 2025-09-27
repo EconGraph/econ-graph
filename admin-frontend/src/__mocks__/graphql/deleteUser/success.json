@@ -1,0 +1,8 @@
+{
+  "data": {
+    "deleteUser": {
+      "success": true,
+      "deletedUserId": "4"
+    }
+  }
+}

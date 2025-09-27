@@ -428,6 +428,7 @@ test: add unit tests for world map
 - **Timing Issues**: Use proper `waitFor` with appropriate timeouts for dialog content
 - **Test Environment**: Material-UI components behave differently in test vs production environments
 - **CRITICAL: TextField Input Testing**: `user.type()` hangs with Material-UI TextField components - use `fireEvent.change()` instead
+- **CRITICAL: Duplicate Drawer Elements**: AdminLayout and similar components render duplicate navigation elements (mobile + desktop drawers) causing "Found multiple elements" errors
 
 ### **UI/UX Issues**
 - **Loading States**: Always show loading indicators
@@ -517,6 +518,58 @@ test: add unit tests for world map
      ```
    - **Impact**: This single change can fix multiple test failures and prevent test suite hanging issues
    - **Scope**: Applies to all Material-UI TextField, TextareaAutosize, and similar controlled input components
+
+8. **CRITICAL: Duplicate Drawer Elements in AdminLayout Components**
+   - **Issue**: AdminLayout and similar components render duplicate navigation elements (mobile + desktop drawers) causing "Found multiple elements" errors in tests
+   - **Root Cause**: Material-UI responsive drawer pattern renders both mobile (temporary) and desktop (permanent) drawers simultaneously, creating duplicate DOM elements
+   - **Symptoms**: Tests fail with "Found multiple elements with the text: [Navigation Item]" errors and timeout at exactly 30 seconds
+   - **Solution**: Use `within()` to target specific drawer containers instead of `getAllByText()[0]` hacks
+   - **Testing Pattern**: 
+     ```typescript
+     // ❌ BAD: Causes "Found multiple elements" errors
+     expect(screen.getByText("Dashboard")).toBeInTheDocument();
+     expect(screen.getByText("2 security event(s)")).toBeInTheDocument();
+     
+     // ✅ GOOD: Target specific drawer container
+     const desktopDrawer = screen.getByRole("navigation");
+     expect(within(desktopDrawer).getByText("Dashboard")).toBeInTheDocument();
+     expect(within(desktopDrawer).getByText("2 security event(s)")).toBeInTheDocument();
+     ```
+   - **Scope**: Applies to all components using Material-UI responsive drawer patterns (AdminLayout, navigation components)
+   - **Impact**: Prevents systematic test timeouts and "Found multiple elements" errors across entire test suites
+
+9. **CRITICAL: Systematic Duplicate Element Detection and Fixing**
+   - **Issue**: Duplicate element issues are often systematic across entire test suites, not isolated incidents
+   - **Root Cause**: Material-UI responsive patterns, portal rendering, and component composition create predictable duplicate element scenarios
+   - **Detection Strategy**: Search for patterns like `getAllByText()[0]`, `getAllByText()[1]`, or "Found multiple elements" errors
+   - **Systematic Fix Approach**:
+     ```bash
+     # 1. Search for fragile patterns
+     grep -r "getAllByText.*\[0\]" src/
+     grep -r "Found multiple elements" src/
+     
+     # 2. Identify common container patterns
+     grep -r "getByRole.*navigation" src/
+     grep -r "getByRole.*dialog" src/
+     ```
+   - **Fix Pattern**: Replace all instances with proper `within()` strategy
+     ```typescript
+     // ❌ BAD: Fragile hack that breaks easily
+     expect(screen.getAllByText("Dashboard")[0]).toBeInTheDocument();
+     expect(screen.getAllByText("User Management")[0]).toBeInTheDocument();
+     
+     // ✅ GOOD: Systematic, reliable approach
+     const desktopDrawer = screen.getByRole("navigation");
+     expect(within(desktopDrawer).getByText("Dashboard")).toBeInTheDocument();
+     expect(within(desktopDrawer).getByText("User Management")).toBeInTheDocument();
+     ```
+   - **Common Duplicate Element Scenarios**:
+     - **Responsive Drawers**: Mobile + desktop drawers render simultaneously
+     - **Portal Dialogs**: Multiple dialog instances in DOM
+     - **Conditional Rendering**: Components render in multiple contexts
+     - **Navigation Menus**: Mobile + desktop navigation elements
+   - **Prevention Strategy**: Always use semantic selectors (`getByRole`, `getByLabelText`) and `within()` for scoped queries
+   - **Impact**: Fixing systematic duplicate element issues can resolve 50%+ of test failures in complex Material-UI applications
 
 ### **Testing Strategy Insights**
 1. **Mock Strategy**: Comprehensive D3.js mocking required for Jest compatibility
@@ -684,6 +737,331 @@ const ChartComponent = ({ data }) => {
   return <Chart data={transformedData} />;
 };
 ```
+
+#### **3. Dependency Injection for Testability**
+```typescript
+// ❌ BAD: Hard-coded dependencies make testing difficult
+const UserProfile = () => {
+  const [user, setUser] = useState(null);
+  
+  useEffect(() => {
+    // Hard to mock this API call
+    fetch('/api/user').then(res => res.json()).then(setUser);
+  }, []);
+  
+  return <div>{user?.name}</div>;
+};
+
+// ✅ GOOD: Injected dependencies enable easy mocking
+interface UserProfileProps {
+  userService?: UserService;
+}
+
+const UserProfile = ({ userService = defaultUserService }: UserProfileProps) => {
+  const [user, setUser] = useState(null);
+  
+  useEffect(() => {
+    userService.getCurrentUser().then(setUser);
+  }, [userService]);
+  
+  return <div>{user?.name}</div>;
+};
+
+// Easy to test with mock service
+const mockUserService = {
+  getCurrentUser: jest.fn().mockResolvedValue({ name: 'Test User' })
+};
+
+test('should display user name', async () => {
+  render(<UserProfile userService={mockUserService} />);
+  await waitFor(() => {
+    expect(screen.getByText('Test User')).toBeInTheDocument();
+  });
+});
+```
+
+### **Robust Test Selector Strategies**
+
+#### **1. Accessibility-First Selectors**
+```typescript
+// ❌ BAD: Fragile selectors that break with UI changes
+test('should submit form', () => {
+  const submitButton = screen.getByText('Submit'); // Breaks if text changes
+  fireEvent.click(submitButton);
+});
+
+// ✅ GOOD: Semantic selectors that match user intent
+test('should submit form', () => {
+  const submitButton = screen.getByRole('button', { name: /submit/i });
+  fireEvent.click(submitButton);
+});
+
+// Even better: Use data-testid for complex interactions
+test('should submit form with validation', () => {
+  const submitButton = screen.getByTestId('submit-form-button');
+  fireEvent.click(submitButton);
+  expect(screen.getByRole('alert')).toBeInTheDocument();
+});
+```
+
+#### **2. Progressive Selector Fallbacks**
+```typescript
+// Robust selector strategy with fallbacks
+const findFormField = (fieldName: string) => {
+  // 1. Try semantic selector first (most accessible)
+  try {
+    return screen.getByLabelText(fieldName);
+  } catch {
+    // 2. Fall back to placeholder
+    try {
+      return screen.getByPlaceholderText(fieldName);
+    } catch {
+      // 3. Fall back to data-testid
+      return screen.getByTestId(`${fieldName.toLowerCase()}-input`);
+    }
+  }
+};
+
+test('should fill form field', () => {
+  const nameField = findFormField('Name');
+  fireEvent.change(nameField, { target: { value: 'John Doe' } });
+  expect(nameField).toHaveValue('John Doe');
+});
+```
+
+#### **3. Portal-Aware Testing**
+```typescript
+// Material-UI Dialogs and other portal components
+test('should handle dialog interactions', async () => {
+  const user = userEvent.setup();
+  
+  // Open dialog
+  await user.click(screen.getByRole('button', { name: 'Open Dialog' }));
+  
+  // Wait for portal content to render
+  await waitFor(() => {
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  }, { timeout: 5000 });
+  
+  // Interact with dialog content (may be in different DOM tree)
+  await waitFor(() => {
+    const input = screen.getByLabelText('Dialog Input');
+    expect(input).toBeInTheDocument();
+  }, { timeout: 2000 });
+  
+  await user.type(input, 'Test Value');
+  expect(input).toHaveValue('Test Value');
+});
+```
+
+### **Test Organization Patterns**
+
+#### **1. Test Structure by Complexity**
+```typescript
+describe('ComplexComponent', () => {
+  // Setup and teardown
+  beforeEach(() => {
+    jest.clearAllMocks();
+    setupTestEnvironment();
+  });
+  
+  afterEach(() => {
+    cleanupTestEnvironment();
+  });
+  
+  // Group tests by functionality
+  describe('Basic Rendering', () => {
+    it('should render without crashing', () => {
+      render(<ComplexComponent />);
+      expect(screen.getByRole('main')).toBeInTheDocument();
+    });
+    
+    it('should display loading state', () => {
+      render(<ComplexComponent loading={true} />);
+      expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    });
+  });
+  
+  describe('User Interactions', () => {
+    it('should handle button clicks', async () => {
+      const user = userEvent.setup();
+      render(<ComplexComponent />);
+      
+      await user.click(screen.getByRole('button', { name: /submit/i }));
+      expect(mockOnSubmit).toHaveBeenCalled();
+    });
+  });
+  
+  describe('Error Handling', () => {
+    it('should display error messages', () => {
+      render(<ComplexComponent error="Test error" />);
+      expect(screen.getByRole('alert')).toHaveTextContent('Test error');
+    });
+  });
+});
+```
+
+#### **2. Mock Strategy Patterns**
+```typescript
+// Centralized mock setup
+const createMockProps = (overrides = {}) => ({
+  data: mockData,
+  onAction: jest.fn(),
+  loading: false,
+  error: null,
+  ...overrides
+});
+
+// Reusable mock implementations
+const mockApiService = {
+  fetchData: jest.fn(),
+  updateData: jest.fn(),
+  deleteData: jest.fn(),
+};
+
+// Reset mocks between tests
+beforeEach(() => {
+  Object.values(mockApiService).forEach(mock => mock.mockClear());
+});
+```
+
+### **Component Design for Testability**
+
+#### **1. Prop Interface Design**
+```typescript
+// ✅ GOOD: Clear, testable prop interface
+interface ChartProps {
+  data: ChartData[];
+  onDataPointClick?: (point: DataPoint) => void;
+  loading?: boolean;
+  error?: string | null;
+  config?: Partial<ChartConfig>;
+  'data-testid'?: string; // Always include for testing
+}
+
+// ❌ BAD: Unclear or hard-to-test props
+interface BadChartProps {
+  data: any; // Too generic
+  onClick: Function; // Too generic
+  style?: React.CSSProperties; // Hard to test styling
+}
+```
+
+#### **2. Event Handler Patterns**
+```typescript
+// ✅ GOOD: Testable event handlers
+const ChartComponent = ({ data, onDataPointClick }: ChartProps) => {
+  const handlePointClick = useCallback((event: MouseEvent, point: DataPoint) => {
+    if (onDataPointClick) {
+      onDataPointClick(point);
+    }
+  }, [onDataPointClick]);
+  
+  return (
+    <Chart 
+      data={data} 
+      onPointClick={handlePointClick}
+      data-testid="interactive-chart"
+    />
+  );
+};
+
+// Easy to test
+test('should call onDataPointClick when point is clicked', async () => {
+  const mockOnClick = jest.fn();
+  render(<ChartComponent data={mockData} onDataPointClick={mockOnClick} />);
+  
+  await user.click(screen.getByTestId('interactive-chart'));
+  expect(mockOnClick).toHaveBeenCalledWith(expect.objectContaining({
+    id: expect.any(String),
+    value: expect.any(Number)
+  }));
+});
+```
+
+### **Key Testing Principles from Real-World Debugging**
+
+#### **1. ARIA Labels Are Essential for Both Accessibility and Testing**
+- **Principle**: Every interactive element should have proper ARIA labels
+- **Why**: ARIA labels provide the most reliable way to find elements in tests
+- **Implementation**: Add `inputProps={{ 'aria-label': 'Descriptive label' }}` to Material-UI Select components
+- **Testing**: Use `screen.getByLabelText('Descriptive label')` instead of fragile selectors
+- **Benefit**: Tests become more robust and components become more accessible
+
+#### **2. Debug Systematically, Don't Give Up**
+- **Approach**: When tests fail, add debugging code to understand what's actually happening
+- **Method**: Use `console.log()` to inspect DOM structure, element properties, and timing
+- **Pattern**: Start with the most likely cause, then systematically eliminate possibilities
+- **Example**: Log all elements, check aria attributes, verify portal rendering, test different selectors
+
+#### **3. Test Real Behavior, Not Internal Implementation**
+- **Anti-Pattern**: Testing internal state values like `toHaveValue('all')`
+- **Better Approach**: Test the actual user-visible behavior (filtering results, UI changes)
+- **Example**: Instead of checking if a select has value 'pinned', check if pinned items are visible
+- **Benefit**: Tests remain stable when internal implementation changes
+
+#### **4. Material-UI Components Need Special Test Setup**
+- **Portal Issues**: Use `MenuProps={{ disablePortal: true }}` for Select components
+- **Provider Setup**: Always include all required Material-UI providers in test environment
+- **Timing**: Use appropriate `waitFor` timeouts for portal content rendering
+- **Cleanup**: Clean up portal containers between tests to prevent DOM pollution
+
+#### **5. CRITICAL: user.type() vs fireEvent.change() for Material-UI TextField Components**
+- **Discovery**: `user.type()` hangs indefinitely with Material-UI TextField components in Jest/jsdom
+- **Root Cause**: Material-UI's controlled components don't properly handle `user.type()` simulation
+- **Solution**: Always use `fireEvent.change()` for Material-UI TextField components
+- **Pattern**: `fireEvent.change(field, { target: { value: 'text' } })` instead of `await user.type(field, 'text')`
+- **Impact**: This can fix 50%+ of Material-UI test failures and prevent test suite hanging
+
+#### **6. CRITICAL: Systematic Duplicate Element Debugging Methodology**
+- **Problem Recognition**: When you see "Found multiple elements" errors, it's usually systematic, not isolated
+- **Detection Strategy**: Search for patterns like `getAllByText()[0]` or `getAllByText()[1]` in test files
+- **Root Cause Analysis**: Material-UI responsive patterns create predictable duplicate scenarios
+- **Systematic Fix Process**:
+  1. **Identify Pattern**: Search for `getAllByText.*\[0\]` across all test files
+  2. **Find Container**: Look for semantic containers like `getByRole("navigation")` or `getByRole("dialog")`
+  3. **Apply within()**: Replace all instances with `within(container).getByText(...)`
+  4. **Verify Fix**: Run tests to ensure no more "Found multiple elements" errors
+- **Prevention**: Always use semantic selectors and `within()` for scoped queries from the start
+- **Impact**: This systematic approach can fix 50%+ of test failures in complex Material-UI applications
+
+#### **7. CRITICAL: Debugging Commands and Patterns for Duplicate Elements**
+- **Detection Commands**:
+  ```bash
+  # Find all fragile getAllByText patterns
+  grep -r "getAllByText.*\[0\]" src/
+  grep -r "getAllByText.*\[1\]" src/
+  
+  # Find "Found multiple elements" error patterns
+  grep -r "Found multiple elements" src/
+  
+  # Find common container patterns
+  grep -r "getByRole.*navigation" src/
+  grep -r "getByRole.*dialog" src/
+  ```
+- **Debugging Strategy**:
+  ```typescript
+  // Add debugging to understand DOM structure
+  console.log('All elements with text "Dashboard":', screen.getAllByText("Dashboard"));
+  console.log('Navigation role elements:', screen.getAllByRole("navigation"));
+  console.log('Desktop drawer:', screen.getByRole("navigation"));
+  ```
+- **Common Fix Patterns**:
+  ```typescript
+  // ❌ BAD: Fragile array indexing
+  expect(screen.getAllByText("Dashboard")[0]).toBeInTheDocument();
+  
+  // ✅ GOOD: Semantic container targeting
+  const desktopDrawer = screen.getByRole("navigation");
+  expect(within(desktopDrawer).getByText("Dashboard")).toBeInTheDocument();
+  ```
+- **Verification Commands**:
+  ```bash
+  # Run specific failing tests to verify fixes
+  npm test -- --testNamePattern="displays user information correctly"
+  npm test -- --testNamePattern="formats session time correctly"
+  ```
+- **Impact**: This systematic debugging approach can identify and fix 8+ duplicate element issues in a single pass
 
 ### **Testing Anti-Patterns to Avoid**
 

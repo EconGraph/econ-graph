@@ -1,0 +1,61 @@
+{
+  "data": {
+    "crawlerLogs": [
+      {
+        "id": "1",
+        "timestamp": "2024-01-15T10:30:00Z",
+        "level": "info",
+        "source": "FRED",
+        "message": "Successfully crawled GDP data",
+        "details": "Series GDP fetched and processed successfully",
+        "duration": 2.3,
+        "status": "success",
+        "created_at": "2024-01-15T10:30:00Z"
+      },
+      {
+        "id": "2",
+        "timestamp": "2024-01-15T10:29:30Z",
+        "level": "error",
+        "source": "BLS",
+        "message": "Connection timeout while fetching unemployment data",
+        "details": "Timeout after 30 seconds, retry count: 2",
+        "duration": 30.0,
+        "status": "failed",
+        "created_at": "2024-01-15T10:29:30Z"
+      },
+      {
+        "id": "3",
+        "timestamp": "2024-01-15T10:29:00Z",
+        "level": "warning",
+        "source": "Census",
+        "message": "Rate limit approaching for Census API",
+        "details": "Current rate: 8 requests/minute, limit: 10",
+        "duration": 0.15,
+        "status": "success",
+        "created_at": "2024-01-15T10:29:00Z"
+      },
+      {
+        "id": "4",
+        "timestamp": "2024-01-15T10:28:30Z",
+        "level": "info",
+        "source": "WorldBank",
+        "message": "Starting scheduled crawl for World Bank data",
+        "details": "Initializing crawl for economic indicators",
+        "duration": null,
+        "status": "pending",
+        "created_at": "2024-01-15T10:28:30Z"
+      },
+      {
+        "id": "5",
+        "timestamp": "2024-01-15T10:28:00Z",
+        "level": "debug",
+        "source": "FRED",
+        "message": "Parsing JSON response for series GDP",
+        "details": "Successfully parsed 100 data points",
+        "duration": 0.1,
+        "status": "success",
+        "created_at": "2024-01-15T10:28:00Z"
+      }
+    ]
+  }
+}

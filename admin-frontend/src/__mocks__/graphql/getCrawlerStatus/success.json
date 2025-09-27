@@ -1,0 +1,24 @@
+{
+  "data": {
+    "crawlerStatus": {
+      "status": "running",
+      "isActive": true,
+      "currentTask": "Processing FRED data",
+      "progress": 75,
+      "lastUpdate": "2025-01-01T10:00:00Z",
+      "uptime": "2h 15m",
+      "totalProcessed": 1250,
+      "errorsCount": 3,
+      "warningsCount": 8,
+      "activeWorkers": 3,
+      "maxWorkers": 5,
+      "queueSize": 45,
+      "queueLimit": 1000,
+      "rateLimit": 10,
+      "maintenanceMode": false,
+      "lastCrawlStart": "2025-01-01T09:45:00Z",
+      "lastCrawlEnd": null,
+      "nextScheduledCrawl": "2025-01-01T11:00:00Z"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Invalid configuration: max_workers cannot exceed 10",
+      "extensions": {
+        "code": "VALIDATION_ERROR",
+        "field": "max_workers",
+        "value": 15
+      }
+    }
+  ]
+}
