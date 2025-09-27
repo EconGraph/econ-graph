@@ -1,17 +1,18 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import { vi } from 'vitest';
 import { FinancialDashboard } from '../FinancialDashboard';
 import { FinancialStatement, Company, FinancialRatio } from '../../../types/financial';
 
 // Mock the useQuery hook
-const mockUseQuery = jest.fn();
-jest.mock('react-query', () => ({
+const mockUseQuery = vi.fn();
+vi.mock('react-query', () => ({
   useQuery: (...args: any[]) => mockUseQuery(...args),
 }));
 
 // Mock the financial components
-jest.mock('../BenchmarkComparison', () => ({
+vi.mock('../BenchmarkComparison', () => ({
   BenchmarkComparison: ({ ratioName, companyValue, benchmarkData }: any) => (
     <div data-testid={`benchmark-${ratioName}`}>
       {ratioName}: {companyValue} (Benchmark: {benchmarkData?.percentile || 'N/A'})
@@ -19,7 +20,7 @@ jest.mock('../BenchmarkComparison', () => ({
   ),
 }));
 
-jest.mock('../TrendAnalysisChart', () => ({
+vi.mock('../TrendAnalysisChart', () => ({
   TrendAnalysisChart: ({ ratios }: any) => (
     <div data-testid="trend-analysis-chart">
       Trend Chart for {ratios?.length || 0} ratios
@@ -27,7 +28,7 @@ jest.mock('../TrendAnalysisChart', () => ({
   ),
 }));
 
-jest.mock('../PeerComparisonChart', () => ({
+vi.mock('../PeerComparisonChart', () => ({
   PeerComparisonChart: ({ ratios }: any) => (
     <div data-testid="peer-comparison-chart">
       Peer Comparison for {ratios?.length || 0} ratios
@@ -35,7 +36,7 @@ jest.mock('../PeerComparisonChart', () => ({
   ),
 }));
 
-jest.mock('../FinancialAlerts', () => ({
+vi.mock('../FinancialAlerts', () => ({
   FinancialAlerts: ({ companyId }: any) => (
     <div data-testid="financial-alerts">
       Alerts for company {companyId}
@@ -43,7 +44,7 @@ jest.mock('../FinancialAlerts', () => ({
   ),
 }));
 
-jest.mock('../FinancialExport', () => ({
+vi.mock('../FinancialExport', () => ({
   FinancialExport: ({ companyId }: any) => (
     <div data-testid="financial-export">
       Export for company {companyId}
@@ -51,7 +52,7 @@ jest.mock('../FinancialExport', () => ({
   ),
 }));
 
-jest.mock('../FinancialMobile', () => ({
+vi.mock('../FinancialMobile', () => ({
   FinancialMobile: ({ companyId }: any) => (
     <div data-testid="financial-mobile">
       Mobile view for company {companyId}
@@ -156,13 +157,13 @@ const mockQueryData = {
 
 describe('FinancialDashboard', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     mockUseQuery.mockReturnValue({
       data: mockQueryData,
       isLoading: false,
       isError: false,
       error: null,
-      refetch: jest.fn(),
+      refetch: vi.fn(),
     });
   });
 
@@ -188,7 +189,7 @@ describe('FinancialDashboard', () => {
       isLoading: true,
       isError: false,
       error: null,
-      refetch: jest.fn(),
+      refetch: vi.fn(),
     });
 
     render(<FinancialDashboard companyId="mock-company-id" />);
@@ -202,7 +203,7 @@ describe('FinancialDashboard', () => {
       isLoading: false,
       isError: true,
       error: new Error('Failed to load data'),
-      refetch: jest.fn(),
+      refetch: vi.fn(),
     });
 
     render(<FinancialDashboard companyId="mock-company-id" />);
@@ -260,7 +261,7 @@ describe('FinancialDashboard', () => {
   });
 
   it('handles refresh button click', async () => {
-    const mockRefetch = jest.fn().mockResolvedValue({});
+    const mockRefetch = vi.fn().mockResolvedValue({});
     mockUseQuery.mockReturnValue({
       data: mockQueryData,
       isLoading: false,
@@ -303,7 +304,7 @@ describe('FinancialDashboard', () => {
       isLoading: false,
       isError: false,
       error: null,
-      refetch: jest.fn(),
+      refetch: vi.fn(),
     });
 
     render(<FinancialDashboard companyId="mock-company-id" />);
@@ -320,7 +321,7 @@ describe('FinancialDashboard', () => {
       isLoading: false,
       isError: false,
       error: null,
-      refetch: jest.fn(),
+      refetch: vi.fn(),
     });
 
     render(<FinancialDashboard companyId="mock-company-id" />);

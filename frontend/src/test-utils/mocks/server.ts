@@ -181,6 +181,9 @@ function initializeMSW() {
   }
 }
 
+// Initialize immediately for Vitest compatibility
+initializeMSW();
+
 // Export initialization function for setupTests.ts
 export function getMSWServer() {
   initializeMSW();
