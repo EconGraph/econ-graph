@@ -366,3 +366,66 @@ BACKEND_INTEGRATION_DB_PORT=5447
 * ✅ **You understand the data flow** from request to response
 * ✅ **Your fix addresses the root cause** - Not just the symptoms
 * ✅ **You can predict what will happen** when you make the change
+
+## Crate Documentation Standards
+
+**CRITICAL: All internal workspace crates must have appropriate README.md files that provide essential information without unnecessary fluff.**
+
+### README.md Structure for Internal Crates
+
+#### **Required Sections**
+1. **Title and Brief Description**: One-line description of what the crate does
+2. **Substantial Introduction**: 2-3 sentence paragraph explaining the crate's role, dependencies, and scope
+3. **Features**: Bullet points of key capabilities (concise, not marketing-style)
+4. **Testing**: Detailed testing strategy with purpose, examples, and benefits
+5. **License**: Required license information
+
+#### **What to Include**
+* **High-level overview** of what the crate provides
+* **Testing approach** with specific details about test types and infrastructure
+* **Essential information** developers need to understand the crate's purpose
+* **Practical details** like how to run tests and what the infrastructure provides
+
+#### **What to Exclude**
+* **Code examples** that belong in source code documentation
+* **Directory structures** that developers can explore directly
+* **Verbose marketing-style descriptions** of features
+* **Usage examples** for internal workspace crates
+* **Detailed configuration** that belongs in source code
+* **Dependency lists** unless essential for understanding requirements
+* **Contributing sections** for internal crates
+* **Support sections** for internal crates
+
+### Documentation Quality Standards
+
+#### **Appropriate Level of Detail**
+* **Internal crates**: Focus on what developers need to know to work with the crate
+* **Testing section**: This is the "meat" - provide detailed explanations of testing strategy
+* **Features**: Concise bullet points, not verbose descriptions
+* **Introduction**: Substantial paragraph explaining role and scope
+
+#### **Writing Style**
+* **Human-readable**: Use clear, concise language
+* **Purpose-driven**: Explain why things exist, not just what they do
+* **Practical**: Focus on information developers actually need
+* **Accurate**: Don't reference non-existent directories or features
+
+#### **Testing Documentation Requirements**
+* **Test Types**: Explain unit tests, integration tests, and schema validation
+* **Purpose and Benefits**: Why each test type exists and what it accomplishes
+* **Examples**: Specific examples of what's being tested (YoY calculations, CRUD operations)
+* **Infrastructure**: What the test infrastructure provides (TestContainer, cleanup, etc.)
+* **Execution**: How to run different types of tests
+
+### Common Documentation Mistakes to Avoid
+* ❌ **Generic testing descriptions** - Be specific about what the tests actually do
+* ❌ **Code examples in README** - Implementation details belong in source code
+* ❌ **Directory structure listings** - Developers can explore the code directly
+* ❌ **Marketing-style feature lists** - Focus on practical capabilities
+* ❌ **Usage sections for internal crates** - Not needed for workspace dependencies
+* ❌ **References to non-existent directories** - Keep documentation accurate
+* ❌ **Verbose configuration details** - Keep it high-level
+* ✅ **Specific testing details** - Explain what tests do and why they matter
+* ✅ **Practical information** - What developers need to work with the crate
+* ✅ **Accurate descriptions** - Don't reference things that don't exist
+* ✅ **Focused content** - Essential information without fluff
