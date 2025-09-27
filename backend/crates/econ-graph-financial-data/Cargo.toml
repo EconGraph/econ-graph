@@ -42,6 +42,9 @@ chrono = { workspace = true }
 # Decimal for financial data
 rust_decimal = { workspace = true }
 
+# Validation and Error Handling
+regex = "1.0"
+
 # Configuration
 config = { workspace = true }
 clap = { workspace = true }
