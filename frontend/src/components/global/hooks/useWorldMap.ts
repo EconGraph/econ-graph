@@ -40,7 +40,7 @@ const PROJECTIONS: Record<string, MapProjection> = {
 
 export const useWorldMap = (
   svgRef: React.RefObject<SVGSVGElement>,
-  projectionType: string = 'naturalEarth'
+  projectionType = 'naturalEarth'
 ) => {
   const [projection, setProjection] = useState(() => {
     const proj = PROJECTIONS[projectionType] || PROJECTIONS.naturalEarth;

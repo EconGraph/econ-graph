@@ -6,6 +6,7 @@ import react from 'eslint-plugin-react';
 import reactHooks from 'eslint-plugin-react-hooks';
 import jsxA11y from 'eslint-plugin-jsx-a11y';
 import testingLibrary from 'eslint-plugin-testing-library';
+import jsdoc from 'eslint-plugin-jsdoc';
 
 export default [
   js.configs.recommended,
@@ -84,12 +85,14 @@ export default [
       'react-hooks': reactHooks,
       'jsx-a11y': jsxA11y,
       'testing-library': testingLibrary,
+      'jsdoc': jsdoc,
     },
     rules: {
       ...typescript.configs.recommended.rules,
       ...react.configs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
       ...jsxA11y.configs.recommended.rules,
+      ...jsdoc.configs.recommended.rules,
 
       // Custom rules
       // Disable base rule in favor of @typescript-eslint/no-unused-vars
@@ -116,10 +119,79 @@ export default [
       'no-constant-binary-expression': 'warn', // Warn instead of error
       '@typescript-eslint/no-unused-expressions': 'warn', // Warn instead of error
       'react/display-name': 'warn', // Warn instead of error
+
+      // JSDoc rules for documentation quality
+      'jsdoc/require-jsdoc': ['warn', {
+        require: {
+          FunctionDeclaration: true,
+          MethodDefinition: true,
+          ClassDeclaration: true,
+          ArrowFunctionExpression: false,
+          FunctionExpression: false,
+        },
+        contexts: [
+          'ExportNamedDeclaration[declaration.type="FunctionDeclaration"]',
+          'ExportDefaultDeclaration[declaration.type="FunctionDeclaration"]',
+          'ExportNamedDeclaration[declaration.type="ClassDeclaration"]',
+          'ExportDefaultDeclaration[declaration.type="ClassDeclaration"]',
+        ],
+      }],
+      'jsdoc/require-description': 'warn',
+      'jsdoc/require-description-complete-sentence': 'warn',
+      'jsdoc/require-param': 'warn',
+      'jsdoc/require-param-description': 'warn',
+      'jsdoc/require-param-name': 'warn',
+      'jsdoc/require-param-type': 'off', // TypeScript provides type information
+      'jsdoc/require-returns': 'warn',
+      'jsdoc/require-returns-description': 'warn',
+      'jsdoc/require-returns-type': 'off', // TypeScript provides type information
+      'jsdoc/require-throws': 'off', // Optional for now
+      'jsdoc/require-yields': 'off', // Optional for now
+      'jsdoc/require-yields-check': 'off', // Optional for now
+      'jsdoc/check-param-names': 'warn',
+      'jsdoc/check-tag-names': 'warn',
+      'jsdoc/check-types': 'warn',
+      'jsdoc/empty-tags': 'warn',
+      'jsdoc/no-undefined-types': 'warn',
+      'jsdoc/valid-types': 'warn',
     },
     settings: {
       react: {
         version: 'detect',
+      },
+      jsdoc: {
+        mode: 'typescript',
+        tagNamePreference: {
+          param: 'param',
+          returns: 'returns',
+          return: 'returns',
+          augments: 'extends',
+          constructor: 'class',
+          const: 'constant',
+          defaultvalue: 'default',
+          desc: 'description',
+          host: 'external',
+          fileoverview: 'file',
+          overview: 'file',
+          emits: 'emits',
+          func: 'function',
+          method: 'function',
+          var: 'member',
+          arg: 'param',
+          argument: 'param',
+          return: 'returns',
+          virtual: 'abstract',
+          fires: 'emits',
+          emits: 'emits',
+          func: 'function',
+          method: 'function',
+          var: 'member',
+          arg: 'param',
+          argument: 'param',
+          return: 'returns',
+          virtual: 'abstract',
+          fires: 'emits',
+        },
       },
     },
   },
@@ -127,6 +199,7 @@ export default [
     files: ['**/*.test.{ts,tsx,js,jsx}', '**/__tests__/**/*'],
     plugins: {
       'testing-library': testingLibrary,
+      'jsdoc': jsdoc,
     },
     rules: {
       ...testingLibrary.configs.react.rules,
@@ -134,6 +207,12 @@ export default [
       'no-console': 'off',
       'testing-library/no-node-access': 'off', // Too strict for development
       'testing-library/no-manual-cleanup': 'off', // Vitest handles cleanup automatically
+      
+      // Relaxed JSDoc requirements for test files
+      'jsdoc/require-jsdoc': 'off', // Tests don't need JSDoc
+      'jsdoc/require-description': 'off',
+      'jsdoc/require-param': 'off',
+      'jsdoc/require-returns': 'off',
     },
   },
   {

@@ -45,6 +45,13 @@ repos:
         files: '^frontend/.*\.(ts|tsx)$'
         pass_filenames: false
 
+      - id: frontend-jsdoc
+        name: Frontend JSDoc Validation
+        entry: bash -c 'cd frontend && npx eslint "src/**/*.{ts,tsx}" --rule "jsdoc/require-jsdoc:warn" --rule "jsdoc/require-description:warn" --rule "jsdoc/require-param:warn" --rule "jsdoc/require-returns:warn" --max-warnings 10'
+        language: system
+        files: '^frontend/src/.*\.(ts|tsx)$'
+        pass_filenames: false
+
   # General file quality checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0

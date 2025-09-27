@@ -182,7 +182,7 @@ describe('GraphQL Utilities', () => {
     // This ensures API compatibility and prevents runtime errors
 
     // Test that all queries are properly formatted
-    Object.entries(QUERIES).forEach(([queryName, query]) => {
+    Object.entries(QUERIES).forEach(([_queryName, query]) => { // eslint-disable-line @typescript-eslint/no-unused-vars
       expect(query).toBeTruthy();
       expect(typeof query).toBe('string');
       expect(query.trim()).toMatch(/^(query|mutation)/);

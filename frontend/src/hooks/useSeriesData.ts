@@ -63,7 +63,7 @@ export interface CrawlerStatus {
 }
 
 // Hook for fetching series detail
-export const useSeriesDetail = (seriesId: string | null, enabled: boolean = true) => {
+export const useSeriesDetail = (seriesId: string | null, enabled = true) => {
   return useQuery(
     ['seriesDetail', seriesId],
     async () => {
@@ -88,8 +88,8 @@ export const useSeriesData = (
   startDate?: string,
   endDate?: string,
   transformation?: string,
-  originalOnly: boolean = false,
-  enabled: boolean = true
+  originalOnly = false,
+  enabled = true
 ) => {
   return useQuery(
     ['seriesData', seriesId, startDate, endDate, transformation, originalOnly],
@@ -117,7 +117,7 @@ export const useSeriesSearch = (
     frequency?: string;
     limit?: number;
   },
-  enabled: boolean = true
+  enabled = true
 ) => {
   return useQuery(
     ['seriesSearch', query, filters],
@@ -138,7 +138,7 @@ export const useSeriesSearch = (
 };
 
 // Hook for search suggestions
-export const useSearchSuggestions = (partialQuery: string, enabled: boolean = true) => {
+export const useSearchSuggestions = (partialQuery: string, enabled = true) => {
   return useQuery(
     ['searchSuggestions', partialQuery],
     async () => {
@@ -158,7 +158,7 @@ export const useSearchSuggestions = (partialQuery: string, enabled: boolean = tr
 };
 
 // Hook for fetching data sources
-export const useDataSources = (enabled: boolean = true) => {
+export const useDataSources = (enabled = true) => {
   return useQuery(
     ['dataSources'],
     async () => {
@@ -175,7 +175,7 @@ export const useDataSources = (enabled: boolean = true) => {
 };
 
 // Hook for crawler status
-export const useCrawlerStatus = (enabled: boolean = true) => {
+export const useCrawlerStatus = (enabled = true) => {
   return useQuery(
     ['crawlerStatus'],
     async () => {

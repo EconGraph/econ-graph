@@ -500,9 +500,13 @@ describe('XBRL Financial Integration Tests', () => {
                     ratios={mockFinancialRatios}
                     statements={mockFinancialStatements}
                     timeRange="3Y"
-                    onTimeRangeChange={() => {}}
+                    onTimeRangeChange={() => {
+                      // Mock time range change handler
+                    }}
                     selectedRatios={['returnOnEquity']}
-                    onRatioSelectionChange={() => {}}
+                    onRatioSelectionChange={() => {
+                      // Mock ratio selection change handler
+                    }}
                   />
           </TestWrapper>
         );
@@ -521,9 +525,13 @@ describe('XBRL Financial Integration Tests', () => {
                     ratios={mockFinancialRatios}
                     statements={mockFinancialStatements}
                     timeRange="3Y"
-                    onTimeRangeChange={() => {}}
+                    onTimeRangeChange={() => {
+                      // Mock time range change handler
+                    }}
                     selectedRatios={['returnOnEquity']}
-                    onRatioSelectionChange={() => {}}
+                    onRatioSelectionChange={() => {
+                      // Mock ratio selection change handler
+                    }}
                   />
           </TestWrapper>
         );

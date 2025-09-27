@@ -449,7 +449,9 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
               ratios={ratios}
               statements={statements}
               timeRange='3Y'
-              onTimeRangeChange={() => {}}
+              onTimeRangeChange={() => {
+                // Mock time range change handler
+              }}
             />
           )}
 
@@ -590,7 +592,9 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
                     ratios={ratios}
                     statements={statements}
                     timeRange='3Y'
-                    onTimeRangeChange={() => {}}
+                    onTimeRangeChange={() => {
+                      // Mock time range change handler
+                    }}
                   />
                 </TabsContent>
 

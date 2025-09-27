@@ -318,7 +318,13 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
           </Box>
 
           {error && (
-            <Alert severity='error' sx={{ mb: 2 }} onClose={() => {}}>
+            <Alert
+              severity='error'
+              sx={{ mb: 2 }}
+              onClose={() => {
+                // Mock close handler
+              }}
+            >
               {error}
             </Alert>
           )}

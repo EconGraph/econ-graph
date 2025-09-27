@@ -1350,6 +1350,10 @@ jobs:
       working-directory: frontend
       run: npm run lint
 
+    - name: Run frontend JSDoc validation
+      working-directory: frontend
+      run: npm run lint -- --ext .ts,.tsx --rule "jsdoc/require-jsdoc:warn"
+
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
