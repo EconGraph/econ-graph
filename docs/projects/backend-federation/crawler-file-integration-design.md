@@ -37,68 +37,90 @@ Enable crawlers to create Parquet files directly in the financial data service's
 
 ### **Detailed Implementation Plan**
 
-#### **2.5.2.1 Crawler Bulk Upload API**
+#### **2.5.2.1 Crawler Bulk Upload APIs**
 
-**New GraphQL Mutation**: `submitDataBatch`
-```graphql
-mutation SubmitDataBatch($input: DataBatchInput!) {
-  submitDataBatch(input: $input) {
-    batchId
-    status
-    seriesProcessed
-    totalDataPoints
-    errors
-    warnings
-    processingTimeMs
-  }
+**Option 1: Arrow Flight RPC (Recommended)**
+Since crawler and backend move in sync, we can use Arrow Flight for efficient data transfer:
+
+```rust
+// Arrow Flight service for bulk data ingestion
+pub struct CrawlerDataService {
+    // Handle bulk Arrow data uploads
+    async fn upload_data_batch(
+        &self,
+        request: UploadBatchRequest,
+    ) -> Result<UploadBatchResponse>;
+    
+    // Handle individual series with Arrow RecordBatch
+    async fn upload_series_data(
+        &self,
+        metadata: SeriesMetadata,
+        data: RecordBatch,
+    ) -> Result<UploadResponse>;
 }
 
-input DataBatchInput {
-  batchId: String!           # Crawler-generated batch identifier
-  source: String!            # Data source identifier
-  files: [DataFileInput!]!   # Multiple files in this batch
-  metadata: BatchMetadataInput
+pub struct UploadBatchRequest {
+    pub batch_id: String,
+    pub source: String,
+    pub series_data: Vec<SeriesDataUpload>,
+    pub metadata: BatchMetadata,
 }
 
-input DataFileInput {
-  externalId: String!        # Series external identifier
-  seriesMetadata: SeriesMetadataInput!
-  data: DataInput!           # Arrow data or file path
+pub struct SeriesDataUpload {
+    pub external_id: String,
+    pub metadata: SeriesMetadata,
+    pub data: RecordBatch,  // Direct Arrow RecordBatch
 }
 
-input DataInput {
-  format: DataFormat!        # Data format
-  # Either inline Arrow data or file path
-  arrowData: String          # Base64-encoded Arrow RecordBatch
-  filePath: String           # Path to data file (Parquet or Arrow)
-  # For streaming Arrow data
-  arrowStreamData: String    # Base64-encoded Arrow Stream data
+pub struct UploadBatchResponse {
+    pub batch_id: String,
+    pub status: BatchStatus,
+    pub series_processed: usize,
+    pub total_data_points: u64,
+    pub errors: Vec<String>,
+    pub processing_time_ms: u64,
+}
+```
+
+**Option 2: HTTP REST API with Arrow**
+```rust
+// POST /api/v1/crawler/batch
+// Content-Type: application/x-arrow
+// Body: Arrow RecordBatch with embedded metadata
+
+pub struct BatchUploadRequest {
+    pub batch_id: String,
+    pub source: String,
+    pub data: RecordBatch,  // Arrow RecordBatch with all series
+    pub metadata: BatchMetadata,
 }
 
-enum DataFormat {
-  ARROW_RECORD_BATCH        # Single Arrow RecordBatch (inline)
-  ARROW_STREAM              # Arrow Stream format (inline)
-  PARQUET_FILE              # Parquet file (file path)
-  ARROW_FILE                # Arrow file (file path)
+pub struct BatchUploadResponse {
+    pub batch_id: String,
+    pub status: BatchStatus,
+    pub series_processed: usize,
+    pub errors: Vec<String>,
+}
+```
+
+**Option 3: Apache Arrow Flight with Custom Actions**
+```rust
+// Use Arrow Flight's action system for custom operations
+pub enum CrawlerAction {
+    UploadBatch(UploadBatchRequest),
+    GetUploadStatus(String),  // batch_id
+    ListPendingBatches,
 }
 
-input SeriesMetadataInput {
-  title: String!
-  description: String
-  units: String
-  frequency: String!
-  seasonalAdjustment: String
-  expectedDataPoints: Int
-  startDate: Date
-  endDate: Date
-}
-
-input BatchMetadataInput {
-  crawlerVersion: String
-  processingTimestamp: DateTime
-  sourceApiVersion: String
-  batchSize: Int
-  compressionType: String
+// Flight service handles these as custom actions
+impl FlightService for CrawlerDataService {
+    async fn do_action(&self, action: Action) -> Result<Vec<RecordBatch>> {
+        match action.action.as_str() {
+            "UploadBatch" => self.handle_upload_batch(action).await,
+            "GetUploadStatus" => self.handle_get_status(action).await,
+            _ => Err(Status::invalid_argument("Unknown action")),
+        }
+    }
 }
 ```
 
@@ -112,12 +134,31 @@ input BatchMetadataInput {
 - Provide batch-level success/failure reporting
 - Support partial batch success (some series succeed, others fail)
 
-**Benefits of Arrow Format Support**:
-- **Zero-Copy**: Direct Arrow RecordBatch processing without file I/O
-- **Efficiency**: No need to write temporary files for small datasets
-- **Streaming**: Support for Arrow Stream format for large datasets
-- **Flexibility**: Crawlers can choose between inline data or file uploads
-- **Performance**: Faster processing for real-time data ingestion
+**API Comparison**:
+
+| Feature | Arrow Flight RPC | HTTP REST + Arrow | GraphQL |
+|---------|------------------|-------------------|---------|
+| **Zero-Copy** | ✅ Native Arrow | ✅ Native Arrow | ❌ Base64 encoding |
+| **Performance** | ✅ High (gRPC) | ✅ Good (HTTP/2) | ❌ JSON overhead |
+| **Schema Evolution** | ✅ Type-safe | ✅ Type-safe | ✅ Type-safe |
+| **Streaming** | ✅ Built-in | ✅ HTTP streaming | ❌ Limited |
+| **Batch Processing** | ✅ Native | ✅ Native | ❌ JSON size limits |
+| **Error Handling** | ✅ Structured | ✅ HTTP codes | ✅ GraphQL errors |
+| **Monitoring** | ✅ gRPC metrics | ✅ HTTP metrics | ✅ GraphQL metrics |
+| **Complexity** | Medium | Low | High for bulk data |
+
+**Recommendation**: **Arrow Flight RPC** for the following reasons:
+- **Native Arrow Support**: Zero-copy data transfer without serialization
+- **High Performance**: gRPC with HTTP/2 multiplexing
+- **Built-in Streaming**: Handle large datasets efficiently
+- **Type Safety**: Rust structs map directly to Arrow schemas
+- **Future-Proof**: Can add more specialized operations easily
+
+**Implementation Strategy**:
+1. **Primary API**: Arrow Flight RPC for bulk data ingestion
+2. **Fallback API**: HTTP REST + Arrow for simpler crawlers
+3. **GraphQL API**: Keep for ad-hoc queries and small updates
+4. **Shared Backend**: All APIs use the same storage and catalog systems
 
 #### **2.5.2.2 File Naming Conventions & Organization**
 
@@ -570,23 +611,23 @@ pub enum RetryResult {
 
 ## Implementation Strategy
 
-### **Phase 1: File Creation Foundation (Week 1)**
-1. Implement `createSeriesFromFile` GraphQL mutation
-2. Add file validation pipeline
+### **Phase 1: Arrow Flight RPC Foundation (Week 1)**
+1. Implement Arrow Flight RPC service for crawler data ingestion
+2. Add bulk batch processing with native Arrow RecordBatch support
 3. Implement file naming conventions and directory structure
-4. Add basic file registry
+4. Add basic file registry and catalog integration
 
-### **Phase 2: Enhanced Discovery (Week 2)**
-1. Enhance `SeriesInfo` with quality metrics
-2. Implement data coverage analysis
-3. Add gap detection algorithms
-4. Create advanced discovery queries
+### **Phase 2: Enhanced Discovery APIs (Week 2)**
+1. Enhance `SeriesInfo` with gap tracking (TCP Selective ACK model)
+2. Implement data availability monitoring and alerting
+3. Add gap detection algorithms for missing data
+4. Create advanced discovery queries for data coverage
 
-### **Phase 3: Quality Metrics (Week 3)**
-1. Implement comprehensive quality scoring
-2. Add outlier detection
-3. Create data quality summary APIs
-4. Add file-level discovery capabilities
+### **Phase 3: Multi-API Support (Week 3)**
+1. Add HTTP REST API with Arrow support as fallback
+2. Implement comprehensive error handling and retry logic
+3. Create data availability summary APIs
+4. Add file-level discovery capabilities and monitoring
 
 ### **Testing Strategy**
 1. **Unit Tests**: File validation, quality metrics, gap detection
