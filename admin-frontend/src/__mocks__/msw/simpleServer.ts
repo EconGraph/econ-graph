@@ -5,6 +5,9 @@
  * TextEncoder issues in the Jest environment.
  */
 
+// Debug flag - set to true to enable MSW debug output
+const MSW_DEBUG = process.env.MSW_DEBUG === "true" || false;
+
 // Import GraphQL mock responses from directory structure
 import getCrawlerConfigSuccess from "../graphql/getCrawlerConfig/success.json";
 import getCrawlerConfigError from "../graphql/getCrawlerConfig/error.json";
@@ -230,13 +233,17 @@ export const setupSimpleMSW = async () => {
             body.operationName || extractOperationName(body.query);
           const variables = body.variables || {};
 
-          console.log(`[Simple MSW] Operation: ${operationName}`);
-          console.log(`[Simple MSW] Variables:`, variables);
-          console.log(`[Simple MSW] Current scenario: ${currentScenario}`);
+          if (MSW_DEBUG) {
+            console.log(`[Simple MSW] Operation: ${operationName}`);
+            console.log(`[Simple MSW] Variables:`, variables);
+            console.log(`[Simple MSW] Current scenario: ${currentScenario}`);
+          }
 
           const response = getMockResponse(operationName, currentScenario);
 
-          console.log(`[Simple MSW] Returning mock response:`, response);
+          if (MSW_DEBUG) {
+            console.log(`[Simple MSW] Returning mock response:`, response);
+          }
 
           return Promise.resolve({
             ok: true,

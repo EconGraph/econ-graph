@@ -8,6 +8,9 @@
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 
+// Debug flag - set to true to enable MSW debug output
+const MSW_DEBUG = process.env.MSW_DEBUG === "true" || false;
+
 // Import GraphQL mock responses from directory structure
 import getCrawlerConfigSuccess from "../graphql/getCrawlerConfig/success.json";
 import getCrawlerConfigError from "../graphql/getCrawlerConfig/error.json";
@@ -47,27 +50,31 @@ let currentScenario = "success";
 
 export const setMockScenario = (scenario: string) => {
   currentScenario = scenario;
-  console.log(`[MSW Server] Set scenario to: ${scenario}`);
+  if (MSW_DEBUG) console.log(`[MSW Server] Set scenario to: ${scenario}`);
 };
 
 export const resetMockScenario = () => {
   currentScenario = "success";
-  console.log(`[MSW Server] Reset scenario to: ${currentScenario}`);
+  if (MSW_DEBUG)
+    console.log(`[MSW Server] Reset scenario to: ${currentScenario}`);
 };
 
 // Define handlers for GraphQL endpoints
 const handlers = [
   // GraphQL endpoint handler
   http.post("/graphql", async ({ request }) => {
-    console.log(`[MSW Server] ===== GRAPHQL REQUEST INTERCEPTED =====`);
+    if (MSW_DEBUG)
+      console.log(`[MSW Server] ===== GRAPHQL REQUEST INTERCEPTED =====`);
 
     try {
       const body = (await request.json()) as any;
       const { operationName, variables } = body;
 
-      console.log(`[MSW Server] Operation: ${operationName}`);
-      console.log(`[MSW Server] Variables:`, variables);
-      console.log(`[MSW Server] Current scenario: ${currentScenario}`);
+      if (MSW_DEBUG) {
+        console.log(`[MSW Server] Operation: ${operationName}`);
+        console.log(`[MSW Server] Variables:`, variables);
+        console.log(`[MSW Server] Current scenario: ${currentScenario}`);
+      }
 
       let response;
 
@@ -250,8 +257,10 @@ const handlers = [
           };
       }
 
-      console.log(`[MSW Server] Returning response:`, response);
-      console.log(`[MSW Server] ==========================================`);
+      if (MSW_DEBUG) {
+        console.log(`[MSW Server] Returning response:`, response);
+        console.log(`[MSW Server] ==========================================`);
+      }
 
       return HttpResponse.json(response);
     } catch (error) {
