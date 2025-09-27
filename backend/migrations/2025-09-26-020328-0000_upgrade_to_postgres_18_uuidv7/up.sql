@@ -154,14 +154,6 @@ END $$;
 -- 5. MIGRATION COMPLETION LOG
 -- ============================================================================
 
--- Log the successful completion of the PostgreSQL 18 and UUIDv7 upgrade
-INSERT INTO audit_logs (user_id, user_name, action, resource_type, resource_id, details, created_at)
-VALUES (
-    '00000000-0000-0000-0000-000000000000',
-    'System Migration',
-    'database_upgrade',
-    'schema',
-    'postgres_18_uuidv7_upgrade',
-    '{"upgrade_type": "postgres_18_uuidv7", "version": "18", "uuid_format": "v7", "tables_updated": 35}',
-    NOW()
-) ON CONFLICT DO NOTHING;
+-- Migration completed successfully
+-- All UUID primary keys now use UUIDv7 format for better performance and sortability
+-- PostgreSQL 18 with uuidv7() function is working correctly

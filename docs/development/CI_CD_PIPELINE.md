@@ -35,6 +35,7 @@ The EconGraph CI/CD pipeline consists of 5 main phases with 20+ individual jobs 
 **Duration**: ~15-20 minutes
 **Dependencies**: Requires Backend Build Cache
 **Parallel Execution**: All backend test jobs run simultaneously
+**Database**: PostgreSQL 18 with UUIDv7 support
 
 #### Jobs:
 - **Backend Smoke Tests** - Basic functionality and health checks
@@ -45,6 +46,7 @@ The EconGraph CI/CD pipeline consists of 5 main phases with 20+ individual jobs 
 - **Backend Queue Basic Tests** - Message queue functionality
 - **Backend Queue Advanced Tests** - Complex queue operations
 - **Backend Global Analysis Basic Tests** - Economic analysis core features
+- **Backend MCP Integration Tests** - Model Context Protocol server testing
 - **Backend Global Analysis Advanced Tests** - Complex analysis algorithms
 - **Backend Series Discovery Basic Tests** - Data series identification
 - **Backend Series Discovery Integration Tests** - External data source integration
