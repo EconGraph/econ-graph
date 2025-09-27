@@ -50,7 +50,8 @@ function createHandlers() {
     graphql.query('GetSeriesData', ({ variables }: { variables: any }) => {
       // REQUIREMENT: Mock series data points for chart testing
       // Destructured but unused: seriesId, filter, transformation
-      variables as any;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { seriesId, filter, transformation } = variables;
 
       // Generate mock data points based on parameters
       const dataPoints = Array.from({ length: 12 }, (_, index) => ({
@@ -102,9 +103,7 @@ function createHandlers() {
       const { partialQuery, limit = 10 } = variables as any;
 
       const filteredSuggestions = mockSuggestions
-        .filter(suggestion =>
-          suggestion.suggestion.toLowerCase().startsWith(partialQuery.toLowerCase())
-        )
+        .filter(suggestion => suggestion.toLowerCase().startsWith(partialQuery.toLowerCase()))
         .slice(0, limit);
 
       return HttpResponse.json({

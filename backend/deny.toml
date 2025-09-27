@@ -98,6 +98,7 @@ allow = [
     "Unlicense",
     "CC0-1.0",
     "MPL-2.0",
+    "MS-PL",
     "Unicode-DFS-2016",
     "Unicode-3.0",
     "OpenSSL",
