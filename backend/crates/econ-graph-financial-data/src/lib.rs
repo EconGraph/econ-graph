@@ -1,3 +1,4 @@
+pub mod catalog;
 pub mod crawler;
 pub mod database;
 pub mod graphql;

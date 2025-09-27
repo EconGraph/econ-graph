@@ -23,6 +23,9 @@ arrow-flight = "56.0"
 object_store = "0.12"
 minio = "0.3"
 
+# Note: Iceberg integration will be added in a future iteration
+# to avoid dependency conflicts with workspace bigdecimal version
+
 # Arrow Flight dependencies
 tonic = "0.13"
 prost = "0.13"
