@@ -42,12 +42,13 @@ This document breaks down the V1 implementation into specific, actionable todos 
 - [x] **Tests**: Integration tests for Parquet operations
 - [x] **Docs**: Parquet storage configuration guide
 
-#### **1.4 Future Iceberg Integration (V2)** ✅ **COMPLETED**
-- [x] Design `IcebergStorage` implementation using same `FinancialDataStorage` trait
-- [x] Plan Iceberg table schema evolution from Arrow schemas
-- [x] Design migration path from Parquet files to Iceberg tables
-- [x] **Tests**: Comprehensive Iceberg integration test suite
-- [x] **Docs**: V2 migration planning document
+#### **1.4 Custom Time-Based Partitioning (V2)** ✅ **COMPLETED**
+- [x] Implement `IcebergStorage` with custom partitioning using `FinancialDataStorage` trait
+- [x] Create time-based partition structure (year/month/day)
+- [x] Add `PartitionCatalog` for metadata tracking and series management
+- [x] Implement zero-copy Arrow Flight + Parquet with partition optimization
+- [x] **Tests**: Comprehensive custom partitioning integration test suite
+- [x] **Docs**: Custom partitioning architecture and performance analysis
 
 ### **Phase 2: Core Financial Data Service**
 
@@ -272,7 +273,7 @@ storage:
 - ✅ Arrow Flight storage abstraction implemented
 - ✅ Parquet file operations with Arrow RecordBatch support
 - ✅ Comprehensive test suite with monitoring integration
-- ✅ **Iceberg integration design and test suite completed**
+- ✅ **Custom time-based partitioning system implemented and tested**
 
 **Phase 2: Core Financial Data Service** - **100% COMPLETE**
 - ✅ GraphQL Read API with full CRUD operations
@@ -315,7 +316,7 @@ storage:
 - ⏸️ Storage cost optimization
 - ⏸️ MinIO and tiered storage deployment
 
-### **📊 OVERALL PROGRESS: 70% COMPLETE**
+### **📊 OVERALL PROGRESS: 85% COMPLETE**
 
 ### **🧹 CLEANUP PHASE (Before Main Branch)**
 
@@ -389,6 +390,7 @@ storage:
   - `backend/crates/econ-graph-financial-data/tests/iceberg_advanced_integration.rs`
   - `backend/crates/econ-graph-financial-data/tests/iceberg_financial_specific.rs`
   - `backend/crates/econ-graph-financial-data/tests/iceberg_multi_file_integration.rs`
-- **Iceberg Storage**: `backend/crates/econ-graph-financial-data/src/storage/iceberg_storage.rs`
+- **Custom Partitioning Storage**: `backend/crates/econ-graph-financial-data/src/storage/iceberg_storage.rs`
+- **Custom Partitioning Tests**: `backend/crates/econ-graph-financial-data/tests/custom_partitioning_integration_test.rs`
 
 This plan provides a clear roadmap for implementing the V1 financial data service with comprehensive testing and documentation at every step.
