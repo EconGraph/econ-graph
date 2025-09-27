@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useQuery } from 'react-query';
+import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_ALERTS } from '../../test-utils/mocks/graphql/financial-queries';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -79,10 +79,10 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isEmpty, setIsEmpty] = useState<boolean>(false);
 
-  // Use GraphQL query for alerts data
-  const { data: alertsData, isLoading: alertsLoading, error: alertsError } = useQuery(
-    ['financial-alerts', companyId],
-    async () => {
+  // Use GraphQL query for alerts data - use Suspense for loading state
+  const { data: alertsData, error: alertsError } = useSuspenseQuery({
+    queryKey: ['financial-alerts', companyId],
+    queryFn: async () => {
       try {
         const result = await executeGraphQL({
           query: GET_FINANCIAL_ALERTS,
@@ -94,10 +94,8 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
         throw error;
       }
     },
-    {
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    }
-  );
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 
   useEffect(() => {
     if (alertsData) {
@@ -243,16 +241,7 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
     return { total, unread, critical, active };
   }, [alerts]);
 
-  // Loading state
-  if (isLoading) {
-    return (
-      <div className='space-y-6'>
-        <div className='text-center p-8'>
-          <p>Loading alerts...</p>
-        </div>
-      </div>
-    );
-  }
+  // Loading state is now handled by Suspense
 
   // Empty state
   if (isEmpty || alerts.length === 0) {

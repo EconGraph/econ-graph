@@ -33,7 +33,7 @@ import {
 // import { FinancialRatio } from '@/types/financial'; // Not used in current implementation
 import { RatioExplanationModal } from './RatioExplanationModal';
 import { BenchmarkComparison } from './BenchmarkComparison';
-import { useQuery } from 'react-query';
+import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_RATIOS } from '../../test-utils/mocks/graphql/ratio-queries';
 
@@ -52,15 +52,14 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
   const [showExplanation, setShowExplanation] = useState(false);
   const [showBenchmarks, setShowBenchmarks] = useState(false);
 
-  // GraphQL query for financial ratios
+  // GraphQL query for financial ratios - use Suspense for loading state
   const {
     data: ratiosData,
-    isLoading: loading,
     isError,
     error,
-  } = useQuery(
-    ['financial-ratios', statementId],
-    async () => {
+  } = useSuspenseQuery({
+    queryKey: ['financial-ratios', statementId],
+    queryFn: async () => {
       try {
         const result = await executeGraphQL({
           query: GET_FINANCIAL_RATIOS,
@@ -72,21 +71,12 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
         throw error;
       }
     },
-    {
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    }
-  );
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 
   const ratios = ratiosData?.financialRatios;
 
-  if (loading) {
-    return (
-      <div className='flex items-center justify-center p-8'>
-        <Progress value={66} className='w-full max-w-md' role='progressbar' />
-        <span className='ml-4'>Calculating financial ratios...</span>
-      </div>
-    );
-  }
+  // Loading state is now handled by Suspense
 
   if (isError) {
     return (

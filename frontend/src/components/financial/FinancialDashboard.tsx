@@ -27,7 +27,7 @@ import { PeerComparisonChart } from './PeerComparisonChart';
 // Import GraphQL utilities
 import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_DASHBOARD } from '../../test-utils/mocks/graphql/financial-queries';
-import { useQuery } from 'react-query';
+import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 
 
 interface FinancialDashboardProps {
@@ -47,16 +47,15 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   const [selectedStatement, setSelectedStatement] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
 
-  // GraphQL queries - use default data as fallback for development
+  // GraphQL queries - use Suspense for loading state
   const {
     data,
-    isLoading: loading,
     isError,
     error,
     refetch,
-  } = useQuery(
-    ['financial-dashboard', companyId],
-    async () => {
+  } = useSuspenseQuery({
+    queryKey: ['financial-dashboard', companyId],
+    queryFn: async () => {
       try {
         const result = await executeGraphQL({
           query: GET_FINANCIAL_DASHBOARD,
@@ -68,10 +67,8 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         throw error;
       }
     },
-    {
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    }
-  );
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 
   const company: Company | undefined = data?.company;
   const statements: FinancialStatement[] = useMemo(
@@ -131,14 +128,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     return `${(value * 100).toFixed(1)}%`;
   };
 
-  if (loading) {
-    return (
-      <div className='flex items-center justify-center p-8'>
-        <Progress value={33} className='w-full max-w-md' />
-        <span className='ml-4'>Loading financial data...</span>
-      </div>
-    );
-  }
+  // Loading state is now handled by Suspense
 
   if (isError || error) {
     return (

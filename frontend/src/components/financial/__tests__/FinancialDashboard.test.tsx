@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { vi } from 'vitest';
@@ -7,9 +7,19 @@ import { FinancialStatement, Company, FinancialRatio } from '../../../types/fina
 
 // Mock the useQuery hook
 const mockUseQuery = vi.fn();
-vi.mock('react-query', () => ({
+vi.mock('@tanstack/react-query', () => ({
   useQuery: (...args: any[]) => mockUseQuery(...args),
+  useSuspenseQuery: (...args: any[]) => mockUseQuery(...args),
 }));
+
+// Helper function to render with Suspense
+const renderWithSuspense = (component: React.ReactElement) => {
+  return render(
+    <Suspense fallback={<div data-testid="loading">Loading...</div>}>
+      {component}
+    </Suspense>
+  );
+};
 
 // Mock the financial components
 vi.mock('../BenchmarkComparison', () => ({
@@ -168,7 +178,7 @@ describe('FinancialDashboard', () => {
   });
 
   it('renders the dashboard with company information', () => {
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
     expect(screen.getByText('AAPL')).toBeInTheDocument();
@@ -176,7 +186,7 @@ describe('FinancialDashboard', () => {
   });
 
   it('displays financial statements in tabs', () => {
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     // Check if tabs are rendered
     expect(screen.getByText('10-K (2023)')).toBeInTheDocument();
@@ -192,7 +202,7 @@ describe('FinancialDashboard', () => {
       refetch: vi.fn(),
     });
 
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     expect(screen.getByText('Loading financial data...')).toBeInTheDocument();
   });
@@ -206,49 +216,49 @@ describe('FinancialDashboard', () => {
       refetch: vi.fn(),
     });
 
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     expect(screen.getByText(/Error loading financial data:/)).toBeInTheDocument();
     expect(screen.getByText(/Failed to load data/)).toBeInTheDocument();
   });
 
   it('renders benchmark comparisons for key ratios', () => {
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     // Analysis tab should be available
     expect(screen.getByRole('button', { name: /analysis/i })).toBeInTheDocument();
   });
 
   it('renders trend analysis chart', () => {
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     // Trends tab should be available
     expect(screen.getByRole('button', { name: /trends/i })).toBeInTheDocument();
   });
 
   it('renders peer comparison chart', () => {
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     // Compare tab should be available
     expect(screen.getByRole('button', { name: /compare/i })).toBeInTheDocument();
   });
 
   it('renders financial alerts', () => {
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     // Check if alerts are available anywhere in the component
     expect(screen.getByText('Apple Inc.')).toBeInTheDocument(); // Main dashboard loads
   });
 
   it('renders export functionality', () => {
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     // Export functionality should be available via the Export button
     expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument();
   });
 
   it('switches between statement tabs', () => {
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     // Initially should show 10-K data
     expect(screen.getByText('10-K (2023)')).toBeInTheDocument();
@@ -270,7 +280,7 @@ describe('FinancialDashboard', () => {
       refetch: mockRefetch,
     });
 
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     const refreshButton = screen.getByRole('button', { name: 'Refresh' });
     fireEvent.click(refreshButton);
@@ -281,7 +291,7 @@ describe('FinancialDashboard', () => {
   });
 
   it('displays ratio cards with correct values', () => {
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     // Check if ratio values are displayed using accessibility labels and getAllByText for duplicates
     expect(screen.getByLabelText('Return on Equity value')).toHaveTextContent('14.7%');
@@ -289,7 +299,7 @@ describe('FinancialDashboard', () => {
   });
 
   it('shows ratio interpretations', () => {
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     expect(screen.getByText('Strong profitability, above industry average')).toBeInTheDocument();
     expect(screen.getByText('Adequate liquidity position')).toBeInTheDocument();
@@ -307,7 +317,7 @@ describe('FinancialDashboard', () => {
       refetch: vi.fn(),
     });
 
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     expect(screen.getByText('No financial ratios available')).toBeInTheDocument();
   });
@@ -324,13 +334,13 @@ describe('FinancialDashboard', () => {
       refetch: vi.fn(),
     });
 
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     expect(screen.getByText('Company information not available')).toBeInTheDocument();
   });
 
   it('displays data quality indicators', () => {
-    render(<FinancialDashboard companyId="mock-company-id" />);
+    renderWithSuspense(<FinancialDashboard companyId="mock-company-id" />);
 
     // Check for data quality scores (should be displayed somewhere in the UI)
     expect(screen.getByText('Quality: 95%')).toBeInTheDocument(); // Data quality score for ROE

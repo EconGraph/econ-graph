@@ -5,7 +5,7 @@
  * from various data sources including FRED, BLS, and other economic data providers.
  */
 
-import { useQuery } from 'react-query';
+import { useQuery } from '@tanstack/react-query';
 import { executeGraphQL, QUERIES } from '../utils/graphql';
 
 // Types for series data

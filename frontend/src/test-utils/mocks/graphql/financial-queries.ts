@@ -110,6 +110,36 @@ export const GET_FINANCIAL_ALERTS = `
   }
 `;
 
+export const GET_FINANCIAL_RATIOS = `
+  query GetFinancialRatios($statementId: ID!) {
+    financialStatement(id: $statementId) {
+      id
+      financialRatios {
+        id
+        name
+        value
+        category
+        benchmark
+      }
+    }
+  }
+`;
+
+export const GET_RATIO_BENCHMARKS = `
+  query GetRatioBenchmarks($statementId: ID!) {
+    financialStatement(id: $statementId) {
+      id
+      ratioBenchmarks {
+        id
+        name
+        value
+        benchmarkText
+        performanceLevel
+      }
+    }
+  }
+`;
+
 export const GET_FINANCIAL_EXPORT = `
   query GetFinancialExport($companyId: ID!, $format: String!) {
     company(id: $companyId) {

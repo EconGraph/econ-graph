@@ -1,0 +1,32 @@
+{
+  "data": {
+    "financialAlerts": [
+      {
+        "id": "alert-1",
+        "companyId": "0000320193",
+        "alertType": "ratio_anomaly",
+        "severity": "high",
+        "title": "High Debt-to-Equity Ratio",
+        "description": "The company's debt-to-equity ratio has increased significantly compared to industry benchmarks.",
+        "triggeredAt": "2023-12-31T00:00:00Z",
+        "isResolved": false,
+        "resolvedAt": null,
+        "createdAt": "2023-12-31T00:00:00Z",
+        "updatedAt": "2023-12-31T00:00:00Z"
+      },
+      {
+        "id": "alert-2",
+        "companyId": "0000320193",
+        "alertType": "revenue_decline",
+        "severity": "medium",
+        "title": "Quarterly Revenue Decline",
+        "description": "Revenue has declined for two consecutive quarters.",
+        "triggeredAt": "2023-12-31T00:00:00Z",
+        "isResolved": false,
+        "resolvedAt": null,
+        "createdAt": "2023-12-31T00:00:00Z",
+        "updatedAt": "2023-12-31T00:00:00Z"
+      }
+    ]
+  }
+}

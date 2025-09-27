@@ -33,14 +33,14 @@ import { CollaborativePresence } from './CollaborativePresence';
 // Import GraphQL utilities
 import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_STATEMENT } from '../../test-utils/mocks/graphql/financial-queries';
-import { useQuery } from 'react-query';
+import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 
 
 // GraphQL hooks for real data fetching
 const useFinancialStatementQuery = (statementId: string) => {
-  return useQuery(
-    ['financial-statement', statementId],
-    async () => {
+  return useSuspenseQuery({
+    queryKey: ['financial-statement', statementId],
+    queryFn: async () => {
       try {
         const result = await executeGraphQL({
           query: GET_FINANCIAL_STATEMENT,
@@ -52,10 +52,8 @@ const useFinancialStatementQuery = (statementId: string) => {
         throw error;
       }
     },
-    {
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    }
-  );
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 };
 
 const useMutation = (mutation: any) => [() => Promise.resolve()];
@@ -89,7 +87,6 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
   // GraphQL queries
   const {
     data: statementData,
-    isLoading: statementLoading,
     error: statementError,
   } = useFinancialStatementQuery(statementId);
 
@@ -138,14 +135,7 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
     }
   }, [newAnnotationData]);
 
-  if (statementLoading) {
-    return (
-      <div className='flex items-center justify-center p-8'>
-        <Progress value={33} className='w-full max-w-md' />
-        <span className='ml-4'>Loading financial statement...</span>
-      </div>
-    );
-  }
+  // Loading state is now handled by Suspense
 
   if (statementError) {
     return (
@@ -222,18 +212,6 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
     );
   };
 
-  // Show loading state
-  if (statementLoading) {
-    return (
-      <div className='space-y-6'>
-        <Card>
-          <CardContent className='p-8 text-center'>
-            <p>Loading financial statements...</p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div className='space-y-6'>
@@ -549,7 +527,7 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                           ) : (
                             <ChevronRight className='h-4 w-4' />
                           )}
-                          <span className='font-medium'>{lineItem.standardLabel}</span>
+                          <span className='font-medium'>{lineItem.name}</span>
                           {renderAnnotationIndicator(lineItem.id)}
                         </div>
                         {lineItem.taxonomyConcept && (
@@ -575,7 +553,7 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                               onClick={(e: any) => {
                                 e.stopPropagation();
                                 handleAddAnnotation(
-                                  `Comment on ${lineItem.standardLabel}`,
+                                  `Comment on ${lineItem.name}`,
                                   'comment',
                                   lineItem.id
                                 );
