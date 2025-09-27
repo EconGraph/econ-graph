@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::catalog::CatalogStats;
 use crate::models::{DataPoint, EconomicSeries};
-use crate::storage::{FinancialDataStorage, IcebergStorage, InMemoryStorage, ParquetStorage};
+use crate::storage::{FinancialDataStorage, InMemoryStorage, ParquetStorage};
 
 /// Database abstraction for financial data service
 ///
@@ -23,16 +23,6 @@ impl Database {
         tracing::info!("Initializing database with Parquet storage");
 
         let storage = ParquetStorage::new(data_dir.into());
-        Ok(Self {
-            storage: Arc::new(storage),
-        })
-    }
-
-    /// Create a new database with custom partitioning storage (V2)
-    pub async fn new_with_custom_partitioning(data_dir: impl Into<String>) -> Result<Self> {
-        tracing::info!("Initializing database with custom partitioning storage");
-
-        let storage = IcebergStorage::new(data_dir.into()).await?;
         Ok(Self {
             storage: Arc::new(storage),
         })
