@@ -1,5 +1,4 @@
 import { vi } from 'vitest';
-import type { Mock } from 'vitest';
 // REQUIREMENT: Comprehensive unit tests for GraphQL utilities
 // PURPOSE: Test GraphQL query execution, error handling, and response processing
 // This ensures reliable communication with the backend API
@@ -7,13 +6,13 @@ import { executeGraphQL, QUERIES } from '../graphql';
 // Removed unused imports: server, http
 
 // Mock fetch for testing
-global.fetch = vi.fn();
+const mockFetch = vi.fn();
+global.fetch = mockFetch;
 
 describe('GraphQL Utilities', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset fetch mock
-    (fetch as Mock).mockClear();
+    // Reset fetch mock - use vi.clearAllMocks() instead of mockClear()
   });
 
   test('should execute GraphQL query successfully', async () => {
@@ -31,7 +30,7 @@ describe('GraphQL Utilities', () => {
       },
     };
 
-    (fetch as Mock).mockResolvedValueOnce({
+    mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => mockResponse,
     });
@@ -41,7 +40,7 @@ describe('GraphQL Utilities', () => {
       variables: { id: 'test-series-1' },
     });
 
-    expect(fetch).toHaveBeenCalledWith('/graphql', {
+    expect(mockFetch).toHaveBeenCalledWith('/graphql', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -72,7 +71,7 @@ describe('GraphQL Utilities', () => {
       ],
     };
 
-    (fetch as Mock).mockResolvedValueOnce({
+    mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => mockErrorResponse,
     });
@@ -90,7 +89,7 @@ describe('GraphQL Utilities', () => {
     // PURPOSE: Verify that network failures are caught and reported
     // This ensures graceful degradation during connectivity issues
 
-    (fetch as Mock).mockRejectedValueOnce(new Error('Network error'));
+    mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
     await expect(
       executeGraphQL({
@@ -105,7 +104,7 @@ describe('GraphQL Utilities', () => {
     // PURPOSE: Verify that HTTP errors (4xx, 5xx) are properly handled
     // This ensures robust error handling for various server conditions
 
-    (fetch as Mock).mockResolvedValueOnce({
+    mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 500,
       statusText: 'Internal Server Error',
@@ -126,7 +125,7 @@ describe('GraphQL Utilities', () => {
 
     const mockResponse = { data: { test: 'data' } };
 
-    (fetch as Mock).mockResolvedValueOnce({
+    mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => mockResponse,
     });
@@ -144,7 +143,7 @@ describe('GraphQL Utilities', () => {
       variables: {},
     });
 
-    expect(fetch).toHaveBeenCalledWith('/graphql', {
+    expect(mockFetch).toHaveBeenCalledWith('/graphql', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -162,7 +161,7 @@ describe('GraphQL Utilities', () => {
     // PURPOSE: Verify that invalid JSON responses are handled gracefully
     // This ensures robustness against server response issues
 
-    (fetch as Mock).mockResolvedValueOnce({
+    mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => {
         throw new Error('Invalid JSON');
@@ -208,7 +207,7 @@ describe('GraphQL Utilities', () => {
       },
     };
 
-    (fetch as Mock).mockResolvedValueOnce({
+    mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => mockResponse,
     });
@@ -230,7 +229,7 @@ describe('GraphQL Utilities', () => {
     expect(result).toEqual(mockResponse);
 
     // Verify request body contains search parameters
-    const requestBody = JSON.parse((fetch as Mock).mock.calls[0][1].body);
+    const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(requestBody.variables.params).toEqual(searchParams);
   });
 
@@ -239,7 +238,7 @@ describe('GraphQL Utilities', () => {
     // PURPOSE: Verify that long-running requests are properly timed out
     // This prevents hanging requests from degrading user experience
 
-    (fetch as Mock).mockImplementationOnce(
+    mockFetch.mockImplementationOnce(
       () => new Promise((resolve) => {
         // Never resolve to simulate timeout
         setTimeout(() => resolve({ ok: true, json: () => ({}) }), 10000);
@@ -248,7 +247,7 @@ describe('GraphQL Utilities', () => {
 
     // This test would require implementing timeout logic in executeGraphQL
     // For now, we'll just verify the mock is set up correctly
-    expect(fetch).toBeDefined();
+    expect(mockFetch).toBeDefined();
   });
 
   test.skip('should handle concurrent requests', async () => {
@@ -284,7 +283,7 @@ describe('GraphQL Utilities', () => {
 
     expect(result1).toEqual(mockResponse1);
     expect(result2).toEqual(mockResponse2);
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
   test.skip('should handle empty response data', async () => {
@@ -296,7 +295,7 @@ describe('GraphQL Utilities', () => {
 
     // Reset and setup fresh mocks
     vi.clearAllMocks();
-    (fetch as Mock).mockResolvedValueOnce({
+    mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => mockResponse,
     });
@@ -318,7 +317,7 @@ describe('GraphQL Utilities', () => {
     // For now, we'll test that variables are passed through correctly
     const variables = { id: 'test-series', filter: { startDate: '2024-01-01' } };
 
-    (fetch as Mock).mockResolvedValueOnce({
+    mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ data: {} }),
     });
@@ -328,7 +327,7 @@ describe('GraphQL Utilities', () => {
       variables,
     });
 
-    const requestBody = JSON.parse((fetch as Mock).mock.calls[0][1].body);
+    const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(requestBody.variables).toEqual(variables);
   });
 });
