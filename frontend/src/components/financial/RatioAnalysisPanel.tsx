@@ -83,7 +83,7 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
   if (loading) {
     return (
       <div className='flex items-center justify-center p-8'>
-        <Progress value={66} className='w-full max-w-md' />
+        <Progress value={66} className='w-full max-w-md' role='progressbar' />
         <span className='ml-4'>Calculating financial ratios...</span>
       </div>
     );
@@ -383,7 +383,17 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
   };
 
   const getRatiosByCategory = () => {
-    const allRatios = Object.entries(ratios).filter(([_, value]) => value !== null);
+    if (!ratios || !Array.isArray(ratios)) {
+      return {
+        profitability: [],
+        liquidity: [],
+        leverage: [],
+        valuation: [],
+        cashFlow: [],
+        growth: [],
+      };
+    }
+
     const categories: Record<string, Array<[string, number | null]>> = {
       profitability: [],
       liquidity: [],
@@ -393,10 +403,10 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
       growth: [],
     };
 
-    allRatios.forEach(([name, value]) => {
-      const category = getRatioCategory(name);
+    ratios.forEach((ratio: any) => {
+      const category = getRatioCategory(ratio.ratioName);
       if (categories[category]) {
-        categories[category].push([name, (value as any).value]);
+        categories[category].push([ratio.ratioName, ratio.value]);
       }
     });
 
