@@ -7,7 +7,7 @@
 
 const express = require('express');
 const cors = require('cors');
-const { generateChartConfig, validateChartRequest } = require('../api/chartApi');
+const { generateChartConfig, validateChartRequest } = require('../api/chartApi.cjs');
 
 const app = express();
 const PORT = process.env.PRIVATE_CHART_API_PORT || 3001;
@@ -63,8 +63,8 @@ app.post('/api/private/chart/generate', async (req, res) => {
     // Return successful response
     res.status(200).json({
       success: true,
-      chartConfig: chartResponse.chartConfig,
-      chartData: chartResponse.chartData,
+      chartConfig: chartResponse.config,
+      chartData: chartResponse.config,
       metadata: chartResponse.metadata,
       message: 'Chart configuration generated successfully',
     });

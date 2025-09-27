@@ -6,15 +6,17 @@
 
 import React from 'react';
 import { render, screen, act, waitFor } from '@testing-library/react';
+import { vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { ThemeProvider, useTheme } from '../ThemeContext';
 
 // Mock the AuthContext
-jest.mock('../AuthContext', () => ({
+vi.mock('../AuthContext', () => ({
   useAuth: () => ({
     user: null, // No user in tests to avoid user preference interference
     isAuthenticated: false,
-    login: jest.fn(),
-    logout: jest.fn(),
+    login: vi.fn(),
+    logout: vi.fn(),
   }),
   AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
@@ -51,15 +53,15 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 describe('ThemeContext', () => {
   beforeEach(() => {
     // Reset localStorage mock for each test
-    (window.localStorage.getItem as jest.Mock).mockClear();
-    (window.localStorage.setItem as jest.Mock).mockClear();
-    (window.localStorage.removeItem as jest.Mock).mockClear();
-    (window.localStorage.clear as jest.Mock).mockClear();
+    (window.localStorage.getItem as Mock).mockClear();
+    (window.localStorage.setItem as Mock).mockClear();
+    (window.localStorage.removeItem as Mock).mockClear();
+    (window.localStorage.clear as Mock).mockClear();
   });
 
   it('should initialize with light theme by default', () => {
-    (window.localStorage.getItem as jest.Mock).mockReturnValue(null);
-    jest.clearAllMocks();
+    (window.localStorage.getItem as Mock).mockReturnValue(null);
+    vi.clearAllMocks();
 
     // Clear any existing localStorage state
     if (window.localStorage.clear) {
@@ -68,7 +70,7 @@ describe('ThemeContext', () => {
   });
 
   it('should initialize with light theme when localStorage is null', () => {
-    (window.localStorage.getItem as jest.Mock).mockReturnValue(null);
+    (window.localStorage.getItem as Mock).mockReturnValue(null);
 
     render(
       <TestWrapper>
@@ -80,7 +82,7 @@ describe('ThemeContext', () => {
   });
 
   it('should load theme from localStorage', async () => {
-    (window.localStorage.getItem as jest.Mock).mockReturnValue('dark');
+    (window.localStorage.getItem as Mock).mockReturnValue('dark');
 
     render(
       <TestWrapper>
@@ -95,7 +97,7 @@ describe('ThemeContext', () => {
   });
 
   it('should toggle theme correctly', async () => {
-    (window.localStorage.getItem as jest.Mock).mockReturnValue('light');
+    (window.localStorage.getItem as Mock).mockReturnValue('light');
 
     render(
       <TestWrapper>
@@ -120,7 +122,7 @@ describe('ThemeContext', () => {
   });
 
   it('should set theme to light', async () => {
-    (window.localStorage.getItem as jest.Mock).mockReturnValue('dark');
+    (window.localStorage.getItem as Mock).mockReturnValue('dark');
 
     render(
       <TestWrapper>
@@ -145,7 +147,7 @@ describe('ThemeContext', () => {
   });
 
   it('should set theme to dark', async () => {
-    (window.localStorage.getItem as jest.Mock).mockReturnValue('light');
+    (window.localStorage.getItem as Mock).mockReturnValue('light');
 
     render(
       <TestWrapper>
@@ -171,7 +173,7 @@ describe('ThemeContext', () => {
 
   it('should throw error when used outside ThemeProvider', () => {
     // Suppress console.error for this test
-    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     expect(() => {
       render(<TestComponent />);

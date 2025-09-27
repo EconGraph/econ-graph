@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
@@ -5,7 +6,7 @@ import { FinancialMobile } from '../FinancialMobile';
 import { FinancialStatement, Company, FinancialRatio } from '../../../types/financial';
 
 // Mock the mobile-specific components
-jest.mock('../FinancialDashboard', () => ({
+vi.mock('../FinancialDashboard', () => ({
   FinancialDashboard: ({ companyId }: any) => (
     <div data-testid="mobile-dashboard">
       Mobile Dashboard for {companyId}
@@ -13,7 +14,7 @@ jest.mock('../FinancialDashboard', () => ({
   ),
 }));
 
-jest.mock('../TrendAnalysisChart', () => ({
+vi.mock('../TrendAnalysisChart', () => ({
   TrendAnalysisChart: ({ ratios }: any) => (
     <div data-testid="mobile-trend-chart">
       Mobile Trend Chart for {ratios?.length || 0} ratios
@@ -21,7 +22,7 @@ jest.mock('../TrendAnalysisChart', () => ({
   ),
 }));
 
-jest.mock('../PeerComparisonChart', () => ({
+vi.mock('../PeerComparisonChart', () => ({
   PeerComparisonChart: ({ ratios }: any) => (
     <div data-testid="mobile-peer-chart">
       Mobile Peer Chart for {ratios?.length || 0} ratios
@@ -29,7 +30,7 @@ jest.mock('../PeerComparisonChart', () => ({
   ),
 }));
 
-jest.mock('../FinancialAlerts', () => ({
+vi.mock('../FinancialAlerts', () => ({
   FinancialAlerts: ({ companyId }: any) => (
     <div data-testid="mobile-alerts">
       Mobile Alerts for {companyId}
@@ -94,7 +95,7 @@ const mockFinancialRatios: FinancialRatio[] = [
 
 describe('FinancialMobile', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     // Mock mobile viewport
     Object.defineProperty(window, 'innerWidth', {

@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
@@ -5,7 +6,7 @@ import { TrendAnalysisChart } from '../TrendAnalysisChart';
 import { FinancialRatio } from '../../../types/financial';
 
 // Mock Chart.js
-jest.mock('react-chartjs-2', () => ({
+vi.mock('react-chartjs-2', () => ({
   Line: ({ data, options, ...props }: any) => (
     <div
       data-testid="trend-line-chart"
@@ -114,7 +115,7 @@ const mockFinancialStatements = [
 
 describe('TrendAnalysisChart', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('renders the trend analysis chart', () => {
