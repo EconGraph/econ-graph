@@ -1,5 +1,5 @@
 /**
- * useCountryData Hook
+ * UseCountryData Hook.
  *
  * Custom hook for managing country data processing, color scaling,
  * and economic indicator calculations for the world map.

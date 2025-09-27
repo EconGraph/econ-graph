@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Professional collaboration hooks for Bloomberg Terminal-level functionality
  * PURPOSE: Provide React hooks for managing chart annotations, comments, and sharing
- * This enables institutional-grade collaboration workflows for economic analysis
+ * This enables institutional-grade collaboration workflows for economic analysis.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -39,6 +39,10 @@ export interface UseCollaborationOptions {
   refreshInterval?: number;
 }
 
+/**
+ *
+ * @param options
+ */
 export function useCollaboration(options: UseCollaborationOptions = {}) {
   const { seriesId, chartId, autoRefresh = false, refreshInterval = 30000 } = options;
   const { user: currentUser } = useAuth();

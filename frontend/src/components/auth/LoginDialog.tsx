@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: OAuth login dialog with Google and Facebook authentication
  * PURPOSE: Provide secure login interface for chart collaboration features
- * This enables professional multi-user collaboration with proper authentication
+ * This enables professional multi-user collaboration with proper authentication.
  */
 
 import React, { useState, useCallback, useEffect } from 'react';

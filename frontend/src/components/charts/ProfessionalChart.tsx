@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Professional chart analytics with Bloomberg Terminal-level capabilities
  * PURPOSE: Advanced charting component with technical analysis, multi-series overlay, and annotations
- * This provides sophisticated economic analysis tools for professional users
+ * This provides sophisticated economic analysis tools for professional users.
  */
 
 import React, { useState, useMemo, useCallback } from 'react';

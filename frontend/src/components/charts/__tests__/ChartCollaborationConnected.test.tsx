@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Comprehensive unit tests for ChartCollaborationConnected component
  * PURPOSE: Test enterprise-grade chart collaboration with GraphQL backend integration
- * This ensures professional collaboration features work correctly with real-time updates
+ * This ensures professional collaboration features work correctly with real-time updates.
  */
 
 import React from 'react';

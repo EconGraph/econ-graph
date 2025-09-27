@@ -11,6 +11,9 @@ interface State {
   error?: Error;
 }
 
+/**
+ *
+ */
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
@@ -23,8 +26,8 @@ export class ErrorBoundary extends Component<Props, State> {
 
   /**
    * Logs error information when an error is caught by the boundary.
-   * @param error - The error that was caught
-   * @param errorInfo - Additional error information
+   * @param error - The error that was caught.
+   * @param errorInfo - Additional error information.
    */
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo);

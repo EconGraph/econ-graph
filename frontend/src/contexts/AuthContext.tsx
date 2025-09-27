@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: OAuth authentication system for multi-user collaboration
  * PURPOSE: Provide secure authentication with Google and Facebook OAuth backends
- * This enables professional chart collaboration with proper user management
+ * This enables professional chart collaboration with proper user management.
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';

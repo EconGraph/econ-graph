@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: GraphQL integration for efficient data fetching
  * PURPOSE: Provide GraphQL client configuration and query utilities
- * This enables efficient data fetching with the Rust backend GraphQL API
+ * This enables efficient data fetching with the Rust backend GraphQL API.
  */
 
 const GRAPHQL_ENDPOINT = import.meta.env.VITE_GRAPHQL_URL || '/graphql';
@@ -27,7 +27,8 @@ export interface GraphQLRequest {
 }
 
 /**
- * Execute a GraphQL query against the backend
+ * Execute a GraphQL query against the backend.
+ * @param request
  */
 export async function executeGraphQL<T = any>(
   request: GraphQLRequest

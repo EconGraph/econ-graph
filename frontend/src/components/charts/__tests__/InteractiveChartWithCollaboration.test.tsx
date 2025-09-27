@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Comprehensive unit tests for InteractiveChartWithCollaboration component
  * PURPOSE: Test sophisticated Bloomberg Terminal-inspired economic data visualization with collaboration
- * This ensures the advanced charting capabilities work correctly with real-time collaboration features
+ * This ensures the advanced charting capabilities work correctly with real-time collaboration features.
  */
 
 import React from 'react';

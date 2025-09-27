@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Comprehensive unit tests for ProfessionalChart component
  * PURPOSE: Test professional chart analytics with Bloomberg Terminal-level capabilities
- * This ensures chart rendering, technical analysis, and collaboration features work correctly
+ * This ensures chart rendering, technical analysis, and collaboration features work correctly.
  */
 
 import React from 'react';

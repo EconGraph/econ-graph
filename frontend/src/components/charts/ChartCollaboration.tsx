@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Chart collaboration features with annotations and comments
  * PURPOSE: Enable real-time collaborative economic analysis with shared annotations
- * This provides Bloomberg Terminal-style collaboration for economic research
+ * This provides Bloomberg Terminal-style collaboration for economic research.
  */
 
 import React, { useState, useCallback } from 'react';

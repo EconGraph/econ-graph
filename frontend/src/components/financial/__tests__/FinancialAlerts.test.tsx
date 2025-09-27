@@ -171,10 +171,8 @@ describe('FinancialAlerts', () => {
   it('marks alerts as read when clicked', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    await waitFor(() => {
-      const unreadAlert = screen.getByText('Current Ratio Below Threshold');
-      fireEvent.click(unreadAlert);
-    });
+    const unreadAlert = await screen.findByText('Current Ratio Below Threshold');
+    fireEvent.click(unreadAlert);
 
     // Component should handle the read state internally
   });
@@ -182,10 +180,8 @@ describe('FinancialAlerts', () => {
   it('marks alerts as unread when clicked again', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    await waitFor(() => {
-      const readAlert = screen.getByText('Data Quality Warning');
-      fireEvent.click(readAlert);
-    });
+    const readAlert = await screen.findByText('Data Quality Warning');
+    fireEvent.click(readAlert);
 
     // Component should handle the unread state internally
   });
@@ -193,10 +189,8 @@ describe('FinancialAlerts', () => {
   it('dismisses alerts when dismiss button is clicked', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    await waitFor(() => {
-      const dismissButton = screen.getAllByText('Dismiss')[0];
-      fireEvent.click(dismissButton);
-    });
+    const dismissButton = await screen.findByText('Dismiss');
+    fireEvent.click(dismissButton);
 
     // Component should handle dismiss functionality internally
   });
@@ -204,10 +198,8 @@ describe('FinancialAlerts', () => {
   it('shows alert details when expanded', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    await waitFor(() => {
-      const alertTitle = screen.getByText('Current Ratio Below Threshold');
-      fireEvent.click(alertTitle);
-    });
+    const alertTitle = await screen.findByText('Current Ratio Below Threshold');
+    fireEvent.click(alertTitle);
 
     // Should show detailed description
     await waitFor(() => {
@@ -268,10 +260,8 @@ describe('FinancialAlerts', () => {
   it('handles bulk actions (mark all as read)', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    await waitFor(() => {
-      const markAllButton = screen.getByText('Mark All as Read');
-      fireEvent.click(markAllButton);
-    });
+    const markAllButton = await screen.findByText('Mark All as Read');
+    fireEvent.click(markAllButton);
 
     // Component should handle bulk actions internally
   });
@@ -279,10 +269,8 @@ describe('FinancialAlerts', () => {
   it('handles bulk actions (dismiss all)', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    await waitFor(() => {
-      const dismissAllButton = screen.getByText('Dismiss All');
-      fireEvent.click(dismissAllButton);
-    });
+    const dismissAllButton = await screen.findByText('Dismiss All');
+    fireEvent.click(dismissAllButton);
 
     // Component should handle bulk dismiss actions internally
   });
@@ -296,10 +284,8 @@ describe('FinancialAlerts', () => {
     });
 
     // Test search
-    await waitFor(() => {
-      const searchInput = screen.getByPlaceholderText('Search alerts...');
-      fireEvent.change(searchInput, { target: { value: 'ratio' } });
-    });
+    const searchInput = await screen.findByPlaceholderText('Search alerts...');
+    fireEvent.change(searchInput, { target: { value: 'ratio' } });
 
     // Should filter alerts based on search
     await waitFor(() => {
@@ -377,10 +363,8 @@ describe('FinancialAlerts', () => {
   it('handles alert refresh functionality', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    await waitFor(() => {
-      const refreshButton = screen.getByRole('button', { name: /refresh/i });
-      fireEvent.click(refreshButton);
-    });
+    const refreshButton = await screen.findByRole('button', { name: /refresh/i });
+    fireEvent.click(refreshButton);
 
     // Component should handle refresh functionality internally
   });
@@ -397,10 +381,8 @@ describe('FinancialAlerts', () => {
   it('handles alert export functionality', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    await waitFor(() => {
-      const exportButton = screen.getByText('Export Alerts');
-      fireEvent.click(exportButton);
-    });
+    const exportButton = await screen.findByText('Export Alerts');
+    fireEvent.click(exportButton);
 
     // Should trigger export functionality
     await waitFor(() => {

@@ -6,7 +6,7 @@ import { SeriesSearchResult } from '../../hooks/useSeriesData';
 
 /**
  * Mock economic series data for testing
- * REQUIREMENT: Realistic series data matching backend GraphQL schema
+ * REQUIREMENT: Realistic series data matching backend GraphQL schema.
  */
 export const mockSeriesData = [
   {
@@ -64,7 +64,7 @@ export const mockSeriesData = [
 
 /**
  * Mock data sources for testing
- * REQUIREMENT: Data source information for dropdown and filtering components
+ * REQUIREMENT: Data source information for dropdown and filtering components.
  */
 export const mockDataSources = [
   {
@@ -91,7 +91,7 @@ export const mockDataSources = [
 
 /**
  * Mock search results for full-text search testing
- * REQUIREMENT: Search results with ranking and similarity scores
+ * REQUIREMENT: Search results with ranking and similarity scores.
  */
 export const mockSearchResults: SeriesSearchResult[] = [
   {
@@ -143,7 +143,7 @@ export const mockSearchResults: SeriesSearchResult[] = [
 
 /**
  * Mock search suggestions for autocomplete testing
- * REQUIREMENT: Search suggestions with different types and confidence scores
+ * REQUIREMENT: Search suggestions with different types and confidence scores.
  */
 export const mockSuggestions: string[] = [
   'Gross Domestic Product',
@@ -157,7 +157,7 @@ export const mockSuggestions: string[] = [
 ];
 /**
  * Mock data points for chart testing
- * REQUIREMENT: Time series data points with various scenarios
+ * REQUIREMENT: Time series data points with various scenarios.
  */
 export const mockDataPoints = [
   {
@@ -194,7 +194,7 @@ export const mockDataPoints = [
 
 /**
  * Mock transformed data for transformation testing
- * REQUIREMENT: Data transformation examples (YoY, QoQ, MoM)
+ * REQUIREMENT: Data transformation examples (YoY, QoQ, MoM).
  */
 export const mockTransformedData = {
   YEAR_OVER_YEAR: [
@@ -243,7 +243,7 @@ export const mockTransformedData = {
 
 /**
  * Mock error responses for error handling testing
- * REQUIREMENT: Error scenarios for robust component testing
+ * REQUIREMENT: Error scenarios for robust component testing.
  */
 export const mockErrors = {
   NETWORK_ERROR: {
@@ -267,7 +267,8 @@ export const mockErrors = {
 
 /**
  * Helper function to create mock data with variations
- * REQUIREMENT: Utility for generating test data with different scenarios
+ * REQUIREMENT: Utility for generating test data with different scenarios.
+ * @param overrides
  */
 export function createMockSeries(overrides: Partial<(typeof mockSeriesData)[0]> = {}) {
   return {
@@ -277,6 +278,11 @@ export function createMockSeries(overrides: Partial<(typeof mockSeriesData)[0]> 
   };
 }
 
+/**
+ *
+ * @param count
+ * @param baseValue
+ */
 export function createMockDataPoints(count: number, baseValue = 100) {
   return Array.from({ length: count }, (_, index) => ({
     date: new Date(2024, 0, index + 1).toISOString().split('T')[0],
@@ -286,6 +292,11 @@ export function createMockDataPoints(count: number, baseValue = 100) {
   }));
 }
 
+/**
+ *
+ * @param query
+ * @param count
+ */
 export function createMockSearchResults(query: string, count = 5) {
   return Array.from({ length: count }, (_, index) => ({
     ...mockSearchResults[0],

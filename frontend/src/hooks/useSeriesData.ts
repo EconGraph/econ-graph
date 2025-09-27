@@ -1,5 +1,5 @@
 /**
- * Custom hooks for series data management
+ * Custom hooks for series data management.
  *
  * This module provides React hooks for fetching and managing economic time series data
  * from various data sources including FRED, BLS, and other economic data providers.

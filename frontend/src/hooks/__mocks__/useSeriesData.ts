@@ -1,6 +1,6 @@
 /**
  * Mock implementation of useSeriesData hooks for testing
- * PURPOSE: Provide predictable test data and behavior for components
+ * PURPOSE: Provide predictable test data and behavior for components.
  */
 
 import { vi } from 'vitest';

@@ -131,7 +131,8 @@ export function validateChartConfig(config: Partial<ChartConfig>): string[] {
 }
 
 /**
- * Generate chart configuration from request
+ * Generate chart configuration from request.
+ * @param request
  */
 export function generateChartConfig(request: ChartRequest): ChartResponse {
   try {
@@ -222,7 +223,8 @@ export function generateChartConfig(request: ChartRequest): ChartResponse {
 }
 
 /**
- * Validate chart request
+ * Validate chart request.
+ * @param request
  */
 export function validateChartRequest(request: any): boolean {
   if (!request) return false;

@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Professional chart analytics with technical analysis tools
  * PURPOSE: Provide Bloomberg Terminal-level technical analysis capabilities
- * This module implements statistical indicators commonly used in economic analysis
+ * This module implements statistical indicators commonly used in economic analysis.
  */
 
 export interface DataPoint {
@@ -30,7 +30,9 @@ export interface RSIPoint {
 
 /**
  * Calculate Simple Moving Average
- * Used for trend analysis and smoothing economic data
+ * Used for trend analysis and smoothing economic data.
+ * @param data
+ * @param period
  */
 export function calculateSMA(data: DataPoint[], period: number): TechnicalIndicator[] {
   if (data.length < period) return [];
@@ -53,7 +55,9 @@ export function calculateSMA(data: DataPoint[], period: number): TechnicalIndica
 
 /**
  * Calculate Exponential Moving Average
- * More responsive to recent changes than SMA
+ * More responsive to recent changes than SMA.
+ * @param data
+ * @param period
  */
 export function calculateEMA(data: DataPoint[], period: number): TechnicalIndicator[] {
   if (data.length === 0) return [];
@@ -81,7 +85,10 @@ export function calculateEMA(data: DataPoint[], period: number): TechnicalIndica
 
 /**
  * Calculate Bollinger Bands
- * Statistical measure of volatility and potential support/resistance levels
+ * Statistical measure of volatility and potential support/resistance levels.
+ * @param data
+ * @param period
+ * @param standardDeviations
  */
 export function calculateBollingerBands(
   data: DataPoint[],
@@ -116,7 +123,9 @@ export function calculateBollingerBands(
 
 /**
  * Calculate Relative Strength Index (RSI)
- * Momentum oscillator measuring the speed and magnitude of price changes
+ * Momentum oscillator measuring the speed and magnitude of price changes.
+ * @param data
+ * @param period
  */
 export function calculateRSI(data: DataPoint[], period = 14): RSIPoint[] {
   if (data.length < period + 1) return [];
@@ -158,7 +167,9 @@ export function calculateRSI(data: DataPoint[], period = 14): RSIPoint[] {
 
 /**
  * Calculate Rate of Change (ROC)
- * Momentum indicator showing percentage change over a specific period
+ * Momentum indicator showing percentage change over a specific period.
+ * @param data
+ * @param period
  */
 export function calculateROC(data: DataPoint[], period: number): TechnicalIndicator[] {
   if (data.length < period + 1) return [];
@@ -182,7 +193,9 @@ export function calculateROC(data: DataPoint[], period: number): TechnicalIndica
 
 /**
  * Calculate Standard Deviation
- * Measure of volatility and dispersion
+ * Measure of volatility and dispersion.
+ * @param data
+ * @param period
  */
 export function calculateStandardDeviation(
   data: DataPoint[],
@@ -211,7 +224,7 @@ export function calculateStandardDeviation(
 
 /**
  * Detect Economic Cycles
- * Identify potential turning points and trend changes
+ * Identify potential turning points and trend changes.
  */
 export interface CyclePoint {
   date: string;
@@ -220,6 +233,11 @@ export interface CyclePoint {
   confidence: number;
 }
 
+/**
+ *
+ * @param data
+ * @param lookback
+ */
 export function detectEconomicCycles(data: DataPoint[], lookback = 6): CyclePoint[] {
   if (data.length < lookback * 2 + 1) return [];
 
@@ -270,7 +288,9 @@ export function detectEconomicCycles(data: DataPoint[], lookback = 6): CyclePoin
 }
 
 /**
- * Calculate correlation between two economic series
+ * Calculate correlation between two economic series.
+ * @param series1
+ * @param series2
  */
 export function calculateCorrelation(series1: DataPoint[], series2: DataPoint[]): number {
   if (series1.length !== series2.length || series1.length === 0) return 0;
@@ -289,7 +309,7 @@ export function calculateCorrelation(series1: DataPoint[], series2: DataPoint[])
 }
 
 /**
- * Economic Event Types for Chart Annotations
+ * Economic Event Types for Chart Annotations.
  */
 export interface EconomicEvent {
   date: string;
@@ -302,7 +322,7 @@ export interface EconomicEvent {
 
 /**
  * Historical Economic Events Database
- * Major events that should be annotated on economic charts
+ * Major events that should be annotated on economic charts.
  */
 export const MAJOR_ECONOMIC_EVENTS: EconomicEvent[] = [
   {
@@ -365,7 +385,9 @@ export const MAJOR_ECONOMIC_EVENTS: EconomicEvent[] = [
 ];
 
 /**
- * Get relevant economic events for a date range
+ * Get relevant economic events for a date range.
+ * @param startDate
+ * @param endDate
  */
 export function getEconomicEventsInRange(startDate: string, endDate: string): EconomicEvent[] {
   const start = new Date(startDate);

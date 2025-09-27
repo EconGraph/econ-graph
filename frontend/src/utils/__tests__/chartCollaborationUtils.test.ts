@@ -2,7 +2,7 @@ import { vi } from 'vitest';
 /**
  * REQUIREMENT: Unit tests for chart collaboration business logic
  * PURPOSE: Test pure functions extracted from ChartCollaborationConnected component
- * This ensures business logic works correctly without UI dependencies
+ * This ensures business logic works correctly without UI dependencies.
  */
 
 import {

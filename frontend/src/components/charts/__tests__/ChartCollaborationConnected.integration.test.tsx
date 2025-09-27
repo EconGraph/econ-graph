@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Integration tests for ChartCollaborationConnected event handlers
  * PURPOSE: Test event handlers with mocked dependencies
- * This ensures business logic works correctly with mocked hooks and APIs
+ * This ensures business logic works correctly with mocked hooks and APIs.
  */
 
 import React from 'react';

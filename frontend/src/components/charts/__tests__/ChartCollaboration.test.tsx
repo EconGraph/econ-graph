@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Comprehensive unit tests for ChartCollaboration component
  * PURPOSE: Test chart collaboration features including annotations, comments, and filtering
- * This ensures the collaboration functionality works correctly for professional economic analysis
+ * This ensures the collaboration functionality works correctly for professional economic analysis.
  */
 
 import React from 'react';

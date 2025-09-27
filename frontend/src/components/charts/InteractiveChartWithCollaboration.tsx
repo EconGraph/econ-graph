@@ -1,5 +1,5 @@
 /**
- * **InteractiveChartWithCollaboration Component**
+ * **InteractiveChartWithCollaboration Component**.
  *
  * A sophisticated, Bloomberg Terminal-inspired economic data visualization component
  * that combines advanced charting capabilities with real-time collaboration features.
@@ -66,17 +66,16 @@
  * 2. Transformation applied based on user selection
  * 3. Chart.js renders with optimized datasets
  * 4. Collaboration events synchronized in real-time
- * 5. User interactions trigger appropriate callbacks
+ * 5. User interactions trigger appropriate callbacks.
  *
  * ## Props Interface
- *
- * @param seriesId - Unique identifier for the economic time series
- * @param data - Array of data points with timestamps and values
- * @param title - Chart title for display and accessibility
- * @param yAxisLabel - Y-axis label describing the data units
- * @param onDataPointClick - Callback for data point interaction events
- * @param onTransformationChange - Callback for transformation option changes
- * @param collaborationEnabled - Flag to enable/disable collaboration features
+ * @param seriesId - Unique identifier for the economic time series.
+ * @param data - Array of data points with timestamps and values.
+ * @param title - Chart title for display and accessibility.
+ * @param yAxisLabel - Y-axis label describing the data units.
+ * @param onDataPointClick - Callback for data point interaction events.
+ * @param onTransformationChange - Callback for transformation option changes.
+ * @param collaborationEnabled - Flag to enable/disable collaboration features.
  * @param theme - Theme configuration for styling consistency
  *
  * ## Examples
@@ -114,8 +113,7 @@
  * - Virtualized rendering for large datasets (>10,000 points)
  * - Debounced user input to prevent excessive re-renders
  * - Memoized transformation calculations
- * - Optimized Chart.js configuration for smooth animations
- *
+ * - Optimized Chart.js configuration for smooth animations.
  * @since 1.0.0
  * @version 2.1.0
  * @author EconGraph Development Team
@@ -172,16 +170,15 @@ ChartJS.register(
 );
 
 /**
- * **DataPoint Interface**
+ * **DataPoint Interface**.
  *
  * Represents a single observation in an economic time series with comprehensive
  * metadata for data provenance and revision tracking.
- *
  * @interface DataPoint
- * @property {string} date - ISO date string for the observation period (e.g., "2024-03-31")
- * @property {number | null} value - Numeric value of the economic observation, null for missing data
- * @property {boolean} isOriginalRelease - True if this is the first published estimate, false for revisions
- * @property {string} revisionDate - ISO date string when this value was published or revised
+ * @property {string} date - ISO date string for the observation period (e.g., "2024-03-31").
+ * @property {number | null} value - Numeric value of the economic observation, null for missing data.
+ * @property {boolean} isOriginalRelease - True if this is the first published estimate, false for revisions.
+ * @property {string} revisionDate - ISO date string when this value was published or revised.
  */
 interface DataPoint {
   date: string;
@@ -191,18 +188,17 @@ interface DataPoint {
 }
 
 /**
- * **InteractiveChartWithCollaboration Props Interface**
+ * **InteractiveChartWithCollaboration Props Interface**.
  *
  * Defines the props contract for the main chart component, ensuring type safety
  * and clear API boundaries for component consumers.
- *
  * @interface InteractiveChartWithCollaborationProps
- * @property {DataPoint[]} data - Array of time series data points to visualize
- * @property {string} seriesId - Unique identifier for the economic series (used for collaboration)
- * @property {string} seriesTitle - Human-readable title for chart display and accessibility
- * @property {string} units - Units of measurement (e.g., "Billions of Dollars", "Percent")
- * @property {string} frequency - Data frequency (e.g., "Monthly", "Quarterly", "Annual")
- * @property {boolean} [loading] - Optional loading state flag for UI feedback
+ * @property {DataPoint[]} data - Array of time series data points to visualize.
+ * @property {string} seriesId - Unique identifier for the economic series (used for collaboration).
+ * @property {string} seriesTitle - Human-readable title for chart display and accessibility.
+ * @property {string} units - Units of measurement (e.g., "Billions of Dollars", "Percent").
+ * @property {string} frequency - Data frequency (e.g., "Monthly", "Quarterly", "Annual").
+ * @property {boolean} [loading] - Optional loading state flag for UI feedback.
  */
 interface InteractiveChartWithCollaborationProps {
   data: DataPoint[];
@@ -215,17 +211,16 @@ interface InteractiveChartWithCollaborationProps {
 }
 
 /**
- * **TransformationType Union**
+ * **TransformationType Union**.
  *
  * Defines the available mathematical transformations that can be applied to
  * the time series data for different analytical perspectives.
- *
  * @type TransformationType
- * @property {'none'} none - No transformation, display raw data values
- * @property {'growth_rate'} growth_rate - Calculate period-over-period growth rates
- * @property {'log'} log - Apply natural logarithm for exponential growth visualization
- * @property {'diff'} diff - Calculate first differences between consecutive periods
- * @property {'pct_change'} pct_change - Calculate percentage changes between periods
+ * @property {'none'} none - No transformation, display raw data values.
+ * @property {'growth_rate'} growth_rate - Calculate period-over-period growth rates.
+ * @property {'log'} log - Apply natural logarithm for exponential growth visualization.
+ * @property {'diff'} diff - Calculate first differences between consecutive periods.
+ * @property {'pct_change'} pct_change - Calculate percentage changes between periods.
  */
 type TransformationType =
   | 'none'
@@ -238,7 +233,7 @@ type TransformationType =
   | 'pct_change';
 
 /**
- * **InteractiveChartWithCollaboration Component Function**
+ * **InteractiveChartWithCollaboration Component Function**.
  *
  * The main React functional component that renders an advanced economic data visualization
  * with collaboration features. This component manages complex state for data transformations,
@@ -266,7 +261,7 @@ type TransformationType =
  * ### User Interaction Handling
  * - Date range selection with Material-UI DatePicker components
  * - Transformation selection via dropdown menus
- * - Data vintage toggles for original vs. revised data display
+ * - Data vintage toggles for original vs. Revised data display
  * - Collaboration panel activation and management
  *
  * ### Performance Optimizations
@@ -285,10 +280,16 @@ type TransformationType =
  * - Graceful handling of missing or invalid data points
  * - User-friendly error messages for transformation failures
  * - Fallback rendering for unsupported data formats
- * - Network error recovery for collaboration features
- *
- * @param props - Component props as defined by InteractiveChartWithCollaborationProps
- * @returns JSX.Element - Rendered chart component with full functionality
+ * - Network error recovery for collaboration features.
+ * @param props - Component props as defined by InteractiveChartWithCollaborationProps.
+ * @param props.data
+ * @param props.seriesId
+ * @param props.seriesTitle
+ * @param props.units
+ * @param props.frequency
+ * @param props.loading
+ * @param props.collaborationEnabled
+ * @returns JSX.Element - Rendered chart component with full functionality.
  */
 const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborationProps> = ({
   data,

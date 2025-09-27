@@ -103,7 +103,13 @@ describe('FinancialDashboard', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
       expect(screen.getByText('Technology')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
       expect(screen.getByText('Technology Hardware & Equipment')).toBeInTheDocument();
     });
   });
@@ -194,10 +200,8 @@ describe('FinancialDashboard', () => {
   it('handles refresh button click', async () => {
     renderWithProviders(<FinancialDashboard companyId="mock-company-id" />);
 
-    await waitFor(() => {
-      const refreshButton = screen.getByRole('button', { name: 'Refresh' });
-      fireEvent.click(refreshButton);
-    });
+    const refreshButton = await screen.findByRole('button', { name: 'Refresh' });
+    fireEvent.click(refreshButton);
 
     // The component should still be rendered after refresh
     await waitFor(() => {

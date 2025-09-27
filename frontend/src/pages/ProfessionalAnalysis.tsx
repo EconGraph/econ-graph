@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Professional chart analytics page with Bloomberg Terminal-level capabilities
  * PURPOSE: Showcase advanced technical analysis, multi-series comparison, and collaboration
- * This demonstrates the professional economic analysis features of EconGraph
+ * This demonstrates the professional economic analysis features of EconGraph.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';

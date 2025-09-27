@@ -1,5 +1,5 @@
 /**
- * Type definitions for Global Analysis features
+ * Type definitions for Global Analysis features.
  *
  * This file contains all TypeScript interfaces and types used throughout
  * the global analysis components, including world map, country data,

@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Enterprise-grade chart collaboration with backend integration
  * PURPOSE: Professional collaboration component connected to GraphQL backend
- * This provides Bloomberg Terminal-level collaboration for institutional users
+ * This provides Bloomberg Terminal-level collaboration for institutional users.
  */
 
 import React, { useState, useCallback } from 'react';

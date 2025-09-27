@@ -76,7 +76,9 @@ interface HeaderProps {
 /**
  * REQUIREMENT: Modern UI with intuitive navigation
  * PURPOSE: Application header with search functionality and responsive design
- * This provides quick access to search and navigation, improving on FRED's UX
+ * This provides quick access to search and navigation, improving on FRED's UX.
+ * @param root0
+ * @param root0.onMenuClick
  */
 const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
   const { user, isAuthenticated, signOut } = useAuth();

@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Comprehensive unit tests for DataSources page component
  * PURPOSE: Test data sources information display and metadata rendering
- * This ensures users can understand the data sources and their characteristics
+ * This ensures users can understand the data sources and their characteristics.
  */
 
 import React from 'react';

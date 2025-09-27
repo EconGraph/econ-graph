@@ -13,6 +13,9 @@ import {
   GET_FINANCIAL_EXPORT,
 } from './graphql/financial-queries';
 
+/**
+ *
+ */
 export function validateFinancialQueries() {
   const queries = [
     GET_FINANCIAL_DASHBOARD,
@@ -48,6 +51,11 @@ export function validateFinancialQueries() {
   return true;
 }
 
+/**
+ *
+ * @param query
+ * @param operationName
+ */
 export function validateQuery(query: string, operationName?: string) {
   try {
     const parsedQuery = parse(query);

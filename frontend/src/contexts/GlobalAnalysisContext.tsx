@@ -1,5 +1,5 @@
 /**
- * GlobalAnalysisContext
+ * GlobalAnalysisContext.
  *
  * React context for managing global analysis state including map view,
  * selected countries, indicators, and user preferences.

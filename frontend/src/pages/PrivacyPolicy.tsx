@@ -1,11 +1,11 @@
 /**
- * Privacy Policy Page
+ * Privacy Policy Page.
  *
  * This page displays our comprehensive privacy policy that complies with
  * GDPR, CCPA, and Facebook's requirements for app approval.
  *
  * REQUIREMENT: Facebook App Review - Privacy Policy Page
- * PURPOSE: Provide transparent information about data collection and usage
+ * PURPOSE: Provide transparent information about data collection and usage.
  */
 
 import React from 'react';

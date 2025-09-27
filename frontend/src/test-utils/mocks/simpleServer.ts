@@ -1,5 +1,5 @@
 /**
- * Simplified MSW server setup to avoid import issues
+ * Simplified MSW server setup to avoid import issues.
  *
  * This version uses dynamic imports and simpler setup to avoid
  * conflicts with other fetch mocks in the test suite.

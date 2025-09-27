@@ -1,5 +1,5 @@
 /**
- * InteractiveWorldMap Component
+ * InteractiveWorldMap Component.
  *
  * A D3.js-powered interactive world map component for global economic analysis.
  * Features include country selection, zoom/pan, economic data visualization,

@@ -15,7 +15,10 @@ interface TestProvidersProps {
 
 /**
  * Test wrapper component that provides all necessary contexts
- * REQUIREMENT: Isolated testing environment with all required providers
+ * REQUIREMENT: Isolated testing environment with all required providers.
+ * @param root0
+ * @param root0.children
+ * @param root0.queryClient
  */
 export function TestProviders({ children, queryClient }: TestProvidersProps) {
   // Create a fresh QueryClient for each test to avoid cache interference
@@ -61,7 +64,11 @@ export function TestProviders({ children, queryClient }: TestProvidersProps) {
 
 /**
  * Custom render function that includes all providers
- * REQUIREMENT: Simplified testing setup with automatic provider wrapping
+ * REQUIREMENT: Simplified testing setup with automatic provider wrapping.
+ * @param ui
+ * @param options
+ * @param options.queryClient
+ * @param options.initialEntries
  */
 export function renderWithProviders(
   ui: React.ReactElement,
@@ -88,7 +95,8 @@ export * from '@testing-library/react';
 
 /**
  * Create a mock QueryClient with custom configuration
- * REQUIREMENT: Configurable query client for different test scenarios
+ * REQUIREMENT: Configurable query client for different test scenarios.
+ * @param overrides
  */
 export function createMockQueryClient(overrides: Partial<QueryClient> = {}) {
   return new QueryClient({
@@ -108,7 +116,7 @@ export function createMockQueryClient(overrides: Partial<QueryClient> = {}) {
 
 /**
  * Wait for React Query to finish loading
- * REQUIREMENT: Utility for waiting for async data fetching in tests
+ * REQUIREMENT: Utility for waiting for async data fetching in tests.
  */
 export async function waitForLoadingToFinish() {
   const { waitFor } = await import('@testing-library/react');

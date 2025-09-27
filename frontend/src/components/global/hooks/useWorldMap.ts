@@ -1,5 +1,5 @@
 /**
- * useWorldMap Hook
+ * UseWorldMap Hook.
  *
  * Custom hook for managing D3.js world map logic including projection,
  * path generation, zoom behavior, and responsive updates.

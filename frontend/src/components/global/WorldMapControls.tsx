@@ -1,5 +1,5 @@
 /**
- * WorldMapControls Component
+ * WorldMapControls Component.
  *
  * Control panel for the interactive world map including zoom controls,
  * projection selection, and color scheme options.

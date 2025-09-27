@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Dynamic theme management for user preferences
  * PURPOSE: Provide theme switching functionality based on user preferences
- * This enables personalized UI experience with light/dark theme support
+ * This enables personalized UI experience with light/dark theme support.
  */
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';

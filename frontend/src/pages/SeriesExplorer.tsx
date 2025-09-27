@@ -56,7 +56,7 @@ interface EconomicSeries {
 /**
  * REQUIREMENT: Browse and search functionality similar to FRED but more modern
  * PURPOSE: Provide comprehensive search and filtering for economic time series
- * This improves on FRED's search with better filters and modern UI patterns
+ * This improves on FRED's search with better filters and modern UI patterns.
  */
 const SeriesExplorer: React.FC = () => {
   const navigate = useNavigate();

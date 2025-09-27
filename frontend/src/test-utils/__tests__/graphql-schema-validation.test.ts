@@ -1,5 +1,5 @@
 /**
- * GraphQL Schema Validation Tests
+ * GraphQL Schema Validation Tests.
  *
  * This test suite ensures that all GraphQL mock responses conform to the backend schema.
  * It validates that mock data structures match the expected GraphQL types and fields.

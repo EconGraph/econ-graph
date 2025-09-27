@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Test user profile preferences functionality
  * PURPOSE: Verify user preferences can be edited and saved correctly
- * This ensures the preferences UI works as expected
+ * This ensures the preferences UI works as expected.
  */
 
 import React from 'react';

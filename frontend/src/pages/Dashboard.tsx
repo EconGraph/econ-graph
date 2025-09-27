@@ -34,7 +34,7 @@ import { useSeriesSearch } from '../hooks/useSeriesData';
 /**
  * REQUIREMENT: Dashboard overview with Bloomberg Terminal-level collaboration
  * PURPOSE: Provide quick access to key economic indicators with professional collaboration
- * This improves on FRED's homepage by adding institutional-grade collaboration features
+ * This improves on FRED's homepage by adding institutional-grade collaboration features.
  */
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();

@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Comprehensive unit tests for authentication dialog
  * PURPOSE: Test LoginDialog component behavior including error handling and user interactions
- * This ensures proper authentication flow and error message visibility
+ * This ensures proper authentication flow and error message visibility.
  */
 
 import React from 'react';

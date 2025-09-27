@@ -25,7 +25,7 @@ import {
 /**
  * REQUIREMENT: About page explaining the modern application features
  * PURPOSE: Provide information about EconGraph and how it improves on FRED
- * This helps users understand the platform's capabilities and advantages
+ * This helps users understand the platform's capabilities and advantages.
  */
 const About: React.FC = () => {
   const features = [

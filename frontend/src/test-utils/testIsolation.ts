@@ -1,7 +1,7 @@
 /**
  * Test isolation utilities to prevent test pollution
  * PURPOSE: Ensure each test runs in isolation without affecting others
- * This prevents race conditions and state pollution in parallel test execution
+ * This prevents race conditions and state pollution in parallel test execution.
  */
 
 import { vi } from 'vitest';

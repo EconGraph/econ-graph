@@ -1,5 +1,5 @@
 /**
- * Private API Routes for MCP Server Integration
+ * Private API Routes for MCP Server Integration.
  *
  * These routes are only accessible from the backend/MCP server within the private network.
  * They provide chart generation capabilities for the MCP server.
@@ -11,7 +11,7 @@ import { Routes, Route } from 'react-router-dom';
 
 /**
  * Private API Routes Component
- * This component handles private API endpoints that are only accessible from the MCP server
+ * This component handles private API endpoints that are only accessible from the MCP server.
  */
 export function PrivateApiRoutes() {
   return (
@@ -24,7 +24,7 @@ export function PrivateApiRoutes() {
 }
 
 /**
- * Private Chart Generation Endpoint Component
+ * Private Chart Generation Endpoint Component.
  */
 function PrivateChartEndpoint() {
   React.useEffect(() => {
@@ -85,7 +85,7 @@ function PrivateChartEndpoint() {
 }
 
 /**
- * Private Chart Health Check Endpoint Component
+ * Private Chart Health Check Endpoint Component.
  */
 function PrivateChartHealthEndpoint() {
   React.useEffect(() => {
@@ -119,7 +119,7 @@ function PrivateChartHealthEndpoint() {
 
 /**
  * Mock Express.js handler for development
- * In production, this would be handled by the actual Express.js server
+ * In production, this would be handled by the actual Express.js server.
  */
 export const mockPrivateChartHandler = {
   generate: async (request: any) => {

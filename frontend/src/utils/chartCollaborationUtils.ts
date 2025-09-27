@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Pure business logic utilities for chart collaboration
  * PURPOSE: Extract testable business logic from ChartCollaborationConnected component
- * This enables unit testing of core functionality without UI dependencies
+ * This enables unit testing of core functionality without UI dependencies.
  */
 
 import { ChartAnnotationType } from './graphql';
@@ -26,11 +26,11 @@ export interface User {
 export type AnnotationFilter = 'all' | 'mine' | 'pinned';
 
 /**
- * Filter annotations based on filter type and current user
- * @param annotations - Array of annotations to filter
- * @param filterBy - Filter type: 'all', 'mine', or 'pinned'
- * @param currentUserId - Current user ID for 'mine' filter
- * @returns Filtered array of annotations
+ * Filter annotations based on filter type and current user.
+ * @param annotations - Array of annotations to filter.
+ * @param filterBy - Filter type: 'all', 'mine', or 'pinned'.
+ * @param currentUserId - Current user ID for 'mine' filter.
+ * @returns Filtered array of annotations.
  */
 export const filterAnnotations = (
   annotations: ChartAnnotationType[],
@@ -48,10 +48,10 @@ export const filterAnnotations = (
 };
 
 /**
- * Calculate total number of comments across all annotations
- * @param annotations - Array of annotations
- * @param getCommentsForAnnotation - Function to get comments for a specific annotation
- * @returns Total number of comments
+ * Calculate total number of comments across all annotations.
+ * @param annotations - Array of annotations.
+ * @param getCommentsForAnnotation - Function to get comments for a specific annotation.
+ * @returns Total number of comments.
  */
 export const calculateTotalComments = (
   annotations: ChartAnnotationType[],
@@ -64,11 +64,11 @@ export const calculateTotalComments = (
 };
 
 /**
- * Filter active collaborators based on last access time
- * @param collaborators - Array of collaborators
- * @param users - Map of user data
- * @param activeThresholdMs - Threshold in milliseconds for considering a collaborator active (default: 5 minutes)
- * @returns Array of active collaborators
+ * Filter active collaborators based on last access time.
+ * @param collaborators - Array of collaborators.
+ * @param users - Map of user data.
+ * @param activeThresholdMs - Threshold in milliseconds for considering a collaborator active (default: 5 minutes).
+ * @returns Array of active collaborators.
  */
 export const filterActiveCollaborators = (
   collaborators: Collaborator[],
@@ -86,9 +86,14 @@ export const filterActiveCollaborators = (
 };
 
 /**
- * Validate annotation form data
- * @param formData - Annotation form data
- * @returns Validation result with errors
+ * Validate annotation form data.
+ * @param formData - Annotation form data.
+ * @param formData.title
+ * @param formData.content
+ * @param formData.annotationDate
+ * @param formData.annotationValue
+ * @param formData.annotationType
+ * @returns Validation result with errors.
  */
 export const validateAnnotationForm = (formData: {
   title: string;
@@ -126,10 +131,12 @@ export const validateAnnotationForm = (formData: {
 };
 
 /**
- * Validate share form data
- * @param formData - Share form data
- * @param chartId - Chart ID
- * @returns Validation result with errors
+ * Validate share form data.
+ * @param formData - Share form data.
+ * @param formData.targetUserId
+ * @param chartId - Chart ID.
+ * @param formData.permissionLevel
+ * @returns Validation result with errors.
  */
 export const validateShareForm = (
   formData: {
@@ -159,10 +166,17 @@ export const validateShareForm = (
 };
 
 /**
- * Format annotation data for API submission
- * @param formData - Annotation form data
- * @param seriesId - Series ID
- * @returns Formatted data for API
+ * Format annotation data for API submission.
+ * @param formData - Annotation form data.
+ * @param formData.title
+ * @param seriesId - Series ID.
+ * @param formData.content
+ * @param formData.annotationDate
+ * @param formData.annotationValue
+ * @param formData.annotationType
+ * @param formData.color
+ * @param formData.isPublic
+ * @returns Formatted data for API.
  */
 export const formatAnnotationForApi = (
   formData: {
@@ -189,8 +203,8 @@ export const formatAnnotationForApi = (
 };
 
 /**
- * Get default annotation form state
- * @returns Default annotation form data
+ * Get default annotation form state.
+ * @returns Default annotation form data.
  */
 export const getDefaultAnnotationForm = () => ({
   annotationDate: new Date().toISOString().split('T')[0],
@@ -203,8 +217,8 @@ export const getDefaultAnnotationForm = () => ({
 });
 
 /**
- * Get default share form state
- * @returns Default share form data
+ * Get default share form state.
+ * @returns Default share form data.
  */
 export const getDefaultShareForm = () => ({
   targetUserId: '',

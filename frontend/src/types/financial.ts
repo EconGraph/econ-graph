@@ -67,6 +67,8 @@ export interface Company {
   sicDescription?: string;
   gics?: string;
   gicsDescription?: string;
+  industry?: string;
+  sector?: string;
   businessAddress?: any;
   mailingAddress?: any;
   phone?: string;

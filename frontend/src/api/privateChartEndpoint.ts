@@ -1,5 +1,5 @@
 /**
- * Private Chart API Endpoint for MCP Server
+ * Private Chart API Endpoint for MCP Server.
  *
  * This endpoint is only accessible from the backend/MCP server within the private network.
  * It provides chart generation capabilities using the existing frontend charting components.
@@ -10,7 +10,9 @@ import { generateChartConfig, validateChartRequest } from './chartApi';
 
 /**
  * Private chart generation endpoint
- * Only accessible from backend/MCP server (IP whitelist or internal network)
+ * Only accessible from backend/MCP server (IP whitelist or internal network).
+ * @param req
+ * @param res
  */
 export async function handlePrivateChartRequest(req: Request, res: Response): Promise<void> {
   try {
@@ -73,7 +75,9 @@ export async function handlePrivateChartRequest(req: Request, res: Response): Pr
 }
 
 /**
- * Check if request is from internal network (backend/MCP server)
+ * Check if request is from internal network (backend/MCP server).
+ * @param clientIP
+ * @param req
  */
 function isInternalNetworkRequest(clientIP: string, req: Request): boolean {
   // Check for internal network IPs
@@ -110,7 +114,9 @@ function isInternalNetworkRequest(clientIP: string, req: Request): boolean {
 }
 
 /**
- * Check if IP is in CIDR range
+ * Check if IP is in CIDR range.
+ * @param ip
+ * @param cidr
  */
 function isIPInRange(ip: string, cidr: string): boolean {
   if (!cidr.includes('/')) {
@@ -127,14 +133,17 @@ function isIPInRange(ip: string, cidr: string): boolean {
 }
 
 /**
- * Convert IP address to number
+ * Convert IP address to number.
+ * @param ip
  */
 function ipToNumber(ip: string): number {
   return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0);
 }
 
 /**
- * Health check endpoint for MCP server
+ * Health check endpoint for MCP server.
+ * @param req
+ * @param res
  */
 export async function handleChartHealthCheck(req: Request, res: Response): Promise<void> {
   try {

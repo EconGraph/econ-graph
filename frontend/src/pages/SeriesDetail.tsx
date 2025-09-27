@@ -54,7 +54,7 @@ interface SeriesData {
 /**
  * REQUIREMENT: Detailed series view with interactive charts and data transformation options
  * PURPOSE: Provide comprehensive analysis tools for individual economic time series
- * This creates a detailed view similar to FRED's series pages but with modern UX
+ * This creates a detailed view similar to FRED's series pages but with modern UX.
  */
 const SeriesDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();

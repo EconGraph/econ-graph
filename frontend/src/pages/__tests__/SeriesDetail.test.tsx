@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Comprehensive unit tests for SeriesDetail page component
  * PURPOSE: Test detailed series view with interactive charts and data transformation options
- * This ensures the main chart visualization interface works correctly for all series types
+ * This ensures the main chart visualization interface works correctly for all series types.
  */
 
 import React from 'react';
