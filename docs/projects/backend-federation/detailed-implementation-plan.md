@@ -42,12 +42,12 @@ This document breaks down the V1 implementation into specific, actionable todos 
 - [x] **Tests**: Integration tests for Parquet operations
 - [x] **Docs**: Parquet storage configuration guide
 
-#### **1.4 Future Iceberg Integration (V2)**
-- [ ] Design `IcebergStorage` implementation using same `FinancialDataStorage` trait
-- [ ] Plan Iceberg table schema evolution from Arrow schemas
-- [ ] Design migration path from Parquet files to Iceberg tables
-- [ ] **Tests**: Future compatibility tests
-- [ ] **Docs**: V2 migration planning document
+#### **1.4 Future Iceberg Integration (V2)** ✅ **COMPLETED**
+- [x] Design `IcebergStorage` implementation using same `FinancialDataStorage` trait
+- [x] Plan Iceberg table schema evolution from Arrow schemas
+- [x] Design migration path from Parquet files to Iceberg tables
+- [x] **Tests**: Comprehensive Iceberg integration test suite
+- [x] **Docs**: V2 migration planning document
 
 ### **Phase 2: Core Financial Data Service**
 
@@ -247,6 +247,7 @@ storage:
 - ✅ Arrow Flight storage abstraction implemented
 - ✅ Parquet file operations with Arrow RecordBatch support
 - ✅ Comprehensive test suite with monitoring integration
+- ✅ **Iceberg integration design and test suite completed**
 
 **Phase 2: Core Financial Data Service** - **100% COMPLETE**
 - ✅ GraphQL Read API with full CRUD operations
@@ -272,7 +273,7 @@ storage:
 - ⏳ Storage tiering deployment
 - ⏳ Production deployment preparation
 
-### **📊 OVERALL PROGRESS: 65% COMPLETE**
+### **📊 OVERALL PROGRESS: 70% COMPLETE**
 
 ### **🎯 NEXT STEPS**
 
@@ -286,7 +287,13 @@ storage:
 - **Main Service**: `backend/crates/econ-graph-financial-data/`
 - **Implementation Plan**: `docs/projects/backend-federation/detailed-implementation-plan.md`
 - **V1 Plan**: `docs/projects/backend-federation/v1-implementation-plan.md`
-- **Testing Strategy**: `docs/Testing-Strategy.md`
+- **Testing Strategy**: `backend/crates/econ-graph-financial-data/docs/Testing-Strategy.md`
 - **Monitoring Tests**: `backend/crates/econ-graph-financial-data/tests/monitoring_integration_test.rs`
+- **Iceberg Integration Tests**:
+  - `backend/crates/econ-graph-financial-data/tests/iceberg_test_runner.rs`
+  - `backend/crates/econ-graph-financial-data/tests/iceberg_advanced_integration.rs`
+  - `backend/crates/econ-graph-financial-data/tests/iceberg_financial_specific.rs`
+  - `backend/crates/econ-graph-financial-data/tests/iceberg_multi_file_integration.rs`
+- **Iceberg Storage**: `backend/crates/econ-graph-financial-data/src/storage/iceberg_storage.rs`
 
 This plan provides a clear roadmap for implementing the V1 financial data service with comprehensive testing and documentation at every step.
