@@ -46,3 +46,6 @@ bcrypt.workspace = true
 # Decimal handling
 bigdecimal.workspace = true
 rust_decimal.workspace = true
+
+# Security dependencies
+regex.workspace = true
