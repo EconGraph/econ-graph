@@ -1,3 +1,29 @@
+//! # Company Models
+//!
+//! This module provides comprehensive company data models for the `EconGraph` system.
+//! It handles company information, financial metrics, and business intelligence features.
+//!
+//! ## Features
+//!
+//! - **Company Data**: Basic company information and metadata
+//! - **Financial Metrics**: Financial ratios and performance indicators
+//! - **Search & Filtering**: Advanced company search capabilities
+//! - **Peer Analysis**: Company comparison and benchmarking tools
+//! - **SEC Integration**: EDGAR filing and regulatory compliance data
+//!
+//! ## Usage
+//!
+//! ```rust,no_run
+//! use econ_graph_core::models::{Company, NewCompany, CompanyWithFinancials};
+//!
+//! // Create a new company
+//! let company = NewCompany {
+//!     name: "Apple Inc".to_string(),
+//!     ticker: "AAPL".to_string(),
+//!     // ... other fields
+//! };
+//! ```
+
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, NaiveDate, Utc};
 use diesel::prelude::*;
@@ -20,7 +46,7 @@ use crate::schema::companies;
 /// - Providing context for financial statement analysis
 ///
 /// # Database Schema
-/// Maps to the `companies` table in PostgreSQL with comprehensive company information.
+/// Maps to the `companies` table in `PostgreSQL` with comprehensive company information.
 /// Indexes are maintained on `cik`, `ticker`, `name`, `industry`, and `sector` for optimal query performance.
 ///
 /// # Examples
@@ -143,7 +169,7 @@ pub struct Company {
     pub updated_at: DateTime<Utc>,
 }
 
-/// **NewCompany Model**
+/// **`NewCompany` Model**
 ///
 /// Data transfer object for creating new company records in the database.
 /// Excludes auto-generated fields like `id`, `created_at`, and `updated_at`.
@@ -241,7 +267,7 @@ pub struct NewCompany {
     pub is_active: bool,
 }
 
-/// **CompanyWithFinancials Model**
+/// **`CompanyWithFinancials` Model**
 ///
 /// Extended company model that includes financial statement summary information.
 /// Used for company listings and search results that need basic financial context.
@@ -297,7 +323,7 @@ pub struct CompanyWithFinancials {
     pub employee_count: Option<i32>,
 }
 
-/// **CompanySearchParams Model**
+/// **`CompanySearchParams` Model**
 ///
 /// Parameters for searching and filtering companies in the database.
 /// Provides flexible filtering capabilities for company discovery and analysis.
@@ -357,7 +383,7 @@ pub struct CompanySearchParams {
     pub offset: Option<i64>,
 }
 
-/// **CompanyComparisonParams Model**
+/// **`CompanyComparisonParams` Model**
 ///
 /// Parameters for comparing companies across financial metrics.
 /// Enables peer group analysis and benchmarking functionality.
@@ -417,7 +443,7 @@ pub struct CompanyComparisonParams {
     pub include_industry_benchmarks: bool,
 }
 
-/// **CompanyComparisonResult Model**
+/// **`CompanyComparisonResult` Model**
 ///
 /// Result of company comparison analysis.
 /// Contains comparative financial data and analysis insights.
@@ -478,7 +504,7 @@ pub struct CompanyComparisonResult {
     pub generated_at: DateTime<Utc>,
 }
 
-/// **CompanyComparisonMetric Model**
+/// **`CompanyComparisonMetric` Model**
 ///
 /// Individual metric within a company comparison.
 /// Contains values for all companies and benchmark data.

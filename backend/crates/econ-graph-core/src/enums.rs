@@ -1,5 +1,25 @@
-//! Financial data enums for type safety and data integrity
-//! These enums correspond to the PostgreSQL enum types created in the database schema
+//! # Database Enums
+//!
+//! This module provides type-safe enums that correspond to `PostgreSQL` enum types in the database schema.
+//! These enums ensure data integrity and provide compile-time type safety for database operations.
+//!
+//! ## Features
+//!
+//! - **Type Safety**: Compile-time validation of enum values
+//! - **Database Integration**: Direct mapping to `PostgreSQL` enum types
+//! - **Serialization**: Full serde support for JSON serialization
+//! - **Diesel Integration**: Seamless integration with Diesel ORM
+//!
+//! ## Usage
+//!
+//! ```rust,no_run
+//! use econ_graph_core::enums::{CompressionType, FilingType, UserRole};
+//!
+//! // Type-safe enum usage
+//! let compression = CompressionType::Zstd;
+//! let filing_type = FilingType::Form10K;
+//! let role = UserRole::Admin;
+//! ```
 
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};

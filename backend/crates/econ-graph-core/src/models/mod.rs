@@ -1,3 +1,38 @@
+//! # Data Models
+//!
+//! This module contains all data models and database entities for the `EconGraph` system.
+//! It provides type-safe representations of database tables with comprehensive business logic.
+//!
+//! ## Core Models
+//!
+//! - **Economic Data**: Economic series, data points, and financial statements
+//! - **User Management**: Users, authentication, and collaboration features
+//! - **Company Data**: Company information and financial metrics
+//! - **Search & Analysis**: Search functionality and global analysis tools
+//! - **Educational Content**: Learning modules and educational resources
+//!
+//! ## Features
+//!
+//! - **Type Safety**: Compile-time validation of data structures
+//! - **Database Integration**: Seamless Diesel ORM integration
+//! - **Validation**: Input validation with validator crate
+//! - **Serialization**: Full serde support for JSON/API responses
+//! - **Business Logic**: Rich domain models with business rules
+//!
+//! ## Usage
+//!
+//! ```rust,no_run
+//! use econ_graph_core::models::{Company, DataPoint, EconomicSeries};
+//! use econ_graph_core::models::NewCompany;
+//!
+//! // Create a new company
+//! let new_company = NewCompany {
+//!     name: "Apple Inc".to_string(),
+//!     ticker: "AAPL".to_string(),
+//!     // ... other fields
+//! };
+//! ```
+
 pub mod admin;
 pub mod annotation_assignment;
 pub mod annotation_reply;

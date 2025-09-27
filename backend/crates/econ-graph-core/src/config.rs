@@ -1,3 +1,9 @@
+//! # Configuration Management
+//!
+//! This module provides configuration management for the `EconGraph` system.
+//! It handles loading configuration from environment variables and provides
+//! type-safe configuration structures.
+
 use serde::{Deserialize, Serialize};
 use std::env;
 
@@ -49,6 +55,10 @@ pub struct OAuthConfig {
 
 impl Config {
     /// Load configuration from environment variables
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if required environment variables are missing or invalid
     pub fn from_env() -> Result<Self, Box<dyn std::error::Error>> {
         // Load .env file if it exists
         dotenvy::dotenv().ok();

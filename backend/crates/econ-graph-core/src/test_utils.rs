@@ -1,4 +1,29 @@
-//! Test utilities for the econ-graph-core crate
+//! # Test Utilities
+//!
+//! This module provides testing utilities and helpers for the `EconGraph` core crate.
+//! It includes database test containers, test data generators, and testing helpers.
+//!
+//! ## Features
+//!
+//! - **Test Containers**: Ephemeral `PostgreSQL` instances for testing
+//! - **Database Helpers**: Connection management and cleanup utilities
+//! - **Test Data**: Generators for test data and fixtures
+//! - **Async Support**: Full async/await support for testing
+//!
+//! ## Usage
+//!
+//! ```rust,no_run
+//! use econ_graph_core::test_utils::TestContainer;
+//!
+//! #[tokio::test]
+//! async fn test_database_operations() {
+//!     let container = TestContainer::new().await;
+//!     let pool = container.pool();
+//!
+//!     // Use pool for database operations
+//!     // Test will automatically clean up
+//! }
+//! ```
 
 use crate::database::DatabasePool;
 use std::sync::Arc;
@@ -13,6 +38,7 @@ use testcontainers::{Container, ContainerAsync, GenericImage, ImageExt};
 
 /// Test container for database testing
 pub struct TestContainer {
+    /// Database connection pool for the test container
     pool: DatabasePool,
     #[cfg(test)]
     _container: ContainerAsync<GenericImage>,
@@ -20,6 +46,10 @@ pub struct TestContainer {
 
 impl TestContainer {
     /// Create a new test container with ephemeral Postgres
+    ///
+    /// # Panics
+    ///
+    /// Panics if database connection fails
     #[cfg(test)]
     pub async fn new() -> Self {
         println!("DEBUG: Creating TestContainer in test mode");
@@ -90,6 +120,10 @@ impl TestContainer {
     }
 
     /// Create a new test container (non-test version for compatibility)
+    ///
+    /// # Panics
+    ///
+    /// Panics if database connection fails
     #[cfg(not(test))]
     pub async fn new() -> Self {
         let database_url = std::env::var("DATABASE_URL")
@@ -109,6 +143,10 @@ impl TestContainer {
     }
 
     /// Clean the database for testing
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if database cleanup fails
     pub async fn clean_database(&self) -> Result<(), Box<dyn std::error::Error>> {
         use diesel::prelude::*;
         use diesel_async::AsyncPgConnection;

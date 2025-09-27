@@ -1,3 +1,31 @@
+//! # Authentication Models
+//!
+//! This module provides authentication and authorization data structures for the `EconGraph` system.
+//! It defines user models, authentication providers, JWT tokens, and password hashing utilities.
+//!
+//! ## Features
+//!
+//! - **User Management**: Core user data structures with OAuth provider support
+//! - **Authentication**: JWT token generation and validation
+//! - **Authorization**: Role-based access control with user roles
+//! - **Security**: Password hashing with bcrypt and secure token handling
+//!
+//! ## Usage
+//!
+//! ```rust,no_run
+//! use econ_graph_core::auth_models::{User, AuthProvider, UserRole};
+//! use econ_graph_core::auth_models::HashedPassword;
+//!
+//! // Create a new user
+//! let user = User {
+//!     id: uuid::Uuid::new_v4(),
+//!     email: "user@example.com".to_string(),
+//!     name: "John Doe".to_string(),
+//!     provider: AuthProvider::Google,
+//!     // ... other fields
+//! };
+//! ```
+
 /**
  * REQUIREMENT: OAuth authentication models for multi-user collaboration
  * PURPOSE: Define user authentication data structures and JWT tokens
@@ -195,11 +223,21 @@ pub struct PasswordHash {
 }
 
 impl PasswordHash {
+    /// Create a new password hash
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if password hashing fails
     pub fn new(password: &str) -> Result<Self, bcrypt::BcryptError> {
         let hash = bcrypt::hash(password, bcrypt::DEFAULT_COST)?;
         Ok(PasswordHash { hash })
     }
 
+    /// Verify a password against the hash
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if password verification fails
     pub fn verify(&self, password: &str) -> Result<bool, bcrypt::BcryptError> {
         bcrypt::verify(password, &self.hash)
     }
