@@ -73,13 +73,14 @@ This document breaks down the V1 implementation into specific, actionable todos 
 - [x] **Tests**: API endpoint tests with sample data
 - [x] **Docs**: Write API documentation with examples
 
-#### **2.4 Storage Tiering Management**
-- [ ] Implement frequency-based tiering algorithm
-- [ ] Create storage tier configuration system
-- [ ] Add manual tiering controls (hot/warm/cold/archive)
-- [ ] Implement storage cost optimization
-- [ ] **Tests**: Tiering algorithm tests with various access patterns
-- [ ] **Docs**: Storage tiering management and optimization guide
+#### **2.4 Storage Tiering Management** ⏸️ **DEFERRED**
+- ⏸️ **Can function without tiering for prototype phase**
+- ⏸️ Implement frequency-based tiering algorithm
+- ⏸️ Create storage tier configuration system
+- ⏸️ Add manual tiering controls (hot/warm/cold/archive)
+- ⏸️ Implement storage cost optimization
+- ⏸️ **Tests**: Tiering algorithm tests with various access patterns
+- ⏸️ **Docs**: Storage tiering management and optimization guide
 
 ### **Phase 2.5: Crawler File Integration**
 
@@ -159,18 +160,19 @@ This document breaks down the V1 implementation into specific, actionable todos 
 - [ ] **Tests**: Documentation accuracy tests
 - [ ] **Docs**: Complete documentation suite
 
-#### **5.2 Storage Tiering Deployment**
-- [ ] Create Docker Compose setup with MinIO and tiered storage
-- [ ] Configure storage tiers (NVMe, SSD, HDD, S3) in Docker
-- [ ] Set up storage monitoring and alerting
-- [ ] Create storage tiering configuration templates
-- [ ] **Tests**: Docker deployment tests with tiered storage
-- [ ] **Docs**: Docker storage tiering setup and configuration guide
+#### **5.2 Storage Tiering Deployment** ⏸️ **DEFERRED**
+- ⏸️ **Defer until after prototype validation**
+- ⏸️ Create Docker Compose setup with MinIO and tiered storage
+- ⏸️ Configure storage tiers (NVMe, SSD, HDD, S3) in Docker
+- ⏸️ Set up storage monitoring and alerting
+- ⏸️ Create storage tiering configuration templates
+- ⏸️ **Tests**: Docker deployment tests with tiered storage
+- ⏸️ **Docs**: Docker storage tiering setup and configuration guide
 
 #### **5.3 Deployment Preparation**
-- [ ] Create Docker containers for both services
-- [ ] Set up Kubernetes manifests with storage tiering
-- [ ] Create deployment scripts with storage configuration
+- [ ] Create Docker containers for financial data service
+- [ ] Set up basic Kubernetes manifests (without storage tiering)
+- [ ] Create deployment scripts for prototype
 - [ ] **Tests**: Deployment tests in staging environment
 - [ ] **Docs**: Deployment and operations guide
 
@@ -294,8 +296,8 @@ storage:
 
 **Phase 5: Documentation & Deployment** - **25% COMPLETE**
 - ✅ Core documentation completed
-- ⏳ Storage tiering deployment
-- ⏳ Production deployment preparation
+- ⏸️ Storage tiering deployment (deferred)
+- ⏳ Basic production deployment preparation
 
 ### **⏸️ DEFERRED**
 
@@ -304,6 +306,14 @@ storage:
 - ⏸️ Crawler service foundation
 - ⏸️ Raw data management
 - ⏸️ Data transformation pipeline
+
+**Storage Tiering** - **DEFERRED**
+- ⏸️ **Can function without tiering for prototype phase**
+- ⏸️ Frequency-based tiering algorithm
+- ⏸️ Storage tier configuration system
+- ⏸️ Manual tiering controls (hot/warm/cold/archive)
+- ⏸️ Storage cost optimization
+- ⏸️ MinIO and tiered storage deployment
 
 ### **📊 OVERALL PROGRESS: 70% COMPLETE**
 
@@ -363,8 +373,9 @@ storage:
 1. **Complete Cleanup Phase**: Crate organization, cataloging, test refinement
 2. **Implement Phase 2.5**: Crawler file integration with cataloging
 3. **Finish Phase 4**: Add optional federation with main backend
-4. **Complete Phase 5**: Production deployment and storage tiering
+4. **Complete Phase 5**: Basic production deployment (without storage tiering)
 5. **Performance optimization**: Large dataset handling and query optimization
+6. **Future**: Storage tiering and advanced crawler integration (after prototype validation)
 
 ### **🔗 KEY FILES & LINKS**
 
