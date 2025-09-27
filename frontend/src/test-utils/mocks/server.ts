@@ -249,20 +249,39 @@ function createHandlers() {
 
       // Route to appropriate handler based on operation name
       if (extractedOperationName === 'GetFinancialStatement') {
-        const { statementId } = variables || {};
-        let scenario = 'success';
-        if (statementId === 'invalid-statement-id') {
-          scenario = 'not_found';
-        } else if (statementId === 'processing-statement-id') {
-          scenario = 'processing';
-        } else if (statementId === 'error-statement-id') {
-          scenario = 'error';
-        }
+        try {
+          const { statementId } = variables || {};
+          let scenario = 'success';
+          if (statementId === 'invalid-statement-id') {
+            scenario = 'not_found';
+          } else if (statementId === 'processing-statement-id') {
+            scenario = 'processing';
+          } else if (statementId === 'error-statement-id') {
+            scenario = 'error';
+          }
 
-        const response = loadGraphQLResponse('get_financial_statement', scenario);
-        return HttpResponse.json(response, {
-          status: response.errors ? 400 : 200,
-        });
+          if (process.env.MSW_DEBUG) {
+            console.log('🔧 Loading GraphQL response for get_financial_statement:', scenario);
+          }
+
+          const response = loadGraphQLResponse('get_financial_statement', scenario);
+
+          if (process.env.MSW_DEBUG) {
+            console.log('🔧 GraphQL response loaded:', response);
+          }
+
+          return HttpResponse.json(response, {
+            status: response.errors ? 400 : 200,
+          });
+        } catch (error) {
+          if (process.env.MSW_DEBUG) {
+            console.error('🔧 Error in GetFinancialStatement handler:', error);
+          }
+          return HttpResponse.json({
+            data: null,
+            errors: [{ message: 'Internal server error' }]
+          }, { status: 500 });
+        }
       }
 
       if (extractedOperationName === 'GetFinancialDashboard') {

@@ -69,8 +69,7 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
         return result.data;
       } catch (error) {
         console.error('Failed to fetch financial ratios:', error);
-        // Fallback to empty data for development
-        return { financialRatios: [] };
+        throw error;
       }
     },
     {

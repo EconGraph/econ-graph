@@ -35,120 +35,6 @@ import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_STATEMENT } from '../../test-utils/mocks/graphql/financial-queries';
 import { useQuery } from 'react-query';
 
-// Mock data that matches integration test expectations (fallback)
-const mockFinancialStatements = [
-  {
-    id: 'statement-1',
-    companyId: 'test-company-1',
-    filingType: '10-K',
-    formType: '10-K',
-    accessionNumber: '0001234567-23-000001',
-    filingDate: '2023-12-31',
-    periodEndDate: '2023-12-31',
-    fiscalYear: 2023,
-    fiscalQuarter: 4,
-    documentType: 'balanceSheet',
-    documentUrl: 'https://example.com/statement-1',
-    xbrlProcessingStatus: 'completed',
-    isAmended: false,
-    isRestated: false,
-    lineItems: [
-      {
-        id: 'item-1',
-        statementId: 'statement-1',
-        taxonomyConcept: 'Assets',
-        standardLabel: 'Total Assets',
-        value: 352755000000,
-        unit: 'USD',
-        contextRef: 'context-1',
-        statementType: 'balanceSheet',
-        statementSection: 'assets',
-        isCalculated: false,
-        createdAt: '2023-12-31T00:00:00Z',
-        updatedAt: '2023-12-31T00:00:00Z',
-      },
-      {
-        id: 'item-2',
-        statementId: 'statement-1',
-        taxonomyConcept: 'AssetsCurrent',
-        standardLabel: 'Current Assets',
-        value: 143566000000,
-        unit: 'USD',
-        contextRef: 'context-1',
-        statementType: 'balanceSheet',
-        statementSection: 'assets',
-        isCalculated: false,
-        parentConcept: 'Assets',
-        createdAt: '2023-12-31T00:00:00Z',
-        updatedAt: '2023-12-31T00:00:00Z',
-      },
-      {
-        id: 'item-3',
-        statementId: 'statement-1',
-        taxonomyConcept: 'Liabilities',
-        standardLabel: 'Total Liabilities',
-        value: 258549000000,
-        unit: 'USD',
-        contextRef: 'context-1',
-        statementType: 'balanceSheet',
-        statementSection: 'liabilities',
-        isCalculated: false,
-        createdAt: '2023-12-31T00:00:00Z',
-        updatedAt: '2023-12-31T00:00:00Z',
-      },
-    ],
-    createdAt: '2023-12-31T00:00:00Z',
-    updatedAt: '2023-12-31T00:00:00Z',
-  },
-  {
-    id: 'statement-2',
-    companyId: 'test-company-1',
-    filingType: '10-K',
-    formType: '10-K',
-    accessionNumber: '0001234567-23-000002',
-    filingDate: '2023-12-31',
-    periodEndDate: '2023-12-30',
-    fiscalYear: 2023,
-    fiscalQuarter: 4,
-    documentType: 'incomeStatement',
-    documentUrl: 'https://example.com/statement-2',
-    xbrlProcessingStatus: 'completed',
-    isAmended: false,
-    isRestated: false,
-    lineItems: [
-      {
-        id: 'item-5',
-        statementId: 'statement-2',
-        taxonomyConcept: 'Revenues',
-        standardLabel: 'Net Sales',
-        value: 383285000000,
-        unit: 'USD',
-        contextRef: 'context-2',
-        statementType: 'incomeStatement',
-        statementSection: 'revenue',
-        isCalculated: false,
-        createdAt: '2023-12-31T00:00:00Z',
-        updatedAt: '2023-12-31T00:00:00Z',
-      },
-      {
-        id: 'item-6',
-        statementId: 'statement-2',
-        taxonomyConcept: 'NetIncomeLoss',
-        standardLabel: 'Net Income',
-        value: 96995000000,
-        unit: 'USD',
-        contextRef: 'context-2',
-        statementType: 'incomeStatement',
-        statementSection: 'income',
-        isCalculated: false,
-        createdAt: '2023-12-31T00:00:00Z',
-        updatedAt: '2023-12-31T00:00:00Z',
-      },
-    ],
-    createdAt: '2023-12-31T00:00:00Z',
-    updatedAt: '2023-12-31T00:00:00Z',
-  },
-];
 
 // GraphQL hooks for real data fetching
 const useFinancialStatementQuery = (statementId: string) => {
@@ -163,14 +49,7 @@ const useFinancialStatementQuery = (statementId: string) => {
         return result.data;
       } catch (error) {
         console.error('Failed to fetch financial statement:', error);
-        // Fallback to mock data
-        const selectedStatement =
-          mockFinancialStatements.find(s => s.id === statementId) || mockFinancialStatements[0];
-        return {
-          financialStatement: selectedStatement,
-          financialRatios: [],
-          annotations: [],
-        };
+        throw error;
       }
     },
     {

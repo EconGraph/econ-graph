@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useQuery } from 'react-query';
+import { executeGraphQL } from '../../utils/graphql';
+import { GET_FINANCIAL_ALERTS } from '../../test-utils/mocks/graphql/financial-queries';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -76,90 +79,40 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isEmpty, setIsEmpty] = useState<boolean>(false);
 
-  // Mock alerts data - in real implementation, this would come from API
-  useEffect(() => {
-    // Simulate different states based on companyId for testing
-    let mockAlerts: FinancialAlert[] = [];
-
-    if (companyId === 'empty-company') {
-      // Empty state for testing
-      mockAlerts = [];
-    } else if (companyId === 'loading-company') {
-      // Keep loading state for testing
-      setIsLoading(true);
-      return;
-    } else {
-      // Normal data
-      mockAlerts = [
-        {
-          id: '1',
-          type: 'ratio_threshold',
-          severity: 'high',
-          title: 'Current Ratio Below Threshold',
-          description: 'Current ratio of 0.95 is below the recommended threshold of 1.0',
-          companyId,
-          companyName: 'Apple Inc.',
-          ratioName: 'currentRatio',
-          currentValue: 1.04,
-          thresholdValue: 1.5,
-          direction: 'decline',
-          isActive: true,
-          isRead: false,
-          createdAt: '2024-01-15T10:30:00Z',
-          triggeredAt: '2024-01-15T10:30:00Z',
-        },
-        {
-          id: '2',
-          type: 'trend_change',
-          severity: 'medium',
-          title: 'ROE Trend Reversal Detected',
-          description:
-            'Return on Equity has declined for 3 consecutive quarters, from 16.2% to 14.7%.',
-          companyId,
-          companyName: 'Apple Inc.',
-          ratioName: 'returnOnEquity',
-          currentValue: 0.147,
-          direction: 'change',
-          isActive: true,
-          isRead: false,
-          createdAt: '2024-01-14T15:45:00Z',
-          triggeredAt: '2024-01-14T15:45:00Z',
-        },
-        {
-          id: '3',
-          type: 'data_quality',
-          severity: 'medium',
-          title: 'Data Quality Warning',
-          description: 'Some financial data has low confidence scores',
-          companyId,
-          companyName: 'Apple Inc.',
-          direction: 'change',
-          isActive: true,
-          isRead: true,
-          createdAt: '2024-01-10T09:00:00Z',
-        },
-        {
-          id: '4',
-          type: 'filing_deadline',
-          severity: 'low',
-          title: '10-Q Filing Due Soon',
-          description:
-            'Quarterly report (10-Q) is due within 5 business days. Ensure all financial data is ready.',
-          companyId,
-          companyName: 'Apple Inc.',
-          direction: 'improvement',
-          isActive: false,
-          isRead: true,
-          createdAt: '2024-01-08T16:00:00Z',
-          expiresAt: '2024-01-25T23:59:59Z',
-        },
-      ];
+  // Use GraphQL query for alerts data
+  const { data: alertsData, isLoading: alertsLoading, error: alertsError } = useQuery(
+    ['financial-alerts', companyId],
+    async () => {
+      try {
+        const result = await executeGraphQL({
+          query: GET_FINANCIAL_ALERTS,
+          variables: { companyId },
+        });
+        return result.data;
+      } catch (error) {
+        console.error('Failed to fetch financial alerts:', error);
+        throw error;
+      }
+    },
+    {
+      staleTime: 5 * 60 * 1000, // 5 minutes
     }
+  );
 
-    setAlerts(mockAlerts);
-    setIsLoading(false);
-    setIsEmpty(mockAlerts.length === 0);
-  }, [companyId]);
+  useEffect(() => {
+    if (alertsData) {
+      setAlerts(alertsData.financialAlerts || []);
+      setIsLoading(false);
+      setIsEmpty((alertsData.financialAlerts || []).length === 0);
+    }
+  }, [alertsData]);
+
+  useEffect(() => {
+    if (alertsError) {
+      setIsLoading(false);
+      setIsEmpty(true);
+    }
+  }, [alertsError]);
 
   // Filter and sort alerts
   const filteredAlerts = useMemo(() => {
