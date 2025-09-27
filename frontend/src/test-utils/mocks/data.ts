@@ -2,7 +2,7 @@
 // PURPOSE: Provide realistic test data that matches the GraphQL schema
 // This ensures components receive properly structured data during testing
 
-import { SeriesSearchResult, SearchSuggestion } from '../../hooks/useSeriesData';
+import { SeriesSearchResult } from '../../hooks/useSeriesData';
 
 /**
  * Mock economic series data for testing
@@ -21,7 +21,7 @@ export const mockSeriesData = [
     frequency: 'Quarterly',
     units: 'Billions of Chained 2017 Dollars',
     startDate: '1947-01-01',
-    endDate: undefined,
+    endDate: '2023-12-31',
     lastUpdated: '2024-01-15T10:30:00Z',
     isActive: true,
     seasonalAdjustment: 'Seasonally Adjusted Annual Rate',
@@ -38,7 +38,7 @@ export const mockSeriesData = [
     frequency: 'Monthly',
     units: 'Percent',
     startDate: '1948-01-01',
-    endDate: undefined,
+    endDate: '2023-12-31',
     lastUpdated: '2024-01-05T08:15:00Z',
     isActive: true,
     seasonalAdjustment: 'Seasonally Adjusted',
@@ -55,7 +55,7 @@ export const mockSeriesData = [
     frequency: 'Monthly',
     units: 'Index 1982-1984=100',
     startDate: '1947-01-01',
-    endDate: undefined,
+    endDate: '2023-12-31',
     lastUpdated: '2024-01-12T09:00:00Z',
     isActive: true,
     seasonalAdjustment: 'Not Seasonally Adjusted',
@@ -103,7 +103,7 @@ export const mockSearchResults: SeriesSearchResult[] = [
     frequency: 'Quarterly',
     units: 'Billions of Chained 2017 Dollars',
     startDate: '1947-01-01',
-    endDate: undefined,
+    endDate: '2023-12-31',
     lastUpdated: '2024-01-15T10:30:00Z',
     isActive: true,
     rank: 0.95,
@@ -118,7 +118,7 @@ export const mockSearchResults: SeriesSearchResult[] = [
     frequency: 'Quarterly',
     units: 'Billions of Dollars',
     startDate: '1947-01-01',
-    endDate: undefined,
+    endDate: '2023-12-31',
     lastUpdated: '2024-01-15T10:30:00Z',
     isActive: true,
     rank: 0.88,
@@ -133,7 +133,7 @@ export const mockSearchResults: SeriesSearchResult[] = [
     frequency: 'Monthly',
     units: 'Percent',
     startDate: '1948-01-01',
-    endDate: undefined,
+    endDate: '2023-12-31',
     lastUpdated: '2024-01-05T08:15:00Z',
     isActive: true,
     rank: 0.82,
@@ -145,39 +145,16 @@ export const mockSearchResults: SeriesSearchResult[] = [
  * Mock search suggestions for autocomplete testing
  * REQUIREMENT: Search suggestions with different types and confidence scores
  */
-export const mockSuggestions: SearchSuggestion[] = [
-  {
-    suggestion: 'Gross Domestic Product',
-    matchCount: 15,
-    suggestionType: 'COMPLETION',
-    confidence: 0.95,
-  },
-  {
-    suggestion: 'GDP',
-    matchCount: 25,
-    suggestionType: 'COMPLETION',
-    confidence: 0.9,
-  },
-  {
-    suggestion: 'Employment',
-    matchCount: 45,
-    suggestionType: 'COMPLETION',
-    confidence: 0.85,
-  },
-  {
-    suggestion: 'Unemployment Rate',
-    matchCount: 8,
-    suggestionType: 'CORRECTION',
-    confidence: 0.75,
-  },
-  {
-    suggestion: 'Consumer Price Index',
-    matchCount: 12,
-    suggestionType: 'RELATED',
-    confidence: 0.8,
-  },
+export const mockSuggestions: string[] = [
+  'Gross Domestic Product',
+  'GDP',
+  'Employment',
+  'Unemployment Rate',
+  'Consumer Price Index',
+  'Interest Rate',
+  'Federal Funds Rate',
+  'Inflation Rate',
 ];
-
 /**
  * Mock data points for chart testing
  * REQUIREMENT: Time series data points with various scenarios

@@ -132,7 +132,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       target: builder
-    command: npm test -- --watchAll=false --coverage
+    command: npm test -- --coverage
     volumes:
       - ./frontend:/app
       - node_modules_cache:/app/node_modules

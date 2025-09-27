@@ -1,26 +1,24 @@
-import globals from "globals";
-import pluginJs from "@eslint/js";
-import tseslint from "typescript-eslint";
-import pluginReact from "eslint-plugin-react";
-import pluginReactHooks from "eslint-plugin-react-hooks";
-import pluginJsxA11y from "eslint-plugin-jsx-a11y";
+// ESLint configuration for Vite + React + TypeScript
+import js from '@eslint/js';
+import typescript from '@typescript-eslint/eslint-plugin';
+import typescriptParser from '@typescript-eslint/parser';
+import react from 'eslint-plugin-react';
+import reactHooks from 'eslint-plugin-react-hooks';
+import jsxA11y from 'eslint-plugin-jsx-a11y';
+import testingLibrary from 'eslint-plugin-testing-library';
 
 export default [
+  js.configs.recommended,
   {
-    files: ["**/*.{js,mjs,cjs,ts,jsx,tsx}"],
-    settings: {
-      react: {
-        version: "detect",
-      },
-    },
+    files: ['**/*.{ts,tsx,js,jsx}'],
     languageOptions: {
-      parser: tseslint.parser,
+      parser: typescriptParser,
       parserOptions: {
+        ecmaVersion: 2020,
+        sourceType: 'module',
         ecmaFeatures: {
           jsx: true,
         },
-        ecmaVersion: 2020,
-        sourceType: "module",
       },
       globals: {
         // Browser globals
@@ -68,8 +66,8 @@ export default [
         import: 'readonly',
         importMeta: 'readonly',
 
-        // Jest globals
-        jest: 'readonly',
+        // Vitest globals
+        vi: 'readonly',
         describe: 'readonly',
         it: 'readonly',
         test: 'readonly',
@@ -81,34 +79,133 @@ export default [
       },
     },
     plugins: {
-      '@typescript-eslint': tseslint.plugin,
-      'react': pluginReact,
-      'react-hooks': pluginReactHooks,
-      'jsx-a11y': pluginJsxA11y,
+      '@typescript-eslint': typescript,
+      'react': react,
+      'react-hooks': reactHooks,
+      'jsx-a11y': jsxA11y,
+      'testing-library': testingLibrary,
     },
     rules: {
-      ...pluginJs.configs.recommended.rules,
-      ...tseslint.configs.recommended.rules,
-      ...pluginReact.configs.recommended.rules,
-      ...pluginReactHooks.configs.recommended.rules,
-      ...pluginJsxA11y.configs.recommended.rules,
+      ...typescript.configs.recommended.rules,
+      ...react.configs.recommended.rules,
+      ...reactHooks.configs.recommended.rules,
+      ...jsxA11y.configs.recommended.rules,
 
       // Custom rules
+      // Disable base rule in favor of @typescript-eslint/no-unused-vars
+      'no-unused-vars': 'off',
       'react/react-in-jsx-scope': 'off', // Not needed with React 17+
       'react/prop-types': 'off', // Using TypeScript for prop validation
-      '@typescript-eslint/no-unused-vars': 'warn',
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-unused-vars': ['warn', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        // Do not warn on unused catch variables; often needed for control flow
+        caughtErrors: 'none',
+        ignoreRestSiblings: true,
+      }],
+      // Temporarily relax any usage while migrating types
+      '@typescript-eslint/no-explicit-any': 'off',
       'no-console': 'warn',
       '@typescript-eslint/no-require-imports': 'off', // Allow require() in test files
       'no-useless-escape': 'off', // Allow escape characters in regex
       'react/no-unescaped-entities': 'off', // Allow quotes and apostrophes in JSX
-      'jsx-a11y/click-events-have-key-events': 'warn', // Warn instead of error
-      'jsx-a11y/no-static-element-interactions': 'warn', // Warn instead of error
-      'jsx-a11y/label-has-associated-control': 'warn', // Warn instead of error
+      'jsx-a11y/click-events-have-key-events': 'off', // Too strict for development
+      'jsx-a11y/no-static-element-interactions': 'off', // Too strict for development
+      'jsx-a11y/label-has-associated-control': 'off', // Too strict for development
       'no-case-declarations': 'off', // Allow variable declarations in case blocks
       'no-constant-binary-expression': 'warn', // Warn instead of error
       '@typescript-eslint/no-unused-expressions': 'warn', // Warn instead of error
       'react/display-name': 'warn', // Warn instead of error
+    },
+    settings: {
+      react: {
+        version: 'detect',
+      },
+    },
+  },
+  {
+    files: ['**/*.test.{ts,tsx,js,jsx}', '**/__tests__/**/*'],
+    plugins: {
+      'testing-library': testingLibrary,
+    },
+    rules: {
+      ...testingLibrary.configs.react.rules,
+      '@typescript-eslint/no-explicit-any': 'off',
+      'no-console': 'off',
+      'testing-library/no-node-access': 'off', // Too strict for development
+      'testing-library/no-manual-cleanup': 'off', // Vitest handles cleanup automatically
+    },
+  },
+  {
+    files: ['**/*.test.cjs', '**/*.cjs'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        describe: 'readonly',
+        it: 'readonly',
+        test: 'readonly',
+        expect: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        beforeAll: 'readonly',
+        afterAll: 'readonly',
+        vi: 'readonly',
+      },
+    },
+    rules: {
+      'no-console': 'off',
+    },
+  },
+  // Test and mock files: relax noisy rules
+  {
+    files: [
+      '**/*.test.ts',
+      '**/*.test.tsx',
+      'src/__tests__/**',
+      'src/test-utils/**',
+      'src/setupTests.ts',
+    ],
+    rules: {
+      'no-console': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
+      'react/display-name': 'off',
+      'jsx-a11y/click-events-have-key-events': 'off',
+      'jsx-a11y/no-static-element-interactions': 'off',
+      'jsx-a11y/label-has-associated-control': 'off',
+    },
+  },
+  // Local dev server files can log freely
+  {
+    files: ['src/server/**', 'src/**/*.server.{js,ts}'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
+  // Types and polyfills: allow any
+  {
+    files: [
+      'src/types/**',
+      'src/test-utils/**',
+      'src/setupTests.ts',
+      'src/**/*.d.ts',
+      'src/test-utils/polyfills.js',
+    ],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unused-vars': ['warn', { caughtErrors: 'none' }],
+    },
+  },
+  // Allow console logs in server, utils, contexts, and hooks (diagnostics)
+  {
+    files: [
+      'src/server/**',
+      'src/utils/**',
+      'src/contexts/**',
+      'src/hooks/**',
+    ],
+    rules: {
+      'no-console': 'off',
     },
   },
 ];

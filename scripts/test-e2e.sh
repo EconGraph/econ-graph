@@ -139,7 +139,7 @@ run_frontend_tests() {
 
     # Run frontend integration tests
     print_step "Executing frontend end-to-end tests..."
-    npm test -- --testPathPattern="e2e-integration" --watchAll=false --coverage=false || {
+    npm test -- --testNamePattern="e2e-integration" --coverage=false || {
         print_error "Frontend integration tests failed"
         return 1
     }
@@ -180,7 +180,7 @@ run_combined_tests() {
     export REACT_APP_GRAPHQL_ENDPOINT=http://localhost:9876/graphql
 
     print_step "Running frontend tests against live backend..."
-    npm test -- --testPathPattern="e2e-integration" --watchAll=false || {
+    npm test -- --testNamePattern="e2e-integration" || {
         print_error "Combined integration tests failed"
         kill $BACKEND_PID 2>/dev/null
         return 1

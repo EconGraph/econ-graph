@@ -323,13 +323,13 @@ jobs:
       working-directory: frontend
       run: |
         echo "Running accessibility runtime tests on frontend..."
-        npm test -- --config=jest.config.accessibility.js --coverage --watchAll=false --testPathPattern="accessibility" || echo "Accessibility tests completed with results"
+        npm test -- --config=jest.config.accessibility.js --coverage --testNamePattern="accessibility" || echo "Accessibility tests completed with results"
 
     - name: Run accessibility runtime tests on admin-frontend
       working-directory: admin-frontend
       run: |
         echo "Running accessibility runtime tests on admin-frontend..."
-        npm test -- --config=jest.config.accessibility.js --coverage --watchAll=false --testPathPattern="accessibility" || echo "Accessibility tests completed with results"
+        npm test -- --config=jest.config.accessibility.js --coverage --testNamePattern="accessibility" || echo "Accessibility tests completed with results"
 
     - name: Upload accessibility test results
       uses: actions/upload-artifact@v4
