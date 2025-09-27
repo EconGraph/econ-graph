@@ -73,10 +73,11 @@ global.IntersectionObserver = vi.fn().mockImplementation(() => ({
   disconnect: vi.fn(),
 }));
 
-// Mock crypto.randomUUID
+// Mock crypto.randomUUID and crypto.random
 Object.defineProperty(global, "crypto", {
   value: {
     randomUUID: vi.fn(() => "mock-uuid-1234"),
+    random: vi.fn(() => new Uint8Array([1, 2, 3, 4, 5])),
   },
 });
 

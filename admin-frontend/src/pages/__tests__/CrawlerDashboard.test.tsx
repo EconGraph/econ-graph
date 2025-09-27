@@ -16,40 +16,12 @@ import { ThemeProvider, createTheme } from "@mui/material/styles";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
-import CrawlerDashboard from "../CrawlerDashboard";
 
-// Mock Material-UI theme
-const theme = createTheme();
-
-// Mock date-fns format function
-vi.mock("date-fns", () => ({
-  format: vi.fn((_date, formatStr) => {
-    if (formatStr === "MMM dd, HH:mm") {
-      return "Jan 01, 12:00";
-    }
-    return "12:00:00.000";
-  }),
-}));
-
-// Mock console methods to avoid noise in tests
-const originalConsoleError = console.error;
-const originalConsoleWarn = console.warn;
-
-beforeAll(() => {
-  console.error = vi.fn();
-  console.warn = vi.fn();
-});
-
-afterAll(() => {
-  console.error = originalConsoleError;
-  console.warn = originalConsoleWarn;
-});
-
-// Mock useCrawlerData to disable auto-refresh and prevent infinite loops
+// Mock useCrawlerData BEFORE importing CrawlerDashboard
 vi.mock("../../hooks/useCrawlerData", () => ({
   useCrawlerData: vi.fn(() => {
     console.log("MOCK useCrawlerData called!");
-    return {
+    const mockData = {
       status: {
         status: {
           is_running: true,
@@ -121,8 +93,38 @@ vi.mock("../../hooks/useCrawlerData", () => ({
       loading: false,
       error: null,
     };
+    return mockData;
   }),
 }));
+
+import CrawlerDashboard from "../CrawlerDashboard";
+
+// Mock Material-UI theme
+const theme = createTheme();
+
+// Mock date-fns format function
+vi.mock("date-fns", () => ({
+  format: vi.fn((_date, formatStr) => {
+    if (formatStr === "MMM dd, HH:mm") {
+      return "Jan 01, 12:00";
+    }
+    return "12:00:00.000";
+  }),
+}));
+
+// Mock console methods to avoid noise in tests
+const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
+
+beforeAll(() => {
+  console.error = vi.fn();
+  console.warn = vi.fn();
+});
+
+afterAll(() => {
+  console.error = originalConsoleError;
+  console.warn = originalConsoleWarn;
+});
 
 // Create a single QueryClient for all tests to avoid performance issues
 const createTestQueryClient = () =>

@@ -415,7 +415,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                   </TableHead>
                   <TableBody>
                     {/* Real GraphQL log data */}
-                    {logs.logs?.map((log: any, index: number) => (
+                    {logs?.logs?.map((log: any, index: number) => (
                       <TableRow key={log.id || index}>
                         <TableCell>
                           <FormattedDate
@@ -452,7 +452,7 @@ const CrawlerDashboard: React.FC<CrawlerDashboardProps> = () => {
                         </TableCell>
                       </TableRow>
                     ))}
-                    {(!logs.logs || logs.logs.length === 0) && (
+                    {(!logs?.logs || logs.logs.length === 0) && (
                       <TableRow>
                         <TableCell colSpan={6} align="center">
                           <Typography variant="body2" color="text.secondary">
