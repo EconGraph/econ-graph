@@ -3,12 +3,20 @@
 
 import '@testing-library/jest-dom';
 import { beforeAll, afterEach, afterAll, vi } from 'vitest';
-import { server } from './test-utils/mocks/server';
+import { setupSimpleMSW, cleanupSimpleMSW } from './test-utils/mocks/simpleServer';
 
 // Start MSW server for all tests
-beforeAll(() => server.listen());
-afterEach(() => server.resetHandlers());
-afterAll(() => server.close());
+beforeAll(async () => {
+  await setupSimpleMSW();
+});
+afterEach(async () => {
+  // Reset to success scenario after each test
+  const { setMockScenario, MockScenarios } = await import('./test-utils/mocks/simpleServer');
+  setMockScenario(MockScenarios.SUCCESS);
+});
+afterAll(async () => {
+  await cleanupSimpleMSW();
+});
 
 // Polyfill for Node.js environment
 import { TextEncoder, TextDecoder } from 'util';
