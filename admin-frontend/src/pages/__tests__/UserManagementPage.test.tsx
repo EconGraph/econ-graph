@@ -25,6 +25,7 @@ import {
   afterAll,
 } from "vitest";
 // MSW is already set up in setupTests.ts - no need to import setMockScenario
+import { useAuth } from "../../contexts/AuthContext";
 import UserManagementPage from "../UserManagementPage";
 
 // Mock Material-UI theme
@@ -120,6 +121,48 @@ describe("UserManagementPage", () => {
 
   afterAll(() => {
     testQueryClient.clear();
+  });
+
+  describe("Access Control", () => {
+    it("allows access for super_admin users", () => {
+      renderWithTheme(<UserManagementPage />);
+
+      expect(screen.getByText("User Management")).toBeInTheDocument();
+      expect(
+        screen.getByText("Manage system users and their permissions."),
+      ).toBeInTheDocument();
+    });
+
+    it("denies access for non-super_admin users", () => {
+      // Mock a regular user context
+      vi.mocked(useAuth).mockReturnValue({
+        user: {
+          id: "test-user",
+          username: "admin",
+          email: "admin@example.com",
+          role: "admin", // Changed from super_admin to admin
+          permissions: ["read"],
+          lastLogin: new Date().toISOString(),
+          sessionExpiry: new Date(Date.now() + 3600000).toISOString(),
+        },
+        isAuthenticated: true,
+        loading: false,
+        sessionWarning: false,
+        login: vi.fn(),
+        logout: vi.fn(),
+        refreshSession: vi.fn(),
+        extendSession: vi.fn(),
+      });
+
+      renderWithTheme(<UserManagementPage />);
+
+      expect(screen.getByText("Access Denied")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "You need super_admin privileges to access user management.",
+        ),
+      ).toBeInTheDocument();
+    });
   });
 
   describe("Basic Rendering", () => {

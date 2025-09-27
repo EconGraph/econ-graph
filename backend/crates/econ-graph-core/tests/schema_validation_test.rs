@@ -7,8 +7,8 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use imara_diff::{Algorithm, UnifiedDiffBuilder};
 use std::fs;
 use std::process::Command;
-use testcontainers::{runners::AsyncRunner, ContainerAsync};
-use testcontainers_modules::postgres::Postgres;
+use testcontainers::core::WaitFor;
+use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage, ImageExt};
 
 // Embed migrations at compile time
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("../../migrations/");
@@ -24,11 +24,14 @@ pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("../../migrations/"
 #[tokio::test]
 async fn test_schema_compatibility() {
     // Start PostgreSQL container
-    let postgres_image = Postgres::default()
-        .with_db_name("test_econ_graph")
-        .with_user("test_user")
-        .with_password("test_password");
-    let container: ContainerAsync<Postgres> = postgres_image
+    let postgres_image = GenericImage::new("postgres", "18")
+        .with_wait_for(WaitFor::message_on_stdout(
+            "database system is ready to accept connections",
+        ))
+        .with_env_var("POSTGRES_DB", "test_econ_graph")
+        .with_env_var("POSTGRES_USER", "test_user")
+        .with_env_var("POSTGRES_PASSWORD", "test_password");
+    let container: ContainerAsync<GenericImage> = postgres_image
         .start()
         .await
         .expect("Failed to start container");
@@ -180,11 +183,14 @@ fn find_schema_differences(schema1: &str, schema2: &str) -> Vec<String> {
 #[tokio::test]
 async fn test_schema_generation_process() {
     // Start PostgreSQL container
-    let postgres_image = Postgres::default()
-        .with_db_name("test_econ_graph")
-        .with_user("test_user")
-        .with_password("test_password");
-    let container: ContainerAsync<Postgres> = postgres_image
+    let postgres_image = GenericImage::new("postgres", "18")
+        .with_wait_for(WaitFor::message_on_stdout(
+            "database system is ready to accept connections",
+        ))
+        .with_env_var("POSTGRES_DB", "test_econ_graph")
+        .with_env_var("POSTGRES_USER", "test_user")
+        .with_env_var("POSTGRES_PASSWORD", "test_password");
+    let container: ContainerAsync<GenericImage> = postgres_image
         .start()
         .await
         .expect("Failed to start container");
@@ -237,11 +243,14 @@ async fn test_schema_generation_process() {
 #[tokio::test]
 async fn test_migration_application() {
     // Start PostgreSQL container
-    let postgres_image = Postgres::default()
-        .with_db_name("test_econ_graph")
-        .with_user("test_user")
-        .with_password("test_password");
-    let container: ContainerAsync<Postgres> = postgres_image
+    let postgres_image = GenericImage::new("postgres", "18")
+        .with_wait_for(WaitFor::message_on_stdout(
+            "database system is ready to accept connections",
+        ))
+        .with_env_var("POSTGRES_DB", "test_econ_graph")
+        .with_env_var("POSTGRES_USER", "test_user")
+        .with_env_var("POSTGRES_PASSWORD", "test_password");
+    let container: ContainerAsync<GenericImage> = postgres_image
         .start()
         .await
         .expect("Failed to start container");
@@ -280,11 +289,14 @@ async fn test_migration_application() {
 #[tokio::test]
 async fn test_schema_compatibility_comparison() {
     // Start PostgreSQL container
-    let postgres_image = Postgres::default()
-        .with_db_name("test_econ_graph")
-        .with_user("test_user")
-        .with_password("test_password");
-    let container: ContainerAsync<Postgres> = postgres_image
+    let postgres_image = GenericImage::new("postgres", "18")
+        .with_wait_for(WaitFor::message_on_stdout(
+            "database system is ready to accept connections",
+        ))
+        .with_env_var("POSTGRES_DB", "test_econ_graph")
+        .with_env_var("POSTGRES_USER", "test_user")
+        .with_env_var("POSTGRES_PASSWORD", "test_password");
+    let container: ContainerAsync<GenericImage> = postgres_image
         .start()
         .await
         .expect("Failed to start container");

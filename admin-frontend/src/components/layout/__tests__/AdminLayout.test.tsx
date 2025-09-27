@@ -12,6 +12,8 @@ import {
 } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
+import { AuthProvider } from "../../../contexts/AuthContext";
+import { SecurityProvider } from "../../../contexts/SecurityContext";
 import { vi } from "vitest";
 import AdminLayout from "../AdminLayout";
 
@@ -46,7 +48,11 @@ const theme = createTheme();
 // Test wrapper component - simplified
 const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <BrowserRouter>
-    <ThemeProvider theme={theme}>{children}</ThemeProvider>
+    <ThemeProvider theme={theme}>
+      <AuthProvider>
+        <SecurityProvider>{children}</SecurityProvider>
+      </AuthProvider>
+    </ThemeProvider>
   </BrowserRouter>
 );
 

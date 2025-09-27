@@ -92,11 +92,20 @@ export default [
       ...jsxA11y.configs.recommended.rules,
 
       // Custom rules
+      // Disable base rule in favor of @typescript-eslint/no-unused-vars
+      'no-unused-vars': 'off',
       'react/react-in-jsx-scope': 'off', // Not needed with React 17+
       'react/prop-types': 'off', // Using TypeScript for prop validation
-      '@typescript-eslint/no-unused-vars': 'off', // Too many unused vars in development
-      '@typescript-eslint/no-explicit-any': 'off', // Allow any types for now
-      'no-console': 'off', // Allow console statements in development
+      '@typescript-eslint/no-unused-vars': ['warn', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        // Do not warn on unused catch variables; often needed for control flow
+        caughtErrors: 'none',
+        ignoreRestSiblings: true,
+      }],
+      // Temporarily relax any usage while migrating types
+      '@typescript-eslint/no-explicit-any': 'off',
+      'no-console': 'warn',
       '@typescript-eslint/no-require-imports': 'off', // Allow require() in test files
       'no-useless-escape': 'off', // Allow escape characters in regex
       'react/no-unescaped-entities': 'off', // Allow quotes and apostrophes in JSX
@@ -144,6 +153,57 @@ export default [
         vi: 'readonly',
       },
     },
+    rules: {
+      'no-console': 'off',
+    },
+  },
+  // Test and mock files: relax noisy rules
+  {
+    files: [
+      '**/*.test.ts',
+      '**/*.test.tsx',
+      'src/__tests__/**',
+      'src/test-utils/**',
+      'src/setupTests.ts',
+    ],
+    rules: {
+      'no-console': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
+      'react/display-name': 'off',
+      'jsx-a11y/click-events-have-key-events': 'off',
+      'jsx-a11y/no-static-element-interactions': 'off',
+      'jsx-a11y/label-has-associated-control': 'off',
+    },
+  },
+  // Local dev server files can log freely
+  {
+    files: ['src/server/**', 'src/**/*.server.{js,ts}'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
+  // Types and polyfills: allow any
+  {
+    files: [
+      'src/types/**',
+      'src/test-utils/**',
+      'src/setupTests.ts',
+      'src/**/*.d.ts',
+      'src/test-utils/polyfills.js',
+    ],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unused-vars': ['warn', { caughtErrors: 'none' }],
+    },
+  },
+  // Allow console logs in server, utils, contexts, and hooks (diagnostics)
+  {
+    files: [
+      'src/server/**',
+      'src/utils/**',
+      'src/contexts/**',
+      'src/hooks/**',
+    ],
     rules: {
       'no-console': 'off',
     },

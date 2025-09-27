@@ -70,6 +70,14 @@ All workflows share these environment variables:
 - `CARGO_TERM_COLOR: always` - Colored Rust output
 - `DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test` - Test database connection
 
+## Database Configuration
+
+All CI workflows now use **PostgreSQL 18** with the following benefits:
+- **UUIDv7 Support**: Native UUIDv7 generation with `uuidv7()` function
+- **Performance**: Better performance for UUID-based primary keys
+- **Future-Proof**: Latest PostgreSQL features and optimizations
+- **Consistency**: All test environments use the same PostgreSQL version
+
 ## Benefits of This Structure
 
 1. **Easier to Understand**: Each workflow has a clear, focused purpose
