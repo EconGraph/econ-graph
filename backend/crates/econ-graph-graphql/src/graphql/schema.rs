@@ -6,14 +6,15 @@
 use async_graphql::{EmptySubscription, Schema};
 use std::sync::Arc;
 
+use crate::graphql::dataloaders::DataLoaders;
 use crate::graphql::{mutation::Mutation, query::Query};
 use econ_graph_core::database::DatabasePool;
 
 /// GraphQL context containing shared resources
 #[derive(Clone)]
 pub struct GraphQLContext {
-    /// Database connection pool
-    pub pool: Arc<DatabasePool>,
+    /// DataLoaders for efficient N+1 query prevention
+    pub data_loaders: Arc<DataLoaders>,
 }
 
 /// Create a new GraphQL schema with the provided context
@@ -38,11 +39,13 @@ pub struct GraphQLContext {
 ///     Ok(())
 /// }
 /// ```
-pub fn create_schema(pool: Arc<DatabasePool>) -> Schema<Query, Mutation, EmptySubscription> {
-    let context = GraphQLContext { pool };
+pub fn create_schema(pool: DatabasePool) -> Schema<Query, Mutation, EmptySubscription> {
+    let data_loaders = Arc::new(DataLoaders::new(pool.clone()));
+    let context = GraphQLContext { data_loaders };
 
     Schema::build(Query, Mutation, EmptySubscription)
         .data(context)
+        .data(pool) // Add pool as separate context data
         .finish()
 }
 
@@ -55,13 +58,15 @@ pub fn create_schema(pool: Arc<DatabasePool>) -> Schema<Query, Mutation, EmptySu
 /// # Returns
 /// Configured GraphQL schema with additional context data
 pub fn create_schema_with_data<T: Send + Sync + 'static>(
-    pool: Arc<DatabasePool>,
+    pool: DatabasePool,
     additional_data: T,
 ) -> Schema<Query, Mutation, EmptySubscription> {
-    let context = GraphQLContext { pool };
+    let data_loaders = Arc::new(DataLoaders::new(pool.clone()));
+    let context = GraphQLContext { data_loaders };
 
     Schema::build(Query, Mutation, EmptySubscription)
         .data(context)
+        .data(pool) // Add pool as separate context data
         .data(additional_data)
         .finish()
 }
@@ -77,7 +82,7 @@ mod tests {
     async fn test_schema_creation() {
         // Create a test database container
         let container = econ_graph_core::test_utils::get_test_db().await;
-        let pool = Arc::new(container.pool().clone());
+        let pool = container.pool().clone();
         let schema = create_schema(pool);
 
         // Verify schema is created successfully
@@ -91,7 +96,7 @@ mod tests {
     async fn test_schema_creation_with_data() {
         // Create a test database container
         let container = econ_graph_core::test_utils::get_test_db().await;
-        let pool = Arc::new(container.pool().clone());
+        let pool = container.pool().clone();
         let additional_data = "test_data".to_string();
         let schema = create_schema_with_data(pool, additional_data);
 
