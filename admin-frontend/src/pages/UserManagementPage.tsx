@@ -1,8 +1,11 @@
 // REQUIREMENT: User management interface for super_admin role
 // PURPOSE: Manage all registered users, view active sessions, and control user access
 // This provides comprehensive user administration capabilities for system administrators
+//
+// UPDATED: Now uses React Query for data fetching, caching, and state management
+// This improves testability, performance, and developer experience
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback, useMemo } from "react";
 import {
   Box,
   Typography,
@@ -34,34 +37,29 @@ import {
   Avatar,
   Tooltip,
   Badge,
-} from '@mui/material';
+  CircularProgress,
+} from "@mui/material";
 import {
   PersonAdd,
   Edit,
   Delete,
-  Block,
-  CheckCircle,
-  Warning,
   Refresh,
   Search,
+  Block,
+  CheckCircle,
   Logout,
-} from '@mui/icons-material';
-import { useAuth } from '../contexts/AuthContext';
-import { useSecurity } from '../contexts/SecurityContext';
-
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: 'read_only' | 'admin' | 'super_admin';
-  status: 'active' | 'inactive' | 'suspended';
-  lastLogin: string;
-  createdAt: string;
-  isOnline: boolean;
-  sessionId?: string;
-  ipAddress?: string;
-  userAgent?: string;
-}
+} from "@mui/icons-material";
+import { useAuth } from "../contexts/AuthContext";
+import { useSecurity } from "../contexts/SecurityContext";
+import {
+  useUsers,
+  useOnlineUsers,
+  useCreateUser,
+  useUpdateUser,
+  useDeleteUser,
+  useRefreshUsers,
+  User,
+} from "../hooks/useUsers";
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -85,285 +83,346 @@ function TabPanel(props: TabPanelProps) {
   );
 }
 
+// Memoized components for expensive date formatting operations
+const FormattedDateTime = React.memo(
+  ({ dateString }: { dateString: string }) => {
+    const formattedDate = useMemo(
+      () => new Date(dateString).toLocaleString(),
+      [dateString],
+    );
+    return <span>{formattedDate}</span>;
+  },
+);
+
+const FormattedDate = React.memo(({ dateString }: { dateString: string }) => {
+  const formattedDate = useMemo(
+    () => new Date(dateString).toLocaleDateString(),
+    [dateString],
+  );
+  return <span>{formattedDate}</span>;
+});
+
 export default function UserManagementPage() {
   const [tabValue, setTabValue] = useState(0);
-  const [users, setUsers] = useState<User[]>([]);
-  const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
-  const [, setLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState("");
+  const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    role: "read_only" as "read_only" | "admin" | "super_admin",
+    status: "active" as "active" | "inactive" | "suspended",
+  });
   const { user: currentUser } = useAuth();
   const { checkAccess } = useSecurity();
 
-  // Mock data - in real implementation, this would come from API
-  useEffect(() => {
-    const mockUsers: User[] = [
-      {
-        id: '1',
-        name: 'John Administrator',
-        email: 'john.admin@company.com',
-        role: 'super_admin',
-        status: 'active',
-        lastLogin: '2024-01-15T10:30:00Z',
-        createdAt: '2023-06-01T00:00:00Z',
-        isOnline: true,
-        sessionId: 'sess_abc123',
-        ipAddress: '192.168.1.100',
-        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
-      },
-      {
-        id: '2',
-        name: 'Jane Manager',
-        email: 'jane.manager@company.com',
-        role: 'admin',
-        status: 'active',
-        lastLogin: '2024-01-15T09:15:00Z',
-        createdAt: '2023-08-15T00:00:00Z',
-        isOnline: true,
-        sessionId: 'sess_def456',
-        ipAddress: '192.168.1.101',
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-      },
-      {
-        id: '3',
-        name: 'Bob Analyst',
-        email: 'bob.analyst@company.com',
-        role: 'read_only',
-        status: 'active',
-        lastLogin: '2024-01-14T16:45:00Z',
-        createdAt: '2023-10-01T00:00:00Z',
-        isOnline: false,
-      },
-      {
-        id: '4',
-        name: 'Alice Developer',
-        email: 'alice.dev@company.com',
-        role: 'admin',
-        status: 'suspended',
-        lastLogin: '2024-01-10T14:20:00Z',
-        createdAt: '2023-07-20T00:00:00Z',
-        isOnline: false,
-      },
-    ];
-
-    setUsers(mockUsers);
-    setOnlineUsers(mockUsers.filter(u => u.isOnline));
-    setLoading(false);
-  }, []);
-
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setTabValue(newValue);
-  };
-
-  const handleEditUser = (user: User) => {
-    setEditingUser(user);
-    setOpenDialog(true);
-  };
-
-  const handleCloseDialog = () => {
-    setOpenDialog(false);
-    setEditingUser(null);
-  };
-
-  const handleSaveUser = () => {
-    // In real implementation, this would call API to update user
-    console.log('Saving user:', editingUser);
-    handleCloseDialog();
-  };
-
-  const handleSuspendUser = (userId: string) => {
-    // In real implementation, this would call API to suspend user
-    setUsers(users.map(u =>
-      u.id === userId
-        ? { ...u, status: u.status === 'suspended' ? 'active' : 'suspended' }
-        : u
-    ));
-  };
-
-  const handleDeleteUser = (userId: string) => {
-    // In real implementation, this would call API to delete user
-    setUsers(users.filter(u => u.id !== userId));
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'active':
-        return 'success';
-      case 'inactive':
-        return 'default';
-      case 'suspended':
-        return 'error';
-      default:
-        return 'default';
-    }
-  };
-
-  const getRoleColor = (role: string) => {
-    switch (role) {
-      case 'super_admin':
-        return 'error';
-      case 'admin':
-        return 'warning';
-      case 'read_only':
-        return 'info';
-      default:
-        return 'default';
-    }
-  };
-
-  const filteredUsers = users.filter(user => {
-    const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         user.email.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesRole = roleFilter === 'all' || user.role === roleFilter;
-    return matchesSearch && matchesRole;
+  // React Query hooks for data fetching
+  const {
+    data: users = [],
+    isLoading: usersLoading,
+    error: usersError,
+  } = useUsers({
+    role: roleFilter !== "all" ? roleFilter : undefined,
+    search: searchTerm || undefined,
   });
 
-  if (!checkAccess('super_admin')) {
+  const { data: onlineUsers = [], isLoading: onlineUsersLoading } =
+    useOnlineUsers();
+
+  // Mutations
+  const createUserMutation = useCreateUser();
+  const updateUserMutation = useUpdateUser();
+  const deleteUserMutation = useDeleteUser();
+  const refreshUsersMutation = useRefreshUsers();
+
+  // Memoized calculated values
+  const totalUsers = useMemo(() => users?.length || 0, [users]);
+  const activeUsers = useMemo(
+    () => users?.filter((u) => u.status === "active").length || 0,
+    [users],
+  );
+  const onlineCount = useMemo(() => onlineUsers?.length || 0, [onlineUsers]);
+
+  const getStatusColor = useCallback((status: string) => {
+    switch (status) {
+      case "active":
+        return "success";
+      case "inactive":
+        return "default";
+      case "suspended":
+        return "error";
+      default:
+        return "default";
+    }
+  }, []);
+
+  const getRoleColor = useCallback((role: string) => {
+    switch (role) {
+      case "super_admin":
+        return "error";
+      case "admin":
+        return "primary";
+      case "read_only":
+        return "secondary";
+      default:
+        return "default";
+    }
+  }, []);
+
+  const handleTabChange = useCallback(
+    (_event: React.SyntheticEvent, newValue: number) => {
+      setTabValue(newValue);
+    },
+    [],
+  );
+
+  const handleCreateUser = useCallback(() => {
+    setEditingUser(null);
+    setFormData({
+      name: "",
+      email: "",
+      role: "read_only",
+      status: "active",
+    });
+    setOpenDialog(true);
+  }, []);
+
+  const handleEditUser = useCallback((user: User) => {
+    setEditingUser(user);
+    setFormData({
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+    });
+    setOpenDialog(true);
+  }, []);
+
+  const handleDeleteUser = useCallback(
+    async (userId: string) => {
+      if (window.confirm("Are you sure you want to delete this user?")) {
+        try {
+          await deleteUserMutation.mutateAsync(userId);
+        } catch (error) {
+          console.error("Failed to delete user:", error);
+        }
+      }
+    },
+    [deleteUserMutation],
+  );
+
+  const handleToggleUserStatus = useCallback(
+    async (user: User) => {
+      const newStatus = user.status === "active" ? "suspended" : "active";
+      const action = newStatus === "suspended" ? "suspend" : "activate";
+
+      if (window.confirm(`Are you sure you want to ${action} this user?`)) {
+        try {
+          await updateUserMutation.mutateAsync({
+            id: user.id,
+            status: newStatus,
+          });
+        } catch (error) {
+          console.error(`Failed to ${action} user:`, error);
+        }
+      }
+    },
+    [updateUserMutation],
+  );
+
+  const handleForceLogout = useCallback(async (userId: string) => {
+    if (window.confirm("Are you sure you want to force logout this user?")) {
+      try {
+        // This would need to be implemented in the backend
+        console.log("Force logout user:", userId);
+      } catch (error) {
+        console.error("Failed to force logout user:", error);
+      }
+    }
+  }, []);
+
+  const handleSaveUser = useCallback(async () => {
+    try {
+      if (editingUser) {
+        await updateUserMutation.mutateAsync({
+          id: editingUser.id,
+          ...formData,
+        });
+      } else {
+        await createUserMutation.mutateAsync(
+          formData as Omit<User, "id" | "createdAt" | "lastLogin">,
+        );
+      }
+      setOpenDialog(false);
+      setEditingUser(null);
+      setFormData({
+        name: "",
+        email: "",
+        role: "read_only",
+        status: "active",
+      });
+    } catch (error) {
+      console.error("Failed to save user:", error);
+    }
+  }, [editingUser, formData, updateUserMutation, createUserMutation]);
+
+  const handleFormChange = useCallback((field: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value as any,
+    }));
+  }, []);
+
+  const handleRefresh = useCallback(async () => {
+    try {
+      await refreshUsersMutation.mutateAsync();
+    } catch (error) {
+      console.error("Failed to refresh users:", error);
+    }
+  }, [refreshUsersMutation]);
+
+  // Access control
+  if (!checkAccess("super_admin")) {
     return (
-      <Box sx={{ p: 3, textAlign: 'center' }}>
+      <Box sx={{ p: 3 }}>
         <Alert severity="error">
-          <Typography variant="h6">Access Denied</Typography>
-          <Typography>You need super_admin privileges to access user management.</Typography>
+          Access Denied. This page requires super_admin privileges.
         </Alert>
       </Box>
     );
   }
 
   return (
-    <Box>
+    <Box sx={{ p: 3 }}>
       <Typography variant="h4" gutterBottom>
         User Management
       </Typography>
-      <Typography variant="subtitle1" color="text.secondary" gutterBottom>
+      <Typography variant="subtitle1" color="text.secondary" sx={{ mb: 3 }}>
         Manage registered users, active sessions, and access controls
       </Typography>
 
-      {/* Statistics Cards */}
+      {/* Summary Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <Avatar sx={{ bgcolor: 'primary.main', mr: 2 }}>
-                  <CheckCircle />
-                </Avatar>
-                <Box>
-                  <Typography variant="h4">{users.length}</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Total Users
-                  </Typography>
-                </Box>
-              </Box>
+              <Typography color="textSecondary" gutterBottom>
+                Total Users
+              </Typography>
+              <Typography variant="h4">
+                {usersLoading ? <CircularProgress size={24} /> : totalUsers}
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <Avatar sx={{ bgcolor: 'success.main', mr: 2 }}>
-                  <Badge badgeContent={onlineUsers.length} color="error">
-                    <CheckCircle />
-                  </Badge>
-                </Avatar>
-                <Box>
-                  <Typography variant="h4">{onlineUsers.length}</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Online Now
-                  </Typography>
-                </Box>
-              </Box>
+              <Typography color="textSecondary" gutterBottom>
+                Active Users
+              </Typography>
+              <Typography variant="h4">
+                {usersLoading ? <CircularProgress size={24} /> : activeUsers}
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <Avatar sx={{ bgcolor: 'warning.main', mr: 2 }}>
-                  <Warning />
-                </Avatar>
-                <Box>
-                  <Typography variant="h4">
-                    {users.filter(u => u.status === 'suspended').length}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Suspended
-                  </Typography>
-                </Box>
-              </Box>
+              <Typography color="textSecondary" gutterBottom>
+                Online Now
+              </Typography>
+              <Typography variant="h4">
+                {onlineUsersLoading ? (
+                  <CircularProgress size={24} />
+                ) : (
+                  onlineCount
+                )}
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <Avatar sx={{ bgcolor: 'info.main', mr: 2 }}>
-                  <PersonAdd />
-                </Avatar>
-                <Box>
-                  <Typography variant="h4">
-                    {users.filter(u => u.role === 'admin' || u.role === 'super_admin').length}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Admins
-                  </Typography>
-                </Box>
-              </Box>
+              <Typography color="textSecondary" gutterBottom>
+                Current User
+              </Typography>
+              <Typography variant="h6">
+                {currentUser?.username || "Unknown"}
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
-      <Paper sx={{ width: '100%' }}>
-        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tabs value={tabValue} onChange={handleTabChange}>
-            <Tab label="All Users" />
-            <Tab label="Online Users" />
-            <Tab label="User Activity" />
-          </Tabs>
-        </Box>
+      {/* Error Handling */}
+      {usersError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          Failed to load users: {usersError.message}
+        </Alert>
+      )}
 
-        {/* All Users Tab */}
+      {/* Controls */}
+      <Box sx={{ display: "flex", gap: 2, mb: 3, flexWrap: "wrap" }}>
+        <Button
+          variant="contained"
+          startIcon={<PersonAdd />}
+          onClick={handleCreateUser}
+          disabled={createUserMutation.isPending}
+        >
+          Add User
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<Refresh />}
+          onClick={handleRefresh}
+          disabled={refreshUsersMutation.isPending}
+        >
+          Refresh
+        </Button>
+        <TextField
+          label="Search users"
+          placeholder="Enter name or email..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          InputProps={{
+            startAdornment: <Search sx={{ mr: 1, color: "text.secondary" }} />,
+          }}
+          sx={{ minWidth: 200 }}
+          aria-label="Search users by name or email"
+        />
+        <FormControl sx={{ minWidth: 120 }}>
+          <InputLabel>Role Filter</InputLabel>
+          <Select
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+            label="Role Filter"
+            MenuProps={{ disablePortal: true }}
+            data-testid="role-filter-select"
+          >
+            <MenuItem value="all">All Roles</MenuItem>
+            <MenuItem value="super_admin">Super Admin</MenuItem>
+            <MenuItem value="admin">Admin</MenuItem>
+            <MenuItem value="read_only">Read Only</MenuItem>
+          </Select>
+        </FormControl>
+      </Box>
+
+      {/* Tabs */}
+      <Paper sx={{ width: "100%" }}>
+        <Tabs
+          value={tabValue}
+          onChange={handleTabChange}
+          aria-label="user management tabs"
+        >
+          <Tab label="All Users" id="user-tab-0" />
+          <Tab label="Online Users" id="user-tab-1" />
+        </Tabs>
+
         <TabPanel value={tabValue} index={0}>
-          <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-            <TextField
-              placeholder="Search users..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              InputProps={{
-                startAdornment: <Search sx={{ mr: 1, color: 'text.secondary' }} />,
-              }}
-              sx={{ flexGrow: 1 }}
-            />
-            <FormControl sx={{ minWidth: 120 }}>
-              <InputLabel>Role</InputLabel>
-              <Select
-                value={roleFilter}
-                label="Role"
-                onChange={(e) => setRoleFilter(e.target.value)}
-              >
-                <MenuItem value="all">All Roles</MenuItem>
-                <MenuItem value="super_admin">Super Admin</MenuItem>
-                <MenuItem value="admin">Admin</MenuItem>
-                <MenuItem value="read_only">Read Only</MenuItem>
-              </Select>
-            </FormControl>
-            <Button
-              variant="contained"
-              startIcon={<PersonAdd />}
-              onClick={() => setOpenDialog(true)}
-            >
-              Add User
-            </Button>
-            <IconButton onClick={() => setLoading(true)}>
-              <Refresh />
-            </IconButton>
-          </Box>
-
           <TableContainer>
             <Table>
               <TableHead>
@@ -373,190 +432,280 @@ export default function UserManagementPage() {
                   <TableCell>Status</TableCell>
                   <TableCell>Last Login</TableCell>
                   <TableCell>Created</TableCell>
-                  <TableCell align="right">Actions</TableCell>
+                  <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {filteredUsers.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Avatar sx={{ mr: 2, bgcolor: 'primary.main' }}>
-                          {user.name.charAt(0)}
-                        </Avatar>
-                        <Box>
-                          <Typography variant="subtitle2">{user.name}</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            {user.email}
-                          </Typography>
-                        </Box>
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={user.role}
-                        color={getRoleColor(user.role)}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={user.status}
-                        color={getStatusColor(user.status)}
-                        size="small"
-                        icon={user.isOnline ? <CheckCircle /> : undefined}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {new Date(user.lastLogin).toLocaleString()}
-                    </TableCell>
-                    <TableCell>
-                      {new Date(user.createdAt).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell align="right">
-                      <Tooltip title="Edit User">
-                        <IconButton
-                          size="small"
-                          onClick={() => handleEditUser(user)}
-                          disabled={user.id === currentUser?.id}
-                        >
-                          <Edit />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title={user.status === 'suspended' ? 'Activate User' : 'Suspend User'}>
-                        <IconButton
-                          size="small"
-                          onClick={() => handleSuspendUser(user.id)}
-                          disabled={user.id === currentUser?.id}
-                        >
-                          <Block />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete User">
-                        <IconButton
-                          size="small"
-                          onClick={() => handleDeleteUser(user.id)}
-                          disabled={user.id === currentUser?.id}
-                          color="error"
-                        >
-                          <Delete />
-                        </IconButton>
-                      </Tooltip>
+                {usersLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center">
+                      <CircularProgress />
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : users && users.length > 0 ? (
+                  users.map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell>
+                        <Box
+                          sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                        >
+                          <Avatar sx={{ width: 32, height: 32 }}>
+                            {user.name.charAt(0)}
+                          </Avatar>
+                          <Box>
+                            <Typography variant="body2" fontWeight="medium">
+                              {user.name}
+                            </Typography>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                            >
+                              {user.email}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={user.role.replace("_", " ")}
+                          color={getRoleColor(user.role) as any}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={user.status}
+                          color={getStatusColor(user.status) as any}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <FormattedDateTime dateString={user.lastLogin} />
+                      </TableCell>
+                      <TableCell>
+                        <FormattedDate dateString={user.createdAt} />
+                      </TableCell>
+                      <TableCell>
+                        <Box sx={{ display: "flex", gap: 1 }}>
+                          <Tooltip title="Edit User">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleEditUser(user)}
+                              disabled={
+                                updateUserMutation.isPending ||
+                                user.id === currentUser?.id
+                              }
+                              aria-label={`Edit user ${user.name}`}
+                            >
+                              <Edit />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip
+                            title={
+                              user.status === "active"
+                                ? "Suspend User"
+                                : "Activate User"
+                            }
+                          >
+                            <IconButton
+                              size="small"
+                              onClick={() => handleToggleUserStatus(user)}
+                              disabled={
+                                updateUserMutation.isPending ||
+                                user.id === currentUser?.id
+                              }
+                              aria-label={`${user.status === "active" ? "Suspend" : "Activate"} user ${user.name}`}
+                            >
+                              {user.status === "active" ? (
+                                <Block />
+                              ) : (
+                                <CheckCircle />
+                              )}
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete User">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleDeleteUser(user.id)}
+                              disabled={
+                                deleteUserMutation.isPending ||
+                                user.id === currentUser?.id
+                              }
+                              aria-label={`Delete user ${user.name}`}
+                            >
+                              <Delete />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center">
+                      <Typography color="text.secondary">
+                        {usersError ? "Failed to load users" : "No users found"}
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </TableContainer>
         </TabPanel>
 
-        {/* Online Users Tab */}
         <TabPanel value={tabValue} index={1}>
-          <Typography variant="h6" gutterBottom>
-            Currently Online Users ({onlineUsers.length})
-          </Typography>
           <TableContainer>
             <Table>
               <TableHead>
                 <TableRow>
                   <TableCell>User</TableCell>
                   <TableCell>Role</TableCell>
+                  <TableCell>Session</TableCell>
                   <TableCell>IP Address</TableCell>
-                  <TableCell>Session Started</TableCell>
                   <TableCell>User Agent</TableCell>
-                  <TableCell align="right">Actions</TableCell>
+                  <TableCell>Last Activity</TableCell>
+                  <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {onlineUsers.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Avatar sx={{ mr: 2, bgcolor: 'success.main' }}>
-                          {user.name.charAt(0)}
-                        </Avatar>
-                        <Box>
-                          <Typography variant="subtitle2">{user.name}</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            {user.email}
-                          </Typography>
-                        </Box>
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={user.role}
-                        color={getRoleColor(user.role)}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>{user.ipAddress}</TableCell>
-                    <TableCell>{new Date(user.lastLogin).toLocaleString()}</TableCell>
-                    <TableCell>
-                      <Tooltip title={user.userAgent}>
-                        <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
-                          {user.userAgent?.split(' ')[0]}
-                        </Typography>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell align="right">
-                      <Tooltip title="Force Logout">
-                        <IconButton
-                          size="small"
-                          color="error"
-                          disabled={user.id === currentUser?.id}
-                        >
-                          <Logout />
-                        </IconButton>
-                      </Tooltip>
+                {onlineUsersLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={7} align="center">
+                      <CircularProgress />
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : onlineUsers && onlineUsers.length > 0 ? (
+                  onlineUsers.map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell>
+                        <Box
+                          sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                        >
+                          <Badge
+                            overlap="circular"
+                            anchorOrigin={{
+                              vertical: "bottom",
+                              horizontal: "right",
+                            }}
+                            variant="dot"
+                            color="success"
+                          >
+                            <Avatar sx={{ width: 32, height: 32 }}>
+                              {user.name.charAt(0)}
+                            </Avatar>
+                          </Badge>
+                          <Box>
+                            <Typography variant="body2" fontWeight="medium">
+                              {user.name}
+                            </Typography>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                            >
+                              {user.email}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={user.role.replace("_", " ")}
+                          color={getRoleColor(user.role) as any}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="caption" fontFamily="monospace">
+                          {user.sessionId}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="caption" fontFamily="monospace">
+                          {user.ipAddress}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Tooltip title={user.userAgent} placement="top">
+                          <Typography
+                            variant="caption"
+                            fontFamily="monospace"
+                            sx={{
+                              maxWidth: 200,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              cursor: "help",
+                            }}
+                          >
+                            {user.userAgent}
+                          </Typography>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell>
+                        <FormattedDateTime dateString={user.lastLogin} />
+                      </TableCell>
+                      <TableCell>
+                        <Tooltip title="Force Logout">
+                          <IconButton
+                            size="small"
+                            onClick={() => handleForceLogout(user.id)}
+                            disabled={user.id === currentUser?.id}
+                            aria-label={`Force logout user ${user.name}`}
+                          >
+                            <Logout />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={7} align="center">
+                      <Typography color="text.secondary">
+                        No online users found
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </TableContainer>
         </TabPanel>
-
-        {/* User Activity Tab */}
-        <TabPanel value={tabValue} index={2}>
-          <Typography variant="h6" gutterBottom>
-            Recent User Activity
-          </Typography>
-          <Alert severity="info">
-            User activity logs and audit trails would be displayed here in a real implementation.
-            This would include login attempts, permission changes, and administrative actions.
-          </Alert>
-        </TabPanel>
       </Paper>
 
-      {/* Edit User Dialog */}
-      <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
+      {/* Edit/Create User Dialog */}
+      <Dialog
+        open={openDialog}
+        onClose={() => setOpenDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
         <DialogTitle>
-          {editingUser ? 'Edit User' : 'Add New User'}
+          {editingUser ? "Edit User" : "Create New User"}
         </DialogTitle>
         <DialogContent>
-          <Box sx={{ pt: 1 }}>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
             <TextField
-              fullWidth
               label="Name"
-              value={editingUser?.name || ''}
-              onChange={(e) => setEditingUser(prev => prev ? { ...prev, name: e.target.value } : null)}
-              sx={{ mb: 2 }}
+              value={formData.name}
+              onChange={(e) => handleFormChange("name", e.target.value)}
+              fullWidth
             />
             <TextField
-              fullWidth
               label="Email"
               type="email"
-              value={editingUser?.email || ''}
-              onChange={(e) => setEditingUser(prev => prev ? { ...prev, email: e.target.value } : null)}
-              sx={{ mb: 2 }}
+              value={formData.email}
+              onChange={(e) => handleFormChange("email", e.target.value)}
+              fullWidth
             />
-            <FormControl fullWidth sx={{ mb: 2 }}>
+            <FormControl fullWidth>
               <InputLabel>Role</InputLabel>
               <Select
-                value={editingUser?.role || 'read_only'}
+                value={formData.role}
+                onChange={(e) => handleFormChange("role", e.target.value)}
                 label="Role"
-                onChange={(e) => setEditingUser(prev => prev ? { ...prev, role: e.target.value as any } : null)}
+                MenuProps={{ disablePortal: true }}
+                data-testid="user-role-select"
               >
                 <MenuItem value="read_only">Read Only</MenuItem>
                 <MenuItem value="admin">Admin</MenuItem>
@@ -566,9 +715,11 @@ export default function UserManagementPage() {
             <FormControl fullWidth>
               <InputLabel>Status</InputLabel>
               <Select
-                value={editingUser?.status || 'active'}
+                value={formData.status}
+                onChange={(e) => handleFormChange("status", e.target.value)}
                 label="Status"
-                onChange={(e) => setEditingUser(prev => prev ? { ...prev, status: e.target.value as any } : null)}
+                MenuProps={{ disablePortal: true }}
+                data-testid="user-status-select"
               >
                 <MenuItem value="active">Active</MenuItem>
                 <MenuItem value="inactive">Inactive</MenuItem>
@@ -578,9 +729,15 @@ export default function UserManagementPage() {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseDialog}>Cancel</Button>
-          <Button onClick={handleSaveUser} variant="contained">
-            Save
+          <Button onClick={() => setOpenDialog(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleSaveUser}
+            disabled={
+              createUserMutation.isPending || updateUserMutation.isPending
+            }
+          >
+            {editingUser ? "Save" : "Create"}
           </Button>
         </DialogActions>
       </Dialog>

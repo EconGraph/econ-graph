@@ -1,0 +1,13 @@
+{
+  "data": {
+    "testDataSourceConnection": {
+      "success": true,
+      "message": "Connection test successful",
+      "connectionInfo": {
+        "responseTime": 245,
+        "statusCode": 200,
+        "timestamp": "2025-01-15T10:45:00Z"
+      }
+    }
+  }
+}

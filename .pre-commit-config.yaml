@@ -45,6 +45,30 @@ repos:
         files: '^frontend/.*\.(ts|tsx)$'
         pass_filenames: false
 
+  # Admin Frontend formatting and linting
+  - repo: local
+    hooks:
+      - id: admin-frontend-prettier
+        name: Admin Frontend Prettier Check
+        entry: bash -c 'cd admin-frontend && npx prettier --check "src/**/*.{ts,tsx,js,jsx,json,css,md}"'
+        language: system
+        files: '^admin-frontend/src/.*\.(ts|tsx|js|jsx|json|css|md)$'
+        pass_filenames: false
+
+      - id: admin-frontend-eslint
+        name: Admin Frontend ESLint Check
+        entry: bash -c 'cd admin-frontend && npx eslint "src/**/*.{ts,tsx,js,jsx}" --max-warnings 20'
+        language: system
+        files: '^admin-frontend/src/.*\.(ts|tsx|js|jsx)$'
+        pass_filenames: false
+
+      - id: admin-frontend-typescript-check
+        name: Admin Frontend TypeScript Compilation Check
+        entry: bash -c 'cd admin-frontend && npx tsc --noEmit'
+        language: system
+        files: '^admin-frontend/.*\.(ts|tsx)$'
+        pass_filenames: false
+
   # General file quality checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
@@ -83,9 +107,9 @@ repos:
 
       - id: npm-audit
         name: NPM Security Audit
-        entry: bash -c 'cd frontend && npm audit --audit-level moderate'
+        entry: bash -c 'cd frontend && npm audit --audit-level moderate && cd ../admin-frontend && npm audit --audit-level moderate'
         language: system
-        files: '^frontend/package.*\.json$'
+        files: '^(frontend|admin-frontend)/package.*\.json$'
         pass_filenames: false
 
   # Database migration validation

@@ -7,6 +7,7 @@ This directory contains the CI/CD workflows for the EconGraph project, cleaned u
 ### Core Tests (`ci-core.yml`) - **PRIMARY WORKFLOW**
 **Purpose**: Comprehensive testing that runs on every commit
 - 20+ parallel backend test jobs covering all service layers
+- Admin Frontend tests (runs in parallel, doesn't gate other tests)
 - Frontend tests, quality checks, security audits, and E2E tests
 - All essential functionality validation
 
@@ -25,6 +26,14 @@ This directory contains the CI/CD workflows for the EconGraph project, cleaned u
 - Validates migration generation
 
 **Triggers**: Manual dispatch only
+
+### Admin Frontend Tests (`admin-frontend-tests.yml`)
+**Purpose**: Comprehensive testing of the admin frontend interface
+- Unit tests, integration tests, and E2E tests for admin UI
+- Build verification and quality checks
+- Runs independently and doesn't gate other workflows
+
+**Triggers**: Push/PR to admin-frontend, manual dispatch
 
 ### Playwright Tests (`playwright-tests*.yml`)
 **Purpose**: End-to-end testing on version releases
@@ -48,6 +57,7 @@ This directory contains the CI/CD workflows for the EconGraph project, cleaned u
 ```
 Core Tests (ci-core.yml)
 ├── backend-smoke-tests
+├── admin-frontend-tests (parallel, non-gating)
 ├── backend-database-tests (needs: backend-smoke-tests)
 ├── backend-service-tests (needs: backend-smoke-tests)
 ├── frontend-tests
@@ -84,6 +94,7 @@ All CI workflows now use **PostgreSQL 18** with the following benefits:
 
 ### Manual Triggers
 - **Core Tests**: `gh workflow run ci-core.yml`
+- **Admin Frontend Tests**: `gh workflow run admin-frontend-tests.yml`
 - **Security Checks**: `gh workflow run security.yml`
 - **Crawler Integration**: `gh workflow run crawler-integration-test.yml`
 - **Experimental**: `gh workflow run ci-experimental.yml --field experiment=ramdisk`
