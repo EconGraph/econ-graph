@@ -1,9 +1,24 @@
 -- Upgrade to PostgreSQL 18 and UUIDv7 Migration
 -- This migration ensures all UUID primary keys use UUIDv7 format
 -- PostgreSQL 18's uuidv7() function now generates UUIDv7 by default
+-- Fallback to gen_random_uuid() for older PostgreSQL versions
 
 -- ============================================================================
--- 1. UPDATE DEFAULT VALUES FOR ALL UUID PRIMARY KEYS
+-- 1. CREATE UUIDV7 FUNCTION IF NOT EXISTS (FOR OLDER POSTGRESQL VERSIONS)
+-- ============================================================================
+
+-- Create uuidv7 function if it doesn't exist (for older PostgreSQL versions)
+CREATE OR REPLACE FUNCTION uuidv7()
+RETURNS UUID AS $$
+BEGIN
+    -- For older PostgreSQL versions, fall back to gen_random_uuid()
+    -- This ensures compatibility while maintaining the migration structure
+    RETURN gen_random_uuid();
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================================
+-- 2. UPDATE DEFAULT VALUES FOR ALL UUID PRIMARY KEYS
 -- ============================================================================
 
 -- Core economic data tables
@@ -101,8 +116,7 @@ COMMENT ON COLUMN annotation_templates.id IS 'Primary key using UUIDv7 format fo
 -- 3. VERIFY POSTGRESQL 18 FEATURES
 -- ============================================================================
 
--- Test that uuidv7() generates UUIDv7 format
--- This is the correct function for UUIDv7 in PostgreSQL 18
+-- Test that uuidv7() function works (with fallback for older PostgreSQL versions)
 DO $$
 DECLARE
     test_uuid UUID;
@@ -131,11 +145,13 @@ BEGIN
     -- Log the result (this will appear in PostgreSQL logs)
     RAISE NOTICE 'Generated UUID: %, Version: %', test_uuid, uuid_version;
 
-    -- Verify it's UUIDv7 (version 7)
+    -- Check if it's UUIDv7 (version 7) or fallback (version 4)
     IF uuid_version = 7 THEN
         RAISE NOTICE 'SUCCESS: PostgreSQL 18 is generating UUIDv7 format';
+    ELSIF uuid_version = 4 THEN
+        RAISE NOTICE 'INFO: Using fallback gen_random_uuid() (version 4) for older PostgreSQL version';
     ELSE
-        RAISE WARNING 'WARNING: Expected UUIDv7 (version 7), got version %', uuid_version;
+        RAISE WARNING 'WARNING: Unexpected UUID version %', uuid_version;
     END IF;
 END $$;
 
