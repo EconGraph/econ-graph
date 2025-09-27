@@ -1,0 +1,50 @@
+{
+  "data": {
+    "securityEvents": [
+      {
+        "id": "1",
+        "event_type": "login_failed",
+        "user_id": "5",
+        "user_email": "user5@company.com",
+        "ip_address": "192.168.1.200",
+        "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+        "description": "Failed login attempt from 192.168.1.200",
+        "severity": "high",
+        "created_at": "2024-01-15T10:30:00Z"
+      },
+      {
+        "id": "2",
+        "event_type": "suspicious_activity",
+        "user_id": null,
+        "user_email": null,
+        "ip_address": "192.168.1.200",
+        "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+        "description": "Multiple failed login attempts detected",
+        "severity": "critical",
+        "created_at": "2024-01-15T10:25:00Z"
+      },
+      {
+        "id": "3",
+        "event_type": "privilege_escalation",
+        "user_id": "3",
+        "user_email": "bob.analyst@company.com",
+        "ip_address": "192.168.1.102",
+        "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+        "description": "Attempted access to admin functions",
+        "severity": "high",
+        "created_at": "2024-01-15T10:20:00Z"
+      },
+      {
+        "id": "4",
+        "event_type": "session_timeout",
+        "user_id": "2",
+        "user_email": "jane.manager@company.com",
+        "ip_address": "192.168.1.101",
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        "description": "Session expired for user",
+        "severity": "medium",
+        "created_at": "2024-01-15T10:15:00Z"
+      }
+    ]
+  }
+}

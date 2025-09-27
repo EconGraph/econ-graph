@@ -1,5 +1,5 @@
 /**
- * Integration tests for XBRL financial statement features
+ * Integration tests for XBRL financial statement features.
  *
  * These tests verify the complete flow from XBRL data through financial analysis
  * and ensure proper integration between frontend components and backend APIs.
@@ -500,9 +500,13 @@ describe('XBRL Financial Integration Tests', () => {
                     ratios={mockFinancialRatios}
                     statements={mockFinancialStatements}
                     timeRange="3Y"
-                    onTimeRangeChange={() => {}}
+                    onTimeRangeChange={() => {
+                      // Mock time range change handler
+                    }}
                     selectedRatios={['returnOnEquity']}
-                    onRatioSelectionChange={() => {}}
+                    onRatioSelectionChange={() => {
+                      // Mock ratio selection change handler
+                    }}
                   />
           </TestWrapper>
         );
@@ -521,9 +525,13 @@ describe('XBRL Financial Integration Tests', () => {
                     ratios={mockFinancialRatios}
                     statements={mockFinancialStatements}
                     timeRange="3Y"
-                    onTimeRangeChange={() => {}}
+                    onTimeRangeChange={() => {
+                      // Mock time range change handler
+                    }}
                     selectedRatios={['returnOnEquity']}
-                    onRatioSelectionChange={() => {}}
+                    onRatioSelectionChange={() => {
+                      // Mock ratio selection change handler
+                    }}
                   />
           </TestWrapper>
         );

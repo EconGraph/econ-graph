@@ -4,6 +4,7 @@
 
 // TextEncoder/TextDecoder polyfills for Node.js
 if (typeof global.TextEncoder === 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { TextEncoder, TextDecoder } = require('util');
   global.TextEncoder = TextEncoder;
   global.TextDecoder = TextDecoder;
@@ -12,6 +13,7 @@ if (typeof global.TextEncoder === 'undefined') {
 // ReadableStream polyfill for MSW
 if (typeof global.ReadableStream === 'undefined') {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { ReadableStream } = require('stream/web');
     global.ReadableStream = ReadableStream;
   } catch (e) {
@@ -25,14 +27,22 @@ if (typeof global.ReadableStream === 'undefined') {
 // TransformStream polyfill for MSW
 if (typeof global.TransformStream === 'undefined') {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { TransformStream } = require('stream/web');
     global.TransformStream = TransformStream;
   } catch (e) {
     // Fallback minimal polyfill
     global.TransformStream = class TransformStream {
-      constructor(transformer = {}) {
+      constructor(_transformer = {}) {
         this.readable = new global.ReadableStream();
-        this.writable = { write: () => {}, close: () => {} };
+        this.writable = {
+          write: () => {
+            // Mock write method
+          },
+          close: () => {
+            // Mock close method
+          },
+        };
       }
     };
   }
@@ -111,7 +121,7 @@ if (typeof global.Headers === 'undefined') {
 
 // Fetch polyfill
 if (typeof global.fetch === 'undefined') {
-  global.fetch = async function (input, init) {
+  global.fetch = async function (_input, _init) {
     return new global.Response('{}', { status: 200 });
   };
 }

@@ -1254,6 +1254,48 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5444/econ_graph_test
 
+  admin-frontend-tests:
+    name: Admin Frontend Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: admin-frontend/package-lock.json
+
+    - name: Install admin frontend dependencies
+      working-directory: admin-frontend
+      run: npm ci
+
+    - name: Run admin frontend linting
+      working-directory: admin-frontend
+      run: npm run lint
+
+    - name: Run admin frontend type checking
+      working-directory: admin-frontend
+      run: npm run typecheck
+
+    - name: Run admin frontend unit tests
+      working-directory: admin-frontend
+      run: npm run test:run -- --coverage --reporter=verbose --exclude="tests/**/*.spec.ts"
+
+    - name: Upload admin frontend test coverage
+      uses: actions/upload-artifact@v4
+      with:
+        name: admin-frontend-coverage-${{ github.sha }}
+        path: admin-frontend/coverage/
+        retention-days: 7
+
   frontend-tests:
     name: Frontend Tests
     runs-on: ubuntu-latest
@@ -1342,6 +1384,14 @@ jobs:
       working-directory: frontend
       run: npm ci
 
+    - name: Install admin-frontend dependencies
+      working-directory: admin-frontend
+      run: npm ci
+
+    - name: Install admin-frontend dependencies
+      working-directory: admin-frontend
+      run: npm ci
+
     - name: Run frontend formatting check
       working-directory: frontend
       run: npm run prettier-check
@@ -1349,6 +1399,10 @@ jobs:
     - name: Run frontend linting
       working-directory: frontend
       run: npm run lint
+
+    - name: Run frontend JSDoc validation
+      working-directory: frontend
+      run: npx eslint "src/**/*.{ts,tsx}" --rule "jsdoc/require-jsdoc:warn" --max-warnings 600
 
   security-audit:
     name: Security Audit
@@ -1401,6 +1455,14 @@ jobs:
     - name: Run npm security audit
       run: npm audit --audit-level moderate
       working-directory: frontend
+
+    - name: Install admin-frontend dependencies
+      working-directory: admin-frontend
+      run: npm ci
+
+    - name: Run admin-frontend npm security audit
+      run: npm audit --audit-level moderate
+      working-directory: admin-frontend
 
   license-compliance:
     name: License Compliance Check
@@ -1460,6 +1522,11 @@ jobs:
         echo "🔍 Checking frontend license compliance with license-checker..."
         license-checker --config .license-checker.json
         echo "✅ Frontend license compliance check passed"
+
+        echo "🔍 Checking admin-frontend license compliance with license-checker..."
+        cd ../admin-frontend
+        license-checker --config ../frontend/.license-checker.json
+        echo "✅ Admin frontend license compliance check passed"
       working-directory: frontend
 
     - name: 📋 Generate License Report
@@ -1472,10 +1539,16 @@ jobs:
         cargo deny check licenses --format json > backend-licenses.json || true
         echo "Backend license check completed"
 
-        # Generate frontend license report
+        # Generate frontend license report (run from repo root using shared config)
         echo "Generating frontend license report..."
-        license-checker --config .license-checker.json --json > frontend-licenses.json || true
+        license-checker --config frontend/.license-checker.json --json > frontend-licenses.json || true
         echo "Frontend license check completed"
+
+        # Generate admin-frontend license report (use shared config path)
+        echo "Generating admin-frontend license report..."
+        cd admin-frontend
+        license-checker --config ../frontend/.license-checker.json --json > admin-frontend-licenses.json || true
+        echo "Admin frontend license check completed"
 
         echo "✅ License compliance check completed successfully"
 
@@ -1486,6 +1559,7 @@ jobs:
         path: |
           backend-licenses.json
           frontend-licenses.json
+          admin-frontend/admin-frontend-licenses.json
 
   backend-integration-tests:
     name: Backend Integration Tests
@@ -1582,43 +1656,6 @@ jobs:
       run: npm run test:coverage
       env:
         REACT_APP_GRAPHQL_ENDPOINT: http://localhost:51249/graphql
-
-  e2e-container-build:
-    name: Build E2E Test Containers
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    needs: [frontend-integration-tests]
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.branch || github.ref }}
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Build standard E2E container
-      run: |
-        docker build -f ci/docker/e2e/Dockerfile -t econ-graph-e2e:latest .
-        docker save econ-graph-e2e:latest | gzip > e2e-container.tar.gz
-
-    - name: Build mobile E2E container
-      run: |
-        # Mobile container depends on the standard container being built first
-        # Verify the standard container is available
-        docker images | grep econ-graph-e2e
-        docker build -f ci/docker/e2e/Dockerfile.mobile -t econ-graph-e2e-mobile:latest .
-        docker save econ-graph-e2e-mobile:latest | gzip > e2e-mobile-container.tar.gz
-
-    - name: Upload E2E containers
-      uses: actions/upload-artifact@v4
-      with:
-        name: e2e-containers-standard
-        path: |
-          e2e-container.tar.gz
-          e2e-mobile-container.tar.gz
-        retention-days: 1
 
   e2e-container-build-optimized:
     name: Build Optimized E2E Test Containers

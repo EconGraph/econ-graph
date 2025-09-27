@@ -92,7 +92,9 @@ describe('ThemeContext', () => {
 
   it('should toggle theme correctly', async () => {
     vi.spyOn(window.localStorage, 'getItem').mockReturnValue('light');
-    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {});
+    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
+      // Mock implementation
+    });
 
     render(
       <TestWrapper>
@@ -118,7 +120,9 @@ describe('ThemeContext', () => {
 
   it('should set theme to light', async () => {
     vi.spyOn(window.localStorage, 'getItem').mockReturnValue('dark');
-    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {});
+    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
+      // Mock implementation
+    });
 
     render(
       <TestWrapper>
@@ -144,7 +148,9 @@ describe('ThemeContext', () => {
 
   it('should set theme to dark', async () => {
     vi.spyOn(window.localStorage, 'getItem').mockReturnValue('light');
-    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {});
+    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
+      // Mock implementation
+    });
 
     render(
       <TestWrapper>
@@ -170,7 +176,9 @@ describe('ThemeContext', () => {
 
   it('should throw error when used outside ThemeProvider', () => {
     // Suppress console.error for this test
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {
+      // Mock console.error implementation
+    });
 
     expect(() => {
       render(<TestComponent />);

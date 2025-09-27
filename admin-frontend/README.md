@@ -40,6 +40,7 @@ The admin interface leverages our existing monitoring and security infrastructur
 **Purpose**: Provides consistent admin interface layout with role-based navigation and security indicators.
 
 **Key Features**:
+
 - Role-based navigation menu with access control
 - Security warnings and session time display
 - Real-time security event notifications
@@ -47,6 +48,7 @@ The admin interface leverages our existing monitoring and security infrastructur
 - User profile management and logout functionality
 
 **Navigation Items**:
+
 - **Dashboard**: System overview (read_only+)
 - **System Health**: Health metrics and service status (read_only+)
 - **Monitoring**: Grafana dashboard integration (read_only+)
@@ -62,11 +64,13 @@ The admin interface leverages our existing monitoring and security infrastructur
 **Purpose**: Integrates with our existing Grafana dashboards to provide comprehensive system monitoring.
 
 **Integration Points**:
+
 - **EconGraph Platform Overview**: `http://localhost:30001/d/econgraph-overview/econgraph-platform-overview`
 - **Database Statistics**: `http://localhost:30001/d/database-statistics/database-statistics`
 - **Crawler Status**: `http://localhost:30001/d/crawler-status/crawler-status`
 
 **Features**:
+
 - Direct links to Grafana dashboards
 - Embedded dashboard views (when available)
 - System status overview with aggregated metrics
@@ -78,6 +82,7 @@ The admin interface leverages our existing monitoring and security infrastructur
 **Purpose**: Provides immediate system health visibility with links to detailed Grafana dashboards.
 
 **Health Metrics**:
+
 - System uptime and availability
 - API response times
 - Database connection status
@@ -85,6 +90,7 @@ The admin interface leverages our existing monitoring and security infrastructur
 - Active user counts
 
 **Service Monitoring**:
+
 - Backend API service status
 - PostgreSQL database health
 - Data crawler status
@@ -92,6 +98,7 @@ The admin interface leverages our existing monitoring and security infrastructur
 - NGINX proxy status
 
 **Quick Actions**:
+
 - Direct links to specific Grafana dashboards
 - Platform overview access
 - Performance metrics
@@ -103,6 +110,7 @@ The admin interface leverages our existing monitoring and security infrastructur
 **Purpose**: Comprehensive user administration interface for super_admin role.
 
 **User Management Features**:
+
 - View all registered users
 - Edit user roles and permissions
 - Suspend/activate user accounts
@@ -111,12 +119,14 @@ The admin interface leverages our existing monitoring and security infrastructur
 - Force user logout
 
 **Session Management**:
+
 - Real-time online user tracking
 - Session information (IP, user agent, duration)
 - Force logout capabilities
 - Session timeout management
 
 **Search and Filtering**:
+
 - Search users by name or email
 - Filter by role (read_only, admin, super_admin)
 - Filter by status (active, inactive, suspended)
@@ -127,28 +137,32 @@ The admin interface leverages our existing monitoring and security infrastructur
 ### Role-Based Access Control (RBAC)
 
 **Role Hierarchy**:
+
 - **read_only**: View-only access to dashboards and logs
 - **admin**: Full system monitoring and crawler management
 - **super_admin**: Complete system administration including user management
 
 **Access Control Implementation**:
+
 ```typescript
 const roleHierarchy = {
-  'read_only': ['read_only'],
-  'admin': ['read_only', 'admin'],
-  'super_admin': ['read_only', 'admin', 'super_admin'],
+  read_only: ["read_only"],
+  admin: ["read_only", "admin"],
+  super_admin: ["read_only", "admin", "super_admin"],
 };
 ```
 
 ### Security Context
 
 **Features**:
+
 - Session timeout management
 - Security event tracking
 - Access control validation
 - Audit logging integration
 
 **Security Events**:
+
 - Failed login attempts
 - Permission denied events
 - Suspicious activity detection
@@ -157,6 +171,7 @@ const roleHierarchy = {
 ### Audit Logging
 
 All administrative actions are logged with:
+
 - User identification
 - Action performed
 - Timestamp
@@ -171,11 +186,13 @@ All administrative actions are logged with:
 The admin interface seamlessly integrates with our existing Grafana monitoring stack:
 
 **Dashboard URLs**:
+
 - Platform Overview: `/d/econgraph-overview/econgraph-platform-overview`
 - Database Statistics: `/d/database-statistics/database-statistics`
 - Crawler Status: `/d/crawler-status/crawler-status`
 
 **Embedded Views**:
+
 - Real-time dashboard panels
 - Direct links to full Grafana interface
 - Custom time range filtering
@@ -184,12 +201,14 @@ The admin interface seamlessly integrates with our existing Grafana monitoring s
 ### Prometheus Metrics Integration
 
 **System Metrics**:
+
 - Service availability (`up{job="econgraph-backend"}`)
 - API response times (`http_request_duration_seconds`)
 - Database connections (`pg_stat_activity_count`)
 - Resource utilization (`container_memory_usage_bytes`)
 
 **Custom Metrics**:
+
 - Queue processing rates (`econgraph_queue_items`)
 - Crawler performance (`econgraph_crawl_errors_total`)
 - User activity (`econgraph_active_users`)
@@ -197,12 +216,14 @@ The admin interface seamlessly integrates with our existing Grafana monitoring s
 ### Authentication Integration
 
 **Backend Integration**:
+
 - JWT token validation
 - Role-based permission checking
 - Session management
 - Secure logout handling
 
 **Security Features**:
+
 - Automatic session timeout
 - Secure token storage
 - CSRF protection
@@ -213,6 +234,7 @@ The admin interface seamlessly integrates with our existing Grafana monitoring s
 ### Test Coverage
 
 Comprehensive test suite covering:
+
 - Component rendering and behavior
 - Role-based access control
 - User interactions and form handling
@@ -243,6 +265,7 @@ __tests__/
 ### Environment Configuration
 
 **Required Environment Variables**:
+
 - `REACT_APP_API_URL`: Backend API endpoint
 - `REACT_APP_GRAFANA_URL`: Grafana dashboard URL
 - `REACT_APP_ADMIN_PORT`: Admin interface port
@@ -378,11 +401,13 @@ EXPOSE 3000
 ### Debug Mode
 
 Enable debug logging by setting:
+
 ```bash
 REACT_APP_DEBUG=true
 ```
 
 This provides detailed logging for:
+
 - Authentication flow
 - API requests and responses
 - Component rendering

@@ -18,10 +18,12 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
   useLocation: () => ({ pathname: '/test', search: '', hash: '', state: null }),
   Link: ({ children, to, ...props }: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const React = require('react');
     return React.createElement('a', { href: to, ...props }, children);
   },
   NavLink: ({ children, to, ...props }: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const React = require('react');
     return React.createElement('a', { href: to, ...props }, children);
   },

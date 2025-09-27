@@ -11,17 +11,33 @@ import { server } from './test-utils/mocks/server';
 // Mock fetch globally for unit tests
 global.fetch = vi.fn();
 
+// MSW is disabled by default for unit tests
+// Integration tests will start MSW manually
+
+// Mock fetch globally for unit tests
+global.fetch = vi.fn();
+
 // Polyfill for Node.js environment
-const { TextEncoder, TextDecoder } = require('util');
+import { TextEncoder, TextDecoder } from 'util';
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - Node.js TextEncoder/TextDecoder types differ from browser types
 global.TextEncoder = TextEncoder;
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - Node.js TextEncoder/TextDecoder types differ from browser types
 global.TextDecoder = TextDecoder;
 
 // Mock localStorage
 const localStorageMock = {
   getItem: () => null,
-  setItem: () => {},
-  removeItem: () => {},
-  clear: () => {},
+  setItem: () => {
+    // Mock implementation
+  },
+  removeItem: () => {
+    // Mock implementation
+  },
+  clear: () => {
+    // Mock implementation
+  },
   key: () => null,
   length: 0,
 };
@@ -220,10 +236,12 @@ vi.mock('react-router-dom', () => ({
   useParams: () => ({}),
   useSearchParams: () => [new URLSearchParams(), vi.fn()],
   Link: ({ children, to, ...props }: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const React = require('react');
     return React.createElement('a', { href: to, ...props }, children);
   },
   NavLink: ({ children, to, ...props }: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const React = require('react');
     return React.createElement('a', { href: to, ...props }, children);
   },

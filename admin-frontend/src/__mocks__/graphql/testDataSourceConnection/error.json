@@ -1,0 +1,12 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Connection test failed: API key invalid",
+      "extensions": {
+        "code": "CONNECTION_ERROR",
+        "details": "HTTP 401 Unauthorized"
+      }
+    }
+  ]
+}

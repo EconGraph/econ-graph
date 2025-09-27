@@ -4,6 +4,7 @@
 import fs from 'fs';
 import path from 'path';
 
+// eslint-disable-next-line no-undef
 const RESPONSES_DIR = path.join(__dirname, 'graphql-responses');
 
 export interface ResponseScenario {
@@ -73,9 +74,10 @@ export function getAvailableOperations(): string[] {
  * @param scenario - Response scenario to use
  * @returns MSW response handler
  */
-export function createResponseHandler(operation: string, scenario: string = 'success') {
+export function createResponseHandler(operation: string, scenario = 'success') {
   return () => {
     const response = loadGraphQLResponse(operation, scenario);
+    // eslint-disable-next-line no-undef
     return new Response(JSON.stringify(response), {
       status: response.errors ? 400 : 200,
       headers: {

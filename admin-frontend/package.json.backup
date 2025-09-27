@@ -1,0 +1,107 @@
+{
+  "name": "econ-graph-admin",
+  "version": "0.1.0",
+  "private": true,
+  "homepage": "/admin",
+  "description": "Administrative interface for EconGraph platform - INTERNAL USE ONLY",
+  "dependencies": {
+    "@apollo/client": "^4.0.5",
+    "@emotion/react": "11.14.0",
+    "@emotion/styled": "11.14.1",
+    "@mui/icons-material": "5.18.0",
+    "@mui/material": "5.18.0",
+    "@mui/x-data-grid": "6.20.4",
+    "@mui/x-date-pickers": "6.20.2",
+    "@tanstack/react-query": "^5.90.2",
+    "@tanstack/react-query-devtools": "^5.90.2",
+    "@types/lodash": "4.17.20",
+    "@types/node": "20.19.13",
+    "@types/react": "18.3.24",
+    "@types/react-dom": "18.3.7",
+    "ace-builds": "1.43.3",
+    "ajv": "8.17.1",
+    "axios": "^1.12.2",
+    "chart.js": "4.5.0",
+    "chartjs-adapter-date-fns": "3.0.0",
+    "date-fns": "3.6.0",
+    "graphql": "^16.11.0",
+    "lodash": "4.17.21",
+    "react": "18.3.1",
+    "react-ace": "10.1.0",
+    "react-chartjs-2": "5.3.0",
+    "react-dom": "18.3.1",
+    "react-query": "3.39.3",
+    "react-router-dom": "6.30.1",
+    "react-scripts": "5.0.1",
+    "rxjs": "^7.8.2",
+    "typescript": "4.9.5",
+    "web-vitals": "3.5.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@testing-library/jest-dom": "6.8.0",
+    "@testing-library/react": "14.3.1",
+    "@testing-library/user-event": "14.6.1",
+    "@types/jest": "29.5.14",
+    "cookie": "^0.6.0",
+    "jest": "27.5.1",
+    "msw": "^2.11.3",
+    "prettier": "^3.0.0",
+    "whatwg-fetch": "^3.6.20"
+  },
+  "scripts": {
+    "start": "REACT_APP_ENV=admin react-scripts start",
+    "build": "REACT_APP_ENV=admin react-scripts build",
+    "test": "react-scripts test --watchAll=false --detectOpenHandles --forceExit --testTimeout=30000",
+    "eject": "react-scripts eject",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "typecheck": "tsc --noEmit",
+    "prettier:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
+    "prettier:fix": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css,md}\""
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ],
+    "overrides": [
+      {
+        "files": [
+          "**/*.test.ts",
+          "**/*.test.tsx",
+          "**/__tests__/**/*"
+        ],
+        "rules": {
+          "testing-library/no-wait-for-multiple-assertions": "off",
+          "testing-library/no-wait-for-side-effects": "off",
+          "testing-library/no-node-access": "off"
+        }
+      }
+    ]
+  },
+  "jest": {},
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "overrides": {
+    "nth-check": "^2.1.1",
+    "postcss": "^8.4.31",
+    "webpack-dev-server": "^5.2.1",
+    "@pmmmwh/react-refresh-webpack-plugin": "^0.5.15",
+    "@types/d3-dispatch": "3.0.4"
+  },
+  "resolutions": {
+    "@types/d3-dispatch": "3.0.4"
+  },
+  "proxy": "http://localhost:8081"
+}

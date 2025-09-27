@@ -1,0 +1,12 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Failed to delete user: Cannot delete your own account",
+      "extensions": {
+        "code": "SELF_DELETE_FORBIDDEN",
+        "timestamp": "2024-01-15T10:30:00Z"
+      }
+    }
+  ]
+}

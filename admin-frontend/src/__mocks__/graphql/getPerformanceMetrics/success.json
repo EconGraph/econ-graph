@@ -1,0 +1,73 @@
+{
+  "data": {
+    "performanceMetrics": {
+      "timeRange": "1h",
+      "metrics": {
+        "cpuUsage": {
+          "current": 45.2,
+          "average": 38.7,
+          "peak": 78.3,
+          "unit": "percent"
+        },
+        "memoryUsage": {
+          "current": 2.1,
+          "average": 1.8,
+          "peak": 3.2,
+          "unit": "GB"
+        },
+        "diskUsage": {
+          "current": 15.7,
+          "average": 15.2,
+          "peak": 16.1,
+          "unit": "GB"
+        },
+        "networkThroughput": {
+          "current": 125.5,
+          "average": 98.3,
+          "peak": 245.7,
+          "unit": "Mbps"
+        },
+        "responseTime": {
+          "current": 245,
+          "average": 189,
+          "peak": 567,
+          "unit": "ms"
+        }
+      },
+      "dataPoints": [
+        {
+          "timestamp": "2025-01-01T09:00:00Z",
+          "cpuUsage": 35.2,
+          "memoryUsage": 1.8,
+          "diskUsage": 15.2,
+          "networkThroughput": 98.3,
+          "responseTime": 189
+        },
+        {
+          "timestamp": "2025-01-01T09:15:00Z",
+          "cpuUsage": 42.1,
+          "memoryUsage": 2.0,
+          "diskUsage": 15.3,
+          "networkThroughput": 112.4,
+          "responseTime": 201
+        },
+        {
+          "timestamp": "2025-01-01T09:30:00Z",
+          "cpuUsage": 38.7,
+          "memoryUsage": 1.9,
+          "diskUsage": 15.4,
+          "networkThroughput": 105.6,
+          "responseTime": 195
+        },
+        {
+          "timestamp": "2025-01-01T09:45:00Z",
+          "cpuUsage": 45.2,
+          "memoryUsage": 2.1,
+          "diskUsage": 15.7,
+          "networkThroughput": 125.5,
+          "responseTime": 245
+        }
+      ]
+    }
+  }
+}

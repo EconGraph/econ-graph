@@ -13,7 +13,9 @@ let setupServer: any, graphql: any, http: any, HttpResponse: any;
 
 function ensureMSWImported() {
   if (!setupServer) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const msw = require('msw/node');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const mswCore = require('msw');
     setupServer = msw.setupServer;
     graphql = mswCore.graphql;

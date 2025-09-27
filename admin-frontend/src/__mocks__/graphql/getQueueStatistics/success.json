@@ -1,0 +1,28 @@
+{
+  "data": {
+    "queueStatistics": {
+      "total": 150,
+      "pending": 45,
+      "processing": 12,
+      "completed": 85,
+      "failed": 8,
+      "retrying": 5,
+      "cancelled": 3,
+      "averageProcessingTime": "2.5s",
+      "estimatedTimeToComplete": "8m 30s",
+      "throughput": {
+        "itemsPerMinute": 12,
+        "itemsPerHour": 720,
+        "itemsPerDay": 17280
+      },
+      "queueHealth": "healthy",
+      "lastProcessed": "2025-01-01T10:00:00Z",
+      "oldestPending": "2025-01-01T09:45:00Z",
+      "priorityDistribution": {
+        "high": 5,
+        "medium": 35,
+        "low": 5
+      }
+    }
+  }
+}

@@ -277,7 +277,7 @@ export function createMockSeries(overrides: Partial<(typeof mockSeriesData)[0]> 
   };
 }
 
-export function createMockDataPoints(count: number, baseValue: number = 100) {
+export function createMockDataPoints(count: number, baseValue = 100) {
   return Array.from({ length: count }, (_, index) => ({
     date: new Date(2024, 0, index + 1).toISOString().split('T')[0],
     value: baseValue + Math.random() * 10 - 5, // ±5 variation
@@ -286,7 +286,7 @@ export function createMockDataPoints(count: number, baseValue: number = 100) {
   }));
 }
 
-export function createMockSearchResults(query: string, count: number = 5) {
+export function createMockSearchResults(query: string, count = 5) {
   return Array.from({ length: count }, (_, index) => ({
     ...mockSearchResults[0],
     id: `search-${query}-${index}`,
