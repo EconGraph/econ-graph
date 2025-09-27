@@ -6,9 +6,9 @@
 use diesel::Connection;
 use econ_graph_core::models::DataSource;
 use serial_test::serial;
+use testcontainers::core::WaitFor;
 use testcontainers::runners::AsyncRunner;
-use testcontainers::{ContainerAsync, ImageExt};
-use testcontainers_modules::postgres::Postgres;
+use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 
 /// Test World Bank data source database integration
 #[tokio::test]
@@ -16,11 +16,13 @@ use testcontainers_modules::postgres::Postgres;
 async fn test_world_bank_data_source_database_integration() -> Result<(), Box<dyn std::error::Error>>
 {
     // Set up test database
-    let postgres = Postgres::default()
-        .with_db_name("econ_graph_test")
-        .with_user("postgres")
-        .with_password("password")
-        .with_tag("postgres:18");
+    let postgres = GenericImage::new("postgres", "18")
+        .with_wait_for(WaitFor::message_on_stdout(
+            "database system is ready to accept connections",
+        ))
+        .with_env_var("POSTGRES_DB", "econ_graph_test")
+        .with_env_var("POSTGRES_USER", "postgres")
+        .with_env_var("POSTGRES_PASSWORD", "password");
 
     let container = postgres.start().await.unwrap();
     let connection_string = format!(
@@ -64,11 +66,13 @@ async fn test_world_bank_data_source_database_integration() -> Result<(), Box<dy
 #[serial]
 async fn test_world_bank_data_source_persistence() -> Result<(), Box<dyn std::error::Error>> {
     // Set up test database
-    let postgres = Postgres::default()
-        .with_db_name("econ_graph_test")
-        .with_user("postgres")
-        .with_password("password")
-        .with_tag("postgres:18");
+    let postgres = GenericImage::new("postgres", "18")
+        .with_wait_for(WaitFor::message_on_stdout(
+            "database system is ready to accept connections",
+        ))
+        .with_env_var("POSTGRES_DB", "econ_graph_test")
+        .with_env_var("POSTGRES_USER", "postgres")
+        .with_env_var("POSTGRES_PASSWORD", "password");
 
     let container = postgres.start().await.unwrap();
     let connection_string = format!(
