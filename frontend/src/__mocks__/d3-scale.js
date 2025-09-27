@@ -3,39 +3,41 @@
  * PURPOSE: Provide predictable test behavior for D3 scale components
  */
 
+const { vi } = require('vitest');
+
 module.exports = {
-  scaleLinear: jest.fn(() => ({
-    domain: jest.fn(() => ({
-      range: jest.fn(() => ({
-        interpolate: jest.fn(() => jest.fn()),
+  scaleLinear: vi.fn(() => ({
+    domain: vi.fn(() => ({
+      range: vi.fn(() => ({
+        interpolate: vi.fn(() => vi.fn()),
       })),
     })),
-    interpolate: jest.fn(() => jest.fn()),
+    interpolate: vi.fn(() => vi.fn()),
   })),
-  scaleTime: jest.fn(() => ({
-    domain: jest.fn(() => ({
-      range: jest.fn(() => ({
-        interpolate: jest.fn(() => jest.fn()),
+  scaleTime: vi.fn(() => ({
+    domain: vi.fn(() => ({
+      range: vi.fn(() => ({
+        interpolate: vi.fn(() => vi.fn()),
       })),
     })),
-    interpolate: jest.fn(() => jest.fn()),
+    interpolate: vi.fn(() => vi.fn()),
   })),
-  scaleOrdinal: jest.fn(() => ({
-    domain: jest.fn(() => ({
-      range: jest.fn(() => jest.fn()),
+  scaleOrdinal: vi.fn(() => ({
+    domain: vi.fn(() => ({
+      range: vi.fn(() => vi.fn()),
     })),
   })),
-  scaleBand: jest.fn(() => ({
-    domain: jest.fn(() => ({
-      range: jest.fn(() => ({
-        padding: jest.fn(() => jest.fn()),
+  scaleBand: vi.fn(() => ({
+    domain: vi.fn(() => ({
+      range: vi.fn(() => ({
+        padding: vi.fn(() => vi.fn()),
       })),
     })),
   })),
-  scalePoint: jest.fn(() => ({
-    domain: jest.fn(() => ({
-      range: jest.fn(() => ({
-        padding: jest.fn(() => jest.fn()),
+  scalePoint: vi.fn(() => ({
+    domain: vi.fn(() => ({
+      range: vi.fn(() => ({
+        padding: vi.fn(() => vi.fn()),
       })),
     })),
   })),

@@ -129,14 +129,8 @@ impl SecureGraphQLServer {
             }
         }
 
-        // Create secure GraphQL context
-        let context = GraphQLContext {
-            pool: self.pool.clone(),
-            security: self.security.clone(),
-        };
-
         // Create schema with security context
-        let schema = create_schema(self.pool.clone());
+        let schema = create_schema((*self.pool).clone());
 
         // Execute GraphQL request with timeout
         let execution_result = self

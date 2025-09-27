@@ -40,7 +40,7 @@ impl Mutation {
         let series_ids = input.series_ids.unwrap_or_else(|| vec!["GDP".to_string()]);
 
         let items = simple_crawler_service::trigger_manual_crawl(
-            pool,
+            &pool,
             Some(sources),
             Some(series_ids),
             1, // priority

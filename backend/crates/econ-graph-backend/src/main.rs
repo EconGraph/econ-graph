@@ -240,7 +240,7 @@ async fn main() -> AppResult<()> {
     info!("✅ Database migrations completed successfully");
 
     // Create GraphQL schema
-    let schema = create_schema_with_data(std::sync::Arc::new(pool.clone()), ());
+    let schema = create_schema_with_data(pool.clone(), ());
     info!("🎯 GraphQL schema created");
 
     // Create authentication service
@@ -331,7 +331,7 @@ async fn main() -> AppResult<()> {
                         econ_graph_graphql::graphql::context::GraphQLContext::new(user),
                     );
                     let auth_schema = econ_graph_graphql::graphql::schema::create_schema_with_data(
-                        std::sync::Arc::new(pool_for_graphql.clone()),
+                        pool_for_graphql.clone(),
                         auth_context,
                     );
 

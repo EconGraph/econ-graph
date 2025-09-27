@@ -6,6 +6,7 @@
 use async_graphql::{EmptySubscription, Schema};
 use std::sync::Arc;
 
+use crate::graphql::dataloaders::DataLoaders;
 use crate::graphql::{mutation::Mutation, query::Query};
 use crate::security::{SecurityConfig, SecurityMiddleware};
 use econ_graph_core::database::DatabasePool;
@@ -15,6 +16,8 @@ use econ_graph_core::database::DatabasePool;
 pub struct GraphQLContext {
     /// Database connection pool
     pub pool: Arc<DatabasePool>,
+    /// DataLoaders for efficient N+1 query prevention
+    pub data_loaders: Arc<DataLoaders>,
     /// Security middleware
     pub security: Arc<SecurityMiddleware>,
 }
@@ -41,13 +44,20 @@ pub struct GraphQLContext {
 ///     Ok(())
 /// }
 /// ```
-pub fn create_schema(pool: Arc<DatabasePool>) -> Schema<Query, Mutation, EmptySubscription> {
+pub fn create_schema(pool: DatabasePool) -> Schema<Query, Mutation, EmptySubscription> {
+    let pool_arc = Arc::new(pool.clone());
+    let data_loaders = Arc::new(DataLoaders::new(pool.clone()));
     let security_config = SecurityConfig::default();
     let security = Arc::new(SecurityMiddleware::new(security_config));
-    let context = GraphQLContext { pool, security };
+    let context = GraphQLContext {
+        pool: pool_arc,
+        data_loaders,
+        security,
+    };
 
     Schema::build(Query, Mutation, EmptySubscription)
         .data(context)
+        .data(pool) // Add pool as separate context data
         .finish()
 }
 
@@ -60,15 +70,22 @@ pub fn create_schema(pool: Arc<DatabasePool>) -> Schema<Query, Mutation, EmptySu
 /// # Returns
 /// Configured GraphQL schema with additional context data
 pub fn create_schema_with_data<T: Send + Sync + 'static>(
-    pool: Arc<DatabasePool>,
+    pool: DatabasePool,
     additional_data: T,
 ) -> Schema<Query, Mutation, EmptySubscription> {
+    let pool_arc = Arc::new(pool.clone());
+    let data_loaders = Arc::new(DataLoaders::new(pool.clone()));
     let security_config = SecurityConfig::default();
     let security = Arc::new(SecurityMiddleware::new(security_config));
-    let context = GraphQLContext { pool, security };
+    let context = GraphQLContext {
+        pool: pool_arc,
+        data_loaders,
+        security,
+    };
 
     Schema::build(Query, Mutation, EmptySubscription)
         .data(context)
+        .data(pool) // Add pool as separate context data
         .data(additional_data)
         .finish()
 }
@@ -84,7 +101,7 @@ mod tests {
     async fn test_schema_creation() {
         // Create a test database container
         let container = econ_graph_core::test_utils::get_test_db().await;
-        let pool = Arc::new(container.pool().clone());
+        let pool = container.pool().clone();
         let schema = create_schema(pool);
 
         // Verify schema is created successfully
@@ -98,7 +115,7 @@ mod tests {
     async fn test_schema_creation_with_data() {
         // Create a test database container
         let container = econ_graph_core::test_utils::get_test_db().await;
-        let pool = Arc::new(container.pool().clone());
+        let pool = container.pool().clone();
         let additional_data = "test_data".to_string();
         let schema = create_schema_with_data(pool, additional_data);
 
