@@ -13,6 +13,7 @@ describe('GraphQL Utilities', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Reset fetch mock - use vi.clearAllMocks() instead of mockClear()
+    mockFetch.mockClear();
   });
 
   test('should execute GraphQL query successfully', async () => {
@@ -240,8 +241,8 @@ describe('GraphQL Utilities', () => {
 
     mockFetch.mockImplementationOnce(
       () => new Promise((resolve) => {
-        // Never resolve to simulate timeout
-        setTimeout(() => resolve({ ok: true, json: () => ({}) }), 10000);
+        // Simulate a slow response that resolves quickly for testing
+        setTimeout(() => resolve({ ok: true, json: () => ({ data: {} }) }), 100);
       })
     );
 
@@ -327,6 +328,7 @@ describe('GraphQL Utilities', () => {
       variables,
     });
 
+    expect(mockFetch).toHaveBeenCalledTimes(1);
     const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(requestBody.variables).toEqual(variables);
   });

@@ -160,6 +160,22 @@
         "fiscalQuarter": 4,
         "calculatedAt": "2023-12-31T00:00:00Z",
         "dataQualityScore": 0.95
+      },
+      {
+        "id": "ratio-11",
+        "statementId": "statement-1",
+        "ratioName": "netProfitMargin",
+        "ratioDisplayName": "Net Profit Margin",
+        "value": 0.253,
+        "category": "profitability",
+        "formula": "Net Income / Revenue",
+        "interpretation": "Above Average",
+        "benchmarkPercentile": 80,
+        "periodEndDate": "2023-12-31",
+        "fiscalYear": 2023,
+        "fiscalQuarter": 4,
+        "calculatedAt": "2023-12-31T00:00:00Z",
+        "dataQualityScore": 0.92
       }
     ]
   }

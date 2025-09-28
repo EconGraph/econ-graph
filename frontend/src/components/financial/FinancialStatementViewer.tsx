@@ -214,6 +214,7 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
     error: statementError,
   } = useFinancialStatementQuery(statementId);
 
+
   const { data: ratiosData } = useQuery(
     ['financial-ratios', statementId],
     async () => {

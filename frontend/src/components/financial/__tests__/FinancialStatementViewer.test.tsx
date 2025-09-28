@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { FinancialStatementViewer } from '../FinancialStatementViewer';
@@ -49,25 +49,10 @@ const TestWrapper = ({ children }: { children: React.ReactNode }) => {
 describe('FinancialStatementViewer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Mock fetch to return a successful response
-    (global.fetch as any).mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        data: {
-          financialStatement: {
-            id: 'statement-1',
-            companyId: 'test-company',
-            statementType: 'INCOME_STATEMENT',
-            fiscalYear: 2023,
-            fiscalQuarter: 4,
-            lineItems: []
-          }
-        }
-      })
-    });
+    // MSW is already set up globally in setupTests.vitest.ts
   });
 
-  it('renders the financial statement viewer', () => {
+  it('renders the financial statement viewer', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -77,11 +62,13 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('Financial Statements')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Financial Statements')).toBeInTheDocument();
+    });
     expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
   });
 
-  it('displays statement selection tabs', () => {
+  it('displays statement selection tabs', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -91,12 +78,14 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('Balance Sheet')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Balance Sheet')).toBeInTheDocument();
+    });
     expect(screen.getByText('Income Statement')).toBeInTheDocument();
     expect(screen.getByText('Cash Flow')).toBeInTheDocument();
   });
 
-  it('switches between statement types', () => {
+  it('switches between statement types', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -106,8 +95,10 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    // Initially should show Balance Sheet with mock data
-    expect(screen.getAllByText('Total Assets').length).toBeGreaterThan(0);
+    // Wait for data to load
+    await waitFor(() => {
+      expect(screen.getAllByText('Total Assets').length).toBeGreaterThan(0);
+    });
     expect(screen.getAllByText('$352.76B').length).toBeGreaterThan(0); // Calculated from mock data
 
     // Click on Income Statement tab
@@ -118,7 +109,7 @@ describe('FinancialStatementViewer', () => {
     expect(incomeTab).toBeInTheDocument();
   });
 
-  it('displays line items in table format', () => {
+  it('displays line items in table format', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -128,13 +119,15 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getAllByText('Total Assets').length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.getAllByText('Total Assets').length).toBeGreaterThan(0);
+    });
     expect(screen.getAllByText('$352.76B').length).toBeGreaterThan(0); // Calculated from mock data: 352755000000
     expect(screen.getAllByText('Total Liabilities').length).toBeGreaterThan(0);
     expect(screen.getAllByText('$258.55B').length).toBeGreaterThan(0); // Calculated from mock data: 258549000000
   });
 
-  it('shows statement metadata', () => {
+  it('shows statement metadata', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -144,13 +137,21 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('10-K')).toBeInTheDocument();
-    expect(screen.getByText('2023')).toBeInTheDocument();
-    expect(screen.getByText('Q4')).toBeInTheDocument();
-    expect(screen.getByText(/Dec 31, 2023/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('10-K')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('2023')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Q4')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Dec 31, 2023/i)).toBeInTheDocument();
+    });
   });
 
-  it('handles line item filtering', () => {
+  it('handles line item filtering', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -160,6 +161,9 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Search line items...')).toBeInTheDocument();
+    });
     const searchInput = screen.getByPlaceholderText('Search line items...');
     fireEvent.change(searchInput, { target: { value: 'Assets' } });
 
@@ -168,7 +172,7 @@ describe('FinancialStatementViewer', () => {
     // Note: Filtering may show both table and div elements, so Total Liabilities might still be visible
   });
 
-  it('displays calculated vs non-calculated items', () => {
+  it('displays calculated vs non-calculated items', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -179,11 +183,12 @@ describe('FinancialStatementViewer', () => {
     );
 
     // Should show indicators for calculated items
-    const calculatedItems = screen.getAllByText('Calculated');
-    expect(calculatedItems.length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.getAllByText('Calculated').length).toBeGreaterThan(0);
+    });
   });
 
-  it('shows line item hierarchy and indentation', () => {
+  it('shows line item hierarchy and indentation', async () => {
 
     render(
       <TestWrapper>
@@ -195,10 +200,12 @@ describe('FinancialStatementViewer', () => {
     );
 
     // Should show hierarchical structure
-    expect(screen.getByText('Cash and Cash Equivalents')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Cash and Cash Equivalents')).toBeInTheDocument();
+    });
   });
 
-  it('handles statement comparison mode', () => {
+  it('handles statement comparison mode', async () => {
 
     render(
       <TestWrapper>
@@ -209,11 +216,15 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('Comparison Mode')).toBeInTheDocument();
-    expect(screen.getByText('2023 vs 2022')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Comparison Mode')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('2023 vs 2022')).toBeInTheDocument();
+    });
   });
 
-  it('shows percentage changes in comparison mode', () => {
+  it('shows percentage changes in comparison mode', async () => {
 
 
     render(
@@ -226,10 +237,12 @@ describe('FinancialStatementViewer', () => {
     );
 
     // Should show percentage change
-    expect(screen.getByText('+8.9%')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('+8.9%')).toBeInTheDocument();
+    });
   });
 
-  it('displays statement sections and subsections', () => {
+  it('displays statement sections and subsections', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -239,11 +252,13 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getAllByText('Assets').length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.getAllByText('Assets').length).toBeGreaterThan(0);
+    });
     expect(screen.getAllByText('Liabilities').length).toBeGreaterThan(0);
   });
 
-  it('handles expandable sections', () => {
+  it('handles expandable sections', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -253,6 +268,9 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
+    await waitFor(() => {
+      expect(screen.getAllByText('Assets').length).toBeGreaterThan(0);
+    });
     const assetsSection = screen.getAllByText('Assets')[0];
     fireEvent.click(assetsSection);
 
@@ -260,7 +278,7 @@ describe('FinancialStatementViewer', () => {
     expect(screen.getAllByText('Current Assets').length).toBeGreaterThan(0);
   });
 
-  it('shows line item annotations', () => {
+  it('shows line item annotations', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -270,10 +288,12 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('Annotations')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Annotations')).toBeInTheDocument();
+    });
   });
 
-  it('handles annotation creation', () => {
+  it('handles annotation creation', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -283,13 +303,16 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
+    await waitFor(() => {
+      expect(screen.getByText('Add Annotation')).toBeInTheDocument();
+    });
     const addAnnotationButton = screen.getByText('Add Annotation');
     fireEvent.click(addAnnotationButton);
 
     // Component should handle annotation creation internally
   });
 
-  it('displays data quality indicators', () => {
+  it('displays data quality indicators', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -299,11 +322,15 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('Data Quality')).toBeInTheDocument();
-    expect(screen.getByText('High Confidence')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Data Quality')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('High Confidence')).toBeInTheDocument();
+    });
   });
 
-  it('handles export functionality', () => {
+  it('handles export functionality', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -313,13 +340,16 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
+    await waitFor(() => {
+      expect(screen.getByText('Export Statement')).toBeInTheDocument();
+    });
     const exportButton = screen.getByText('Export Statement');
     fireEvent.click(exportButton);
 
     // Component should handle export functionality internally
   });
 
-  it('shows loading state', () => {
+  it('shows loading state', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -329,10 +359,12 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('Loading financial statements...')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Loading financial statements...')).toBeInTheDocument();
+    });
   });
 
-  it('handles empty line items', () => {
+  it('handles empty line items', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -342,10 +374,12 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('No line items available')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('No line items available')).toBeInTheDocument();
+    });
   });
 
-  it('displays statement footnotes', () => {
+  it('displays statement footnotes', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -355,10 +389,12 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('Footnotes')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Footnotes')).toBeInTheDocument();
+    });
   });
 
-  it('handles responsive design', () => {
+  it('handles responsive design', async () => {
     // Mock mobile viewport
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
@@ -376,10 +412,12 @@ describe('FinancialStatementViewer', () => {
     );
 
     // Should adapt to mobile view
-    expect(screen.getByText('Financial Statements')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Financial Statements')).toBeInTheDocument();
+    });
   });
 
-  it('shows statement validation status', () => {
+  it('shows statement validation status', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -389,11 +427,15 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('Validation Status')).toBeInTheDocument();
-    expect(screen.getByText('✓ Validated')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Validation Status')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('✓ Validated')).toBeInTheDocument();
+    });
   });
 
-  it('displays XBRL processing status', () => {
+  it('displays XBRL processing status', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -403,10 +445,12 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('XBRL Status: Completed')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('XBRL Status: Completed')).toBeInTheDocument();
+    });
   });
 
-  it('handles statement amendments and restatements', () => {
+  it('handles statement amendments and restatements', async () => {
 
     render(
       <TestWrapper>
@@ -417,11 +461,15 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('Amended Filing')).toBeInTheDocument();
-    expect(screen.getByText('10-K/A')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Amended Filing')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('10-K/A')).toBeInTheDocument();
+    });
   });
 
-  it('shows statement download options', () => {
+  it('shows statement download options', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -431,12 +479,18 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('Download Options')).toBeInTheDocument();
-    expect(screen.getByText('Original Filing')).toBeInTheDocument();
-    expect(screen.getByText('XBRL Data')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Download Options')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Original Filing')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('XBRL Data')).toBeInTheDocument();
+    });
   });
 
-  it('handles line item drill-down', () => {
+  it('handles line item drill-down', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -446,14 +500,19 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
+    await waitFor(() => {
+      expect(screen.getAllByText('Total Assets').length).toBeGreaterThan(0);
+    });
     const lineItem = screen.getAllByText('Total Assets')[0];
     fireEvent.click(lineItem);
 
     // Should show detailed breakdown
-    expect(screen.getByText('Asset Breakdown')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Asset Breakdown')).toBeInTheDocument();
+    });
   });
 
-  it('displays statement ratios and calculations', () => {
+  it('displays statement ratios and calculations', async () => {
     render(
       <TestWrapper>
         <FinancialStatementViewer
@@ -463,11 +522,15 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('Calculated Ratios')).toBeInTheDocument();
-    expect(screen.getByText('Debt to Assets: 73.3%')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Calculated Ratios')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Debt to Assets: 73.3%')).toBeInTheDocument();
+    });
   });
 
-  it('handles statement navigation', () => {
+  it('handles statement navigation', async () => {
 
     render(
       <TestWrapper>
@@ -478,11 +541,15 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('← Previous')).toBeInTheDocument();
-    expect(screen.getByText('Next →')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('← Previous')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Next →')).toBeInTheDocument();
+    });
   });
 
-  it('shows statement timeline', () => {
+  it('shows statement timeline', async () => {
 
     render(
       <TestWrapper>
@@ -493,9 +560,17 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText('Statement Timeline')).toBeInTheDocument();
-    expect(screen.getByText('Q2 2023')).toBeInTheDocument();
-    expect(screen.getByText('Q3 2023')).toBeInTheDocument();
-    expect(screen.getByText('Q4 2023')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Statement Timeline')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Q2 2023')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Q3 2023')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Q4 2023')).toBeInTheDocument();
+    });
   });
 });

@@ -167,6 +167,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
           query: GET_FINANCIAL_DASHBOARD,
           variables: { companyId },
         });
+        console.log('FinancialDashboard - GraphQL result:', result);
         return result.data;
       } catch (error) {
         console.error('Failed to fetch financial dashboard data:', error);
@@ -178,6 +179,8 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
       staleTime: 5 * 60 * 1000, // 5 minutes
     }
   );
+
+  console.log('FinancialDashboard - loading:', loading, 'data:', data, 'error:', error);
 
   const company: Company | undefined = data?.company;
   const statements: FinancialStatement[] = useMemo(

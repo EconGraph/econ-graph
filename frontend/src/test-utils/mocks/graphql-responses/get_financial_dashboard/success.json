@@ -58,6 +58,48 @@
               "parentConcept": "Assets",
               "createdAt": "2023-12-31T00:00:00Z",
               "updatedAt": "2023-12-31T00:00:00Z"
+            },
+            {
+              "id": "item-3",
+              "statementId": "statement-1",
+              "taxonomyConcept": "Revenues",
+              "standardLabel": "Net Sales",
+              "value": 383290000000,
+              "unit": "USD",
+              "contextRef": "context-1",
+              "statementType": "incomeStatement",
+              "statementSection": "revenue",
+              "isCalculated": false,
+              "createdAt": "2023-12-31T00:00:00Z",
+              "updatedAt": "2023-12-31T00:00:00Z"
+            },
+            {
+              "id": "item-4",
+              "statementId": "statement-1",
+              "taxonomyConcept": "NetIncomeLoss",
+              "standardLabel": "Net Income",
+              "value": 96995000000,
+              "unit": "USD",
+              "contextRef": "context-1",
+              "statementType": "incomeStatement",
+              "statementSection": "income",
+              "isCalculated": false,
+              "createdAt": "2023-12-31T00:00:00Z",
+              "updatedAt": "2023-12-31T00:00:00Z"
+            },
+            {
+              "id": "item-5",
+              "statementId": "statement-1",
+              "taxonomyConcept": "Liabilities",
+              "standardLabel": "Total Liabilities",
+              "value": 258549000000,
+              "unit": "USD",
+              "contextRef": "context-1",
+              "statementType": "balanceSheet",
+              "statementSection": "liabilities",
+              "isCalculated": false,
+              "createdAt": "2023-12-31T00:00:00Z",
+              "updatedAt": "2023-12-31T00:00:00Z"
             }
           ],
           "createdAt": "2023-12-31T00:00:00Z",
@@ -96,6 +138,38 @@
           "fiscalQuarter": 4,
           "calculatedAt": "2023-12-31T00:00:00Z",
           "dataQualityScore": 0.98
+        },
+        {
+          "id": "ratio-3",
+          "statementId": "statement-1",
+          "ratioName": "enterpriseValueToEbitda",
+          "ratioDisplayName": "Enterprise Value to EBITDA",
+          "value": 18.5,
+          "category": "valuation",
+          "formula": "Enterprise Value / EBITDA",
+          "interpretation": "Good",
+          "benchmarkPercentile": 65,
+          "periodEndDate": "2023-12-31",
+          "fiscalYear": 2023,
+          "fiscalQuarter": 4,
+          "calculatedAt": "2023-12-31T00:00:00Z",
+          "dataQualityScore": 0.88
+        },
+        {
+          "id": "ratio-4",
+          "statementId": "statement-1",
+          "ratioName": "netProfitMargin",
+          "ratioDisplayName": "Net Profit Margin",
+          "value": 0.253,
+          "category": "profitability",
+          "formula": "Net Income / Revenue",
+          "interpretation": "Above Average",
+          "benchmarkPercentile": 80,
+          "periodEndDate": "2023-12-31",
+          "fiscalYear": 2023,
+          "fiscalQuarter": 4,
+          "calculatedAt": "2023-12-31T00:00:00Z",
+          "dataQualityScore": 0.92
         }
       ],
       "alerts": [

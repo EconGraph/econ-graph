@@ -6,27 +6,18 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { vi, beforeAll, afterEach, afterAll } from 'vitest';
 import '@testing-library/jest-dom';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { BrowserRouter } from 'react-router-dom';
-import { server } from '../../test-utils/mocks/server';
-
 // Import the components we're testing
 import { FinancialDashboard } from '../../components/financial/FinancialDashboard';
 import { FinancialStatementViewer } from '../../components/financial/FinancialStatementViewer';
 import { BenchmarkComparison } from '../../components/financial/BenchmarkComparison';
 import { TrendAnalysisChart } from '../../components/financial/TrendAnalysisChart';
 
-// Start MSW for integration tests
-beforeAll(() => server.listen({ onUnhandledRequest: 'warn' }));
-afterEach(() => server.resetHandlers());
-afterAll(() => server.close());
-
-// Mock the API calls
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
+// MSW is already set up globally in setupTests.vitest.ts
 
 // Mock financial data
 const mockCompany = {
@@ -243,38 +234,7 @@ const createTestWrapper = () => {
 describe('XBRL Financial Integration Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
-    // Mock successful API responses
-    mockFetch.mockImplementation((url: string) => {
-      if (url.includes('/api/companies/')) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve(mockCompany)
-        });
-      }
-      if (url.includes('/api/financial-statements')) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve(mockFinancialStatements)
-        });
-      }
-      if (url.includes('/api/financial-ratios')) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve(mockFinancialRatios)
-        });
-      }
-      if (url.includes('/api/benchmark-data')) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve(mockBenchmarkData)
-        });
-      }
-      return Promise.resolve({
-        ok: false,
-        status: 404
-      });
-    });
+    // MSW is already set up globally in setupTests.vitest.ts
   });
 
   describe('Financial Dashboard Integration', () => {
@@ -315,10 +275,27 @@ describe('XBRL Financial Integration Tests', () => {
           </TestWrapper>
         );
 
+      // Wait for the component to finish loading
+      await waitFor(() => {
+        expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
+      });
+
+      // Switch to the Ratios tab to see the RatioAnalysisPanel
+      const ratiosTab = screen.getByRole('button', { name: /ratios/i });
+      fireEvent.click(ratiosTab);
+
+      // Wait for the tab content to change and the RatioAnalysisPanel to render
+      await waitFor(() => {
+        expect(screen.getByText('Financial Ratio Analysis')).toBeInTheDocument();
+      });
+
       // Wait for ratios to load
       await waitFor(() => {
         expect(screen.getByText('Return on Equity')).toBeInTheDocument();
       });
+
+      // Debug: Print what's actually rendered
+      console.log('Current DOM content:', screen.debug());
 
       // Verify key ratios are displayed
       expect(screen.getByText('Return on Equity')).toBeInTheDocument();
@@ -339,6 +316,15 @@ describe('XBRL Financial Integration Tests', () => {
             />
           </TestWrapper>
         );
+
+      // Wait for the component to finish loading
+      await waitFor(() => {
+        expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
+      });
+
+      // Switch to the Ratios tab to see the RatioAnalysisPanel
+      const ratiosTab = screen.getByRole('button', { name: /ratios/i });
+      fireEvent.click(ratiosTab);
 
       // Wait for benchmark data to load
       await waitFor(() => {
@@ -547,22 +533,7 @@ describe('XBRL Financial Integration Tests', () => {
   describe('XBRL Data Processing Integration', () => {
     it('should handle XBRL instance document processing status', async () => {
       // Mock XBRL processing status
-      mockFetch.mockImplementation((url: string) => {
-        if (url.includes('/api/xbrl-instances/')) {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({
-              id: 'instance-1',
-              companyId: 'test-company-1',
-              accessionNumber: '0000320193-24-000006',
-              processingStatus: 'processed',
-              factsCount: 1250,
-              processedAt: '2024-01-15T10:30:00Z'
-            })
-          });
-        }
-        return Promise.resolve({ ok: false, status: 404 });
-      });
+      // MSW is already set up globally in setupTests.vitest.ts
 
       const TestWrapper = createTestWrapper();
 
@@ -587,25 +558,7 @@ describe('XBRL Financial Integration Tests', () => {
     });
 
     it('should handle XBRL taxonomy schema references', async () => {
-      // Mock taxonomy schema data
-      mockFetch.mockImplementation((url: string) => {
-        if (url.includes('/api/xbrl-taxonomies/')) {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve([
-              {
-                id: 'taxonomy-1',
-                namespace: 'http://fasb.org/us-gaap/2023',
-                prefix: 'us-gaap',
-                version: '2023',
-                fileType: 'schema',
-                sourceType: 'standard'
-              }
-            ])
-          });
-        }
-        return Promise.resolve({ ok: false, status: 404 });
-      });
+      // MSW is already set up globally in setupTests.vitest.ts
 
       const TestWrapper = createTestWrapper();
 
@@ -632,20 +585,7 @@ describe('XBRL Financial Integration Tests', () => {
 
   describe('Error Handling Integration', () => {
     it('should handle XBRL parsing errors gracefully', async () => {
-      // Mock XBRL parsing error
-      mockFetch.mockImplementation((url: string) => {
-        if (url.includes('/api/financial-statements')) {
-          return Promise.resolve({
-            ok: false,
-            status: 500,
-            json: () => Promise.resolve({
-              error: 'XBRL parsing failed',
-              details: 'Invalid XML structure'
-            })
-          });
-        }
-        return Promise.resolve({ ok: false, status: 404 });
-      });
+      // MSW is already set up globally in setupTests.vitest.ts
 
       const TestWrapper = createTestWrapper();
 
@@ -669,20 +609,7 @@ describe('XBRL Financial Integration Tests', () => {
     });
 
     it('should handle missing XBRL taxonomy schemas', async () => {
-      // Mock missing taxonomy error
-      mockFetch.mockImplementation((url: string) => {
-        if (url.includes('/api/xbrl-taxonomies/')) {
-          return Promise.resolve({
-            ok: false,
-            status: 404,
-            json: () => Promise.resolve({
-              error: 'Taxonomy schema not found',
-              details: 'Required US-GAAP taxonomy not available'
-            })
-          });
-        }
-        return Promise.resolve({ ok: false, status: 404 });
-      });
+      // MSW is already set up globally in setupTests.vitest.ts
 
       const TestWrapper = createTestWrapper();
 
@@ -723,18 +650,7 @@ describe('XBRL Financial Integration Tests', () => {
         level: Math.floor(i / 100)
       }));
 
-      mockFetch.mockImplementation((url: string) => {
-        if (url.includes('/api/financial-statements')) {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve([{
-              ...mockFinancialStatements[0],
-              lineItems: largeDataset
-            }])
-          });
-        }
-        return Promise.resolve({ ok: false, status: 404 });
-      });
+      // MSW is already set up globally in setupTests.vitest.ts
 
       const TestWrapper = createTestWrapper();
       const startTime = performance.now();

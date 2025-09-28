@@ -2,160 +2,105 @@
 // This file sets up the test environment for Vitest with MSW support
 
 import '@testing-library/jest-dom';
-import { vi } from 'vitest';
+import { vi, beforeAll, afterEach, afterAll } from 'vitest';
+import { setupServer } from 'msw/node';
+import { http, HttpResponse } from 'msw';
+import { loadGraphQLResponse } from './test-utils/mocks/graphql-response-loader';
 
-// MSW is disabled by default for unit tests
-// Integration tests will start MSW manually
+// MSW server for mocking API calls
+const server = setupServer(
+  // GraphQL endpoint handler
+  http.post('/graphql', ({ request }) => {
+    return request.json().then((body: any) => {
+      console.log('MSW GraphQL Request:', body.query);
+      console.log('MSW GraphQL Variables:', body.variables);
+      
+      // Handle different GraphQL queries based on the query string
+      if (body.query && body.query.includes('GetFinancialDashboard')) {
+        // Financial dashboard query
+        const response = loadGraphQLResponse('get_financial_dashboard', 'success');
+        return HttpResponse.json(response);
+      } else if (body.query && body.query.includes('GetFinancialRatios')) {
+        // Financial ratios query
+        console.log('MSW returning financial ratios data');
+        console.log('MSW GetFinancialRatios query variables:', body.variables);
+        
+        // Handle empty data scenarios
+        if (body.variables?.statementId === 'error-statement-id' || body.variables?.statementId === 'empty-statement-id') {
+          const response = loadGraphQLResponse('get_financial_ratios', 'empty');
+          return HttpResponse.json(response);
+        }
+        
+        const response = loadGraphQLResponse('get_financial_ratios', 'success');
+        return HttpResponse.json(response);
+      } else {
+        // Default financial statement query
+        const response = loadGraphQLResponse('get_financial_statement', 'success');
+        return HttpResponse.json(response);
+      }
+    });
+  })
+);
 
-// Mock fetch globally for unit tests
-global.fetch = vi.fn();
+// Start server before all tests
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 
-// Polyfill for Node.js environment
-import { TextEncoder, TextDecoder } from 'util';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore - Node.js TextEncoder/TextDecoder types differ from browser types
-global.TextEncoder = TextEncoder;
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore - Node.js TextEncoder/TextDecoder types differ from browser types
-global.TextDecoder = TextDecoder;
+// Reset handlers after each test `important for test isolation`
+afterEach(() => server.resetHandlers());
 
-// Mock localStorage
-const localStorageMock = {
-  getItem: () => null,
-  setItem: () => {
-    // Mock implementation
-  },
-  removeItem: () => {
-    // Mock implementation
-  },
-  clear: () => {
-    // Mock implementation
-  },
-  key: () => null,
-  length: 0,
+// Clean up after all tests
+afterAll(() => server.close());
+
+// Mock console methods to reduce noise in test output
+global.console = {
+  ...console,
+  // Uncomment to ignore a specific log level
+  log: vi.fn(),
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
 };
-(global as any).localStorage = localStorageMock;
-Object.defineProperty(window, 'localStorage', {
-  value: localStorageMock,
+
+// Mock window.matchMedia
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: vi.fn().mockImplementation(query => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(), // deprecated
+    removeListener: vi.fn(), // deprecated
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
 });
 
-// Mock Chart.js and related modules
-vi.mock('chart.js', () => ({
-  Chart: {
-    register: vi.fn(),
-  },
-  registerables: [],
-  CategoryScale: vi.fn(),
-  LinearScale: vi.fn(),
-  PointElement: vi.fn(),
-  LineElement: vi.fn(),
-  BarElement: vi.fn(),
-  ArcElement: vi.fn(),
-  Title: vi.fn(),
-  Tooltip: vi.fn(),
-  Legend: vi.fn(),
-  Filler: vi.fn(),
+// Mock ResizeObserver
+global.ResizeObserver = vi.fn().mockImplementation(() => ({
+  observe: vi.fn(),
+  unobserve: vi.fn(),
+  disconnect: vi.fn(),
 }));
 
-vi.mock('chartjs-adapter-date-fns', () => ({}));
-
-vi.mock('react-chartjs-2', () => ({
-  Line: vi.fn(() => 'Mock Chart'),
-  Bar: vi.fn(() => 'Mock Chart'),
-  Pie: vi.fn(() => 'Mock Chart'),
+// Mock IntersectionObserver
+global.IntersectionObserver = vi.fn().mockImplementation(() => ({
+  observe: vi.fn(),
+  unobserve: vi.fn(),
+  disconnect: vi.fn(),
 }));
 
-// Mock chartjs-plugin-annotation to avoid plugin runtime issues in tests
-vi.mock('chartjs-plugin-annotation', () => ({
-  __esModule: true,
-  default: { id: 'annotation', beforeDraw: vi.fn(), afterDraw: vi.fn() },
-}));
+// Mock URL.createObjectURL
+global.URL.createObjectURL = vi.fn(() => 'mocked-url');
 
-// Mock the hooks module globally
-const mockDataSources = [
-  {
-    id: 'fred',
-    name: 'Federal Reserve Economic Data',
-    description: 'Economic data from the Federal Reserve',
-    base_url: 'https://fred.stlouisfed.org',
-    api_key_required: false,
-    rate_limit_per_minute: 120,
-    series_count: 800000,
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-12-15T10:00:00Z',
-  },
-  {
-    id: 'bls',
-    name: 'Bureau of Labor Statistics',
-    description: 'Labor market and economic statistics',
-    base_url: 'https://www.bls.gov',
-    api_key_required: true,
-    rate_limit_per_minute: 60,
-    series_count: 50000,
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-12-14T09:00:00Z',
-  },
-  {
-    id: 'census',
-    name: 'U.S. Census Bureau',
-    description: 'Demographic and economic data',
-    base_url: 'https://www.census.gov',
-    api_key_required: false,
-    rate_limit_per_minute: 100,
-    series_count: 25000,
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-12-13T08:00:00Z',
-  },
-  {
-    id: 'worldbank',
-    name: 'World Bank Open Data',
-    description: 'Global development indicators',
-    base_url: 'https://data.worldbank.org',
-    api_key_required: false,
-    rate_limit_per_minute: 80,
-    series_count: 15000,
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-12-12T07:00:00Z',
-  },
-];
+// Mock fetch for tests that don't use MSW
+global.fetch = vi.fn();
 
-const mockSearchResults = [
-  {
-    id: 'gdp-series-1',
-    title: 'Real Gross Domestic Product',
-    description: 'Real GDP in billions of chained 2017 dollars',
-    sourceId: 'fred',
-    frequency: 'Quarterly',
-    units: 'Billions of Chained 2017 Dollars',
-    lastUpdated: '2024-10-01T00:00:00Z',
-    startDate: '1948-01-01T00:00:00Z',
-    endDate: '2024-11-01T00:00:00Z',
-    similarityScore: 0.9,
-  },
-  {
-    id: 'unemployment-series-1',
-    title: 'Unemployment Rate',
-    description: 'Unemployment rate as a percentage',
-    sourceId: 'fred',
-    frequency: 'Monthly',
-    units: 'Percent',
-    lastUpdated: '2024-11-01T00:00:00Z',
-    startDate: '1948-01-01T00:00:00Z',
-    endDate: '2024-11-01T00:00:00Z',
-    similarityScore: 0.85,
-  },
-];
-
-vi.mock('./hooks/useSeriesData', () => ({
-  useDataSources: vi.fn().mockImplementation(() => ({
-    data: mockDataSources,
-    isLoading: false,
-    error: null,
-    isError: false,
-    isSuccess: true,
-  })),
+// Mock react-query hooks
+vi.mock('@/hooks/useSeriesSearch', () => ({
   useSeriesSearch: vi.fn().mockImplementation(() => ({
-    data: mockSearchResults,
+    data: [],
     isLoading: false,
     error: null,
     isError: false,
@@ -224,6 +169,8 @@ vi.mock('d3-zoom', () => ({
 // Mock react-router-dom
 vi.mock('react-router-dom', () => ({
   BrowserRouter: ({ children }: { children: React.ReactNode }) => children,
+  Routes: ({ children }: { children: React.ReactNode }) => children,
+  Route: ({ children }: { children: React.ReactNode }) => children,
   useNavigate: () => vi.fn(),
   useLocation: () => ({ pathname: '/test', search: '', hash: '', state: null }),
   useParams: () => ({}),
