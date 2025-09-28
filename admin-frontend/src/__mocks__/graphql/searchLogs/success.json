@@ -1,0 +1,30 @@
+{
+  "data": {
+    "searchLogs": [
+      {
+        "id": "1",
+        "timestamp": "2024-01-15T10:30:00Z",
+        "level": "info",
+        "source": "FRED",
+        "message": "Successfully crawled GDP data",
+        "details": "Series GDP fetched and processed successfully",
+        "duration_ms": 2300,
+        "status": "completed",
+        "relevance_score": 0.95,
+        "created_at": "2024-01-15T10:30:00Z"
+      },
+      {
+        "id": "5",
+        "timestamp": "2024-01-15T10:28:00Z",
+        "level": "debug",
+        "source": "FRED",
+        "message": "Parsing JSON response for series GDP",
+        "details": "Successfully parsed 100 data points",
+        "duration_ms": 100,
+        "status": "completed",
+        "relevance_score": 0.87,
+        "created_at": "2024-01-15T10:28:00Z"
+      }
+    ]
+  }
+}

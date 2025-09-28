@@ -20,9 +20,10 @@ import UserDataDeletion from './pages/UserDataDeletion';
 const SIDEBAR_WIDTH = 240;
 
 /**
- * REQUIREMENT: Modern application that is easier to use than FRED
- * PURPOSE: Main application component that provides routing and layout structure
- * This creates a responsive layout with navigation that's more intuitive than FRED's interface
+ * REQUIREMENT: Modern application that is easier to use than FRED.
+ * PURPOSE: Main application component that provides routing and layout structure.
+ * This creates a responsive layout with navigation that's more intuitive than FRED's interface.
+ * @returns The main application component with routing and layout.
  */
 function App() {
   const [sidebarOpen, setSidebarOpen] = React.useState(true);

@@ -2,7 +2,7 @@
 // PURPOSE: Provide secure login interface for administrators
 // This ensures only authorized personnel can access administrative functions
 
-import React, { useState } from 'react';
+import React, { useState } from "react";
 import {
   Box,
   Paper,
@@ -10,35 +10,35 @@ import {
   Button,
   Typography,
   Alert,
-  CircularProgress
-} from '@mui/material';
-import { useAuth } from '../../contexts/AuthContext';
+  CircularProgress,
+} from "@mui/material";
+import { useAuth } from "../../contexts/AuthContext";
 
 function LoginPage() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const { login, loading } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    setError("");
 
     try {
       await login(username, password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      setError(err instanceof Error ? err.message : "Login failed");
     }
   };
 
   return (
     <Box
       sx={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
         padding: 2,
       }}
     >
@@ -46,12 +46,12 @@ function LoginPage() {
         elevation={10}
         sx={{
           padding: 4,
-          width: '100%',
+          width: "100%",
           maxWidth: 400,
           borderRadius: 2,
         }}
       >
-        <Box sx={{ textAlign: 'center', mb: 3 }}>
+        <Box sx={{ textAlign: "center", mb: 3 }}>
           <Typography variant="h4" component="h1" gutterBottom>
             🔒 Admin Login
           </Typography>
@@ -92,11 +92,11 @@ function LoginPage() {
             sx={{ mt: 3, mb: 2 }}
             disabled={loading}
           >
-            {loading ? <CircularProgress size={24} /> : 'Login'}
+            {loading ? <CircularProgress size={24} /> : "Login"}
           </Button>
         </form>
 
-        <Box sx={{ mt: 2, textAlign: 'center' }}>
+        <Box sx={{ mt: 2, textAlign: "center" }}>
           <Typography variant="caption" color="text.secondary">
             All login attempts are logged and monitored
           </Typography>

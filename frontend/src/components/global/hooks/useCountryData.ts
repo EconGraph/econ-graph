@@ -35,7 +35,7 @@ const COLOR_SCHEMES = {
 export const useCountryData = (
   countries: CountryData[],
   selectedIndicator: string,
-  colorScheme: string = 'viridis'
+  colorScheme = 'viridis'
 ) => {
   // Process country data
   const processedData = useMemo(() => {
@@ -140,7 +140,7 @@ export const useCountryData = (
 
   // Get top countries by indicator value
   const getTopCountries = useCallback(
-    (limit: number = 10) => {
+    (limit = 10) => {
       return countriesWithData
         .sort((a, b) => (b.colorValue || 0) - (a.colorValue || 0))
         .slice(0, limit);
@@ -150,7 +150,7 @@ export const useCountryData = (
 
   // Get bottom countries by indicator value
   const getBottomCountries = useCallback(
-    (limit: number = 10) => {
+    (limit = 10) => {
       return countriesWithData
         .sort((a, b) => (a.colorValue || 0) - (b.colorValue || 0))
         .slice(0, limit);

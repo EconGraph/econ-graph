@@ -1,4 +1,3 @@
-import { vi } from 'vitest';
 /**
  * REQUIREMENT: Comprehensive unit tests for authentication dialog
  * PURPOSE: Test LoginDialog component behavior including error handling and user interactions
@@ -8,10 +7,11 @@ import { vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { vi } from 'vitest';
 import LoginDialog from '../LoginDialog';
 import { AuthProvider } from '../../../contexts/AuthContext';
 
-// Note: ResizeObserver is mocked in setupTests.ts using resize-observer-polyfill
+// Note: ResizeObserver is mocked in setupTests.vitest.ts using resize-observer-polyfill
 
 // Set up Facebook App ID for testing
 process.env.REACT_APP_FACEBOOK_APP_ID = 'test-facebook-app-id';
@@ -33,10 +33,14 @@ const mockAuthContext = {
 };
 
 // Mock the useAuth hook
-vi.mock('../../../contexts/AuthContext', async () => ({
-  ...(await vi.importActual('../../../contexts/AuthContext')),
-  useAuth: () => mockAuthContext,
-}));
+vi.mock('../../../contexts/AuthContext', async () => {
+  const actual = await vi.importActual('../../../contexts/AuthContext');
+  return {
+    ...actual,
+    useAuth: () => mockAuthContext,
+    AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  };
+});
 
 // Create a test theme
 const theme = createTheme();

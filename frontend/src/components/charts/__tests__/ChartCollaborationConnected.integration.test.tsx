@@ -7,12 +7,11 @@
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { vi } from 'vitest';
-import type { Mock } from 'vitest';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, StyledEngineProvider } from '@mui/material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { vi } from 'vitest';
 import ChartCollaborationConnected from '../ChartCollaborationConnected';
 import { ChartAnnotationType } from '../../../utils/graphql';
 import { useCollaboration } from '../../../hooks/useCollaboration';
@@ -125,7 +124,7 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseAuth.mockReturnValue({ user: mockUser });
-    (useCollaboration as Mock).mockReturnValue(mockCollaborationHook);
+    (useCollaboration as any).mockReturnValue(mockCollaborationHook);
 
     // Mock window.confirm
     window.confirm = vi.fn(() => true);
@@ -407,7 +406,7 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
 
   describe('Loading and Error States', () => {
     it('should handle loading state', () => {
-      (useCollaboration as Mock).mockReturnValue({
+      (useCollaboration as any).mockReturnValue({
         ...mockCollaborationHook,
         loading: true,
       });
@@ -419,7 +418,7 @@ describe('ChartCollaborationConnected - Integration Tests', () => {
     });
 
     it('should handle error state', () => {
-      (useCollaboration as Mock).mockReturnValue({
+      (useCollaboration as any).mockReturnValue({
         ...mockCollaborationHook,
         error: 'Failed to load data',
       });

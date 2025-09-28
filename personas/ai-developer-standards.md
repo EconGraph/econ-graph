@@ -366,3 +366,141 @@ BACKEND_INTEGRATION_DB_PORT=5447
 * ✅ **You understand the data flow** from request to response
 * ✅ **Your fix addresses the root cause** - Not just the symptoms
 * ✅ **You can predict what will happen** when you make the change
+
+## Test-Component Disagreement Resolution Process
+
+**CRITICAL: When tests and components disagree, stop and analyze from a product perspective before making changes.**
+
+### The Problem
+When tests fail because they expect different behavior than what the component implements, it's tempting to either:
+* Change the component to make tests pass
+* Change the tests to match the component
+* Assume one side is "wrong" without analysis
+
+### The Solution: Product-First Analysis
+
+#### 1. Stop and Analyze
+* **Don't immediately change code** - Pause and investigate both sides
+* **Don't assume either is wrong** - Both might be correct for different reasons
+* **Gather evidence** - Look at the actual behavior vs expected behavior
+
+#### 2. Gather Evidence
+* **Product specifications** - What should the component actually do?
+* **Design documents** - What was the intended user experience?
+* **User stories** - What problem is this solving for users?
+* **Acceptance criteria** - What defines "done" for this feature?
+* **Business requirements** - What value does this provide?
+
+#### 3. Justify from Product Perspective
+* **User needs** - Does this serve the intended users?
+* **Business value** - Does this align with business goals?
+* **UX principles** - Does this follow good design patterns?
+* **Industry standards** - How do similar products handle this?
+* **Technical constraints** - Are there valid technical reasons?
+
+#### 4. If Uncertainty Remains
+* **Ask for clarification** - Don't guess what the product should do
+* **Request product review** - Get input from product stakeholders
+* **Get stakeholder input** - Understand the business context
+* **Document assumptions** - Make your reasoning explicit
+
+#### 5. Make Informed Decisions
+* **Based on evidence** - Not convenience or assumptions
+* **Aligned with product goals** - Supports the overall product vision
+* **Documented rationale** - Clear reasoning for future reference
+* **Communicated clearly** - Explain the decision to the team
+
+### Example: RatioAnalysisPanel Component
+
+#### The Disagreement
+* **Tests expected**: All ratios visible in a flat table structure
+* **Component implemented**: Summary cards + tabbed interface with progressive disclosure
+
+#### Product Analysis
+* **User personas**: Executives (quick overview), Analysts (detailed analysis), Beginners (learning)
+* **Information architecture**: Progressive disclosure reduces cognitive load
+* **UX patterns**: Dashboard → details → actions (industry standard)
+* **Mobile experience**: Tabs work better than long tables on small screens
+* **Business value**: Serves multiple user types, reduces abandonment, supports learning
+
+#### Decision
+* **Component was correct** - Follows sound UX principles and serves business goals
+* **Tests were wrong** - Didn't account for intended user experience and progressive disclosure
+* **Action**: Update tests to match the component's intended behavior
+
+### Process Requirements
+
+#### When Tests and Components Disagree:
+1. **Stop and analyze** - Don't immediately change either side
+2. **Gather evidence** - Product specs, design docs, user stories, business requirements
+3. **Justify from product perspective** - User needs, business value, UX principles
+4. **Ask for clarification** - If uncertainty remains, don't guess
+5. **Make informed decisions** - Based on evidence, not convenience
+
+#### Documentation Requirements:
+* **Document the disagreement** - What each side expects
+* **Document the analysis** - Product perspective and evidence
+* **Document the decision** - Why one approach is correct
+* **Document the rationale** - For future reference and team understanding
+
+### Common Mistakes to Avoid
+* ❌ **Assuming tests are always right** - Tests can be wrong or outdated
+* ❌ **Assuming components are always right** - Components can be buggy or poorly designed
+* ❌ **Changing code without analysis** - Leads to inconsistent behavior
+* ❌ **Ignoring product context** - Technical correctness isn't enough
+* ❌ **Making decisions based on convenience** - Easy fixes aren't always right fixes
+* ✅ **Always analyze from product perspective** - What serves users and business goals?
+* ✅ **Gather evidence before deciding** - Don't rely on assumptions
+* ✅ **Document your reasoning** - For future reference and team alignment
+* ✅ **Ask for clarification when uncertain** - Better to ask than guess wrong
+
+### Success Criteria
+* ✅ **You can explain the product rationale** - Why this behavior serves users
+* ✅ **You have evidence to support your decision** - Not just opinions
+* ✅ **You've considered multiple perspectives** - User, business, technical
+* ✅ **Your decision aligns with product goals** - Supports overall vision
+* ✅ **You've documented your reasoning** - Clear for future reference
+
+## Testing Verification and False Confidence Prevention
+
+**CRITICAL: Always verify your fixes work before claiming success. Never assume changes will work without testing.**
+
+### The "I Fixed It" Anti-Pattern
+* ❌ **NEVER** claim to have fixed something without actually running the tests that were failing
+* ❌ **NEVER** assume that fixing one error automatically fixes related errors
+* ❌ **NEVER** push changes without verifying they solve the original problem
+* ❌ **NEVER** test only simple cases when the real issue is in complex scenarios
+
+### Proper Testing Verification Process
+1. **Identify the Specific Failing Test**: Get the exact test name and error message
+2. **Run the Failing Test Locally**: Reproduce the issue in your environment
+3. **Make Your Fix**: Address only the specific root cause
+4. **Test the Exact Same Scenario**: Run the same test that was failing
+5. **Verify the Fix Works**: Confirm the test now passes
+6. **Only Then Push**: Don't push until you've verified the fix works locally
+
+### Common Verification Mistakes
+* ❌ **Testing only simple cases** - The real issue might be in complex component tests
+* ❌ **Assuming related tests will pass** - Each test scenario is different
+* ❌ **Not running the exact failing test** - Generic tests don't catch specific issues
+* ❌ **Pushing without local verification** - CI is not your testing environment
+
+### Verification Requirements
+* **Run the Exact Failing Test**: Use the same test command that was failing in CI
+* **Test the Specific Component**: Don't just test simple utility functions
+* **Verify All Related Tests**: If you fix a context issue, test all components using that context
+* **Wait for CI Results**: Even after local verification, wait for CI to confirm
+
+### Red Flags That You're Not Testing Properly
+* You're only testing simple, isolated functions
+* You're not running the exact test that was failing
+* You're assuming your fix will work for all related scenarios
+* You're pushing changes without local verification
+* You're claiming success based on partial test results
+
+### Success Metrics for Testing Verification
+* ✅ **You can run the exact failing test locally and it passes**
+* ✅ **You've tested all components that use the fixed functionality**
+* ✅ **You've verified the fix works in the same environment where it was failing**
+* ✅ **You can explain exactly why your fix addresses the specific error**
+* ✅ **You're confident the fix will work in CI because you've tested it locally**

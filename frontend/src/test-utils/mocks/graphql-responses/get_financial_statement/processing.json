@@ -1,0 +1,23 @@
+{
+  "data": {
+    "financialStatement": {
+      "id": "statement-1",
+      "companyId": "0000320193",
+      "filingType": "10-K",
+      "formType": "10-K",
+      "accessionNumber": "0001234567-23-000001",
+      "filingDate": "2023-12-31",
+      "periodEndDate": "2023-12-31",
+      "fiscalYear": 2023,
+      "fiscalQuarter": 4,
+      "documentType": "XBRL",
+      "documentUrl": "http://example.com/filing.xbrl",
+      "xbrlProcessingStatus": "processing",
+      "isAmended": false,
+      "isRestated": false,
+      "lineItems": [],
+      "createdAt": "2023-12-31T00:00:00Z",
+      "updatedAt": "2023-12-31T00:00:00Z"
+    }
+  }
+}

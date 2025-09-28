@@ -1,0 +1,57 @@
+{
+  "data": {
+    "company": {
+      "id": "0000320193",
+      "name": "Apple Inc.",
+      "ticker": "AAPL",
+      "sic": "3571",
+      "sicDescription": "Electronic Computers",
+      "gics": "4520",
+      "gicsDescription": "Technology Hardware & Equipment",
+      "businessStatus": "active",
+      "fiscalYearEnd": "09-30",
+      "createdAt": "2023-01-01T00:00:00Z",
+      "updatedAt": "2023-12-31T00:00:00Z",
+      "financialStatements": [
+        {
+          "id": "statement-1",
+          "companyId": "0000320193",
+          "filingType": "10-K",
+          "formType": "10-K",
+          "accessionNumber": "0001234567-23-000001",
+          "filingDate": "2023-12-31",
+          "periodEndDate": "2023-12-31",
+          "fiscalYear": 2023,
+          "fiscalQuarter": 4,
+          "documentType": "XBRL",
+          "documentUrl": "http://example.com/filing.xbrl",
+          "xbrlProcessingStatus": "processing",
+          "isAmended": false,
+          "isRestated": false,
+          "lineItems": [],
+          "createdAt": "2023-12-31T00:00:00Z",
+          "updatedAt": "2023-12-31T00:00:00Z"
+        }
+      ],
+      "financialRatios": [
+        {
+          "id": "ratio-1",
+          "statementId": "statement-1",
+          "ratioName": "returnOnEquity",
+          "ratioDisplayName": "Return on Equity",
+          "value": 0.147,
+          "category": "profitability",
+          "formula": "Net Income / Shareholders Equity",
+          "interpretation": "Strong profitability, above industry average",
+          "benchmarkPercentile": 75,
+          "periodEndDate": "2023-12-31",
+          "fiscalYear": 2023,
+          "fiscalQuarter": 4,
+          "calculatedAt": "2023-12-31T00:00:00Z",
+          "dataQualityScore": 0.95
+        }
+      ],
+      "alerts": []
+    }
+  }
+}

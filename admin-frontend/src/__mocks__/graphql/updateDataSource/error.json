@@ -1,0 +1,12 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Failed to update data source",
+      "extensions": {
+        "code": "INTERNAL_ERROR",
+        "details": "Database connection timeout"
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "data": {
+    "financialRatios": null
+  },
+  "errors": [
+    {
+      "message": "Failed to calculate financial ratios",
+      "extensions": {
+        "code": "CALCULATION_ERROR",
+        "details": "Insufficient data for ratio calculation",
+        "statementId": "statement-1"
+      }
+    }
+  ]
+}

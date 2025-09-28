@@ -119,21 +119,27 @@ describe('TrendAnalysisChart', () => {
   });
 
   it('renders the trend analysis chart', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     expect(screen.getByTestId('trend-line-chart')).toBeInTheDocument();
     expect(screen.getByText('Financial Ratio Trends')).toBeInTheDocument();
   });
 
   it('displays ratio selection dropdown', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     expect(screen.getByText('Select Ratio to Analyze')).toBeInTheDocument();
     expect(screen.getByLabelText('Select financial ratio to analyze')).toBeInTheDocument();
   });
 
   it('filters ratios by selected category', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     // Should show profitability ratios by default
     expect(screen.getByLabelText('Select financial ratio to analyze')).toBeInTheDocument();
@@ -147,7 +153,9 @@ describe('TrendAnalysisChart', () => {
   });
 
   it('handles ratio selection change', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     const ratioSelect = screen.getByLabelText('Select financial ratio to analyze');
     fireEvent.click(ratioSelect);
@@ -157,20 +165,26 @@ describe('TrendAnalysisChart', () => {
   });
 
   it('displays trend direction and strength', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     // Should show trend indicators
     expect(screen.getByTestId('trend-line-chart')).toBeInTheDocument();
   });
 
   it('shows loading state when data is being processed', () => {
-    render(<TrendAnalysisChart ratios={[]} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={[]} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     expect(screen.getByText('Loading trend data...')).toBeInTheDocument();
   });
 
   it('handles empty ratios array', async () => {
-    render(<TrendAnalysisChart ratios={[]} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={[]} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     await waitFor(() => {
       expect(screen.getByText('No ratio data available for trend analysis')).toBeInTheDocument();
@@ -178,7 +192,9 @@ describe('TrendAnalysisChart', () => {
   });
 
   it('groups ratios by name for trend calculation', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     // Should group ratios with the same name for trend analysis
     // ROE should have 2 data points, Current Ratio should have 1
@@ -188,7 +204,9 @@ describe('TrendAnalysisChart', () => {
   });
 
   it('calculates trend direction correctly', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     // ROE trend: 0.142 -> 0.147 (improving)
     // Should show improving trend
@@ -196,14 +214,18 @@ describe('TrendAnalysisChart', () => {
   });
 
   it('displays time period controls', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     expect(screen.getByText('Time Period')).toBeInTheDocument();
     expect(screen.getByLabelText('Select time period in quarters')).toBeInTheDocument();
   });
 
   it('handles time period change', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     const timePeriodSelect = screen.getByDisplayValue('12');
     fireEvent.click(timePeriodSelect);
@@ -214,13 +236,17 @@ describe('TrendAnalysisChart', () => {
   });
 
   it('shows chart controls (zoom, reset)', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     expect(screen.getByText('Reset View')).toBeInTheDocument();
   });
 
   it('displays data quality indicators', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     // Should show data quality information
     expect(screen.getByText(/data quality/i)).toBeInTheDocument();
@@ -234,14 +260,18 @@ describe('TrendAnalysisChart', () => {
       value: 375,
     });
 
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     // Should adapt to mobile view
     expect(screen.getByTestId('trend-line-chart')).toBeInTheDocument();
   });
 
   it('shows benchmark comparison when available', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     // Should show benchmark information if available
     expect(screen.getByRole('button', { name: /view benchmarks/i })).toBeInTheDocument();
@@ -250,13 +280,17 @@ describe('TrendAnalysisChart', () => {
   it('handles ratio selection with no trend data', () => {
     const singleRatio = [mockRatios[0]]; // Only one data point
 
-    render(<TrendAnalysisChart ratios={singleRatio} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={singleRatio} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     expect(screen.getByText('Insufficient data for trend analysis')).toBeInTheDocument();
   });
 
   it('formats ratio values correctly in chart', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     // Should format percentages and ratios appropriately
     const chartData = screen.getByTestId('trend-line-chart');
@@ -270,7 +304,9 @@ describe('TrendAnalysisChart', () => {
   });
 
   it('handles chart interaction events', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     // Test chart interaction (hover, click, etc.)
     const chart = screen.getByTestId('trend-line-chart');
@@ -281,13 +317,17 @@ describe('TrendAnalysisChart', () => {
   });
 
   it('displays export functionality', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     expect(screen.getByRole('button', { name: /export chart/i })).toBeInTheDocument();
   });
 
   it('handles export button click', () => {
-    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {}} />);
+    render(<TrendAnalysisChart ratios={mockRatios} statements={mockFinancialStatements} timeRange="3Y" onTimeRangeChange={() => {
+      // Mock time range change handler
+    }} />);
 
     const exportButton = screen.getByRole('button', { name: /export chart/i });
     fireEvent.click(exportButton);

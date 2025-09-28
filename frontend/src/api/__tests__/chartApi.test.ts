@@ -1,5 +1,5 @@
 /**
- * Tests for Private Chart API
+ * Tests for Private Chart API.
  *
  * Tests the chart configuration generation functionality
  * used by the MCP server for professional chart creation.

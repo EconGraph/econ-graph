@@ -1,0 +1,38 @@
+{
+  "data": {
+    "financialRatios": [
+      {
+        "id": "ratio-1",
+        "statementId": "statement-1",
+        "ratioName": "returnOnEquity",
+        "ratioDisplayName": "Return on Equity (ROE)",
+        "value": 0.147,
+        "category": "profitability",
+        "formula": "Net Income / Shareholders Equity",
+        "interpretation": "Strong profitability, above industry average",
+        "benchmarkPercentile": 75,
+        "periodEndDate": "2023-12-31",
+        "fiscalYear": 2023,
+        "fiscalQuarter": 4,
+        "calculatedAt": "2023-12-31T00:00:00Z",
+        "dataQualityScore": 0.95
+      },
+      {
+        "id": "ratio-2",
+        "statementId": "statement-1",
+        "ratioName": "currentRatio",
+        "ratioDisplayName": "Current Ratio",
+        "value": 1.04,
+        "category": "liquidity",
+        "formula": "Current Assets / Current Liabilities",
+        "interpretation": "Adequate liquidity position",
+        "benchmarkPercentile": 45,
+        "periodEndDate": "2023-12-31",
+        "fiscalYear": 2023,
+        "fiscalQuarter": 4,
+        "calculatedAt": "2023-12-31T00:00:00Z",
+        "dataQualityScore": 0.98
+      }
+    ]
+  }
+}

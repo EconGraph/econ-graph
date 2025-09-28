@@ -1,0 +1,12 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Failed to retrieve performance metrics",
+      "extensions": {
+        "code": "METRICS_ERROR",
+        "details": "Metrics collection service unavailable"
+      }
+    }
+  ]
+}

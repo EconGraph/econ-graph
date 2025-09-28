@@ -1,0 +1,17 @@
+{
+  "data": {
+    "crawlerConfig": {
+      "global_enabled": true,
+      "max_workers": 5,
+      "queue_size_limit": 10000,
+      "default_timeout": 30,
+      "default_retry_attempts": 3,
+      "rate_limit_global": 10,
+      "schedule_frequency": "hourly",
+      "error_threshold": 5,
+      "maintenance_mode": false,
+      "created_at": "2025-01-01T00:00:00Z",
+      "updated_at": "2025-01-01T10:00:00Z"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Failed to retrieve data sources",
+      "extensions": {
+        "code": "INTERNAL_ERROR",
+        "details": "Database connection timeout"
+      }
+    }
+  ]
+}

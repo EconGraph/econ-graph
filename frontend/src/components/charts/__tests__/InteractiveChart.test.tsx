@@ -24,6 +24,30 @@ vi.mock('react-chartjs-2', () => ({
   ),
 }));
 
+// Mock Chart.js components
+vi.mock('chart.js', () => ({
+  Chart: {
+    register: vi.fn(),
+  },
+  registerables: [],
+  CategoryScale: {},
+  LinearScale: {},
+  TimeScale: {},
+  PointElement: {},
+  LineElement: {},
+  Title: {},
+  Tooltip: {},
+  Legend: {},
+  Filler: {},
+}));
+
+vi.mock('chartjs-adapter-date-fns', () => ({}));
+
+vi.mock('chartjs-plugin-annotation', () => ({
+  __esModule: true,
+  default: { id: 'annotation', beforeDraw: vi.fn(), afterDraw: vi.fn() },
+}));
+
 const defaultProps = {
   seriesId: 'test-series-1',
   title: 'Test Economic Series',

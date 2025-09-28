@@ -49,6 +49,7 @@ dotenvy = "0.15"
 
 # Validation
 validator = { version = "0.19", features = ["derive"] }
+regex = "1.0"
 
 # CSV parsing
 csv = "1.3"
