@@ -1,8 +1,8 @@
 // GraphQL Response Loader for MSW
 // Loads JSON response files for different GraphQL operations and scenarios
 
-import fs from 'fs';
-import path from 'path';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // eslint-disable-next-line no-undef
 const RESPONSES_DIR = path.join(__dirname, 'graphql-responses');
