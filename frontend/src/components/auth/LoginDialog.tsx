@@ -157,46 +157,31 @@ const LoginDialog: React.FC<LoginDialogProps> = ({ open, onClose, onSuccess }) =
   const handleEmailAuth = useCallback(async () => {
     if (!validateForm()) return;
 
-    try {
-      if (tabValue === 0) {
-        // Sign in
-        await signInWithEmail(formData.email, formData.password);
-      } else {
-        // Sign up
-        await signUp(formData.email, formData.password, formData.name);
-      }
-
-      // Only close dialog and call success callback if authentication was successful
-      onSuccess?.();
-      onClose();
-    } catch (error) {
-      // Error is handled by the auth context - dialog stays open so user can read error
-      console.error('Authentication error:', error);
+    if (tabValue === 0) {
+      // Sign in
+      await signInWithEmail(formData.email, formData.password);
+    } else {
+      // Sign up
+      await signUp(formData.email, formData.password, formData.name);
     }
+
+    // Only close dialog and call success callback if authentication was successful
+    onSuccess?.();
+    onClose();
   }, [formData, tabValue, signInWithEmail, signUp, validateForm, onSuccess, onClose]);
 
   const handleGoogleAuth = useCallback(async () => {
-    try {
-      await signInWithGoogle();
-      // Only close dialog and call success callback if authentication was successful
-      onSuccess?.();
-      onClose();
-    } catch (error) {
-      // Error is handled by the auth context - dialog stays open so user can read error
-      console.error('Google authentication error:', error);
-    }
+    await signInWithGoogle();
+    // Only close dialog and call success callback if authentication was successful
+    onSuccess?.();
+    onClose();
   }, [signInWithGoogle, onSuccess, onClose]);
 
   const handleFacebookAuth = useCallback(async () => {
-    try {
-      await signInWithFacebook();
-      // Only close dialog and call success callback if authentication was successful
-      onSuccess?.();
-      onClose();
-    } catch (error) {
-      // Error is handled by the auth context - dialog stays open so user can read error
-      console.error('Facebook authentication error:', error);
-    }
+    await signInWithFacebook();
+    // Only close dialog and call success callback if authentication was successful
+    onSuccess?.();
+    onClose();
   }, [signInWithFacebook, onSuccess, onClose]);
 
   const handleClose = useCallback(() => {

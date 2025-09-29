@@ -233,7 +233,6 @@ function createHandlers() {
 
     // Handle GraphQL POST requests
     http.post('/graphql', async ({ request }: { request: any }) => {
-      console.log('🔧 MSW GraphQL POST handler called!', request.url);
       const body = await request.json();
       const { query, variables, operationName } = body;
 
@@ -324,17 +323,11 @@ function createHandlers() {
 
     // Handle unmatched GraphQL requests
     graphql.operation(({ operationName }: { operationName: any }) => {
-      console.log('🔧 MSW GraphQL operation handler called:', operationName);
+      console.warn(`Unhandled GraphQL operation: ${operationName}`);
       return HttpResponse.json({
         data: null,
         errors: [{ message: `Unhandled operation: ${operationName}` }],
       });
-    }),
-    
-    // Catch-all handler for debugging
-    http.all('*', ({ request }) => {
-      console.log('🔧 MSW catch-all handler:', request.method, request.url);
-      throw new Error(`Unhandled ${request.method} request to ${request.url}`);
     }),
   ];
 }

@@ -148,14 +148,11 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   showEducationalContent = true,
   showCollaborativeFeatures = true,
 }) => {
-  console.log('🔧 FinancialDashboard: Component rendered with companyId:', companyId);
-  
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedStatement, setSelectedStatement] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
 
   // GraphQL queries - use default data as fallback for development
-  console.log('🔧 FinancialDashboard: About to call useQuery');
   const {
     data,
     isLoading: loading,
@@ -166,12 +163,10 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     ['financial-dashboard', companyId],
     async () => {
       try {
-        console.log('🔧 FinancialDashboard: Making GraphQL request for companyId:', companyId);
         const result = await executeGraphQL({
           query: GET_FINANCIAL_DASHBOARD,
           variables: { companyId },
         });
-        console.log('🔧 FinancialDashboard: GraphQL result:', result);
         return result.data;
       } catch (error) {
         console.error('Failed to fetch financial dashboard data:', error);
@@ -183,8 +178,6 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
       staleTime: 5 * 60 * 1000, // 5 minutes
     }
   );
-  
-  console.log('🔧 FinancialDashboard: useQuery result - loading:', loading, 'isError:', isError, 'data:', !!data);
 
   const company: Company | undefined = data?.company;
   const statements: FinancialStatement[] = useMemo(

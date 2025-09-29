@@ -32,17 +32,14 @@ beforeAll(async () => {
   }
   
   server.listen({ onUnhandledRequest: 'error' });
-  console.log('🔧 MSW server started for integration tests');
   
   // Give MSW time to start
   await new Promise(resolve => setTimeout(resolve, 100));
 });
 afterEach(() => {
-  console.log('🔧 MSW server reset handlers');
   server.resetHandlers();
 });
 afterAll(() => {
-  console.log('🔧 MSW server closed');
   server.close();
 });
 
@@ -251,8 +248,6 @@ const createTestWrapper = () => {
       },
     },
   });
-  
-  console.log('🔧 QueryClient created for integration test');
 
   const TestWrapper = ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={queryClient}>
@@ -318,9 +313,6 @@ describe('XBRL Financial Integration Tests', () => {
           </TestWrapper>
         );
 
-      // Debug: Log the current DOM content
-      console.log('Current DOM content:', screen.debug());
-      
       // Wait for data to load with longer timeout
       await waitFor(() => {
         expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
