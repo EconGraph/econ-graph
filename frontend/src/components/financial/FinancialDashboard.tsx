@@ -29,111 +29,7 @@ import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_DASHBOARD } from '../../test-utils/mocks/graphql/financial-queries';
 import { useQuery } from '@tanstack/react-query';
 
-// Default data structure for development/demo purposes
-const defaultData = {
-  financialStatements: [
-    {
-      id: 'mock-statement-1',
-      companyId: 'mock-company-id',
-      filingType: '10-K',
-      formType: '10-K',
-      accessionNumber: '0001234567-23-000001',
-      filingDate: '2023-12-31',
-      periodEndDate: '2023-12-31',
-      fiscalYear: 2023,
-      fiscalQuarter: 4,
-      documentType: 'XBRL',
-      documentUrl: 'http://example.com/filing.xbrl',
-      xbrlProcessingStatus: 'completed',
-      isAmended: false,
-      isRestated: false,
-      createdAt: '2023-12-31T00:00:00Z',
-      updatedAt: '2023-12-31T00:00:00Z',
-    },
-    {
-      id: 'mock-statement-2',
-      companyId: 'mock-company-id',
-      filingType: '10-Q',
-      formType: '10-Q',
-      accessionNumber: '0001234567-23-000002',
-      filingDate: '2023-09-30',
-      periodEndDate: '2023-09-30',
-      fiscalYear: 2023,
-      fiscalQuarter: 3,
-      documentType: 'XBRL',
-      documentUrl: 'http://example.com/filing.xbrl',
-      xbrlProcessingStatus: 'completed',
-      isAmended: false,
-      isRestated: false,
-      createdAt: '2023-09-30T00:00:00Z',
-      updatedAt: '2023-09-30T00:00:00Z',
-    },
-  ],
-  company: {
-    id: 'mock-company-id',
-    cik: '0000320193',
-    name: 'Apple Inc.',
-    ticker: 'AAPL',
-    sic: '3571',
-    sicDescription: 'Electronic Computers',
-    gics: '4520',
-    gicsDescription: 'Technology Hardware & Equipment',
-    businessStatus: 'active',
-    fiscalYearEnd: '09-30',
-    createdAt: '2023-01-01T00:00:00Z',
-    updatedAt: '2023-12-31T00:00:00Z',
-  },
-  financialRatios: [
-    {
-      id: 'ratio-1',
-      statementId: 'mock-statement-1',
-      ratioName: 'returnOnEquity',
-      ratioDisplayName: 'Return on Equity',
-      value: 0.147,
-      category: 'profitability',
-      formula: 'Net Income / Shareholders Equity',
-      interpretation: 'Strong profitability, above industry average',
-      benchmarkPercentile: 75,
-      periodEndDate: '2023-12-31',
-      fiscalYear: 2023,
-      fiscalQuarter: 4,
-      calculatedAt: '2023-12-31T00:00:00Z',
-      dataQualityScore: 0.95,
-    },
-    {
-      id: 'ratio-2',
-      statementId: 'mock-statement-1',
-      ratioName: 'currentRatio',
-      ratioDisplayName: 'Net Profit Margin',
-      value: 0.253,
-      category: 'liquidity',
-      formula: 'Current Assets / Current Liabilities',
-      interpretation: 'Adequate liquidity position',
-      benchmarkPercentile: 45,
-      periodEndDate: '2023-12-31',
-      fiscalYear: 2023,
-      fiscalQuarter: 4,
-      calculatedAt: '2023-12-31T00:00:00Z',
-      dataQualityScore: 0.98,
-    },
-    {
-      id: 'ratio-3',
-      statementId: 'mock-statement-1',
-      ratioName: 'debtToEquity',
-      ratioDisplayName: 'Debt to Equity',
-      value: 1.73,
-      category: 'leverage',
-      formula: 'Total Debt / Shareholders Equity',
-      interpretation: 'Moderate leverage, manageable debt levels',
-      benchmarkPercentile: 60,
-      periodEndDate: '2023-12-31',
-      fiscalYear: 2023,
-      fiscalQuarter: 4,
-      calculatedAt: '2023-12-31T00:00:00Z',
-      dataQualityScore: 0.92,
-    },
-  ],
-};
+// No mock data - all data comes from GraphQL
 
 interface FinancialDashboardProps {
   companyId: string;
@@ -170,8 +66,8 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         return result.data;
       } catch (error) {
         console.error('Failed to fetch financial dashboard data:', error);
-        // Fallback to default data for development
-        return defaultData;
+        // Re-throw error to be handled by React Query
+        throw error;
       }
     },
     {
@@ -534,7 +430,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               </CardContent>
             </Card>
 
-            {/* Industry Benchmark Section - Uses dynamic calculation from mock ratio data */}
+            {/* Industry Benchmark Section - Uses dynamic calculation from GraphQL data */}
             <Card>
               <CardHeader>
                 <CardTitle role='heading' aria-label='Industry Benchmark'>
@@ -543,7 +439,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               </CardHeader>
               <CardContent>
                 <div className='space-y-2'>
-                  <p className='text-sm'>Industry performance comparison from mock data</p>
+                  <p className='text-sm'>Industry performance comparison from real data</p>
                   {ratios.length > 0 && (
                     <div className='flex items-center justify-between'>
                       <span>Company Performance:</span>

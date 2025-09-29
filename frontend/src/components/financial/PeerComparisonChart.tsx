@@ -21,6 +21,9 @@ import {
   Table,
 } from 'lucide-react';
 import { FinancialRatio, Company } from '@/types/financial';
+import { useQuery } from '@tanstack/react-query';
+import { executeGraphQL } from '../../utils/graphql';
+import { GET_PEER_COMPANIES } from '../../test-utils/mocks/graphql/financial-queries';
 
 interface PeerCompany {
   id: string;
@@ -51,104 +54,22 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
   const [industryFilter, setIndustryFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'name' | 'performance' | 'marketCap'>('performance');
 
-  // Mock peer companies data - in real implementation, this would come from API
-  const peerCompanies = useMemo(
-    (): PeerCompany[] => [
-      {
-        id: '1',
-        name: 'Microsoft Corporation',
-        ticker: 'MSFT',
-        industry: 'Technology',
-        marketCap: 2800000000000,
-        ratios: {
-          returnOnEquity: 0.382,
-          currentRatio: 2.51,
-          debtToEquity: 0.31,
-          grossMargin: 0.688,
-          netMargin: 0.366,
-          priceToEarnings: 28.5,
-        },
-        percentile: {
-          returnOnEquity: 85,
-          currentRatio: 90,
-          debtToEquity: 75,
-          grossMargin: 88,
-          netMargin: 92,
-          priceToEarnings: 60,
-        },
-      },
-      {
-        id: '2',
-        name: 'Amazon.com Inc.',
-        ticker: 'AMZN',
-        industry: 'Technology',
-        marketCap: 1500000000000,
-        ratios: {
-          returnOnEquity: 0.156,
-          currentRatio: 1.12,
-          debtToEquity: 0.45,
-          grossMargin: 0.431,
-          netMargin: 0.028,
-          priceToEarnings: 65.2,
-        },
-        percentile: {
-          returnOnEquity: 45,
-          currentRatio: 25,
-          debtToEquity: 55,
-          grossMargin: 35,
-          netMargin: 15,
-          priceToEarnings: 85,
-        },
-      },
-      {
-        id: '3',
-        name: 'Alphabet Inc.',
-        ticker: 'GOOGL',
-        industry: 'Technology',
-        marketCap: 1800000000000,
-        ratios: {
-          returnOnEquity: 0.187,
-          currentRatio: 2.89,
-          debtToEquity: 0.12,
-          grossMargin: 0.554,
-          netMargin: 0.211,
-          priceToEarnings: 24.8,
-        },
-        percentile: {
-          returnOnEquity: 55,
-          currentRatio: 95,
-          debtToEquity: 85,
-          grossMargin: 65,
-          netMargin: 70,
-          priceToEarnings: 40,
-        },
-      },
-      {
-        id: '4',
-        name: 'Meta Platforms Inc.',
-        ticker: 'META',
-        industry: 'Technology',
-        marketCap: 850000000000,
-        ratios: {
-          returnOnEquity: 0.221,
-          currentRatio: 4.12,
-          debtToEquity: 0.08,
-          grossMargin: 0.802,
-          netMargin: 0.208,
-          priceToEarnings: 22.1,
-        },
-        percentile: {
-          returnOnEquity: 65,
-          currentRatio: 98,
-          debtToEquity: 95,
-          grossMargin: 95,
-          netMargin: 68,
-          priceToEarnings: 35,
-        },
-      },
-    ],
-    []
+  // Fetch peer companies data from GraphQL
+  const { data: peerCompaniesData, isLoading: peerCompaniesLoading } = useQuery(
+    ['peer-companies', companyId],
+    async () => {
+      const result = await executeGraphQL({
+        query: GET_PEER_COMPANIES,
+        variables: { companyId },
+      });
+      return result.data;
+    },
+    {
+      staleTime: 5 * 60 * 1000, // 5 minutes
+    }
   );
+
+  const peerCompanies = peerCompaniesData?.peerCompanies || [];
 
   // Current company data
   const currentCompanyData = useMemo(() => {
@@ -165,7 +86,7 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
       name: company.name,
       ticker: company.ticker || 'N/A',
       industry: company.gicsDescription || 'Unknown',
-      marketCap: 3000000000000, // Mock data
+      marketCap: company.marketCap || 0,
       ratios: companyRatios,
       percentile: ratios.reduce(
         (acc, ratio) => {

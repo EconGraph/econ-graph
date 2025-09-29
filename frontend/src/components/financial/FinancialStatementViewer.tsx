@@ -33,6 +33,8 @@ import { CollaborativePresence } from './CollaborativePresence';
 // Import GraphQL utilities
 import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_STATEMENT } from '../../test-utils/mocks/graphql/financial-queries';
+import { GET_FINANCIAL_RATIOS } from '../../test-utils/mocks/graphql/ratio-queries';
+import { GET_FINANCIAL_ANNOTATIONS } from '../../test-utils/mocks/graphql/financial-queries';
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 
 
@@ -93,8 +95,11 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
   const { data: ratiosData } = useQuery(
     ['financial-ratios', statementId],
     async () => {
-      // Mock ratios data for now
-      return { financialRatios: [] };
+      const result = await executeGraphQL({
+        query: GET_FINANCIAL_RATIOS,
+        variables: { statementId },
+      });
+      return result.data;
     },
     {
       enabled: showRatios,
@@ -105,8 +110,11 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
   const { data: annotationsData } = useQuery(
     ['financial-annotations', statementId],
     async () => {
-      // Mock annotations data for now
-      return { annotations: [] };
+      const result = await executeGraphQL({
+        query: GET_FINANCIAL_ANNOTATIONS,
+        variables: { statementId },
+      });
+      return result.data;
     },
     {
       enabled: showAnnotations,
@@ -312,7 +320,7 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
         <TabsContent value='statement' className='space-y-4'>
           {/* Search and Filter */}
 
-          {/* Mock Asset/Liability Data */}
+          {/* Asset/Liability Data */}
           <Card>
             <CardHeader>
               <CardTitle>Line Items</CardTitle>
@@ -337,7 +345,7 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                     <span>$383,285,000,000</span>
                   </div>
                 )}
-                {/* Hierarchical Table Structure from Mock Data */}
+                {/* Hierarchical Table Structure from GraphQL Data */}
                 {statement?.lineItems && statement.lineItems.length > 0 && (
                   <table className='w-full border-collapse'>
                     <tbody>
