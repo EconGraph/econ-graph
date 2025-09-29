@@ -57,6 +57,18 @@
           "name": "Total Stockholders' Equity",
           "value": 94206000000,
           "category": "equity"
+        },
+        {
+          "id": "item-7",
+          "name": "Net Sales",
+          "value": 383290000000,
+          "category": "revenue"
+        },
+        {
+          "id": "item-8",
+          "name": "Net Income",
+          "value": 96995000000,
+          "category": "income"
         }
       ]
     }

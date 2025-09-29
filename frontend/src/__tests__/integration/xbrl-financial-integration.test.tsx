@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { vi, beforeAll, afterEach, afterAll } from 'vitest';
 import '@testing-library/jest-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -389,13 +389,25 @@ describe('XBRL Financial Integration Tests', () => {
           </TestWrapper>
         );
 
-      // Wait for ratios to load
+      // Wait for initial data to load
       await waitFor(() => {
-        expect(screen.getByText('Return on Equity')).toBeInTheDocument();
+        expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
       });
 
+      // Click on the Ratios tab
+      const ratiosTab = screen.getByRole('button', { name: /ratios/i });
+      fireEvent.click(ratiosTab);
+
+      // Debug: log the current DOM to see what's rendered
+      console.log('DOM after clicking ratios tab:', screen.debug());
+
+      // Wait for ratios to load with a longer timeout
+      await waitFor(() => {
+        expect(screen.getByText('Return on Equity (ROE)')).toBeInTheDocument();
+      }, { timeout: 5000 });
+
       // Verify key ratios are displayed
-      expect(screen.getByText('Return on Equity')).toBeInTheDocument();
+      expect(screen.getByText('Return on Equity (ROE)')).toBeInTheDocument();
       expect(screen.getByText('Net Profit Margin')).toBeInTheDocument();
       expect(screen.getAllByText('14.7%').length).toBeGreaterThan(0);
       expect(screen.getAllByText('25.3%').length).toBeGreaterThan(0);
@@ -414,10 +426,19 @@ describe('XBRL Financial Integration Tests', () => {
           </TestWrapper>
         );
 
-      // Wait for benchmark data to load
+      // Wait for initial data to load
+      await waitFor(() => {
+        expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
+      });
+
+      // Click on the Ratios tab
+      const ratiosTab = screen.getByRole('button', { name: /ratios/i });
+      fireEvent.click(ratiosTab);
+
+      // Wait for benchmark data to load with a longer timeout
       await waitFor(() => {
         expect(screen.getAllByText(/Industry Benchmark/i).length).toBeGreaterThan(0);
-      });
+      }, { timeout: 5000 });
 
       // Verify benchmark mock data is rendered correctly
       expect(screen.getAllByText(/Industry Benchmark/i).length).toBeGreaterThan(0);
