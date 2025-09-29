@@ -46,21 +46,21 @@ interface PeerComparisonChartProps {
 export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
   ratios,
   company,
-  userType = 'intermediate',
+  userType: _userType = 'intermediate',
   selectedRatios = [],
-  onRatioSelectionChange,
+  onRatioSelectionChange: _onRatioSelectionChange,
 }) => {
   const [viewMode, setViewMode] = useState<'table' | 'chart' | 'radar'>('chart');
   const [industryFilter, setIndustryFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'name' | 'performance' | 'marketCap'>('performance');
 
   // Fetch peer companies data from GraphQL
-  const { data: peerCompaniesData, isLoading: peerCompaniesLoading } = useQuery(
-    ['peer-companies', companyId],
+  const { data: peerCompaniesData, isLoading: _peerCompaniesLoading } = useQuery(
+    ['peer-companies', company.id],
     async () => {
       const result = await executeGraphQL({
         query: GET_PEER_COMPANIES,
-        variables: { companyId },
+        variables: { companyId: company.id },
       });
       return result.data;
     },
@@ -325,9 +325,9 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
                   value={selectedRatios.length > 0 ? selectedRatios.join(',') : 'all'}
                   onValueChange={(value: string) => {
                     if (value === 'all') {
-                      onRatioSelectionChange?.([]);
+                      _onRatioSelectionChange?.([]);
                     } else {
-                      onRatioSelectionChange?.(value.split(','));
+                      _onRatioSelectionChange?.(value.split(','));
                     }
                   }}
                 >

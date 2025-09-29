@@ -17,7 +17,6 @@ import { graphql, http, HttpResponse } from 'msw';
 
 // Create handlers function
 function createHandlers() {
-
   return [
     // GraphQL handlers
     graphql.query('GetSeriesDetail', ({ variables }: { variables: any }) => {
@@ -241,7 +240,11 @@ function createHandlers() {
       const extractedOperationName = operationMatch ? operationMatch[1] : operationName;
 
       if (process.env.MSW_DEBUG) {
-        console.log('🔧 MSW GraphQL Request:', { query: query.substring(0, 100) + '...', variables, operationName: extractedOperationName });
+        console.log('🔧 MSW GraphQL Request:', {
+          query: query.substring(0, 100) + '...',
+          variables,
+          operationName: extractedOperationName,
+        });
       }
 
       // Route to appropriate handler based on operation name
@@ -274,10 +277,13 @@ function createHandlers() {
           if (process.env.MSW_DEBUG) {
             console.error('🔧 Error in GetFinancialStatement handler:', error);
           }
-          return HttpResponse.json({
-            data: null,
-            errors: [{ message: 'Internal server error' }]
-          }, { status: 500 });
+          return HttpResponse.json(
+            {
+              data: null,
+              errors: [{ message: 'Internal server error' }],
+            },
+            { status: 500 }
+          );
         }
       }
 
@@ -315,10 +321,13 @@ function createHandlers() {
 
       // Default fallback
       console.warn(`Unhandled GraphQL operation: ${extractedOperationName}`);
-      return HttpResponse.json({
-        data: null,
-        errors: [{ message: `Unhandled operation: ${extractedOperationName}` }]
-      }, { status: 400 });
+      return HttpResponse.json(
+        {
+          data: null,
+          errors: [{ message: `Unhandled operation: ${extractedOperationName}` }],
+        },
+        { status: 400 }
+      );
     }),
 
     // Handle unmatched GraphQL requests

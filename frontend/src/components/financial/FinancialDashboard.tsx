@@ -58,17 +58,11 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   } = useQuery(
     ['financial-dashboard', companyId],
     async () => {
-      try {
-        const result = await executeGraphQL({
-          query: GET_FINANCIAL_DASHBOARD,
-          variables: { companyId },
-        });
-        return result.data;
-      } catch (error) {
-        console.error('Failed to fetch financial dashboard data:', error);
-        // Re-throw error to be handled by React Query
-        throw error;
-      }
+      const result = await executeGraphQL({
+        query: GET_FINANCIAL_DASHBOARD,
+        variables: { companyId },
+      });
+      return result.data;
     },
     {
       staleTime: 5 * 60 * 1000, // 5 minutes
@@ -95,12 +89,10 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
 
   const handleExportData = () => {
     // Implementation for data export
-    console.log('Exporting financial data...');
   };
 
   const handleShareAnalysis = () => {
     // Implementation for sharing analysis
-    console.log('Sharing financial analysis...');
   };
 
   const getStatusColor = (status: string) => {

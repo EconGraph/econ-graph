@@ -40,10 +40,8 @@ export class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <Alert variant="destructive">
-          <AlertDescription>
-            {this.state.error?.message || 'Something went wrong'}
-          </AlertDescription>
+        <Alert variant='destructive'>
+          <AlertDescription>{this.state.error?.message || 'Something went wrong'}</AlertDescription>
         </Alert>
       );
     }

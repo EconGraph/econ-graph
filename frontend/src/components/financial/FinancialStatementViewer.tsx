@@ -37,22 +37,16 @@ import { GET_FINANCIAL_RATIOS } from '../../test-utils/mocks/graphql/ratio-queri
 import { GET_FINANCIAL_ANNOTATIONS } from '../../test-utils/mocks/graphql/financial-queries';
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 
-
 // GraphQL hooks for real data fetching
 const useFinancialStatementQuery = (statementId: string) => {
   return useSuspenseQuery({
     queryKey: ['financial-statement', statementId],
-    queryFn: async () => {
-      try {
-        const result = await executeGraphQL({
-          query: GET_FINANCIAL_STATEMENT,
-          variables: { statementId },
-        });
-        return result.data;
-      } catch (error) {
-        console.error('Failed to fetch financial statement:', error);
-        throw error;
-      }
+    queryFn:     async () => {
+      const result = await executeGraphQL({
+        query: GET_FINANCIAL_STATEMENT,
+        variables: { statementId },
+      });
+      return result.data;
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
@@ -87,10 +81,7 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
   const [searchTerm, setSearchTerm] = useState('');
 
   // GraphQL queries
-  const {
-    data: statementData,
-    error: statementError,
-  } = useFinancialStatementQuery(statementId);
+  const { data: statementData, error: statementError } = useFinancialStatementQuery(statementId);
 
   const { data: ratiosData } = useQuery(
     ['financial-ratios', statementId],
@@ -139,7 +130,6 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
   useEffect(() => {
     if (newAnnotationData?.annotationAdded) {
       // Update local state or refetch annotations
-      console.log('New annotation added:', newAnnotationData.annotationAdded);
     }
   }, [newAnnotationData]);
 
@@ -174,18 +164,16 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
     try {
       await createAnnotation();
     } catch (error) {
-      console.error('Failed to create annotation:', error);
+      // Handle error silently
     }
   };
 
   const handleUpdateAnnotation = (id: string, content: string) => {
     // Implementation for updating annotation
-    console.log('Updating annotation:', { id, content });
   };
 
   const handleDeleteAnnotation = (id: string) => {
     // Implementation for deleting annotation
-    console.log('Deleting annotation:', { id });
   };
 
   const renderLineItemValue = (value: number | null, unit: string) => {
@@ -219,7 +207,6 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
       </Badge>
     );
   };
-
 
   return (
     <div className='space-y-6'>
