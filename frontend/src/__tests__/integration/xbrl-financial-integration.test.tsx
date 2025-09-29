@@ -647,8 +647,8 @@ describe('XBRL Financial Integration Tests', () => {
       // Verify trend indicators are displayed (using getAllByText for multiple instances)
       expect(screen.getAllByText(/Trend:/i).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/Strength:/i).length).toBeGreaterThan(0);
-      // Verify trend visualization exists
-      expect(screen.getByText('Trend Visualization')).toBeInTheDocument();
+      // Verify trend visualization exists - use getAllByText to handle multiple instances
+      expect(screen.getAllByText('Trend Visualization').length).toBeGreaterThan(0);
     });
   });
 
