@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { vi } from 'vitest';
@@ -92,6 +92,10 @@ describe('ProfessionalChart', () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    cleanup(); // Clean up DOM between tests
+  });
+
   describe('Basic Rendering', () => {
     it('renders professional chart with primary series', () => {
       render(
@@ -120,7 +124,7 @@ describe('ProfessionalChart', () => {
       );
 
       // Should render the chart component
-      expect(screen.getByTestId('professional-chart')).toBeInTheDocument();
+      expect(screen.getByRole('region')).toBeInTheDocument();
       expect(screen.getByText('Professional Chart Analytics')).toBeInTheDocument();
     });
 

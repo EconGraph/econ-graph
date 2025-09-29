@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import UserProfile from '../UserProfile';
@@ -127,6 +127,7 @@ describe('UserProfile Preferences', () => {
   });
 
   afterEach(() => {
+    cleanup(); // Clean up DOM between tests
     if (fetchSpy) {
       fetchSpy.mockRestore();
     }

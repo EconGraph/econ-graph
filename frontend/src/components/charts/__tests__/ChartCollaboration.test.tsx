@@ -227,7 +227,7 @@ describe('ChartCollaboration', () => {
       const user = userEvent.setup();
       renderChartCollaboration();
 
-      const filterSelect = screen.getByLabelText('Filter annotations by type');
+      const filterSelect = screen.getByLabelText('Filter Annotations');
       await user.click(filterSelect);
       await user.click(screen.getByText('My Annotations (1)'));
 
@@ -241,7 +241,7 @@ describe('ChartCollaboration', () => {
       const user = userEvent.setup();
       renderChartCollaboration();
 
-      const filterSelect = screen.getByLabelText('Filter annotations by type');
+      const filterSelect = screen.getByLabelText('Filter Annotations');
       await user.click(filterSelect);
       await user.click(screen.getByText('Pinned (1)'));
 
@@ -256,7 +256,7 @@ describe('ChartCollaboration', () => {
       renderChartCollaboration();
 
       // First filter to pinned
-      const filterSelect = screen.getByLabelText('Filter annotations by type');
+      const filterSelect = screen.getByLabelText('Filter Annotations');
       await user.click(filterSelect);
       await user.click(screen.getByText('Pinned (1)'));
 
@@ -531,9 +531,9 @@ describe('ChartCollaboration', () => {
       if (commentButtons.length > 1) {
         await user.click(commentButtons[1]); // Second annotation has comments
 
-        // Wait for comments dialog to appear using robust selector
+        // Wait for comments dialog to appear using role selector
         await waitFor(() => {
-          expect(screen.getByTestId('comments-dialog')).toBeInTheDocument();
+          expect(screen.getByRole('dialog')).toBeInTheDocument();
         }, { timeout: 300 });
 
         // Check for comment content
@@ -557,16 +557,16 @@ describe('ChartCollaboration', () => {
       if (commentButtons.length > 0) {
         await user.click(commentButtons[0]);
 
-        // Wait for comments dialog to appear using robust selector
+        // Wait for comments dialog to appear using role selector
         await waitFor(() => {
-          expect(screen.getByTestId('comments-dialog')).toBeInTheDocument();
+          expect(screen.getByRole('dialog')).toBeInTheDocument();
         }, { timeout: 300 });
 
-        // Add comment using robust selector
-        const commentInput = screen.getByTestId('comment-input');
+        // Add comment using role selector
+        const commentInput = screen.getByRole('textbox', { name: /comment/i });
         await user.type(commentInput, 'This is a new comment');
 
-        const commentButton = screen.getByTestId('submit-comment-button');
+        const commentButton = screen.getByRole('button', { name: /submit|add|comment/i });
         await user.click(commentButton);
 
         expect(mockHandlers.onCommentAdd).toHaveBeenCalledWith('annotation-1', {
@@ -589,13 +589,13 @@ describe('ChartCollaboration', () => {
       if (commentButtons.length > 0) {
         await user.click(commentButtons[0]);
 
-        // Wait for comments dialog to appear using robust selector
+        // Wait for comments dialog to appear using role selector
         await waitFor(() => {
-          expect(screen.getByTestId('comments-dialog')).toBeInTheDocument();
+          expect(screen.getByRole('dialog')).toBeInTheDocument();
         }, { timeout: 300 });
 
         // Try to add empty comment - button should be disabled
-        const commentButton = screen.getByTestId('submit-comment-button');
+        const commentButton = screen.getByRole('button', { name: /submit|add|comment/i });
         expect(commentButton).toBeDisabled();
 
         // Since button is disabled, the handler should not be called
@@ -676,7 +676,7 @@ describe('ChartCollaboration', () => {
       renderChartCollaboration({ annotations: otherUserAnnotations });
 
       // Filter to user's annotations - use the select input directly
-      const filterSelect = screen.getByLabelText('Filter annotations by type');
+      const filterSelect = screen.getByLabelText('Filter Annotations');
       await user.click(filterSelect);
       await user.click(screen.getByText('My Annotations (0)'));
 
