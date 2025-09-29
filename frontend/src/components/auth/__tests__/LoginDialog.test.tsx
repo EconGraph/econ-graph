@@ -111,9 +111,11 @@ describe('LoginDialog', () => {
       </TestWrapper>
     );
 
-    // Fill in email and password
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@example.com' } });
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
+    // Fill in email and password (target the Sign In tab specifically)
+    const emailInput = screen.getAllByLabelText('Email')[0]; // First one is Sign In tab
+    const passwordInput = screen.getByLabelText('Password');
+    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'password123' } });
 
     // Click sign in button (use the form button in DialogActions)
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
@@ -186,9 +188,11 @@ describe('LoginDialog', () => {
       </TestWrapper>
     );
 
-    // Fill in email and password
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@example.com' } });
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
+    // Fill in email and password (target the Sign In tab specifically)
+    const emailInput = screen.getAllByLabelText('Email')[0]; // First one is Sign In tab
+    const passwordInput = screen.getByLabelText('Password');
+    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'password123' } });
 
     // Click sign in button (use the form button in DialogActions)
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
@@ -290,8 +294,9 @@ describe('LoginDialog', () => {
       </TestWrapper>
     );
 
-    // Start typing in email field
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test' } });
+    // Start typing in email field (target the Sign In tab specifically)
+    const emailInput = screen.getAllByLabelText('Email')[0]; // First one is Sign In tab
+    fireEvent.change(emailInput, { target: { value: 'test' } });
 
     // The component clears field-specific errors, not the global auth error
     // This test verifies that the input change works without errors
@@ -512,7 +517,8 @@ describe('LoginDialog', () => {
     );
 
     // Fill email on sign in tab
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@example.com' } });
+    const emailInput = screen.getAllByLabelText('Email')[0]; // First one is Sign In tab
+    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
 
     // Switch to sign up tab
     fireEvent.click(screen.getByText('Sign Up'));
@@ -536,9 +542,11 @@ describe('LoginDialog', () => {
       </TestWrapper>
     );
 
-    // Fill form
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@example.com' } });
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
+    // Fill form (target the Sign In tab specifically)
+    const emailInput = screen.getAllByLabelText('Email')[0]; // First one is Sign In tab
+    const passwordInput = screen.getByLabelText('Password');
+    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'password123' } });
 
     // During loading, buttons should be disabled
     const googleButton = screen.getByText('Continue with Google');
@@ -562,9 +570,11 @@ describe('LoginDialog', () => {
       </TestWrapper>
     );
 
-    // Fill form
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'test@example.com' } });
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'wrongpassword' } });
+    // Fill form (target the Sign In tab specifically)
+    const emailInput = screen.getAllByLabelText('Email')[0]; // First one is Sign In tab
+    const passwordInput = screen.getByLabelText('Password');
+    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'wrongpassword' } });
 
     // Submit form
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }));

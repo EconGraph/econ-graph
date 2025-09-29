@@ -227,7 +227,7 @@ describe('ChartCollaboration', () => {
       const user = userEvent.setup();
       renderChartCollaboration();
 
-      const filterSelect = screen.getByRole('combobox');
+      const filterSelect = screen.getByLabelText('Filter annotations by type');
       await user.click(filterSelect);
       await user.click(screen.getByText('My Annotations (1)'));
 
@@ -241,7 +241,7 @@ describe('ChartCollaboration', () => {
       const user = userEvent.setup();
       renderChartCollaboration();
 
-      const filterSelect = screen.getByRole('combobox');
+      const filterSelect = screen.getByLabelText('Filter annotations by type');
       await user.click(filterSelect);
       await user.click(screen.getByText('Pinned (1)'));
 
@@ -256,7 +256,7 @@ describe('ChartCollaboration', () => {
       renderChartCollaboration();
 
       // First filter to pinned
-      const filterSelect = screen.getByRole('combobox');
+      const filterSelect = screen.getByLabelText('Filter annotations by type');
       await user.click(filterSelect);
       await user.click(screen.getByText('Pinned (1)'));
 
@@ -676,7 +676,7 @@ describe('ChartCollaboration', () => {
       renderChartCollaboration({ annotations: otherUserAnnotations });
 
       // Filter to user's annotations - use the select input directly
-      const filterSelect = screen.getByRole('combobox');
+      const filterSelect = screen.getByLabelText('Filter annotations by type');
       await user.click(filterSelect);
       await user.click(screen.getByText('My Annotations (0)'));
 
