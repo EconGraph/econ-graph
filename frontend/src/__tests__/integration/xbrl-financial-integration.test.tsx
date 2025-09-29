@@ -12,9 +12,12 @@ import '@testing-library/jest-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import { server } from '../../test-utils/mocks/server';
+import { setupServer } from 'msw/node';
+import { http, HttpResponse } from 'msw';
+import { loadGraphQLResponse } from '../../test-utils/mocks/graphql-response-loader';
 
-// Restore the real useQuery for integration tests by importing the actual module
-vi.doUnmock('@tanstack/react-query');
+// Integration tests use real React Query with MSW
+// No need to unmock since we're using a separate setup file
 
 // Import the components we're testing
 import { FinancialDashboard } from '../../components/financial/FinancialDashboard';
@@ -22,25 +25,74 @@ import { FinancialStatementViewer } from '../../components/financial/FinancialSt
 import { BenchmarkComparison } from '../../components/financial/BenchmarkComparison';
 import { TrendAnalysisChart } from '../../components/financial/TrendAnalysisChart';
 
+// Create a dedicated MSW server for integration tests
+const integrationServer = setupServer(
+  http.post('/graphql', async ({ request }) => {
+    const body = await request.json();
+    const { query, variables, operationName } = body;
+    
+    console.log('🔧 Integration MSW intercepted GraphQL request:', operationName);
+    
+    // Handle GetFinancialDashboard
+    if (query.includes('GetFinancialDashboard')) {
+      const { companyId } = variables || {};
+      let scenario = 'success';
+      if (companyId === 'invalid-company-id') {
+        scenario = 'not_found';
+      } else if (companyId === 'error-company-id') {
+        scenario = 'error';
+      }
+      
+      const response = loadGraphQLResponse('get_financial_dashboard', scenario);
+      console.log('🔧 Integration MSW returning GetFinancialDashboard:', response);
+      return HttpResponse.json(response);
+    }
+    
+    // Handle GetFinancialRatios
+    if (query.includes('GetFinancialRatios')) {
+      const { statementId } = variables || {};
+      let scenario = 'success';
+      if (statementId === 'error-statement-id') {
+        scenario = 'error';
+      } else if (statementId === 'empty-statement-id') {
+        scenario = 'empty';
+      }
+      
+      const response = loadGraphQLResponse('get_financial_ratios', scenario);
+      console.log('🔧 Integration MSW returning GetFinancialRatios:', response);
+      return HttpResponse.json(response);
+    }
+    
+    // Handle GetFinancialStatement
+    if (query.includes('GetFinancialStatement')) {
+      const response = loadGraphQLResponse('get_financial_statement', 'success');
+      console.log('🔧 Integration MSW returning GetFinancialStatement:', response);
+      return HttpResponse.json(response);
+    }
+    
+    console.log('🔧 Integration MSW unhandled GraphQL operation:', operationName);
+    return HttpResponse.json({
+      data: null,
+      errors: [{ message: `Unhandled operation: ${operationName}` }],
+    });
+  })
+);
+
 // Start MSW for integration tests
 beforeAll(async () => {
-  // Close any existing MSW server first
-  try {
-    server.close();
-  } catch (e) {
-    // Ignore errors if server wasn't running
-  }
+  integrationServer.listen({ onUnhandledRequest: 'error' });
   
-  server.listen({ onUnhandledRequest: 'error' });
-  
+  // Add debug logging to see if MSW is working
+  console.log('🔧 Integration MSW server started');
+
   // Give MSW time to start
   await new Promise(resolve => setTimeout(resolve, 100));
 });
 afterEach(() => {
-  server.resetHandlers();
+  integrationServer.resetHandlers();
 });
 afterAll(() => {
-  server.close();
+  integrationServer.close();
 });
 
 // Mock the API calls

@@ -4,7 +4,7 @@
       "id": "0000320193",
       "name": "Apple Inc.",
       "ticker": "AAPL",
-      "industry": "Technology Hardware & Equipment",
+      "gicsDescription": "Technology Hardware & Equipment",
       "sector": "Technology",
       "financialStatements": [
         {
