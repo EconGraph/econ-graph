@@ -483,7 +483,7 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
         {/* Mobile Bottom Navigation */}
         <div className='fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg'>
           <div className='flex' role='tablist' aria-label='Mobile navigation tabs'>
-            {mobileTabs.map((tab, index) => (
+            {mobileTabs.map((tab, _index) => (
               <button
                 key={tab.id}
                 role='tab'

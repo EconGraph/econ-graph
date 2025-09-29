@@ -152,7 +152,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ open, onClose }) => {
 
   const handleDeleteAccount = useCallback(() => {
     // In a real app, this would call a delete account API
-    console.log('Delete account requested');
+    // Delete account functionality would be implemented here
     setShowDeleteConfirm(false);
   }, []);
 

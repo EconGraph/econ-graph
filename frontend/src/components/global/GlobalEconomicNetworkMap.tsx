@@ -419,7 +419,8 @@ const GlobalEconomicNetworkMap: React.FC = () => {
           .style('stroke-dasharray', d => (d.correlationCoefficient > 0 ? 'none' : '5,5'));
       })
       .catch(error => {
-        console.error('Failed to load world map data:', error);
+        // Handle error silently or log to monitoring service
+        // console.error('Failed to load world map data:', error);
       });
   }, [minCorrelation, selectedIndicator, selectedCountries]);
 

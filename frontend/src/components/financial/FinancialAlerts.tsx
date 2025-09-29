@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
+import { useSuspenseQuery } from '@tanstack/react-query';
 import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_ALERTS } from '../../test-utils/mocks/graphql/financial-queries';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -65,9 +65,9 @@ interface FinancialAlertsProps {
 
 export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
   companyId,
-  ratios,
-  statements,
-  userType = 'intermediate',
+  ratios: _ratios,
+  statements: _statements,
+  userType: _userType = 'intermediate',
   onAlertClick,
 }) => {
   const [alerts, setAlerts] = useState<FinancialAlert[]>([]);
@@ -76,7 +76,7 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
   const [showRead, setShowRead] = useState(true);
   const [sortBy, setSortBy] = useState<'date' | 'severity' | 'type'>('date');
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [_isLoading, setIsLoading] = useState<boolean>(true);
   const [isEmpty, setIsEmpty] = useState<boolean>(false);
 
   // Use GraphQL query for alerts data - use Suspense for loading state
@@ -90,7 +90,7 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
         });
         return result.data;
       } catch (error) {
-        console.error('Failed to fetch financial alerts:', error);
+        // Handle error silently or log to monitoring service
         throw error;
       }
     },

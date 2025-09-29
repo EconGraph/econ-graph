@@ -262,7 +262,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
   const downloadExport = (job: ExportJob) => {
     if (job.downloadUrl) {
       // In real implementation, this would trigger actual download
-      console.log('Downloading:', job.downloadUrl);
+      // Download functionality would be implemented here
     }
   };
 

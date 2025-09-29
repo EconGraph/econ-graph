@@ -506,7 +506,7 @@ const ProfessionalChart: React.FC<ProfessionalChartProps> = ({
 
   const exportChart = useCallback(() => {
     // Implementation for chart export (PNG, PDF, SVG)
-    console.log('Export chart functionality');
+    // Export functionality would be implemented here
   }, []);
 
   return (

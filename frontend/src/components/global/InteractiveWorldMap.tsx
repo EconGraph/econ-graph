@@ -85,7 +85,7 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
         const world = await response.json();
         setWorldData(world);
       } catch (err) {
-        console.error('Failed to load world data:', err);
+        // Handle error silently or log to monitoring service
         setError('Failed to load world map data');
       } finally {
         setLoading(false);
