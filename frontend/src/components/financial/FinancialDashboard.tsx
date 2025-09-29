@@ -231,9 +231,9 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
             <div className='flex items-center space-x-2 mt-2'>
               {statements[0] && (
                 <>
-                  {getStatusIcon(statements[0].data?.xbrlProcessingStatus)}
-                  <span className={`text-sm ${getStatusColor(statements[0].data?.xbrlProcessingStatus)}`}>
-                    {statements[0].data?.xbrlProcessingStatus || 'Unknown'}
+                  {getStatusIcon(statements[0].xbrlProcessingStatus)}
+                  <span className={`text-sm ${getStatusColor(statements[0].xbrlProcessingStatus)}`}>
+                    {statements[0].xbrlProcessingStatus || 'Unknown'}
                   </span>
                 </>
               )}
@@ -371,7 +371,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                         </div>
                       </div>
                       <div className='flex items-center space-x-2'>
-                        {getStatusIcon(statement.data?.xbrlProcessingStatus)}
+                        {getStatusIcon(statement.xbrlProcessingStatus)}
                         <span className='text-sm'>{statement.periodEndDate}</span>
                       </div>
                     </div>
