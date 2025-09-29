@@ -397,9 +397,9 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
 
           {/* Filter */}
           <FormControl size='small' fullWidth sx={{ mb: 2 }}>
-            <InputLabel id="filter-annotations-label">Filter Annotations</InputLabel>
+            <InputLabel id='filter-annotations-label'>Filter Annotations</InputLabel>
             <Select
-              labelId="filter-annotations-label"
+              labelId='filter-annotations-label'
               value={filterBy}
               onChange={e => setFilterBy(e.target.value as any)}
               label='Filter Annotations'

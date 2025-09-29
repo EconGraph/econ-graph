@@ -536,7 +536,7 @@ describe('XBRL Financial Integration Tests', () => {
 
       // Wait for statement data to load
       await waitFor(() => {
-        expect(screen.getAllByText('Total Assets')[0]).toBeInTheDocument();
+        expect(screen.getAllByText('Total Assets').length).toBeGreaterThan(0);
       });
 
       // Verify hierarchical structure is displayed
@@ -586,7 +586,7 @@ describe('XBRL Financial Integration Tests', () => {
         );
 
       // Verify industry distribution is displayed
-      expect(screen.getByText('Industry Distribution')).toBeInTheDocument();
+      expect(screen.getAllByText('Industry Distribution').length).toBeGreaterThan(0);
       expect(screen.getByText('P10:')).toBeInTheDocument();
       expect(screen.getByText('0.08')).toBeInTheDocument();
       expect(screen.getByText('P25:')).toBeInTheDocument();
