@@ -26,10 +26,10 @@ export class ErrorBoundary extends Component<Props, State> {
 
   /**
    * Logs error information when an error is caught by the boundary.
-   * @param error - The error that was caught.
-   * @param errorInfo - Additional error information.
+   * @param _error - The error that was caught.
+   * @param _errorInfo - Additional error information.
    */
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+  componentDidCatch(_error: Error, _errorInfo: React.ErrorInfo) {
     // Log error to monitoring service in production
     // console.error('ErrorBoundary caught an error:', error, errorInfo);
   }

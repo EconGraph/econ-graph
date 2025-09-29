@@ -72,7 +72,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
   company,
   statements,
   ratios,
-  userType = 'intermediate',
+  userType: _userType = 'intermediate',
 }) => {
   const [exportOptions, setExportOptions] = useState<ExportOptions>({
     format: 'pdf',

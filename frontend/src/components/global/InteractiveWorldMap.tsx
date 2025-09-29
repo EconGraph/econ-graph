@@ -15,47 +15,47 @@ import { useWorldMap } from './hooks/useWorldMap';
 import { useCountryData } from './hooks/useCountryData';
 
 interface InteractiveWorldMapProps {
-  /** Array of country data to display on the map */
+  /** Array of country data to display on the map. */
   data: CountryData[];
-  /** Currently selected economic indicator */
+  /** Currently selected economic indicator. */
   selectedIndicator: string;
-  /** Time range for data visualization */
+  /** Time range for data visualization. */
   timeRange: { start: Date; end: Date };
-  /** Callback when a country is clicked */
+  /** Callback when a country is clicked. */
   onCountryClick: (country: CountryData) => void;
-  /** Callback when a country is hovered */
+  /** Callback when a country is hovered. */
   onCountryHover: (country: CountryData | null) => void;
-  /** Current map view state */
+  /** Current map view state. */
   mapView: MapViewState;
-  /** Callback when map view changes */
+  /** Callback when map view changes. */
   onMapViewChange: (view: Partial<MapViewState>) => void;
-  /** Whether animation is enabled */
+  /** Whether animation is enabled. */
   animationEnabled?: boolean;
-  /** Whether to show country borders */
+  /** Whether to show country borders. */
   showBorders?: boolean;
-  /** Whether to show country labels */
+  /** Whether to show country labels. */
   showLabels?: boolean;
-  /** Size of country labels */
+  /** Size of country labels. */
   labelSize?: number;
-  /** Width of the map container */
+  /** Width of the map container. */
   width: number;
-  /** Height of the map container */
+  /** Height of the map container. */
   height: number;
-  /** Map projection type */
+  /** Map projection type. */
   projection?: string;
-  /** Color scheme for data visualization */
+  /** Color scheme for data visualization. */
   colorScheme?: string;
 }
 
 const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
   data,
   selectedIndicator,
-  timeRange,
+  timeRange: _timeRange,
   onCountryClick,
   onCountryHover,
-  mapView,
-  onMapViewChange,
-  animationEnabled = true,
+  mapView: _mapView,
+  onMapViewChange: _onMapViewChange,
+  animationEnabled: _animationEnabled = true,
   showBorders = true,
   showLabels = false,
   labelSize = 12,

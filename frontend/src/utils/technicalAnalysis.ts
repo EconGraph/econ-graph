@@ -91,6 +91,7 @@ export function calculateEMA(data: DataPoint[], period: number): TechnicalIndica
  * @param data - Array of data points to analyze.
  * @param period - Number of periods for the moving average.
  * @param standardDeviations - Number of standard deviations for the bands.
+ * @returns Bollinger Bands data with upper, middle, and lower bands.
  */
 export function calculateBollingerBands(
   data: DataPoint[],
@@ -128,6 +129,7 @@ export function calculateBollingerBands(
  * Momentum oscillator measuring the speed and magnitude of price changes.
  * @param data - Array of data points to analyze.
  * @param period - Number of periods for the RSI calculation.
+ * @returns Array of RSI values.
  */
 export function calculateRSI(data: DataPoint[], period = 14): RSIPoint[] {
   if (data.length < period + 1) return [];
@@ -172,6 +174,7 @@ export function calculateRSI(data: DataPoint[], period = 14): RSIPoint[] {
  * Momentum indicator showing percentage change over a specific period.
  * @param data - Array of data points to analyze.
  * @param period - Number of periods for the RSI calculation.
+ * @returns Array of ROC values.
  */
 export function calculateROC(data: DataPoint[], period: number): TechnicalIndicator[] {
   if (data.length < period + 1) return [];
@@ -198,6 +201,7 @@ export function calculateROC(data: DataPoint[], period: number): TechnicalIndica
  * Measure of volatility and dispersion.
  * @param data - Array of data points to analyze.
  * @param period - Number of periods for the RSI calculation.
+ * @returns Array of standard deviation values.
  */
 export function calculateStandardDeviation(
   data: DataPoint[],
@@ -295,6 +299,7 @@ export function detectEconomicCycles(data: DataPoint[], lookback = 6): CyclePoin
  * Calculate correlation between two economic series.
  * @param series1 - First data series for comparison.
  * @param series2 - Second data series for comparison.
+ * @returns Correlation coefficient between the two series.
  */
 export function calculateCorrelation(series1: DataPoint[], series2: DataPoint[]): number {
   if (series1.length !== series2.length || series1.length === 0) return 0;
@@ -392,6 +397,7 @@ export const MAJOR_ECONOMIC_EVENTS: EconomicEvent[] = [
  * Get relevant economic events for a date range.
  * @param startDate - Start date for the period.
  * @param endDate - End date for the period.
+ * @returns Array of economic events within the date range.
  */
 export function getEconomicEventsInRange(startDate: string, endDate: string): EconomicEvent[] {
   const start = new Date(startDate);

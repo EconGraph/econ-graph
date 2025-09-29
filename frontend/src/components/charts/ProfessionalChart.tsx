@@ -118,8 +118,8 @@ const ProfessionalChart: React.FC<ProfessionalChartProps> = ({
   height = 600,
   showTechnicalAnalysis = true,
   showEconomicEvents = true,
-  allowAnnotations = true,
-  onAnnotationAdd,
+  allowAnnotations: _allowAnnotations = true,
+  onAnnotationAdd: _onAnnotationAdd,
   onSeriesAdd,
 }) => {
   const [taSettings, setTASettings] = useState<TechnicalAnalysisSettings>({

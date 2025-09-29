@@ -10,7 +10,7 @@ interface AnnotationPanelProps {
 
 export const AnnotationPanel: React.FC<AnnotationPanelProps> = ({
   annotations,
-  onAddAnnotation,
+  onAddAnnotation: _onAddAnnotation,
   onUpdateAnnotation,
   onDeleteAnnotation,
 }) => {

@@ -418,7 +418,7 @@ const GlobalEconomicNetworkMap: React.FC = () => {
           .attr('opacity', 0.8)
           .style('stroke-dasharray', d => (d.correlationCoefficient > 0 ? 'none' : '5,5'));
       })
-      .catch(error => {
+        .catch(_error => {
         // Handle error silently or log to monitoring service
         // console.error('Failed to load world map data:', error);
       });

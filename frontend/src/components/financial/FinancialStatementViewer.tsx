@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Badge, Button, Progress, Alert, AlertDescription } from '@/components/ui';
+import { Badge, Button, Progress as _Progress, Alert, AlertDescription } from '@/components/ui';
 import {
   TrendingUp,
   DollarSign,
@@ -52,8 +52,8 @@ const useFinancialStatementQuery = (statementId: string) => {
   });
 };
 
-const useMutation = (mutation: any) => [() => Promise.resolve()];
-const useSubscription = (subscription: any, options?: any) => ({
+const useMutation = (_mutation: any) => [() => Promise.resolve()];
+const useSubscription = (_subscription: any, _options?: any) => ({
   data: {
     annotationAdded: null,
   },
@@ -69,7 +69,7 @@ interface FinancialStatementViewerProps {
 
 export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> = ({
   statementId,
-  companyId,
+  companyId: _companyId,
   userType = 'intermediate',
   showEducationalContent = true,
   showCollaborativeFeatures = true,
@@ -160,7 +160,7 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
     }
   };
 
-  const handleAddAnnotation = async (content: string, type: string, lineItemId?: string) => {
+  const handleAddAnnotation = async (_content: string, _type: string, _lineItemId?: string) => {
     try {
       await createAnnotation();
     } catch (error) {
@@ -168,11 +168,11 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
     }
   };
 
-  const handleUpdateAnnotation = (id: string, content: string) => {
+  const handleUpdateAnnotation = (_id: string, _content: string) => {
     // Implementation for updating annotation
   };
 
-  const handleDeleteAnnotation = (id: string) => {
+  const handleDeleteAnnotation = (_id: string) => {
     // Implementation for deleting annotation
   };
 

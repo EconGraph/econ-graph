@@ -29,7 +29,7 @@ vi.mock('../../../contexts/AuthContext', () => ({
 
 // Mock date-fns format function
 vi.mock('date-fns', () => ({
-  format: vi.fn((date) => 'Jan 15, 2:30 PM'),
+  format: vi.fn((_date) => 'Jan 15, 2:30 PM'),
 }));
 
 const theme = createTheme();

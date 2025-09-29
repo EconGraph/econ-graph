@@ -14,7 +14,7 @@ import ChartCollaboration, { ChartAnnotation } from '../ChartCollaboration';
 
 // Mock date-fns format function
 vi.mock('date-fns', () => ({
-  format: vi.fn((date) => 'Jan 15, 2:30 PM'),
+  format: vi.fn((_date) => 'Jan 15, 2:30 PM'),
 }));
 
 // Mock data for testing

@@ -88,11 +88,11 @@ export const filterActiveCollaborators = (
 /**
  * Validate annotation form data.
  * @param formData - Annotation form data.
- * @param formData.title
- * @param formData.content
- * @param formData.annotationDate
- * @param formData.annotationValue
- * @param formData.annotationType
+ * @param formData.title - The title of the annotation.
+ * @param formData.content - The content of the annotation.
+ * @param formData.annotationDate - The date of the annotation.
+ * @param formData.annotationValue - The value of the annotation.
+ * @param formData.annotationType - The type of the annotation.
  * @returns Validation result with errors.
  */
 export const validateAnnotationForm = (formData: {

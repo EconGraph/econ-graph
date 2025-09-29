@@ -17,11 +17,11 @@ import {
 import { CountryData } from '../../../types/globalAnalysis';
 
 export interface ProcessedCountryData extends CountryData {
-  /** Color value for this country based on selected indicator */
+  /** Color value for this country based on selected indicator. */
   colorValue?: number;
-  /** Normalized value (0-1) for this country */
+  /** Normalized value (0-1) for this country. */
   normalizedValue?: number;
-  /** Whether this country has data for the selected indicator */
+  /** Whether this country has data for the selected indicator. */
   hasData: boolean;
 }
 

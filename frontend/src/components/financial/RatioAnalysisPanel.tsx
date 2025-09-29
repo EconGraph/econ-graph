@@ -12,7 +12,7 @@ import {
 import {
   Badge,
   Button,
-  Progress,
+  Progress as _Progress,
   Alert,
   AlertDescription,
   Tooltip,

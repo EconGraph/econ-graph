@@ -10,13 +10,13 @@ import { loadGraphQLResponse } from '../mocks/graphql-response-loader';
 import { MockScenarios } from '../mocks/simpleServer';
 
 // Import all GraphQL queries we're testing
-import {
-  GET_FINANCIAL_STATEMENT,
-  GET_FINANCIAL_DASHBOARD,
-  GET_FINANCIAL_RATIOS,
-  GET_FINANCIAL_ALERTS,
-  GET_RATIO_BENCHMARKS,
-} from '../mocks/graphql/financial-queries';
+// import {
+//   GET_FINANCIAL_STATEMENT,
+//   GET_FINANCIAL_DASHBOARD,
+//   GET_FINANCIAL_RATIOS,
+//   GET_FINANCIAL_ALERTS,
+//   GET_RATIO_BENCHMARKS,
+// } from '../mocks/graphql/financial-queries';
 
 // Schema validation helper
 const validateGraphQLResponse = (response: any, expectedFields: string[]) => {

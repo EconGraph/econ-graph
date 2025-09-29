@@ -83,16 +83,11 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
   const { data: alertsData, error: alertsError } = useSuspenseQuery({
     queryKey: ['financial-alerts', companyId],
     queryFn: async () => {
-      try {
-        const result = await executeGraphQL({
-          query: GET_FINANCIAL_ALERTS,
-          variables: { companyId },
-        });
-        return result.data;
-      } catch (error) {
-        // Handle error silently or log to monitoring service
-        throw error;
-      }
+      const result = await executeGraphQL({
+        query: GET_FINANCIAL_ALERTS,
+        variables: { companyId },
+      });
+      return result.data;
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
   });

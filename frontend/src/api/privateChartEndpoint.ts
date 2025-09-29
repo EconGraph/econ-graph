@@ -67,7 +67,7 @@ export async function handlePrivateChartRequest(req: Request, res: Response): Pr
       message: 'Chart configuration generated successfully',
     });
   } catch (error) {
-    console.error('Private chart API error:', error);
+    // console.error('Private chart API error:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error while generating chart',
