@@ -21,8 +21,8 @@
     "allowJs": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "forceConsistentCasingInFileNames": true,
-    "types": ["vitest/globals", "vite/client"]
+    "forceConsistentCasingInFileNames": true
   },
-  "include": ["src", "src/**/*.d.ts"]
+  "include": ["src"],
+  "references": [{ "path": "./tsconfig.node.json" }]
 }

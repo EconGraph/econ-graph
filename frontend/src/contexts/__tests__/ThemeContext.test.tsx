@@ -7,24 +7,21 @@
 import React from 'react';
 import { render, screen, act, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { ThemeProvider, useTheme } from '../ThemeContext';
 
 // Mock the AuthContext
-vi.mock('../AuthContext', async () => {
-  const actual = await vi.importActual('../AuthContext');
-  return {
-    ...actual,
-    useAuth: () => ({
-      user: null, // No user in tests to avoid user preference interference
-      isAuthenticated: false,
-      login: vi.fn(),
-      logout: vi.fn(),
-    }),
-    AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  };
-});
+vi.mock('../AuthContext', () => ({
+  useAuth: () => ({
+    user: null, // No user in tests to avoid user preference interference
+    isAuthenticated: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+  }),
+  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
 
-// localStorage mock is now handled globally in setupTests.vitest.ts
+// localStorage mock is now handled globally in setupTests.ts
 
 // Test component that uses the theme context
 const TestComponent: React.FC = () => {
@@ -56,15 +53,24 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 describe('ThemeContext', () => {
   beforeEach(() => {
     // Reset localStorage mock for each test
-    vi.clearAllMocks();
+    (window.localStorage.getItem as Mock).mockClear();
+    (window.localStorage.setItem as Mock).mockClear();
+    (window.localStorage.removeItem as Mock).mockClear();
+    (window.localStorage.clear as Mock).mockClear();
   });
 
   it('should initialize with light theme by default', () => {
-    // This test is covered by the next test
+    (window.localStorage.getItem as Mock).mockReturnValue(null);
+    vi.clearAllMocks();
+
+    // Clear any existing localStorage state
+    if (window.localStorage.clear) {
+      window.localStorage.clear();
+    }
   });
 
   it('should initialize with light theme when localStorage is null', () => {
-    vi.spyOn(window.localStorage, 'getItem').mockReturnValue(null);
+    (window.localStorage.getItem as Mock).mockReturnValue(null);
 
     render(
       <TestWrapper>
@@ -76,7 +82,7 @@ describe('ThemeContext', () => {
   });
 
   it('should load theme from localStorage', async () => {
-    vi.spyOn(window.localStorage, 'getItem').mockReturnValue('dark');
+    (window.localStorage.getItem as Mock).mockReturnValue('dark');
 
     render(
       <TestWrapper>
@@ -91,10 +97,7 @@ describe('ThemeContext', () => {
   });
 
   it('should toggle theme correctly', async () => {
-    vi.spyOn(window.localStorage, 'getItem').mockReturnValue('light');
-    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
-      // Mock implementation
-    });
+    (window.localStorage.getItem as Mock).mockReturnValue('light');
 
     render(
       <TestWrapper>
@@ -119,10 +122,7 @@ describe('ThemeContext', () => {
   });
 
   it('should set theme to light', async () => {
-    vi.spyOn(window.localStorage, 'getItem').mockReturnValue('dark');
-    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
-      // Mock implementation
-    });
+    (window.localStorage.getItem as Mock).mockReturnValue('dark');
 
     render(
       <TestWrapper>
@@ -147,10 +147,7 @@ describe('ThemeContext', () => {
   });
 
   it('should set theme to dark', async () => {
-    vi.spyOn(window.localStorage, 'getItem').mockReturnValue('light');
-    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
-      // Mock implementation
-    });
+    (window.localStorage.getItem as Mock).mockReturnValue('light');
 
     render(
       <TestWrapper>
@@ -176,9 +173,7 @@ describe('ThemeContext', () => {
 
   it('should throw error when used outside ThemeProvider', () => {
     // Suppress console.error for this test
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {
-      // Mock console.error implementation
-    });
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     expect(() => {
       render(<TestComponent />);

@@ -7,11 +7,12 @@
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, StyledEngineProvider } from '@mui/material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { vi } from 'vitest';
 import ChartCollaborationConnected from '../ChartCollaborationConnected';
 import { ChartAnnotationType } from '../../../utils/graphql';
 import { useCollaboration } from '../../../hooks/useCollaboration';
@@ -218,7 +219,7 @@ describe('ChartCollaborationConnected', () => {
       return comments;
     });
 
-    (useCollaboration as any).mockReturnValue(mockCollaborationHook);
+    (useCollaboration as Mock).mockReturnValue(mockCollaborationHook);
 
     // Clean up any existing portal containers
     const existingContainers = document.querySelectorAll('[data-testid="portal-container"]');
@@ -308,7 +309,7 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Loading States', () => {
     it('should show loading indicator when data is loading', () => {
-      (useCollaboration as any).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         loading: true,
       });
@@ -319,7 +320,7 @@ describe('ChartCollaborationConnected', () => {
     });
 
     it('should disable add annotation button when loading', () => {
-      (useCollaboration as any).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         loading: true,
       });
@@ -333,7 +334,7 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Error Handling', () => {
     it('should display error message when there is an error', () => {
-      (useCollaboration as any).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         error: 'Failed to load collaboration data',
       });
@@ -539,7 +540,7 @@ describe('ChartCollaborationConnected', () => {
         color: '#f44336', // Default color
         is_public: true,
         });
-      }, { timeout: 10000 });
+      }, { timeout: 300 });
     });
 
     it('should show snackbar on successful creation', async () => {
@@ -558,12 +559,12 @@ describe('ChartCollaborationConnected', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Annotation created successfully')).toBeInTheDocument();
-      }, { timeout: 10000 });
+      }, { timeout: 300 });
     });
 
     it('should show error snackbar on creation failure', async () => {
       const user = userEvent.setup();
-      (useCollaboration as any).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         createAnnotation: vi.fn().mockRejectedValue(new Error('Creation failed')),
       });
@@ -582,7 +583,7 @@ describe('ChartCollaborationConnected', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Creation failed')).toBeInTheDocument();
-      }, { timeout: 10000 });
+      }, { timeout: 300 });
     });
   });
 
@@ -799,7 +800,7 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Empty States', () => {
     it('should show empty state when no annotations', () => {
-      (useCollaboration as any).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         annotations: [],
       });
@@ -816,7 +817,7 @@ describe('ChartCollaborationConnected', () => {
         userId: 'other-user'
       }));
 
-      (useCollaboration as any).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         annotations: otherUserAnnotations,
       });
@@ -853,7 +854,7 @@ describe('ChartCollaborationConnected', () => {
         updatedAt: '2024-01-15T10:00:00Z',
       }));
 
-      (useCollaboration as any).mockReturnValue({
+      (useCollaboration as Mock).mockReturnValue({
         ...mockCollaborationHook,
         collaborators: manyCollaborators,
       });

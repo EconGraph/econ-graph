@@ -7,8 +7,8 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { vi } from 'vitest';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
 import InteractiveChartWithCollaboration from '../InteractiveChartWithCollaboration';
 
 // Mock Chart.js to avoid canvas rendering issues in tests
@@ -41,33 +41,11 @@ vi.mock('../ChartCollaborationConnected', () => ({
         )}
       </div>
     );
-  },
+  }
 }));
 
 // Mock chart.js
 vi.mock('chartjs-adapter-date-fns', () => ({}));
-
-// Mock Chart.js components
-vi.mock('chart.js', () => ({
-  Chart: {
-    register: vi.fn(),
-  },
-  registerables: [],
-  CategoryScale: {},
-  LinearScale: {},
-  TimeScale: {},
-  PointElement: {},
-  LineElement: {},
-  Title: {},
-  Tooltip: {},
-  Legend: {},
-  Filler: {},
-}));
-
-vi.mock('chartjs-plugin-annotation', () => ({
-  __esModule: true,
-  default: { id: 'annotation', beforeDraw: vi.fn(), afterDraw: vi.fn() },
-}));
 
 const theme = createTheme();
 

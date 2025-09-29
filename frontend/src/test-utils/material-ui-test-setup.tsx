@@ -45,14 +45,14 @@ export const customRender = (ui: React.ReactElement, options: RenderOptions = {}
   portalContainer.setAttribute('data-testid', 'material-ui-portal-container');
   document.body.appendChild(portalContainer);
 
-  const renderResult = render(ui, {
+  const view = render(ui, {
     wrapper: MaterialUITestWrapper,
     container: container, // Use proper container instead of document.body
     ...options,
   });
 
   return {
-    ...renderResult,
+    ...view,
     portalContainer,
     cleanup: () => {
       // Clean up portal container
@@ -70,46 +70,56 @@ export const customRender = (ui: React.ReactElement, options: RenderOptions = {}
 // Test cleanup utilities
 export const setupTestEnvironment = () => {
   // Clean up any existing portal containers
+
   const existingContainers = document.querySelectorAll(
     '[data-testid="material-ui-portal-container"]'
   );
   existingContainers.forEach(container => container.remove());
 
   // Clean up any existing test containers
+
   const existingTestContainers = document.querySelectorAll('[data-testid="test-container"]');
   existingTestContainers.forEach(container => container.remove());
 
   // Clean up any portal containers with different testid
+
   const portalContainers = document.querySelectorAll('[data-testid="portal-container"]');
   portalContainers.forEach(container => container.remove());
 
   // Clean up any remaining React roots
+
   const reactRoots = document.querySelectorAll('[data-reactroot]');
   reactRoots.forEach(root => root.remove());
 
   // Clean up any remaining dialogs
+
   const dialogs = document.querySelectorAll('[role="dialog"]');
   dialogs.forEach(dialog => dialog.remove());
 };
 
 export const cleanupTestEnvironment = () => {
   // Clean up all portal containers
+
   const containers = document.querySelectorAll('[data-testid="material-ui-portal-container"]');
   containers.forEach(container => container.remove());
 
   // Clean up all test containers
+
   const testContainers = document.querySelectorAll('[data-testid="test-container"]');
   testContainers.forEach(container => container.remove());
 
   // Clean up all portal containers with different testid
+
   const portalContainers = document.querySelectorAll('[data-testid="portal-container"]');
   portalContainers.forEach(container => container.remove());
 
   // Clean up any remaining React roots
+
   const reactRoots = document.querySelectorAll('[data-reactroot]');
   reactRoots.forEach(root => root.remove());
 
   // Clean up any remaining dialogs
+
   const dialogs = document.querySelectorAll('[role="dialog"]');
   dialogs.forEach(dialog => dialog.remove());
 };
@@ -124,6 +134,7 @@ export const waitForDialog = async (dialogTitle?: string) => {
         const dialog = document.querySelector(`[role="dialog"]`);
         expect(dialog).toBeInTheDocument();
         // Check if dialog title matches (flexible matching)
+
         const titleElement = document.querySelector(
           '[role="dialog"] h2, [role="dialog"] h1, [role="dialog"] [class*="DialogTitle"]'
         );
@@ -148,21 +159,25 @@ export const findFormFieldInDialog = (
 
   // Try different strategies to find the field
   // 1. By aria-label
+
   let field = dialog.querySelector(`${fieldType}[aria-label*="${fieldName}"]`);
   if (field) return field;
 
   // 2. By placeholder
+
   field = dialog.querySelector(`${fieldType}[placeholder*="${fieldName}"]`);
   if (field) return field;
 
   // 3. By associated label
+
   const labels = dialog.querySelectorAll('label');
   for (const label of labels) {
     if (label.textContent?.toLowerCase().includes(fieldName.toLowerCase())) {
       const labelFor = label.getAttribute('for');
       if (labelFor) {
         // Escape special characters in the ID for CSS selector
-        const escapedId = labelFor.replace(/[!"#$%&'()*+,./:;<=>?@[\\\]^`{|}~]/g, '\\$&');
+        const escapedId = labelFor.replace(/[!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~]/g, '\\$&');
+
         field = dialog.querySelector(`#${escapedId}`);
         if (field) return field;
       }
@@ -170,6 +185,7 @@ export const findFormFieldInDialog = (
   }
 
   // 4. By data-testid
+
   field = dialog.querySelector(`${fieldType}[data-testid*="${fieldName.toLowerCase()}"]`);
   if (field) return field;
 
