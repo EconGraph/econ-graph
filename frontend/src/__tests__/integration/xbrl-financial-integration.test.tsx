@@ -11,7 +11,7 @@ import { vi, beforeAll, afterEach, afterAll } from 'vitest';
 import '@testing-library/jest-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
-import { server } from '../../test-utils/mocks/server';
+// import { server } from '../../test-utils/mocks/server'; // Not used in integration tests
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { loadGraphQLResponse } from '../../test-utils/mocks/graphql-response-loader';
@@ -28,7 +28,11 @@ import { TrendAnalysisChart } from '../../components/financial/TrendAnalysisChar
 // Create a dedicated MSW server for integration tests
 const integrationServer = setupServer(
   http.post('/graphql', async ({ request }) => {
-    const body = await request.json();
+    const body = await request.json() as {
+      query: string;
+      variables?: Record<string, any>;
+      operationName?: string;
+    };
     const { query, variables, operationName } = body;
     
     console.log('🔧 Integration MSW intercepted GraphQL request:', operationName);
