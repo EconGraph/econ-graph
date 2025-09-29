@@ -233,9 +233,7 @@ function createHandlers() {
 
     // Handle GraphQL POST requests
     http.post('/graphql', async ({ request }: { request: any }) => {
-      if (process.env.MSW_DEBUG) {
-        console.log('🔧 MSW GraphQL POST handler called!');
-      }
+      console.log('🔧 MSW GraphQL POST handler called!');
       const body = await request.json();
       const { query, variables, operationName } = body;
 

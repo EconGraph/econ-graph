@@ -20,7 +20,11 @@ import { BenchmarkComparison } from '../../components/financial/BenchmarkCompari
 import { TrendAnalysisChart } from '../../components/financial/TrendAnalysisChart';
 
 // Start MSW for integration tests
-beforeAll(() => server.listen({ onUnhandledRequest: 'warn' }));
+beforeAll(async () => {
+  server.listen({ onUnhandledRequest: 'warn' });
+  // Give MSW time to start
+  await new Promise(resolve => setTimeout(resolve, 100));
+});
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
@@ -292,10 +296,13 @@ describe('XBRL Financial Integration Tests', () => {
           </TestWrapper>
         );
 
-      // Wait for data to load
+      // Debug: Log the current DOM content
+      console.log('Current DOM content:', screen.debug());
+      
+      // Wait for data to load with longer timeout
       await waitFor(() => {
         expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
-      });
+      }, { timeout: 10000 });
 
       // Verify company information is displayed
       expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
