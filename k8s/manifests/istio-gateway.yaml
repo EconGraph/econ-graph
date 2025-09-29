@@ -1,0 +1,72 @@
+# Istio Gateway for external traffic (replaces nginx ingress)
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: econ-graph-gateway
+  namespace: econ-graph
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - admin.econ-graph.local
+    tls:
+      httpsRedirect: true
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    hosts:
+    - admin.econ-graph.local
+    tls:
+      mode: SIMPLE
+      credentialName: econ-graph-tls
+---
+# Virtual Service for routing
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: econ-graph-vs
+  namespace: econ-graph
+spec:
+  hosts:
+  - admin.econ-graph.local
+  gateways:
+  - econ-graph-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /admin
+    route:
+    - destination:
+        host: econ-graph-admin-frontend-service
+        port:
+          number: 3001
+  - match:
+    - uri:
+        prefix: /api
+    route:
+    - destination:
+        host: econ-graph-backend-service
+        port:
+          number: 9876
+  - match:
+    - uri:
+        prefix: /graphql
+    route:
+    - destination:
+        host: econ-graph-backend-service
+        port:
+          number: 9876
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: econ-graph-frontend-service
+        port:
+          number: 3000

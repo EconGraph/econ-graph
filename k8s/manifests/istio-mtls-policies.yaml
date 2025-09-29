@@ -1,0 +1,57 @@
+# Istio mTLS policies for service-to-service authentication
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: econ-graph
+spec:
+  mtls:
+    mode: STRICT  # Require mTLS for all service communication
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: econ-graph-services
+  namespace: econ-graph
+spec:
+  rules:
+  # Backend can communicate with Chart API
+  - from:
+    - source:
+        principals: ["cluster.local/ns/econ-graph/sa/econ-graph-backend"]
+    to:
+    - operation:
+        hosts: ["chart-api-service.econ-graph.svc.cluster.local"]
+  # Backend can communicate with MCP Server
+  - from:
+    - source:
+        principals: ["cluster.local/ns/econ-graph/sa/econ-graph-backend"]
+    to:
+    - operation:
+        hosts: ["mcp-server.econ-graph.svc.cluster.local"]
+  # Backend can communicate with PostgreSQL
+  - from:
+    - source:
+        principals: ["cluster.local/ns/econ-graph/sa/econ-graph-backend"]
+    to:
+    - operation:
+        hosts: ["postgres-service.econ-graph.svc.cluster.local"]
+  # Keycloak can communicate with its database
+  - from:
+    - source:
+        principals: ["cluster.local/ns/econ-graph/sa/keycloak"]
+    to:
+    - operation:
+        hosts: ["keycloak-postgres-service.econ-graph.svc.cluster.local"]
+---
+# Destination rules for mTLS
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: econ-graph-services
+  namespace: econ-graph
+spec:
+  host: "*.econ-graph.svc.cluster.local"
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL  # Use Istio-managed certificates
