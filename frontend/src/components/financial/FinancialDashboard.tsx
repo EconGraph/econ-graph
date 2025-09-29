@@ -71,10 +71,10 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
 
   const company: Company | undefined = data?.company;
   const statements: FinancialStatement[] = useMemo(
-    () => data?.financialStatements || [],
-    [data?.financialStatements]
+    () => data?.company?.financialStatements || [],
+    [data?.company?.financialStatements]
   );
-  const ratios: FinancialRatio[] = data?.financialRatios || [];
+  const ratios: FinancialRatio[] = data?.company?.financialRatios || [];
 
   // Auto-select the most recent statement
   useEffect(() => {

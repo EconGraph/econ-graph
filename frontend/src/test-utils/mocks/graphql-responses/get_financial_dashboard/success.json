@@ -5,6 +5,7 @@
       "name": "Apple Inc.",
       "ticker": "AAPL",
       "gicsDescription": "Technology Hardware & Equipment",
+      "industry": "Technology Hardware & Equipment",
       "sector": "Technology",
       "financialStatements": [
         {
@@ -62,6 +63,22 @@
           "fiscalQuarter": 4,
           "calculatedAt": "2023-12-31T00:00:00Z",
           "dataQualityScore": 0.95
+        },
+        {
+          "id": "ratio-3",
+          "statementId": "statement-1",
+          "ratioName": "currentRatio",
+          "ratioDisplayName": "Current Ratio",
+          "value": 1.04,
+          "category": "liquidity",
+          "formula": "Current Assets / Current Liabilities",
+          "interpretation": "Adequate liquidity position",
+          "benchmarkPercentile": 45,
+          "periodEndDate": "2023-12-31",
+          "fiscalYear": 2023,
+          "fiscalQuarter": 4,
+          "calculatedAt": "2023-12-31T00:00:00Z",
+          "dataQualityScore": 0.98
         }
       ],
       "alerts": [
