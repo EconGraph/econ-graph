@@ -316,7 +316,9 @@ describe('UserProfile Preferences', () => {
     const deleteButtons = screen.getAllByText('Delete Account');
     const deleteButton = deleteButtons.find(button => button.tagName === 'BUTTON');
     expect(deleteButton).toBeInTheDocument();
-    await user.click(deleteButton!);
+    if (deleteButton) {
+      await user.click(deleteButton);
+    }
 
     // Should show confirmation dialog
     await waitFor(() => {
@@ -338,7 +340,9 @@ describe('UserProfile Preferences', () => {
     // Open delete dialog
     const deleteButtons = screen.getAllByText('Delete Account');
     const deleteButton = deleteButtons.find(button => button.tagName === 'BUTTON');
-    await user.click(deleteButton!);
+    if (deleteButton) {
+      await user.click(deleteButton);
+    }
 
     // Wait for dialog to open
     await waitFor(() => {

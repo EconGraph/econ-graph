@@ -338,8 +338,10 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
           case 'yoy':
             // Year-over-Year: Compare with same period last year (assuming monthly data)
             if (index >= 12 && data[index - 12].value !== null) {
-              transformedValue =
-                ((point.value - data[index - 12].value!) / data[index - 12].value!) * 100;
+              const previousValue = data[index - 12].value;
+              if (previousValue !== null) {
+                transformedValue = ((point.value - previousValue) / previousValue) * 100;
+              }
             } else {
               transformedValue = 0;
             }
@@ -347,8 +349,10 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
           case 'qoq':
             // Quarter-over-Quarter: Compare with same period 3 months ago
             if (index >= 3 && data[index - 3].value !== null) {
-              transformedValue =
-                ((point.value - data[index - 3].value!) / data[index - 3].value!) * 100;
+              const previousValue = data[index - 3].value;
+              if (previousValue !== null) {
+                transformedValue = ((point.value - previousValue) / previousValue) * 100;
+              }
             } else {
               transformedValue = 0;
             }
