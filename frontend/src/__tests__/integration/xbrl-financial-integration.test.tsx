@@ -398,19 +398,21 @@ describe('XBRL Financial Integration Tests', () => {
       const ratiosTab = screen.getByRole('button', { name: /ratios/i });
       fireEvent.click(ratiosTab);
 
-      // Debug: log the current DOM to see what's rendered
-      console.log('DOM after clicking ratios tab:', screen.debug());
-
-      // Wait for ratios to load with a longer timeout
+      // Wait for ratio data to load using proper selector hierarchy
       await waitFor(() => {
-        expect(screen.getByText('Return on Equity (ROE)')).toBeInTheDocument();
+        expect(screen.getByLabelText('Return on Equity value')).toBeInTheDocument();
       }, { timeout: 5000 });
 
-      // Verify key ratios are displayed
-      expect(screen.getByText('Return on Equity (ROE)')).toBeInTheDocument();
-      expect(screen.getByText('Net Profit Margin')).toBeInTheDocument();
-      expect(screen.getAllByText('14.7%').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('25.3%').length).toBeGreaterThan(0);
+      // Use proper selectors to verify ratios are displayed (Testing Library best practices)
+      // Look for ratio values by their aria-labels (highest priority selector)
+      const roeValue = screen.getByLabelText('Return on Equity value');
+      const currentRatioValue = screen.getByLabelText('Current Ratio value');
+      
+      // Verify key ratios are displayed with proper values
+      expect(roeValue).toBeInTheDocument();
+      expect(roeValue).toHaveTextContent('14.7%');
+      expect(currentRatioValue).toBeInTheDocument();
+      expect(currentRatioValue).toHaveTextContent('104.0%');
     });
 
     it('should show benchmark comparisons with industry data', async () => {
@@ -437,12 +439,19 @@ describe('XBRL Financial Integration Tests', () => {
 
       // Wait for benchmark data to load with a longer timeout
       await waitFor(() => {
-        expect(screen.getAllByText(/Industry Benchmark/i).length).toBeGreaterThan(0);
+        // Look for benchmark content using proper selectors
+        const benchmarkCards = screen.queryAllByRole('region', { name: /benchmark|industry/i });
+        const benchmarkTexts = screen.queryAllByText(/Industry Benchmark|Above Average|Average|Below Average/);
+        
+        console.log('Benchmark cards found:', benchmarkCards.length);
+        console.log('Benchmark texts found:', benchmarkTexts.length);
+        
+        expect(benchmarkTexts.length).toBeGreaterThan(0);
       }, { timeout: 5000 });
 
-      // Verify benchmark mock data is rendered correctly
-      expect(screen.getAllByText(/Industry Benchmark/i).length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Above Average').length).toBeGreaterThan(0); // Calculated from mock percentile data
+      // Verify benchmark mock data is rendered correctly using proper selectors
+      expect(screen.getByText('Industry Benchmark Analysis')).toBeInTheDocument();
+      expect(screen.getByText('Above Average')).toBeInTheDocument();
     });
   });
 

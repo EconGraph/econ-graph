@@ -266,7 +266,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                 <p className='text-sm font-medium text-muted-foreground'>Current Ratio</p>
                 <p
                   className='text-2xl font-bold text-blue-600'
-                  aria-label='Net Profit Margin value'
+                  aria-label='Current Ratio value'
                 >
                   {ratios.find(r => r.ratioName === 'currentRatio')?.value
                     ? formatPercent(ratios.find(r => r.ratioName === 'currentRatio')!.value)
