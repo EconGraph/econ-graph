@@ -7,6 +7,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline } from '@mui/material';
 import { render } from '@testing-library/react';
+import { AuthProvider } from '../contexts/AuthContext';
+import { ThemeProvider as CustomThemeProvider } from '../contexts/ThemeContext';
 
 interface TestProvidersProps {
   children: React.ReactNode;
@@ -53,12 +55,16 @@ export function TestProviders({ children, queryClient }: TestProvidersProps) {
 
   return (
     <QueryClientProvider client={testQueryClient}>
-      <RouterWrapper>
-        <ThemeProvider theme={testTheme}>
-          <CssBaseline />
-          {children}
-        </ThemeProvider>
-      </RouterWrapper>
+      <AuthProvider>
+        <CustomThemeProvider>
+          <RouterWrapper>
+            <ThemeProvider theme={testTheme}>
+              <CssBaseline />
+              {children}
+            </ThemeProvider>
+          </RouterWrapper>
+        </CustomThemeProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
