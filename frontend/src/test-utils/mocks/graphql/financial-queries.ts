@@ -75,6 +75,23 @@ export const GET_PEER_COMPARISON = `
   }
 `;
 
+export const GET_PEER_COMPANIES = `
+  query GetPeerCompanies($companyId: ID!) {
+    peerCompanies(companyId: $companyId) {
+      id
+      name
+      ticker
+      industry
+      marketCap
+      ratios {
+        name
+        value
+        percentile
+      }
+    }
+  }
+`;
+
 export const GET_BENCHMARK_COMPARISON = `
   query GetBenchmarkComparison($companyId: ID!, $benchmarkType: String!) {
     company(id: $companyId) {
@@ -152,6 +169,19 @@ export const GET_FINANCIAL_EXPORT = `
         period
         data
       }
+    }
+  }
+`;
+
+export const GET_FINANCIAL_ANNOTATIONS = `
+  query GetFinancialAnnotations($statementId: ID!) {
+    annotations(statementId: $statementId) {
+      id
+      content
+      type
+      lineItemId
+      createdAt
+      updatedAt
     }
   }
 `;

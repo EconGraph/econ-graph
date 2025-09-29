@@ -41,7 +41,7 @@ import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 const useFinancialStatementQuery = (statementId: string) => {
   return useSuspenseQuery({
     queryKey: ['financial-statement', statementId],
-    queryFn:     async () => {
+    queryFn: async () => {
       const result = await executeGraphQL({
         query: GET_FINANCIAL_STATEMENT,
         variables: { statementId },

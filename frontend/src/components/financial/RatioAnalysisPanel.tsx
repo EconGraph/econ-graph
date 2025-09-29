@@ -55,7 +55,7 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
   // GraphQL query for financial ratios - use Suspense for loading state
   const { data: ratiosData } = useSuspenseQuery({
     queryKey: ['financial-ratios', statementId],
-    queryFn:     async () => {
+    queryFn: async () => {
       const result = await executeGraphQL({
         query: GET_FINANCIAL_RATIOS,
         variables: { statementId },
