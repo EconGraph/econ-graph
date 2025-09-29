@@ -9,9 +9,12 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { vi, beforeAll, afterEach, afterAll } from 'vitest';
 import '@testing-library/jest-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import { server } from '../../test-utils/mocks/server';
+
+// Restore the real useQuery for integration tests by importing the actual module
+vi.doUnmock('@tanstack/react-query');
 
 // Import the components we're testing
 import { FinancialDashboard } from '../../components/financial/FinancialDashboard';
@@ -21,12 +24,27 @@ import { TrendAnalysisChart } from '../../components/financial/TrendAnalysisChar
 
 // Start MSW for integration tests
 beforeAll(async () => {
-  server.listen({ onUnhandledRequest: 'warn' });
+  // Close any existing MSW server first
+  try {
+    server.close();
+  } catch (e) {
+    // Ignore errors if server wasn't running
+  }
+  
+  server.listen({ onUnhandledRequest: 'error' });
+  console.log('🔧 MSW server started for integration tests');
+  
   // Give MSW time to start
   await new Promise(resolve => setTimeout(resolve, 100));
 });
-afterEach(() => server.resetHandlers());
-afterAll(() => server.close());
+afterEach(() => {
+  console.log('🔧 MSW server reset handlers');
+  server.resetHandlers();
+});
+afterAll(() => {
+  console.log('🔧 MSW server closed');
+  server.close();
+});
 
 // Mock the API calls
 const mockFetch = vi.fn();
@@ -228,9 +246,13 @@ const createTestWrapper = () => {
     defaultOptions: {
       queries: {
         retry: false,
+        staleTime: 0,
+        cacheTime: 0,
       },
     },
   });
+  
+  console.log('🔧 QueryClient created for integration test');
 
   const TestWrapper = ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={queryClient}>
