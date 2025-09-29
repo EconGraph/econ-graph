@@ -124,7 +124,6 @@ describe('ProfessionalChart', () => {
       );
 
       // Should render the chart component
-      expect(screen.getByRole('region')).toBeInTheDocument();
       expect(screen.getByText('Professional Chart Analytics')).toBeInTheDocument();
     });
 

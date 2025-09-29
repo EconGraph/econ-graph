@@ -72,8 +72,8 @@ describe('LoginDialog', () => {
     );
 
     expect(screen.getByText('Welcome to EconGraph')).toBeInTheDocument();
-    expect(screen.getByText('Continue with Google')).toBeInTheDocument();
-    expect(screen.getByText('Continue with Facebook')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue with Facebook' })).toBeInTheDocument();
     expect(screen.getAllByText('Sign In')).toHaveLength(2); // Tab and button
   });
 
@@ -113,7 +113,7 @@ describe('LoginDialog', () => {
 
     // Fill in email and password (target the Sign In tab specifically)
     const emailInput = screen.getAllByLabelText('Email')[0]; // First one is Sign In tab
-    const passwordInput = screen.getByLabelText('Password');
+    const passwordInput = screen.getAllByLabelText('Password')[0]; // First one is Sign In tab
     fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
     fireEvent.change(passwordInput, { target: { value: 'password123' } });
 
@@ -143,7 +143,7 @@ describe('LoginDialog', () => {
     );
 
     // Click Google sign in button
-    fireEvent.click(screen.getByText('Continue with Google'));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }));
 
     await waitFor(() => {
       expect(mockAuthContext.signInWithGoogle).toHaveBeenCalled();
@@ -190,7 +190,7 @@ describe('LoginDialog', () => {
 
     // Fill in email and password (target the Sign In tab specifically)
     const emailInput = screen.getAllByLabelText('Email')[0]; // First one is Sign In tab
-    const passwordInput = screen.getByLabelText('Password');
+    const passwordInput = screen.getAllByLabelText('Password')[0]; // First one is Sign In tab
     fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
     fireEvent.change(passwordInput, { target: { value: 'password123' } });
 
@@ -217,7 +217,7 @@ describe('LoginDialog', () => {
     );
 
     // Click Google sign in button
-    fireEvent.click(screen.getByText('Continue with Google'));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }));
 
     await waitFor(() => {
       expect(mockAuthContext.signInWithGoogle).toHaveBeenCalled();
@@ -259,8 +259,8 @@ describe('LoginDialog', () => {
     );
 
     // Buttons should be disabled during loading
-    expect(screen.getByText('Continue with Google')).toBeDisabled();
-    expect(screen.getByText('Continue with Facebook')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Continue with Facebook' })).toBeDisabled();
     // Check if the form button is disabled (it shows CircularProgress when loading)
     // Should show loading spinner
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
@@ -280,7 +280,7 @@ describe('LoginDialog', () => {
     );
 
     // Switch to sign up tab
-    fireEvent.click(screen.getByText('Sign Up'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Sign Up' }));
 
     expect(mockAuthContext.clearError).toHaveBeenCalled();
   });
@@ -325,7 +325,7 @@ describe('LoginDialog', () => {
     );
 
     // Switch to sign up tab
-    fireEvent.click(screen.getByText('Sign Up'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Sign Up' }));
 
     expect(screen.getByLabelText('Full Name')).toBeInTheDocument();
     expect(screen.getByLabelText('Confirm Password')).toBeInTheDocument();
@@ -344,7 +344,7 @@ describe('LoginDialog', () => {
     );
 
     // Switch to sign up tab
-    fireEvent.click(screen.getByText('Sign Up'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Sign Up' }));
 
     // Fill in form
     fireEvent.change(screen.getByLabelText('Full Name'), { target: { value: 'John Doe' } });
@@ -409,7 +409,7 @@ describe('LoginDialog', () => {
     );
 
     // Switch to sign up tab
-    fireEvent.click(screen.getByText('Sign Up'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Sign Up' }));
 
     // Fill form with mismatched passwords
     fireEvent.change(screen.getByLabelText('Full Name'), { target: { value: 'Test User' } });
@@ -435,8 +435,8 @@ describe('LoginDialog', () => {
     );
 
     // Buttons should be disabled during loading
-    const googleButton = screen.getByText('Continue with Google');
-    const facebookButton = screen.getByText('Continue with Facebook');
+    const googleButton = screen.getByRole('button', { name: 'Continue with Google' });
+    const facebookButton = screen.getByRole('button', { name: 'Continue with Facebook' });
 
     expect(googleButton.closest('button')).toBeDisabled();
     expect(facebookButton.closest('button')).toBeDisabled();
@@ -452,7 +452,7 @@ describe('LoginDialog', () => {
     );
 
     // Switch to sign up tab
-    fireEvent.click(screen.getByText('Sign Up'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Sign Up' }));
 
     // Fill sign up form
     fireEvent.change(screen.getByLabelText('Full Name'), { target: { value: 'New User' } });
@@ -521,13 +521,13 @@ describe('LoginDialog', () => {
     fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
 
     // Switch to sign up tab
-    fireEvent.click(screen.getByText('Sign Up'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Sign Up' }));
 
     // Email should be preserved
     expect(screen.getByDisplayValue('test@example.com')).toBeInTheDocument();
 
     // Switch back to sign in tab
-    fireEvent.click(screen.getByText('Sign In'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Sign In' }));
 
     // Email should still be there
     expect(screen.getByDisplayValue('test@example.com')).toBeInTheDocument();
@@ -544,13 +544,13 @@ describe('LoginDialog', () => {
 
     // Fill form (target the Sign In tab specifically)
     const emailInput = screen.getAllByLabelText('Email')[0]; // First one is Sign In tab
-    const passwordInput = screen.getByLabelText('Password');
+    const passwordInput = screen.getAllByLabelText('Password')[0]; // First one is Sign In tab
     fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
     fireEvent.change(passwordInput, { target: { value: 'password123' } });
 
     // During loading, buttons should be disabled
-    const googleButton = screen.getByText('Continue with Google');
-    const facebookButton = screen.getByText('Continue with Facebook');
+    const googleButton = screen.getByRole('button', { name: 'Continue with Google' });
+    const facebookButton = screen.getByRole('button', { name: 'Continue with Facebook' });
 
     expect(googleButton.closest('button')).toBeDisabled();
     expect(facebookButton.closest('button')).toBeDisabled();
@@ -572,7 +572,7 @@ describe('LoginDialog', () => {
 
     // Fill form (target the Sign In tab specifically)
     const emailInput = screen.getAllByLabelText('Email')[0]; // First one is Sign In tab
-    const passwordInput = screen.getByLabelText('Password');
+    const passwordInput = screen.getAllByLabelText('Password')[0]; // First one is Sign In tab
     fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
     fireEvent.change(passwordInput, { target: { value: 'wrongpassword' } });
 
