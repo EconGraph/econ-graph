@@ -1,64 +1,61 @@
 {
   "data": {
-    "company": {
-      "alerts": [
+    "financialAlerts": [
         {
           "id": "alert-1",
-          "type": "ratio_threshold",
+          "companyId": "test-company",
+          "alertType": "ratio_threshold",
           "severity": "high",
           "title": "Current Ratio Below Threshold",
           "description": "Current ratio of 0.95 is below the recommended threshold of 1.0",
-          "companyId": "test-company",
-          "companyName": "Test Company Inc.",
-          "direction": "decline",
-          "isActive": true,
-          "isRead": false,
+          "triggeredAt": "2024-01-15T10:00:00Z",
+          "isResolved": false,
+          "resolvedAt": null,
           "createdAt": "2024-01-15T10:00:00Z",
-          "expiresAt": "2024-01-25T23:59:59Z"
+          "updatedAt": "2024-01-15T10:00:00Z"
         },
         {
           "id": "alert-2",
-          "type": "filing_deadline",
+          "alertType": "filing_deadline",
           "severity": "medium",
           "title": "10-Q Filing Due Soon",
           "description": "Quarterly report filing deadline is approaching",
           "companyId": "test-company",
           "companyName": "Test Company Inc.",
           "direction": "change",
-          "isActive": true,
+          "isResolved": false,
           "isRead": false,
           "createdAt": "2024-01-08T16:00:00Z",
           "expiresAt": "2024-01-18T23:59:59Z"
         },
         {
           "id": "alert-3",
-          "type": "trend_change",
+          "alertType": "trend_change",
           "severity": "low",
           "title": "Revenue Growth Slowing",
           "description": "Revenue growth rate has decreased compared to previous quarters",
           "companyId": "test-company",
           "companyName": "Test Company Inc.",
           "direction": "decline",
-          "isActive": true,
+          "isResolved": false,
           "isRead": true,
           "createdAt": "2024-01-05T09:00:00Z",
           "expiresAt": "2024-01-15T23:59:59Z"
         },
         {
           "id": "alert-4",
-          "type": "benchmark_change",
+          "alertType": "benchmark_change",
           "severity": "medium",
           "title": "Industry Benchmark Update",
           "description": "Industry benchmarks have been updated for Q4 2023",
           "companyId": "test-company",
           "companyName": "Test Company Inc.",
           "direction": "change",
-          "isActive": true,
+          "isResolved": false,
           "isRead": true,
           "createdAt": "2024-01-01T00:00:00Z",
           "expiresAt": "2024-01-31T23:59:59Z"
         }
       ]
-    }
   }
 }

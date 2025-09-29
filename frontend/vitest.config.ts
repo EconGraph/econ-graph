@@ -56,7 +56,7 @@ export default defineConfig({
       }
     },
     deps: {
-      inline: ['d3', 'd3-geo', 'd3-zoom', 'd3-scale', 'd3-scale-chromatic', 'd3-array', 'd3-selection']
+      inline: ['d3', 'd3-geo', 'd3-zoom', 'd3-scale', 'd3-scale-chromatic', 'd3-array', 'd3-selection', '@tanstack/react-query']
     }
   },
   resolve: {

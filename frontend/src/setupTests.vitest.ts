@@ -219,6 +219,73 @@ vi.mock('./hooks/useSeriesData', () => ({
     isError: false,
     isSuccess: true,
   })),
+  useDataSources: vi.fn().mockImplementation(() => ({
+    data: [
+      {
+        id: 'fred',
+        name: 'Federal Reserve Economic Data',
+        description: 'Economic data from the Federal Reserve',
+        base_url: 'https://fred.stlouisfed.org',
+        api_key_required: false,
+        rate_limit_per_minute: 120,
+        series_count: 800000,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-12-15T10:00:00Z',
+      },
+      {
+        id: 'bls',
+        name: 'Bureau of Labor Statistics',
+        description: 'Labor market and economic statistics',
+        base_url: 'https://www.bls.gov',
+        api_key_required: true,
+        rate_limit_per_minute: 60,
+        series_count: 50000,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-12-14T09:00:00Z',
+      },
+    ],
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+  useSeriesSearch: vi.fn().mockImplementation(() => ({
+    data: {
+      results: [
+        {
+          id: 'gdp-series-1',
+          title: 'Gross Domestic Product',
+          description: 'Real GDP in billions of chained 2017 dollars',
+          source: 'fred',
+          frequency: 'Quarterly',
+          units: 'Billions of Chained 2017 Dollars',
+          lastUpdated: '2024-10-01T00:00:00Z',
+          startDate: '1948-01-01T00:00:00Z',
+          endDate: '2024-11-01T00:00:00Z',
+          similarityScore: 0.9,
+        },
+        {
+          id: 'unemployment-series-1',
+          title: 'Unemployment Rate',
+          description: 'Unemployment rate as a percentage of the labor force',
+          source: 'bls',
+          frequency: 'Monthly',
+          units: 'Percent',
+          lastUpdated: '2024-11-01T00:00:00Z',
+          startDate: '1948-01-01T00:00:00Z',
+          endDate: '2024-11-01T00:00:00Z',
+          similarityScore: 0.85,
+        },
+      ],
+      totalCount: 2,
+      page: 1,
+      pageSize: 10,
+    },
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
 }));
 
 // Mock D3 modules
@@ -248,6 +315,55 @@ vi.mock('d3-zoom', () => ({
   zoom: vi.fn(() => ({
     scaleExtent: vi.fn().mockReturnThis(),
     on: vi.fn().mockReturnThis(),
+  })),
+}));
+
+// Mock useAuth hook
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: vi.fn(() => ({
+    user: {
+      id: 'test-user-1',
+      email: 'test@example.com',
+      name: 'Test User',
+      role: 'user',
+    },
+    isAuthenticated: true,
+    isLoading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+    register: vi.fn(),
+  })),
+}));
+
+// Mock @tanstack/react-query
+vi.mock('@tanstack/react-query', () => ({
+  QueryClient: vi.fn(() => ({
+    setQueryData: vi.fn(),
+    getQueryData: vi.fn(),
+    invalidateQueries: vi.fn(),
+    clear: vi.fn(),
+  })),
+  QueryClientProvider: ({ children }: { children: React.ReactNode }) => children,
+  useQuery: vi.fn(() => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+  useSuspenseQuery: vi.fn(() => ({
+    data: null,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+  useMutation: vi.fn(() => ({
+    mutate: vi.fn(),
+    mutateAsync: vi.fn(),
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: false,
   })),
 }));
 
