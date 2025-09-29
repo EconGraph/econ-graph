@@ -1,0 +1,31 @@
+[package]
+name = "econ-graph-financial-graphql"
+version = "0.1.0"
+edition = "2021"
+authors = ["EconGraph Team"]
+description = "GraphQL API layer for financial data"
+license = "MS-PL"
+
+[dependencies]
+# Basic dependencies for now (will add GraphQL later)
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# UUID and Time
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Decimal for financial data
+rust_decimal = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Testing
+[dev-dependencies]
+tokio-test = { workspace = true }
+tempfile = { workspace = true }

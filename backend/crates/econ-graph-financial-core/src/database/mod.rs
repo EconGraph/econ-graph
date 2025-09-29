@@ -53,7 +53,7 @@ impl Database {
 
     pub async fn get_series(&self, id: Uuid) -> Result<Option<EconomicSeries>> {
         let start_time = Instant::now();
-        let result = self.storage.read_series(id).await;
+        let result = self.storage.read_series(&id).await;
         let duration = start_time.elapsed();
         let success = result.is_ok();
 
@@ -75,7 +75,7 @@ impl Database {
         let start_time = Instant::now();
         let result = self
             .storage
-            .read_data_points(series_id, start_date, end_date)
+            .read_data_points(&series_id, start_date, end_date)
             .await;
         let duration = start_time.elapsed();
         let success = result.is_ok();

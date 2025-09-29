@@ -1,0 +1,37 @@
+[package]
+name = "econ-graph-arrow-storage"
+version = "0.1.0"
+edition = "2021"
+authors = ["EconGraph Team"]
+description = "Arrow Flight + Parquet + Iceberg storage implementations"
+license = "MS-PL"
+
+[dependencies]
+# Basic dependencies for now (will add Arrow later)
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# UUID and Time
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Decimal for financial data
+rust_decimal = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Async traits
+async-trait = "0.1"
+
+# Async runtime
+tokio = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Testing
+[dev-dependencies]
+tokio-test = { workspace = true }
+tempfile = { workspace = true }

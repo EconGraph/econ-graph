@@ -9,7 +9,12 @@ members = [
     "crates/econ-graph-mcp",
     "crates/econ-graph-backend",
     "crates/econ-graph-metrics",
-    "crates/econ-graph-financial-data",
+    # Original financial-data crate temporarily disabled
+    # "crates/econ-graph-financial-data",
+    # New financial data crates
+    "crates/econ-graph-arrow-storage",
+    "crates/econ-graph-financial-graphql",
+    "crates/econ-graph-financial-core",
 ]
 resolver = "2"
 
@@ -84,10 +89,16 @@ tracing-test = "0.2"
 warp = { version = "0.3", features = ["tls"] }
 tokio-stream = "0.1"
 
-# GraphQL
-async-graphql = { version = "7.0", features = ["chrono", "uuid", "bigdecimal"] }
-async-graphql-warp = "7.0"
+# GraphQL (compatible with Rust 1.74.1)
+async-graphql = { version = "6.0", features = ["chrono", "uuid", "bigdecimal"] }
+async-graphql-warp = "6.0"
 dataloader = { version = "0.18", default-features = false, features = ["runtime-tokio"] }
+
+# Financial data crates (internal dependencies)
+econ-graph-core = { workspace = true }
+econ-graph-arrow-storage = { workspace = true }
+econ-graph-financial-core = { workspace = true }
+econ-graph-financial-graphql = { workspace = true }
 
 # Testing
 tokio-test = "0.4"

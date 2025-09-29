@@ -1,11 +1,14 @@
+//! Input types for financial data
+//! 
+//! TODO: Add GraphQL InputObject support once dependencies are resolved
+
 use crate::models::DecimalScalar;
-use async_graphql::InputObject;
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Input type for creating economic series
-#[derive(Debug, Clone, Serialize, Deserialize, InputObject)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateEconomicSeriesInput {
     pub source_id: Uuid,
     pub external_id: String,
@@ -20,7 +23,7 @@ pub struct CreateEconomicSeriesInput {
 }
 
 /// Input type for creating data points
-#[derive(Debug, Clone, Serialize, Deserialize, InputObject)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateDataPointInput {
     pub series_id: Uuid,
     pub date: NaiveDate,
