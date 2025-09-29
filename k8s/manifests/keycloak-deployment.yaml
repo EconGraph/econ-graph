@@ -1,0 +1,140 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: econ-graph
+  labels:
+    app: keycloak
+    component: auth
+    tier: infrastructure
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+        component: auth
+        tier: infrastructure
+    spec:
+      initContainers:
+      - name: wait-for-postgres
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Waiting for PostgreSQL to be ready..."
+          until nc -z keycloak-postgres-service 5432; do
+            echo "PostgreSQL is unavailable - sleeping"
+            sleep 2
+          done
+          echo "PostgreSQL is ready!"
+        resources:
+          requests:
+            memory: "16Mi"
+            cpu: "10m"
+          limits:
+            memory: "32Mi"
+            cpu: "50m"
+      containers:
+      - name: keycloak
+        image: quay.io/keycloak/keycloak:25.0.5
+        imagePullPolicy: IfNotPresent
+        args:
+        - "start"
+        - "--hostname-strict=false"
+        - "--hostname-strict-https=false"
+        - "--http-enabled=true"
+        - "--proxy=edge"
+        - "--health-enabled=true"
+        - "--metrics-enabled=true"
+        - "--db=postgres"
+        - "--db-url=jdbc:postgresql://keycloak-postgres-service:5432/keycloak"
+        - "--db-username=keycloak"
+        - "--db-password-file=/etc/secrets/db-password"
+        - "--cache=ispn"
+        - "--cache-stack=kubernetes"
+        - "--log-level=INFO"
+        - "--log-console-output=json"
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        - containerPort: 9990
+          name: management
+          protocol: TCP
+        env:
+        - name: KEYCLOAK_ADMIN
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-secrets
+              key: admin-username
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-secrets
+              key: admin-password
+        - name: KC_HOSTNAME_STRICT
+          value: "false"
+        - name: KC_HOSTNAME_STRICT_HTTPS
+          value: "false"
+        - name: KC_HTTP_ENABLED
+          value: "true"
+        - name: KC_PROXY
+          value: "edge"
+        - name: KC_HEALTH_ENABLED
+          value: "true"
+        - name: KC_METRICS_ENABLED
+          value: "true"
+        - name: KC_LOG_LEVEL
+          value: "INFO"
+        - name: KC_LOG_CONSOLE_OUTPUT
+          value: "json"
+        volumeMounts:
+        - name: db-password
+          mountPath: /etc/secrets
+          readOnly: true
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: db-password
+        secret:
+          secretName: keycloak-secrets
+          items:
+          - key: db-password
+            path: db-password
+      securityContext:
+        fsGroup: 1000
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30

@@ -1,0 +1,72 @@
+# Service certificates for mTLS authentication
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: backend-service-cert
+  namespace: econ-graph
+spec:
+  secretName: backend-service-tls
+  issuerRef:
+    name: vault-issuer
+    kind: ClusterIssuer
+  dnsNames:
+  - backend-service.econ-graph.svc.cluster.local
+  - econ-graph-backend.econ-graph.svc.cluster.local
+  - backend.econ-graph.svc.cluster.local
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: frontend-service-cert
+  namespace: econ-graph
+spec:
+  secretName: frontend-service-tls
+  issuerRef:
+    name: vault-issuer
+    kind: ClusterIssuer
+  dnsNames:
+  - frontend-service.econ-graph.svc.cluster.local
+  - econ-graph-frontend.econ-graph.svc.cluster.local
+  - frontend.econ-graph.svc.cluster.local
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: chart-api-service-cert
+  namespace: econ-graph
+spec:
+  secretName: chart-api-service-tls
+  issuerRef:
+    name: vault-issuer
+    kind: ClusterIssuer
+  dnsNames:
+  - chart-api-service.econ-graph.svc.cluster.local
+  - econ-graph-chart-api.econ-graph.svc.cluster.local
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: keycloak-service-cert
+  namespace: econ-graph
+spec:
+  secretName: keycloak-service-tls
+  issuerRef:
+    name: vault-issuer
+    kind: ClusterIssuer
+  dnsNames:
+  - keycloak-service.econ-graph.svc.cluster.local
+  - keycloak.econ-graph.svc.cluster.local
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: postgres-service-cert
+  namespace: econ-graph
+spec:
+  secretName: postgres-service-tls
+  issuerRef:
+    name: vault-issuer
+    kind: ClusterIssuer
+  dnsNames:
+  - postgres-service.econ-graph.svc.cluster.local
+  - postgresql.econ-graph.svc.cluster.local

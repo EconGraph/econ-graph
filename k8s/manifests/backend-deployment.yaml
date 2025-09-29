@@ -98,6 +98,20 @@ spec:
             secretKeyRef:
               name: econ-graph-secrets
               key: facebook-app-secret
+        # Keycloak Configuration (optional)
+        - name: KEYCLOAK_ENABLED
+          value: "true"
+        - name: KEYCLOAK_URL
+          value: "http://keycloak-service:8080"
+        - name: KEYCLOAK_REALM
+          value: "econ-graph"
+        - name: KEYCLOAK_CLIENT_ID
+          value: "econ-graph-backend"
+        - name: KEYCLOAK_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-secrets
+              key: backend-client-secret
         resources:
           requests:
             memory: "256Mi"

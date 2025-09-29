@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vault
+  namespace: econ-graph
+  labels:
+    app: vault
+    component: security
+    tier: infrastructure
+spec:
+  serviceName: vault
+  replicas: 3
+  selector:
+    matchLabels:
+      app: vault
+  template:
+    metadata:
+      labels:
+        app: vault
+        component: security
+        tier: infrastructure
+    spec:
+      containers:
+      - name: vault
+        image: hashicorp/vault:1.15.4
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8200
+          name: http
+          protocol: TCP
+        - containerPort: 8201
+          name: https-internal
+          protocol: TCP
+        env:
+        - name: VAULT_DEV_ROOT_TOKEN_ID
+          valueFrom:
+            secretKeyRef:
+              name: vault-secrets
+              key: root-token
+        - name: VAULT_DEV_LISTEN_ADDRESS
+          value: "0.0.0.0:8200"
+        - name: VAULT_API_ADDR
+          value: "http://0.0.0.0:8200"
+        - name: VAULT_CLUSTER_ADDR
+          value: "https://0.0.0.0:8201"
+        - name: SKIP_SETCAP
+          value: "true"
+        - name: VAULT_RAFT_NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        command:
+        - vault
+        - server
+        - -config=/vault/config/vault.hcl
+        volumeMounts:
+        - name: vault-config
+          mountPath: /vault/config
+        - name: vault-data
+          mountPath: /vault/data
+        - name: vault-tls
+          mountPath: /vault/tls
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /v1/sys/health
+            port: 8200
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /v1/sys/health
+            port: 8200
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 100
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: vault-config
+        configMap:
+          name: vault-config
+      - name: vault-tls
+        secret:
+          secretName: vault-tls
+      securityContext:
+        fsGroup: 100
+  volumeClaimTemplates:
+  - metadata:
+      name: vault-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi

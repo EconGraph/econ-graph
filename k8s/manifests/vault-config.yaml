@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-config
+  namespace: econ-graph
+  labels:
+    app: vault
+    component: security
+    tier: infrastructure
+data:
+  vault.hcl: |
+    # Vault configuration for EconGraph internal CA
+    
+    # Storage backend - using file storage for simplicity
+    # In production, use Consul or etcd for HA
+    storage "file" {
+      path = "/vault/data"
+    }
+    
+    # API server configuration
+    listener "tcp" {
+      address = "0.0.0.0:8200"
+      tls_disable = true
+    }
+    
+    # Cluster configuration
+    cluster_addr = "https://0.0.0.0:8201"
+    
+    # Disable clustering for single-node setup
+    disable_clustering = true
+    
+    # Enable UI for development
+    ui = true
+    
+    # Log level
+    log_level = "INFO"
+    
+    # Default lease TTL
+    default_lease_ttl = "168h"  # 7 days
+    
+    # Max lease TTL
+    max_lease_ttl = "720h"      # 30 days

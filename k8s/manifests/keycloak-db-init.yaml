@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-postgresql-init
+  namespace: econ-graph
+  labels:
+    app: keycloak-postgresql
+    component: database
+    tier: infrastructure
+data:
+  init-keycloak.sql: |
+    -- Keycloak PostgreSQL initialization
+    -- This script runs when the PostgreSQL container starts for the first time
+    
+    -- Create extensions that Keycloak might need
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
+    
+    -- The database, user, and password are already created by the container environment
+    -- This script is mainly for any additional initialization Keycloak might need
+    
+    -- Ensure proper permissions (though they should already be set by container)
+    GRANT ALL PRIVILEGES ON DATABASE keycloak TO keycloak;
+    GRANT ALL PRIVILEGES ON SCHEMA public TO keycloak;
+    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO keycloak;
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO keycloak;
+    
+    -- Set default privileges for future objects
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO keycloak;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO keycloak;

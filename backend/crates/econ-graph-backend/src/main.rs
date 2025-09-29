@@ -12,7 +12,7 @@ use tracing::info;
 use warp::Filter;
 
 // Import from our new crates
-use econ_graph_auth::auth::{routes::auth_routes, services::AuthService};
+use econ_graph_auth::auth::{routes::auth_routes, services::AuthService, unified_auth::UnifiedAuthService};
 use econ_graph_core::{create_pool, AppError, AppResult, Config, DatabasePool};
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
 use econ_graph_mcp::mcp_server::{mcp_handler, EconGraphMcpServer};
@@ -243,9 +243,16 @@ async fn main() -> AppResult<()> {
     let schema = create_schema_with_data(std::sync::Arc::new(pool.clone()), ());
     info!("🎯 GraphQL schema created");
 
-    // Create authentication service
-    let auth_service = AuthService::new(pool.clone());
-    info!("🔐 Authentication service created");
+    // Create unified authentication service (supports both legacy and Keycloak)
+    let mut unified_auth_service = UnifiedAuthService::new(pool.clone());
+    let legacy_auth_service = unified_auth_service.get_legacy_auth().clone();
+    info!("🔐 Unified authentication service created");
+    
+    if unified_auth_service.is_keycloak_available() {
+        info!("🔑 Keycloak authentication enabled");
+    } else {
+        info!("🔑 Keycloak authentication disabled - using legacy auth only");
+    }
 
     // Initialize metrics
     info!("📊 Initializing Prometheus metrics...");
@@ -302,18 +309,10 @@ async fn main() -> AppResult<()> {
                         if let Ok(auth_str) = std::str::from_utf8(auth_header.as_bytes()) {
                             if auth_str.starts_with("Bearer ") {
                                 let token = auth_str.trim_start_matches("Bearer ");
-                                // Validate token and get user
-                                let auth_service =
-                                    econ_graph_auth::auth::services::AuthService::new(
-                                        pool_for_graphql.clone(),
-                                    );
-                                match auth_service.verify_token(token) {
-                                    Ok(claims) => econ_graph_core::models::User::get_by_id(
-                                        &pool_for_graphql,
-                                        claims.sub.parse().unwrap_or_default(),
-                                    )
-                                    .await
-                                    .ok(),
+                                // Validate token using unified authentication (supports both legacy and Keycloak)
+                                let mut unified_auth = UnifiedAuthService::new(pool_for_graphql.clone());
+                                match unified_auth.verify_token_user(token).await {
+                                    Ok(user) => Some(user),
                                     Err(_) => None, // Invalid token, continue without user
                                 }
                             } else {
@@ -356,8 +355,8 @@ async fn main() -> AppResult<()> {
     // Root endpoint
     let root_filter = warp::path::end().and(warp::get()).and_then(root_handler);
 
-    // Authentication routes
-    let auth_filter = auth_routes(auth_service);
+    // Authentication routes (using legacy auth service for OAuth flows)
+    let auth_filter = auth_routes(legacy_auth_service);
 
     // MCP Server routes
     let mcp_server = Arc::new(EconGraphMcpServer::new(Arc::new(pool.clone())));

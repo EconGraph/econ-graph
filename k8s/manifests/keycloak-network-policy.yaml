@@ -1,0 +1,104 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keycloak-netpol
+  namespace: econ-graph
+  labels:
+    app: keycloak
+    component: auth
+    tier: infrastructure
+spec:
+  podSelector:
+    matchLabels:
+      app: keycloak
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from ingress controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow ingress from frontend
+  - from:
+    - podSelector:
+        matchLabels:
+          app: econ-graph-frontend
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow ingress from backend (for token validation)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: econ-graph-backend
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow ingress from admin frontend
+  - from:
+    - podSelector:
+        matchLabels:
+          app: econ-graph-admin-frontend
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  # Allow egress to Keycloak PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          app: keycloak-postgresql
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow egress for DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow egress for external OAuth providers (Google, Facebook, etc.)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keycloak-postgres-netpol
+  namespace: econ-graph
+  labels:
+    app: keycloak-postgresql
+    component: database
+    tier: infrastructure
+spec:
+  podSelector:
+    matchLabels:
+      app: keycloak-postgresql
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Only allow ingress from Keycloak
+  - from:
+    - podSelector:
+        matchLabels:
+          app: keycloak
+    ports:
+    - protocol: TCP
+      port: 5432
+  egress:
+  # Allow egress for DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
