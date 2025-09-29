@@ -39,7 +39,7 @@ import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 
 // GraphQL hooks for real data fetching
 const useFinancialStatementQuery = (statementId: string) => {
-  return useSuspenseQuery({
+  return useQuery({
     queryKey: ['financial-statement', statementId],
     queryFn: async () => {
       const result = await executeGraphQL({
@@ -81,7 +81,7 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
   const [searchTerm, setSearchTerm] = useState('');
 
   // GraphQL queries
-  const { data: statementData, error: statementError } = useFinancialStatementQuery(statementId);
+  const { data: statementData, error: statementError, isLoading: statementLoading } = useFinancialStatementQuery(statementId);
 
   const { data: ratiosData } = useQuery(
     ['financial-ratios', statementId],
@@ -133,7 +133,17 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
     }
   }, [newAnnotationData]);
 
-  // Loading state is now handled by Suspense
+  // Loading state handling
+  if (statementLoading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-sm text-gray-600">Loading financial statement...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (statementError) {
     return (

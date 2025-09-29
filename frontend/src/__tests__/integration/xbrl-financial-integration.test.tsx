@@ -35,7 +35,9 @@ const integrationServer = setupServer(
     };
     const { query, variables, operationName } = body;
     
-    console.log('🔧 Integration MSW intercepted GraphQL request:', operationName);
+    // console.log('🔧 Integration MSW intercepted GraphQL request:', operationName);
+    // console.log('🔧 Query includes GetFinancialDashboard:', query.includes('GetFinancialDashboard'));
+    // console.log('🔧 Variables:', variables);
     
     // Handle GetFinancialDashboard
     if (query.includes('GetFinancialDashboard')) {
@@ -48,7 +50,8 @@ const integrationServer = setupServer(
       }
       
       const response = loadGraphQLResponse('get_financial_dashboard', scenario);
-      console.log('🔧 Integration MSW returning GetFinancialDashboard:', response);
+      // console.log('🔧 Integration MSW returning GetFinancialDashboard:', response);
+      // console.log('🔧 Company name in response:', response.data?.company?.name);
       return HttpResponse.json(response);
     }
     

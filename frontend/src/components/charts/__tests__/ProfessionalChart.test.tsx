@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { vi } from 'vitest';
@@ -200,7 +200,9 @@ describe('ProfessionalChart', () => {
       const smaCheckbox = screen.getByRole('checkbox', { name: /Simple Moving Average/ });
 
       // Click to enable - just verify the interaction works
-      await user.click(smaCheckbox);
+      await act(async () => {
+        await user.click(smaCheckbox);
+      });
 
       // Verify the checkbox is still present after interaction
       expect(smaCheckbox).toBeInTheDocument();
@@ -233,9 +235,15 @@ describe('ProfessionalChart', () => {
       const bollingerCheckbox = screen.getByRole('checkbox', { name: /Bollinger Bands/ });
 
       // Interact with all checkboxes
-      await user.click(smaCheckbox);
-      await user.click(emaCheckbox);
-      await user.click(bollingerCheckbox);
+      await act(async () => {
+        await user.click(smaCheckbox);
+      });
+      await act(async () => {
+        await user.click(emaCheckbox);
+      });
+      await act(async () => {
+        await user.click(bollingerCheckbox);
+      });
 
       // Verify all checkboxes are still present after interactions
       expect(smaCheckbox).toBeInTheDocument();
@@ -294,7 +302,9 @@ describe('ProfessionalChart', () => {
       const eventsCheckbox = screen.getByRole('checkbox', { name: /Economic Events/ });
 
       // Click to disable
-      await user.click(eventsCheckbox);
+      await act(async () => {
+        await user.click(eventsCheckbox);
+      });
       expect(eventsCheckbox).not.toBeChecked();
     });
   });
@@ -864,9 +874,15 @@ describe('ProfessionalChart', () => {
       const emaCheckbox = screen.getByLabelText(/Exponential Moving Average \(EMA\)/);
       const bollingerCheckbox = screen.getByLabelText(/Bollinger Bands/);
 
-      await user.click(smaCheckbox);
-      await user.click(emaCheckbox);
-      await user.click(bollingerCheckbox);
+      await act(async () => {
+        await user.click(smaCheckbox);
+      });
+      await act(async () => {
+        await user.click(emaCheckbox);
+      });
+      await act(async () => {
+        await user.click(bollingerCheckbox);
+      });
 
       // Verify all indicators are enabled
       await waitFor(() => {

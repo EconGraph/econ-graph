@@ -95,7 +95,10 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     // Implementation for sharing analysis
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: string | undefined) => {
+    if (!status) {
+      return 'text-gray-600';
+    }
     switch (status.toLowerCase()) {
       case 'completed':
         return 'text-green-600';
@@ -108,7 +111,10 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     }
   };
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = (status: string | undefined) => {
+    if (!status) {
+      return <AlertTriangle className='h-4 w-4' />;
+    }
     switch (status.toLowerCase()) {
       case 'completed':
         return <CheckCircle className='h-4 w-4' />;
@@ -225,9 +231,9 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
             <div className='flex items-center space-x-2 mt-2'>
               {statements[0] && (
                 <>
-                  {getStatusIcon(statements[0].xbrlProcessingStatus)}
-                  <span className={`text-sm ${getStatusColor(statements[0].xbrlProcessingStatus)}`}>
-                    {statements[0].xbrlProcessingStatus}
+                  {getStatusIcon(statements[0].data?.xbrlProcessingStatus)}
+                  <span className={`text-sm ${getStatusColor(statements[0].data?.xbrlProcessingStatus)}`}>
+                    {statements[0].data?.xbrlProcessingStatus || 'Unknown'}
                   </span>
                 </>
               )}
@@ -365,7 +371,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                         </div>
                       </div>
                       <div className='flex items-center space-x-2'>
-                        {getStatusIcon(statement.xbrlProcessingStatus)}
+                        {getStatusIcon(statement.data?.xbrlProcessingStatus)}
                         <span className='text-sm'>{statement.periodEndDate}</span>
                       </div>
                     </div>
