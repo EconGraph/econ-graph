@@ -131,11 +131,15 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
         default:
           // Sort by average percentile ranking
           const aAvg =
-            (Object.values(a.percentile) as number[]).reduce((sum: number, p: number) => sum + p, 0) /
-            Object.keys(a.percentile).length;
+            (Object.values(a.percentile) as number[]).reduce(
+              (sum: number, p: number) => sum + p,
+              0
+            ) / Object.keys(a.percentile).length;
           const bAvg =
-            (Object.values(b.percentile) as number[]).reduce((sum: number, p: number) => sum + p, 0) /
-            Object.keys(b.percentile).length;
+            (Object.values(b.percentile) as number[]).reduce(
+              (sum: number, p: number) => sum + p,
+              0
+            ) / Object.keys(b.percentile).length;
           return bAvg - aAvg;
       }
     });
