@@ -133,9 +133,9 @@ export const validateAnnotationForm = (formData: {
 /**
  * Validate share form data.
  * @param formData - Share form data.
- * @param formData.targetUserId
- * @param chartId - Chart ID.
- * @param formData.permissionLevel
+ * @param formData.targetUserId - The user ID to share the chart with.
+ * @param formData.permissionLevel - Permission level to grant (e.g. 'view' | 'annotate' | 'edit').
+ * @param chartId - The chart ID to share.
  * @returns Validation result with errors.
  */
 export const validateShareForm = (
@@ -168,14 +168,14 @@ export const validateShareForm = (
 /**
  * Format annotation data for API submission.
  * @param formData - Annotation form data.
- * @param formData.title
- * @param seriesId - Series ID.
- * @param formData.content
- * @param formData.annotationDate
- * @param formData.annotationValue
- * @param formData.annotationType
- * @param formData.color
- * @param formData.isPublic
+ * @param formData.title - The title of the annotation.
+ * @param formData.content - The annotation content/description.
+ * @param formData.annotationDate - ISO date string for the annotation.
+ * @param formData.annotationValue - Optional numeric value associated with the annotation.
+ * @param formData.annotationType - The annotation type (e.g. 'note' | 'warning').
+ * @param formData.color - Hex color string used for the annotation UI.
+ * @param formData.isPublic - Whether the annotation is public.
+ * @param seriesId - Series ID the annotation belongs to.
  * @returns Formatted data for API.
  */
 export const formatAnnotationForApi = (
