@@ -250,10 +250,11 @@ export const ratioHandlers = [
 
   graphql.query('GetRatioBenchmarks', ({ variables }) => {
     const { ratioName, industry: _industry } = variables as {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       ratioName: string;
       industry?: string;
     };
+    // Mark intentionally unused var as used for linting purposes
+    void _industry;
 
     const benchmark = mockRatioBenchmarks[ratioName as keyof typeof mockRatioBenchmarks];
     if (benchmark) {
