@@ -25,11 +25,11 @@ async fn main() -> Result<()> {
     info!("Starting econ-graph-financial-core");
 
     // Create database with in-memory storage for now
-    let database = Database::new_in_memory().await?;
+    let _database = Database::new_in_memory().await?;
     
     // Initialize monitoring
-    let health_checker = HealthChecker::new();
-    let metrics_collector = MetricsCollector::new();
+    let _health_checker = HealthChecker::new();
+    let _metrics_collector = MetricsCollector::new();
 
     info!("Financial data service started successfully");
     info!("Database: In-memory storage");

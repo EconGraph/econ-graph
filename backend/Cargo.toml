@@ -96,10 +96,7 @@ async-graphql-warp = "6.0"
 dataloader = { version = "0.18", default-features = false, features = ["runtime-tokio"] }
 
 # Financial data crates (internal dependencies)
-econ-graph-core = { workspace = true }
-econ-graph-arrow-storage = { workspace = true }
-econ-graph-financial-core = { workspace = true }
-econ-graph-financial-graphql = { workspace = true }
+# Note: These are defined as workspace dependencies but used as path dependencies in individual crates
 
 # Testing
 tokio-test = "0.4"

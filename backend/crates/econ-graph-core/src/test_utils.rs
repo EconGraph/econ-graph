@@ -110,8 +110,6 @@ impl TestContainer {
 
     /// Clean the database for testing
     pub async fn clean_database(&self) -> Result<(), Box<dyn std::error::Error>> {
-        use diesel::prelude::*;
-        use diesel_async::AsyncPgConnection;
         use diesel_async::RunQueryDsl;
 
         let mut conn = self.pool.get().await?;

@@ -16,7 +16,7 @@ pub mod file_catalog;
 pub mod series_metadata;
 
 pub use file_catalog::FileCatalog;
-pub use series_metadata::{DataCoverage, DataRange, SeriesMetadata};
+pub use series_metadata::SeriesMetadata;
 
 /// Main catalog interface for managing series metadata and data discovery
 #[derive(Debug, Clone)]
