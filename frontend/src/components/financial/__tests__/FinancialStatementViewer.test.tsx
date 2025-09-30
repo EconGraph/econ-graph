@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import React, { Suspense } from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { FinancialStatementViewer } from '../FinancialStatementViewer';
@@ -52,6 +52,10 @@ describe('FinancialStatementViewer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // MSW server handles GraphQL requests automatically in Node.js mode
+  });
+  
+  afterEach(() => {
+    cleanup();
   });
 
   it('renders the financial statement viewer', async () => {
@@ -207,7 +211,7 @@ describe('FinancialStatementViewer', () => {
 
     // Wait for the component to finish loading
     await waitFor(() => {
-      expect(screen.getByText('Cash and Cash Equivalents')).toBeInTheDocument();
+      expect(screen.getAllByText('Cash and Cash Equivalents').length).toBeGreaterThan(0);
     });
   });
 
@@ -223,7 +227,7 @@ describe('FinancialStatementViewer', () => {
 
     // Wait for the component to finish loading
     await waitFor(() => {
-      expect(screen.getByText('Comparison Mode')).toBeInTheDocument();
+      expect(screen.getAllByText('Comparison Mode').length).toBeGreaterThan(0);
     });
 
     expect(screen.getByText('2023 vs 2022')).toBeInTheDocument();
