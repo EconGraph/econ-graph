@@ -150,14 +150,19 @@ describe('FinancialStatementViewer', () => {
       </TestWrapper>
     );
 
-    // Wait for the component to finish loading
+    // Wait for the component to finish loading and scope assertions to the metadata card
     await waitFor(() => {
-      expect(screen.getByText('10-K')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Statement Metadata' })).toBeInTheDocument();
     });
 
-    expect(screen.getByText('2023')).toBeInTheDocument();
-    expect(screen.getByText('Q4')).toBeInTheDocument();
-    expect(screen.getByText(/Dec 31, 2023/i)).toBeInTheDocument();
+    const metadataHeading = screen.getByRole('heading', { name: 'Statement Metadata' });
+    const metadataCard = metadataHeading.closest('[class*=Card]') || metadataHeading.parentElement?.parentElement || metadataHeading.parentElement || document.body;
+
+    // Scoped assertions within the metadata section to avoid duplicates elsewhere on the page
+    expect(within(metadataCard!).getByText('10-K')).toBeInTheDocument();
+    expect(within(metadataCard!).getByText('2023')).toBeInTheDocument();
+    expect(within(metadataCard!).getByText('Q4')).toBeInTheDocument();
+    expect(within(metadataCard!).getByText(/Dec 31, 2023/i)).toBeInTheDocument();
   });
 
   it('handles line item filtering', async () => {

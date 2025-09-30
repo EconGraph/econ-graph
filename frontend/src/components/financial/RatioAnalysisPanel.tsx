@@ -68,16 +68,7 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
   const ratios = ratiosData?.financialRatios;
 
   // Loading state is now handled by Suspense
-
-  if (!ratios || ratios.length === 0) {
-    return (
-      <Alert>
-        <AlertDescription>
-          No ratio data available. Please ensure market data is provided for valuation ratios.
-        </AlertDescription>
-      </Alert>
-    );
-  }
+  const hasNoRatios = !ratios || ratios.length === 0;
 
   const getRatioCategory = (ratioName: string) => {
     const profitabilityRatios = [
@@ -387,89 +378,102 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
 
   return (
     <div className='space-y-6'>
-      {/* Header with key insights */}
+      {/* Header with key insights - always render for consistent UX/tests */}
       <Card>
         <CardHeader>
           <CardTitle className='flex items-center space-x-2'>
             <Calculator className='h-5 w-5' />
             <span>Financial Ratio Analysis</span>
           </CardTitle>
-          <div className='grid grid-cols-1 md:grid-cols-3 gap-4 mt-4'>
-            {/* Key metrics summary */}
-            <div className='p-4 border rounded-lg'>
-              <h3 className='font-semibold text-green-600'>Profitability</h3>
-              <p className='text-2xl font-bold'>
-                {(() => {
-                  const roe = ratios?.find((r: any) => r.ratioName === 'returnOnEquity');
-                  return roe && roe.value != null ? `${(roe.value * 100).toFixed(1)}%` : '-';
-                })()}
-              </p>
-              <p className='text-sm text-muted-foreground'>Return on Equity</p>
-            </div>
+          {!hasNoRatios && (
+            <div className='grid grid-cols-1 md:grid-cols-3 gap-4 mt-4'>
+              {/* Key metrics summary */}
+              <div className='p-4 border rounded-lg'>
+                <h3 className='font-semibold text-green-600'>Profitability</h3>
+                <p className='text-2xl font-bold'>
+                  {(() => {
+                    const roe = ratios?.find((r: any) => r.ratioName === 'returnOnEquity');
+                    return roe && roe.value != null ? `${(roe.value * 100).toFixed(1)}%` : '-';
+                  })()}
+                </p>
+                <p className='text-sm text-muted-foreground'>Return on Equity</p>
+              </div>
 
-            <div className='p-4 border rounded-lg'>
-              <h3 className='font-semibold text-blue-600'>Liquidity</h3>
-              <p className='text-2xl font-bold'>
-                {(() => {
-                  const cr = ratios?.find((r: any) => r.ratioName === 'currentRatio');
-                  return cr && cr.value != null ? cr.value.toFixed(2) : '-';
-                })()}
-              </p>
-              <p className='text-sm text-muted-foreground'>Current Ratio</p>
-            </div>
+              <div className='p-4 border rounded-lg'>
+                <h3 className='font-semibold text-blue-600'>Liquidity</h3>
+                <p className='text-2xl font-bold'>
+                  {(() => {
+                    const cr = ratios?.find((r: any) => r.ratioName === 'currentRatio');
+                    return cr && cr.value != null ? cr.value.toFixed(2) : '-';
+                  })()}
+                </p>
+                <p className='text-sm text-muted-foreground'>Current Ratio</p>
+              </div>
 
-            <div className='p-4 border rounded-lg'>
-              <h3 className='font-semibold text-purple-600'>Valuation</h3>
-              <p className='text-2xl font-bold'>
-                {(() => {
-                  const ev = ratios?.find((r: any) => r.ratioName === 'enterpriseValueToEbitda');
-                  return ev && ev.value != null ? `${ev.value.toFixed(1)}x` : '-';
-                })()}
-              </p>
-              <p className='text-sm text-muted-foreground'>EV/EBITDA</p>
+              <div className='p-4 border rounded-lg'>
+                <h3 className='font-semibold text-purple-600'>Valuation</h3>
+                <p className='text-2xl font-bold'>
+                  {(() => {
+                    const ev = ratios?.find((r: any) => r.ratioName === 'enterpriseValueToEbitda');
+                    return ev && ev.value != null ? `${ev.value.toFixed(1)}x` : '-';
+                  })()}
+                </p>
+                <p className='text-sm text-muted-foreground'>EV/EBITDA</p>
+              </div>
             </div>
-          </div>
+          )}
         </CardHeader>
       </Card>
 
-      {/* Detailed ratios by category */}
-      <Tabs defaultValue='profitability' className='space-y-4'>
-        <TabsList className='grid w-full grid-cols-6'>
-          <TabsTrigger value='profitability'>Profitability</TabsTrigger>
-          <TabsTrigger value='liquidity'>Liquidity</TabsTrigger>
-          <TabsTrigger value='leverage'>Leverage</TabsTrigger>
-          <TabsTrigger value='valuation'>Valuation</TabsTrigger>
-          <TabsTrigger value='cashFlow'>Cash Flow</TabsTrigger>
-          <TabsTrigger value='growth'>Growth</TabsTrigger>
-        </TabsList>
+      {/* If no data, show an inline alert instead of early-returning */}
+      {hasNoRatios ? (
+        <Alert>
+          <AlertDescription>
+            No ratio data available. Please ensure market data is provided for valuation ratios.
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <>
+          {/* Detailed ratios by category */}
+          <Tabs defaultValue='profitability' className='space-y-4'>
+            <TabsList className='grid w-full grid-cols-6'>
+              <TabsTrigger value='profitability'>Profitability</TabsTrigger>
+              <TabsTrigger value='liquidity'>Liquidity</TabsTrigger>
+              <TabsTrigger value='leverage'>Leverage</TabsTrigger>
+              <TabsTrigger value='valuation'>Valuation</TabsTrigger>
+              <TabsTrigger value='cashFlow'>Cash Flow</TabsTrigger>
+              <TabsTrigger value='growth'>Growth</TabsTrigger>
+            </TabsList>
 
-        {Object.entries(categories).map(([category, ratioList]) => (
-          <TabsContent key={category} value={category}>
-            <Card>
-              <CardHeader>
-                <CardTitle className='flex items-center space-x-2'>
-                  {getRatioIcon(category)}
-                  <span className='capitalize'>{category} Ratios</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Ratio</TableHead>
-                      <TableHead>Value</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {ratioList.map(([ratioName, value]) => renderRatioRow(ratioName, value))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        ))}
-      </Tabs>
+            {Object.entries(categories).map(([category, ratioList]) => (
+              <TabsContent key={category} value={category}>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className='flex items-center space-x-2'>
+                      {getRatioIcon(category)}
+                      <span className='capitalize'>{category} Ratios</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Ratio</TableHead>
+                          <TableHead>Value</TableHead>
+                          <TableHead>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {ratioList.map(([ratioName, value]) => renderRatioRow(ratioName, value))}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            ))}
+          </Tabs>
+        </>
+      )}
 
       {/* Educational content for beginners */}
       {userType === 'beginner' && showEducationalContent && (

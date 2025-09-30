@@ -401,7 +401,9 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                 <h4 className='font-medium'>Date Range</h4>
                 <div className='grid grid-cols-2 gap-3'>
                   <div>
-                    <label className='text-sm text-gray-600' htmlFor='start-date'>Start Date</label>
+                    <label className='text-sm text-gray-600' htmlFor='start-date'>
+                      Start Date
+                    </label>
                     <input
                       id='start-date'
                       type='date'
@@ -416,7 +418,9 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                     />
                   </div>
                   <div>
-                    <label className='text-sm text-gray-600' htmlFor='end-date'>End Date</label>
+                    <label className='text-sm text-gray-600' htmlFor='end-date'>
+                      End Date
+                    </label>
                     <input
                       id='end-date'
                       type='date'
