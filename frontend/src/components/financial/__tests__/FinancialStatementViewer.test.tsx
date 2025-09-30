@@ -2,6 +2,7 @@ import { vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import { QueryClient, QueryClientProvider } from 'react-query';
 import { FinancialStatementViewer } from '../FinancialStatementViewer';
 import { Company } from '../../../types/financial';
 
@@ -21,17 +22,59 @@ const mockCompany: Company = {
 };
 
 
+// Create a test QueryClient
+const createTestQueryClient = () => new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+      cacheTime: 0,
+      staleTime: 0,
+    },
+    mutations: {
+      retry: false,
+    },
+  },
+});
+
+// Test wrapper with QueryClient
+const TestWrapper = ({ children }: { children: React.ReactNode }) => {
+  const queryClient = createTestQueryClient();
+  return (
+    <QueryClientProvider client={queryClient}>
+      {children}
+    </QueryClientProvider>
+  );
+};
+
 describe('FinancialStatementViewer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Mock fetch to return a successful response
+    (global.fetch as any).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          financialStatement: {
+            id: 'statement-1',
+            companyId: 'test-company',
+            statementType: 'INCOME_STATEMENT',
+            fiscalYear: 2023,
+            fiscalQuarter: 4,
+            lineItems: []
+          }
+        }
+      })
+    });
   });
 
   it('renders the financial statement viewer', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('Financial Statements')).toBeInTheDocument();
@@ -40,10 +83,12 @@ describe('FinancialStatementViewer', () => {
 
   it('displays statement selection tabs', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('Balance Sheet')).toBeInTheDocument();
@@ -53,10 +98,12 @@ describe('FinancialStatementViewer', () => {
 
   it('switches between statement types', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     // Initially should show Balance Sheet with mock data
@@ -73,10 +120,12 @@ describe('FinancialStatementViewer', () => {
 
   it('displays line items in table format', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getAllByText('Total Assets').length).toBeGreaterThan(0);
@@ -87,10 +136,12 @@ describe('FinancialStatementViewer', () => {
 
   it('shows statement metadata', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('10-K')).toBeInTheDocument();
@@ -101,10 +152,12 @@ describe('FinancialStatementViewer', () => {
 
   it('handles line item filtering', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     const searchInput = screen.getByPlaceholderText('Search line items...');
@@ -117,10 +170,12 @@ describe('FinancialStatementViewer', () => {
 
   it('displays calculated vs non-calculated items', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     // Should show indicators for calculated items
@@ -131,10 +186,12 @@ describe('FinancialStatementViewer', () => {
   it('shows line item hierarchy and indentation', () => {
 
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     // Should show hierarchical structure
@@ -144,10 +201,12 @@ describe('FinancialStatementViewer', () => {
   it('handles statement comparison mode', () => {
 
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('Comparison Mode')).toBeInTheDocument();
@@ -158,10 +217,12 @@ describe('FinancialStatementViewer', () => {
 
 
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     // Should show percentage change
@@ -170,10 +231,12 @@ describe('FinancialStatementViewer', () => {
 
   it('displays statement sections and subsections', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getAllByText('Assets').length).toBeGreaterThan(0);
@@ -182,10 +245,12 @@ describe('FinancialStatementViewer', () => {
 
   it('handles expandable sections', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     const assetsSection = screen.getAllByText('Assets')[0];
@@ -197,10 +262,12 @@ describe('FinancialStatementViewer', () => {
 
   it('shows line item annotations', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('Annotations')).toBeInTheDocument();
@@ -208,10 +275,12 @@ describe('FinancialStatementViewer', () => {
 
   it('handles annotation creation', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     const addAnnotationButton = screen.getByText('Add Annotation');
@@ -222,10 +291,12 @@ describe('FinancialStatementViewer', () => {
 
   it('displays data quality indicators', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('Data Quality')).toBeInTheDocument();
@@ -234,10 +305,12 @@ describe('FinancialStatementViewer', () => {
 
   it('handles export functionality', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     const exportButton = screen.getByText('Export Statement');
@@ -248,10 +321,12 @@ describe('FinancialStatementViewer', () => {
 
   it('shows loading state', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('Loading financial statements...')).toBeInTheDocument();
@@ -259,10 +334,12 @@ describe('FinancialStatementViewer', () => {
 
   it('handles empty line items', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('No line items available')).toBeInTheDocument();
@@ -270,10 +347,12 @@ describe('FinancialStatementViewer', () => {
 
   it('displays statement footnotes', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('Footnotes')).toBeInTheDocument();
@@ -288,10 +367,12 @@ describe('FinancialStatementViewer', () => {
     });
 
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     // Should adapt to mobile view
@@ -300,10 +381,12 @@ describe('FinancialStatementViewer', () => {
 
   it('shows statement validation status', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('Validation Status')).toBeInTheDocument();
@@ -312,10 +395,12 @@ describe('FinancialStatementViewer', () => {
 
   it('displays XBRL processing status', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('XBRL Status: Completed')).toBeInTheDocument();
@@ -324,10 +409,12 @@ describe('FinancialStatementViewer', () => {
   it('handles statement amendments and restatements', () => {
 
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('Amended Filing')).toBeInTheDocument();
@@ -336,10 +423,12 @@ describe('FinancialStatementViewer', () => {
 
   it('shows statement download options', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('Download Options')).toBeInTheDocument();
@@ -349,10 +438,12 @@ describe('FinancialStatementViewer', () => {
 
   it('handles line item drill-down', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     const lineItem = screen.getAllByText('Total Assets')[0];
@@ -364,10 +455,12 @@ describe('FinancialStatementViewer', () => {
 
   it('displays statement ratios and calculations', () => {
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('Calculated Ratios')).toBeInTheDocument();
@@ -377,10 +470,12 @@ describe('FinancialStatementViewer', () => {
   it('handles statement navigation', () => {
 
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('← Previous')).toBeInTheDocument();
@@ -390,10 +485,12 @@ describe('FinancialStatementViewer', () => {
   it('shows statement timeline', () => {
 
     render(
-      <FinancialStatementViewer
-        companyId={mockCompany.id}
-        statementId="statement-1"
-      />
+      <TestWrapper>
+        <FinancialStatementViewer
+          companyId={mockCompany.id}
+          statementId="statement-1"
+        />
+      </TestWrapper>
     );
 
     expect(screen.getByText('Statement Timeline')).toBeInTheDocument();
