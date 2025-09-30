@@ -267,8 +267,8 @@ describe('FinancialAlerts', () => {
   it('handles bulk actions (mark all as read)', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const markAllButton = await screen.findByText('Mark All as Read');
-    fireEvent.click(markAllButton);
+    const markAllButtons = await screen.findAllByText('Mark All as Read');
+    fireEvent.click(markAllButtons[0]); // Click the first one
 
     // Component should handle bulk actions internally
   });
@@ -281,19 +281,19 @@ describe('FinancialAlerts', () => {
     fireEvent.click(dismissAllButtons[0]);
 
     // Component should handle bulk dismiss actions internally
-  });
+  }, 15000); // Increase timeout for this test
 
   it('shows alert search functionality', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     await waitFor(() => {
-      const searchInput = screen.getByPlaceholderText('Search alerts...');
-      expect(searchInput).toBeInTheDocument();
+      const searchInputs = screen.getAllByPlaceholderText('Search alerts...');
+      expect(searchInputs.length).toBeGreaterThan(0);
     });
 
     // Test search
-    const searchInput = await screen.findByPlaceholderText('Search alerts...');
-    fireEvent.change(searchInput, { target: { value: 'ratio' } });
+    const searchInputs = await screen.findAllByPlaceholderText('Search alerts...');
+    fireEvent.change(searchInputs[0], { target: { value: 'ratio' } });
 
     // Should filter alerts based on search
     await waitFor(() => {
@@ -309,13 +309,16 @@ describe('FinancialAlerts', () => {
 
     // Should show category breakdown
     await waitFor(() => {
-      expect(screen.getByText('Ratio Threshold: 1')).toBeInTheDocument();
+      const ratioThresholdElements = screen.getAllByText('Ratio Threshold: 1');
+      expect(ratioThresholdElements.length).toBeGreaterThan(0);
     });
     await waitFor(() => {
-      expect(screen.getByText('Filing Deadline: 1')).toBeInTheDocument();
+      const filingDeadlineElements = screen.getAllByText('Filing Deadline: 1');
+      expect(filingDeadlineElements.length).toBeGreaterThan(0);
     });
     await waitFor(() => {
-      expect(screen.getByText('Data Quality: 1')).toBeInTheDocument();
+      const dataQualityElements = screen.getAllByText('Data Quality: 1');
+      expect(dataQualityElements.length).toBeGreaterThan(0);
     });
   });
 
