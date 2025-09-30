@@ -161,9 +161,9 @@ describe('FinancialAlerts', () => {
   it('sorts alerts by different criteria', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Should show sort option is available
+    // Sort label may appear multiple times across layouts
     await waitFor(() => {
-      expect(screen.getByText('Sort:')).toBeInTheDocument();
+      expect(screen.getAllByText('Sort:').length).toBeGreaterThan(0);
     });
   });
 
@@ -202,12 +202,16 @@ describe('FinancialAlerts', () => {
   it('shows alert details when expanded', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const alertTitle = await screen.findByText('Current Ratio Below Threshold');
-    fireEvent.click(alertTitle);
+    const titleEls = await screen.findAllByText('Current Ratio Below Threshold');
+    const firstTitle = titleEls[0];
+    fireEvent.click(firstTitle);
 
-    // Should show detailed description
+    const cardRoot = firstTitle.closest('[class*=Card]') || firstTitle.parentElement;
+    const scoped = within(cardRoot as HTMLElement);
     await waitFor(() => {
-      expect(screen.getByText('Current ratio of 0.95 is below the recommended threshold of 1.0')).toBeInTheDocument();
+      expect(
+        scoped.getByText('Current ratio of 0.95 is below the recommended threshold of 1.0')
+      ).toBeInTheDocument();
     });
   });
 
