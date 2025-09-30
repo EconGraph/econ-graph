@@ -6,10 +6,11 @@
  * and responsive design.
  */
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, Suspense } from 'react';
 import * as d3 from 'd3';
 import * as topojson from 'topojson-client';
-import { Box, CircularProgress, Alert } from '@mui/material';
+import { Box, CircularProgress } from '@mui/material';
+import { useQuery } from '@tanstack/react-query';
 import { CountryData, MapViewState } from '../../types/globalAnalysis';
 import { useWorldMap } from './hooks/useWorldMap';
 import { useCountryData } from './hooks/useCountryData';
@@ -47,7 +48,25 @@ interface InteractiveWorldMapProps {
   colorScheme?: string;
 }
 
-const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
+// Fetch world atlas data using React Query
+const useWorldAtlasData = () => {
+  return useQuery({
+    queryKey: ['world-atlas'],
+    queryFn: async () => {
+      const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@3/world/110m.json');
+      if (!response.ok) {
+        throw new Error('Failed to load world map data');
+      }
+      return response.json();
+    },
+    staleTime: Infinity, // Atlas data never changes
+    cacheTime: Infinity,
+    suspense: true,
+  });
+};
+
+// Main map content component - assumes data is loaded
+const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
   data,
   selectedIndicator,
   timeRange: _timeRange,
@@ -65,35 +84,13 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
   colorScheme = 'viridis',
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
-  const [worldData, setWorldData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  
+  // Load world atlas data with Suspense
+  const { data: worldData } = useWorldAtlasData();
 
   // Custom hooks for map logic
   const { path, zoomBehavior } = useWorldMap(svgRef, projection);
   const { processedData, colorScale } = useCountryData(data, selectedIndicator, colorScheme);
-
-  // Load world atlas data
-  useEffect(() => {
-    const loadWorldData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-
-        // Load world atlas data from a CDN or local file
-        const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@3/world/110m.json');
-        const world = await response.json();
-        setWorldData(world);
-      } catch (err) {
-        // Handle error silently or log to monitoring service
-        setError('Failed to load world map data');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadWorldData();
-  }, []);
 
   // Initialize D3 map
   useEffect(() => {
@@ -236,24 +233,6 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
     onCountryHover,
   ]);
 
-  // Handle loading state
-  if (loading) {
-    return (
-      <Box display='flex' justifyContent='center' alignItems='center' height={height} width={width}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-
-  // Handle error state
-  if (error) {
-    return (
-      <Box display='flex' justifyContent='center' alignItems='center' height={height} width={width}>
-        <Alert severity='error'>{error}</Alert>
-      </Box>
-    );
-  }
-
   return (
     <Box
       width={width}
@@ -274,6 +253,27 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
         }}
       />
     </Box>
+  );
+};
+
+// Wrapper component with Suspense boundary
+const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = (props) => {
+  return (
+    <Suspense
+      fallback={
+        <Box 
+          display='flex' 
+          justifyContent='center' 
+          alignItems='center' 
+          height={props.height} 
+          width={props.width}
+        >
+          <CircularProgress />
+        </Box>
+      }
+    >
+      <WorldMapContent {...props} />
+    </Suspense>
   );
 };
 
