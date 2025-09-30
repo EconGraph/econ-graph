@@ -531,7 +531,7 @@ describe('ProfessionalChart', () => {
     });
 
     it('supports keyboard navigation', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -544,7 +544,7 @@ describe('ProfessionalChart', () => {
       );
 
       // Test tab navigation through controls
-      await user.tab();
+      await _user.tab();
 
       // Should be able to navigate to focusable elements
       const buttons = screen.getAllByRole('button');
@@ -553,7 +553,7 @@ describe('ProfessionalChart', () => {
       // Test Enter key activation
       if (buttons[0]) {
         buttons[0].focus();
-        await user.keyboard('{Enter}');
+        await _user.keyboard('{Enter}');
         // Should not throw errors
         expect(buttons[0]).toBeInTheDocument();
       }
@@ -701,7 +701,7 @@ describe('ProfessionalChart', () => {
 
   describe('Advanced Technical Analysis Features', () => {
     it('calculates and displays multiple SMA periods', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -732,7 +732,7 @@ describe('ProfessionalChart', () => {
     });
 
     it('calculates and displays EMA with multiple periods', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -763,7 +763,7 @@ describe('ProfessionalChart', () => {
     });
 
     it('calculates and displays Bollinger Bands with configurable parameters', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -794,7 +794,7 @@ describe('ProfessionalChart', () => {
     });
 
     it('enables economic events toggle', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -825,7 +825,7 @@ describe('ProfessionalChart', () => {
     });
 
     it('calculates and displays correlation analysis', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -857,7 +857,7 @@ describe('ProfessionalChart', () => {
     });
 
     it('detects and displays economic cycles', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -888,7 +888,7 @@ describe('ProfessionalChart', () => {
     });
 
     it('handles multiple technical indicators simultaneously', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -938,7 +938,7 @@ describe('ProfessionalChart', () => {
 
   describe('Economic Events Integration', () => {
     it('displays economic events toggle when showEconomicEvents is true', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -973,7 +973,7 @@ describe('ProfessionalChart', () => {
         })),
       };
 
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -1005,7 +1005,7 @@ describe('ProfessionalChart', () => {
     });
 
     it('toggles economic events display on/off', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -1039,7 +1039,7 @@ describe('ProfessionalChart', () => {
 
   describe('Chart Export and Fullscreen Features', () => {
     it('provides export functionality', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -1061,7 +1061,7 @@ describe('ProfessionalChart', () => {
     });
 
     it('provides fullscreen functionality', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -1085,7 +1085,7 @@ describe('ProfessionalChart', () => {
 
   describe('Series Management', () => {
     it('handles adding new series', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart

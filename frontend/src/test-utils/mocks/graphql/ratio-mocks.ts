@@ -250,7 +250,7 @@ export const ratioHandlers = [
 
   graphql.query('GetRatioBenchmarks', ({ variables }) => {
     const { ratioName, industry: _industry } = variables as {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       ratioName: string;
       industry?: string;
     };

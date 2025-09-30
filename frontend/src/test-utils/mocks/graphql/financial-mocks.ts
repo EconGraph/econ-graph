@@ -182,7 +182,7 @@ export const financialHandlers = [
 
   graphql.query('GetTrendAnalysis', ({ variables }) => {
     const { companyId, timeRange: _timeRange } = variables as {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       companyId: string;
       timeRange: string;
     };

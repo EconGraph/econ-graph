@@ -399,9 +399,10 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
             <div className='p-4 border rounded-lg'>
               <h3 className='font-semibold text-green-600'>Profitability</h3>
               <p className='text-2xl font-bold'>
-                {ratios?.find((r: any) => r.ratioName === 'returnOnEquity')?.value
-                  ? `${(ratios.find((r: any) => r.ratioName === 'returnOnEquity')!.value * 100).toFixed(1)}%`
-                  : '-'}
+                {(() => {
+                  const roe = ratios?.find((r: any) => r.ratioName === 'returnOnEquity');
+                  return roe && roe.value != null ? `${(roe.value * 100).toFixed(1)}%` : '-';
+                })()}
               </p>
               <p className='text-sm text-muted-foreground'>Return on Equity</p>
             </div>
@@ -409,9 +410,10 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
             <div className='p-4 border rounded-lg'>
               <h3 className='font-semibold text-blue-600'>Liquidity</h3>
               <p className='text-2xl font-bold'>
-                {ratios?.find((r: any) => r.ratioName === 'currentRatio')?.value
-                  ? ratios.find((r: any) => r.ratioName === 'currentRatio')!.value.toFixed(2)
-                  : '-'}
+                {(() => {
+                  const cr = ratios?.find((r: any) => r.ratioName === 'currentRatio');
+                  return cr && cr.value != null ? cr.value.toFixed(2) : '-';
+                })()}
               </p>
               <p className='text-sm text-muted-foreground'>Current Ratio</p>
             </div>
@@ -419,9 +421,10 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
             <div className='p-4 border rounded-lg'>
               <h3 className='font-semibold text-purple-600'>Valuation</h3>
               <p className='text-2xl font-bold'>
-                {ratios?.find((r: any) => r.ratioName === 'enterpriseValueToEbitda')?.value
-                  ? `${ratios.find((r: any) => r.ratioName === 'enterpriseValueToEbitda')!.value.toFixed(1)}x`
-                  : '-'}
+                {(() => {
+                  const ev = ratios?.find((r: any) => r.ratioName === 'enterpriseValueToEbitda');
+                  return ev && ev.value != null ? `${ev.value.toFixed(1)}x` : '-';
+                })()}
               </p>
               <p className='text-sm text-muted-foreground'>EV/EBITDA</p>
             </div>

@@ -331,10 +331,10 @@ describe('ChartCollaboration', () => {
       expect(valueField).toBeInTheDocument();
 
       // Fill form fields
-      fireEvent.change(titleField!, { target: { value: 'New Annotation' } });
-      fireEvent.change(descriptionField!, { target: { value: 'This is a test annotation' } });
-      fireEvent.change(dateField!, { target: { value: '2024-01-20' } });
-      fireEvent.change(valueField!, { target: { value: '105.5' } });
+      if (titleField) fireEvent.change(titleField, { target: { value: 'New Annotation' } });
+      if (descriptionField) fireEvent.change(descriptionField, { target: { value: 'This is a test annotation' } });
+      if (dateField) fireEvent.change(dateField, { target: { value: '2024-01-20' } });
+      if (valueField) fireEvent.change(valueField, { target: { value: '105.5' } });
 
       // Select annotation type - find select field
       const typeSelect = findFormFieldInDialog('select', 'Type') ||
@@ -399,7 +399,9 @@ describe('ChartCollaboration', () => {
       const dialogSubmitButton = submitButtons.find(button =>
         button.closest('[role="dialog"]') !== null
       );
-      await user.click(dialogSubmitButton!);
+      if (dialogSubmitButton) {
+        await user.click(dialogSubmitButton);
+      }
 
       // Should not call onAnnotationAdd
       expect(mockHandlers.onAnnotationAdd).not.toHaveBeenCalled();

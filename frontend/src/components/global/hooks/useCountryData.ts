@@ -61,8 +61,8 @@ export const useCountryData = (
   const dataRange = useMemo(() => {
     const values = processedData
       .filter(country => country.hasData)
-      .map(country => country.colorValue!)
-      .filter(value => value !== undefined && !isNaN(value));
+      .map(country => country.colorValue)
+      .filter((value): value is number => value !== undefined && !isNaN(value as number));
 
     if (values.length === 0) {
       return { min: 0, max: 1 };
@@ -107,7 +107,9 @@ export const useCountryData = (
 
   // Calculate statistics for selected indicator
   const statistics = useMemo(() => {
-    const values = countriesWithData.map(country => country.colorValue!);
+    const values = countriesWithData
+      .map(country => country.colorValue)
+      .filter((v): v is number => v !== undefined);
 
     if (values.length === 0) {
       return {

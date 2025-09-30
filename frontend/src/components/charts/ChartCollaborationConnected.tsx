@@ -4,7 +4,7 @@
  * This provides Bloomberg Terminal-level collaboration for institutional users.
  */
 
-import React, { useState, useCallback, useEffect, Suspense } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Box,
   Typography,

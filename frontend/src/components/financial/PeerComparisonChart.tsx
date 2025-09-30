@@ -69,7 +69,10 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
     }
   );
 
-  const peerCompanies = peerCompaniesData?.peerCompanies || [];
+  // Memoize to avoid new array identity when data is missing, satisfying exhaustive-deps
+  const peerCompanies = useMemo(() => {
+    return peerCompaniesData?.peerCompanies ?? [];
+  }, [peerCompaniesData?.peerCompanies]);
 
   // Current company data
   const currentCompanyData = useMemo(() => {

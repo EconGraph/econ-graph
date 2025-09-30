@@ -360,16 +360,16 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
           case 'mom':
             // Month-over-Month: Compare with previous month
             if (index > 0 && data[index - 1].value !== null) {
-              transformedValue =
-                ((point.value - data[index - 1].value!) / data[index - 1].value!) * 100;
+              const prev = data[index - 1].value;
+              transformedValue = prev !== null ? ((point.value - prev) / prev) * 100 : 0;
             } else {
               transformedValue = 0;
             }
             break;
           case 'growth_rate':
             if (index > 0 && data[index - 1].value !== null) {
-              transformedValue =
-                ((point.value - data[index - 1].value!) / data[index - 1].value!) * 100;
+              const prev = data[index - 1].value;
+              transformedValue = prev !== null ? ((point.value - prev) / prev) * 100 : 0;
             } else {
               transformedValue = 0;
             }
@@ -379,15 +379,16 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
             break;
           case 'diff':
             if (index > 0 && data[index - 1].value !== null) {
-              transformedValue = point.value - data[index - 1].value!;
+              const prev = data[index - 1].value;
+              transformedValue = prev !== null ? point.value - prev : 0;
             } else {
               transformedValue = 0;
             }
             break;
           case 'pct_change':
             if (index > 0 && data[index - 1].value !== null) {
-              transformedValue =
-                ((point.value - data[index - 1].value!) / data[index - 1].value!) * 100;
+              const prev = data[index - 1].value;
+              transformedValue = prev !== null ? ((point.value - prev) / prev) * 100 : 0;
             } else {
               transformedValue = 0;
             }

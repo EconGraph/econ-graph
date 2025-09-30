@@ -250,17 +250,21 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                   className='text-2xl font-bold text-green-600'
                   aria-label='Return on Equity value'
                 >
-                  {ratios.find(r => r.ratioName === 'returnOnEquity')?.value
-                    ? formatPercent(ratios.find(r => r.ratioName === 'returnOnEquity')!.value)
-                    : '-'}
+                  {(() => {
+                    const roe = ratios.find(r => r.ratioName === 'returnOnEquity');
+                    return roe && roe.value != null ? formatPercent(roe.value) : '-';
+                  })()}
                 </p>
               </div>
               <TrendingUp className='h-8 w-8 text-green-600' />
             </div>
             <p className='text-sm text-muted-foreground mt-2'>
-              {ratios.find(r => r.ratioName === 'returnOnEquity')?.benchmarkPercentile
-                ? `${ratios.find(r => r.ratioName === 'returnOnEquity')!.benchmarkPercentile}th percentile`
-                : 'Return on Equity'}
+              {(() => {
+                const roe = ratios.find(r => r.ratioName === 'returnOnEquity');
+                return roe && roe.benchmarkPercentile != null
+                  ? `${roe.benchmarkPercentile}th percentile`
+                  : 'Return on Equity';
+              })()}
             </p>
           </CardContent>
         </Card>
@@ -271,17 +275,21 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               <div>
                 <p className='text-sm font-medium text-muted-foreground'>Current Ratio</p>
                 <p className='text-2xl font-bold text-blue-600' aria-label='Current Ratio value'>
-                  {ratios.find(r => r.ratioName === 'currentRatio')?.value
-                    ? formatPercent(ratios.find(r => r.ratioName === 'currentRatio')!.value)
-                    : '-'}
+                  {(() => {
+                    const cr = ratios.find(r => r.ratioName === 'currentRatio');
+                    return cr && cr.value != null ? formatPercent(cr.value) : '-';
+                  })()}
                 </p>
               </div>
               <Activity className='h-8 w-8 text-blue-600' />
             </div>
             <p className='text-sm text-muted-foreground mt-2'>
-              {ratios.find(r => r.ratioName === 'currentRatio')?.benchmarkPercentile
-                ? `${ratios.find(r => r.ratioName === 'currentRatio')!.benchmarkPercentile}th percentile`
-                : 'Liquidity Position'}
+              {(() => {
+                const cr = ratios.find(r => r.ratioName === 'currentRatio');
+                return cr && cr.benchmarkPercentile != null
+                  ? `${cr.benchmarkPercentile}th percentile`
+                  : 'Liquidity Position';
+              })()}
             </p>
           </CardContent>
         </Card>
@@ -292,17 +300,21 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               <div>
                 <p className='text-sm font-medium text-muted-foreground'>Debt/Equity</p>
                 <p className='text-2xl font-bold text-purple-600'>
-                  {ratios.find(r => r.ratioName === 'debtToEquity')?.value
-                    ? ratios.find(r => r.ratioName === 'debtToEquity')!.value.toFixed(2)
-                    : '-'}
+                  {(() => {
+                    const dte = ratios.find(r => r.ratioName === 'debtToEquity');
+                    return dte && dte.value != null ? dte.value.toFixed(2) : '-';
+                  })()}
                 </p>
               </div>
               <BarChart3 className='h-8 w-8 text-purple-600' />
             </div>
             <p className='text-sm text-muted-foreground mt-2'>
-              {ratios.find(r => r.ratioName === 'debtToEquity')?.benchmarkPercentile
-                ? `${ratios.find(r => r.ratioName === 'debtToEquity')!.benchmarkPercentile}th percentile`
-                : 'Leverage Ratio'}
+              {(() => {
+                const dte = ratios.find(r => r.ratioName === 'debtToEquity');
+                return dte && dte.benchmarkPercentile != null
+                  ? `${dte.benchmarkPercentile}th percentile`
+                  : 'Leverage Ratio';
+              })()}
             </p>
           </CardContent>
         </Card>
