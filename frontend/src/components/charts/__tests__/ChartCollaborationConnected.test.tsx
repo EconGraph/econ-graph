@@ -11,15 +11,12 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, StyledEngineProvider } from '@mui/material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { vi } from 'vitest';
+import { vi, beforeEach, beforeAll, afterAll } from 'vitest';
+import { setupServer } from 'msw/node';
+import { http, HttpResponse } from 'msw';
 import ChartCollaborationConnected from '../ChartCollaborationConnected';
 import { ChartAnnotationType } from '../../../utils/graphql';
 import { useCollaboration } from '../../../hooks/useCollaboration';
-
-// Mock the useCollaboration hook
-vi.mock('../../../hooks/useCollaboration', () => ({
-  useCollaboration: vi.fn(),
-}));
 
 // Mock the useAuth hook
 const mockUseAuth = vi.fn();
@@ -27,10 +24,109 @@ vi.mock('../../../contexts/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
 }));
 
+// Set up the mock to return proper auth context
+beforeEach(() => {
+  mockUseAuth.mockReturnValue({
+    user: mockUser,
+    isAuthenticated: true,
+    isLoading: false,
+    error: null,
+    signInWithGoogle: vi.fn(),
+    signInWithFacebook: vi.fn(),
+    signInWithEmail: vi.fn(),
+    signUp: vi.fn(),
+    signOut: vi.fn(),
+    updateProfile: vi.fn(),
+    refreshUser: vi.fn(),
+    clearError: vi.fn(),
+  });
+});
+
 // Mock date-fns format function
 vi.mock('date-fns', () => ({
   format: vi.fn((_date) => 'Jan 15, 2:30 PM'),
 }));
+
+// Set up MSW server for GraphQL mocking
+const server = setupServer(
+  // Mock GraphQL endpoint
+  http.post('/graphql', async ({ request }) => {
+    const body = await request.json();
+    const { query, variables } = body;
+
+    // Mock annotations for series query
+    if (query.includes('annotationsForSeries')) {
+      return HttpResponse.json({
+        data: {
+          annotationsForSeries: mockAnnotations,
+        },
+      });
+    }
+
+    // Mock comments for annotation query
+    if (query.includes('commentsForAnnotation')) {
+      return HttpResponse.json({
+        data: {
+          commentsForAnnotation: [
+            {
+              id: 'comment-1',
+              annotationId: 'annotation-1',
+              userId: 'user-1',
+              content: 'Great analysis!',
+              isResolved: false,
+              createdAt: '2024-01-15T14:30:00Z',
+              updatedAt: '2024-01-15T14:30:00Z',
+            },
+          ],
+        },
+      });
+    }
+
+    // Mock chart collaborators query
+    if (query.includes('chartCollaborators')) {
+      return HttpResponse.json({
+        data: {
+          chartCollaborators: [
+            {
+              id: 'collab-1',
+              chartId: 'chart-1',
+              userId: 'user-1',
+              role: 'owner',
+              lastAccessedAt: '2024-01-15T14:30:00Z',
+              createdAt: '2024-01-15T14:30:00Z',
+              updatedAt: '2024-01-15T14:30:00Z',
+            },
+          ],
+        },
+      });
+    }
+
+    // Mock user query
+    if (query.includes('user')) {
+      return HttpResponse.json({
+        data: {
+          user: mockUser,
+        },
+      });
+    }
+
+    // Default response
+    return HttpResponse.json({
+      data: null,
+      errors: [{ message: 'Unhandled GraphQL query' }],
+    });
+  })
+);
+
+// Start server before all tests
+beforeAll(() => {
+  server.listen({ onUnhandledRequest: 'warn' });
+});
+
+// Clean up after each test
+afterAll(() => {
+  server.close();
+});
 
 const theme = createTheme();
 
@@ -207,18 +303,7 @@ describe('ChartCollaborationConnected', () => {
     vi.clearAllMocks();
     mockUseAuth.mockReturnValue({ user: mockUser });
 
-    // Re-setup the mock implementation after clearing
-    mockCollaborationHook.getUserById = vi.fn((id: string) => {
-      const user = mockUsers[id as keyof typeof mockUsers];
-      return user;
-    });
-
-    mockCollaborationHook.getCommentsForAnnotation = vi.fn((annotationId) => {
-      const comments = mockComments.filter(comment => comment.annotationId === annotationId);
-      return comments;
-    });
-
-    (useCollaboration as any).mockReturnValue(mockCollaborationHook);
+    // useCollaboration hook will now work with MSW-mocked GraphQL responses
 
     // Clean up any existing portal containers
     const existingContainers = document.querySelectorAll('[data-testid="portal-container"]');
