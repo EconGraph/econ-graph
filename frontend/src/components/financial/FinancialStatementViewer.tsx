@@ -35,7 +35,7 @@ import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_STATEMENT } from '../../test-utils/mocks/graphql/financial-queries';
 import { GET_FINANCIAL_RATIOS } from '../../test-utils/mocks/graphql/ratio-queries';
 import { GET_FINANCIAL_ANNOTATIONS } from '../../test-utils/mocks/graphql/financial-queries';
-import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 
 // GraphQL hooks for real data fetching
 const useFinancialStatementQuery = (statementId: string) => {
@@ -614,9 +614,10 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                 <div className='p-4 border rounded-lg'>
                   <h3 className='font-semibold'>Profitability</h3>
                   <p className='text-2xl font-bold text-green-600'>
-                    {ratios?.find(r => r.ratioName === 'returnOnEquity')?.value
-                      ? `${(ratios.find(r => r.ratioName === 'returnOnEquity')!.value * 100).toFixed(1)}%`
-                      : '-'}
+                    {(() => {
+                      const roeRatio = ratios?.find(r => r.ratioName === 'returnOnEquity');
+                      return roeRatio?.value ? `${(roeRatio.value * 100).toFixed(1)}%` : '-';
+                    })()}
                   </p>
                   <p className='text-sm text-muted-foreground'>Return on Equity</p>
                 </div>
@@ -624,9 +625,10 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                 <div className='p-4 border rounded-lg'>
                   <h3 className='font-semibold'>Liquidity</h3>
                   <p className='text-2xl font-bold text-blue-600'>
-                    {ratios?.find(r => r.ratioName === 'currentRatio')?.value
-                      ? ratios.find(r => r.ratioName === 'currentRatio')!.value.toFixed(2)
-                      : '-'}
+                    {(() => {
+                      const currentRatio = ratios?.find(r => r.ratioName === 'currentRatio');
+                      return currentRatio?.value ? currentRatio.value.toFixed(2) : '-';
+                    })()}
                   </p>
                   <p className='text-sm text-muted-foreground'>Current Ratio</p>
                 </div>
@@ -634,9 +636,12 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                 <div className='p-4 border rounded-lg'>
                   <h3 className='font-semibold'>Valuation</h3>
                   <p className='text-2xl font-bold text-purple-600'>
-                    {ratios?.find(r => r.ratioName === 'enterpriseValueToEbitda')?.value
-                      ? `${ratios.find(r => r.ratioName === 'enterpriseValueToEbitda')!.value.toFixed(1)}x`
-                      : '-'}
+                    {(() => {
+                      const evEbitdaRatio = ratios?.find(
+                        r => r.ratioName === 'enterpriseValueToEbitda'
+                      );
+                      return evEbitdaRatio?.value ? `${evEbitdaRatio.value.toFixed(1)}x` : '-';
+                    })()}
                   </p>
                   <p className='text-sm text-muted-foreground'>EV/EBITDA</p>
                 </div>
