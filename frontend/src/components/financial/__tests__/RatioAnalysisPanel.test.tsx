@@ -293,17 +293,13 @@ describe('RatioAnalysisPanel', () => {
         expect(screen.getAllByText('Financial Ratio Analysis').length).toBeGreaterThan(0);
       });
 
-      // Find the Liquidity tab button (there are multiple "Profitability" elements)
-      const tabButtons = screen.getAllByRole('button');
-      const liquidityTab = tabButtons.find(button => button.textContent === 'Liquidity');
+      // Switch using role-based tab query for accessibility
+      const liquidityTab = await screen.findByRole('tab', { name: 'Liquidity' });
+      fireEvent.click(liquidityTab);
 
-      if (liquidityTab) {
-        fireEvent.click(liquidityTab);
-
-        await waitFor(() => {
-          expect(screen.getByText('Current Ratio')).toBeInTheDocument();
-        });
-      }
+      await waitFor(() => {
+        expect(screen.getByText('Current Ratio')).toBeInTheDocument();
+      });
     });
   });
 
@@ -429,9 +425,8 @@ describe('RatioAnalysisPanel', () => {
         expect(screen.getAllByText('Financial Ratio Analysis').length).toBeGreaterThan(0);
       });
 
-      // Check that the component structure is responsive
-      const tabButtons = screen.getAllByRole('button');
-      expect(tabButtons.length).toBeGreaterThan(0);
+      // Check that tabs are present (accessible role)
+      expect(screen.getAllByRole('tab').length).toBeGreaterThan(0);
     });
   });
 

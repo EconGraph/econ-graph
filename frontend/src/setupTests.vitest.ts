@@ -268,37 +268,7 @@ vi.mock('@/hooks/useAuth', () => ({
   })),
 }));
 
-// Mock @tanstack/react-query
-vi.mock('@tanstack/react-query', () => ({
-  QueryClient: vi.fn(() => ({
-    setQueryData: vi.fn(),
-    getQueryData: vi.fn(),
-    invalidateQueries: vi.fn(),
-    clear: vi.fn(),
-  })),
-  QueryClientProvider: ({ children }: { children: React.ReactNode }) => children,
-  useQuery: vi.fn(() => ({
-    data: null,
-    isLoading: false,
-    error: null,
-    isError: false,
-    isSuccess: true,
-  })),
-  useSuspenseQuery: vi.fn(() => ({
-    data: null,
-    error: null,
-    isError: false,
-    isSuccess: true,
-  })),
-  useMutation: vi.fn(() => ({
-    mutate: vi.fn(),
-    mutateAsync: vi.fn(),
-    isLoading: false,
-    error: null,
-    isError: false,
-    isSuccess: false,
-  })),
-}));
+// Use real @tanstack/react-query in tests so MSW-backed GraphQL executes
 
 // Mock react-router-dom
 vi.mock('react-router-dom', () => ({
