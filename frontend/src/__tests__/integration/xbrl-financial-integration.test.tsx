@@ -36,6 +36,7 @@ const integrationServer = setupServer(
     };
     const { query, variables, operationName } = body;
     console.log('🔧 MSW GraphQL request:', { operationName, variables });
+    console.log('🔧 MSW GraphQL query includes GetFinancialStatement:', query.includes('GetFinancialStatement'));
     
     // console.log('🔧 Integration MSW intercepted GraphQL request:', operationName);
     // console.log('🔧 Query includes GetFinancialDashboard:', query.includes('GetFinancialDashboard'));
@@ -106,6 +107,55 @@ afterAll(() => {
 const mockFetch = vi.fn();
 // Don't assign to global.fetch to avoid interfering with MSW
 // global.fetch = mockFetch;
+
+// Mock the executeGraphQL function directly
+vi.mock('../../utils/graphql', async () => {
+  const actual = await vi.importActual('../../utils/graphql');
+  return {
+    ...actual,
+    executeGraphQL: vi.fn(async ({ query, variables }) => {
+      console.log('🔧 Mocked executeGraphQL called with:', { query: query.substring(0, 50) + '...', variables });
+      
+      // Handle GetFinancialStatement
+      if (query.includes('GetFinancialStatement')) {
+        const response = loadGraphQLResponse('get_financial_statement', 'success');
+        console.log('🔧 Mocked executeGraphQL returning GetFinancialStatement:', response);
+        return response;
+      }
+      
+      // Handle GetFinancialDashboard
+      if (query.includes('GetFinancialDashboard')) {
+        const { companyId } = variables || {};
+        let scenario = 'success';
+        if (companyId === 'invalid-company-id') {
+          scenario = 'not_found';
+        } else if (companyId === 'error-company-id') {
+          scenario = 'error';
+        }
+        const response = loadGraphQLResponse('get_financial_dashboard', scenario);
+        console.log('🔧 Mocked executeGraphQL returning GetFinancialDashboard:', response);
+        return response;
+      }
+      
+      // Handle GetFinancialRatios
+      if (query.includes('GetFinancialRatios')) {
+        const { statementId } = variables || {};
+        let scenario = 'success';
+        if (statementId === 'error-statement-id') {
+          scenario = 'error';
+        } else if (statementId === 'empty-statement-id') {
+          scenario = 'empty';
+        }
+        const response = loadGraphQLResponse('get_financial_ratios', scenario);
+        console.log('🔧 Mocked executeGraphQL returning GetFinancialRatios:', response);
+        return response;
+      }
+      
+      console.log('🔧 Mocked executeGraphQL unhandled query:', query.substring(0, 50) + '...');
+      return { data: null, errors: [{ message: 'Unhandled query' }] };
+    })
+  };
+});
 
 // Mock financial data
 const mockCompany = {

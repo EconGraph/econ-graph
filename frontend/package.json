@@ -87,7 +87,7 @@
     "test:coverage": "vitest run --coverage --no-watch",
     "test:serial": "vitest run --run --no-watch",
     "test:unit": "vitest run --exclude=src/__tests__/integration --no-watch",
-    "test:integration": "vitest run src/__tests__/integration --no-watch",
+    "test:integration": "vitest run --config vitest.integration.config.ts --no-watch",
     "test:xbrl-financial:integration": "vitest run src/__tests__/integration/xbrl-financial --no-watch",
     "test:server": "vitest run --config=vitest.server.config.ts --no-watch",
     "eject": "react-scripts eject",
