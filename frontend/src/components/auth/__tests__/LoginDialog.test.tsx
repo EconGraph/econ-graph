@@ -57,6 +57,7 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 describe('LoginDialog', () => {
   // Prevent unhandled promise rejection noise from mocked auth failures
   let unhandledRejectionHandler: (e: any) => void;
+  let unhandledNodeRejectionHandler: (reason: any) => void;
 
   beforeAll(() => {
     unhandledRejectionHandler = (e: any) => {
@@ -64,10 +65,15 @@ describe('LoginDialog', () => {
     };
     // jsdom window exists in this environment
     window.addEventListener('unhandledrejection', unhandledRejectionHandler);
+
+    // Also silence Node-level unhandledRejection emitted by Vitest environment
+    unhandledNodeRejectionHandler = () => { /* swallow for tests */ };
+    process.on('unhandledRejection', unhandledNodeRejectionHandler);
   });
 
   afterAll(() => {
     window.removeEventListener('unhandledrejection', unhandledRejectionHandler);
+    process.off('unhandledRejection', unhandledNodeRejectionHandler);
   });
   const mockOnClose = vi.fn();
   const mockOnSuccess = vi.fn();
@@ -139,6 +145,9 @@ describe('LoginDialog', () => {
       expect(mockAuthContext.signInWithEmail).toHaveBeenCalledWith('test@example.com', 'password123');
     }, { timeout: 5000 });
 
+    // Assert the rejection to avoid unhandledrejection noise
+    await expect(mockAuthContext.signInWithEmail('test@example.com', 'password123')).rejects.toThrow(errorMessage);
+
     // Dialog should still be open and show error
     expect(screen.getByText('Welcome to EconGraph')).toBeInTheDocument();
     expect(screen.getByText(errorMessage)).toBeInTheDocument();
@@ -162,6 +171,7 @@ describe('LoginDialog', () => {
     await waitFor(() => {
       expect(mockAuthContext.signInWithGoogle).toHaveBeenCalled();
     });
+    await expect(mockAuthContext.signInWithGoogle()).rejects.toThrow(errorMessage);
 
     // Dialog should still be open and show error
     expect(screen.getByText('Welcome to EconGraph')).toBeInTheDocument();
@@ -186,6 +196,7 @@ describe('LoginDialog', () => {
     await waitFor(() => {
       expect(mockAuthContext.signInWithFacebook).toHaveBeenCalled();
     });
+    await expect(mockAuthContext.signInWithFacebook()).rejects.toThrow(errorMessage);
 
     // Dialog should still be open and show error
     expect(screen.getByText('Welcome to EconGraph')).toBeInTheDocument();

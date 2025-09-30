@@ -238,6 +238,20 @@ function createHandlers() {
       });
     }),
 
+    // Explicit absolute URL variants to avoid any leakage in CI
+    http.get('http://localhost:9876/health', () => {
+      return HttpResponse.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+      });
+    }),
+    http.get('http://localhost:9876/api/health', () => {
+      return HttpResponse.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+      });
+    }),
+
     // Handle GraphQL POST requests
     http.post('/graphql', async ({ request }: { request: any }) => {
       const body = await request.json();
