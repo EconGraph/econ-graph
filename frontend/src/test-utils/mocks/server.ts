@@ -221,36 +221,7 @@ function createHandlers() {
       });
     }),
 
-    // REST API fallback handlers
-    http.get('/api/health', () => {
-      // REQUIREMENT: Mock health check endpoint
-      return HttpResponse.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-      });
-    }),
-
-    // Some code paths call `${API_BASE_URL}/health` without the /api prefix
-    http.get('/health', () => {
-      return HttpResponse.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-      });
-    }),
-
-    // Explicit absolute URL variants to avoid any leakage in CI
-    http.get('http://localhost:9876/health', () => {
-      return HttpResponse.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-      });
-    }),
-    http.get('http://localhost:9876/api/health', () => {
-      return HttpResponse.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-      });
-    }),
+    // REST API fallback handlers (intentionally minimal; no health endpoint mocking)
 
     // Handle GraphQL POST requests
     http.post('/graphql', async ({ request }: { request: any }) => {

@@ -155,28 +155,7 @@ export const setupSimpleMSW = async () => {
       }
     }
 
-    // Intercept health checks to avoid real network
-    if (
-      url === '/health' ||
-      url === '/api/health' ||
-      url.endsWith('/health') ||
-      url.includes('localhost:9876/health') ||
-      url.includes('localhost:9876/api/health')
-    ) {
-      if (MSW_DEBUG) console.log(`[Simple MSW] *** HEALTH CHECK INTERCEPTED ***`);
-      const healthy = {
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-      };
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(healthy),
-        status: 200,
-        statusText: 'OK',
-      } as any);
-    }
-
-    // For other non-GraphQL requests, pass through to original fetch
+    // For non-GraphQL requests, pass through to original fetch
     if (MSW_DEBUG) console.log(`[Simple MSW] Passing through request: ${url}`);
     return originalFetch(input, options);
   });
