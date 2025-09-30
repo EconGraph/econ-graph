@@ -1,3 +1,4 @@
+/* eslint-disable testing-library/no-unnecessary-act */
 /**
  * REQUIREMENT: Comprehensive unit tests for ProfessionalChart component
  * PURPOSE: Test professional chart analytics with Bloomberg Terminal-level capabilities

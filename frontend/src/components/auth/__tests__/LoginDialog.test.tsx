@@ -56,10 +56,10 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 describe('LoginDialog', () => {
   // Prevent unhandled promise rejection noise from mocked auth failures
-  let unhandledRejectionHandler: (e: PromiseRejectionEvent) => void;
+  let unhandledRejectionHandler: (e: any) => void;
 
   beforeAll(() => {
-    unhandledRejectionHandler = (e: PromiseRejectionEvent) => {
+    unhandledRejectionHandler = (e: any) => {
       e.preventDefault();
     };
     // jsdom window exists in this environment
