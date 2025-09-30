@@ -138,24 +138,23 @@ describe('FinancialAlerts', () => {
   it('filters alerts by severity', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Should show severity filter options are available in the component
+    // Should show severity filter label (may appear multiple times across layouts)
     await waitFor(() => {
-      expect(screen.getByText('Severity:')).toBeInTheDocument();
+      expect(screen.getAllByText('Severity:').length).toBeGreaterThan(0);
     });
 
-    // Since the options are in SelectContent, they may not be visible until clicked
-    // For now, just verify the filter exists
+    // Since options are in popover, just verify the filter label exists
     await waitFor(() => {
-      expect(screen.getByText('Severity:')).toBeInTheDocument();
+      expect(screen.getAllByText('Severity:').length).toBeGreaterThan(0);
     });
   });
 
   it('filters alerts by type', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Should show type filter is available
+    // Should show type filter label (may appear multiple times across layouts)
     await waitFor(() => {
-      expect(screen.getByText('Type:')).toBeInTheDocument();
+      expect(screen.getAllByText('Type:').length).toBeGreaterThan(0);
     });
   });
 
