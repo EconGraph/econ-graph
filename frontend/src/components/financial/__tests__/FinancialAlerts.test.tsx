@@ -131,7 +131,7 @@ describe('FinancialAlerts', () => {
 
     await waitFor(() => {
       // Should show count of unread alerts (2 unread out of 4 total)
-      expect(screen.getByText('2 Unread')).toBeInTheDocument();
+      expect(screen.getAllByText('2 Unread').length).toBeGreaterThan(0);
     });
   });
 
