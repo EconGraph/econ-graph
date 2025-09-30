@@ -83,12 +83,9 @@ const initFacebookSDK = () => {
   return new Promise<void>((resolve, reject) => {
     // Check if Facebook App ID is configured
     if (!FACEBOOK_APP_ID || FACEBOOK_APP_ID.trim() === '') {
-      // In test environment, silently skip Facebook SDK initialization
-      if (import.meta.env.MODE === 'test' || import.meta.env.VITEST) {
-        resolve();
-        return;
-      }
-      reject(new Error('Facebook App ID not configured'));
+      // Skip Facebook SDK initialization if not configured
+      // This is the expected behavior in development/test environments
+      resolve();
       return;
     }
 
@@ -216,12 +213,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
 
-    // In test environment, skip initialization to avoid act() warnings
-    if (import.meta.env.MODE === 'test' || import.meta.env.VITEST) {
-      setAuthState(prev => ({ ...prev, isLoading: false }));
-    } else {
-      initAuth();
-    }
+    initAuth();
   }, [refreshUser]); // Include refreshUser in dependency array
 
   const signInWithGoogle = useCallback(async () => {
