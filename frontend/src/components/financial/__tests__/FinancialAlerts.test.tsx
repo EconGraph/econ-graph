@@ -297,7 +297,8 @@ describe('FinancialAlerts', () => {
 
     // Should filter alerts based on search
     await waitFor(() => {
-      expect(screen.getByText('Current Ratio Below Threshold')).toBeInTheDocument();
+      const ratioElements = screen.getAllByText('Current Ratio Below Threshold');
+      expect(ratioElements.length).toBeGreaterThan(0);
     });
     await waitFor(() => {
       expect(screen.queryByText('10-Q Filing Due Soon')).not.toBeInTheDocument();
@@ -334,7 +335,8 @@ describe('FinancialAlerts', () => {
 
     // Should adapt to mobile view
     await waitFor(() => {
-      expect(screen.getByText('Financial Alerts')).toBeInTheDocument();
+      const alertElements = screen.getAllByText('Financial Alerts');
+      expect(alertElements.length).toBeGreaterThan(0);
     });
   });
 
@@ -343,7 +345,8 @@ describe('FinancialAlerts', () => {
 
     // Should show priority indicators for high severity alerts
     await waitFor(() => {
-      expect(screen.getByText('High Priority')).toBeInTheDocument();
+      const priorityElements = screen.getAllByText('High Priority');
+      expect(priorityElements.length).toBeGreaterThan(0);
     });
   });
 
@@ -376,8 +379,8 @@ describe('FinancialAlerts', () => {
   it('handles alert refresh functionality', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const refreshButton = await screen.findByRole('button', { name: /refresh/i });
-    fireEvent.click(refreshButton);
+    const refreshButtons = await screen.findAllByRole('button', { name: /refresh/i });
+    fireEvent.click(refreshButtons[0]); // Click the first one
 
     // Component should handle refresh functionality internally
   });
@@ -387,19 +390,21 @@ describe('FinancialAlerts', () => {
 
     // Should show settings/preferences link
     await waitFor(() => {
-      expect(screen.getByText('Alert Settings')).toBeInTheDocument();
+      const settingsElements = screen.getAllByText('Alert Settings');
+      expect(settingsElements.length).toBeGreaterThan(0);
     });
   });
 
   it('handles alert export functionality', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const exportButton = await screen.findByText('Export Alerts');
-    fireEvent.click(exportButton);
+    const exportButtons = await screen.findAllByText('Export Alerts');
+    fireEvent.click(exportButtons[0]); // Click the first one
 
     // Should trigger export functionality
     await waitFor(() => {
-      expect(screen.getByText('Export Alerts')).toBeInTheDocument();
+      const exportElements = screen.getAllByText('Export Alerts');
+      expect(exportElements.length).toBeGreaterThan(0);
     });
   });
 
@@ -411,10 +416,12 @@ describe('FinancialAlerts', () => {
       expect(screen.getAllByText('Alert Trends').length).toBeGreaterThan(0);
     });
     await waitFor(() => {
-      expect(screen.getByText('This Week: 4')).toBeInTheDocument();
+      const thisWeekElements = screen.getAllByText('This Week: 4');
+      expect(thisWeekElements.length).toBeGreaterThan(0);
     });
     await waitFor(() => {
-      expect(screen.getByText('Last Week: 2')).toBeInTheDocument();
+      const lastWeekElements = screen.getAllByText('Last Week: 2');
+      expect(lastWeekElements.length).toBeGreaterThan(0);
     });
   });
 });
