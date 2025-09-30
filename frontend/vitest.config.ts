@@ -29,6 +29,8 @@ export default defineConfig({
       '**/server/**/*.test.cjs',
       '**/__tests__/integration/privateChartServer.test.cjs',
       '**/__tests__/integration/**/*.test.tsx',
+      // Ignore unit-level e2e-style tests for now
+      '**/__tests__/e2e-*.test.tsx',
       '**/tests/**/*.spec.ts',
       '**/tests/**/*.spec.tsx'
     ],

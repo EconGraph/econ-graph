@@ -170,8 +170,8 @@ describe('FinancialAlerts', () => {
   it('marks alerts as read when clicked', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const unreadAlert = await screen.findByText('Current Ratio Below Threshold');
-    fireEvent.click(unreadAlert);
+    const unreadAlerts = await screen.findAllByText('Current Ratio Below Threshold');
+    fireEvent.click(unreadAlerts[0]); // Click the first one
 
     // Component should handle the read state internally
   });
@@ -259,8 +259,8 @@ describe('FinancialAlerts', () => {
 
     // Expired alert should be shown with different styling
     await waitFor(() => {
-      const expiredAlert = screen.getByText('10-Q Filing Due Soon');
-      expect(expiredAlert).toBeInTheDocument();
+      const expiredAlerts = screen.getAllByText('10-Q Filing Due Soon');
+      expect(expiredAlerts.length).toBeGreaterThan(0);
     });
   });
 

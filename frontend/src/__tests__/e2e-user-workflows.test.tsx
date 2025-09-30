@@ -8,6 +8,7 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
+import { BrowserRouter } from 'react-router-dom';
 import { TestProviders } from '../test-utils/test-providers';
 import App from '../App';
 
@@ -125,7 +126,7 @@ describe('End-to-End User Workflows', () => {
 
       // 2. Navigate to Series Explorer
       const seriesExplorerLink = await waitFor(() => {
-        return screen.getByText('Explore Series');
+        return screen.getByText('Explore All Series');
       }, { timeout: 10000 });
       await user.click(seriesExplorerLink);
 
@@ -144,7 +145,7 @@ describe('End-to-End User Workflows', () => {
 
       // Navigate to Series Explorer
       const seriesExplorerLink = await waitFor(() => {
-        return screen.getByText('Explore Series');
+        return screen.getByText('Explore All Series');
       }, { timeout: 10000 });
       await user.click(seriesExplorerLink);
 
@@ -155,7 +156,7 @@ describe('End-to-End User Workflows', () => {
 
       // Search for GDP data
       const searchInput = await waitFor(() => {
-        return screen.getByPlaceholderText('Search economic series...');
+        return screen.getByPlaceholderText('Search economic series (e.g., GDP, unemployment, inflation)');
       }, { timeout: 10000 });
       await user.type(searchInput, 'GDP');
 
@@ -226,11 +227,11 @@ describe('End-to-End User Workflows', () => {
       renderApp();
 
       // Navigate to Series Explorer
-      const seriesExplorerLink = screen.getByText('Explore Series');
+      const seriesExplorerLink = screen.getByText('Explore All Series');
       await user.click(seriesExplorerLink);
 
       // Search for non-existent series
-      const searchInput = screen.getByPlaceholderText('Search economic series...');
+      const searchInput = screen.getByPlaceholderText('Search economic series (e.g., GDP, unemployment, inflation)');
       await user.type(searchInput, 'nonexistent-series-xyz');
 
       // Verify the search input has the text
@@ -289,14 +290,14 @@ describe('End-to-End User Workflows', () => {
       const startTime = performance.now();
 
       // Navigate between pages
-      const pages = ['Explore Series', 'About'];
+      const pages = ['Explore All Series', 'About'];
 
       for (const page of pages) {
         const pageLink = screen.getByText(page);
         await user.click(pageLink);
 
         await waitFor(() => {
-          if (page === 'Explore Series') {
+          if (page === 'Explore All Series') {
             expect(screen.getByText('Series Explorer')).toBeInTheDocument();
           } else if (page === 'About') {
             // Use getAllByText and take the first one (main heading)
