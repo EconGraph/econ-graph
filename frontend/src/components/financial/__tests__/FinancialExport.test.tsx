@@ -134,7 +134,7 @@ describe('FinancialExport', () => {
       />
     );
 
-    expect(screen.getByText('Include Financial Statements')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Include Financial Statements/i })).toBeInTheDocument();
     expect(screen.getByText('Include Ratios')).toBeInTheDocument();
     expect(screen.getByText('Include Charts')).toBeInTheDocument();
   });
@@ -178,7 +178,7 @@ describe('FinancialExport', () => {
       />
     );
 
-    const startDateInput = screen.getByDisplayValue('2023-01-01');
+    const startDateInput = screen.getByLabelText(/Start Date/i);
     fireEvent.change(startDateInput, { target: { value: '2023-06-01' } });
 
     expect(startDateInput).toHaveValue('2023-06-01');

@@ -167,11 +167,43 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
     fiscalQuarter: '4',
     periodEndDate: 'Dec 31, 2023',
     lineItems: [
-      { id: 'li-assets-total', name: 'Total Assets', standardLabel: 'Total Assets', value: 352755000000, unit: 'USD' },
-      { id: 'li-liabilities-total', name: 'Total Liabilities', standardLabel: 'Total Liabilities', value: 258549000000, unit: 'USD' },
-      { id: 'li-equity', name: "Stockholders' Equity", standardLabel: "Stockholders' Equity", value: 352760000000, unit: 'USD' },
-      { id: 'li-current-assets', name: 'Current Assets', standardLabel: 'Current Assets', value: null, unit: 'USD', parentConcept: 'Assets' },
-      { id: 'li-cash', name: 'Cash and Cash Equivalents', standardLabel: 'Cash and Cash Equivalents', value: 143570000000, unit: 'USD', parentConcept: 'Current Assets' },
+      {
+        id: 'li-assets-total',
+        name: 'Total Assets',
+        standardLabel: 'Total Assets',
+        value: 352755000000,
+        unit: 'USD',
+      },
+      {
+        id: 'li-liabilities-total',
+        name: 'Total Liabilities',
+        standardLabel: 'Total Liabilities',
+        value: 258549000000,
+        unit: 'USD',
+      },
+      {
+        id: 'li-equity',
+        name: "Stockholders' Equity",
+        standardLabel: "Stockholders' Equity",
+        value: 352760000000,
+        unit: 'USD',
+      },
+      {
+        id: 'li-current-assets',
+        name: 'Current Assets',
+        standardLabel: 'Current Assets',
+        value: null,
+        unit: 'USD',
+        parentConcept: 'Assets',
+      },
+      {
+        id: 'li-cash',
+        name: 'Cash and Cash Equivalents',
+        standardLabel: 'Cash and Cash Equivalents',
+        value: 143570000000,
+        unit: 'USD',
+        parentConcept: 'Current Assets',
+      },
     ],
   };
 
@@ -273,12 +305,14 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
               <CardTitle className='flex items-center space-x-2'>
                 <DollarSign className='h-5 w-5' />
                 <span>
-                  {(effectiveStatement as any).formType} - {(effectiveStatement as any).periodEndDate}
+                  {(effectiveStatement as any).formType} -{' '}
+                  {(effectiveStatement as any).periodEndDate}
                 </span>
               </CardTitle>
               <p className='text-sm text-muted-foreground mt-1'>
                 Fiscal Year {(effectiveStatement as any).fiscalYear}
-                {(effectiveStatement as any).fiscalQuarter && `, Q${(effectiveStatement as any).fiscalQuarter}`}
+                {(effectiveStatement as any).fiscalQuarter &&
+                  `, Q${(effectiveStatement as any).fiscalQuarter}`}
               </p>
             </div>
 
@@ -357,22 +391,23 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
                   </div>
                 )}
                 {/* Hierarchical Table Structure from GraphQL Data */}
-                {(effectiveStatement as any)?.lineItems && (effectiveStatement as any).lineItems.length > 0 && (
-                  <table className='w-full border-collapse'>
-                    <tbody>
-                      {(effectiveStatement as any).lineItems.map((item: any, index: number) => (
-                        <tr key={`table-${item.id || index}`} className='border-b'>
-                          <td className={`font-medium py-2 ${item.parentConcept ? 'pl-4' : ''}`}>
-                            {item.standardLabel}
-                          </td>
-                          <td className='text-right py-2'>
-                            {item.value ? `$${(item.value / 1000000000).toFixed(2)}B` : '-'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
+                {(effectiveStatement as any)?.lineItems &&
+                  (effectiveStatement as any).lineItems.length > 0 && (
+                    <table className='w-full border-collapse'>
+                      <tbody>
+                        {(effectiveStatement as any).lineItems.map((item: any, index: number) => (
+                          <tr key={`table-${item.id || index}`} className='border-b'>
+                            <td className={`font-medium py-2 ${item.parentConcept ? 'pl-4' : ''}`}>
+                              {item.standardLabel}
+                            </td>
+                            <td className='text-right py-2'>
+                              {item.value ? `$${(item.value / 1000000000).toFixed(2)}B` : '-'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
 
                 {/* Assets Section */}
                 {(!searchTerm || 'Assets'.toLowerCase().includes(searchTerm.toLowerCase())) && (
