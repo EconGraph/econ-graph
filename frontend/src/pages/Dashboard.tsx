@@ -304,14 +304,14 @@ const Dashboard: React.FC = () => {
                   <ListItemText
                     primary={update.title}
                     secondary={
-                      <Box>
-                        <Typography variant='body2' color='text.secondary'>
+                      <React.Fragment>
+                        <Typography variant='body2' color='text.secondary' component='div'>
                           {update.series}
                         </Typography>
-                        <Typography variant='caption' color='text.secondary'>
+                        <Typography variant='caption' color='text.secondary' component='div'>
                           {update.source} • {new Date(update.date).toLocaleDateString()}
                         </Typography>
-                      </Box>
+                      </React.Fragment>
                     }
                   />
                 </ListItem>
