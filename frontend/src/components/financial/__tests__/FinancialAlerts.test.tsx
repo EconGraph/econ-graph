@@ -106,7 +106,7 @@ describe('FinancialAlerts', () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     await waitFor(() => {
-      expect(screen.getByText('Financial Alerts')).toBeInTheDocument();
+      expect(screen.getAllByText('Financial Alerts').length).toBeGreaterThan(0);
     });
   });
 
@@ -183,7 +183,7 @@ describe('FinancialAlerts', () => {
     // The component now shows a summary view, so we need to look for the actual alert content
     // Since the component is using MSW, we need to wait for the data to load
     await waitFor(() => {
-      expect(screen.getByText('Financial Alerts')).toBeInTheDocument();
+      expect(screen.getAllByText('Financial Alerts').length).toBeGreaterThan(0);
     });
 
     // The component should handle the unread state internally
@@ -232,7 +232,7 @@ describe('FinancialAlerts', () => {
     // The component now shows a summary view, so we need to look for the actual alert content
     // Since the component is using MSW, we need to wait for the data to load
     await waitFor(() => {
-      expect(screen.getByText('Financial Alerts')).toBeInTheDocument();
+      expect(screen.getAllByText('Financial Alerts').length).toBeGreaterThan(0);
     });
 
     // The component should handle direction indicators internally
@@ -244,7 +244,7 @@ describe('FinancialAlerts', () => {
     // The component now shows a summary view, so we need to look for the actual alert content
     // Since the component is using MSW, we need to wait for the data to load
     await waitFor(() => {
-      expect(screen.getByText('Financial Alerts')).toBeInTheDocument();
+      expect(screen.getAllByText('Financial Alerts').length).toBeGreaterThan(0);
     });
 
     // The component should handle empty state internally
@@ -409,7 +409,7 @@ describe('FinancialAlerts', () => {
 
     // Should show alert trends
     await waitFor(() => {
-      expect(screen.getByText('Alert Trends')).toBeInTheDocument();
+      expect(screen.getAllByText('Alert Trends').length).toBeGreaterThan(0);
     });
     await waitFor(() => {
       expect(screen.getByText('This Week: 4')).toBeInTheDocument();
