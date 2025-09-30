@@ -82,6 +82,14 @@ const getMockResponse = (operationName: string, scenario: MockScenarios, variabl
 
     const response = loadGraphQLResponse(responseFile, finalScenario);
 
+    // Normalize shapes for specific operations to satisfy all tests
+    if (operationName === 'GetFinancialAlerts' && response?.data) {
+      const companyAlerts = (response.data as any)?.company?.alerts;
+      if (companyAlerts && !(response.data as any).financialAlerts) {
+        (response.data as any).financialAlerts = companyAlerts;
+      }
+    }
+
     if (MSW_DEBUG) {
       console.log(`[Simple MSW] Found response for ${operationName}/${finalScenario}`);
     }

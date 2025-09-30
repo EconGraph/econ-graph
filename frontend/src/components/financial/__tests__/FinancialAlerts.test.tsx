@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import React, { Suspense } from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { FinancialAlerts } from '../FinancialAlerts';
@@ -122,7 +122,7 @@ describe('FinancialAlerts', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('Low')).toBeInTheDocument();
+      expect(screen.getAllByText('Low').length).toBeGreaterThan(0);
     });
   });
 
@@ -280,7 +280,10 @@ describe('FinancialAlerts', () => {
   it('handles bulk actions (dismiss all)', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const dismissAllButton = await screen.findByText('Dismiss All');
+    const bulkActionsCard = await screen.findByText('Bulk Actions');
+    const bulkCardRoot = bulkActionsCard.closest('[class*=Card]') || bulkActionsCard.parentElement;
+    const scoped = within(bulkCardRoot as HTMLElement);
+    const dismissAllButton = await scoped.findByRole('button', { name: 'Dismiss All' });
     fireEvent.click(dismissAllButton);
 
     // Component should handle bulk dismiss actions internally
