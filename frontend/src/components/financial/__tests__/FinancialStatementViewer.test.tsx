@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import React, { Suspense } from 'react';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { FinancialStatementViewer } from '../FinancialStatementViewer';
@@ -156,13 +156,19 @@ describe('FinancialStatementViewer', () => {
     });
 
     const metadataHeading = screen.getByRole('heading', { name: 'Statement Metadata' });
-    const metadataCard = metadataHeading.closest('[class*=Card]') || metadataHeading.parentElement?.parentElement || metadataHeading.parentElement || document.body;
+    const metadataCard =
+      metadataHeading.closest('[class*=Card]') ||
+      metadataHeading.parentElement?.parentElement ||
+      metadataHeading.parentElement ||
+      undefined;
 
+    expect(metadataCard).toBeTruthy();
+    const scoped = within(metadataCard as HTMLElement);
     // Scoped assertions within the metadata section to avoid duplicates elsewhere on the page
-    expect(within(metadataCard!).getByText('10-K')).toBeInTheDocument();
-    expect(within(metadataCard!).getByText('2023')).toBeInTheDocument();
-    expect(within(metadataCard!).getByText('Q4')).toBeInTheDocument();
-    expect(within(metadataCard!).getByText(/Dec 31, 2023/i)).toBeInTheDocument();
+    expect(scoped.getByText('10-K')).toBeInTheDocument();
+    expect(scoped.getByText('2023')).toBeInTheDocument();
+    expect(scoped.getByText('Q4')).toBeInTheDocument();
+    expect(scoped.getByText(/Dec 31, 2023/i)).toBeInTheDocument();
   });
 
   it('handles line item filtering', async () => {
