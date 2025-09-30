@@ -61,7 +61,23 @@ const server = setupServer(
       console.log('🔧 MSW returning annotationsForSeries:', mockAnnotations);
       return HttpResponse.json({
         data: {
-          annotationsForSeries: mockAnnotations,
+          annotationsForSeries: mockAnnotations.map(annotation => ({
+            id: annotation.id,
+            user_id: annotation.userId,
+            series_id: annotation.seriesId,
+            chart_id: annotation.chartId,
+            annotation_date: annotation.annotationDate,
+            annotation_value: annotation.annotationValue,
+            title: annotation.title,
+            description: annotation.description,
+            color: annotation.color,
+            annotation_type: annotation.annotationType,
+            is_visible: annotation.isVisible,
+            is_pinned: annotation.isPinned,
+            tags: annotation.tags,
+            created_at: annotation.createdAt,
+            updated_at: annotation.updatedAt,
+          })),
         },
       });
     }
@@ -73,12 +89,12 @@ const server = setupServer(
           commentsForAnnotation: [
             {
               id: 'comment-1',
-              annotationId: 'annotation-1',
-              userId: 'user-1',
+              annotation_id: 'annotation-1',
+              user_id: 'user-1',
               content: 'Great analysis!',
-              isResolved: false,
-              createdAt: '2024-01-15T14:30:00Z',
-              updatedAt: '2024-01-15T14:30:00Z',
+              is_resolved: false,
+              created_at: '2024-01-15T14:30:00Z',
+              updated_at: '2024-01-15T14:30:00Z',
             },
           ],
         },
@@ -92,12 +108,12 @@ const server = setupServer(
           chartCollaborators: [
             {
               id: 'collab-1',
-              chartId: 'chart-1',
-              userId: 'user-1',
+              chart_id: 'chart-1',
+              user_id: 'user-1',
               role: 'owner',
-              lastAccessedAt: '2024-01-15T14:30:00Z',
-              createdAt: '2024-01-15T14:30:00Z',
-              updatedAt: '2024-01-15T14:30:00Z',
+              last_accessed_at: '2024-01-15T14:30:00Z',
+              created_at: '2024-01-15T14:30:00Z',
+              updated_at: '2024-01-15T14:30:00Z',
             },
           ],
         },

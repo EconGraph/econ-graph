@@ -261,20 +261,20 @@ export const QUERIES = {
     query GetAnnotationsForSeries($seriesId: String!, $userId: ID) {
       annotationsForSeries(seriesId: $seriesId, userId: $userId) {
         id
-        userId
-        seriesId
-        chartId
-        annotationDate
-        annotationValue
+        user_id
+        series_id
+        chart_id
+        annotation_date
+        annotation_value
         title
         description
         color
-        annotationType
-        isVisible
-        isPinned
+        annotation_type
+        is_visible
+        is_pinned
         tags
-        createdAt
-        updatedAt
+        created_at
+        updated_at
       }
     }
   `,
@@ -283,12 +283,12 @@ export const QUERIES = {
     query GetCommentsForAnnotation($annotationId: ID!) {
       commentsForAnnotation(annotationId: $annotationId) {
         id
-        annotationId
-        userId
+        annotation_id
+        user_id
         content
-        isResolved
-        createdAt
-        updatedAt
+        is_resolved
+        created_at
+        updated_at
       }
     }
   `,
@@ -297,13 +297,13 @@ export const QUERIES = {
     query GetChartCollaborators($chartId: ID!) {
       chartCollaborators(chartId: $chartId) {
         id
-        chartId
-        userId
-        invitedBy
+        chart_id
+        user_id
+        invited_by
         role
         permissions
-        createdAt
-        lastAccessedAt
+        created_at
+        last_accessed_at
       }
     }
   `,
@@ -555,41 +555,41 @@ export interface SearchSeriesResponse {
 // Collaboration types
 export interface ChartAnnotationType {
   id: string;
-  userId: string;
-  seriesId?: string;
-  chartId?: string;
-  annotationDate: string;
-  annotationValue?: number;
+  user_id: string;
+  series_id?: string;
+  chart_id?: string;
+  annotation_date: string;
+  annotation_value?: number;
   title: string;
   description?: string;
   color?: string;
-  annotationType?: string;
-  isVisible?: boolean;
-  isPinned?: boolean;
+  annotation_type?: string;
+  is_visible?: boolean;
+  is_pinned?: boolean;
   tags?: string[];
-  createdAt?: string;
-  updatedAt?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface AnnotationCommentType {
   id: string;
-  annotationId: string;
-  userId: string;
+  annotation_id: string;
+  user_id: string;
   content: string;
-  isResolved?: boolean;
-  createdAt?: string;
-  updatedAt?: string;
+  is_resolved?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface ChartCollaboratorType {
   id: string;
-  chartId: string;
-  userId: string;
-  invitedBy?: string;
+  chart_id: string;
+  user_id: string;
+  invited_by?: string;
   role?: string;
   permissions?: string;
-  createdAt?: string;
-  lastAccessedAt?: string;
+  created_at?: string;
+  last_accessed_at?: string;
 }
 
 export interface UserType {
