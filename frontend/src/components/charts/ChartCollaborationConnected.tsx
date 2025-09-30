@@ -4,7 +4,7 @@
  * This provides Bloomberg Terminal-level collaboration for institutional users.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -107,6 +107,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
     toggleAnnotationVisibility,
     toggleAnnotationPin,
     loadComments,
+    loadCollaborators,
     getUserById,
     getCommentsForAnnotation,
   } = useCollaboration({
@@ -131,6 +132,13 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
     message: '',
     severity: 'success',
   });
+
+  // Load collaborators when component mounts
+  useEffect(() => {
+    if (chartId) {
+      loadCollaborators();
+    }
+  }, [chartId, loadCollaborators]);
 
   // New annotation form state
   const [annotationForm, setAnnotationForm] = useState({
@@ -330,7 +338,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
           )}
 
           {/* Collaborators */}
-          {chartId && (
+          {chartId && !loading && (
             <Box sx={{ mb: 3 }}>
               <Box
                 sx={{
