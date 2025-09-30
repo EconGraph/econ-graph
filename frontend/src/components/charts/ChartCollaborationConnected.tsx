@@ -4,7 +4,7 @@
  * This provides Bloomberg Terminal-level collaboration for institutional users.
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, Suspense } from 'react';
 import {
   Box,
   Typography,
@@ -108,6 +108,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
     toggleAnnotationPin,
     loadComments,
     loadCollaborators,
+    loadUsers,
     getUserById,
     getCommentsForAnnotation,
   } = useCollaboration({
@@ -133,12 +134,17 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
     severity: 'success',
   });
 
-  // Load collaborators when component mounts
+  // Load collaborators and users when component mounts
   useEffect(() => {
     if (chartId) {
       loadCollaborators();
+      // Load users after collaborators are loaded
+      if (collaborators.length > 0) {
+        const userIds = collaborators.map(c => c.user_id);
+        loadUsers(userIds);
+      }
     }
-  }, [chartId, loadCollaborators]);
+  }, [chartId, loadCollaborators, loadUsers, collaborators]);
 
   // New annotation form state
   const [annotationForm, setAnnotationForm] = useState({
@@ -266,11 +272,11 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
   const filteredAnnotations = annotations.filter(annotation => {
     switch (filterBy) {
       case 'mine':
-        return annotation.userId === currentUser?.id;
+        return annotation.user_id === currentUser?.id;
       case 'pinned':
-        return annotation.isPinned;
+        return annotation.is_pinned;
       default:
-        return annotation.isVisible !== false;
+        return annotation.is_visible !== false;
     }
   });
 
@@ -280,7 +286,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
   }, 0);
 
   const activeCollaborators = collaborators.filter(
-    c => users[c.userId] && Date.now() - new Date(c.lastAccessedAt || 0).getTime() < 300000 // 5 minutes
+    c => users[c.user_id] && Date.now() - new Date(c.last_accessed_at || 0).getTime() < 300000 // 5 minutes
   );
 
   if (!currentUser) {
@@ -362,7 +368,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
               </Box>
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                 {activeCollaborators.slice(0, 8).map(collaborator => {
-                  const user = getUserById(collaborator.userId);
+                  const user = getUserById(collaborator.user_id);
                   return (
                     <Tooltip
                       key={collaborator.id}
@@ -422,10 +428,10 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
             >
               <MenuItem value='all'>All Annotations ({annotations.length})</MenuItem>
               <MenuItem value='mine'>
-                My Annotations ({annotations.filter(a => a.userId === currentUser.id).length})
+                My Annotations ({annotations.filter(a => a.user_id === currentUser.id).length})
               </MenuItem>
               <MenuItem value='pinned'>
-                Pinned ({annotations.filter(a => a.isPinned).length})
+                Pinned ({annotations.filter(a => a.is_pinned).length})
               </MenuItem>
             </Select>
           </FormControl>
@@ -445,9 +451,9 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
           <Box sx={{ flexGrow: 1, overflow: 'auto' }}>
             <List>
               {filteredAnnotations.map(annotation => {
-                const author = getUserById(annotation.userId);
+                const author = getUserById(annotation.user_id);
                 const annotationType = ANNOTATION_TYPES.find(
-                  t => t.value === annotation.annotationType
+                  t => t.value === annotation.annotation_type
                 );
                 const commentCount = getCommentsForAnnotation(annotation.id)?.length || 0;
 
@@ -459,7 +465,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                       borderColor: 'divider',
                       borderRadius: 1,
                       mb: 1,
-                      bgcolor: annotation.isPinned ? 'action.hover' : 'background.paper',
+                      bgcolor: annotation.is_pinned ? 'action.hover' : 'background.paper',
                       cursor: 'pointer',
                     }}
                     onClick={() => handleAnnotationSelect(annotation)}
@@ -483,16 +489,16 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                           <Typography variant='subtitle2' noWrap>
                             {annotation.title}
                           </Typography>
-                          {annotation.isPinned && <PinIcon sx={{ fontSize: 16 }} />}
-                          {!annotation.isVisible && <VisibilityOffIcon sx={{ fontSize: 16 }} />}
+                          {annotation.is_pinned && <PinIcon sx={{ fontSize: 16 }} />}
+                          {!annotation.is_visible && <VisibilityOffIcon sx={{ fontSize: 16 }} />}
                         </Box>
                       }
                       secondary={
                         <Box>
                           <Typography variant='caption' color='text.secondary'>
                             {author?.name || 'Loading...'} •{' '}
-                            {annotation.createdAt
-                              ? format(new Date(annotation.createdAt), 'MMM d, h:mm a')
+                            {annotation.created_at
+                              ? format(new Date(annotation.created_at), 'MMM d, h:mm a')
                               : 'Just now'}
                           </Typography>
                           <br />
@@ -529,7 +535,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                             toggleAnnotationVisibility(annotation.id);
                           }}
                         >
-                          {annotation.isVisible ? <VisibilityIcon /> : <VisibilityOffIcon />}
+                          {annotation.is_visible ? <VisibilityIcon /> : <VisibilityOffIcon />}
                         </IconButton>
 
                         <IconButton
@@ -538,12 +544,12 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                             e.stopPropagation();
                             toggleAnnotationPin(annotation.id);
                           }}
-                          color={annotation.isPinned ? 'primary' : 'default'}
+                          color={annotation.is_pinned ? 'primary' : 'default'}
                         >
                           <PinIcon />
                         </IconButton>
 
-                        {annotation.userId === currentUser.id && (
+                        {annotation.user_id === currentUser.id && (
                           <IconButton
                             size='small'
                             onClick={e => {
@@ -719,7 +725,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
               {(getCommentsForAnnotation(selectedAnnotation.id)?.length || 0) > 0 && (
                 <List sx={{ mb: 2 }}>
                   {(getCommentsForAnnotation(selectedAnnotation.id) || []).map(comment => {
-                    const author = getUserById(comment.userId);
+                    const author = getUserById(comment.user_id);
                     return (
                       <ListItem key={comment.id} alignItems='flex-start'>
                         <ListItemAvatar>
@@ -729,12 +735,19 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                           primary={author?.name || 'Loading...'}
                           secondary={
                             <Box>
-                              <Box component="span" sx={{ display: 'block', mt: 0.5 }}>
+                              <Box component='span' sx={{ display: 'block', mt: 0.5 }}>
                                 {comment.content}
                               </Box>
-                              <Box component="span" sx={{ display: 'block', fontSize: '0.75rem', color: 'text.secondary' }}>
-                                {comment.createdAt
-                                  ? format(new Date(comment.createdAt), 'MMM d, h:mm a')
+                              <Box
+                                component='span'
+                                sx={{
+                                  display: 'block',
+                                  fontSize: '0.75rem',
+                                  color: 'text.secondary',
+                                }}
+                              >
+                                {comment.created_at
+                                  ? format(new Date(comment.created_at), 'MMM d, h:mm a')
                                   : 'Just now'}
                               </Box>
                             </Box>

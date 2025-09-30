@@ -9,7 +9,7 @@
         "role": "owner",
         "permissions": "{\"view\": true, \"annotate\": true, \"edit\": true}",
         "created_at": "2024-01-15T14:30:00Z",
-        "last_accessed_at": "2024-01-15T14:30:00Z"
+        "last_accessed_at": "2024-12-19T14:30:00Z"
       },
       {
         "id": "collab-2",
@@ -19,7 +19,7 @@
         "role": "editor",
         "permissions": "{\"view\": true, \"annotate\": true, \"edit\": true}",
         "created_at": "2024-01-15T14:30:00Z",
-        "last_accessed_at": "2024-01-15T14:30:00Z"
+        "last_accessed_at": "2024-12-19T14:30:00Z"
       }
     ]
   }
