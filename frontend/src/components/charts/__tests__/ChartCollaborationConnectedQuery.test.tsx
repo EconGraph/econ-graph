@@ -52,7 +52,7 @@ describe('ChartCollaborationConnectedQuery', () => {
     });
 
     // Mock GraphQL responses
-    mockExecuteGraphQL.mockImplementation(async ({ query, variables }) => {
+    mockExecuteGraphQL.mockImplementation(async ({ query, variables }: { query: string; variables?: any }) => {
       if (query.includes('GetChartCollaborators')) {
         return {
           data: {

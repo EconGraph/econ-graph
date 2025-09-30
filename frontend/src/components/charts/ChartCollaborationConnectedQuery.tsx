@@ -68,6 +68,7 @@ interface Annotation {
   is_pinned: boolean;
   is_visible: boolean;
   type?: string;
+  comments?: Comment[];
 }
 
 interface Comment {

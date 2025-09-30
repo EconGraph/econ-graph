@@ -155,7 +155,7 @@ import { Groups as CollaborationIcon, Comment as CommentIcon } from '@mui/icons-
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import ChartCollaborationConnected from './ChartCollaborationConnected';
+import { ChartCollaborationConnectedQuery } from './ChartCollaborationConnectedQuery';
 import { ChartAnnotationType } from '../../utils/graphql';
 
 ChartJS.register(
@@ -786,12 +786,10 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
 
       {/* Collaboration Panel */}
       {collaborationEnabled && (
-        <ChartCollaborationConnected
-          seriesId={seriesId}
+        <ChartCollaborationConnectedQuery
           chartId={chartId}
           isOpen={collaborationOpen}
           onToggle={() => setCollaborationOpen(!collaborationOpen)}
-          onAnnotationClick={handleAnnotationClick}
         />
       )}
 
