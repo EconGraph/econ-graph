@@ -66,6 +66,7 @@
       {
         "id": "1",
         "type": "ratio_threshold",
+        "alertType": "ratio_threshold",
         "severity": "high",
         "title": "Current Ratio Below Threshold",
         "description": "Current ratio of 0.95 is below the recommended threshold of 1.0",
@@ -74,12 +75,16 @@
         "direction": "decline",
         "isActive": true,
         "isRead": false,
+        "isResolved": false,
         "createdAt": "2024-01-15T10:00:00Z",
+        "updatedAt": "2024-01-15T10:00:00Z",
+        "resolvedAt": null,
         "expiresAt": "2024-01-25T23:59:59Z"
       },
       {
         "id": "2",
         "type": "filing_deadline",
+        "alertType": "filing_deadline",
         "severity": "medium",
         "title": "10-Q Filing Due Soon",
         "description": "Quarterly report (10-Q) is due within 5 business days",
@@ -88,12 +93,16 @@
         "direction": "change",
         "isActive": true,
         "isRead": false,
+        "isResolved": false,
         "createdAt": "2024-01-12T14:00:00Z",
+        "updatedAt": "2024-01-12T14:00:00Z",
+        "resolvedAt": null,
         "expiresAt": "2024-01-25T23:59:59Z"
       },
       {
         "id": "3",
         "type": "data_quality",
+        "alertType": "data_quality",
         "severity": "low",
         "title": "Data Quality Warning",
         "description": "Some financial data has low confidence scores",
@@ -102,12 +111,16 @@
         "direction": "stable",
         "isActive": true,
         "isRead": true,
+        "isResolved": false,
         "createdAt": "2024-01-10T09:00:00Z",
+        "updatedAt": "2024-01-10T09:00:00Z",
+        "resolvedAt": null,
         "expiresAt": "2024-01-20T23:59:59Z"
       },
       {
         "id": "4",
         "type": "benchmark_change",
+        "alertType": "benchmark_change",
         "severity": "medium",
         "title": "Industry Benchmark Updated",
         "description": "Industry benchmarks have been updated with latest data",
@@ -116,7 +129,10 @@
         "direction": "improvement",
         "isActive": false,
         "isRead": true,
+        "isResolved": false,
         "createdAt": "2024-01-08T16:00:00Z",
+        "updatedAt": "2024-01-08T16:00:00Z",
+        "resolvedAt": null,
         "expiresAt": "2024-01-18T23:59:59Z"
       }
     ]
