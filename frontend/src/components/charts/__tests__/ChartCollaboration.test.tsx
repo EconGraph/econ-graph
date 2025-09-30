@@ -534,8 +534,8 @@ describe('ChartCollaboration', () => {
       const user = userEvent.setup();
       renderChartCollaboration();
 
-      // Open comments for annotation with comments
-      const commentButtons = screen.getAllByTestId('CommentIcon');
+      // Use getByTestId for better performance when buttons don't have accessible names
+      const commentButtons = screen.getAllByTestId('comment-button');
       if (commentButtons.length > 1) {
         await user.click(commentButtons[1]); // Second annotation has comments
 

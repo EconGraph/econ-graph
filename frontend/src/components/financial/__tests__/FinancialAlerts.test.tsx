@@ -267,8 +267,9 @@ describe('FinancialAlerts', () => {
   it('handles bulk actions (mark all as read)', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const markAllButtons = await screen.findAllByText('Mark All as Read');
-    fireEvent.click(markAllButtons[0]); // Click the first one
+    // Use getByRole with name for better accessibility and performance
+    const markAllButton = await screen.findByRole('button', { name: /mark all as read/i });
+    fireEvent.click(markAllButton);
 
     // Component should handle bulk actions internally
   });
@@ -276,12 +277,12 @@ describe('FinancialAlerts', () => {
   it('handles bulk actions (dismiss all)', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    const dismissAllButtons = await screen.findAllByRole('button', { name: 'Dismiss All' });
-    expect(dismissAllButtons.length).toBeGreaterThan(0);
-    fireEvent.click(dismissAllButtons[0]);
+    // Use findByRole with name for better accessibility and performance
+    const dismissAllButton = await screen.findByRole('button', { name: /dismiss all/i });
+    fireEvent.click(dismissAllButton);
 
     // Component should handle bulk dismiss actions internally
-  }, 20000); // Increase timeout further for this test
+  });
 
   it('shows alert search functionality', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });

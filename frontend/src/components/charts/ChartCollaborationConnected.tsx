@@ -558,7 +558,6 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                             }}
                             color='error'
                             aria-label={`Delete annotation: ${annotation.title}`}
-                            data-testid={`delete-annotation-${annotation.id}`}
                           >
                             <DeleteIcon />
                           </IconButton>
@@ -826,7 +825,7 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShareDialog(false)} data-testid='cancel-share-button'>
+          <Button onClick={() => setShareDialog(false)}>
             Cancel
           </Button>
           <Button

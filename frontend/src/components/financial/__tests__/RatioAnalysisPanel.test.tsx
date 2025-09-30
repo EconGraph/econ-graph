@@ -261,13 +261,9 @@ describe('RatioAnalysisPanel', () => {
         expect(screen.getByText('Return on Equity')).toBeInTheDocument();
       });
 
-      // The benchmark comparison is triggered by clicking the Target icon button
-      // Since the detailed table isn't rendered by default, we'll test the summary card interaction
-      const targetButtons = screen.getAllByRole('button');
-      const benchmarkButton = targetButtons.find(button =>
-        button.querySelector('svg[class*="lucide-target"]')
-      );
-
+      // Use getByRole with aria-label for better accessibility and performance
+      const benchmarkButton = screen.queryByRole('button', { name: /benchmark|target/i });
+      
       if (benchmarkButton) {
         fireEvent.click(benchmarkButton);
 
