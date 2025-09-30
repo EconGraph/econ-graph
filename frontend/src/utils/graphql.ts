@@ -308,6 +308,24 @@ export const QUERIES = {
     }
   `,
 
+  GET_ANNOTATIONS: `
+    query GetAnnotations($chartId: ID!) {
+      annotationsForChart(chartId: $chartId) {
+        id
+        user_id
+        chart_id
+        title
+        description
+        content
+        annotation_type
+        is_visible
+        is_pinned
+        created_at
+        updated_at
+      }
+    }
+  `,
+
   GET_USER: `
     query GetUser($userId: ID!) {
       user(userId: $userId) {

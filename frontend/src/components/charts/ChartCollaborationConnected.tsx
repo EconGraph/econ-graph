@@ -4,7 +4,7 @@
  * This provides Bloomberg Terminal-level collaboration for institutional users.
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, Suspense } from 'react';
 import {
   Box,
   Typography,
@@ -134,17 +134,23 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
     severity: 'success',
   });
 
-  // Load collaborators and users when component mounts
+  // Load collaborators when component mounts
   useEffect(() => {
     if (chartId) {
       loadCollaborators();
-      // Load users after collaborators are loaded
-      if (collaborators.length > 0) {
-        const userIds = collaborators.map(c => c.user_id);
-        loadUsers(userIds);
+    }
+  }, [chartId]); // Remove loadCollaborators from dependencies to prevent infinite loop
+
+  // Load users when collaborators change - but only if we have collaborators and haven't loaded users yet
+  useEffect(() => {
+    if (collaborators.length > 0) {
+      const userIds = collaborators.map(c => c.user_id);
+      const missingUsers = userIds.filter(id => !users[id]);
+      if (missingUsers.length > 0) {
+        loadUsers(missingUsers);
       }
     }
-  }, [chartId, loadCollaborators, loadUsers, collaborators]);
+  }, [collaborators, loadUsers, users]);
 
   // New annotation form state
   const [annotationForm, setAnnotationForm] = useState({

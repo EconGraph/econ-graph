@@ -676,7 +676,7 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Chart Sharing', () => {
     it('should open share dialog when share button is clicked', async () => {
-      renderChartCollaborationConnected({ chartId: 'chart-1' });
+      renderChartCollaborationConnected({ chartId: '550e8400-e29b-41d4-a716-446655440000' });
 
       const shareButton = screen.getByTestId('share-chart-button');
       fireEvent.click(shareButton);
@@ -687,7 +687,7 @@ describe('ChartCollaborationConnected', () => {
     });
 
     it('should share chart with valid data', async () => {
-      renderChartCollaborationConnected({ chartId: 'chart-1' });
+      renderChartCollaborationConnected({ chartId: '550e8400-e29b-41d4-a716-446655440000' });
 
       // Open share dialog
       const shareButton = screen.getByTestId('share-chart-button');
@@ -716,7 +716,7 @@ describe('ChartCollaborationConnected', () => {
     });
 
     it('should show error when sharing without chart ID', async () => {
-      renderChartCollaborationConnected({ chartId: 'chart-1' });
+      renderChartCollaborationConnected({ chartId: '550e8400-e29b-41d4-a716-446655440000' });
 
       // Open share dialog
       const shareButton = screen.getByTestId('share-chart-button');

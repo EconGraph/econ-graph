@@ -140,6 +140,8 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
         return;
       }
 
+      setState(prev => ({ ...prev, loading: true, error: null }));
+
       try {
         const response = await executeGraphQL<ChartCollaboratorsResponse>({
           query: QUERIES.GET_CHART_COLLABORATORS,
@@ -151,14 +153,21 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
           setState(prev => ({
             ...prev,
             collaborators: data.chartCollaborators,
+            loading: false,
           }));
 
           // Load user details for collaborators
           const userIds = [...new Set(data.chartCollaborators.map(c => c.user_id))];
           await loadUsers(userIds);
+        } else {
+          setState(prev => ({ ...prev, loading: false }));
         }
       } catch (error) {
-        console.error('Failed to load collaborators:', error);
+        setState(prev => ({
+          ...prev,
+          loading: false,
+          error: error instanceof Error ? error.message : 'Failed to load collaborators',
+        }));
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
