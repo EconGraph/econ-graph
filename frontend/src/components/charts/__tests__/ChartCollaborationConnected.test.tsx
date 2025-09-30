@@ -17,6 +17,7 @@ import { http, HttpResponse } from 'msw';
 import ChartCollaborationConnected from '../ChartCollaborationConnected';
 import { ChartAnnotationType } from '../../../utils/graphql';
 import { useCollaboration } from '../../../hooks/useCollaboration';
+import { loadGraphQLResponse } from '../../../test-utils/mocks/graphql-response-loader';
 
 // Mock the useAuth hook
 const mockUseAuth = vi.fn();
@@ -58,66 +59,23 @@ const server = setupServer(
 
     // Mock annotations for series query
     if (query.includes('annotationsForSeries')) {
-      console.log('🔧 MSW returning annotationsForSeries:', mockAnnotations);
-      return HttpResponse.json({
-        data: {
-          annotationsForSeries: mockAnnotations.map(annotation => ({
-            id: annotation.id,
-            user_id: annotation.userId,
-            series_id: annotation.seriesId,
-            chart_id: annotation.chartId,
-            annotation_date: annotation.annotationDate,
-            annotation_value: annotation.annotationValue,
-            title: annotation.title,
-            description: annotation.description,
-            color: annotation.color,
-            annotation_type: annotation.annotationType,
-            is_visible: annotation.isVisible,
-            is_pinned: annotation.isPinned,
-            tags: annotation.tags,
-            created_at: annotation.createdAt,
-            updated_at: annotation.updatedAt,
-          })),
-        },
-      });
+      console.log('🔧 MSW returning annotationsForSeries from JSON file');
+      const response = loadGraphQLResponse('get_annotations_for_series', 'success');
+      return HttpResponse.json(response);
     }
 
     // Mock comments for annotation query
     if (query.includes('commentsForAnnotation')) {
-      return HttpResponse.json({
-        data: {
-          commentsForAnnotation: [
-            {
-              id: 'comment-1',
-              annotation_id: 'annotation-1',
-              user_id: 'user-1',
-              content: 'Great analysis!',
-              is_resolved: false,
-              created_at: '2024-01-15T14:30:00Z',
-              updated_at: '2024-01-15T14:30:00Z',
-            },
-          ],
-        },
-      });
+      console.log('🔧 MSW returning commentsForAnnotation from JSON file');
+      const response = loadGraphQLResponse('get_comments_for_annotation', 'success');
+      return HttpResponse.json(response);
     }
 
     // Mock chart collaborators query
     if (query.includes('chartCollaborators')) {
-      return HttpResponse.json({
-        data: {
-          chartCollaborators: [
-            {
-              id: 'collab-1',
-              chart_id: 'chart-1',
-              user_id: 'user-1',
-              role: 'owner',
-              last_accessed_at: '2024-01-15T14:30:00Z',
-              created_at: '2024-01-15T14:30:00Z',
-              updated_at: '2024-01-15T14:30:00Z',
-            },
-          ],
-        },
-      });
+      console.log('🔧 MSW returning chartCollaborators from JSON file');
+      const response = loadGraphQLResponse('get_chart_collaborators', 'success');
+      return HttpResponse.json(response);
     }
 
     // Mock user query
@@ -142,6 +100,59 @@ beforeAll(() => {
   server.listen({ onUnhandledRequest: 'warn' });
 });
 
+// Reset handlers before each test
+beforeEach(() => {
+  server.resetHandlers();
+  vi.clearAllMocks();
+  mockUseAuth.mockReturnValue({ user: mockUser });
+  
+  // Re-add the handlers after reset
+  server.use(
+    http.post('/graphql', async ({ request }) => {
+      const body = await request.json() as { query: string; variables?: any };
+      const { query, variables } = body;
+      
+      console.log('🔧 MSW intercepted GraphQL request:', { query: query.substring(0, 100) + '...', variables });
+
+      // Mock annotations for series query
+      if (query.includes('annotationsForSeries')) {
+        console.log('🔧 MSW returning annotationsForSeries from JSON file');
+        const response = loadGraphQLResponse('get_annotations_for_series', 'success');
+        return HttpResponse.json(response);
+      }
+
+      // Mock comments for annotation query
+      if (query.includes('commentsForAnnotation')) {
+        console.log('🔧 MSW returning commentsForAnnotation from JSON file');
+        const response = loadGraphQLResponse('get_comments_for_annotation', 'success');
+        return HttpResponse.json(response);
+      }
+
+      // Mock chart collaborators query
+      if (query.includes('chartCollaborators')) {
+        console.log('🔧 MSW returning chartCollaborators from JSON file');
+        const response = loadGraphQLResponse('get_chart_collaborators', 'success');
+        return HttpResponse.json(response);
+      }
+
+      // Mock user query
+      if (query.includes('user')) {
+        return HttpResponse.json({
+          data: {
+            user: mockUser,
+          },
+        });
+      }
+
+      // Default response
+      return HttpResponse.json({
+        data: null,
+        errors: [{ message: 'Unhandled GraphQL query' }],
+      });
+    })
+  );
+});
+
 // Clean up after each test
 afterAll(() => {
   server.close();
@@ -157,61 +168,7 @@ const mockUser = {
   avatarUrl: 'https://example.com/avatar.jpg',
 };
 
-const mockAnnotations: ChartAnnotationType[] = [
-  {
-    id: 'annotation-1',
-    seriesId: 'series-1',
-    userId: 'user-1',
-    title: 'GDP Growth Analysis',
-    description: 'This indicates strong economic performance',
-    annotationDate: '2024-01-15',
-    annotationValue: 105.5,
-    annotationType: 'analysis',
-    color: '#f44336',
-    isVisible: true,
-    isPinned: false,
-    tags: ['gdp', 'growth'],
-    createdAt: '2024-01-15T14:30:00Z',
-    updatedAt: '2024-01-15T14:30:00Z',
-  },
-  {
-    id: 'annotation-2',
-    seriesId: 'series-1',
-    userId: 'user-2',
-    title: 'Market Correction',
-    description: 'This is a normal market cycle',
-    annotationDate: '2024-01-16',
-    annotationValue: 98.2,
-    annotationType: 'warning',
-    color: '#2196f3',
-    isVisible: true,
-    isPinned: true,
-    tags: ['market', 'correction'],
-    createdAt: '2024-01-16T10:15:00Z',
-    updatedAt: '2024-01-16T10:15:00Z',
-  },
-];
-
-const mockCollaborators = [
-  {
-    id: 'collab-1',
-    userId: 'user-1',
-    chartId: 'chart-1',
-    role: 'admin',
-    lastAccessedAt: new Date().toISOString(),
-    createdAt: '2024-01-15T10:00:00Z',
-    updatedAt: '2024-01-15T10:00:00Z',
-  },
-  {
-    id: 'collab-2',
-    userId: 'user-2',
-    chartId: 'chart-1',
-    role: 'editor',
-    lastAccessedAt: new Date(Date.now() - 60000).toISOString(), // 1 minute ago
-    createdAt: '2024-01-15T11:00:00Z',
-    updatedAt: '2024-01-15T11:00:00Z',
-  },
-];
+// Mock data is now loaded from JSON files via loadGraphQLResponse
 
 const mockUsers = {
   'user-1': {
@@ -239,33 +196,7 @@ const mockUsers = {
   },
   ];
 
-// Mock collaboration hook return value
-const mockCollaborationHook = {
-  annotations: mockAnnotations,
-  collaborators: mockCollaborators,
-  users: mockUsers,
-  loading: false,
-  error: null,
-  createAnnotation: vi.fn().mockResolvedValue(undefined),
-  addComment: vi.fn().mockResolvedValue(undefined),
-  shareChart: vi.fn().mockResolvedValue(undefined),
-  deleteAnnotation: vi.fn().mockResolvedValue(undefined),
-  toggleAnnotationVisibility: vi.fn().mockResolvedValue(undefined),
-  toggleAnnotationPin: vi.fn().mockResolvedValue(undefined),
-  loadComments: vi.fn().mockResolvedValue(undefined),
-  getUserById: vi.fn((id: string) => {
-    console.log('getUserById called with:', id);
-    const user = mockUsers[id as keyof typeof mockUsers];
-    console.log('getUserById returning:', user);
-    return user;
-  }),
-  getCommentsForAnnotation: vi.fn((annotationId) => {
-    console.log('getCommentsForAnnotation called with:', annotationId);
-    const comments = mockComments.filter(comment => comment.annotationId === annotationId);
-    console.log('getCommentsForAnnotation returning:', comments);
-    return comments;
-  }),
-};
+// Mock collaboration hook is no longer needed - using MSW for GraphQL mocking
 
 const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <StyledEngineProvider injectFirst>
@@ -439,10 +370,14 @@ describe('ChartCollaborationConnected', () => {
   });
 
   describe('Annotation Display', () => {
-    it('should display annotations with correct information', () => {
+    it('should display annotations with correct information', async () => {
       renderChartCollaborationConnected();
 
-      expect(screen.getByText('GDP Growth Analysis')).toBeInTheDocument();
+      // Wait for the annotations to load
+      await waitFor(() => {
+        expect(screen.getByText('GDP Growth Analysis')).toBeInTheDocument();
+      });
+      
       expect(screen.getByText('Market Correction')).toBeInTheDocument();
       expect(screen.getByText('This indicates strong economic performance')).toBeInTheDocument();
       expect(screen.getByText('This is a normal market cycle')).toBeInTheDocument();
@@ -872,7 +807,14 @@ describe('ChartCollaborationConnected', () => {
       const annotationItem = screen.getByText('GDP Growth Analysis');
       await user.click(annotationItem);
 
-      expect(mockOnAnnotationClick).toHaveBeenCalledWith(mockAnnotations[0]);
+      // Verify the annotation click was called with the expected data structure
+      expect(mockOnAnnotationClick).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'annotation-1',
+          title: 'GDP Growth Analysis',
+          user_id: 'user-1',
+        })
+      );
     });
 
     it('should load comments when annotation is selected', async () => {
