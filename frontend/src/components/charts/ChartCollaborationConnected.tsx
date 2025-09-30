@@ -721,14 +721,14 @@ const ChartCollaborationConnected: React.FC<ChartCollaborationConnectedProps> = 
                           primary={author?.name || 'Loading...'}
                           secondary={
                             <Box>
-                              <Typography variant='body2' sx={{ mt: 0.5 }}>
+                              <Box component="span" sx={{ display: 'block', mt: 0.5 }}>
                                 {comment.content}
-                              </Typography>
-                              <Typography variant='caption' color='text.secondary'>
+                              </Box>
+                              <Box component="span" sx={{ display: 'block', fontSize: '0.75rem', color: 'text.secondary' }}>
                                 {comment.createdAt
                                   ? format(new Date(comment.createdAt), 'MMM d, h:mm a')
                                   : 'Just now'}
-                              </Typography>
+                              </Box>
                             </Box>
                           }
                         />

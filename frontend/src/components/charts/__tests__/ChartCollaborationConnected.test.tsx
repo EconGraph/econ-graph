@@ -136,9 +136,17 @@ beforeEach(() => {
 
       // Mock user query
       if (query.includes('user')) {
+        const { userId } = variables || {};
+        const userData = userId === 'user-2' ? {
+          id: 'user-2',
+          name: 'John Doe',
+          email: 'john@example.com',
+          avatarUrl: 'https://example.com/john.jpg',
+        } : mockUser;
+        
         return HttpResponse.json({
           data: {
-            user: mockUser,
+            user: userData,
           },
         });
       }
@@ -244,7 +252,7 @@ describe('ChartCollaborationConnected', () => {
   const renderChartCollaborationConnected = (props = {}) => {
     const defaultProps = {
       seriesId: 'series-1',
-      chartId: 'chart-1',
+      chartId: '550e8400-e29b-41d4-a716-446655440000', // Valid UUID format
       isOpen: true,
       onToggle: vi.fn(),
       onAnnotationClick: vi.fn(),
@@ -279,21 +287,25 @@ describe('ChartCollaborationConnected', () => {
       });
     });
 
-    it('should display active collaborators', () => {
+    it('should display active collaborators', async () => {
       renderChartCollaborationConnected();
 
-      expect(screen.getByText('Active Collaborators (2)')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText('Active Collaborators (2)')).toBeInTheDocument();
+      });
       expect(screen.getByLabelText('Test User (admin)')).toBeInTheDocument();
       expect(screen.getByLabelText('John Doe (editor)')).toBeInTheDocument();
     });
 
-    it('should show total comment count', () => {
+    it('should show total comment count', async () => {
       renderChartCollaborationConnected();
 
       // Should show badge with total comments (1 comment for annotation-2)
       // The badge should be visible with the comment count
-      const commentBadge = screen.getByText('1');
-      expect(commentBadge).toBeInTheDocument();
+      await waitFor(() => {
+        const commentBadge = screen.getByText('1');
+        expect(commentBadge).toBeInTheDocument();
+      });
     });
   });
 
