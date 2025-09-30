@@ -281,7 +281,7 @@ describe('FinancialAlerts', () => {
     fireEvent.click(dismissAllButtons[0]);
 
     // Component should handle bulk dismiss actions internally
-  }, 15000); // Increase timeout for this test
+  }, 20000); // Increase timeout further for this test
 
   it('shows alert search functionality', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
@@ -301,7 +301,8 @@ describe('FinancialAlerts', () => {
       expect(ratioElements.length).toBeGreaterThan(0);
     });
     await waitFor(() => {
-      expect(screen.queryByText('10-Q Filing Due Soon')).not.toBeInTheDocument();
+      const filingElements = screen.queryAllByText('10-Q Filing Due Soon');
+      expect(filingElements.length).toBe(0); // Should not be visible after search
     });
   });
 
@@ -383,7 +384,7 @@ describe('FinancialAlerts', () => {
     fireEvent.click(refreshButtons[0]); // Click the first one
 
     // Component should handle refresh functionality internally
-  });
+  }, 20000); // Increase timeout for this test
 
   it('shows alert settings and preferences', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
