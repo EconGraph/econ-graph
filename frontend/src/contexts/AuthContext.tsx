@@ -50,26 +50,7 @@ const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 const FACEBOOK_APP_ID = import.meta.env.VITE_FACEBOOK_APP_ID || '';
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:9876';
 
-// Debug: Log the API URL being used
-console.log('🔧 Frontend API Configuration:');
-console.log('  - VITE_API_URL:', import.meta.env.VITE_API_URL);
-console.log('  - Final API_BASE_URL:', API_BASE_URL);
-
-// Debug: Test backend connectivity (only in development)
-if (import.meta.env.DEV && typeof window !== 'undefined') {
-  console.log('🔧 Testing backend connectivity...');
-  fetch(`${API_BASE_URL}/health`)
-    .then(response => {
-      console.log('  - Backend health check response:', response.status, response.statusText);
-      return response.text();
-    })
-    .then(data => {
-      console.log('  - Backend health check data:', data);
-    })
-    .catch(error => {
-      console.error('  - Backend health check failed:', error);
-    });
-}
+// Remove test-time connectivity checks and noisy logs from UI runtime
 
 // Facebook SDK initialization
 declare global {
