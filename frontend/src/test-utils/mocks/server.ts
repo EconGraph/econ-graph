@@ -230,6 +230,14 @@ function createHandlers() {
       });
     }),
 
+    // Some code paths call `${API_BASE_URL}/health` without the /api prefix
+    http.get('/health', () => {
+      return HttpResponse.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+      });
+    }),
+
     // Handle GraphQL POST requests
     http.post('/graphql', async ({ request }: { request: any }) => {
       const body = await request.json();

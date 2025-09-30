@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, act, cleanup, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { vi } from 'vitest';
@@ -150,7 +150,6 @@ describe('ProfessionalChart', () => {
 
   describe('Technical Analysis Features', () => {
     it('shows technical analysis controls when enabled', async () => {
-      const user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -168,7 +167,7 @@ describe('ProfessionalChart', () => {
       // Expand the accordion to access controls
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
       await act(async () => {
-        await user.click(accordionButton);
+        fireEvent.click(accordionButton);
       });
 
       // Wait for accordion to expand and show controls
@@ -180,7 +179,6 @@ describe('ProfessionalChart', () => {
     });
 
     it('toggles SMA indicator when checkbox is clicked', async () => {
-      const user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -195,7 +193,7 @@ describe('ProfessionalChart', () => {
       // Expand accordion first
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
       await act(async () => {
-        await user.click(accordionButton);
+        fireEvent.click(accordionButton);
       });
 
       // Wait for SMA checkbox to be available
@@ -208,7 +206,7 @@ describe('ProfessionalChart', () => {
 
       // Click to enable - just verify the interaction works
       await act(async () => {
-        await user.click(smaCheckbox);
+        fireEvent.click(smaCheckbox);
       });
 
       // Verify the checkbox is still present after interaction
@@ -216,7 +214,6 @@ describe('ProfessionalChart', () => {
     }, 10000);
 
     it('handles technical analysis settings changes', async () => {
-      const user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -231,7 +228,7 @@ describe('ProfessionalChart', () => {
       // Expand accordion first
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
       await act(async () => {
-        await user.click(accordionButton);
+        fireEvent.click(accordionButton);
       });
 
       // Wait for checkboxes to be available and interact with them
@@ -245,13 +242,13 @@ describe('ProfessionalChart', () => {
 
       // Interact with all checkboxes
       await act(async () => {
-        await user.click(smaCheckbox);
+        fireEvent.click(smaCheckbox);
       });
       await act(async () => {
-        await user.click(emaCheckbox);
+        fireEvent.click(emaCheckbox);
       });
       await act(async () => {
-        await user.click(bollingerCheckbox);
+        fireEvent.click(bollingerCheckbox);
       });
 
       // Verify all checkboxes are still present after interactions
@@ -263,7 +260,6 @@ describe('ProfessionalChart', () => {
 
   describe('Economic Events', () => {
     it('shows economic events when enabled', async () => {
-      const user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -277,7 +273,9 @@ describe('ProfessionalChart', () => {
 
       // Expand accordion to access economic events toggle
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        fireEvent.click(accordionButton);
+      });
 
       // Should show events toggle after expanding
       await waitFor(() => {
@@ -286,7 +284,6 @@ describe('ProfessionalChart', () => {
     });
 
     it('toggles economic events display', async () => {
-      const user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -300,7 +297,9 @@ describe('ProfessionalChart', () => {
 
       // Expand accordion first
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        fireEvent.click(accordionButton);
+      });
 
       // Wait for events checkbox to appear
       await waitFor(() => {
@@ -312,7 +311,7 @@ describe('ProfessionalChart', () => {
 
       // Click to disable
       await act(async () => {
-        await user.click(eventsCheckbox);
+        fireEvent.click(eventsCheckbox);
       });
       expect(eventsCheckbox).not.toBeChecked();
     });
@@ -337,7 +336,6 @@ describe('ProfessionalChart', () => {
     });
 
     it('calls onSeriesAdd when add series button is clicked', async () => {
-      const user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -349,13 +347,14 @@ describe('ProfessionalChart', () => {
       );
 
       const addSeriesButton = screen.getByLabelText(/Add Series/);
-      await user.click(addSeriesButton);
+      await act(async () => {
+        fireEvent.click(addSeriesButton);
+      });
 
       expect(mockOnSeriesAdd).toHaveBeenCalledTimes(1);
     });
 
     it('toggles fullscreen mode', async () => {
-      const user = userEvent.setup();
       render(
         <TestWrapper>
           <ProfessionalChart
@@ -367,7 +366,9 @@ describe('ProfessionalChart', () => {
       );
 
       const fullscreenButton = screen.getByLabelText(/Fullscreen/);
-      await user.click(fullscreenButton);
+      await act(async () => {
+        fireEvent.click(fullscreenButton);
+      });
 
       // Verify fullscreen state change (check for any visual changes)
       expect(fullscreenButton).toBeInTheDocument();
@@ -713,11 +714,15 @@ describe('ProfessionalChart', () => {
 
       // Expand technical analysis accordion
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        fireEvent.click(accordionButton);
+      });
 
       // Enable SMA
       const smaCheckbox = screen.getByLabelText(/Simple Moving Average \(SMA\)/);
-      await user.click(smaCheckbox);
+      await act(async () => {
+        fireEvent.click(smaCheckbox);
+      });
 
       // Verify SMA periods are displayed
       await waitFor(() => {
@@ -740,11 +745,15 @@ describe('ProfessionalChart', () => {
 
       // Expand technical analysis accordion
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        fireEvent.click(accordionButton);
+      });
 
       // Enable EMA
       const emaCheckbox = screen.getByLabelText(/Exponential Moving Average \(EMA\)/);
-      await user.click(emaCheckbox);
+      await act(async () => {
+        fireEvent.click(emaCheckbox);
+      });
 
       // Verify EMA periods are displayed
       await waitFor(() => {
@@ -767,11 +776,15 @@ describe('ProfessionalChart', () => {
 
       // Expand technical analysis accordion
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        fireEvent.click(accordionButton);
+      });
 
       // Enable Bollinger Bands
       const bollingerCheckbox = screen.getByLabelText(/Bollinger Bands/);
-      await user.click(bollingerCheckbox);
+      await act(async () => {
+        fireEvent.click(bollingerCheckbox);
+      });
 
       // Verify Bollinger Bands parameters are displayed
       await waitFor(() => {
@@ -794,11 +807,15 @@ describe('ProfessionalChart', () => {
 
       // Expand technical analysis accordion
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        fireEvent.click(accordionButton);
+      });
 
       // Enable Economic Events
       const eventsCheckbox = screen.getByLabelText(/Economic Events/);
-      await user.click(eventsCheckbox);
+      await act(async () => {
+        fireEvent.click(eventsCheckbox);
+      });
 
       // Verify checkbox is checked (Material-UI uses checked attribute)
       await waitFor(() => {
@@ -823,13 +840,13 @@ describe('ProfessionalChart', () => {
       // Expand technical analysis accordion
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
       await act(async () => {
-        await user.click(accordionButton);
+        fireEvent.click(accordionButton);
       });
 
       // Enable correlation analysis
       const correlationCheckbox = screen.getByLabelText(/Correlation Analysis/);
       await act(async () => {
-        await user.click(correlationCheckbox);
+        fireEvent.click(correlationCheckbox);
       });
 
       // Verify correlation analysis is displayed
@@ -854,13 +871,13 @@ describe('ProfessionalChart', () => {
       // Expand technical analysis accordion
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
       await act(async () => {
-        await user.click(accordionButton);
+        fireEvent.click(accordionButton);
       });
 
       // Enable cycles detection
       const cyclesCheckbox = screen.getByLabelText(/Economic Cycle Detection/);
       await act(async () => {
-        await user.click(cyclesCheckbox);
+        fireEvent.click(cyclesCheckbox);
       });
 
       // Verify cycles checkbox is checked
@@ -885,7 +902,7 @@ describe('ProfessionalChart', () => {
       // Expand technical analysis accordion
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
       await act(async () => {
-        await user.click(accordionButton);
+        fireEvent.click(accordionButton);
       });
 
       // Enable multiple indicators
@@ -894,13 +911,13 @@ describe('ProfessionalChart', () => {
       const bollingerCheckbox = screen.getByLabelText(/Bollinger Bands/);
 
       await act(async () => {
-        await user.click(smaCheckbox);
+        fireEvent.click(smaCheckbox);
       });
       await act(async () => {
-        await user.click(emaCheckbox);
+        fireEvent.click(emaCheckbox);
       });
       await act(async () => {
-        await user.click(bollingerCheckbox);
+        fireEvent.click(bollingerCheckbox);
       });
 
       // Verify all indicators are enabled
@@ -936,7 +953,7 @@ describe('ProfessionalChart', () => {
       // Expand technical analysis accordion to access economic events
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
       await act(async () => {
-        await user.click(accordionButton);
+        fireEvent.click(accordionButton);
       });
 
       // Verify economic events checkbox is available
@@ -971,13 +988,13 @@ describe('ProfessionalChart', () => {
       // Expand technical analysis accordion to access economic events
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
       await act(async () => {
-        await user.click(accordionButton);
+        fireEvent.click(accordionButton);
       });
 
       // Enable economic events
       const eventsCheckbox = screen.getByLabelText(/Economic Events/);
       await act(async () => {
-        await user.click(eventsCheckbox);
+        fireEvent.click(eventsCheckbox);
       });
 
       // Verify component handles large datasets without crashing
@@ -1003,13 +1020,13 @@ describe('ProfessionalChart', () => {
       // Expand technical analysis accordion to access economic events
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
       await act(async () => {
-        await user.click(accordionButton);
+        fireEvent.click(accordionButton);
       });
 
       // Toggle events display
       const eventsToggle = screen.getByLabelText(/Economic Events/);
       await act(async () => {
-        await user.click(eventsToggle);
+        fireEvent.click(eventsToggle);
       });
 
       // Verify events are hidden
@@ -1035,7 +1052,7 @@ describe('ProfessionalChart', () => {
       // Find and click export button
       const exportButton = screen.getByLabelText(/Export Chart/);
       await act(async () => {
-        await user.click(exportButton);
+        fireEvent.click(exportButton);
       });
 
       // Verify export functionality is triggered
@@ -1057,7 +1074,7 @@ describe('ProfessionalChart', () => {
       // Find and click fullscreen button
       const fullscreenButton = screen.getByLabelText(/Fullscreen/);
       await act(async () => {
-        await user.click(fullscreenButton);
+        fireEvent.click(fullscreenButton);
       });
 
       // Verify fullscreen functionality is triggered
@@ -1081,7 +1098,7 @@ describe('ProfessionalChart', () => {
       // Find and click add series button
       const addSeriesButton = screen.getByLabelText(/Add Series/);
       await act(async () => {
-        await user.click(addSeriesButton);
+        fireEvent.click(addSeriesButton);
       });
 
       // Verify callback is called

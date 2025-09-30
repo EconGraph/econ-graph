@@ -55,6 +55,20 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 );
 
 describe('LoginDialog', () => {
+  // Prevent unhandled promise rejection noise from mocked auth failures
+  let unhandledRejectionHandler: (e: PromiseRejectionEvent) => void;
+
+  beforeAll(() => {
+    unhandledRejectionHandler = (e: PromiseRejectionEvent) => {
+      e.preventDefault();
+    };
+    // jsdom window exists in this environment
+    window.addEventListener('unhandledrejection', unhandledRejectionHandler);
+  });
+
+  afterAll(() => {
+    window.removeEventListener('unhandledrejection', unhandledRejectionHandler);
+  });
   const mockOnClose = vi.fn();
   const mockOnSuccess = vi.fn();
 
