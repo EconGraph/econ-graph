@@ -167,7 +167,9 @@ describe('ProfessionalChart', () => {
 
       // Expand the accordion to access controls
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        await user.click(accordionButton);
+      });
 
       // Wait for accordion to expand and show controls
       await waitFor(() => {
@@ -192,7 +194,9 @@ describe('ProfessionalChart', () => {
 
       // Expand accordion first
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        await user.click(accordionButton);
+      });
 
       // Wait for SMA checkbox to be available
       await waitFor(() => {
@@ -226,7 +230,9 @@ describe('ProfessionalChart', () => {
 
       // Expand accordion first
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        await user.click(accordionButton);
+      });
 
       // Wait for checkboxes to be available and interact with them
       await waitFor(() => {
@@ -816,11 +822,15 @@ describe('ProfessionalChart', () => {
 
       // Expand technical analysis accordion
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        await user.click(accordionButton);
+      });
 
       // Enable correlation analysis
       const correlationCheckbox = screen.getByLabelText(/Correlation Analysis/);
-      await user.click(correlationCheckbox);
+      await act(async () => {
+        await user.click(correlationCheckbox);
+      });
 
       // Verify correlation analysis is displayed
       await waitFor(() => {
@@ -843,11 +853,15 @@ describe('ProfessionalChart', () => {
 
       // Expand technical analysis accordion
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        await user.click(accordionButton);
+      });
 
       // Enable cycles detection
       const cyclesCheckbox = screen.getByLabelText(/Economic Cycle Detection/);
-      await user.click(cyclesCheckbox);
+      await act(async () => {
+        await user.click(cyclesCheckbox);
+      });
 
       // Verify cycles checkbox is checked
       await waitFor(() => {
@@ -870,7 +884,9 @@ describe('ProfessionalChart', () => {
 
       // Expand technical analysis accordion
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        await user.click(accordionButton);
+      });
 
       // Enable multiple indicators
       const smaCheckbox = screen.getByLabelText(/Simple Moving Average \(SMA\)/);
@@ -919,7 +935,9 @@ describe('ProfessionalChart', () => {
 
       // Expand technical analysis accordion to access economic events
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        await user.click(accordionButton);
+      });
 
       // Verify economic events checkbox is available
       await waitFor(() => {
@@ -952,11 +970,15 @@ describe('ProfessionalChart', () => {
 
       // Expand technical analysis accordion to access economic events
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        await user.click(accordionButton);
+      });
 
       // Enable economic events
       const eventsCheckbox = screen.getByLabelText(/Economic Events/);
-      await user.click(eventsCheckbox);
+      await act(async () => {
+        await user.click(eventsCheckbox);
+      });
 
       // Verify component handles large datasets without crashing
       await waitFor(() => {
@@ -980,11 +1002,15 @@ describe('ProfessionalChart', () => {
 
       // Expand technical analysis accordion to access economic events
       const accordionButton = screen.getByRole('button', { name: /Technical Analysis/ });
-      await user.click(accordionButton);
+      await act(async () => {
+        await user.click(accordionButton);
+      });
 
       // Toggle events display
       const eventsToggle = screen.getByLabelText(/Economic Events/);
-      await user.click(eventsToggle);
+      await act(async () => {
+        await user.click(eventsToggle);
+      });
 
       // Verify events are hidden
       await waitFor(() => {
@@ -1008,7 +1034,9 @@ describe('ProfessionalChart', () => {
 
       // Find and click export button
       const exportButton = screen.getByLabelText(/Export Chart/);
-      await user.click(exportButton);
+      await act(async () => {
+        await user.click(exportButton);
+      });
 
       // Verify export functionality is triggered
       expect(exportButton).toBeInTheDocument();
@@ -1028,7 +1056,9 @@ describe('ProfessionalChart', () => {
 
       // Find and click fullscreen button
       const fullscreenButton = screen.getByLabelText(/Fullscreen/);
-      await user.click(fullscreenButton);
+      await act(async () => {
+        await user.click(fullscreenButton);
+      });
 
       // Verify fullscreen functionality is triggered
       expect(fullscreenButton).toBeInTheDocument();
@@ -1050,7 +1080,9 @@ describe('ProfessionalChart', () => {
 
       // Find and click add series button
       const addSeriesButton = screen.getByLabelText(/Add Series/);
-      await user.click(addSeriesButton);
+      await act(async () => {
+        await user.click(addSeriesButton);
+      });
 
       // Verify callback is called
       expect(mockOnSeriesAdd).toHaveBeenCalledTimes(1);
