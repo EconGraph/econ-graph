@@ -8,8 +8,8 @@ import { ChartAnnotationType } from './graphql';
 
 export interface Collaborator {
   id: string;
-  userId: string;
-  chartId: string;
+  userId: string; // kept for utility typing compatibility
+  chartId: string; // kept for utility typing compatibility
   role: string;
   lastAccessedAt?: string;
   createdAt: string;
@@ -39,11 +39,11 @@ export const filterAnnotations = (
 ): ChartAnnotationType[] => {
   switch (filterBy) {
     case 'mine':
-      return annotations.filter(annotation => annotation.userId === currentUserId);
+      return annotations.filter(annotation => annotation.user_id === currentUserId);
     case 'pinned':
-      return annotations.filter(annotation => annotation.isPinned);
+      return annotations.filter(annotation => annotation.is_pinned);
     default:
-      return annotations.filter(annotation => annotation.isVisible !== false);
+      return annotations.filter(annotation => annotation.is_visible !== false);
   }
 };
 

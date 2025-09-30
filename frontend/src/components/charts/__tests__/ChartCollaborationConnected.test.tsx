@@ -6,7 +6,6 @@
 
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, StyledEngineProvider } from '@mui/material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -453,7 +452,6 @@ describe('ChartCollaborationConnected', () => {
     });
 
     it('should filter to show only pinned annotations', async () => {
-      const user = userEvent.setup();
       renderChartCollaborationConnected();
 
       // Find the select using aria-label
@@ -463,15 +461,12 @@ describe('ChartCollaborationConnected', () => {
       expect(filterSelect).toBeInTheDocument();
 
       // Click the select to open the dropdown
-      await user.click(filterSelect);
-
-      // Wait for the dropdown to appear
+      fireEvent.mouseDown(filterSelect);
       await waitFor(() => {
         expect(screen.getByText('Pinned (1)')).toBeInTheDocument();
       });
+      fireEvent.click(screen.getByText('Pinned (1)'));
 
-      // Click the "Pinned" option
-      await user.click(screen.getByText('Pinned (1)'));
 
       // Wait for the change to take effect and verify the filter is applied
       await waitFor(() => {
@@ -486,11 +481,10 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Annotation Creation', () => {
     it('should open annotation creation dialog', async () => {
-      const user = userEvent.setup();
       renderChartCollaborationConnected();
 
       const addButton = screen.getByText('Add Annotation');
-      await user.click(addButton);
+      fireEvent.click(addButton);
 
       expect(screen.getByText('Add Chart Annotation')).toBeInTheDocument();
       expect(screen.getByLabelText('Annotation title')).toBeInTheDocument();
@@ -499,12 +493,11 @@ describe('ChartCollaborationConnected', () => {
     });
 
     it('should create annotation with valid data', async () => {
-      const user = userEvent.setup();
       renderChartCollaborationConnected();
 
       // Open dialog
       const addButton = screen.getByText('Add Annotation');
-      await user.click(addButton);
+      fireEvent.click(addButton);
 
       // Wait for dialog to appear
       await waitFor(() => {
@@ -525,25 +518,24 @@ describe('ChartCollaborationConnected', () => {
 
       // Submit
       const submitButton = screen.getByTestId('submit-annotation-button');
-      await user.click(submitButton);
+      fireEvent.click(submitButton);
 
       // Annotation creation is now handled through MSW GraphQL mocking
       // The component will make GraphQL requests that are intercepted by MSW
     });
 
     it('should show snackbar on successful creation', async () => {
-      const user = userEvent.setup();
       renderChartCollaborationConnected();
 
       // Open dialog and fill form
       const addButton = screen.getByText('Add Annotation');
-      await user.click(addButton);
+      fireEvent.click(addButton);
       fireEvent.change(screen.getByRole('textbox', { name: /title/i }), { target: { value: 'Test Title' } });
       fireEvent.change(screen.getByRole('textbox', { name: /content/i }), { target: { value: 'Test content' } });
 
       // Submit
       const submitButton = screen.getByTestId('submit-annotation-button');
-      await user.click(submitButton);
+      fireEvent.click(submitButton);
 
       await waitFor(() => {
         expect(screen.getByText('Annotation created successfully')).toBeInTheDocument();
@@ -551,19 +543,18 @@ describe('ChartCollaborationConnected', () => {
     });
 
     it('should show error snackbar on creation failure', async () => {
-      const user = userEvent.setup();
       // MSW will handle error responses through GraphQL
       renderChartCollaborationConnected();
 
       // Open dialog and fill form
       const addButton = screen.getByText('Add Annotation');
-      await user.click(addButton);
+      fireEvent.click(addButton);
       fireEvent.change(screen.getByRole('textbox', { name: /title/i }), { target: { value: 'Test Title' } });
       fireEvent.change(screen.getByRole('textbox', { name: /content/i }), { target: { value: 'Test content' } });
 
       // Submit
       const submitButton = screen.getByTestId('submit-annotation-button');
-      await user.click(submitButton);
+      fireEvent.click(submitButton);
 
       await waitFor(() => {
         expect(screen.getByText('Creation failed')).toBeInTheDocument();
@@ -573,29 +564,26 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Annotation Interactions', () => {
     it('should toggle annotation visibility', async () => {
-      const user = userEvent.setup();
       renderChartCollaborationConnected();
 
       // Find visibility toggle button for first annotation
       const visibilityButtons = screen.getAllByTestId('VisibilityIcon');
-      await user.click(visibilityButtons[0]);
+      fireEvent.click(visibilityButtons[0]);
 
       // Annotation visibility toggle is now handled through MSW GraphQL mocking
     });
 
     it('should toggle annotation pin status', async () => {
-      const user = userEvent.setup();
       renderChartCollaborationConnected();
 
       // Find pin button for first annotation
       const pinButtons = screen.getAllByTestId('PushPinIcon');
-      await user.click(pinButtons[0]);
+      fireEvent.click(pinButtons[0]);
 
       // Annotation pin toggle is now handled through MSW GraphQL mocking
     });
 
     it('should delete annotation when delete button is clicked', async () => {
-      const user = userEvent.setup();
 
       // Mock window.confirm
       window.confirm = vi.fn().mockReturnValue(true);
@@ -604,13 +592,12 @@ describe('ChartCollaborationConnected', () => {
 
       // Find delete button for first annotation (user's own annotation)
       const deleteButtons = screen.getAllByTestId('DeleteIcon');
-      await user.click(deleteButtons[0]);
+      fireEvent.click(deleteButtons[0]);
 
       // Annotation deletion is now handled through MSW GraphQL mocking
     });
 
     it('should not delete annotation when confirmation is cancelled', async () => {
-      const user = userEvent.setup();
 
       // Mock window.confirm to return false
       window.confirm = vi.fn().mockReturnValue(false);
@@ -619,7 +606,7 @@ describe('ChartCollaborationConnected', () => {
 
       // Find delete button for first annotation
       const deleteButtons = screen.getAllByTestId('DeleteIcon');
-      await user.click(deleteButtons[0]);
+      fireEvent.click(deleteButtons[0]);
 
       // Annotation deletion is now handled through MSW GraphQL mocking
     });
@@ -627,12 +614,11 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Comments Functionality', () => {
     it('should display existing comments', async () => {
-      const user = userEvent.setup();
       renderChartCollaborationConnected();
 
       // Select an annotation to open comments dialog
       const annotationTitles = screen.getAllByText('Market Correction');
-      await user.click(annotationTitles[0]);
+      fireEvent.click(annotationTitles[0]);
 
       // Wait for comments dialog to open
       await waitFor(() => {
@@ -642,12 +628,11 @@ describe('ChartCollaborationConnected', () => {
     });
 
     it('should add new comment', async () => {
-      const user = userEvent.setup();
       renderChartCollaborationConnected();
 
       // Select an annotation to open comments dialog
       const annotationTitles = screen.getAllByText('GDP Growth Analysis');
-      await user.click(annotationTitles[0]);
+      fireEvent.click(annotationTitles[0]);
 
       // Wait for comments dialog to open
       await waitFor(() => {
@@ -659,18 +644,17 @@ describe('ChartCollaborationConnected', () => {
       fireEvent.change(commentInput, { target: { value: 'This is a new comment' } });
 
       const commentButton = screen.getByText('Comment');
-      await user.click(commentButton);
+      fireEvent.click(commentButton);
 
       // Comment addition is now handled through MSW GraphQL mocking
     });
 
     it('should show snackbar on successful comment addition', async () => {
-      const user = userEvent.setup();
       renderChartCollaborationConnected();
 
       // Open comments dialog by clicking on an annotation
       const annotationItem = screen.getByText('GDP Growth Analysis');
-      await user.click(annotationItem);
+      fireEvent.click(annotationItem);
 
       // Wait for comments dialog to open
       await waitFor(() => {
@@ -682,7 +666,7 @@ describe('ChartCollaborationConnected', () => {
       fireEvent.change(commentInput, { target: { value: 'Test comment' } });
 
       const commentButton = screen.getByText('Comment');
-      await user.click(commentButton);
+      fireEvent.click(commentButton);
 
       await waitFor(() => {
         expect(screen.getByText('Comment added successfully')).toBeInTheDocument();
@@ -692,11 +676,10 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Chart Sharing', () => {
     it('should open share dialog when share button is clicked', async () => {
-      const user = userEvent.setup();
       renderChartCollaborationConnected({ chartId: 'chart-1' });
 
       const shareButton = screen.getByTestId('share-chart-button');
-      await user.click(shareButton);
+      fireEvent.click(shareButton);
 
       expect(screen.getByTestId('share-chart-dialog')).toBeInTheDocument();
       expect(screen.getByTestId('share-target-user-input')).toBeInTheDocument();
@@ -704,12 +687,11 @@ describe('ChartCollaborationConnected', () => {
     });
 
     it('should share chart with valid data', async () => {
-      const user = userEvent.setup();
       renderChartCollaborationConnected({ chartId: 'chart-1' });
 
       // Open share dialog
       const shareButton = screen.getByTestId('share-chart-button');
-      await user.click(shareButton);
+      fireEvent.click(shareButton);
 
       // Wait for share dialog to open
       await waitFor(() => {
@@ -720,23 +702,25 @@ describe('ChartCollaborationConnected', () => {
       fireEvent.change(screen.getByTestId('share-target-user-input'), { target: { value: 'user-3' } });
 
       const permissionSelect = screen.getByRole('combobox');
-      await user.click(permissionSelect);
-      await user.click(screen.getByText('Edit - Can create and edit annotations'));
+      fireEvent.mouseDown(permissionSelect);
+      await waitFor(() => {
+        expect(screen.getByText('Edit - Can create and edit annotations')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText('Edit - Can create and edit annotations'));
 
       // Submit
       const shareSubmitButton = screen.getByTestId('submit-share-button');
-      await user.click(shareSubmitButton);
+      fireEvent.click(shareSubmitButton);
 
       // Chart sharing is now handled through MSW GraphQL mocking
     });
 
     it('should show error when sharing without chart ID', async () => {
-      const user = userEvent.setup();
       renderChartCollaborationConnected({ chartId: 'chart-1' });
 
       // Open share dialog
       const shareButton = screen.getByTestId('share-chart-button');
-      await user.click(shareButton);
+      fireEvent.click(shareButton);
 
       // Wait for dialog to open
       await waitFor(() => {
@@ -745,7 +729,7 @@ describe('ChartCollaborationConnected', () => {
 
       // Try to share without filling form
       const shareSubmitButton = screen.getByTestId('submit-share-button');
-      await user.click(shareSubmitButton);
+      fireEvent.click(shareSubmitButton);
 
       await waitFor(() => {
         expect(screen.getByText('Chart ID and target user are required')).toBeInTheDocument();
@@ -755,13 +739,12 @@ describe('ChartCollaborationConnected', () => {
 
   describe('Annotation Selection', () => {
     it('should call onAnnotationClick when annotation is selected', async () => {
-      const user = userEvent.setup();
       const mockOnAnnotationClick = vi.fn();
       renderChartCollaborationConnected({ onAnnotationClick: mockOnAnnotationClick });
 
       // Click on an annotation - look for the annotation text content
       const annotationItem = screen.getByText('GDP Growth Analysis');
-      await user.click(annotationItem);
+      fireEvent.click(annotationItem);
 
       // Verify the annotation click was called with the expected data structure
       expect(mockOnAnnotationClick).toHaveBeenCalledWith(
@@ -774,12 +757,11 @@ describe('ChartCollaborationConnected', () => {
     });
 
     it('should load comments when annotation is selected', async () => {
-      const user = userEvent.setup();
       renderChartCollaborationConnected();
 
       // Click on an annotation - look for the annotation text content
       const annotationItem = screen.getByText('GDP Growth Analysis');
-      await user.click(annotationItem);
+      fireEvent.click(annotationItem);
 
       // Comment loading is now handled through MSW GraphQL mocking
     });

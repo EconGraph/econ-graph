@@ -45,30 +45,30 @@ const mockUser = {
 const mockAnnotations: ChartAnnotationType[] = [
   {
     id: 'annotation-1',
-    seriesId: 'series-1',
-    userId: 'user-1',
+    series_id: 'series-1',
+    user_id: 'user-1',
     title: 'Test Annotation',
     description: 'Test description',
-    annotationDate: '2024-01-15',
-    annotationValue: 100.5,
-    annotationType: 'note',
+    annotation_date: '2024-01-15',
+    annotation_value: 100.5,
+    annotation_type: 'note',
     color: '#f44336',
-    isPinned: false,
-    isVisible: true,
-    createdAt: '2024-01-15T10:00:00Z',
-    updatedAt: '2024-01-15T10:00:00Z',
+    is_pinned: false,
+    is_visible: true,
+    created_at: '2024-01-15T10:00:00Z',
+    updated_at: '2024-01-15T10:00:00Z',
   },
 ];
 
 const mockCollaborators = [
   {
     id: 'collab-1',
-    userId: 'user-1',
-    chartId: 'chart-1',
+    user_id: 'user-1',
+    chart_id: 'chart-1',
     role: 'admin',
-    lastAccessedAt: new Date().toISOString(),
-    createdAt: '2024-01-15T10:00:00Z',
-    updatedAt: '2024-01-15T10:00:00Z',
+    last_accessed_at: new Date().toISOString(),
+    created_at: '2024-01-15T10:00:00Z',
+    updated_at: '2024-01-15T10:00:00Z',
   },
 ];
 

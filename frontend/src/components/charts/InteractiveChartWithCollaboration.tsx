@@ -447,7 +447,7 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
       // Add annotation lines (simplified for now)
       ...selectedAnnotations.map(annotation => ({
         label: annotation.title,
-        data: [{ x: annotation.annotationDate, y: '0' }],
+        data: [{ x: annotation.annotation_date, y: '0' }],
         borderColor: annotation.color || theme.palette.warning.main,
         backgroundColor: 'transparent',
         fill: false,

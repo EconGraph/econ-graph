@@ -82,7 +82,7 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
           }));
 
           // Load user details for annotation authors
-          const userIds = [...new Set(response.data.annotationsForSeries.map(a => a.userId))];
+          const userIds = [...new Set(response.data.annotationsForSeries.map(a => a.user_id))];
           await loadUsers(userIds);
         }
       } catch (error) {
@@ -115,7 +115,7 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
         }));
 
         // Load user details for comment authors
-        const userIds = [...new Set(response.data.commentsForAnnotation.map(c => c.userId))];
+        const userIds = [...new Set(response.data.commentsForAnnotation.map(c => c.user_id))];
         await loadUsers(userIds);
       }
     } catch (error) {
@@ -151,7 +151,7 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
           }));
 
           // Load user details for collaborators
-          const userIds = [...new Set(response.data.chartCollaborators.map(c => c.userId))];
+          const userIds = [...new Set(response.data.chartCollaborators.map(c => c.user_id))];
           await loadUsers(userIds);
         }
       } catch (error) {
@@ -341,7 +341,7 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
       ...prev,
       annotations: prev.annotations.map(annotation =>
         annotation.id === annotationId
-          ? { ...annotation, isVisible: !annotation.isVisible }
+          ? { ...annotation, is_visible: !annotation.is_visible }
           : annotation
       ),
     }));
@@ -355,7 +355,7 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
       ...prev,
       annotations: prev.annotations.map(annotation =>
         annotation.id === annotationId
-          ? { ...annotation, isPinned: !annotation.isPinned }
+          ? { ...annotation, is_pinned: !annotation.is_pinned }
           : annotation
       ),
     }));
