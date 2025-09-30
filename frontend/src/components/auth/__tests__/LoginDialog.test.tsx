@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { vi } from 'vitest';
 import LoginDialog from '../LoginDialog';
@@ -55,6 +55,9 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 );
 
 describe('LoginDialog', () => {
+  afterEach(() => {
+    cleanup();
+  });
   // Prevent unhandled promise rejection noise from mocked auth failures
   let unhandledRejectionHandler: (e: any) => void;
   let unhandledNodeRejectionHandler: (reason: any) => void;
@@ -190,8 +193,9 @@ describe('LoginDialog', () => {
       </TestWrapper>
     );
 
-    // Click Facebook sign in button
-    fireEvent.click(screen.getByText('Continue with Facebook'));
+    // Click Facebook sign in button scoped to the dialog
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Continue with Facebook' }));
 
     await waitFor(() => {
       expect(mockAuthContext.signInWithFacebook).toHaveBeenCalled();

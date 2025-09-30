@@ -544,7 +544,9 @@ describe('ProfessionalChart', () => {
       );
 
       // Test tab navigation through controls
-      await _user.tab();
+      await act(async () => {
+        await _user.tab();
+      });
 
       // Should be able to navigate to focusable elements
       const buttons = screen.getAllByRole('button');
@@ -553,7 +555,9 @@ describe('ProfessionalChart', () => {
       // Test Enter key activation
       if (buttons[0]) {
         buttons[0].focus();
-        await _user.keyboard('{Enter}');
+        await act(async () => {
+          await _user.keyboard('{Enter}');
+        });
         // Should not throw errors
         expect(buttons[0]).toBeInTheDocument();
       }
