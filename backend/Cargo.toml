@@ -9,12 +9,13 @@ members = [
     "crates/econ-graph-mcp",
     "crates/econ-graph-backend",
     "crates/econ-graph-metrics",
-    # Original financial-data crate temporarily disabled
-    # "crates/econ-graph-financial-data",
     # New financial data crates
     "crates/econ-graph-arrow-storage",
     "crates/econ-graph-financial-graphql",
     "crates/econ-graph-financial-core",
+]
+exclude = [
+    "crates/econ-graph-financial-data",  # Replaced by new split crates
 ]
 resolver = "2"
 
