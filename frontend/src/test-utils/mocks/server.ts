@@ -221,6 +221,21 @@ function createHandlers() {
       });
     }),
 
+    // Financial Alerts
+    graphql.query('GetFinancialAlerts', ({ variables }: { variables: any }) => {
+      const { companyId } = variables as { companyId: string };
+
+      let scenario = 'success';
+      if (companyId === 'empty-company') {
+        scenario = 'empty';
+      }
+
+      const response = loadGraphQLResponse('get_financial_alerts', scenario);
+      return HttpResponse.json(response, {
+        status: response.errors ? 400 : 200,
+      });
+    }),
+
     // REST API fallback handlers (intentionally minimal; no health endpoint mocking)
 
     // Handle GraphQL POST requests

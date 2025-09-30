@@ -124,22 +124,63 @@ const mockBenchmarks = [
   },
 ];
 
+// Alerts matching the component and tests' expected shape/content
 const mockAlerts = [
   {
-    id: 'alert-1',
-    type: 'REVENUE_GROWTH',
-    severity: 'HIGH',
-    message: 'Revenue growth has slowed significantly',
+    id: '1',
+    type: 'ratio_threshold',
+    severity: 'high',
+    title: 'Current Ratio Below Threshold',
+    description: 'Current ratio of 0.95 is below the recommended threshold of 1.0',
+    companyId: 'test-company',
+    companyName: 'Test Company Inc.',
+    direction: 'decline',
+    isActive: true,
+    isRead: false,
     createdAt: '2024-01-15T10:00:00Z',
-    resolved: false,
+    expiresAt: '2024-01-25T23:59:59Z',
   },
   {
-    id: 'alert-2',
-    type: 'PROFIT_MARGIN',
-    severity: 'MEDIUM',
-    message: 'Profit margins are below industry average',
-    createdAt: '2024-01-14T15:30:00Z',
-    resolved: false,
+    id: '2',
+    type: 'filing_deadline',
+    severity: 'medium',
+    title: '10-Q Filing Due Soon',
+    description: 'Quarterly report (10-Q) is due within 5 business days',
+    companyId: 'test-company',
+    companyName: 'Test Company Inc.',
+    direction: 'change',
+    isActive: true,
+    isRead: false,
+    createdAt: '2024-01-12T14:00:00Z',
+    expiresAt: '2024-01-25T23:59:59Z',
+  },
+  {
+    id: '3',
+    type: 'data_quality',
+    severity: 'low',
+    title: 'Data Quality Warning',
+    description: 'Some financial data has low confidence scores',
+    companyId: 'test-company',
+    companyName: 'Test Company Inc.',
+    direction: 'stable',
+    isActive: true,
+    isRead: true,
+    createdAt: '2024-01-10T09:00:00Z',
+    expiresAt: '2024-01-20T23:59:59Z',
+  },
+  {
+    id: '4',
+    type: 'benchmark_change',
+    severity: 'medium',
+    title: 'Industry Benchmark Updated',
+    description: 'Industry benchmarks have been updated with latest data',
+    companyId: 'test-company',
+    companyName: 'Test Company Inc.',
+    direction: 'improvement',
+    isActive: false,
+    isRead: true,
+    createdAt: '2024-01-08T16:00:00Z',
+    expiresAt: '2024-01-18T23:59:59Z',
   },
 ];
 
@@ -244,12 +285,24 @@ export const financialHandlers = [
   graphql.query('GetFinancialAlerts', ({ variables }) => {
     const { companyId } = variables as { companyId: string };
 
-    if (companyId === '0000320193') {
+    if (companyId === 'test-company') {
       return HttpResponse.json({
         data: {
           company: {
-            ...mockCompany,
+            id: 'test-company',
+            name: 'Test Company Inc.',
             alerts: mockAlerts,
+          },
+        },
+      });
+    }
+    if (companyId === 'empty-company') {
+      return HttpResponse.json({
+        data: {
+          company: {
+            id: 'empty-company',
+            name: 'Empty Company',
+            alerts: [],
           },
         },
       });

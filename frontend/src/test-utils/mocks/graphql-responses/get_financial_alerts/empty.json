@@ -1,0 +1,10 @@
+{
+  "data": {
+    "company": {
+      "id": "empty-company",
+      "name": "Empty Company",
+      "alerts": []
+    }
+  }
+}
+
