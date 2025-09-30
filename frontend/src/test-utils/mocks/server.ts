@@ -236,6 +236,39 @@ function createHandlers() {
       });
     }),
 
+    // Peer Comparison
+    graphql.query('GetPeerComparison', ({ variables }: { variables: any }) => {
+      const { companyId } = variables as { companyId: string };
+
+      const scenario = companyId === 'invalid-company-id' ? 'not_found' : 'success';
+      const response = loadGraphQLResponse('get_peer_comparison', scenario);
+      return HttpResponse.json(response, {
+        status: response.errors ? 400 : 200,
+      });
+    }),
+
+    // Trend Analysis
+    graphql.query('GetTrendAnalysis', ({ variables }: { variables: any }) => {
+      const { companyId } = variables as { companyId: string };
+
+      const scenario = companyId === 'loading-company' ? 'loading' : 'success';
+      const response = loadGraphQLResponse('get_trend_analysis', scenario);
+      return HttpResponse.json(response, {
+        status: response.errors ? 400 : 200,
+      });
+    }),
+
+    // Financial Export
+    graphql.query('GetFinancialExport', ({ variables }: { variables: any }) => {
+      const { companyId } = variables as { companyId: string };
+
+      const scenario = companyId === 'empty-company' ? 'empty' : 'success';
+      const response = loadGraphQLResponse('get_financial_export', scenario);
+      return HttpResponse.json(response, {
+        status: response.errors ? 400 : 200,
+      });
+    }),
+
     // REST API fallback handlers (intentionally minimal; no health endpoint mocking)
 
     // Handle GraphQL POST requests
