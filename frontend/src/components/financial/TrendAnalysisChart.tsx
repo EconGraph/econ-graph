@@ -29,7 +29,7 @@ interface TrendAnalysisChartProps {
   onRatioSelectionChange?: (ratios: string[]) => void;
 }
 
-export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
+const TrendAnalysisChartComponent: React.FC<TrendAnalysisChartProps> = ({
   ratios,
   statements: _statements,
   timeRange,
@@ -577,3 +577,6 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
     </div>
   );
 };
+
+// Memoize the component to prevent unnecessary re-renders
+export const TrendAnalysisChart = React.memo(TrendAnalysisChartComponent);

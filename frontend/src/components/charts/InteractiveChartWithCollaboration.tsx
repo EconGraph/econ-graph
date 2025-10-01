@@ -813,4 +813,5 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
   );
 };
 
-export default InteractiveChartWithCollaboration;
+// Memoize the component to prevent unnecessary re-renders
+export default React.memo(InteractiveChartWithCollaboration);

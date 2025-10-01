@@ -210,28 +210,37 @@ const ChartCollaborationContent = ({
   const userIds = collaborators?.map(c => c.user_id) || [];
   const { data: users } = useUsers(userIds);
 
-  // Calculate derived state (no loading states needed!)
-  const activeCollaborators =
-    collaborators?.filter(
-      c => users?.[c.user_id] && Date.now() - new Date(c.last_accessed_at || 0).getTime() < 300000
-    ) || [];
+  // Calculate derived state (memoized for performance)
+  const activeCollaborators = useMemo(() => {
+    return (
+      collaborators?.filter(
+        c => users?.[c.user_id] && Date.now() - new Date(c.last_accessed_at || 0).getTime() < 300000
+      ) || []
+    );
+  }, [collaborators, users]);
 
-  const filteredAnnotations =
-    annotations?.filter(annotation => {
-      switch (filterBy) {
-        case 'mine':
-          return annotation.user_id === currentUser?.id;
-        case 'pinned':
-          return annotation.is_pinned;
-        default:
-          return annotation.is_visible !== false;
-      }
-    }) || [];
+  const filteredAnnotations = useMemo(() => {
+    return (
+      annotations?.filter(annotation => {
+        switch (filterBy) {
+          case 'mine':
+            return annotation.user_id === currentUser?.id;
+          case 'pinned':
+            return annotation.is_pinned;
+          default:
+            return annotation.is_visible !== false;
+        }
+      }) || []
+    );
+  }, [annotations, filterBy, currentUser?.id]);
 
-  const totalComments =
-    annotations?.reduce((sum, annotation) => {
-      return sum + (annotation.comments?.length || 0);
-    }, 0) || 0;
+  const totalComments = useMemo(() => {
+    return (
+      annotations?.reduce((sum, annotation) => {
+        return sum + (annotation.comments?.length || 0);
+      }, 0) || 0
+    );
+  }, [annotations]);
 
   const showSnackbar = useCallback(
     (message: string, severity: 'success' | 'error' | 'info' | 'warning' = 'success') => {

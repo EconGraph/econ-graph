@@ -43,7 +43,7 @@ interface PeerComparisonChartProps {
   onRatioSelectionChange?: (ratios: string[]) => void;
 }
 
-export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
+const PeerComparisonChartComponent: React.FC<PeerComparisonChartProps> = ({
   ratios,
   company,
   userType: _userType = 'intermediate',
@@ -115,7 +115,17 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
     }));
   }, [peerCompanies, currentCompanyData, ratios]);
 
-  // Filter and sort companies
+  // Memoize performance score calculation to avoid recalculating
+  const companyPerformanceScores = useMemo(() => {
+    const scores = new Map<string, number>();
+    [...peerCompanies, currentCompanyData].forEach(company => {
+      const percentiles = Object.values(company.percentile);
+      scores.set(company.id, percentiles.reduce((sum, p) => sum + p, 0) / percentiles.length);
+    });
+    return scores;
+  }, [peerCompanies, currentCompanyData]);
+
+  // Filter and sort companies (optimized with memoized performance scores)
   const filteredCompanies = useMemo(() => {
     let filtered = [...peerCompanies];
 
@@ -123,7 +133,7 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
       filtered = filtered.filter(company => company.industry === industryFilter);
     }
 
-    // Sort companies
+    // Sort companies using pre-calculated performance scores
     filtered.sort((a, b) => {
       switch (sortBy) {
         case 'name':
@@ -132,29 +142,23 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
           return (b.marketCap || 0) - (a.marketCap || 0);
         case 'performance':
         default:
-          // Sort by average percentile ranking
-          const aAvg =
-            (Object.values(a.percentile) as number[]).reduce(
-              (sum: number, p: number) => sum + p,
-              0
-            ) / Object.keys(a.percentile).length;
-          const bAvg =
-            (Object.values(b.percentile) as number[]).reduce(
-              (sum: number, p: number) => sum + p,
-              0
-            ) / Object.keys(b.percentile).length;
-          return bAvg - aAvg;
+          const aScore = companyPerformanceScores.get(a.id) || 0;
+          const bScore = companyPerformanceScores.get(b.id) || 0;
+          return bScore - aScore;
       }
     });
 
     return filtered;
-  }, [peerCompanies, industryFilter, sortBy]);
+  }, [peerCompanies, industryFilter, sortBy, companyPerformanceScores]);
 
-  // Calculate overall performance score
-  const calculatePerformanceScore = (company: PeerCompany | typeof currentCompanyData) => {
-    const percentiles = Object.values(company.percentile);
-    return percentiles.reduce((sum, p) => sum + p, 0) / percentiles.length;
-  };
+  // Calculate overall performance score (memoized for performance)
+  const calculatePerformanceScore = useCallback(
+    (company: PeerCompany | typeof currentCompanyData) => {
+      const percentiles = Object.values(company.percentile);
+      return percentiles.reduce((sum, p) => sum + p, 0) / percentiles.length;
+    },
+    []
+  );
 
   // Format ratio values
   const formatRatioValue = (value: number, ratioName: string) => {
@@ -607,3 +611,6 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
     </div>
   );
 };
+
+// Memoize the component to prevent unnecessary re-renders
+export const PeerComparisonChart = React.memo(PeerComparisonChartComponent);
