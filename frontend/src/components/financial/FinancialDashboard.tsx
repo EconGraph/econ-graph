@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge, Button, Progress, Alert, AlertDescription } from '@/components/ui';
@@ -38,7 +38,24 @@ interface FinancialDashboardProps {
   showCollaborativeFeatures?: boolean;
 }
 
-export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
+// Hook to fetch dashboard data with Suspense
+const useFinancialDashboardData = (companyId: string) => {
+  return useQuery({
+    queryKey: ['financial-dashboard', companyId],
+    queryFn: async () => {
+      const result = await executeGraphQL({
+        query: GET_FINANCIAL_DASHBOARD,
+        variables: { companyId },
+      });
+      return result.data;
+    },
+    suspense: true,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+};
+
+// Main dashboard content component - assumes data is loaded
+const FinancialDashboardContent: React.FC<FinancialDashboardProps> = ({
   companyId,
   userType = 'intermediate',
   showEducationalContent = true,
@@ -48,26 +65,8 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   const [selectedStatement, setSelectedStatement] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
 
-  // GraphQL queries - use default data as fallback for development
-  const {
-    data,
-    isLoading: loading,
-    isError,
-    error,
-    refetch,
-  } = useQuery(
-    ['financial-dashboard', companyId],
-    async () => {
-      const result = await executeGraphQL({
-        query: GET_FINANCIAL_DASHBOARD,
-        variables: { companyId },
-      });
-      return result.data;
-    },
-    {
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    }
-  );
+  // Fetch data with Suspense
+  const { data, refetch } = useFinancialDashboardData(companyId);
 
   const company: Company | undefined = data?.company;
   const statements: FinancialStatement[] = useMemo(
@@ -131,23 +130,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     return `${(value * 100).toFixed(1)}%`;
   };
 
-  if (loading) {
-    return (
-      <div className='flex items-center justify-center p-8'>
-        <Progress value={33} className='w-full max-w-md' />
-        <span className='ml-4'>Loading financial data...</span>
-      </div>
-    );
-  }
-
-  if (isError || error) {
-    return (
-      <Alert variant='destructive'>
-        <AlertDescription>Error loading financial data: {String(error)}</AlertDescription>
-      </Alert>
-    );
-  }
-
+  // Validate company data
   if (!company) {
     return (
       <Alert>
@@ -549,5 +532,21 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         </TabsContent>
       </Tabs>
     </div>
+  );
+};
+
+// Wrapper component with Suspense boundary
+export const FinancialDashboard: React.FC<FinancialDashboardProps> = (props) => {
+  return (
+    <Suspense
+      fallback={
+        <div className='flex items-center justify-center p-8'>
+          <Progress value={33} className='w-full max-w-md' />
+          <span className='ml-4'>Loading financial data...</span>
+        </div>
+      }
+    >
+      <FinancialDashboardContent {...props} />
+    </Suspense>
   );
 };
