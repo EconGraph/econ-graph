@@ -408,11 +408,13 @@ describe('FinancialAlerts', () => {
   it('shows alert settings and preferences', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
+    // Wait for component to render first
+    const headings = await screen.findAllByRole('heading', { level: 3 });
+    expect(headings.length).toBeGreaterThan(0);
+
     // Should show settings/preferences link
-    await waitFor(() => {
-      const settingsElements = screen.getAllByText('Alert Settings');
-      expect(settingsElements.length).toBeGreaterThan(0);
-    });
+    const settingsElements = screen.getAllByText('Alert Settings');
+    expect(settingsElements.length).toBeGreaterThan(0);
   });
 
   it('handles alert export functionality', async () => {
