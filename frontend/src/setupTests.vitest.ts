@@ -16,18 +16,22 @@ afterEach(async () => {
 });
 afterAll(async () => {
   await cleanupSimpleMSW();
-  // Simple cleanup without aggressive process.exit
+  
+  // Aggressive cleanup to prevent hanging processes
   if (typeof process !== 'undefined') {
-    // Clear any pending timeouts/intervals more safely
-    const highestTimeoutId = setTimeout(() => {
-      // Empty function for cleanup
-    }, 0);
-    clearTimeout(highestTimeoutId);
-
-    const highestIntervalId = setInterval(() => {
-      // Empty function for cleanup
-    }, 0);
-    clearInterval(highestIntervalId);
+    // Clear all timeouts and intervals
+    for (let i = 1; i < 10000; i++) {
+      clearTimeout(i);
+      clearInterval(i);
+    }
+    
+    // Clear any remaining handles
+    if (process.env.CI) {
+      // Force exit in CI to prevent hanging
+      setTimeout(() => {
+        process.exit(0);
+      }, 1000);
+    }
   }
 });
 

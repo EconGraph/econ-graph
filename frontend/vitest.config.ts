@@ -20,6 +20,8 @@ export default defineConfig({
     testTimeout: 10000,
     hookTimeout: 10000,
     bail: 0, // Don't bail on first failure
+    // Force process exit after tests complete to prevent hanging
+    forceExit: true,
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
