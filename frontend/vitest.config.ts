@@ -13,12 +13,15 @@ export default defineConfig({
     poolOptions: {
       forks: {
         singleFork: true,
+        isolate: false, // Share memory between tests for faster execution
       },
     },
+    // Global timeout for entire test run
+    timeout: 30000, // 30 seconds max for all tests
     // Force exit after tests complete
-    teardownTimeout: 1000,
-    testTimeout: 10000,
-    hookTimeout: 10000,
+    teardownTimeout: 500,
+    testTimeout: 5000,
+    hookTimeout: 5000,
     bail: 0, // Don't bail on first failure
     // Force process exit after tests complete to prevent hanging
     forceExit: true,
