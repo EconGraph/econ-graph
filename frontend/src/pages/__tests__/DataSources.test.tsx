@@ -196,7 +196,7 @@ describe('DataSources', () => {
       const mainHeadings = screen.getAllByRole('heading', { level: 1 });
       expect(mainHeadings.length).toBeGreaterThan(0);
       
-      // Check that at least one has "Data Sources" text
+      // Check that at least one has "Data Sources" text (use first one found)
       const dataSourcesHeading = mainHeadings.find(h => h.textContent?.includes('Data Sources'));
       expect(dataSourcesHeading).toBeTruthy();
 
