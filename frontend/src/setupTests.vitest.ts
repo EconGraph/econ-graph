@@ -277,7 +277,7 @@ vi.mock('@/hooks/useAuth', () => ({
   useAuth: mockUseAuth,
 }));
 
-vi.mock('../contexts/AuthContext', () => ({
+vi.mock('./contexts/AuthContext', () => ({
   useAuth: mockUseAuth,
   AuthProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
