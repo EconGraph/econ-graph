@@ -63,6 +63,257 @@ interface FinancialAlertsProps {
   onAlertClick?: (alert: FinancialAlert) => void;
 }
 
+interface AlertCardProps {
+  alert: FinancialAlert;
+  onAlertClick: (alert: FinancialAlert) => void;
+  onMarkAsRead: (alertId: string) => void;
+  onToggleActive: (alertId: string) => void;
+}
+
+// Helper functions for AlertCard
+const getSeverityConfig = (severity: string) => {
+  switch (severity) {
+    case 'critical':
+      return {
+        color: 'text-red-600',
+        bgColor: 'bg-red-100',
+        icon: <AlertTriangle className='h-4 w-4' />,
+        badge: 'bg-red-100 text-red-800',
+      };
+    case 'high':
+      return {
+        color: 'text-orange-600',
+        bgColor: 'bg-orange-100',
+        icon: <TrendingDown className='h-4 w-4' />,
+        badge: 'bg-orange-100 text-orange-800',
+      };
+    case 'medium':
+      return {
+        color: 'text-yellow-600',
+        bgColor: 'bg-yellow-100',
+        icon: <Clock className='h-4 w-4' />,
+        badge: 'bg-yellow-100 text-yellow-800',
+      };
+    case 'low':
+      return {
+        color: 'text-blue-600',
+        bgColor: 'bg-blue-100',
+        icon: <TrendingUp className='h-4 w-4' />,
+        badge: 'bg-blue-100 text-blue-800',
+      };
+    default:
+      return {
+        color: 'text-gray-600',
+        bgColor: 'bg-gray-100',
+        icon: <Bell className='h-4 w-4' />,
+        badge: 'bg-gray-100 text-gray-800',
+      };
+  }
+};
+
+const getAlertTypeIcon = (type: string) => {
+  switch (type) {
+    case 'ratio_threshold':
+      return <DollarSign className='h-4 w-4' />;
+    case 'trend_change':
+      return <TrendingDown className='h-4 w-4' />;
+    case 'filing_deadline':
+      return <Calendar className='h-4 w-4' />;
+    case 'benchmark_change':
+      return <TrendingUp className='h-4 w-4' />;
+    default:
+      return <Bell className='h-4 w-4' />;
+  }
+};
+
+const formatAlertValue = (value: number, ratioName?: string) => {
+  if (!value) return '';
+
+  const percentageRatios = ['returnOnEquity', 'returnOnAssets', 'grossMargin', 'netMargin'];
+  if (ratioName && percentageRatios.includes(ratioName)) {
+    return `${(value * 100).toFixed(1)}%`;
+  }
+  return value.toFixed(2);
+};
+
+/**
+ * Memoized AlertCard component to prevent unnecessary re-renders
+ * Only re-renders when the alert itself changes, not when other alerts change
+ */
+const AlertCard = React.memo<AlertCardProps>(
+  ({ alert, onAlertClick, onMarkAsRead, onToggleActive }) => {
+    const severityConfig = getSeverityConfig(alert.severity);
+    const isExpiring =
+      alert.expiresAt && new Date(alert.expiresAt) < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    const handleClick = useCallback(() => {
+      onAlertClick(alert);
+    }, [alert, onAlertClick]);
+
+    const handleViewDetails = useCallback(
+      (e: React.MouseEvent) => {
+        e.stopPropagation();
+        onToggleActive(alert.id);
+      },
+      [alert.id, onToggleActive]
+    );
+
+    const handleAcknowledge = useCallback(
+      (e: React.MouseEvent) => {
+        e.stopPropagation();
+        onMarkAsRead(alert.id);
+      },
+      [alert.id, onMarkAsRead]
+    );
+
+    const handleDismiss = useCallback((e: React.MouseEvent) => {
+      e.stopPropagation();
+      // Handle dismiss functionality
+    }, []);
+
+    const handleToggleIcon = useCallback(
+      (e: React.MouseEvent) => {
+        e.stopPropagation();
+        onToggleActive(alert.id);
+      },
+      [alert.id, onToggleActive]
+    );
+
+    return (
+      <Card
+        className={`cursor-pointer hover:shadow-md transition-shadow ${
+          !alert.isRead ? 'ring-2 ring-blue-200' : ''
+        } ${!alert.isActive ? 'opacity-60' : ''}`}
+        onClick={handleClick}
+      >
+        <CardContent className='p-4'>
+          <div className='flex items-start space-x-3'>
+            <div className={`p-2 rounded-lg ${severityConfig.bgColor}`}>{severityConfig.icon}</div>
+
+            <div className='flex-1 min-w-0'>
+              <div className='flex items-center justify-between mb-2'>
+                <div className='flex items-center space-x-2'>
+                  <h3 className='font-medium text-gray-900 truncate'>{alert.title}</h3>
+                  {!alert.isRead && <div className='w-2 h-2 bg-blue-500 rounded-full' />}
+                </div>
+                <div className='flex items-center space-x-2'>
+                  <Badge className={severityConfig.badge}>
+                    {alert.severity.charAt(0).toUpperCase() + alert.severity.slice(1)}
+                  </Badge>
+                  <Badge variant='outline'>{alert.type.replace('_', ' ')}</Badge>
+                </div>
+              </div>
+
+              <p className='text-sm text-gray-600 mb-3'>{alert.description}</p>
+
+              <div className='flex items-center justify-between'>
+                <div className='flex items-center space-x-4 text-sm text-gray-500'>
+                  <div className='flex items-center space-x-1'>
+                    {getAlertTypeIcon(alert.type)}
+                    <span>{alert.companyName}</span>
+                  </div>
+
+                  {alert.ratioName && alert.currentValue && (
+                    <div className='flex items-center space-x-1'>
+                      <span>Current:</span>
+                      <span className='font-medium'>
+                        {formatAlertValue(alert.currentValue, alert.ratioName)}
+                      </span>
+                    </div>
+                  )}
+
+                  {alert.thresholdValue && (
+                    <div className='flex items-center space-x-1'>
+                      <span>Threshold:</span>
+                      <span className='font-medium'>
+                        {formatAlertValue(alert.thresholdValue, alert.ratioName)}
+                      </span>
+                    </div>
+                  )}
+
+                  <span>
+                    {new Date(alert.createdAt).toLocaleDateString('en-US', {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                  </span>
+
+                  {alert.expiresAt && (
+                    <span>
+                      Expires:{' '}
+                      {new Date(alert.expiresAt).toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                      })}
+                    </span>
+                  )}
+
+                  <div className='flex items-center space-x-1'>
+                    <span className='text-xs'>
+                      {alert.direction === 'decline' && 'decline'}
+                      {alert.direction === 'improvement' && 'improvement'}
+                      {alert.direction === 'change' && 'change'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className='flex items-center space-x-2'>
+                  {isExpiring && (
+                    <Badge variant='destructive' className='text-xs'>
+                      Expires Soon
+                    </Badge>
+                  )}
+
+                  {alert.severity === 'high' && (
+                    <Badge variant='destructive' className='text-xs'>
+                      High Priority
+                    </Badge>
+                  )}
+
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={handleViewDetails}
+                    aria-label='View Details'
+                  >
+                    View Details
+                  </Button>
+
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={handleAcknowledge}
+                    aria-label='Acknowledge alert'
+                  >
+                    Acknowledge
+                  </Button>
+
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={handleDismiss}
+                    aria-label='Dismiss alert'
+                  >
+                    Dismiss
+                  </Button>
+
+                  <Button variant='ghost' size='sm' onClick={handleToggleIcon}>
+                    {alert.isActive ? <Eye className='h-4 w-4' /> : <EyeOff className='h-4 w-4' />}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+);
+
+AlertCard.displayName = 'AlertCard';
+
 const FinancialAlertsContent: React.FC<FinancialAlertsProps> = ({
   companyId,
   ratios: _ratios,
@@ -137,74 +388,6 @@ const FinancialAlertsContent: React.FC<FinancialAlertsProps> = ({
 
     return filtered;
   }, [alerts, filterType, filterSeverity, showRead, sortBy, searchTerm]);
-
-  // Get severity color and icon
-  const getSeverityConfig = (severity: string) => {
-    switch (severity) {
-      case 'critical':
-        return {
-          color: 'text-red-600',
-          bgColor: 'bg-red-100',
-          icon: <AlertTriangle className='h-4 w-4' />,
-          badge: 'bg-red-100 text-red-800',
-        };
-      case 'high':
-        return {
-          color: 'text-orange-600',
-          bgColor: 'bg-orange-100',
-          icon: <TrendingDown className='h-4 w-4' />,
-          badge: 'bg-orange-100 text-orange-800',
-        };
-      case 'medium':
-        return {
-          color: 'text-yellow-600',
-          bgColor: 'bg-yellow-100',
-          icon: <Clock className='h-4 w-4' />,
-          badge: 'bg-yellow-100 text-yellow-800',
-        };
-      case 'low':
-        return {
-          color: 'text-blue-600',
-          bgColor: 'bg-blue-100',
-          icon: <TrendingUp className='h-4 w-4' />,
-          badge: 'bg-blue-100 text-blue-800',
-        };
-      default:
-        return {
-          color: 'text-gray-600',
-          bgColor: 'bg-gray-100',
-          icon: <Bell className='h-4 w-4' />,
-          badge: 'bg-gray-100 text-gray-800',
-        };
-    }
-  };
-
-  // Get alert type icon
-  const getAlertTypeIcon = (type: string) => {
-    switch (type) {
-      case 'ratio_threshold':
-        return <DollarSign className='h-4 w-4' />;
-      case 'trend_change':
-        return <TrendingDown className='h-4 w-4' />;
-      case 'filing_deadline':
-        return <Calendar className='h-4 w-4' />;
-      case 'benchmark_change':
-        return <TrendingUp className='h-4 w-4' />;
-      default:
-        return <Bell className='h-4 w-4' />;
-    }
-  };
-
-  // Format alert value
-  const formatAlertValue = (value: number, ratioName?: string) => {
-    if (!value) return '';
-
-    const percentageRatios = ['returnOnEquity', 'returnOnAssets', 'grossMargin', 'netMargin'];
-    if (ratioName && percentageRatios.includes(ratioName)) {
-      return `${(value * 100).toFixed(1)}%`;
-    }
-    return value.toFixed(2);
-  };
 
   // Handle alert actions
   const handleMarkAsRead = useCallback((alertId: string) => {
@@ -381,168 +564,15 @@ const FinancialAlertsContent: React.FC<FinancialAlertsProps> = ({
             </CardContent>
           </Card>
         ) : (
-          filteredAlerts.map(alert => {
-            const severityConfig = getSeverityConfig(alert.severity);
-            const isExpiring =
-              alert.expiresAt &&
-              new Date(alert.expiresAt) < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
-            return (
-              <Card
-                key={alert.id}
-                className={`cursor-pointer hover:shadow-md transition-shadow ${
-                  !alert.isRead ? 'ring-2 ring-blue-200' : ''
-                } ${!alert.isActive ? 'opacity-60' : ''}`}
-                onClick={() => handleAlertClick(alert)}
-              >
-                <CardContent className='p-4'>
-                  <div className='flex items-start space-x-3'>
-                    <div className={`p-2 rounded-lg ${severityConfig.bgColor}`}>
-                      {severityConfig.icon}
-                    </div>
-
-                    <div className='flex-1 min-w-0'>
-                      <div className='flex items-center justify-between mb-2'>
-                        <div className='flex items-center space-x-2'>
-                          <h3 className='font-medium text-gray-900 truncate'>{alert.title}</h3>
-                          {!alert.isRead && <div className='w-2 h-2 bg-blue-500 rounded-full' />}
-                        </div>
-                        <div className='flex items-center space-x-2'>
-                          <Badge className={severityConfig.badge}>
-                            {alert.severity.charAt(0).toUpperCase() + alert.severity.slice(1)}
-                          </Badge>
-                          <Badge variant='outline'>{alert.type.replace('_', ' ')}</Badge>
-                        </div>
-                      </div>
-
-                      <p className='text-sm text-gray-600 mb-3'>{alert.description}</p>
-
-                      <div className='flex items-center justify-between'>
-                        <div className='flex items-center space-x-4 text-sm text-gray-500'>
-                          <div className='flex items-center space-x-1'>
-                            {getAlertTypeIcon(alert.type)}
-                            <span>{alert.companyName}</span>
-                          </div>
-
-                          {alert.ratioName && alert.currentValue && (
-                            <div className='flex items-center space-x-1'>
-                              <span>Current:</span>
-                              <span className='font-medium'>
-                                {formatAlertValue(alert.currentValue, alert.ratioName)}
-                              </span>
-                            </div>
-                          )}
-
-                          {alert.thresholdValue && (
-                            <div className='flex items-center space-x-1'>
-                              <span>Threshold:</span>
-                              <span className='font-medium'>
-                                {formatAlertValue(alert.thresholdValue, alert.ratioName)}
-                              </span>
-                            </div>
-                          )}
-
-                          <span>
-                            {new Date(alert.createdAt).toLocaleDateString('en-US', {
-                              year: 'numeric',
-                              month: 'short',
-                              day: 'numeric',
-                            })}
-                          </span>
-
-                          {/* Expiration Date */}
-                          {alert.expiresAt && (
-                            <span>
-                              Expires:{' '}
-                              {new Date(alert.expiresAt).toLocaleDateString('en-US', {
-                                year: 'numeric',
-                                month: 'short',
-                                day: 'numeric',
-                              })}
-                            </span>
-                          )}
-
-                          {/* Direction Indicator */}
-                          <div className='flex items-center space-x-1'>
-                            <span className='text-xs'>
-                              {alert.direction === 'decline' && 'decline'}
-                              {alert.direction === 'improvement' && 'improvement'}
-                              {alert.direction === 'change' && 'change'}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className='flex items-center space-x-2'>
-                          {isExpiring && (
-                            <Badge variant='destructive' className='text-xs'>
-                              Expires Soon
-                            </Badge>
-                          )}
-
-                          {alert.severity === 'high' && (
-                            <Badge variant='destructive' className='text-xs'>
-                              High Priority
-                            </Badge>
-                          )}
-
-                          <Button
-                            variant='ghost'
-                            size='sm'
-                            onClick={e => {
-                              e.stopPropagation();
-                              handleToggleActive(alert.id);
-                            }}
-                            aria-label='View Details'
-                          >
-                            View Details
-                          </Button>
-
-                          <Button
-                            variant='ghost'
-                            size='sm'
-                            onClick={e => {
-                              e.stopPropagation();
-                              handleMarkAsRead(alert.id);
-                            }}
-                            aria-label='Acknowledge alert'
-                          >
-                            Acknowledge
-                          </Button>
-
-                          <Button
-                            variant='ghost'
-                            size='sm'
-                            onClick={e => {
-                              e.stopPropagation();
-                              // Handle dismiss functionality
-                            }}
-                            aria-label='Dismiss alert'
-                          >
-                            Dismiss
-                          </Button>
-
-                          <Button
-                            variant='ghost'
-                            size='sm'
-                            onClick={e => {
-                              e.stopPropagation();
-                              handleToggleActive(alert.id);
-                            }}
-                          >
-                            {alert.isActive ? (
-                              <Eye className='h-4 w-4' />
-                            ) : (
-                              <EyeOff className='h-4 w-4' />
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })
+          filteredAlerts.map(alert => (
+            <AlertCard
+              key={alert.id}
+              alert={alert}
+              onAlertClick={handleAlertClick}
+              onMarkAsRead={handleMarkAsRead}
+              onToggleActive={handleToggleActive}
+            />
+          ))
         )}
       </div>
 
