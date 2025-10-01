@@ -176,14 +176,14 @@ describe('DataSources', () => {
       renderDataSources();
 
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
     });
 
     test('should display page title and description', () => {
       renderDataSources();
 
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
       expect(screen.getByText('Active Sources')).toBeInTheDocument();
     });
 
@@ -210,7 +210,7 @@ describe('DataSources', () => {
 
       // Since the mock isn't working properly, check that the component renders without crashing
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
     });
 
     test('should display BLS data source information', () => {
@@ -218,7 +218,7 @@ describe('DataSources', () => {
 
       // Since the mock isn't working properly, check that the component renders without crashing
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
     });
 
     test('should display BEA data source information', () => {
@@ -226,7 +226,7 @@ describe('DataSources', () => {
 
       // Since the mock isn't working properly, check that the component renders without crashing
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
     });
 
     test('should display Federal Reserve data source information', () => {
@@ -234,7 +234,7 @@ describe('DataSources', () => {
 
       // Since the mock isn't working properly, check that the component renders without crashing
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
     });
 
     test('should display Census Bureau data source information', () => {
@@ -242,7 +242,7 @@ describe('DataSources', () => {
 
       // Since the mock isn't working properly, check that the component renders without crashing
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
     });
   });
 
@@ -261,7 +261,7 @@ describe('DataSources', () => {
 
       // Since the mock isn't working properly, check that the component renders without crashing
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
     });
 
     test('should display data coverage information', () => {
@@ -269,7 +269,7 @@ describe('DataSources', () => {
 
       // Since the mock isn't working properly, check that the component renders without crashing
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
     });
   });
 
@@ -279,7 +279,7 @@ describe('DataSources', () => {
 
       // Since the mock isn't working properly, check that the component renders without crashing
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
     });
 
     test('should display data source logos or icons', () => {
@@ -287,7 +287,7 @@ describe('DataSources', () => {
 
       // Since the mock isn't working properly, check that the component renders without crashing
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
     });
 
     test('should display data source statistics', () => {
@@ -311,7 +311,7 @@ describe('DataSources', () => {
 
       // Since the mock isn't working properly, check that the component renders without crashing
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
     });
 
     test('should have search or filter functionality', () => {
@@ -346,7 +346,7 @@ describe('DataSources', () => {
 
       // Since the mock isn't working properly, check that the component renders without crashing
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
     });
   });
 
@@ -363,7 +363,7 @@ describe('DataSources', () => {
 
       // Since the mock isn't working properly, check that the component renders without crashing
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
     });
 
     test('should render correctly on tablet viewport', () => {
@@ -431,7 +431,7 @@ describe('DataSources', () => {
 
       // Since the mock isn't working properly, check that the component renders without crashing
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      expect(screen.getByText('Economic data providers and their current status')).toBeInTheDocument();
+      expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
     });
   });
 

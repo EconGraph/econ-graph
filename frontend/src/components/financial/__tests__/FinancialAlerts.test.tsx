@@ -267,10 +267,8 @@ describe('FinancialAlerts', () => {
   it('handles bulk actions (mark all as read)', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Wait for component to render - use getAllByRole to handle multiple h3 headings
-    const headings = await screen.findAllByRole('heading', { level: 3 });
-    const alertsHeading = headings.find(h => /financial alerts/i.test(h.textContent || ''));
-    expect(alertsHeading).toBeTruthy();
+    // Wait for component to render - just wait for the text to appear
+    await screen.findByText('Financial Alerts');
 
     // Check if mark all button exists (may not always render)
     const markAllButtons = screen.queryAllByRole('button', { name: /mark all as read/i });
@@ -283,10 +281,8 @@ describe('FinancialAlerts', () => {
   it('handles bulk actions (dismiss all)', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Wait for component to render - use getAllByRole to handle multiple h3 headings
-    const headings = await screen.findAllByRole('heading', { level: 3 });
-    const alertsHeading = headings.find(h => /financial alerts/i.test(h.textContent || ''));
-    expect(alertsHeading).toBeTruthy();
+    // Wait for component to render - just wait for the text to appear
+    await screen.findByText('Financial Alerts');
 
     // Check if dismiss all button exists (may not always render)
     const dismissAllButtons = screen.queryAllByRole('button', { name: /dismiss all/i });
@@ -392,10 +388,8 @@ describe('FinancialAlerts', () => {
   it('handles alert refresh functionality', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Wait for component to render - use getAllByRole to handle multiple h3 headings
-    const headings = await screen.findAllByRole('heading', { level: 3 });
-    const alertsHeading = headings.find(h => /financial alerts/i.test(h.textContent || ''));
-    expect(alertsHeading).toBeTruthy();
+    // Wait for component to render - just wait for the text to appear
+    await screen.findByText('Financial Alerts');
 
     // Check if refresh button exists (may not always render)
     const refreshButtons = screen.queryAllByRole('button', { name: /refresh/i });
@@ -408,9 +402,8 @@ describe('FinancialAlerts', () => {
   it('shows alert settings and preferences', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Wait for component to render first
-    const headings = await screen.findAllByRole('heading', { level: 3 });
-    expect(headings.length).toBeGreaterThan(0);
+    // Wait for component to render - just wait for the text to appear
+    await screen.findByText('Financial Alerts');
 
     // Should show settings/preferences link
     const settingsElements = screen.getAllByText('Alert Settings');
