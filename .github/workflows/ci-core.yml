@@ -1324,11 +1324,11 @@ jobs:
 
     - name: Run tests (parallel)
       working-directory: frontend
-      run: npm run test:coverage -- --exclude="**/ChartCollaborationConnected*|**/ChartCollaboration*|**/ProfessionalChart*|**/InteractiveChartWithCollaboration*"
+      run: npm run test:coverage
 
     - name: Run problematic tests (serial)
       working-directory: frontend
-      run: npm run test:coverage -- --include="**/ChartCollaborationConnected*|**/ChartCollaboration*|**/ProfessionalChart*|**/InteractiveChartWithCollaboration*"
+      run: npm run test:coverage -- "**/ChartCollaborationConnected*" "**/ChartCollaboration*" "**/ProfessionalChart*" "**/InteractiveChartWithCollaboration*"
 
   quality-checks:
     name: Quality Checks
