@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -183,28 +183,34 @@ const FinancialStatementViewerContent: React.FC<FinancialStatementViewerProps> =
 
   const effectiveStatement = statement || statementFallback;
 
-  const handleLineItemClick = (lineItemId: string) => {
-    setSelectedLineItem(selectedLineItem === lineItemId ? null : lineItemId);
-    if (showCollaborativeFeatures) {
-      setShowAnnotations(true);
-    }
-  };
+  const handleLineItemClick = useCallback(
+    (lineItemId: string) => {
+      setSelectedLineItem(selectedLineItem === lineItemId ? null : lineItemId);
+      if (showCollaborativeFeatures) {
+        setShowAnnotations(true);
+      }
+    },
+    [selectedLineItem, showCollaborativeFeatures]
+  );
 
-  const handleAddAnnotation = async (_content: string, _type: string, _lineItemId?: string) => {
-    try {
-      await createAnnotation();
-    } catch (error) {
-      // Handle error silently
-    }
-  };
+  const handleAddAnnotation = useCallback(
+    async (_content: string, _type: string, _lineItemId?: string) => {
+      try {
+        await createAnnotation();
+      } catch (error) {
+        // Handle error silently
+      }
+    },
+    [createAnnotation]
+  );
 
-  const handleUpdateAnnotation = (_id: string, _content: string) => {
+  const handleUpdateAnnotation = useCallback((_id: string, _content: string) => {
     // Implementation for updating annotation
-  };
+  }, []);
 
-  const handleDeleteAnnotation = (_id: string) => {
+  const handleDeleteAnnotation = useCallback((_id: string) => {
     // Implementation for deleting annotation
-  };
+  }, []);
 
   const renderLineItemValue = (value: number | null, unit: string) => {
     if (value === null) return '-';

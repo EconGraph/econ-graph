@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge, Button, Progress, Alert, AlertDescription } from '@/components/ui';
@@ -54,6 +54,41 @@ const useFinancialDashboardData = (companyId: string) => {
   });
 };
 
+// Helper functions (pure - moved outside component for performance)
+const getStatusColor = (status: string | undefined) => {
+  if (!status) {
+    return 'text-gray-600';
+  }
+  switch (status.toLowerCase()) {
+    case 'completed':
+      return 'text-green-600';
+    case 'processing':
+      return 'text-yellow-600';
+    case 'failed':
+      return 'text-red-600';
+    default:
+      return 'text-gray-600';
+  }
+};
+
+const getStatusIcon = (status: string | undefined) => {
+  if (!status) return null;
+  switch (status.toLowerCase()) {
+    case 'completed':
+      return <TrendingUp className='h-4 w-4 text-green-600' />;
+    case 'processing':
+      return <Clock className='h-4 w-4 text-yellow-600' />;
+    case 'failed':
+      return <AlertCircle className='h-4 w-4 text-red-600' />;
+    default:
+      return null;
+  }
+};
+
+const formatPercent = (value: number) => {
+  return `${(value * 100).toFixed(1)}%`;
+};
+
 // Main dashboard content component - assumes data is loaded
 const FinancialDashboardContent: React.FC<FinancialDashboardProps> = ({
   companyId,
@@ -82,53 +117,17 @@ const FinancialDashboardContent: React.FC<FinancialDashboardProps> = ({
     }
   }, [statements, selectedStatement]);
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     await refetch();
-  };
+  }, [refetch]);
 
-  const handleExportData = () => {
+  const handleExportData = useCallback(() => {
     // Implementation for data export
-  };
+  }, []);
 
-  const handleShareAnalysis = () => {
+  const handleShareAnalysis = useCallback(() => {
     // Implementation for sharing analysis
-  };
-
-  const getStatusColor = (status: string | undefined) => {
-    if (!status) {
-      return 'text-gray-600';
-    }
-    switch (status.toLowerCase()) {
-      case 'completed':
-        return 'text-green-600';
-      case 'processing':
-        return 'text-yellow-600';
-      case 'failed':
-        return 'text-red-600';
-      default:
-        return 'text-gray-600';
-    }
-  };
-
-  const getStatusIcon = (status: string | undefined) => {
-    if (!status) {
-      return <AlertTriangle className='h-4 w-4' />;
-    }
-    switch (status.toLowerCase()) {
-      case 'completed':
-        return <CheckCircle className='h-4 w-4' />;
-      case 'processing':
-        return <RefreshCw className='h-4 w-4 animate-spin' />;
-      case 'failed':
-        return <XCircle className='h-4 w-4' />;
-      default:
-        return <AlertTriangle className='h-4 w-4' />;
-    }
-  };
-
-  const formatPercent = (value: number) => {
-    return `${(value * 100).toFixed(1)}%`;
-  };
+  }, []);
 
   // Validate company data
   if (!company) {
