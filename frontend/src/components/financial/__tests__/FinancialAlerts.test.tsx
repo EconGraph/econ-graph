@@ -267,8 +267,8 @@ describe('FinancialAlerts', () => {
   it('handles bulk actions (mark all as read)', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Wait for component to render - use a more reliable selector
-    await screen.findByRole('heading', { name: /financial alerts/i });
+    // Wait for component to render - use a more specific selector
+    await screen.findByRole('heading', { level: 3, name: /financial alerts/i });
 
     // Check if mark all button exists (may not always render)
     const markAllButtons = screen.queryAllByRole('button', { name: /mark all as read/i });
@@ -281,8 +281,8 @@ describe('FinancialAlerts', () => {
   it('handles bulk actions (dismiss all)', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Wait for component to render - use a more reliable selector
-    await screen.findByRole('heading', { name: /financial alerts/i });
+    // Wait for component to render - use a more specific selector
+    await screen.findByRole('heading', { level: 3, name: /financial alerts/i });
 
     // Check if dismiss all button exists (may not always render)
     const dismissAllButtons = screen.queryAllByRole('button', { name: /dismiss all/i });
@@ -388,8 +388,8 @@ describe('FinancialAlerts', () => {
   it('handles alert refresh functionality', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Wait for component to render - use a more reliable selector
-    await screen.findByRole('heading', { name: /financial alerts/i });
+    // Wait for component to render - use a more specific selector
+    await screen.findByRole('heading', { level: 3, name: /financial alerts/i });
 
     // Check if refresh button exists (may not always render)
     const refreshButtons = screen.queryAllByRole('button', { name: /refresh/i });
