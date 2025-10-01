@@ -165,11 +165,7 @@ vi.mock('../../hooks/useSeriesData', () => ({
 }));
 
 function renderDataSources() {
-  return renderWithProviders(
-    <Suspense fallback={<div>Loading...</div>}>
-      <DataSources />
-    </Suspense>
-  );
+  return renderWithProviders(<DataSources />);
 }
 
 describe('DataSources', () => {
