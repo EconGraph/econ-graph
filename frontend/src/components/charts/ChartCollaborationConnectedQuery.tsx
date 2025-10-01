@@ -248,7 +248,6 @@ const ChartCollaborationContent = ({
   const addAnnotationMutation = useMutation({
     mutationFn: async (newAnnotation: Partial<Annotation>) => {
       // Your mutation logic here
-      console.log('Adding annotation:', newAnnotation);
       return newAnnotation;
     },
     onSuccess: () => {
@@ -264,8 +263,7 @@ const ChartCollaborationContent = ({
   const shareChartMutation = useMutation({
     mutationFn: async ({ email, permission }: { email: string; permission: string }) => {
       // Your mutation logic here
-      console.log('Sharing chart:', { email, permission });
-      return { success: true };
+      return { email, permission, success: true };
     },
     onSuccess: () => {
       showSnackbar('Chart shared successfully');
@@ -501,7 +499,6 @@ const ChartCollaborationContent = ({
         <DialogTitle>Add New Annotation</DialogTitle>
         <DialogContent>
           <TextField
-            autoFocus
             margin='dense'
             id='annotation-title'
             label='Title'
@@ -539,7 +536,6 @@ const ChartCollaborationContent = ({
         <DialogTitle>Share Chart</DialogTitle>
         <DialogContent>
           <TextField
-            autoFocus
             margin='dense'
             id='share-email'
             label='User Email'

@@ -1,10 +1,8 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient } from '@tanstack/react-query';
 import { vi } from 'vitest';
 import { ChartCollaborationConnectedQuery } from '../ChartCollaborationConnectedQuery';
-import { server } from '../../../test-utils/mocks/server';
 import { renderWithProviders } from '../../../test-utils/test-providers';
 
 // Mock the auth context
@@ -214,7 +212,6 @@ describe('ChartCollaborationConnectedQuery', () => {
   });
 
   it('should filter annotations correctly', async () => {
-    const user = userEvent.setup();
     renderWithProviders(
       <ChartCollaborationConnectedQuery
         chartId="550e8400-e29b-41d4-a716-446655440000"

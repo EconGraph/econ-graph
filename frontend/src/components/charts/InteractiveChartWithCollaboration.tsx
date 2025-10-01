@@ -580,7 +580,7 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
     },
   };
 
-  const handleAnnotationClick = useCallback((annotation: ChartAnnotationType) => {
+  const _handleAnnotationClick = useCallback((annotation: ChartAnnotationType) => {
     setSelectedAnnotations(prev => {
       const exists = prev.find(a => a.id === annotation.id);
       if (exists) {

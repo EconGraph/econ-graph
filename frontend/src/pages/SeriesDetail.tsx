@@ -19,7 +19,6 @@ import {
   Link,
   Skeleton,
   Alert,
-  CircularProgress,
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,

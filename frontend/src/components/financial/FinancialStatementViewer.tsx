@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Badge, Button, Progress as _Progress, Alert, AlertDescription } from '@/components/ui';
+import { Badge, Button, Progress as _Progress } from '@/components/ui';
 import {
   TrendingUp,
   DollarSign,

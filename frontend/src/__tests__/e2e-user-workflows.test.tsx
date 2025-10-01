@@ -8,7 +8,7 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
-import { BrowserRouter } from 'react-router-dom';
+// BrowserRouter is provided by TestProviders
 import { TestProviders } from '../test-utils/test-providers';
 import App from '../App';
 

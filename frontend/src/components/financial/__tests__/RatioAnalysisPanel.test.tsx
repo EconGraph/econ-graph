@@ -295,9 +295,7 @@ describe('RatioAnalysisPanel', () => {
       });
 
       // Find the Liquidity button (shadcn/ui Tabs use buttons without role="tab")
-      const liquidityTab = await waitFor(() => 
-        screen.getByRole('button', { name: 'Liquidity' })
-      );
+      const liquidityTab = await screen.findByRole('button', { name: 'Liquidity' });
       fireEvent.click(liquidityTab);
 
       await waitFor(() => {

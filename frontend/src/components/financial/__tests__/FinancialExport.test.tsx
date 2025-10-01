@@ -148,7 +148,7 @@ describe('FinancialExport', () => {
       />
     );
 
-    const statementsCheckbox = screen.getByLabelText('Include Financial Statements');
+    const statementsCheckbox = screen.getAllByLabelText('Include Financial Statements')[0];
     fireEvent.click(statementsCheckbox);
 
     // Checkbox should be checked
