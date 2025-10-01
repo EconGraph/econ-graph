@@ -132,7 +132,12 @@ export const setupSimpleMSW = async () => {
     }
 
     // Intercept GraphQL requests - be more flexible with URL matching
-    if (url.includes('graphql') || url === '/graphql' || url.endsWith('/graphql') || url.includes('/graphql')) {
+    if (
+      url.includes('graphql') ||
+      url === '/graphql' ||
+      url.endsWith('/graphql') ||
+      url.includes('/graphql')
+    ) {
       if (MSW_DEBUG) console.log(`[Simple MSW] *** GRAPHQL REQUEST DETECTED ***`);
       try {
         const body = JSON.parse(options.body);

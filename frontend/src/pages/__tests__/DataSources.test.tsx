@@ -4,7 +4,7 @@
  * This ensures users can understand the data sources and their characteristics.
  */
 
-import React, { Suspense } from 'react';
+import React from 'react';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';

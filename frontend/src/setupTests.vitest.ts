@@ -10,35 +10,44 @@ import { cleanup } from '@testing-library/react';
 const cleanupTestResources = () => {
   // Clean up React Testing Library
   cleanup();
-  
+
   // Clear all timers and intervals
   for (let i = 1; i < 10000; i++) {
     clearTimeout(i);
     clearInterval(i);
   }
-  
+
   // Clean up DOM elements
   const containers = document.querySelectorAll('[data-testid="test-container"]');
   containers.forEach(container => container.remove());
-  
-  const portalContainers = document.querySelectorAll('[data-testid="material-ui-portal-container"]');
+
+  const portalContainers = document.querySelectorAll(
+    '[data-testid="material-ui-portal-container"]'
+  );
   portalContainers.forEach(container => container.remove());
-  
+
   const reactRoots = document.querySelectorAll('[data-reactroot]');
   reactRoots.forEach(root => root.remove());
-  
+
   const dialogs = document.querySelectorAll('[role="dialog"]');
   dialogs.forEach(dialog => dialog.remove());
-  
+
   // Clear any remaining event listeners
-  document.removeEventListener('click', () => {});
-  document.removeEventListener('keydown', () => {});
-  document.removeEventListener('keyup', () => {});
-  
+  document.removeEventListener('click', () => {
+    // Event listener cleanup
+  });
+  document.removeEventListener('keydown', () => {
+    // Event listener cleanup
+  });
+  document.removeEventListener('keyup', () => {
+    // Event listener cleanup
+  });
+
   // Clear any remaining fetch mocks
   vi.restoreAllMocks();
-  
+
   // Clear console to prevent memory leaks from console.log
+  // eslint-disable-next-line no-console
   console.clear();
 };
 
@@ -50,10 +59,10 @@ afterEach(async () => {
   // Reset to success scenario after each test
   const { setMockScenario, MockScenarios } = await import('./test-utils/mocks/simpleServer');
   setMockScenario(MockScenarios.SUCCESS);
-  
+
   // Comprehensive cleanup after each test (but preserve MSW)
   cleanupTestResources();
-  
+
   // Re-setup MSW after cleanup to ensure it's still working
   await setupSimpleMSW();
 });
