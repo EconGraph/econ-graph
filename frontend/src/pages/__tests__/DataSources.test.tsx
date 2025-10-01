@@ -196,11 +196,12 @@ describe('DataSources', () => {
     test('should have proper heading hierarchy', async () => {
       renderDataSources();
 
-      await waitFor(() => {
-        const mainHeadings = screen.getAllByRole('heading', { level: 1 });
-        expect(mainHeadings.length).toBeGreaterThan(0);
-        expect(mainHeadings[0]).toHaveTextContent('Data Sources');
-      });
+      // Wait for main heading to appear
+      await screen.findByRole('heading', { level: 1, name: /data sources/i });
+
+      const mainHeadings = screen.getAllByRole('heading', { level: 1 });
+      expect(mainHeadings.length).toBeGreaterThan(0);
+      expect(mainHeadings[0]).toHaveTextContent('Data Sources');
 
       // Check for h3 headings that exist in the component
       const subHeadings = screen.getAllByRole('heading', { level: 3 });
