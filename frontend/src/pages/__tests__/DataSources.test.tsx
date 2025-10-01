@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import { render as customRender, setupTestEnvironment, cleanupTestEnvironment } from '../../test-utils/material-ui-test-setup';
@@ -193,12 +193,14 @@ describe('DataSources', () => {
       expect(screen.getByText('Active Sources')).toBeInTheDocument();
     });
 
-    test('should have proper heading hierarchy', () => {
+    test('should have proper heading hierarchy', async () => {
       renderDataSources();
 
-      const mainHeadings = screen.getAllByRole('heading', { level: 1 });
-      expect(mainHeadings.length).toBeGreaterThan(0);
-      expect(mainHeadings[0]).toHaveTextContent('Data Sources');
+      await waitFor(() => {
+        const mainHeadings = screen.getAllByRole('heading', { level: 1 });
+        expect(mainHeadings.length).toBeGreaterThan(0);
+        expect(mainHeadings[0]).toHaveTextContent('Data Sources');
+      });
 
       // Check for h3 headings that exist in the component
       const subHeadings = screen.getAllByRole('heading', { level: 3 });
@@ -383,11 +385,14 @@ describe('DataSources', () => {
   });
 
   describe('Accessibility', () => {
-    test('should have proper ARIA labels', () => {
+    test('should have proper ARIA labels', async () => {
       renderDataSources();
 
-      // Since the mock isn't working properly, check that the component renders without crashing
-      expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
+      // Wait for component to render
+      await waitFor(() => {
+        expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
+      });
+
       expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
 
       // Check for proper heading structure
