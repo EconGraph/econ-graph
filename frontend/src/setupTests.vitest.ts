@@ -16,7 +16,7 @@ afterEach(async () => {
 });
 afterAll(async () => {
   await cleanupSimpleMSW();
-  
+
   // Aggressive cleanup to prevent hanging processes
   if (typeof process !== 'undefined') {
     // Clear all timeouts and intervals
@@ -24,7 +24,7 @@ afterAll(async () => {
       clearTimeout(i);
       clearInterval(i);
     }
-    
+
     // Clear any remaining handles
     if (process.env.CI) {
       // Force exit in CI to prevent hanging

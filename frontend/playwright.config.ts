@@ -7,7 +7,10 @@ import { defineConfig, devices } from '@playwright/test';
 console.log('🔧 Playwright Configuration:');
 console.log('  - FRONTEND_URL:', process.env.FRONTEND_URL);
 console.log('  - CI:', process.env.CI);
-console.log('  - Final baseURL:', process.env.FRONTEND_URL || (process.env.CI ? 'http://localhost:3000' : 'http://localhost:18473'));
+console.log(
+  '  - Final baseURL:',
+  process.env.FRONTEND_URL || (process.env.CI ? 'http://localhost:3000' : 'http://localhost:18473')
+);
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -24,7 +27,9 @@ export default defineConfig({
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: process.env.FRONTEND_URL || (process.env.CI ? 'http://localhost:3000' : 'http://localhost:18473'),
+    baseURL:
+      process.env.FRONTEND_URL ||
+      (process.env.CI ? 'http://localhost:3000' : 'http://localhost:18473'),
 
     /* Run in headless mode by default */
     headless: true,
@@ -80,12 +85,14 @@ export default defineConfig({
   ],
 
   /* Run your local dev server before starting the tests */
-  webServer: process.env.CI ? undefined : {
-    command: 'cd dev-server && npm start',
-    url: 'http://localhost:18473',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
-  },
+  webServer: process.env.CI
+    ? undefined
+    : {
+        command: 'cd dev-server && npm start',
+        url: 'http://localhost:18473',
+        reuseExistingServer: !process.env.CI,
+        timeout: 120 * 1000,
+      },
 
   /* Global setup to add network error interception */
   globalSetup: require.resolve('./tests/e2e/global-setup.ts'),

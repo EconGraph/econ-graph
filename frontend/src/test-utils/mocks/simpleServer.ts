@@ -182,12 +182,12 @@ export const cleanupSimpleMSW = async () => {
   const vitestModule3 = await import('vitest');
   const vi3 = vitestModule3.vi;
   vi3.restoreAllMocks();
-  
+
   // Clear any remaining fetch mocks
   if (originalFetch) {
     global.fetch = originalFetch;
   }
-  
+
   if (MSW_DEBUG) {
     console.log('[Simple MSW] Cleanup completed');
   }

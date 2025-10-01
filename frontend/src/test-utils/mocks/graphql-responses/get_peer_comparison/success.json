@@ -8,9 +8,20 @@
       "sector": "Technology"
     },
     "peers": [
-      { "id": "0000789019", "name": "Microsoft Corporation", "ticker": "MSFT", "industry": "Software", "sector": "Technology" },
-      { "id": "0001018724", "name": "Amazon.com Inc.", "ticker": "AMZN", "industry": "E-commerce", "sector": "Consumer Discretionary" }
+      {
+        "id": "0000789019",
+        "name": "Microsoft Corporation",
+        "ticker": "MSFT",
+        "industry": "Software",
+        "sector": "Technology"
+      },
+      {
+        "id": "0001018724",
+        "name": "Amazon.com Inc.",
+        "ticker": "AMZN",
+        "industry": "E-commerce",
+        "sector": "Consumer Discretionary"
+      }
     ]
   }
 }
-

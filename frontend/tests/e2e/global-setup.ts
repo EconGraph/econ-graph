@@ -8,12 +8,12 @@ async function globalSetup(config: FullConfig) {
   const context = await browser.newContext();
 
   // Add network request logging (ALL requests, not just failures)
-  context.on('request', (request) => {
+  context.on('request', request => {
     console.log(`🌐 Playwright Network Request: ${request.method()} ${request.url()}`);
     console.log(`   📋 Request headers: ${JSON.stringify(request.headers())}`);
   });
 
-  context.on('response', (response) => {
+  context.on('response', response => {
     const status = response.status();
     const url = response.url();
     console.log(`📡 Playwright Network Response: ${status} ${url}`);
@@ -25,7 +25,7 @@ async function globalSetup(config: FullConfig) {
   });
 
   // Add request failed interception with detailed error analysis
-  context.on('requestfailed', (request) => {
+  context.on('requestfailed', request => {
     const failure = request.failure();
     const url = request.url();
     const errorText = failure?.errorText || 'Unknown error';
@@ -55,15 +55,16 @@ async function globalSetup(config: FullConfig) {
     console.log('  - Testing frontend connectivity...');
     const frontendResponse = await page.goto(process.env.FRONTEND_URL || 'http://localhost:3000', {
       timeout: 10000,
-      waitUntil: 'networkidle'
+      waitUntil: 'networkidle',
     });
     console.log(`    Frontend response: ${frontendResponse?.status()}`);
 
     // Test backend connectivity
     console.log('  - Testing backend connectivity...');
-    const backendResponse = await page.request.get(process.env.BACKEND_URL + '/health' || 'http://localhost:51249/health');
+    const backendResponse = await page.request.get(
+      process.env.BACKEND_URL + '/health' || 'http://localhost:51249/health'
+    );
     console.log(`    Backend response: ${backendResponse.status()}`);
-
   } catch (error) {
     console.error('❌ Network connectivity test failed:', error);
   }

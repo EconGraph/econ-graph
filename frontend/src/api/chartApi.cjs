@@ -10,59 +10,59 @@ function generateChartConfig(request) {
     if (!request.seriesData || request.seriesData.length === 0) {
       return {
         success: false,
-        error: 'No series data provided'
+        error: 'No series data provided',
       };
     }
 
     if (!request.chartType) {
       return {
         success: false,
-        error: 'Chart type is required'
+        error: 'Chart type is required',
       };
     }
 
     const config = {
       type: request.chartType,
       data: {
-        labels: request.seriesData[0]?.dataPoints?.map((point) => point.date) || [],
+        labels: request.seriesData[0]?.dataPoints?.map(point => point.date) || [],
         datasets: request.seriesData.map((series, index) => ({
           label: series.title || `Series ${index + 1}`,
-          data: series.dataPoints?.map((point) => point.value) || [],
+          data: series.dataPoints?.map(point => point.value) || [],
           backgroundColor: request.colors?.[index] || `hsl(${index * 137.5}, 70%, 50%)`,
           borderColor: request.colors?.[index] || `hsl(${index * 137.5}, 70%, 50%)`,
           borderWidth: 2,
-          fill: request.chartType === 'line'
-        }))
+          fill: request.chartType === 'line',
+        })),
       },
       options: {
         responsive: true,
         plugins: {
           title: {
             display: true,
-            text: request.title || 'Chart'
+            text: request.title || 'Chart',
           },
           legend: {
-            display: true
-          }
+            display: true,
+          },
         },
         scales: {
           x: {
             display: true,
             title: {
               display: true,
-              text: 'Date'
-            }
+              text: 'Date',
+            },
           },
           y: {
             display: true,
             title: {
               display: true,
-              text: 'Value'
-            }
-          }
+              text: 'Value',
+            },
+          },
         },
-        ...request.options
-      }
+        ...request.options,
+      },
     };
 
     return {
@@ -70,14 +70,17 @@ function generateChartConfig(request) {
       config,
       metadata: {
         seriesCount: request.seriesData.length,
-        dataPointCount: request.seriesData.reduce((sum, series) => sum + (series.dataPoints?.length || 0), 0),
-        chartType: request.chartType
-      }
+        dataPointCount: request.seriesData.reduce(
+          (sum, series) => sum + (series.dataPoints?.length || 0),
+          0
+        ),
+        chartType: request.chartType,
+      },
     };
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
 }
@@ -87,12 +90,13 @@ function generateChartConfig(request) {
  */
 function validateChartRequest(request) {
   if (!request) return false;
-  if (!request.seriesData || !Array.isArray(request.seriesData) || request.seriesData.length === 0) return false;
+  if (!request.seriesData || !Array.isArray(request.seriesData) || request.seriesData.length === 0)
+    return false;
   if (!request.chartType || !['line', 'bar', 'scatter'].includes(request.chartType)) return false;
   return true;
 }
 
 module.exports = {
   generateChartConfig,
-  validateChartRequest
+  validateChartRequest,
 };

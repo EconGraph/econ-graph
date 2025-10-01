@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
@@ -8,4 +8,4 @@ export default defineConfig({
     // Include only server tests
     include: ['**/server/**/*.test.cjs', '**/__tests__/integration/privateChartServer.test.cjs'],
   },
-})
+});
