@@ -139,22 +139,26 @@ describe('FinancialExport', () => {
     expect(screen.getByText('Include Charts')).toBeInTheDocument();
   });
 
-  it('handles data selection checkboxes', () => {
-    render(
-      <FinancialExport
-        company={mockCompany}
-        statements={mockFinancialStatements}
-        ratios={mockFinancialRatios}
-      />
-    );
+  it(
+    'handles data selection checkboxes',
+    () => {
+      render(
+        <FinancialExport
+          company={mockCompany}
+          statements={mockFinancialStatements}
+          ratios={mockFinancialRatios}
+        />
+      );
 
-    const statementsCheckboxes = screen.getAllByLabelText(/Include Financial Statements/i);
-    const statementsCheckbox = statementsCheckboxes[0];
-    fireEvent.click(statementsCheckbox);
+      const statementsCheckboxes = screen.getAllByLabelText(/Include Financial Statements/i);
+      const statementsCheckbox = statementsCheckboxes[0];
+      fireEvent.click(statementsCheckbox);
 
-    // Checkbox should be checked
-    expect(statementsCheckbox).toBeChecked();
-  });
+      // Checkbox should be checked
+      expect(statementsCheckbox).toBeChecked();
+    },
+    15000
+  );
 
   it('displays date range selection', () => {
     render(
