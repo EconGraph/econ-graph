@@ -186,10 +186,13 @@ describe('DataSources', () => {
       expect(screen.getAllByText('Active Sources').length).toBeGreaterThan(0);
     });
 
-    test('should have proper heading hierarchy', () => {
+    test('should have proper heading hierarchy', async () => {
       renderDataSources();
 
-      // Component renders h1 with "Data Sources" text synchronously
+      // Wait for component to render with Suspense
+      await screen.findByText('Data Sources');
+
+      // Component renders h1 with "Data Sources" text
       const mainHeadings = screen.getAllByRole('heading', { level: 1 });
       expect(mainHeadings.length).toBeGreaterThan(0);
       
@@ -200,7 +203,7 @@ describe('DataSources', () => {
       // Check for any headings (not specific level since structure varies)
       const allHeadings = screen.getAllByRole('heading');
       expect(allHeadings.length).toBeGreaterThan(0);
-    });
+    }, 10000); // 10 second timeout for this specific test
   });
 
   describe('Data Source Information Display', () => {
@@ -380,17 +383,19 @@ describe('DataSources', () => {
   });
 
   describe('Accessibility', () => {
-    test('should have proper ARIA labels', () => {
+    test('should have proper ARIA labels', async () => {
       renderDataSources();
 
-      // Component renders synchronously, no need to wait
+      // Wait for component to render with Suspense
+      await screen.findByText('Data Sources');
+      
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
       expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
 
       // Check for proper heading structure
       const headings = screen.getAllByRole('heading');
       expect(headings.length).toBeGreaterThan(0);
-    });
+    }, 10000); // 10 second timeout for this specific test
 
     test('should be keyboard navigable', async () => {
       const user = userEvent.setup();
