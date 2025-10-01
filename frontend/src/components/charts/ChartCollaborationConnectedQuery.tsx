@@ -213,14 +213,14 @@ const ChartCollaborationContent = ({
   // Calculate derived state (memoized for performance)
   const activeCollaborators = useMemo(() => {
     if (!collaborators || !users) return [];
-    
+
     const now = Date.now();
     const fiveMinutesAgo = now - 300000; // Pre-compute threshold
-    
+
     return collaborators.filter(c => {
       const user = users[c.user_id];
       if (!user) return false;
-      
+
       const lastAccessed = new Date(c.last_accessed_at || 0).getTime();
       return lastAccessed > fiveMinutesAgo;
     });

@@ -362,7 +362,7 @@ const FinancialAlertsContentComponent: React.FC<FinancialAlertsProps> = ({
   const filteredAlerts = useMemo(() => {
     // Pre-compute search term once
     const searchLower = searchTerm.toLowerCase();
-    
+
     // Pre-compute severity order for faster sorting
     const severityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
 

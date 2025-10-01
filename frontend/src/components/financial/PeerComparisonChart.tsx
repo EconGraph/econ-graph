@@ -110,7 +110,10 @@ const PeerComparisonChartComponent: React.FC<PeerComparisonChartProps> = ({
 
     // Create a lookup map for ratios to avoid nested find operations
     const ratioLookup = new Map(
-      ratios.map(ratio => [ratio.ratioName, { displayName: ratio.ratioDisplayName, category: ratio.category }])
+      ratios.map(ratio => [
+        ratio.ratioName,
+        { displayName: ratio.ratioDisplayName, category: ratio.category },
+      ])
     );
 
     return Array.from(ratioNames).map(ratioName => {
