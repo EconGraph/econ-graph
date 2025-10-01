@@ -4,12 +4,13 @@
  * This ensures users can understand the data sources and their characteristics.
  */
 
-import React from 'react';
+import React, { Suspense } from 'react';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
-import { render as customRender, setupTestEnvironment, cleanupTestEnvironment } from '../../test-utils/material-ui-test-setup';
+import { renderWithProviders } from '../../test-utils/test-providers';
 import DataSources from '../DataSources';
+import { CircularProgress } from '@mui/material';
 
 // Mock the hooks module BEFORE importing the component
 const mockDataSources = [
@@ -165,17 +166,10 @@ vi.mock('../../hooks/useSeriesData', () => ({
 }));
 
 function renderDataSources() {
-  return customRender(<DataSources />);
+  return renderWithProviders(<DataSources />);
 }
 
 describe('DataSources', () => {
-  beforeEach(() => {
-    setupTestEnvironment();
-  });
-
-  afterEach(() => {
-    cleanupTestEnvironment();
-  });
 
   describe('Page Layout and Structure', () => {
     test('should render data sources page successfully', () => {
