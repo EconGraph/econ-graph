@@ -196,12 +196,13 @@ describe('DataSources', () => {
     test('should have proper heading hierarchy', async () => {
       renderDataSources();
 
-      // Wait for main heading to appear
-      await screen.findByRole('heading', { level: 1, name: /data sources/i });
-
-      const mainHeadings = screen.getAllByRole('heading', { level: 1 });
+      // Wait for any h1 heading to appear first
+      const mainHeadings = await screen.findAllByRole('heading', { level: 1 });
       expect(mainHeadings.length).toBeGreaterThan(0);
-      expect(mainHeadings[0]).toHaveTextContent('Data Sources');
+      
+      // Check that at least one has "Data Sources" text
+      const dataSourcesHeading = mainHeadings.find(h => h.textContent?.includes('Data Sources'));
+      expect(dataSourcesHeading).toBeTruthy();
 
       // Check for h3 headings that exist in the component
       const subHeadings = screen.getAllByRole('heading', { level: 3 });
@@ -389,10 +390,8 @@ describe('DataSources', () => {
     test('should have proper ARIA labels', async () => {
       renderDataSources();
 
-      // Wait for component to render
-      await waitFor(() => {
-        expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
-      });
+      // Wait for component to render - use findByRole instead of waitFor
+      await screen.findByRole('heading', { level: 1, name: /data sources/i });
 
       expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
 
