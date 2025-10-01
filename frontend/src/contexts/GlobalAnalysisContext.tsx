@@ -5,7 +5,7 @@
  * selected countries, indicators, and user preferences.
  */
 
-import React, { createContext, useContext, useReducer, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useMemo } from 'react';
 import { CountryData, MapViewState, FilterState, UserPreferences } from '../types/globalAnalysis';
 
 interface GlobalAnalysisState {
@@ -274,79 +274,84 @@ const GlobalAnalysisContext = createContext<GlobalAnalysisContextType | undefine
 export const GlobalAnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, dispatch] = useReducer(globalAnalysisReducer, initialState);
 
-  const actions = {
-    setSelectedCountries: useCallback((countries: string[]) => {
-      dispatch({ type: 'SET_SELECTED_COUNTRIES', payload: countries });
-    }, []),
+  // Memoize actions object to prevent context consumers from re-rendering
+  // Individual functions don't need useCallback since they're already in useMemo
+  const actions = useMemo(
+    () => ({
+      setSelectedCountries: (countries: string[]) => {
+        dispatch({ type: 'SET_SELECTED_COUNTRIES', payload: countries });
+      },
 
-    toggleCountry: useCallback((countryId: string) => {
-      dispatch({ type: 'TOGGLE_COUNTRY', payload: countryId });
-    }, []),
+      toggleCountry: (countryId: string) => {
+        dispatch({ type: 'TOGGLE_COUNTRY', payload: countryId });
+      },
 
-    setHoveredCountry: useCallback((country: string | null) => {
-      dispatch({ type: 'SET_HOVERED_COUNTRY', payload: country });
-    }, []),
+      setHoveredCountry: (country: string | null) => {
+        dispatch({ type: 'SET_HOVERED_COUNTRY', payload: country });
+      },
 
-    setSelectedIndicator: useCallback((indicator: string) => {
-      dispatch({ type: 'SET_SELECTED_INDICATOR', payload: indicator });
-    }, []),
+      setSelectedIndicator: (indicator: string) => {
+        dispatch({ type: 'SET_SELECTED_INDICATOR', payload: indicator });
+      },
 
-    setTimeRange: useCallback((range: { start: Date; end: Date }) => {
-      dispatch({ type: 'SET_TIME_RANGE', payload: range });
-    }, []),
+      setTimeRange: (range: { start: Date; end: Date }) => {
+        dispatch({ type: 'SET_TIME_RANGE', payload: range });
+      },
 
-    setMapView: useCallback((view: Partial<MapViewState>) => {
-      dispatch({ type: 'SET_MAP_VIEW', payload: view });
-    }, []),
+      setMapView: (view: Partial<MapViewState>) => {
+        dispatch({ type: 'SET_MAP_VIEW', payload: view });
+      },
 
-    updateFilters: useCallback((filters: Partial<FilterState>) => {
-      dispatch({ type: 'UPDATE_FILTERS', payload: filters });
-    }, []),
+      updateFilters: (filters: Partial<FilterState>) => {
+        dispatch({ type: 'UPDATE_FILTERS', payload: filters });
+      },
 
-    setCountries: useCallback((countries: CountryData[]) => {
-      dispatch({ type: 'SET_COUNTRIES', payload: countries });
-    }, []),
+      setCountries: (countries: CountryData[]) => {
+        dispatch({ type: 'SET_COUNTRIES', payload: countries });
+      },
 
-    setProjection: useCallback((projection: string) => {
-      dispatch({ type: 'SET_PROJECTION', payload: projection });
-    }, []),
+      setProjection: (projection: string) => {
+        dispatch({ type: 'SET_PROJECTION', payload: projection });
+      },
 
-    setColorScheme: useCallback((scheme: string) => {
-      dispatch({ type: 'SET_COLOR_SCHEME', payload: scheme });
-    }, []),
+      setColorScheme: (scheme: string) => {
+        dispatch({ type: 'SET_COLOR_SCHEME', payload: scheme });
+      },
 
-    toggleAnimation: useCallback(() => {
-      dispatch({ type: 'TOGGLE_ANIMATION' });
-    }, []),
+      toggleAnimation: () => {
+        dispatch({ type: 'TOGGLE_ANIMATION' });
+      },
 
-    toggleBorders: useCallback(() => {
-      dispatch({ type: 'TOGGLE_BORDERS' });
-    }, []),
+      toggleBorders: () => {
+        dispatch({ type: 'TOGGLE_BORDERS' });
+      },
 
-    toggleLabels: useCallback(() => {
-      dispatch({ type: 'TOGGLE_LABELS' });
-    }, []),
+      toggleLabels: () => {
+        dispatch({ type: 'TOGGLE_LABELS' });
+      },
 
-    setLabelSize: useCallback((size: number) => {
-      dispatch({ type: 'SET_LABEL_SIZE', payload: size });
-    }, []),
+      setLabelSize: (size: number) => {
+        dispatch({ type: 'SET_LABEL_SIZE', payload: size });
+      },
 
-    setLoading: useCallback((loading: boolean) => {
-      dispatch({ type: 'SET_LOADING', payload: loading });
-    }, []),
+      setLoading: (loading: boolean) => {
+        dispatch({ type: 'SET_LOADING', payload: loading });
+      },
 
-    setError: useCallback((error: string | null) => {
-      dispatch({ type: 'SET_ERROR', payload: error });
-    }, []),
+      setError: (error: string | null) => {
+        dispatch({ type: 'SET_ERROR', payload: error });
+      },
 
-    updatePreferences: useCallback((preferences: Partial<UserPreferences>) => {
-      dispatch({ type: 'UPDATE_PREFERENCES', payload: preferences });
-    }, []),
+      updatePreferences: (preferences: Partial<UserPreferences>) => {
+        dispatch({ type: 'UPDATE_PREFERENCES', payload: preferences });
+      },
 
-    resetMap: useCallback(() => {
-      dispatch({ type: 'RESET_MAP' });
-    }, []),
-  };
+      resetMap: () => {
+        dispatch({ type: 'RESET_MAP' });
+      },
+    }),
+    []
+  ); // Empty deps - dispatch is stable from useReducer
 
   return (
     <GlobalAnalysisContext.Provider value={{ state, actions }}>
