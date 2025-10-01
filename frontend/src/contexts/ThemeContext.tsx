@@ -140,7 +140,8 @@ interface ThemeProviderProps {
 }
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
-  const { user } = useAuth();
+  const authResult = useAuth();
+  const user = authResult?.user;
   const [currentTheme, setCurrentTheme] = useState<'light' | 'dark'>('light');
 
   // Initialize theme from user preferences or localStorage
