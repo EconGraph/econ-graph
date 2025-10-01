@@ -10,8 +10,6 @@ import {
   PieChart,
   Activity,
   AlertTriangle,
-  CheckCircle,
-  XCircle,
   RefreshCw,
   Download,
   Share2,

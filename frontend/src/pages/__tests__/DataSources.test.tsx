@@ -5,12 +5,11 @@
  */
 
 import React, { Suspense } from 'react';
-import { screen, waitFor } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import { renderWithProviders } from '../../test-utils/test-providers';
 import DataSources from '../DataSources';
-import { CircularProgress } from '@mui/material';
 
 // Mock the hooks module BEFORE importing the component
 const mockDataSources = [

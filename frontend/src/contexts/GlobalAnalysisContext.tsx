@@ -5,7 +5,7 @@
  * selected countries, indicators, and user preferences.
  */
 
-import React, { createContext, useContext, useReducer, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useReducer, useMemo } from 'react';
 import { CountryData, MapViewState, FilterState, UserPreferences } from '../types/globalAnalysis';
 
 interface GlobalAnalysisState {

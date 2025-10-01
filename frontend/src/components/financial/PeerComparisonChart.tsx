@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -119,7 +119,7 @@ const PeerComparisonChartComponent: React.FC<PeerComparisonChartProps> = ({
   const companyPerformanceScores = useMemo(() => {
     const scores = new Map<string, number>();
     [...peerCompanies, currentCompanyData].forEach(company => {
-      const percentiles = Object.values(company.percentile);
+      const percentiles = Object.values(company.percentile) as number[];
       scores.set(company.id, percentiles.reduce((sum, p) => sum + p, 0) / percentiles.length);
     });
     return scores;
