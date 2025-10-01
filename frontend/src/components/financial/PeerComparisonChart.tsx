@@ -101,18 +101,26 @@ const PeerComparisonChartComponent: React.FC<PeerComparisonChartProps> = ({
     };
   }, [company, ratios]);
 
-  // Available ratios for selection
+  // Available ratios for selection (optimized to avoid O(n²) complexity)
   const availableRatios = useMemo(() => {
     const ratioNames = new Set<string>();
     [...peerCompanies, currentCompanyData].forEach(company => {
       Object.keys(company.ratios).forEach(ratio => ratioNames.add(ratio));
     });
 
-    return Array.from(ratioNames).map(ratioName => ({
-      name: ratioName,
-      displayName: ratios.find(r => r.ratioName === ratioName)?.ratioDisplayName || ratioName,
-      category: ratios.find(r => r.ratioName === ratioName)?.category || 'other',
-    }));
+    // Create a lookup map for ratios to avoid nested find operations
+    const ratioLookup = new Map(
+      ratios.map(ratio => [ratio.ratioName, { displayName: ratio.ratioDisplayName, category: ratio.category }])
+    );
+
+    return Array.from(ratioNames).map(ratioName => {
+      const ratioInfo = ratioLookup.get(ratioName);
+      return {
+        name: ratioName,
+        displayName: ratioInfo?.displayName || ratioName,
+        category: ratioInfo?.category || 'other',
+      };
+    });
   }, [peerCompanies, currentCompanyData, ratios]);
 
   // Memoize performance score calculation to avoid recalculating

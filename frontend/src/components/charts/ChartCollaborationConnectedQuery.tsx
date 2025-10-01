@@ -212,11 +212,18 @@ const ChartCollaborationContent = ({
 
   // Calculate derived state (memoized for performance)
   const activeCollaborators = useMemo(() => {
-    return (
-      collaborators?.filter(
-        c => users?.[c.user_id] && Date.now() - new Date(c.last_accessed_at || 0).getTime() < 300000
-      ) || []
-    );
+    if (!collaborators || !users) return [];
+    
+    const now = Date.now();
+    const fiveMinutesAgo = now - 300000; // Pre-compute threshold
+    
+    return collaborators.filter(c => {
+      const user = users[c.user_id];
+      if (!user) return false;
+      
+      const lastAccessed = new Date(c.last_accessed_at || 0).getTime();
+      return lastAccessed > fiveMinutesAgo;
+    });
   }, [collaborators, users]);
 
   const filteredAnnotations = useMemo(() => {

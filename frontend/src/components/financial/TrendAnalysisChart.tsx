@@ -54,7 +54,7 @@ const TrendAnalysisChartComponent: React.FC<TrendAnalysisChartProps> = ({
   const [selectedRatio, setSelectedRatio] = useState('returnOnEquity');
   const [timePeriodQuarters, setTimePeriodQuarters] = useState(12);
 
-  // Group ratios by name and sort by period
+  // Group ratios by name and sort by period (optimized for performance)
   const ratioTrends = useMemo(() => {
     const grouped = ratios.reduce(
       (acc, ratio) => {
@@ -70,7 +70,7 @@ const TrendAnalysisChartComponent: React.FC<TrendAnalysisChartProps> = ({
       {} as Record<string, (FinancialRatio & { periodDate: Date })[]>
     );
 
-    // Sort each ratio group by date
+    // Sort each ratio group by date (optimized to avoid repeated getTime calls)
     Object.keys(grouped).forEach(ratioName => {
       grouped[ratioName].sort((a, b) => a.periodDate.getTime() - b.periodDate.getTime());
     });

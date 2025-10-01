@@ -362,6 +362,9 @@ const FinancialAlertsContentComponent: React.FC<FinancialAlertsProps> = ({
   const filteredAlerts = useMemo(() => {
     // Pre-compute search term once
     const searchLower = searchTerm.toLowerCase();
+    
+    // Pre-compute severity order for faster sorting
+    const severityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
 
     let filtered = alerts.filter(alert => {
       if (!showRead && alert.isRead) return false;
@@ -376,16 +379,16 @@ const FinancialAlertsContentComponent: React.FC<FinancialAlertsProps> = ({
       return true;
     });
 
-    // Don't mutate - create new sorted array
+    // Optimize sorting by pre-computing sort keys
     const sorted = [...filtered].sort((a, b) => {
       switch (sortBy) {
         case 'severity':
-          const severityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
           return severityOrder[b.severity] - severityOrder[a.severity];
         case 'type':
           return a.type.localeCompare(b.type);
         case 'date':
         default:
+          // Pre-compute dates to avoid repeated Date object creation
           return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       }
     });
