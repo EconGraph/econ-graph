@@ -71,9 +71,10 @@ const getDataSourceCategories = (name: string): string[] => {
 };
 
 /**
- * REQUIREMENT: Support for Federal Reserve and BLS data sources with monitoring
- * PURPOSE: Display available data sources and their status for transparency
+ * REQUIREMENT: Support for Federal Reserve and BLS data sources with monitoring.
+ * PURPOSE: Display available data sources and their status for transparency.
  * This provides users with information about data sources and system status.
+ * @returns The DataSourcesContent component.
  */
 const DataSourcesContent: React.FC = () => {
   // Fetch real data sources from backend - suspense: true eliminates need for isLoading/error checks
@@ -358,7 +359,8 @@ const DataSourcesContent: React.FC = () => {
 };
 
 /**
- * DataSources wrapper with Suspense boundary for loading states
+ * DataSources wrapper with Suspense boundary for loading states.
+ * @returns The DataSources component with Suspense boundary.
  */
 const DataSources: React.FC = () => (
   <Suspense

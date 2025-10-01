@@ -137,8 +137,8 @@ const formatAlertValue = (value: number, ratioName?: string) => {
 };
 
 /**
- * Memoized AlertCard component to prevent unnecessary re-renders
- * Only re-renders when the alert itself changes, not when other alerts change
+ * Memoized AlertCard component to prevent unnecessary re-renders.
+ * Only re-renders when the alert itself changes, not when other alerts change.
  */
 const AlertCard = React.memo<AlertCardProps>(
   ({ alert, onAlertClick, onMarkAsRead, onToggleActive }) => {
@@ -712,7 +712,9 @@ const FinancialAlertsContentComponent: React.FC<FinancialAlertsProps> = ({
 const FinancialAlertsContent = React.memo(FinancialAlertsContentComponent);
 
 /**
- * FinancialAlerts wrapper with Suspense boundary for loading states
+ * FinancialAlerts wrapper with Suspense boundary for loading states.
+ * @param props - The component props.
+ * @returns The FinancialAlerts component with Suspense boundary.
  */
 export const FinancialAlerts: React.FC<FinancialAlertsProps> = props => (
   <Suspense

@@ -551,7 +551,9 @@ const RatioAnalysisPanelContent: React.FC<RatioAnalysisPanelProps> = ({
 };
 
 /**
- * RatioAnalysisPanel wrapper with Suspense boundary for loading states
+ * RatioAnalysisPanel wrapper with Suspense boundary for loading states.
+ * @param props - The component props.
+ * @returns The RatioAnalysisPanel component with Suspense boundary.
  */
 export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = props => (
   <Suspense
