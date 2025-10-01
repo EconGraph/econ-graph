@@ -16,6 +16,8 @@ import {
   Download,
   Share2,
   Eye,
+  Clock,
+  AlertCircle,
 } from 'lucide-react';
 import { FinancialStatement, FinancialRatio, Company } from '@/types/financial';
 import { FinancialStatementViewer } from './FinancialStatementViewer';
