@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -37,7 +37,7 @@ import { GET_FINANCIAL_RATIOS } from '../../test-utils/mocks/graphql/ratio-queri
 import { GET_FINANCIAL_ANNOTATIONS } from '../../test-utils/mocks/graphql/financial-queries';
 import { useQuery } from '@tanstack/react-query';
 
-// GraphQL hooks for real data fetching
+// GraphQL hooks for real data fetching with Suspense
 const useFinancialStatementQuery = (statementId: string) => {
   return useQuery({
     queryKey: ['financial-statement', statementId],
@@ -48,6 +48,7 @@ const useFinancialStatementQuery = (statementId: string) => {
       });
       return result.data;
     },
+    suspense: true,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 };
@@ -67,7 +68,8 @@ interface FinancialStatementViewerProps {
   showCollaborativeFeatures?: boolean;
 }
 
-export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> = ({
+// Main content component - assumes data is loaded via Suspense
+const FinancialStatementViewerContent: React.FC<FinancialStatementViewerProps> = ({
   statementId,
   companyId: _companyId,
   userType = 'intermediate',
@@ -80,42 +82,36 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
   const [showRatios] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // GraphQL queries
-  const {
-    data: statementData,
-    error: statementError,
-    isLoading: statementLoading,
-  } = useFinancialStatementQuery(statementId);
+  // GraphQL queries with Suspense
+  const { data: statementData } = useFinancialStatementQuery(statementId);
 
-  const { data: ratiosData } = useQuery(
-    ['financial-ratios', statementId],
-    async () => {
+  const { data: ratiosData } = useQuery({
+    queryKey: ['financial-ratios', statementId],
+    queryFn: async () => {
       const result = await executeGraphQL({
         query: GET_FINANCIAL_RATIOS,
         variables: { statementId },
       });
       return result.data;
     },
-    {
-      enabled: showRatios,
-      staleTime: 5 * 60 * 1000,
-    }
-  );
+    enabled: showRatios,
+    suspense: true,
+    staleTime: 5 * 60 * 1000,
+  });
 
-  const { data: annotationsData } = useQuery(
-    ['financial-annotations', statementId],
-    async () => {
+  const { data: annotationsData } = useQuery({
+    queryKey: ['financial-annotations', statementId],
+    queryFn: async () => {
       const result = await executeGraphQL({
         query: GET_FINANCIAL_ANNOTATIONS,
         variables: { statementId },
       });
       return result.data;
     },
-    {
-      enabled: showAnnotations,
-      staleTime: 5 * 60 * 1000,
-    }
-  );
+    enabled: showAnnotations,
+    suspense: true,
+    staleTime: 5 * 60 * 1000,
+  });
 
   // Real-time subscription for new annotations (mocked for now)
   const { data: newAnnotationData } = useSubscription(FINANCIAL_ANNOTATION_SUBSCRIPTION, {
@@ -136,28 +132,6 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
       // Update local state or refetch annotations
     }
   }, [newAnnotationData]);
-
-  // Loading state handling
-  if (statementLoading) {
-    return (
-      <div className='flex items-center justify-center p-8'>
-        <div className='text-center'>
-          <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4'></div>
-          <p className='text-sm text-gray-600'>Loading financial statement...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (statementError) {
-    return (
-      <Alert variant='destructive'>
-        <AlertDescription>
-          Error loading financial statement: {String(statementError)}
-        </AlertDescription>
-      </Alert>
-    );
-  }
 
   // Fallback placeholder to ensure tests render expected UI even if data is missing
   const statementFallback: any = {
@@ -762,5 +736,23 @@ export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> =
         />
       )}
     </div>
+  );
+};
+
+// Wrapper component with Suspense boundary
+export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> = (props) => {
+  return (
+    <Suspense
+      fallback={
+        <div className='flex items-center justify-center p-8'>
+          <div className='text-center'>
+            <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4'></div>
+            <p className='text-sm text-gray-600'>Loading financial statement...</p>
+          </div>
+        </div>
+      }
+    >
+      <FinancialStatementViewerContent {...props} />
+    </Suspense>
   );
 };
