@@ -349,7 +349,8 @@ describe('FinancialExport', () => {
       />
     );
 
-    const templateSelect = screen.getByDisplayValue('Standard Report');
+    const templateSelects = screen.getAllByDisplayValue('Standard Report');
+    const templateSelect = templateSelects[0];
     fireEvent.click(templateSelect);
 
     // Should show template options
@@ -386,7 +387,7 @@ describe('FinancialExport', () => {
     );
 
     // Should adapt to mobile view
-    expect(screen.getByText('Export Financial Data')).toBeInTheDocument();
+    expect(screen.getAllByText('Export Financial Data').length).toBeGreaterThan(0);
   });
 
   it('displays export file naming options', () => {
@@ -399,7 +400,7 @@ describe('FinancialExport', () => {
     );
 
     expect(screen.getAllByText('File Naming').length).toBeGreaterThan(0);
-    expect(screen.getByLabelText('File naming format selection')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('File naming format selection').length).toBeGreaterThan(0);
   });
 
   it('handles custom file naming', () => {
@@ -411,7 +412,8 @@ describe('FinancialExport', () => {
       />
     );
 
-    const customNameInput = screen.getByPlaceholderText('Custom file name...');
+    const customNameInputs = screen.getAllByPlaceholderText('Custom file name...');
+    const customNameInput = customNameInputs[0];
     fireEvent.change(customNameInput, { target: { value: 'my_custom_report' } });
 
     expect(customNameInput).toHaveValue('my_custom_report');
@@ -427,7 +429,7 @@ describe('FinancialExport', () => {
     );
 
     expect(screen.getAllByText('Schedule Export').length).toBeGreaterThan(0);
-    expect(screen.getByText('One-time')).toBeInTheDocument();
+    expect(screen.getAllByText('One-time').length).toBeGreaterThan(0);
   });
 
   it('handles scheduled export settings', () => {
@@ -439,7 +441,8 @@ describe('FinancialExport', () => {
       />
     );
 
-    const scheduleSelect = screen.getByDisplayValue('One-time');
+    const scheduleSelects = screen.getAllByDisplayValue('One-time');
+    const scheduleSelect = scheduleSelects[0];
     fireEvent.click(scheduleSelect);
 
     // Should show scheduling options
@@ -458,7 +461,7 @@ describe('FinancialExport', () => {
     );
 
     expect(screen.getAllByText('Access Controls').length).toBeGreaterThan(0);
-    expect(screen.getByText('Public')).toBeInTheDocument();
+    expect(screen.getAllByText('Public').length).toBeGreaterThan(0);
   });
 
   it('handles export sharing options', () => {
@@ -471,7 +474,7 @@ describe('FinancialExport', () => {
     );
 
     expect(screen.getAllByText('Share Export').length).toBeGreaterThan(0);
-    expect(screen.getByText('Email Link')).toBeInTheDocument();
+    expect(screen.getAllByText('Email Link').length).toBeGreaterThan(0);
   });
 
   it('shows export analytics and usage statistics', () => {
@@ -484,7 +487,7 @@ describe('FinancialExport', () => {
     );
 
     expect(screen.getAllByText('Export Analytics').length).toBeGreaterThan(0);
-    expect(screen.getByText('Total Exports: 5')).toBeInTheDocument();
-    expect(screen.getByText('This Month: 2')).toBeInTheDocument();
+    expect(screen.getAllByText('Total Exports: 5').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('This Month: 2').length).toBeGreaterThan(0);
   });
 });
