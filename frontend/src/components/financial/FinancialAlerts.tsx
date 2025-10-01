@@ -358,22 +358,26 @@ const FinancialAlertsContent: React.FC<FinancialAlertsProps> = ({
     }
   }, [alertsError]);
 
-  // Filter and sort alerts
+  // Filter and sort alerts (optimized for performance)
   const filteredAlerts = useMemo(() => {
+    // Pre-compute search term once
+    const searchLower = searchTerm.toLowerCase();
+    
     let filtered = alerts.filter(alert => {
       if (!showRead && alert.isRead) return false;
       if (filterType !== 'all' && alert.type !== filterType) return false;
       if (filterSeverity !== 'all' && alert.severity !== filterSeverity) return false;
       if (
         searchTerm &&
-        !alert.title.toLowerCase().includes(searchTerm.toLowerCase()) &&
-        !alert.description.toLowerCase().includes(searchTerm.toLowerCase())
+        !alert.title.toLowerCase().includes(searchLower) &&
+        !alert.description.toLowerCase().includes(searchLower)
       )
         return false;
       return true;
     });
 
-    filtered.sort((a, b) => {
+    // Don't mutate - create new sorted array
+    const sorted = [...filtered].sort((a, b) => {
       switch (sortBy) {
         case 'severity':
           const severityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
@@ -386,7 +390,7 @@ const FinancialAlertsContent: React.FC<FinancialAlertsProps> = ({
       }
     });
 
-    return filtered;
+    return sorted;
   }, [alerts, filterType, filterSeverity, showRead, sortBy, searchTerm]);
 
   // Handle alert actions

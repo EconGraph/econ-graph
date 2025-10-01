@@ -1,4 +1,4 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -134,6 +134,13 @@ const DataSourcesContent: React.FC = () => {
     return date.toLocaleDateString();
   };
 
+  // Memoize expensive statistics calculations
+  const stats = useMemo(() => {
+    const totalSeries = dataSources.reduce((sum, source) => sum + source.seriesCount, 0);
+    const healthySources = dataSources.filter(s => s.status === 'active').length;
+    return { totalSeries, healthySources };
+  }, [dataSources]);
+
   return (
     <Box>
       {/* Page header */}
@@ -162,7 +169,7 @@ const DataSourcesContent: React.FC = () => {
           <Grid item xs={12} sm={3}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant='h3' color='primary'>
-                {dataSources.reduce((sum, source) => sum + source.seriesCount, 0).toLocaleString()}
+                {stats.totalSeries.toLocaleString()}
               </Typography>
               <Typography variant='body2' color='text.secondary'>
                 Total Series
@@ -172,7 +179,7 @@ const DataSourcesContent: React.FC = () => {
           <Grid item xs={12} sm={3}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant='h3' color='success.main'>
-                {dataSources.filter(s => s.status === 'active').length}
+                {stats.healthySources}
               </Typography>
               <Typography variant='body2' color='text.secondary'>
                 Healthy Sources
