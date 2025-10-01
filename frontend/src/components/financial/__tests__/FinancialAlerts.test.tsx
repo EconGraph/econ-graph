@@ -66,18 +66,19 @@ const mockAlerts = [
   },
 ];
 
-// Create test wrapper with QueryClient and ErrorBoundary
-const createTestWrapper = () => {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-      },
+// Create a single test QueryClient and reset it between tests for better performance
+const testQueryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+      cacheTime: 0, // Don't cache between tests
     },
-  });
+  },
+});
 
+const createTestWrapper = () => {
   return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={testQueryClient}>
       <ErrorBoundary>
         <Suspense fallback={<div data-testid="loading">Loading...</div>}>
           {children}
@@ -90,6 +91,7 @@ const createTestWrapper = () => {
 describe('FinancialAlerts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    testQueryClient.clear(); // Clear query cache between tests
   });
 
   // Helper function to render component with all necessary providers
