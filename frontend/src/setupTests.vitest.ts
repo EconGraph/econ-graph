@@ -255,21 +255,31 @@ vi.mock('d3-zoom', () => ({
   })),
 }));
 
-// Mock useAuth hook
-vi.mock('@/hooks/useAuth', () => ({
-  useAuth: vi.fn(() => ({
-    user: {
-      id: 'test-user-1',
-      email: 'test@example.com',
-      name: 'Test User',
-      role: 'user',
+// Mock useAuth hook from multiple import paths
+const mockUseAuth = vi.fn(() => ({
+  user: {
+    id: 'test-user-1',
+    email: 'test@example.com',
+    name: 'Test User',
+    role: 'user',
+    preferences: {
+      theme: 'light',
     },
-    isAuthenticated: true,
-    isLoading: false,
-    login: vi.fn(),
-    logout: vi.fn(),
-    register: vi.fn(),
-  })),
+  },
+  isAuthenticated: true,
+  isLoading: false,
+  login: vi.fn(),
+  logout: vi.fn(),
+  register: vi.fn(),
+}));
+
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: mockUseAuth,
+}));
+
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: mockUseAuth,
+  AuthProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 // Use real @tanstack/react-query in tests so MSW-backed GraphQL executes
