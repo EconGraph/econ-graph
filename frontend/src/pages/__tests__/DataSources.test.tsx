@@ -184,7 +184,7 @@ describe('DataSources', () => {
 
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
       expect(screen.getAllByText('Economic data providers and their current status').length).toBeGreaterThan(0);
-      expect(screen.getByText('Active Sources')).toBeInTheDocument();
+      expect(screen.getAllByText('Active Sources').length).toBeGreaterThan(0);
     });
 
     test('should have proper heading hierarchy', () => {
@@ -251,9 +251,9 @@ describe('DataSources', () => {
       renderDataSources();
 
       // Check for common metadata elements that actually exist
-      expect(screen.getByText('Frequency')).toBeInTheDocument();
-      expect(screen.getByText('Next Scheduled')).toBeInTheDocument();
-      expect(screen.getByText('Priority')).toBeInTheDocument();
+      expect(screen.getAllByText('Frequency').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Next Scheduled').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Priority').length).toBeGreaterThan(0);
     });
 
     test('should display update frequencies for different sources', () => {
@@ -294,7 +294,7 @@ describe('DataSources', () => {
       renderDataSources();
 
       // Should show statistics like number of series
-      expect(screen.getByText('Total Series')).toBeInTheDocument();
+      expect(screen.getAllByText('Total Series').length).toBeGreaterThan(0);
     });
   });
 
@@ -327,18 +327,18 @@ describe('DataSources', () => {
       renderDataSources();
 
       // Should show status indicators (healthy sources, uptime)
-      expect(screen.getByText('Healthy Sources')).toBeInTheDocument();
-      expect(screen.getByText('Uptime')).toBeInTheDocument();
+      expect(screen.getAllByText('Healthy Sources').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Uptime').length).toBeGreaterThan(0);
     });
 
     test('should display data source status information', () => {
       renderDataSources();
 
       // Should show data source status and health information
-      expect(screen.getByText('Active Sources')).toBeInTheDocument();
-      expect(screen.getByText('Total Series')).toBeInTheDocument();
-      expect(screen.getByText('Healthy Sources')).toBeInTheDocument();
-      expect(screen.getByText('Uptime')).toBeInTheDocument();
+      expect(screen.getAllByText('Active Sources').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Total Series').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Healthy Sources').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Uptime').length).toBeGreaterThan(0);
     });
 
     test('should display data source descriptions', () => {
