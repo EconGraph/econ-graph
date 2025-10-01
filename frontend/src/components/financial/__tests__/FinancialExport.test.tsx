@@ -154,7 +154,7 @@ describe('FinancialExport', () => {
 
     // Checkbox should be checked
     expect(statementsCheckbox).toBeChecked();
-  }, 15000);
+  });
 
   it('displays date range selection', () => {
     render(
