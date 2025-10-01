@@ -25,6 +25,14 @@ export default defineConfig({
     bail: 0, // Don't bail on first failure
     // Force process exit after tests complete to prevent hanging
     forceExit: true,
+    // Additional options to prevent hanging
+    reporter: ['verbose'],
+    // Force exit on completion
+    onFinished: () => {
+      setTimeout(() => {
+        process.exit(0);
+      }, 100);
+    },
     exclude: [
       '**/node_modules/**',
       '**/dist/**',

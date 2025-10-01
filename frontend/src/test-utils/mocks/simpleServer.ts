@@ -188,6 +188,18 @@ export const cleanupSimpleMSW = async () => {
     global.fetch = originalFetch;
   }
 
+  // Clear any remaining handlers
+  if (typeof global !== 'undefined' && global.fetch) {
+    // Reset fetch to original implementation
+    global.fetch = originalFetch || fetch;
+  }
+
+  // Clear any remaining timers that might be related to MSW
+  for (let i = 1; i < 1000; i++) {
+    clearTimeout(i);
+    clearInterval(i);
+  }
+
   if (MSW_DEBUG) {
     console.log('[Simple MSW] Cleanup completed');
   }

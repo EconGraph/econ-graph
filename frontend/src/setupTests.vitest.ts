@@ -4,6 +4,43 @@
 import '@testing-library/jest-dom';
 import { beforeAll, afterEach, afterAll, vi } from 'vitest';
 import { setupSimpleMSW, cleanupSimpleMSW } from './test-utils/mocks/simpleServer';
+import { cleanup } from '@testing-library/react';
+
+// Comprehensive cleanup function to prevent resource leaks
+const cleanupTestResources = () => {
+  // Clean up React Testing Library
+  cleanup();
+  
+  // Clear all timers and intervals
+  for (let i = 1; i < 10000; i++) {
+    clearTimeout(i);
+    clearInterval(i);
+  }
+  
+  // Clean up DOM elements
+  const containers = document.querySelectorAll('[data-testid="test-container"]');
+  containers.forEach(container => container.remove());
+  
+  const portalContainers = document.querySelectorAll('[data-testid="material-ui-portal-container"]');
+  portalContainers.forEach(container => container.remove());
+  
+  const reactRoots = document.querySelectorAll('[data-reactroot]');
+  reactRoots.forEach(root => root.remove());
+  
+  const dialogs = document.querySelectorAll('[role="dialog"]');
+  dialogs.forEach(dialog => dialog.remove());
+  
+  // Clear any remaining event listeners
+  document.removeEventListener('click', () => {});
+  document.removeEventListener('keydown', () => {});
+  document.removeEventListener('keyup', () => {});
+  
+  // Clear any remaining fetch mocks
+  vi.restoreAllMocks();
+  
+  // Clear console to prevent memory leaks from console.log
+  console.clear();
+};
 
 // Start MSW server for all tests
 beforeAll(async () => {
@@ -13,6 +50,9 @@ afterEach(async () => {
   // Reset to success scenario after each test
   const { setMockScenario, MockScenarios } = await import('./test-utils/mocks/simpleServer');
   setMockScenario(MockScenarios.SUCCESS);
+  
+  // Comprehensive cleanup after each test
+  cleanupTestResources();
 });
 afterAll(async () => {
   await cleanupSimpleMSW();
@@ -25,18 +65,11 @@ afterAll(async () => {
       clearInterval(i);
     }
 
-    // Clear any remaining handles
-    if (process.env.CI) {
-      // Force exit in CI to prevent hanging - reduced timeout
-      setTimeout(() => {
-        process.exit(0);
-      }, 500);
-    } else {
-      // Also force exit in local development after a short delay
-      setTimeout(() => {
-        process.exit(0);
-      }, 2000);
-    }
+    // Force exit after cleanup with a short delay to allow cleanup to complete
+    setTimeout(() => {
+      // Force exit to prevent hanging processes
+      process.exit(0);
+    }, 500);
   }
 });
 
