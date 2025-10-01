@@ -362,7 +362,7 @@ const FinancialAlertsContent: React.FC<FinancialAlertsProps> = ({
   const filteredAlerts = useMemo(() => {
     // Pre-compute search term once
     const searchLower = searchTerm.toLowerCase();
-    
+
     let filtered = alerts.filter(alert => {
       if (!showRead && alert.isRead) return false;
       if (filterType !== 'all' && alert.type !== filterType) return false;
