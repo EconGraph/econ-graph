@@ -267,20 +267,22 @@ describe('FinancialAlerts', () => {
     });
   });
 
-  it('handles bulk actions (mark all as read)', () => {
+  it('handles bulk actions (mark all as read)', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Component renders with Suspense - no need to wait
-    // Just verify no errors thrown
-    expect(true).toBe(true);
+    // Wait for Suspense to resolve
+    await waitFor(() => {
+      expect(screen.getAllByText('Financial Alerts').length).toBeGreaterThan(0);
+    });
   });
 
-  it('handles bulk actions (dismiss all)', () => {
+  it('handles bulk actions (dismiss all)', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Component renders with Suspense - no need to wait
-    // Just verify no errors thrown
-    expect(true).toBe(true);
+    // Wait for Suspense to resolve
+    await waitFor(() => {
+      expect(screen.getAllByText('Financial Alerts').length).toBeGreaterThan(0);
+    });
   });
 
   it('shows alert search functionality', async () => {
@@ -376,12 +378,13 @@ describe('FinancialAlerts', () => {
     });
   });
 
-  it('handles alert refresh functionality', () => {
+  it('handles alert refresh functionality', async () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
-    // Component renders with Suspense - no need to wait
-    // Just verify no errors thrown
-    expect(true).toBe(true);
+    // Wait for Suspense to resolve
+    await waitFor(() => {
+      expect(screen.getAllByText('Financial Alerts').length).toBeGreaterThan(0);
+    });
   });
 
   it('shows alert settings and preferences', async () => {
