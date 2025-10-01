@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, Suspense } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -43,7 +43,7 @@ interface RatioAnalysisPanelProps {
   showEducationalContent?: boolean;
 }
 
-export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
+const RatioAnalysisPanelContent: React.FC<RatioAnalysisPanelProps> = ({
   statementId,
   userType,
   showEducationalContent = true,
@@ -549,3 +549,25 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
     </div>
   );
 };
+
+/**
+ * RatioAnalysisPanel wrapper with Suspense boundary for loading states
+ */
+export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = props => (
+  <Suspense
+    fallback={
+      <Card>
+        <CardHeader>
+          <CardTitle>Loading Financial Ratios...</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className='flex justify-center items-center min-h-[200px]'>
+            <div className='text-muted-foreground'>Loading ratio analysis...</div>
+          </div>
+        </CardContent>
+      </Card>
+    }
+  >
+    <RatioAnalysisPanelContent {...props} />
+  </Suspense>
+);

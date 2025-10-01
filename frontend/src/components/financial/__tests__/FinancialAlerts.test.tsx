@@ -248,9 +248,9 @@ describe('FinancialAlerts', () => {
   it('shows loading state when alerts are being fetched', async () => {
     renderWithProviders({ companyId: "loading-company", ratios: [], statements: [] });
 
-    // With Suspense, we should see the loading fallback instead of custom loading text
+    // Component has built-in Suspense boundary with text fallback
     await waitFor(() => {
-      expect(screen.getByTestId('loading')).toBeInTheDocument();
+      expect(screen.getByText('Loading alerts...')).toBeInTheDocument();
     });
   });
 

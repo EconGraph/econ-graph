@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_ALERTS } from '../../test-utils/mocks/graphql/financial-queries';
@@ -63,7 +63,7 @@ interface FinancialAlertsProps {
   onAlertClick?: (alert: FinancialAlert) => void;
 }
 
-export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
+const FinancialAlertsContent: React.FC<FinancialAlertsProps> = ({
   companyId,
   ratios: _ratios,
   statements: _statements,
@@ -670,3 +670,18 @@ export const FinancialAlerts: React.FC<FinancialAlertsProps> = ({
     </div>
   );
 };
+
+/**
+ * FinancialAlerts wrapper with Suspense boundary for loading states
+ */
+export const FinancialAlerts: React.FC<FinancialAlertsProps> = props => (
+  <Suspense
+    fallback={
+      <div className='flex justify-center items-center min-h-[200px]'>
+        <div className='text-muted-foreground'>Loading alerts...</div>
+      </div>
+    }
+  >
+    <FinancialAlertsContent {...props} />
+  </Suspense>
+);

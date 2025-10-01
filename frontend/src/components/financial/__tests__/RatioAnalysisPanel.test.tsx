@@ -72,8 +72,8 @@ describe('RatioAnalysisPanel', () => {
         </TestWrapper>
       );
 
-      // With Suspense, we should see the loading fallback immediately
-      expect(screen.getByTestId('loading')).toBeInTheDocument();
+      // Component has built-in Suspense boundary with text fallback
+      expect(screen.getByText('Loading Financial Ratios...')).toBeInTheDocument();
     });
   });
 
