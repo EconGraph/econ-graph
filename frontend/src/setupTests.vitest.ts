@@ -27,10 +27,15 @@ afterAll(async () => {
 
     // Clear any remaining handles
     if (process.env.CI) {
-      // Force exit in CI to prevent hanging
+      // Force exit in CI to prevent hanging - reduced timeout
       setTimeout(() => {
         process.exit(0);
-      }, 1000);
+      }, 500);
+    } else {
+      // Also force exit in local development after a short delay
+      setTimeout(() => {
+        process.exit(0);
+      }, 2000);
     }
   }
 });

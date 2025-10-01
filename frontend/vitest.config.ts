@@ -17,11 +17,11 @@ export default defineConfig({
       },
     },
     // Global timeout for entire test run
-    timeout: 30000, // 30 seconds max for all tests
+    timeout: 15000, // 15 seconds max for all tests
     // Force exit after tests complete
-    teardownTimeout: 500,
-    testTimeout: 5000,
-    hookTimeout: 5000,
+    teardownTimeout: 200,
+    testTimeout: 3000,
+    hookTimeout: 3000,
     bail: 0, // Don't bail on first failure
     // Force process exit after tests complete to prevent hanging
     forceExit: true,
