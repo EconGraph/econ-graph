@@ -444,4 +444,5 @@ const InteractiveChart: React.FC<ChartProps> = ({ data, title, units, frequency 
   );
 };
 
-export default InteractiveChart;
+// Memoize the component to prevent unnecessary re-renders
+export default React.memo(InteractiveChart);

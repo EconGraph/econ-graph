@@ -711,4 +711,5 @@ const ProfessionalChart: React.FC<ProfessionalChartProps> = ({
   );
 };
 
-export default ProfessionalChart;
+// Memoize the component to prevent unnecessary re-renders
+export default React.memo(ProfessionalChart);

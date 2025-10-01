@@ -314,7 +314,7 @@ const AlertCard = React.memo<AlertCardProps>(
 
 AlertCard.displayName = 'AlertCard';
 
-const FinancialAlertsContent: React.FC<FinancialAlertsProps> = ({
+const FinancialAlertsContentComponent: React.FC<FinancialAlertsProps> = ({
   companyId,
   ratios: _ratios,
   statements: _statements,
@@ -707,6 +707,9 @@ const FinancialAlertsContent: React.FC<FinancialAlertsProps> = ({
     </div>
   );
 };
+
+// Memoize the component to prevent unnecessary re-renders
+const FinancialAlertsContent = React.memo(FinancialAlertsContentComponent);
 
 /**
  * FinancialAlerts wrapper with Suspense boundary for loading states
