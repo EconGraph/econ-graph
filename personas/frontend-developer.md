@@ -1063,6 +1063,419 @@ test('should call onDataPointClick when point is clicked', async () => {
   ```
 - **Impact**: This systematic debugging approach can identify and fix 8+ duplicate element issues in a single pass
 
+### **React Query + Suspense Best Practices**
+
+#### **Modern Data Fetching Patterns**
+```typescript
+// ❌ BAD: Manual loading state management
+const Component = () => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  
+  useEffect(() => {
+    setLoading(true);
+    fetchData()
+      .then(setData)
+      .catch(setError)
+      .finally(() => setLoading(false));
+  }, []);
+  
+  if (loading) return <CircularProgress />;
+  if (error) return <Alert severity="error">{error}</Alert>;
+  return <div>{data?.content}</div>;
+};
+
+// ✅ GOOD: React Query + Suspense for declarative loading
+const useComponentData = () => {
+  return useQuery({
+    queryKey: ['component-data'],
+    queryFn: fetchData,
+    suspense: true, // Enable Suspense integration
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+};
+
+const ComponentContent = () => {
+  const { data } = useComponentData(); // No loading check needed!
+  return <div>{data.content}</div>;
+};
+
+const Component = () => (
+  <Suspense fallback={<CircularProgress />}>
+    <ErrorBoundary fallback={<Alert severity="error">Error loading data</Alert>}>
+      <ComponentContent />
+    </ErrorBoundary>
+  </Suspense>
+);
+```
+
+#### **Benefits of React Query + Suspense**
+- ✅ **~50-80 lines less code per component** - No manual loading/error states
+- ✅ **Automatic caching** - Data persists across component unmounts
+- ✅ **Automatic retries** - Built-in error recovery
+- ✅ **Declarative loading states** - Suspense boundaries handle loading UI
+- ✅ **Better code organization** - Separate data fetching from presentation
+- ✅ **Easier testing** - Mock data at the hook level
+
+#### **Multiple Query Coordination**
+```typescript
+// ✅ GOOD: Multiple queries with Suspense
+const useFinancialData = (companyId: string) => {
+  const statements = useQuery({
+    queryKey: ['statements', companyId],
+    queryFn: () => fetchStatements(companyId),
+    suspense: true,
+  });
+  
+  const ratios = useQuery({
+    queryKey: ['ratios', companyId],
+    queryFn: () => fetchRatios(companyId),
+    suspense: true,
+  });
+  
+  const annotations = useQuery({
+    queryKey: ['annotations', companyId],
+    queryFn: () => fetchAnnotations(companyId),
+    suspense: true,
+  });
+  
+  return { statements: statements.data, ratios: ratios.data, annotations: annotations.data };
+};
+
+// Component automatically suspends until ALL queries resolve
+const FinancialDashboard = ({ companyId }: Props) => {
+  const { statements, ratios, annotations } = useFinancialData(companyId);
+  // All data guaranteed to be present here!
+  return <div>...</div>;
+};
+```
+
+#### **Infinite Cache for Static Data**
+```typescript
+// For data that never changes (world atlas, static configs)
+const useWorldAtlasData = () => {
+  return useQuery({
+    queryKey: ['world-atlas'],
+    queryFn: async () => {
+      const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+      return response.json();
+    },
+    suspense: true,
+    staleTime: Infinity, // Never refetch
+    cacheTime: Infinity, // Never garbage collect
+  });
+};
+```
+
+### **Testing Library Query Priority - Critical Lessons**
+
+#### **The Query Priority Hierarchy**
+Testing Library has a recommended query priority. **Always follow this order:**
+
+1. **`getByRole`** - Most accessible and robust
+2. **`getByLabelText`** - For form fields
+3. **`getByPlaceholderText`** - For inputs without labels
+4. **`getByText`** - For non-interactive elements
+5. **`getByDisplayValue`** - For form inputs with values
+6. **`getByAltText`** - For images
+7. **`getByTitle`** - Last resort
+8. **`getByTestId`** - ONLY when semantic queries are impossible
+
+#### **CRITICAL: Multiple Elements vs Single Elements**
+
+**The most common test failure pattern:**
+```typescript
+// ❌ BAD: Will throw "Found multiple elements" if there are duplicates
+const element = screen.getByText('Financial Alerts'); // THROWS if >1 found
+const button = screen.findByRole('button', { name: 'Submit' }); // THROWS if >1 found
+
+// ✅ GOOD: Use getAllBy* to check for presence
+expect(screen.getAllByText('Financial Alerts').length).toBeGreaterThan(0);
+expect(screen.getAllByRole('button', { name: 'Submit' }).length).toBeGreaterThan(0);
+
+// ✅ GOOD: Use queryBy* for optional elements
+const optionalButton = screen.queryByRole('button', { name: 'Refresh' });
+if (optionalButton) {
+  fireEvent.click(optionalButton);
+}
+
+// ✅ GOOD: Use queryAllBy* for optional multiple elements
+const refreshButtons = screen.queryAllByRole('button', { name: /refresh/i });
+if (refreshButtons.length > 0) {
+  fireEvent.click(refreshButtons[0]);
+}
+```
+
+#### **Query Variants: When to Use Each**
+
+| Variant | Returns | Throws if not found? | Waits? | Use case |
+|---------|---------|---------------------|--------|----------|
+| `getBy*` | Single element | ✅ Yes | ❌ No | Required single element |
+| `getAllBy*` | Array | ✅ Yes (if none) | ❌ No | Required multiple elements |
+| `queryBy*` | Single element or null | ❌ No | ❌ No | Optional single element |
+| `queryAllBy*` | Array (empty if none) | ❌ No | ❌ No | Optional multiple elements |
+| `findBy*` | Promise<element> | ✅ Yes (after timeout) | ✅ Yes | Async single element |
+| `findAllBy*` | Promise<array> | ✅ Yes (after timeout) | ✅ Yes | Async multiple elements |
+
+#### **Real-World Test Fixes**
+
+**Problem: "Found multiple elements" error**
+```typescript
+// ❌ BAD: Fails with "Found multiple elements with the text: Data Sources"
+test('should render page title', () => {
+  render(<DataSources />);
+  expect(screen.getByText('Data Sources')).toBeInTheDocument();
+});
+
+// ✅ GOOD: Handle multiple elements correctly
+test('should render page title', () => {
+  render(<DataSources />);
+  expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
+});
+
+// ✅ EVEN BETTER: Use semantic query
+test('should render page title', () => {
+  render(<DataSources />);
+  expect(screen.getByRole('heading', { name: 'Data Sources', level: 1 })).toBeInTheDocument();
+});
+```
+
+**Problem: Test timeout waiting for element**
+```typescript
+// ❌ BAD: waitFor with getAllBy* can timeout if element doesn't exist
+await waitFor(() => {
+  expect(screen.getAllByText('Financial Alerts').length).toBeGreaterThan(0);
+});
+
+// ✅ GOOD: Use findBy* for async elements
+await screen.findByRole('heading', { name: /financial alerts/i });
+
+// ✅ GOOD: Use findBy* with semantic selector
+await screen.findByRole('heading', { level: 1, name: /data sources/i });
+```
+
+**Problem: Multiple assertions in waitFor**
+```typescript
+// ❌ BAD: ESLint error - no-wait-for-multiple-assertions
+await waitFor(() => {
+  const headings = screen.getAllByRole('heading', { level: 1 });
+  expect(headings.length).toBeGreaterThan(0);
+  expect(headings[0]).toHaveTextContent('Data Sources');
+});
+
+// ✅ GOOD: Use findBy* then make assertions
+await screen.findByRole('heading', { level: 1, name: /data sources/i });
+
+const headings = screen.getAllByRole('heading', { level: 1 });
+expect(headings.length).toBeGreaterThan(0);
+expect(headings[0]).toHaveTextContent('Data Sources');
+```
+
+#### **Scoping Queries with within()**
+```typescript
+// When you have duplicate elements, scope to a container
+import { within } from '@testing-library/react';
+
+// ❌ BAD: Ambiguous - which drawer?
+expect(screen.getByText('Dashboard')).toBeInTheDocument(); // Multiple drawers!
+
+// ✅ GOOD: Scoped to specific container
+const desktopDrawer = screen.getByRole('navigation');
+expect(within(desktopDrawer).getByText('Dashboard')).toBeInTheDocument();
+
+// ✅ GOOD: Scoped to dialog
+const dialog = screen.getByRole('dialog');
+const titleInput = within(dialog).getByLabelText('Title');
+fireEvent.change(titleInput, { target: { value: 'New Title' } });
+```
+
+### **MSW (Mock Service Worker) Best Practices**
+
+#### **JSON-Backed Mocks vs In-Code Mocks**
+```typescript
+// ❌ BAD: In-code mocks are hard to maintain and inconsistent
+server.use(
+  graphql.query('GetFinancialAlerts', (req, res, ctx) => {
+    return res(ctx.data({
+      financialAlerts: [
+        { id: '1', title: 'Alert 1', severity: 'high', ... },
+        { id: '2', title: 'Alert 2', severity: 'medium', ... },
+        // 50+ lines of mock data...
+      ]
+    }));
+  })
+);
+
+// ✅ GOOD: JSON files are centralized and reusable
+// frontend/src/__tests__/mocks/graphql/get_financial_alerts/success.json
+{
+  "data": {
+    "financialAlerts": [
+      { "id": "1", "title": "Alert 1", "severity": "high", ... }
+    ]
+  }
+}
+
+// frontend/src/__tests__/mocks/server.ts
+import getFinancialAlertsSuccess from './graphql/get_financial_alerts/success.json';
+
+server.use(
+  graphql.query('GetFinancialAlerts', (req, res, ctx) => {
+    return res(ctx.json(getFinancialAlertsSuccess));
+  })
+);
+```
+
+#### **Benefits of JSON-Backed Mocks**
+- ✅ **Single source of truth** - All tests use same mock data
+- ✅ **Easier to update** - Change data in one place
+- ✅ **Schema validation** - Catch schema mismatches early
+- ✅ **Reusable across tests** - Import same mocks in multiple test files
+- ✅ **Version control** - Track changes to mock data over time
+
+#### **GraphQL Schema Alignment**
+```typescript
+// CRITICAL: Backend schema is the source of truth!
+// Always use snake_case to match backend, not camelCase
+
+// ❌ BAD: Frontend using camelCase when backend uses snake_case
+interface Annotation {
+  annotationId: string;      // Backend uses annotation_id
+  chartId: string;            // Backend uses chart_id
+  createdAt: string;          // Backend uses created_at
+  isPinned: boolean;          // Backend uses is_pinned
+}
+
+// ✅ GOOD: Match backend schema exactly
+interface Annotation {
+  annotation_id: string;
+  chart_id: string;
+  created_at: string;
+  is_pinned: boolean;
+}
+
+// GraphQL query must also match
+const GET_ANNOTATIONS = gql`
+  query GetAnnotations($chartId: ID!) {
+    annotationsForChart(chartId: $chartId) {
+      annotation_id
+      chart_id
+      created_at
+      is_pinned
+    }
+  }
+`;
+```
+
+#### **MSW Handler Reset Best Practices**
+```typescript
+// ❌ BAD: Handlers persist between tests causing conflicts
+describe('Component Tests', () => {
+  it('test 1', () => {
+    server.use(
+      graphql.query('GetData', (req, res, ctx) => res(ctx.data({ custom: 'data' })))
+    );
+    // Handler persists to next test!
+  });
+  
+  it('test 2', () => {
+    // Still using handler from test 1!
+  });
+});
+
+// ✅ GOOD: Reset handlers between tests
+describe('Component Tests', () => {
+  beforeEach(() => {
+    server.resetHandlers(); // Clear all custom handlers
+  });
+  
+  it('test 1', () => {
+    server.use(
+      graphql.query('GetData', (req, res, ctx) => res(ctx.data({ custom: 'data' })))
+    );
+  });
+  
+  it('test 2', () => {
+    // Clean slate - back to default handlers
+  });
+});
+```
+
+### **Common Test Failure Patterns and Solutions**
+
+#### **Pattern 1: Timeout Waiting for Element**
+**Symptom:** `Test timed out in 10000ms`
+
+**Root Cause:** Using wrong query type or waiting for element that doesn't exist
+
+**Solution:**
+```typescript
+// ❌ BAD: findAllByRole waits until timeout if no elements
+const buttons = await screen.findAllByRole('button', { name: /refresh/i }); // Waits 10s!
+
+// ✅ GOOD: queryAllByRole returns immediately
+const buttons = screen.queryAllByRole('button', { name: /refresh/i });
+if (buttons.length > 0) {
+  fireEvent.click(buttons[0]);
+}
+```
+
+#### **Pattern 2: Component Stuck in Loading State**
+**Symptom:** Test finds loading spinner but never finds actual content
+
+**Root Cause:** Component's data fetching hook not setting loading to false
+
+**Solution:**
+```typescript
+// ❌ BAD: Forgetting to set loading: false
+const loadData = async () => {
+  setState({ ...state, loading: true });
+  const data = await fetchData();
+  setState({ ...state, data }); // loading still true!
+};
+
+// ✅ GOOD: Always set loading: false
+const loadData = async () => {
+  setState({ ...state, loading: true });
+  const data = await fetchData();
+  setState({ data, loading: false }); // Explicitly set loading
+};
+
+// ✅ BETTER: Use React Query and eliminate manual loading state
+const { data, isLoading } = useQuery({
+  queryKey: ['data'],
+  queryFn: fetchData,
+});
+```
+
+#### **Pattern 3: Infinite Loop in useEffect**
+**Symptom:** Tests hang, component re-renders infinitely, MSW shows repeated requests
+
+**Root Cause:** Dependency array includes mutable value that triggers re-fetch
+
+**Solution:**
+```typescript
+// ❌ BAD: loadCollaborators in dependency array triggers infinite loop
+useEffect(() => {
+  loadCollaborators(chartId);
+}, [chartId, loadCollaborators]); // loadCollaborators changes every render!
+
+// ✅ GOOD: Remove function from dependencies
+useEffect(() => {
+  loadCollaborators(chartId);
+}, [chartId]); // Only re-run when chartId changes
+
+// ✅ BETTER: Use useCallback to stabilize function reference
+const loadCollaborators = useCallback(async (id: string) => {
+  // fetch logic
+}, []); // Empty deps means function reference never changes
+
+useEffect(() => {
+  loadCollaborators(chartId);
+}, [chartId, loadCollaborators]); // Now safe!
+```
+
 ### **Testing Anti-Patterns to Avoid**
 
 #### **Testing Implementation Details**
