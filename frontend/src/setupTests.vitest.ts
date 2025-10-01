@@ -51,8 +51,11 @@ afterEach(async () => {
   const { setMockScenario, MockScenarios } = await import('./test-utils/mocks/simpleServer');
   setMockScenario(MockScenarios.SUCCESS);
   
-  // Comprehensive cleanup after each test
+  // Comprehensive cleanup after each test (but preserve MSW)
   cleanupTestResources();
+  
+  // Re-setup MSW after cleanup to ensure it's still working
+  await setupSimpleMSW();
 });
 afterAll(async () => {
   await cleanupSimpleMSW();

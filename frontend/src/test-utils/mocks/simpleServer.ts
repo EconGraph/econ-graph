@@ -124,6 +124,7 @@ export const setupSimpleMSW = async () => {
     if (MSW_DEBUG) {
       console.log(`[Simple MSW] ===== FETCH INTERCEPTED =====`);
       console.log(`[Simple MSW] URL: "${url}"`);
+      console.log(`[Simple MSW] URL type: ${typeof input}`);
       console.log(`[Simple MSW] Method: ${options?.method || 'GET'}`);
       console.log(`[Simple MSW] Headers:`, options?.headers);
       console.log(`[Simple MSW] Body:`, options?.body);
@@ -131,7 +132,7 @@ export const setupSimpleMSW = async () => {
     }
 
     // Intercept GraphQL requests - be more flexible with URL matching
-    if (url.includes('graphql') || url === '/graphql' || url.endsWith('/graphql')) {
+    if (url.includes('graphql') || url === '/graphql' || url.endsWith('/graphql') || url.includes('/graphql')) {
       if (MSW_DEBUG) console.log(`[Simple MSW] *** GRAPHQL REQUEST DETECTED ***`);
       try {
         const body = JSON.parse(options.body);
