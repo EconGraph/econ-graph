@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import {
   Box,
   Typography,
@@ -75,12 +75,10 @@ const getDataSourceCategories = (name: string): string[] => {
  * REQUIREMENT: Support for Federal Reserve and BLS data sources with monitoring
  * PURPOSE: Display available data sources and their status for transparency
  * This provides users with information about data sources and system status.
- * @returns JSX element representing the DataSources page.
  */
-const DataSources: React.FC = () => {
-  // Fetch real data sources from backend
-  const hookResult = useDataSources();
-  const { data: backendDataSources, isLoading, error } = hookResult || {};
+const DataSourcesContent: React.FC = () => {
+  // Fetch real data sources from backend - suspense: true eliminates need for isLoading/error checks
+  const { data: backendDataSources } = useDataSources();
 
   // Transform backend data to frontend format
   const dataSources: DataSourceInfo[] = React.useMemo(() => {
@@ -135,31 +133,6 @@ const DataSources: React.FC = () => {
     if (diffHours < 24) return `${diffHours} hours ago`;
     return date.toLocaleDateString();
   };
-
-  // Handle loading state
-  if (isLoading) {
-    return (
-      <Box
-        sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}
-      >
-        <CircularProgress />
-      </Box>
-    );
-  }
-
-  // Handle error state
-  if (error) {
-    return (
-      <Box>
-        <Typography variant='h4' component='h1' gutterBottom>
-          Data Sources
-        </Typography>
-        <Alert severity='error'>
-          Failed to load data sources: {error instanceof Error ? error.message : 'Unknown error'}
-        </Alert>
-      </Box>
-    );
-  }
 
   return (
     <Box>
@@ -377,5 +350,22 @@ const DataSources: React.FC = () => {
     </Box>
   );
 };
+
+/**
+ * DataSources wrapper with Suspense boundary for loading states
+ */
+const DataSources: React.FC = () => (
+  <Suspense
+    fallback={
+      <Box
+        sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}
+      >
+        <CircularProgress />
+      </Box>
+    }
+  >
+    <DataSourcesContent />
+  </Suspense>
+);
 
 export default DataSources;
