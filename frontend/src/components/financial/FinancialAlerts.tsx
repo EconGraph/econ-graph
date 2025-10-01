@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_ALERTS } from '../../test-utils/mocks/graphql/financial-queries';
@@ -207,24 +207,27 @@ const FinancialAlertsContent: React.FC<FinancialAlertsProps> = ({
   };
 
   // Handle alert actions
-  const handleMarkAsRead = (alertId: string) => {
+  const handleMarkAsRead = useCallback((alertId: string) => {
     setAlerts(prev =>
       prev.map(alert => (alert.id === alertId ? { ...alert, isRead: true } : alert))
     );
-  };
+  }, []);
 
-  const handleToggleActive = (alertId: string) => {
+  const handleToggleActive = useCallback((alertId: string) => {
     setAlerts(prev =>
       prev.map(alert => (alert.id === alertId ? { ...alert, isActive: !alert.isActive } : alert))
     );
-  };
+  }, []);
 
-  const handleAlertClick = (alert: FinancialAlert) => {
-    if (!alert.isRead) {
-      handleMarkAsRead(alert.id);
-    }
-    onAlertClick?.(alert);
-  };
+  const handleAlertClick = useCallback(
+    (alert: FinancialAlert) => {
+      if (!alert.isRead) {
+        handleMarkAsRead(alert.id);
+      }
+      onAlertClick?.(alert);
+    },
+    [handleMarkAsRead, onAlertClick]
+  );
 
   // Statistics
   const stats = useMemo(() => {
