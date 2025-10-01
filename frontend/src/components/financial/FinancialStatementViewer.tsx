@@ -740,7 +740,7 @@ const FinancialStatementViewerContent: React.FC<FinancialStatementViewerProps> =
 };
 
 // Wrapper component with Suspense boundary
-export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> = (props) => {
+export const FinancialStatementViewer: React.FC<FinancialStatementViewerProps> = props => {
   return (
     <Suspense
       fallback={

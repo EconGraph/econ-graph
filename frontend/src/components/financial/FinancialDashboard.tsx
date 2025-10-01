@@ -536,7 +536,7 @@ const FinancialDashboardContent: React.FC<FinancialDashboardProps> = ({
 };
 
 // Wrapper component with Suspense boundary
-export const FinancialDashboard: React.FC<FinancialDashboardProps> = (props) => {
+export const FinancialDashboard: React.FC<FinancialDashboardProps> = props => {
   return (
     <Suspense
       fallback={

@@ -106,24 +106,25 @@ const fetchCollaborators = async (chartId: string): Promise<Collaborator[]> => {
 
 const fetchUsers = async (userIds: string[]): Promise<Record<string, User>> => {
   if (userIds.length === 0) return {};
-  
+
   // Fetch users individually since we don't have a batch query
-  const userPromises = userIds.map(userId => 
+  const userPromises = userIds.map(userId =>
     executeGraphQL<UserResponse>({
       query: QUERIES.GET_USER,
       variables: { userId },
     })
   );
-  
+
   const responses = await Promise.all(userPromises);
-  const users = responses
-    .map(response => response.data?.user)
-    .filter(Boolean) as User[];
-    
-  return users.reduce((acc, user) => {
-    acc[user.id] = user;
-    return acc;
-  }, {} as Record<string, User>);
+  const users = responses.map(response => response.data?.user).filter(Boolean) as User[];
+
+  return users.reduce(
+    (acc, user) => {
+      acc[user.id] = user;
+      return acc;
+    },
+    {} as Record<string, User>
+  );
 };
 
 const fetchAnnotations = async (chartId: string): Promise<Annotation[]> => {
@@ -180,10 +181,10 @@ const useComments = (annotationId: string) => {
 };
 
 // Main content component that assumes all data is available
-const ChartCollaborationContent = ({ 
-  chartId, 
-  isOpen, 
-  onToggle 
+const ChartCollaborationContent = ({
+  chartId,
+  isOpen,
+  onToggle,
 }: {
   chartId: string;
   isOpen: boolean;
@@ -201,38 +202,43 @@ const ChartCollaborationContent = ({
     severity: 'success' as 'success' | 'error' | 'info' | 'warning',
   });
 
-
   // These hooks will suspend until data is available
   const { data: collaborators } = useCollaborators(chartId);
   const { data: annotations } = useAnnotations(chartId);
-  
+
   // Get user IDs from collaborators
   const userIds = collaborators?.map(c => c.user_id) || [];
   const { data: users } = useUsers(userIds);
-  
-  // Calculate derived state (no loading states needed!)
-  const activeCollaborators = collaborators?.filter(
-    c => users?.[c.user_id] && Date.now() - new Date(c.last_accessed_at || 0).getTime() < 300000
-  ) || [];
-  
-  const filteredAnnotations = annotations?.filter(annotation => {
-    switch (filterBy) {
-      case 'mine':
-        return annotation.user_id === currentUser?.id;
-      case 'pinned':
-        return annotation.is_pinned;
-      default:
-        return annotation.is_visible !== false;
-    }
-  }) || [];
-  
-  const totalComments = annotations?.reduce((sum, annotation) => {
-    return sum + (annotation.comments?.length || 0);
-  }, 0) || 0;
 
-  const showSnackbar = useCallback((message: string, severity: 'success' | 'error' | 'info' | 'warning' = 'success') => {
-    setSnackbar({ open: true, message, severity });
-  }, []);
+  // Calculate derived state (no loading states needed!)
+  const activeCollaborators =
+    collaborators?.filter(
+      c => users?.[c.user_id] && Date.now() - new Date(c.last_accessed_at || 0).getTime() < 300000
+    ) || [];
+
+  const filteredAnnotations =
+    annotations?.filter(annotation => {
+      switch (filterBy) {
+        case 'mine':
+          return annotation.user_id === currentUser?.id;
+        case 'pinned':
+          return annotation.is_pinned;
+        default:
+          return annotation.is_visible !== false;
+      }
+    }) || [];
+
+  const totalComments =
+    annotations?.reduce((sum, annotation) => {
+      return sum + (annotation.comments?.length || 0);
+    }, 0) || 0;
+
+  const showSnackbar = useCallback(
+    (message: string, severity: 'success' | 'error' | 'info' | 'warning' = 'success') => {
+      setSnackbar({ open: true, message, severity });
+    },
+    []
+  );
 
   const handleCloseSnackbar = useCallback(() => {
     setSnackbar(prev => ({ ...prev, open: false }));
@@ -250,7 +256,7 @@ const ChartCollaborationContent = ({
       showSnackbar('Annotation added successfully');
       setNewAnnotationDialog(false);
     },
-    onError: (error) => {
+    onError: error => {
       showSnackbar(error instanceof Error ? error.message : 'Failed to add annotation', 'error');
     },
   });
@@ -265,7 +271,7 @@ const ChartCollaborationContent = ({
       showSnackbar('Chart shared successfully');
       setShareDialog(false);
     },
-    onError: (error) => {
+    onError: error => {
       showSnackbar(error instanceof Error ? error.message : 'Failed to share chart', 'error');
     },
   });
@@ -305,7 +311,9 @@ const ChartCollaborationContent = ({
 
           {/* Active Collaborators */}
           <Box sx={{ mb: 3 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+            <Box
+              sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}
+            >
               <Typography variant='subtitle2'>
                 Active Collaborators ({activeCollaborators.length})
               </Typography>
@@ -371,7 +379,8 @@ const ChartCollaborationContent = ({
             >
               <MenuItem value='all'>All Annotations ({annotations?.length || 0})</MenuItem>
               <MenuItem value='mine'>
-                My Annotations ({annotations?.filter(a => a.user_id === currentUser?.id).length || 0})
+                My Annotations (
+                {annotations?.filter(a => a.user_id === currentUser?.id).length || 0})
               </MenuItem>
               <MenuItem value='pinned'>
                 Pinned ({annotations?.filter(a => a.is_pinned).length || 0})
@@ -515,8 +524,8 @@ const ChartCollaborationContent = ({
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setNewAnnotationDialog(false)}>Cancel</Button>
-          <Button 
-            onClick={() => addAnnotationMutation.mutate({})} 
+          <Button
+            onClick={() => addAnnotationMutation.mutate({})}
             variant='contained'
             disabled={addAnnotationMutation.isPending}
           >
@@ -555,8 +564,8 @@ const ChartCollaborationContent = ({
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShareDialog(false)}>Cancel</Button>
-          <Button 
-            onClick={() => shareChartMutation.mutate({ email: '', permission: 'view' })} 
+          <Button
+            onClick={() => shareChartMutation.mutate({ email: '', permission: 'view' })}
             variant='contained'
             disabled={shareChartMutation.isPending}
           >
@@ -566,7 +575,12 @@ const ChartCollaborationContent = ({
       </Dialog>
 
       {/* Comments Dialog */}
-      <Dialog open={!!selectedAnnotation} onClose={() => setSelectedAnnotation(null)} fullWidth maxWidth='sm'>
+      <Dialog
+        open={!!selectedAnnotation}
+        onClose={() => setSelectedAnnotation(null)}
+        fullWidth
+        maxWidth='sm'
+      >
         <DialogTitle>
           Comments for "{selectedAnnotation?.title}"
           <IconButton
@@ -583,9 +597,7 @@ const ChartCollaborationContent = ({
           </IconButton>
         </DialogTitle>
         <DialogContent dividers>
-          {selectedAnnotation && (
-            <CommentsList annotationId={selectedAnnotation.id} />
-          )}
+          {selectedAnnotation && <CommentsList annotationId={selectedAnnotation.id} />}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setSelectedAnnotation(null)}>Close</Button>
@@ -664,7 +676,7 @@ export const ChartCollaborationConnectedQuery = ({
   if (!currentUser) {
     return (
       <Box sx={{ p: 2, textAlign: 'center' }}>
-        <Typography variant="body1" color="text.secondary">
+        <Typography variant='body1' color='text.secondary'>
           Please log in to access collaboration features.
         </Typography>
       </Box>
@@ -672,18 +684,14 @@ export const ChartCollaborationConnectedQuery = ({
   }
 
   return (
-    <Suspense 
+    <Suspense
       fallback={
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 200 }}>
           <CircularProgress />
         </Box>
       }
     >
-      <ChartCollaborationContent 
-        chartId={chartId} 
-        isOpen={isOpen} 
-        onToggle={onToggle} 
-      />
+      <ChartCollaborationContent chartId={chartId} isOpen={isOpen} onToggle={onToggle} />
     </Suspense>
   );
 };

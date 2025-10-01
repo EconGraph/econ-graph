@@ -84,7 +84,7 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
   colorScheme = 'viridis',
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
-  
+
   // Load world atlas data with Suspense
   const { data: worldData } = useWorldAtlasData();
 
@@ -257,15 +257,15 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
 };
 
 // Wrapper component with Suspense boundary
-const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = (props) => {
+const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = props => {
   return (
     <Suspense
       fallback={
-        <Box 
-          display='flex' 
-          justifyContent='center' 
-          alignItems='center' 
-          height={props.height} 
+        <Box
+          display='flex'
+          justifyContent='center'
+          alignItems='center'
+          height={props.height}
           width={props.width}
         >
           <CircularProgress />
