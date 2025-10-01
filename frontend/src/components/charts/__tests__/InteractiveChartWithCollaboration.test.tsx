@@ -26,8 +26,8 @@ vi.mock('react-chartjs-2', () => ({
 }));
 
 // Mock the collaboration component
-vi.mock('../ChartCollaborationConnected', () => ({
-  default: function MockChartCollaborationConnected({ isOpen, onToggle, collaborationEnabled: _collaborationEnabled }: any) {
+vi.mock('../ChartCollaborationConnectedQuery', () => ({
+  ChartCollaborationConnectedQuery: function MockChartCollaborationConnectedQuery({ isOpen, onToggle }: any) {
     return (
       <div data-testid="chart-collaboration">
         <button data-testid="toggle-collaboration" onClick={onToggle}>
