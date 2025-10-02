@@ -39,6 +39,25 @@ print_status() {
     esac
 }
 
+# Ensure required dependencies are installed
+ensure_dependencies() {
+    local missing=0
+
+    if ! command -v yq >/dev/null 2>&1; then
+        echo -e "${RED}❌ [$(date '+%H:%M:%S')] Missing dependency: yq${NC}"
+        echo -e "${YELLOW}⚠️  [$(date '+%H:%M:%S')] Install yq (v4+ recommended). Examples:${NC}"
+        echo -e "${YELLOW}   - Ubuntu/Debian: sudo apt-get install -y yq${NC}"
+        echo -e "${YELLOW}   - Snap: sudo snap install yq${NC}"
+        echo -e "${YELLOW}   - Binary: see https://github.com/mikefarah/yq/releases${NC}"
+        missing=1
+    fi
+
+    if [ $missing -ne 0 ]; then
+        echo -e "${RED}❌ [$(date '+%H:%M:%S')] Aborting: required tools are not installed.${NC}"
+        exit 1
+    fi
+}
+
 # Function to validate JSON structure
 validate_json_structure() {
     local file="$1"
@@ -926,6 +945,7 @@ run_specific_step() {
 
 # Main execution
 main() {
+    ensure_dependencies
     # Check for step parameter
     if [ "$1" = "--step" ] && [ -n "$2" ]; then
         run_specific_step "$2"
