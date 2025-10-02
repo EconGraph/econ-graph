@@ -1,0 +1,77 @@
+{
+  "data": {
+    "financialAlerts": [
+      {
+        "id": "1",
+        "companyId": "test-company",
+        "companyName": "Apple Inc.",
+        "alertType": "ratio_threshold",
+        "severity": "high",
+        "title": "Current Ratio Below Threshold",
+        "description": "Current ratio of 0.95 is below the recommended threshold of 1.0",
+        "ratioName": "currentRatio",
+        "currentValue": 0.95,
+        "thresholdValue": 1.0,
+        "direction": "decline",
+        "isActive": true,
+        "isRead": false,
+        "triggeredAt": "2024-01-15T10:00:00Z",
+        "isResolved": false,
+        "resolvedAt": null,
+        "createdAt": "2024-01-15T10:00:00Z",
+        "updatedAt": "2024-01-15T10:00:00Z"
+      },
+      {
+        "id": "2",
+        "companyId": "test-company",
+        "companyName": "Apple Inc.",
+        "alertType": "filing_deadline",
+        "severity": "medium",
+        "title": "10-Q Filing Due Soon",
+        "description": "Quarterly report (10-Q) is due within 5 business days",
+        "direction": "change",
+        "isActive": true,
+        "isRead": false,
+        "triggeredAt": "2024-01-12T14:00:00Z",
+        "isResolved": false,
+        "resolvedAt": null,
+        "createdAt": "2024-01-12T14:00:00Z",
+        "updatedAt": "2024-01-12T14:00:00Z"
+      },
+      {
+        "id": "3",
+        "companyId": "test-company",
+        "companyName": "Apple Inc.",
+        "alertType": "data_quality",
+        "severity": "low",
+        "title": "Data Quality Warning",
+        "description": "Some financial data has low confidence scores",
+        "direction": "change",
+        "isActive": true,
+        "isRead": true,
+        "triggeredAt": "2024-01-10T09:00:00Z",
+        "isResolved": false,
+        "resolvedAt": null,
+        "createdAt": "2024-01-10T09:00:00Z",
+        "updatedAt": "2024-01-10T09:00:00Z"
+      },
+      {
+        "id": "4",
+        "companyId": "test-company",
+        "companyName": "Apple Inc.",
+        "alertType": "benchmark_change",
+        "severity": "medium",
+        "title": "Industry Benchmark Updated",
+        "description": "Industry benchmarks have been updated with latest data",
+        "direction": "change",
+        "isActive": true,
+        "isRead": false,
+        "triggeredAt": "2024-01-08T16:00:00Z",
+        "isResolved": false,
+        "resolvedAt": null,
+        "createdAt": "2024-01-08T16:00:00Z",
+        "updatedAt": "2024-01-08T16:00:00Z"
+      }
+    ]
+  }
+}

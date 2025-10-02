@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Professional collaboration hooks for Bloomberg Terminal-level functionality
  * PURPOSE: Provide React hooks for managing chart annotations, comments, and sharing
- * This enables institutional-grade collaboration workflows for economic analysis
+ * This enables institutional-grade collaboration workflows for economic analysis.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -39,6 +39,12 @@ export interface UseCollaborationOptions {
   refreshInterval?: number;
 }
 
+/**
+ * Hook for managing chart collaboration features.
+ * Provides real-time collaboration capabilities for charts and annotations.
+ * @param options - Configuration options for collaboration features.
+ * @returns Object containing collaboration state and methods.
+ */
 export function useCollaboration(options: UseCollaborationOptions = {}) {
   const { seriesId, chartId, autoRefresh = false, refreshInterval = 30000 } = options;
   const { user: currentUser } = useAuth();
@@ -68,15 +74,16 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
           },
         });
 
-        if (response.data) {
+        const data = response.data;
+        if (data && data.annotationsForSeries) {
           setState(prev => ({
             ...prev,
-            annotations: response.data!.annotationsForSeries,
+            annotations: data.annotationsForSeries,
             loading: false,
           }));
 
           // Load user details for annotation authors
-          const userIds = [...new Set(response.data.annotationsForSeries.map(a => a.userId))];
+          const userIds = [...new Set(data.annotationsForSeries.map(a => a.user_id))];
           await loadUsers(userIds);
         }
       } catch (error) {
@@ -99,17 +106,18 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
         variables: { annotationId },
       });
 
-      if (response.data) {
+      const data = response.data;
+      if (data && data.commentsForAnnotation) {
         setState(prev => ({
           ...prev,
           comments: {
             ...prev.comments,
-            [annotationId]: response.data!.commentsForAnnotation,
+            [annotationId]: data.commentsForAnnotation,
           },
         }));
 
         // Load user details for comment authors
-        const userIds = [...new Set(response.data.commentsForAnnotation.map(c => c.userId))];
+        const userIds = [...new Set(data.commentsForAnnotation.map(c => c.user_id))];
         await loadUsers(userIds);
       }
     } catch (error) {
@@ -132,24 +140,34 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
         return;
       }
 
+      setState(prev => ({ ...prev, loading: true, error: null }));
+
       try {
         const response = await executeGraphQL<ChartCollaboratorsResponse>({
           query: QUERIES.GET_CHART_COLLABORATORS,
           variables: { chartId: resolvedChartId },
         });
 
-        if (response.data) {
+        const data = response.data;
+        if (data && data.chartCollaborators) {
           setState(prev => ({
             ...prev,
-            collaborators: response.data!.chartCollaborators,
+            collaborators: data.chartCollaborators,
+            loading: false,
           }));
 
           // Load user details for collaborators
-          const userIds = [...new Set(response.data.chartCollaborators.map(c => c.userId))];
+          const userIds = [...new Set(data.chartCollaborators.map(c => c.user_id))];
           await loadUsers(userIds);
+        } else {
+          setState(prev => ({ ...prev, loading: false }));
         }
       } catch (error) {
-        console.error('Failed to load collaborators:', error);
+        setState(prev => ({
+          ...prev,
+          loading: false,
+          error: error instanceof Error ? error.message : 'Failed to load collaborators',
+        }));
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -335,7 +353,7 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
       ...prev,
       annotations: prev.annotations.map(annotation =>
         annotation.id === annotationId
-          ? { ...annotation, isVisible: !annotation.isVisible }
+          ? { ...annotation, is_visible: !annotation.is_visible }
           : annotation
       ),
     }));
@@ -349,7 +367,7 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
       ...prev,
       annotations: prev.annotations.map(annotation =>
         annotation.id === annotationId
-          ? { ...annotation, isPinned: !annotation.isPinned }
+          ? { ...annotation, is_pinned: !annotation.is_pinned }
           : annotation
       ),
     }));

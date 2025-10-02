@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Professional chart analytics with technical analysis tools
  * PURPOSE: Provide Bloomberg Terminal-level technical analysis capabilities
- * This module implements statistical indicators commonly used in economic analysis
+ * This module implements statistical indicators commonly used in economic analysis.
  */
 
 export interface DataPoint {
@@ -30,7 +30,10 @@ export interface RSIPoint {
 
 /**
  * Calculate Simple Moving Average
- * Used for trend analysis and smoothing economic data
+ * Used for trend analysis and smoothing economic data.
+ * @param data - Array of data points to analyze.
+ * @param period - Number of periods for the moving average.
+ * @returns Array of technical indicator values.
  */
 export function calculateSMA(data: DataPoint[], period: number): TechnicalIndicator[] {
   if (data.length < period) return [];
@@ -53,7 +56,10 @@ export function calculateSMA(data: DataPoint[], period: number): TechnicalIndica
 
 /**
  * Calculate Exponential Moving Average
- * More responsive to recent changes than SMA
+ * More responsive to recent changes than SMA.
+ * @param data - Array of data points to analyze.
+ * @param period - Number of periods for the moving average.
+ * @returns Array of technical indicator values.
  */
 export function calculateEMA(data: DataPoint[], period: number): TechnicalIndicator[] {
   if (data.length === 0) return [];
@@ -81,7 +87,11 @@ export function calculateEMA(data: DataPoint[], period: number): TechnicalIndica
 
 /**
  * Calculate Bollinger Bands
- * Statistical measure of volatility and potential support/resistance levels
+ * Statistical measure of volatility and potential support/resistance levels.
+ * @param data - Array of data points to analyze.
+ * @param period - Number of periods for the moving average.
+ * @param standardDeviations - Number of standard deviations for the bands.
+ * @returns Bollinger Bands data with upper, middle, and lower bands.
  */
 export function calculateBollingerBands(
   data: DataPoint[],
@@ -116,7 +126,10 @@ export function calculateBollingerBands(
 
 /**
  * Calculate Relative Strength Index (RSI)
- * Momentum oscillator measuring the speed and magnitude of price changes
+ * Momentum oscillator measuring the speed and magnitude of price changes.
+ * @param data - Array of data points to analyze.
+ * @param period - Number of periods for the RSI calculation.
+ * @returns Array of RSI values.
  */
 export function calculateRSI(data: DataPoint[], period = 14): RSIPoint[] {
   if (data.length < period + 1) return [];
@@ -158,7 +171,10 @@ export function calculateRSI(data: DataPoint[], period = 14): RSIPoint[] {
 
 /**
  * Calculate Rate of Change (ROC)
- * Momentum indicator showing percentage change over a specific period
+ * Momentum indicator showing percentage change over a specific period.
+ * @param data - Array of data points to analyze.
+ * @param period - Number of periods for the RSI calculation.
+ * @returns Array of ROC values.
  */
 export function calculateROC(data: DataPoint[], period: number): TechnicalIndicator[] {
   if (data.length < period + 1) return [];
@@ -182,7 +198,10 @@ export function calculateROC(data: DataPoint[], period: number): TechnicalIndica
 
 /**
  * Calculate Standard Deviation
- * Measure of volatility and dispersion
+ * Measure of volatility and dispersion.
+ * @param data - Array of data points to analyze.
+ * @param period - Number of periods for the RSI calculation.
+ * @returns Array of standard deviation values.
  */
 export function calculateStandardDeviation(
   data: DataPoint[],
@@ -211,7 +230,7 @@ export function calculateStandardDeviation(
 
 /**
  * Detect Economic Cycles
- * Identify potential turning points and trend changes
+ * Identify potential turning points and trend changes.
  */
 export interface CyclePoint {
   date: string;
@@ -220,6 +239,13 @@ export interface CyclePoint {
   confidence: number;
 }
 
+/**
+ * Detect economic cycles in time series data.
+ * Identifies peaks and troughs in economic indicators.
+ * @param data - Array of data points to analyze.
+ * @param lookback - Number of periods to look back for the calculation.
+ * @returns Array of cycle points with peaks and troughs.
+ */
 export function detectEconomicCycles(data: DataPoint[], lookback = 6): CyclePoint[] {
   if (data.length < lookback * 2 + 1) return [];
 
@@ -270,7 +296,10 @@ export function detectEconomicCycles(data: DataPoint[], lookback = 6): CyclePoin
 }
 
 /**
- * Calculate correlation between two economic series
+ * Calculate correlation between two economic series.
+ * @param series1 - First data series for comparison.
+ * @param series2 - Second data series for comparison.
+ * @returns Correlation coefficient between the two series.
  */
 export function calculateCorrelation(series1: DataPoint[], series2: DataPoint[]): number {
   if (series1.length !== series2.length || series1.length === 0) return 0;
@@ -289,7 +318,7 @@ export function calculateCorrelation(series1: DataPoint[], series2: DataPoint[])
 }
 
 /**
- * Economic Event Types for Chart Annotations
+ * Economic Event Types for Chart Annotations.
  */
 export interface EconomicEvent {
   date: string;
@@ -302,7 +331,7 @@ export interface EconomicEvent {
 
 /**
  * Historical Economic Events Database
- * Major events that should be annotated on economic charts
+ * Major events that should be annotated on economic charts.
  */
 export const MAJOR_ECONOMIC_EVENTS: EconomicEvent[] = [
   {
@@ -365,7 +394,10 @@ export const MAJOR_ECONOMIC_EVENTS: EconomicEvent[] = [
 ];
 
 /**
- * Get relevant economic events for a date range
+ * Get relevant economic events for a date range.
+ * @param startDate - Start date for the period.
+ * @param endDate - End date for the period.
+ * @returns Array of economic events within the date range.
  */
 export function getEconomicEventsInRange(startDate: string, endDate: string): EconomicEvent[] {
   const start = new Date(startDate);

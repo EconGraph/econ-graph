@@ -1,5 +1,5 @@
 /**
- * GlobalAnalysisDemo Page
+ * GlobalAnalysisDemo Page.
  *
  * Demo page showcasing the interactive world map component
  * with all its features and controls.

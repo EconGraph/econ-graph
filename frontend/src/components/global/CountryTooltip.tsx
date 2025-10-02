@@ -1,5 +1,5 @@
 /**
- * CountryTooltip Component
+ * CountryTooltip Component.
  *
  * Tooltip component for displaying country-specific data when hovering
  * over countries on the world map.

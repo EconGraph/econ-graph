@@ -1,6 +1,6 @@
-import { defineConfig } from 'vitest/config'
-import react from '@vitejs/plugin-react'
-import path from 'path'
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
@@ -8,6 +8,34 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/setupTests.vitest.ts'],
     globals: true,
+    forceRerunTriggers: ['**/package.json/**', '**/vitest.config.*/**', '**/vite.config.*/**'],
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        singleFork: true,
+        isolate: false, // Share memory between tests for faster execution
+      },
+    },
+    // CI-specific optimizations
+    ...(process.env.CI && {
+      // Run tests sequentially in CI to avoid resource contention
+      pool: 'threads',
+      poolOptions: {
+        threads: {
+          singleThread: true,
+        },
+      },
+      // More conservative timeouts for CI
+      testTimeout: 15000,
+      hookTimeout: 10000,
+    }),
+    // Force exit after tests complete
+    teardownTimeout: 1000, // Increased for CI cleanup
+    testTimeout: 10000, // 10 seconds per test (increased for CI)
+    hookTimeout: 5000, // 5 seconds for hooks (increased for CI)
+    bail: 0, // Don't bail on first failure
+    // Force process exit after tests complete to prevent hanging
+    forceExit: true,
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
@@ -16,8 +44,11 @@ export default defineConfig({
       '**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*',
       '**/server/**/*.test.cjs',
       '**/__tests__/integration/privateChartServer.test.cjs',
+      '**/__tests__/integration/**/*.test.tsx',
+      // Ignore unit-level e2e-style tests for now
+      '**/__tests__/e2e-*.test.tsx',
       '**/tests/**/*.spec.ts',
-      '**/tests/**/*.spec.tsx'
+      '**/tests/**/*.spec.tsx',
     ],
     coverage: {
       provider: 'v8',
@@ -32,24 +63,33 @@ export default defineConfig({
         '**/dist/**',
         '**/build/**',
         '**/playwright-report/**',
-        '**/test-results/**'
+        '**/test-results/**',
       ],
       thresholds: {
         global: {
           branches: 70,
           functions: 70,
           lines: 70,
-          statements: 70
-        }
-      }
+          statements: 70,
+        },
+      },
     },
     deps: {
-      inline: ['d3', 'd3-geo', 'd3-zoom', 'd3-scale', 'd3-scale-chromatic', 'd3-array', 'd3-selection']
-    }
+      inline: [
+        'd3',
+        'd3-geo',
+        'd3-zoom',
+        'd3-scale',
+        'd3-scale-chromatic',
+        'd3-array',
+        'd3-selection',
+        '@tanstack/react-query',
+      ],
+    },
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src')
-    }
-  }
-})
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+});

@@ -1,61 +1,80 @@
 /**
- * InteractiveWorldMap Component
+ * InteractiveWorldMap Component.
  *
  * A D3.js-powered interactive world map component for global economic analysis.
  * Features include country selection, zoom/pan, economic data visualization,
  * and responsive design.
  */
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, Suspense } from 'react';
 import * as d3 from 'd3';
 import * as topojson from 'topojson-client';
-import { Box, CircularProgress, Alert } from '@mui/material';
+import { Box, CircularProgress } from '@mui/material';
+import { useQuery } from '@tanstack/react-query';
 import { CountryData, MapViewState } from '../../types/globalAnalysis';
 import { useWorldMap } from './hooks/useWorldMap';
 import { useCountryData } from './hooks/useCountryData';
 
 interface InteractiveWorldMapProps {
-  /** Array of country data to display on the map */
+  /** Array of country data to display on the map. */
   data: CountryData[];
-  /** Currently selected economic indicator */
+  /** Currently selected economic indicator. */
   selectedIndicator: string;
-  /** Time range for data visualization */
+  /** Time range for data visualization. */
   timeRange: { start: Date; end: Date };
-  /** Callback when a country is clicked */
+  /** Callback when a country is clicked. */
   onCountryClick: (country: CountryData) => void;
-  /** Callback when a country is hovered */
+  /** Callback when a country is hovered. */
   onCountryHover: (country: CountryData | null) => void;
-  /** Current map view state */
+  /** Current map view state. */
   mapView: MapViewState;
-  /** Callback when map view changes */
+  /** Callback when map view changes. */
   onMapViewChange: (view: Partial<MapViewState>) => void;
-  /** Whether animation is enabled */
+  /** Whether animation is enabled. */
   animationEnabled?: boolean;
-  /** Whether to show country borders */
+  /** Whether to show country borders. */
   showBorders?: boolean;
-  /** Whether to show country labels */
+  /** Whether to show country labels. */
   showLabels?: boolean;
-  /** Size of country labels */
+  /** Size of country labels. */
   labelSize?: number;
-  /** Width of the map container */
+  /** Width of the map container. */
   width: number;
-  /** Height of the map container */
+  /** Height of the map container. */
   height: number;
-  /** Map projection type */
+  /** Map projection type. */
   projection?: string;
-  /** Color scheme for data visualization */
+  /** Color scheme for data visualization. */
   colorScheme?: string;
 }
 
-const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
+// Fetch world atlas data using React Query
+const useWorldAtlasData = () => {
+  return useQuery({
+    queryKey: ['world-atlas'],
+    queryFn: async () => {
+      const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@3/world/110m.json');
+      if (!response.ok) {
+        throw new Error('Failed to load world map data');
+      }
+      return response.json();
+    },
+    staleTime: Infinity, // Atlas data never changes
+    cacheTime: Infinity,
+    suspense: true,
+  });
+};
+
+// Main map content component - assumes data is loaded
+const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
   data,
   selectedIndicator,
-  timeRange,
+  timeRange: _timeRange,
   onCountryClick,
   onCountryHover,
-  mapView,
-  onMapViewChange,
-  animationEnabled = true,
+  mapView: _mapView,
+  onMapViewChange: _onMapViewChange,
+  animationEnabled: _animationEnabled = true,
   showBorders = true,
   showLabels = false,
   labelSize = 12,
@@ -65,35 +84,13 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
   colorScheme = 'viridis',
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
-  const [worldData, setWorldData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  // Load world atlas data with Suspense
+  const { data: worldData } = useWorldAtlasData();
 
   // Custom hooks for map logic
   const { path, zoomBehavior } = useWorldMap(svgRef, projection);
   const { processedData, colorScale } = useCountryData(data, selectedIndicator, colorScheme);
-
-  // Load world atlas data
-  useEffect(() => {
-    const loadWorldData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-
-        // Load world atlas data from a CDN or local file
-        const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@3/world/110m.json');
-        const world = await response.json();
-        setWorldData(world);
-      } catch (err) {
-        console.error('Failed to load world data:', err);
-        setError('Failed to load world map data');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadWorldData();
-  }, []);
 
   // Initialize D3 map
   useEffect(() => {
@@ -236,24 +233,6 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
     onCountryHover,
   ]);
 
-  // Handle loading state
-  if (loading) {
-    return (
-      <Box display='flex' justifyContent='center' alignItems='center' height={height} width={width}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-
-  // Handle error state
-  if (error) {
-    return (
-      <Box display='flex' justifyContent='center' alignItems='center' height={height} width={width}>
-        <Alert severity='error'>{error}</Alert>
-      </Box>
-    );
-  }
-
   return (
     <Box
       width={width}
@@ -274,6 +253,27 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = ({
         }}
       />
     </Box>
+  );
+};
+
+// Wrapper component with Suspense boundary
+const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = props => {
+  return (
+    <Suspense
+      fallback={
+        <Box
+          display='flex'
+          justifyContent='center'
+          alignItems='center'
+          height={props.height}
+          width={props.width}
+        >
+          <CircularProgress />
+        </Box>
+      }
+    >
+      <WorldMapContent {...props} />
+    </Suspense>
   );
 };
 

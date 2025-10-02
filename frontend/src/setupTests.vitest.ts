@@ -2,13 +2,87 @@
 // This file sets up the test environment for Vitest with MSW support
 
 import '@testing-library/jest-dom';
-import { vi } from 'vitest';
+import { beforeAll, afterEach, afterAll, vi } from 'vitest';
+import { setupSimpleMSW, cleanupSimpleMSW } from './test-utils/mocks/simpleServer';
+import { cleanup } from '@testing-library/react';
 
-// MSW is disabled by default for unit tests
-// Integration tests will start MSW manually
+// Comprehensive cleanup function to prevent resource leaks
+const cleanupTestResources = () => {
+  // Clean up React Testing Library
+  cleanup();
 
-// Mock fetch globally for unit tests
-global.fetch = vi.fn();
+  // Clear all timers and intervals (expanded range for CI)
+  for (let i = 1; i < 50000; i++) {
+    clearTimeout(i);
+    clearInterval(i);
+  }
+
+  // Clean up DOM elements more aggressively
+  const containers = document.querySelectorAll('[data-testid="test-container"]');
+  containers.forEach(container => container.remove());
+
+  const portalContainers = document.querySelectorAll(
+    '[data-testid="material-ui-portal-container"]'
+  );
+  portalContainers.forEach(container => container.remove());
+
+  const reactRoots = document.querySelectorAll('[data-reactroot]');
+  reactRoots.forEach(root => root.remove());
+
+  const dialogs = document.querySelectorAll('[role="dialog"]');
+  dialogs.forEach(dialog => dialog.remove());
+
+  // Clear any remaining event listeners
+  document.removeEventListener('click', () => {
+    // Event listener cleanup
+  });
+  document.removeEventListener('keydown', () => {
+    // Event listener cleanup
+  });
+  document.removeEventListener('keyup', () => {
+    // Event listener cleanup
+  });
+
+  // Clear any remaining fetch mocks
+  vi.restoreAllMocks();
+
+  // Clear console to prevent memory leaks from console.log
+  // eslint-disable-next-line no-console
+  console.clear();
+
+  // Force garbage collection if available (helps with memory pressure in CI)
+  if (typeof global !== 'undefined' && global.gc) {
+    global.gc();
+  }
+};
+
+// Start MSW server for all tests
+beforeAll(async () => {
+  await setupSimpleMSW();
+});
+afterEach(async () => {
+  // Reset to success scenario after each test
+  const { setMockScenario, MockScenarios } = await import('./test-utils/mocks/simpleServer');
+  setMockScenario(MockScenarios.SUCCESS);
+
+  // Comprehensive cleanup after each test (but preserve MSW)
+  cleanupTestResources();
+
+  // Re-setup MSW after cleanup to ensure it's still working
+  await setupSimpleMSW();
+});
+afterAll(async () => {
+  await cleanupSimpleMSW();
+
+  // Aggressive cleanup to prevent hanging processes
+  if (typeof process !== 'undefined') {
+    // Clear all timeouts and intervals
+    for (let i = 1; i < 10000; i++) {
+      clearTimeout(i);
+      clearInterval(i);
+    }
+  }
+});
 
 // Polyfill for Node.js environment
 import { TextEncoder, TextDecoder } from 'util';
@@ -34,9 +108,18 @@ const localStorageMock = {
   key: () => null,
   length: 0,
 };
-(global as any).localStorage = localStorageMock;
+
+// Define localStorage on global and window more safely
+Object.defineProperty(global, 'localStorage', {
+  value: localStorageMock,
+  writable: true,
+  configurable: true,
+});
+
 Object.defineProperty(window, 'localStorage', {
   value: localStorageMock,
+  writable: true,
+  configurable: true,
 });
 
 // Mock Chart.js and related modules
@@ -221,9 +304,40 @@ vi.mock('d3-zoom', () => ({
   })),
 }));
 
+// Mock useAuth hook from multiple import paths
+const mockUseAuth = vi.fn(() => ({
+  user: {
+    id: 'test-user-1',
+    email: 'test@example.com',
+    name: 'Test User',
+    role: 'user',
+    preferences: {
+      theme: 'light',
+    },
+  },
+  isAuthenticated: true,
+  isLoading: false,
+  login: vi.fn(),
+  logout: vi.fn(),
+  register: vi.fn(),
+}));
+
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: mockUseAuth,
+}));
+
+vi.mock('./contexts/AuthContext', () => ({
+  useAuth: mockUseAuth,
+  AuthProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+// Use real @tanstack/react-query in tests so MSW-backed GraphQL executes
+
 // Mock react-router-dom
 vi.mock('react-router-dom', () => ({
   BrowserRouter: ({ children }: { children: React.ReactNode }) => children,
+  Routes: ({ children }: { children: React.ReactNode }) => children,
+  Route: ({ children }: { children: React.ReactNode }) => children,
   useNavigate: () => vi.fn(),
   useLocation: () => ({ pathname: '/test', search: '', hash: '', state: null }),
   useParams: () => ({}),

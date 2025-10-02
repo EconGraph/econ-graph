@@ -1,10 +1,18 @@
 /**
  * REQUIREMENT: Dynamic theme management for user preferences
  * PURPOSE: Provide theme switching functionality based on user preferences
- * This enables personalized UI experience with light/dark theme support
+ * This enables personalized UI experience with light/dark theme support.
  */
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  ReactNode,
+} from 'react';
 import { createTheme, Theme, ThemeProvider as MuiThemeProvider } from '@mui/material/styles';
 import { useAuth } from './AuthContext';
 
@@ -132,7 +140,8 @@ interface ThemeProviderProps {
 }
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
-  const { user } = useAuth();
+  const authResult = useAuth();
+  const user = authResult?.user;
   const [currentTheme, setCurrentTheme] = useState<'light' | 'dark'>('light');
 
   // Initialize theme from user preferences or localStorage
@@ -148,25 +157,28 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     }
   }, [user?.preferences?.theme]);
 
-  const toggleTheme = () => {
+  const toggleTheme = useCallback(() => {
     const newTheme = currentTheme === 'light' ? 'dark' : 'light';
     setCurrentTheme(newTheme);
     localStorage.setItem('theme', newTheme);
-  };
+  }, [currentTheme]);
 
-  const setTheme = (theme: 'light' | 'dark') => {
+  const setTheme = useCallback((theme: 'light' | 'dark') => {
     setCurrentTheme(theme);
     localStorage.setItem('theme', theme);
-  };
+  }, []);
 
   const theme = currentTheme === 'dark' ? darkTheme : lightTheme;
 
-  const contextValue: ThemeContextType = {
-    theme,
-    toggleTheme,
-    setTheme,
-    currentTheme,
-  };
+  const contextValue: ThemeContextType = useMemo(
+    () => ({
+      theme,
+      toggleTheme,
+      setTheme,
+      currentTheme,
+    }),
+    [theme, toggleTheme, setTheme, currentTheme]
+  );
 
   return (
     <ThemeContext.Provider value={contextValue}>

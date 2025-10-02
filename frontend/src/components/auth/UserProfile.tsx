@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: User profile management for authenticated collaboration
  * PURPOSE: Provide user account management and preferences for chart collaboration
- * This enables personalized professional economic analysis experience
+ * This enables personalized professional economic analysis experience.
  */
 
 import React, { useState, useCallback } from 'react';
@@ -152,7 +152,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ open, onClose }) => {
 
   const handleDeleteAccount = useCallback(() => {
     // In a real app, this would call a delete account API
-    console.log('Delete account requested');
+    // Delete account functionality would be implemented here
     setShowDeleteConfirm(false);
   }, []);
 

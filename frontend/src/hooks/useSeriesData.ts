@@ -1,11 +1,11 @@
 /**
- * Custom hooks for series data management
+ * Custom hooks for series data management.
  *
  * This module provides React hooks for fetching and managing economic time series data
  * from various data sources including FRED, BLS, and other economic data providers.
  */
 
-import { useQuery } from 'react-query';
+import { useQuery } from '@tanstack/react-query';
 import { executeGraphQL, QUERIES } from '../utils/graphql';
 
 // Types for series data
@@ -158,20 +158,18 @@ export const useSearchSuggestions = (partialQuery: string, enabled = true) => {
 };
 
 // Hook for fetching data sources
-export const useDataSources = (enabled = true) => {
-  return useQuery(
-    ['dataSources'],
-    async () => {
+export const useDataSources = () => {
+  return useQuery({
+    queryKey: ['dataSources'],
+    queryFn: async () => {
       const result = await executeGraphQL({
         query: QUERIES.GET_DATA_SOURCES,
       });
       return result.data?.dataSources || [];
     },
-    {
-      enabled,
-      staleTime: 30 * 60 * 1000, // 30 minutes
-    }
-  );
+    suspense: true,
+    staleTime: 30 * 60 * 1000, // 30 minutes
+  });
 };
 
 // Hook for crawler status

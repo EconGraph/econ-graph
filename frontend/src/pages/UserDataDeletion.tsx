@@ -1,12 +1,12 @@
 /**
- * User Data Deletion Callback Page
+ * User Data Deletion Callback Page.
  *
  * This page handles Facebook's user data deletion callback requirements.
  * When a user deletes their Facebook account, Facebook will send a POST request
  * to this endpoint to notify us that we should delete the user's data.
  *
  * REQUIREMENT: Facebook App Review - User Data Deletion Callback
- * PURPOSE: Comply with Facebook's data deletion requirements for app approval
+ * PURPOSE: Comply with Facebook's data deletion requirements for app approval.
  */
 
 import React, { useState, useEffect } from 'react';

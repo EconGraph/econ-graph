@@ -1,5 +1,5 @@
 /**
- * MapLegend Component
+ * MapLegend Component.
  *
  * Legend component for displaying color scale and value ranges
  * for the world map visualization.

@@ -1,8 +1,8 @@
 // GraphQL Response Loader for MSW
 // Loads JSON response files for different GraphQL operations and scenarios
 
-import fs from 'fs';
-import path from 'path';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // eslint-disable-next-line no-undef
 const RESPONSES_DIR = path.join(__dirname, 'graphql-responses');
@@ -14,10 +14,10 @@ export interface ResponseScenario {
 }
 
 /**
- * Load a GraphQL response from JSON file
- * @param operation - GraphQL operation name (snake_case)
- * @param scenario - Response scenario (success, error, not_found, etc.)
- * @returns GraphQL response object
+ * Load a GraphQL response from JSON file.
+ * @param operation - GraphQL operation name (snake_case).
+ * @param scenario - Response scenario (success, error, not_found, etc.).
+ * @returns GraphQL response object.
  */
 export function loadGraphQLResponse(operation: string, scenario: string): any {
   const filePath = path.join(RESPONSES_DIR, operation, `${scenario}.json`);
@@ -35,9 +35,9 @@ export function loadGraphQLResponse(operation: string, scenario: string): any {
 }
 
 /**
- * Get all available scenarios for a GraphQL operation
- * @param operation - GraphQL operation name
- * @returns Array of available scenario names
+ * Get all available scenarios for a GraphQL operation.
+ * @param operation - GraphQL operation name.
+ * @returns Array of available scenario names.
  */
 export function getAvailableScenarios(operation: string): string[] {
   const operationDir = path.join(RESPONSES_DIR, operation);
@@ -52,8 +52,8 @@ export function getAvailableScenarios(operation: string): string[] {
 }
 
 /**
- * Get all available GraphQL operations
- * @returns Array of operation names
+ * Get all available GraphQL operations.
+ * @returns Array of operation names.
  */
 export function getAvailableOperations(): string[] {
   try {
@@ -69,10 +69,10 @@ export function getAvailableOperations(): string[] {
 }
 
 /**
- * Create a response handler for MSW that uses the specified scenario
- * @param operation - GraphQL operation name
- * @param scenario - Response scenario to use
- * @returns MSW response handler
+ * Create a response handler for MSW that uses the specified scenario.
+ * @param operation - GraphQL operation name.
+ * @param scenario - Response scenario to use.
+ * @returns MSW response handler.
  */
 export function createResponseHandler(operation: string, scenario = 'success') {
   return () => {
@@ -88,8 +88,8 @@ export function createResponseHandler(operation: string, scenario = 'success') {
 }
 
 /**
- * Validate that all response files are valid JSON
- * @returns Array of validation errors
+ * Validate that all response files are valid JSON.
+ * @returns Array of validation errors.
  */
 export function validateResponseFiles(): string[] {
   const errors: string[] = [];

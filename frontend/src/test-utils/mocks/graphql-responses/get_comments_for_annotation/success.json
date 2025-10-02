@@ -1,0 +1,15 @@
+{
+  "data": {
+    "commentsForAnnotation": [
+      {
+        "id": "comment-1",
+        "annotation_id": "annotation-1",
+        "user_id": "user-1",
+        "content": "Great analysis!",
+        "is_resolved": false,
+        "created_at": "2024-01-15T14:30:00Z",
+        "updated_at": "2024-01-15T14:30:00Z"
+      }
+    ]
+  }
+}

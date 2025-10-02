@@ -1,5 +1,5 @@
 /**
- * **InteractiveChartWithCollaboration Component**
+ * **InteractiveChartWithCollaboration Component**.
  *
  * A sophisticated, Bloomberg Terminal-inspired economic data visualization component
  * that combines advanced charting capabilities with real-time collaboration features.
@@ -66,17 +66,16 @@
  * 2. Transformation applied based on user selection
  * 3. Chart.js renders with optimized datasets
  * 4. Collaboration events synchronized in real-time
- * 5. User interactions trigger appropriate callbacks
+ * 5. User interactions trigger appropriate callbacks.
  *
  * ## Props Interface
- *
- * @param seriesId - Unique identifier for the economic time series
- * @param data - Array of data points with timestamps and values
- * @param title - Chart title for display and accessibility
- * @param yAxisLabel - Y-axis label describing the data units
- * @param onDataPointClick - Callback for data point interaction events
- * @param onTransformationChange - Callback for transformation option changes
- * @param collaborationEnabled - Flag to enable/disable collaboration features
+ * @param seriesId - Unique identifier for the economic time series.
+ * @param data - Array of data points with timestamps and values.
+ * @param title - Chart title for display and accessibility.
+ * @param yAxisLabel - Y-axis label describing the data units.
+ * @param onDataPointClick - Callback for data point interaction events.
+ * @param onTransformationChange - Callback for transformation option changes.
+ * @param collaborationEnabled - Flag to enable/disable collaboration features.
  * @param theme - Theme configuration for styling consistency
  *
  * ## Examples
@@ -114,8 +113,7 @@
  * - Virtualized rendering for large datasets (>10,000 points)
  * - Debounced user input to prevent excessive re-renders
  * - Memoized transformation calculations
- * - Optimized Chart.js configuration for smooth animations
- *
+ * - Optimized Chart.js configuration for smooth animations.
  * @since 1.0.0
  * @version 2.1.0
  * @author EconGraph Development Team
@@ -157,7 +155,7 @@ import { Groups as CollaborationIcon, Comment as CommentIcon } from '@mui/icons-
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import ChartCollaborationConnected from './ChartCollaborationConnected';
+import { ChartCollaborationConnectedQuery } from './ChartCollaborationConnectedQuery';
 import { ChartAnnotationType } from '../../utils/graphql';
 
 ChartJS.register(
@@ -172,16 +170,15 @@ ChartJS.register(
 );
 
 /**
- * **DataPoint Interface**
+ * **DataPoint Interface**.
  *
  * Represents a single observation in an economic time series with comprehensive
  * metadata for data provenance and revision tracking.
- *
  * @interface DataPoint
- * @property {string} date - ISO date string for the observation period (e.g., "2024-03-31")
- * @property {number | null} value - Numeric value of the economic observation, null for missing data
- * @property {boolean} isOriginalRelease - True if this is the first published estimate, false for revisions
- * @property {string} revisionDate - ISO date string when this value was published or revised
+ * @property {string} date - ISO date string for the observation period (e.g., "2024-03-31").
+ * @property {number | null} value - Numeric value of the economic observation, null for missing data.
+ * @property {boolean} isOriginalRelease - True if this is the first published estimate, false for revisions.
+ * @property {string} revisionDate - ISO date string when this value was published or revised.
  */
 interface DataPoint {
   date: string;
@@ -191,18 +188,17 @@ interface DataPoint {
 }
 
 /**
- * **InteractiveChartWithCollaboration Props Interface**
+ * **InteractiveChartWithCollaboration Props Interface**.
  *
  * Defines the props contract for the main chart component, ensuring type safety
  * and clear API boundaries for component consumers.
- *
  * @interface InteractiveChartWithCollaborationProps
- * @property {DataPoint[]} data - Array of time series data points to visualize
- * @property {string} seriesId - Unique identifier for the economic series (used for collaboration)
- * @property {string} seriesTitle - Human-readable title for chart display and accessibility
- * @property {string} units - Units of measurement (e.g., "Billions of Dollars", "Percent")
- * @property {string} frequency - Data frequency (e.g., "Monthly", "Quarterly", "Annual")
- * @property {boolean} [loading] - Optional loading state flag for UI feedback
+ * @property {DataPoint[]} data - Array of time series data points to visualize.
+ * @property {string} seriesId - Unique identifier for the economic series (used for collaboration).
+ * @property {string} seriesTitle - Human-readable title for chart display and accessibility.
+ * @property {string} units - Units of measurement (e.g., "Billions of Dollars", "Percent").
+ * @property {string} frequency - Data frequency (e.g., "Monthly", "Quarterly", "Annual").
+ * @property {boolean} [loading] - Optional loading state flag for UI feedback.
  */
 interface InteractiveChartWithCollaborationProps {
   data: DataPoint[];
@@ -215,17 +211,16 @@ interface InteractiveChartWithCollaborationProps {
 }
 
 /**
- * **TransformationType Union**
+ * **TransformationType Union**.
  *
  * Defines the available mathematical transformations that can be applied to
  * the time series data for different analytical perspectives.
- *
- * @type TransformationType
- * @property {'none'} none - No transformation, display raw data values
- * @property {'growth_rate'} growth_rate - Calculate period-over-period growth rates
- * @property {'log'} log - Apply natural logarithm for exponential growth visualization
- * @property {'diff'} diff - Calculate first differences between consecutive periods
- * @property {'pct_change'} pct_change - Calculate percentage changes between periods
+ * @typedef {object} TransformationType
+ * @property {'none'} none - No transformation, display raw data values.
+ * @property {'growth_rate'} growth_rate - Calculate period-over-period growth rates.
+ * @property {'log'} log - Apply natural logarithm for exponential growth visualization.
+ * @property {'diff'} diff - Calculate first differences between consecutive periods.
+ * @property {'pct_change'} pct_change - Calculate percentage changes between periods.
  */
 type TransformationType =
   | 'none'
@@ -238,7 +233,7 @@ type TransformationType =
   | 'pct_change';
 
 /**
- * **InteractiveChartWithCollaboration Component Function**
+ * **InteractiveChartWithCollaboration Component Function**.
  *
  * The main React functional component that renders an advanced economic data visualization
  * with collaboration features. This component manages complex state for data transformations,
@@ -266,7 +261,7 @@ type TransformationType =
  * ### User Interaction Handling
  * - Date range selection with Material-UI DatePicker components
  * - Transformation selection via dropdown menus
- * - Data vintage toggles for original vs. revised data display
+ * - Data vintage toggles for original vs. Revised data display
  * - Collaboration panel activation and management
  *
  * ### Performance Optimizations
@@ -285,10 +280,16 @@ type TransformationType =
  * - Graceful handling of missing or invalid data points
  * - User-friendly error messages for transformation failures
  * - Fallback rendering for unsupported data formats
- * - Network error recovery for collaboration features
- *
- * @param props - Component props as defined by InteractiveChartWithCollaborationProps
- * @returns JSX.Element - Rendered chart component with full functionality
+ * - Network error recovery for collaboration features.
+ * @param props - Component props as defined by InteractiveChartWithCollaborationProps.
+ * @param props.data - The time series data to display.
+ * @param props.seriesId - Unique identifier for the data series.
+ * @param props.seriesTitle - Display title for the data series.
+ * @param props.units - Units of measurement for the data.
+ * @param props.frequency - Data collection frequency (daily, monthly, etc.).
+ * @param props.loading - Loading state indicator.
+ * @param props.collaborationEnabled - Whether collaboration features are enabled.
+ * @returns JSX.Element - Rendered chart component with full functionality.
  */
 const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborationProps> = ({
   data,
@@ -337,8 +338,10 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
           case 'yoy':
             // Year-over-Year: Compare with same period last year (assuming monthly data)
             if (index >= 12 && data[index - 12].value !== null) {
-              transformedValue =
-                ((point.value - data[index - 12].value!) / data[index - 12].value!) * 100;
+              const previousValue = data[index - 12].value;
+              if (previousValue !== null) {
+                transformedValue = ((point.value - previousValue) / previousValue) * 100;
+              }
             } else {
               transformedValue = 0;
             }
@@ -346,8 +349,10 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
           case 'qoq':
             // Quarter-over-Quarter: Compare with same period 3 months ago
             if (index >= 3 && data[index - 3].value !== null) {
-              transformedValue =
-                ((point.value - data[index - 3].value!) / data[index - 3].value!) * 100;
+              const previousValue = data[index - 3].value;
+              if (previousValue !== null) {
+                transformedValue = ((point.value - previousValue) / previousValue) * 100;
+              }
             } else {
               transformedValue = 0;
             }
@@ -355,16 +360,16 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
           case 'mom':
             // Month-over-Month: Compare with previous month
             if (index > 0 && data[index - 1].value !== null) {
-              transformedValue =
-                ((point.value - data[index - 1].value!) / data[index - 1].value!) * 100;
+              const prev = data[index - 1].value;
+              transformedValue = prev !== null ? ((point.value - prev) / prev) * 100 : 0;
             } else {
               transformedValue = 0;
             }
             break;
           case 'growth_rate':
             if (index > 0 && data[index - 1].value !== null) {
-              transformedValue =
-                ((point.value - data[index - 1].value!) / data[index - 1].value!) * 100;
+              const prev = data[index - 1].value;
+              transformedValue = prev !== null ? ((point.value - prev) / prev) * 100 : 0;
             } else {
               transformedValue = 0;
             }
@@ -374,15 +379,16 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
             break;
           case 'diff':
             if (index > 0 && data[index - 1].value !== null) {
-              transformedValue = point.value - data[index - 1].value!;
+              const prev = data[index - 1].value;
+              transformedValue = prev !== null ? point.value - prev : 0;
             } else {
               transformedValue = 0;
             }
             break;
           case 'pct_change':
             if (index > 0 && data[index - 1].value !== null) {
-              transformedValue =
-                ((point.value - data[index - 1].value!) / data[index - 1].value!) * 100;
+              const prev = data[index - 1].value;
+              transformedValue = prev !== null ? ((point.value - prev) / prev) * 100 : 0;
             } else {
               transformedValue = 0;
             }
@@ -442,7 +448,7 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
       // Add annotation lines (simplified for now)
       ...selectedAnnotations.map(annotation => ({
         label: annotation.title,
-        data: [{ x: annotation.annotationDate, y: '0' }],
+        data: [{ x: annotation.annotation_date, y: '0' }],
         borderColor: annotation.color || theme.palette.warning.main,
         backgroundColor: 'transparent',
         fill: false,
@@ -574,7 +580,7 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
     },
   };
 
-  const handleAnnotationClick = useCallback((annotation: ChartAnnotationType) => {
+  const _handleAnnotationClick = useCallback((annotation: ChartAnnotationType) => {
     setSelectedAnnotations(prev => {
       const exists = prev.find(a => a.id === annotation.id);
       if (exists) {
@@ -780,12 +786,10 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
 
       {/* Collaboration Panel */}
       {collaborationEnabled && (
-        <ChartCollaborationConnected
-          seriesId={seriesId}
+        <ChartCollaborationConnectedQuery
           chartId={chartId}
           isOpen={collaborationOpen}
           onToggle={() => setCollaborationOpen(!collaborationOpen)}
-          onAnnotationClick={handleAnnotationClick}
         />
       )}
 
@@ -809,4 +813,5 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
   );
 };
 
-export default InteractiveChartWithCollaboration;
+// Memoize the component to prevent unnecessary re-renders
+export default React.memo(InteractiveChartWithCollaboration);

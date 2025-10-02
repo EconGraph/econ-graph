@@ -34,7 +34,8 @@ import { useSeriesSearch } from '../hooks/useSeriesData';
 /**
  * REQUIREMENT: Dashboard overview with Bloomberg Terminal-level collaboration
  * PURPOSE: Provide quick access to key economic indicators with professional collaboration
- * This improves on FRED's homepage by adding institutional-grade collaboration features
+ * This improves on FRED's homepage by adding institutional-grade collaboration features.
+ * @returns JSX element representing the Dashboard page.
  */
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -303,14 +304,14 @@ const Dashboard: React.FC = () => {
                   <ListItemText
                     primary={update.title}
                     secondary={
-                      <Box>
-                        <Typography variant='body2' color='text.secondary'>
+                      <React.Fragment>
+                        <Typography variant='body2' color='text.secondary' component='div'>
                           {update.series}
                         </Typography>
-                        <Typography variant='caption' color='text.secondary'>
+                        <Typography variant='caption' color='text.secondary' component='div'>
                           {update.source} • {new Date(update.date).toLocaleDateString()}
                         </Typography>
-                      </Box>
+                      </React.Fragment>
                     }
                   />
                 </ListItem>

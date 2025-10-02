@@ -1,11 +1,11 @@
 /**
  * REQUIREMENT: Comprehensive unit tests for SeriesDetail page component
  * PURPOSE: Test detailed series view with interactive charts and data transformation options
- * This ensures the main chart visualization interface works correctly for all series types
+ * This ensures the main chart visualization interface works correctly for all series types.
  */
 
 import React from 'react';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { vi } from 'vitest';
 import { useParams } from 'react-router-dom';
 import { TestProviders } from '../../test-utils/test-providers';
@@ -110,14 +110,15 @@ describe('SeriesDetail', () => {
     test('should show default series data when no series ID provided', () => {
       mockUseParams.mockReturnValue({ id: undefined });
 
-      const { container } = render(
+      render(
         <TestProviders>
           <SeriesDetail />
         </TestProviders>
       );
 
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
+      // Component shows error state when no series ID is provided
+      expect(screen.getByText('No series ID provided')).toBeInTheDocument();
+      expect(screen.getByText('Back to Explorer')).toBeInTheDocument();
     });
   });
 

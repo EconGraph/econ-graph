@@ -4,17 +4,17 @@ import { test as base, expect } from '@playwright/test';
 export const test = base.extend({
   page: async ({ page }, use) => {
     // Add network request logging to every test
-    page.on('request', (request) => {
+    page.on('request', request => {
       console.log(`🌐 Test Network Request: ${request.method()} ${request.url()}`);
     });
 
-    page.on('response', (response) => {
+    page.on('response', response => {
       const status = response.status();
       const url = response.url();
       console.log(`📡 Test Network Response: ${status} ${url}`);
     });
 
-    page.on('requestfailed', (request) => {
+    page.on('requestfailed', request => {
       const failure = request.failure();
       const url = request.url();
       const errorText = failure?.errorText || 'Unknown error';

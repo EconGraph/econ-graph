@@ -1,5 +1,5 @@
 /**
- * useCountryData Hook
+ * UseCountryData Hook.
  *
  * Custom hook for managing country data processing, color scaling,
  * and economic indicator calculations for the world map.
@@ -17,11 +17,11 @@ import {
 import { CountryData } from '../../../types/globalAnalysis';
 
 export interface ProcessedCountryData extends CountryData {
-  /** Color value for this country based on selected indicator */
+  /** Color value for this country based on selected indicator. */
   colorValue?: number;
-  /** Normalized value (0-1) for this country */
+  /** Normalized value (0-1) for this country. */
   normalizedValue?: number;
-  /** Whether this country has data for the selected indicator */
+  /** Whether this country has data for the selected indicator. */
   hasData: boolean;
 }
 
@@ -61,8 +61,8 @@ export const useCountryData = (
   const dataRange = useMemo(() => {
     const values = processedData
       .filter(country => country.hasData)
-      .map(country => country.colorValue!)
-      .filter(value => value !== undefined && !isNaN(value));
+      .map(country => country.colorValue)
+      .filter((value): value is number => value !== undefined && !isNaN(value as number));
 
     if (values.length === 0) {
       return { min: 0, max: 1 };
@@ -107,7 +107,9 @@ export const useCountryData = (
 
   // Calculate statistics for selected indicator
   const statistics = useMemo(() => {
-    const values = countriesWithData.map(country => country.colorValue!);
+    const values = countriesWithData
+      .map(country => country.colorValue)
+      .filter((v): v is number => v !== undefined);
 
     if (values.length === 0) {
       return {

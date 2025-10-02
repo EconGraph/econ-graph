@@ -11,7 +11,7 @@ export default defineConfig({
     '**/professional-analysis/**',
     '**/core/**',
     '**/analysis/**',
-    '**/debug/**'
+    '**/debug/**',
   ],
   /* Run tests in files in parallel */
   fullyParallel: true,

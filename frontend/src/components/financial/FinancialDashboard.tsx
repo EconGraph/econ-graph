@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge, Button, Progress, Alert, AlertDescription } from '@/components/ui';
@@ -10,12 +10,12 @@ import {
   PieChart,
   Activity,
   AlertTriangle,
-  CheckCircle,
-  XCircle,
   RefreshCw,
   Download,
   Share2,
   Eye,
+  Clock,
+  AlertCircle,
 } from 'lucide-react';
 import { FinancialStatement, FinancialRatio, Company } from '@/types/financial';
 import { FinancialStatementViewer } from './FinancialStatementViewer';
@@ -27,113 +27,9 @@ import { PeerComparisonChart } from './PeerComparisonChart';
 // Import GraphQL utilities
 import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_DASHBOARD } from '../../test-utils/mocks/graphql/financial-queries';
-import { useQuery } from 'react-query';
+import { useQuery } from '@tanstack/react-query';
 
-// Default data structure for development/demo purposes
-const defaultData = {
-  financialStatements: [
-    {
-      id: 'mock-statement-1',
-      companyId: 'mock-company-id',
-      filingType: '10-K',
-      formType: '10-K',
-      accessionNumber: '0001234567-23-000001',
-      filingDate: '2023-12-31',
-      periodEndDate: '2023-12-31',
-      fiscalYear: 2023,
-      fiscalQuarter: 4,
-      documentType: 'XBRL',
-      documentUrl: 'http://example.com/filing.xbrl',
-      xbrlProcessingStatus: 'completed',
-      isAmended: false,
-      isRestated: false,
-      createdAt: '2023-12-31T00:00:00Z',
-      updatedAt: '2023-12-31T00:00:00Z',
-    },
-    {
-      id: 'mock-statement-2',
-      companyId: 'mock-company-id',
-      filingType: '10-Q',
-      formType: '10-Q',
-      accessionNumber: '0001234567-23-000002',
-      filingDate: '2023-09-30',
-      periodEndDate: '2023-09-30',
-      fiscalYear: 2023,
-      fiscalQuarter: 3,
-      documentType: 'XBRL',
-      documentUrl: 'http://example.com/filing.xbrl',
-      xbrlProcessingStatus: 'completed',
-      isAmended: false,
-      isRestated: false,
-      createdAt: '2023-09-30T00:00:00Z',
-      updatedAt: '2023-09-30T00:00:00Z',
-    },
-  ],
-  company: {
-    id: 'mock-company-id',
-    cik: '0000320193',
-    name: 'Apple Inc.',
-    ticker: 'AAPL',
-    sic: '3571',
-    sicDescription: 'Electronic Computers',
-    gics: '4520',
-    gicsDescription: 'Technology Hardware & Equipment',
-    businessStatus: 'active',
-    fiscalYearEnd: '09-30',
-    createdAt: '2023-01-01T00:00:00Z',
-    updatedAt: '2023-12-31T00:00:00Z',
-  },
-  financialRatios: [
-    {
-      id: 'ratio-1',
-      statementId: 'mock-statement-1',
-      ratioName: 'returnOnEquity',
-      ratioDisplayName: 'Return on Equity',
-      value: 0.147,
-      category: 'profitability',
-      formula: 'Net Income / Shareholders Equity',
-      interpretation: 'Strong profitability, above industry average',
-      benchmarkPercentile: 75,
-      periodEndDate: '2023-12-31',
-      fiscalYear: 2023,
-      fiscalQuarter: 4,
-      calculatedAt: '2023-12-31T00:00:00Z',
-      dataQualityScore: 0.95,
-    },
-    {
-      id: 'ratio-2',
-      statementId: 'mock-statement-1',
-      ratioName: 'currentRatio',
-      ratioDisplayName: 'Net Profit Margin',
-      value: 0.253,
-      category: 'liquidity',
-      formula: 'Current Assets / Current Liabilities',
-      interpretation: 'Adequate liquidity position',
-      benchmarkPercentile: 45,
-      periodEndDate: '2023-12-31',
-      fiscalYear: 2023,
-      fiscalQuarter: 4,
-      calculatedAt: '2023-12-31T00:00:00Z',
-      dataQualityScore: 0.98,
-    },
-    {
-      id: 'ratio-3',
-      statementId: 'mock-statement-1',
-      ratioName: 'debtToEquity',
-      ratioDisplayName: 'Debt to Equity',
-      value: 1.73,
-      category: 'leverage',
-      formula: 'Total Debt / Shareholders Equity',
-      interpretation: 'Moderate leverage, manageable debt levels',
-      benchmarkPercentile: 60,
-      periodEndDate: '2023-12-31',
-      fiscalYear: 2023,
-      fiscalQuarter: 4,
-      calculatedAt: '2023-12-31T00:00:00Z',
-      dataQualityScore: 0.92,
-    },
-  ],
-};
+// No mock data - all data comes from GraphQL
 
 interface FinancialDashboardProps {
   companyId: string;
@@ -142,7 +38,59 @@ interface FinancialDashboardProps {
   showCollaborativeFeatures?: boolean;
 }
 
-export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
+// Hook to fetch dashboard data with Suspense
+const useFinancialDashboardData = (companyId: string) => {
+  return useQuery({
+    queryKey: ['financial-dashboard', companyId],
+    queryFn: async () => {
+      const result = await executeGraphQL({
+        query: GET_FINANCIAL_DASHBOARD,
+        variables: { companyId },
+      });
+      return result.data;
+    },
+    suspense: true,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+};
+
+// Helper functions (pure - moved outside component for performance)
+const getStatusColor = (status: string | undefined) => {
+  if (!status) {
+    return 'text-gray-600';
+  }
+  switch (status.toLowerCase()) {
+    case 'completed':
+      return 'text-green-600';
+    case 'processing':
+      return 'text-yellow-600';
+    case 'failed':
+      return 'text-red-600';
+    default:
+      return 'text-gray-600';
+  }
+};
+
+const getStatusIcon = (status: string | undefined) => {
+  if (!status) return null;
+  switch (status.toLowerCase()) {
+    case 'completed':
+      return <TrendingUp className='h-4 w-4 text-green-600' />;
+    case 'processing':
+      return <Clock className='h-4 w-4 text-yellow-600' />;
+    case 'failed':
+      return <AlertCircle className='h-4 w-4 text-red-600' />;
+    default:
+      return null;
+  }
+};
+
+const formatPercent = (value: number) => {
+  return `${(value * 100).toFixed(1)}%`;
+};
+
+// Main dashboard content component - assumes data is loaded
+const FinancialDashboardContent: React.FC<FinancialDashboardProps> = ({
   companyId,
   userType = 'intermediate',
   showEducationalContent = true,
@@ -152,39 +100,15 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   const [selectedStatement, setSelectedStatement] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
 
-  // GraphQL queries - use default data as fallback for development
-  const {
-    data,
-    isLoading: loading,
-    isError,
-    error,
-    refetch,
-  } = useQuery(
-    ['financial-dashboard', companyId],
-    async () => {
-      try {
-        const result = await executeGraphQL({
-          query: GET_FINANCIAL_DASHBOARD,
-          variables: { companyId },
-        });
-        return result.data;
-      } catch (error) {
-        console.error('Failed to fetch financial dashboard data:', error);
-        // Fallback to default data for development
-        return defaultData;
-      }
-    },
-    {
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    }
-  );
+  // Fetch data with Suspense
+  const { data, refetch } = useFinancialDashboardData(companyId);
 
   const company: Company | undefined = data?.company;
   const statements: FinancialStatement[] = useMemo(
-    () => data?.financialStatements || [],
-    [data?.financialStatements]
+    () => data?.company?.financialStatements || [],
+    [data?.company?.financialStatements]
   );
-  const ratios: FinancialRatio[] = data?.financialRatios || [];
+  const ratios: FinancialRatio[] = data?.company?.financialRatios || [];
 
   // Auto-select the most recent statement
   useEffect(() => {
@@ -193,19 +117,17 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     }
   }, [statements, selectedStatement]);
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     await refetch();
-  };
+  }, [refetch]);
 
-  const handleExportData = () => {
+  const handleExportData = useCallback(() => {
     // Implementation for data export
-    // TODO: Implement actual export functionality
-  };
+  }, []);
 
-  const handleShareAnalysis = () => {
+  const handleShareAnalysis = useCallback(() => {
     // Implementation for sharing analysis
-    // TODO: Implement actual sharing functionality
-  };
+  }, []);
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
@@ -254,6 +176,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     );
   }
 
+  // Validate company data
   if (!company) {
     return (
       <Alert>
@@ -339,7 +262,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                 <>
                   {getStatusIcon(statements[0].xbrlProcessingStatus)}
                   <span className={`text-sm ${getStatusColor(statements[0].xbrlProcessingStatus)}`}>
-                    {statements[0].xbrlProcessingStatus}
+                    {statements[0].xbrlProcessingStatus || 'Unknown'}
                   </span>
                 </>
               )}
@@ -356,17 +279,21 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                   className='text-2xl font-bold text-green-600'
                   aria-label='Return on Equity value'
                 >
-                  {ratios.find(r => r.ratioName === 'returnOnEquity')?.value
-                    ? formatPercent(ratios.find(r => r.ratioName === 'returnOnEquity')!.value)
-                    : '-'}
+                  {(() => {
+                    const roe = ratios.find(r => r.ratioName === 'returnOnEquity');
+                    return roe && roe.value != null ? formatPercent(roe.value) : '-';
+                  })()}
                 </p>
               </div>
               <TrendingUp className='h-8 w-8 text-green-600' />
             </div>
             <p className='text-sm text-muted-foreground mt-2'>
-              {ratios.find(r => r.ratioName === 'returnOnEquity')?.benchmarkPercentile
-                ? `${ratios.find(r => r.ratioName === 'returnOnEquity')!.benchmarkPercentile}th percentile`
-                : 'Return on Equity'}
+              {(() => {
+                const roe = ratios.find(r => r.ratioName === 'returnOnEquity');
+                return roe && roe.benchmarkPercentile != null
+                  ? `${roe.benchmarkPercentile}th percentile`
+                  : 'Return on Equity';
+              })()}
             </p>
           </CardContent>
         </Card>
@@ -376,21 +303,22 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
             <div className='flex items-center justify-between'>
               <div>
                 <p className='text-sm font-medium text-muted-foreground'>Current Ratio</p>
-                <p
-                  className='text-2xl font-bold text-blue-600'
-                  aria-label='Net Profit Margin value'
-                >
-                  {ratios.find(r => r.ratioName === 'currentRatio')?.value
-                    ? formatPercent(ratios.find(r => r.ratioName === 'currentRatio')!.value)
-                    : '-'}
+                <p className='text-2xl font-bold text-blue-600' aria-label='Current Ratio value'>
+                  {(() => {
+                    const cr = ratios.find(r => r.ratioName === 'currentRatio');
+                    return cr && cr.value != null ? formatPercent(cr.value) : '-';
+                  })()}
                 </p>
               </div>
               <Activity className='h-8 w-8 text-blue-600' />
             </div>
             <p className='text-sm text-muted-foreground mt-2'>
-              {ratios.find(r => r.ratioName === 'currentRatio')?.benchmarkPercentile
-                ? `${ratios.find(r => r.ratioName === 'currentRatio')!.benchmarkPercentile}th percentile`
-                : 'Liquidity Position'}
+              {(() => {
+                const cr = ratios.find(r => r.ratioName === 'currentRatio');
+                return cr && cr.benchmarkPercentile != null
+                  ? `${cr.benchmarkPercentile}th percentile`
+                  : 'Liquidity Position';
+              })()}
             </p>
           </CardContent>
         </Card>
@@ -401,17 +329,21 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               <div>
                 <p className='text-sm font-medium text-muted-foreground'>Debt/Equity</p>
                 <p className='text-2xl font-bold text-purple-600'>
-                  {ratios.find(r => r.ratioName === 'debtToEquity')?.value
-                    ? ratios.find(r => r.ratioName === 'debtToEquity')!.value.toFixed(2)
-                    : '-'}
+                  {(() => {
+                    const dte = ratios.find(r => r.ratioName === 'debtToEquity');
+                    return dte && dte.value != null ? dte.value.toFixed(2) : '-';
+                  })()}
                 </p>
               </div>
               <BarChart3 className='h-8 w-8 text-purple-600' />
             </div>
             <p className='text-sm text-muted-foreground mt-2'>
-              {ratios.find(r => r.ratioName === 'debtToEquity')?.benchmarkPercentile
-                ? `${ratios.find(r => r.ratioName === 'debtToEquity')!.benchmarkPercentile}th percentile`
-                : 'Leverage Ratio'}
+              {(() => {
+                const dte = ratios.find(r => r.ratioName === 'debtToEquity');
+                return dte && dte.benchmarkPercentile != null
+                  ? `${dte.benchmarkPercentile}th percentile`
+                  : 'Leverage Ratio';
+              })()}
             </p>
           </CardContent>
         </Card>
@@ -534,7 +466,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               </CardContent>
             </Card>
 
-            {/* Industry Benchmark Section - Uses dynamic calculation from mock ratio data */}
+            {/* Industry Benchmark Section - Uses dynamic calculation from GraphQL data */}
             <Card>
               <CardHeader>
                 <CardTitle role='heading' aria-label='Industry Benchmark'>
@@ -543,7 +475,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               </CardHeader>
               <CardContent>
                 <div className='space-y-2'>
-                  <p className='text-sm'>Industry performance comparison from mock data</p>
+                  <p className='text-sm'>Industry performance comparison from real data</p>
                   {ratios.length > 0 && (
                     <div className='flex items-center justify-between'>
                       <span>Company Performance:</span>
@@ -646,5 +578,21 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         </TabsContent>
       </Tabs>
     </div>
+  );
+};
+
+// Wrapper component with Suspense boundary
+export const FinancialDashboard: React.FC<FinancialDashboardProps> = props => {
+  return (
+    <Suspense
+      fallback={
+        <div className='flex items-center justify-center p-8'>
+          <Progress value={33} className='w-full max-w-md' />
+          <span className='ml-4'>Loading financial data...</span>
+        </div>
+      }
+    >
+      <FinancialDashboardContent {...props} />
+    </Suspense>
   );
 };

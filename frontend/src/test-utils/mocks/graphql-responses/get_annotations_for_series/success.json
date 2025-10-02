@@ -1,0 +1,40 @@
+{
+  "data": {
+    "annotationsForSeries": [
+      {
+        "id": "annotation-1",
+        "user_id": "user-1",
+        "series_id": "series-1",
+        "chart_id": null,
+        "annotation_date": "2024-01-15",
+        "annotation_value": 105.5,
+        "title": "GDP Growth Analysis",
+        "description": "This indicates strong economic performance",
+        "color": "#f44336",
+        "annotation_type": "analysis",
+        "is_visible": true,
+        "is_pinned": false,
+        "tags": ["gdp", "growth"],
+        "created_at": "2024-01-15T14:30:00Z",
+        "updated_at": "2024-01-15T14:30:00Z"
+      },
+      {
+        "id": "annotation-2",
+        "user_id": "user-2",
+        "series_id": "series-1",
+        "chart_id": null,
+        "annotation_date": "2024-01-16",
+        "annotation_value": 98.2,
+        "title": "Market Correction",
+        "description": "This is a normal market cycle",
+        "color": "#2196f3",
+        "annotation_type": "warning",
+        "is_visible": true,
+        "is_pinned": true,
+        "tags": ["market", "correction"],
+        "created_at": "2024-01-16T10:15:00Z",
+        "updated_at": "2024-01-16T10:15:00Z"
+      }
+    ]
+  }
+}

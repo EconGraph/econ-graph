@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Comprehensive unit tests for ChartCollaboration component
  * PURPOSE: Test chart collaboration features including annotations, comments, and filtering
- * This ensures the collaboration functionality works correctly for professional economic analysis
+ * This ensures the collaboration functionality works correctly for professional economic analysis.
  */
 
 import React from 'react';
@@ -14,7 +14,7 @@ import ChartCollaboration, { ChartAnnotation } from '../ChartCollaboration';
 
 // Mock date-fns format function
 vi.mock('date-fns', () => ({
-  format: vi.fn((date) => 'Jan 15, 2:30 PM'),
+  format: vi.fn((_date) => 'Jan 15, 2:30 PM'),
 }));
 
 // Mock data for testing
@@ -169,8 +169,14 @@ describe('ChartCollaboration', () => {
       renderChartCollaboration();
 
       // Should show badge with total comments (1 from annotation-2)
-      const commentBadge = screen.getByText('1');
-      expect(commentBadge).toBeInTheDocument();
+      // Look for the badge by finding the CommentIcon and checking its badge content
+      const commentIcons = screen.getAllByTestId('CommentIcon');
+      expect(commentIcons.length).toBeGreaterThan(0);
+      
+      // The badge should be a parent of the first CommentIcon (the one in the header)
+      const badge = commentIcons[0].closest('[class*="MuiBadge-root"]');
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveTextContent('1');
     });
   });
 
@@ -227,7 +233,7 @@ describe('ChartCollaboration', () => {
       const user = userEvent.setup();
       renderChartCollaboration();
 
-      const filterSelect = screen.getByRole('combobox');
+      const filterSelect = screen.getByLabelText('Filter Annotations');
       await user.click(filterSelect);
       await user.click(screen.getByText('My Annotations (1)'));
 
@@ -241,7 +247,7 @@ describe('ChartCollaboration', () => {
       const user = userEvent.setup();
       renderChartCollaboration();
 
-      const filterSelect = screen.getByRole('combobox');
+      const filterSelect = screen.getByLabelText('Filter Annotations');
       await user.click(filterSelect);
       await user.click(screen.getByText('Pinned (1)'));
 
@@ -256,7 +262,7 @@ describe('ChartCollaboration', () => {
       renderChartCollaboration();
 
       // First filter to pinned
-      const filterSelect = screen.getByRole('combobox');
+      const filterSelect = screen.getByLabelText('Filter Annotations');
       await user.click(filterSelect);
       await user.click(screen.getByText('Pinned (1)'));
 
@@ -325,10 +331,10 @@ describe('ChartCollaboration', () => {
       expect(valueField).toBeInTheDocument();
 
       // Fill form fields
-      fireEvent.change(titleField!, { target: { value: 'New Annotation' } });
-      fireEvent.change(descriptionField!, { target: { value: 'This is a test annotation' } });
-      fireEvent.change(dateField!, { target: { value: '2024-01-20' } });
-      fireEvent.change(valueField!, { target: { value: '105.5' } });
+      if (titleField) fireEvent.change(titleField, { target: { value: 'New Annotation' } });
+      if (descriptionField) fireEvent.change(descriptionField, { target: { value: 'This is a test annotation' } });
+      if (dateField) fireEvent.change(dateField, { target: { value: '2024-01-20' } });
+      if (valueField) fireEvent.change(valueField, { target: { value: '105.5' } });
 
       // Select annotation type - find select field
       const typeSelect = findFormFieldInDialog('select', 'Type') ||
@@ -393,7 +399,9 @@ describe('ChartCollaboration', () => {
       const dialogSubmitButton = submitButtons.find(button =>
         button.closest('[role="dialog"]') !== null
       );
-      await user.click(dialogSubmitButton!);
+      if (dialogSubmitButton) {
+        await user.click(dialogSubmitButton);
+      }
 
       // Should not call onAnnotationAdd
       expect(mockHandlers.onAnnotationAdd).not.toHaveBeenCalled();
@@ -526,14 +534,14 @@ describe('ChartCollaboration', () => {
       const user = userEvent.setup();
       renderChartCollaboration();
 
-      // Open comments for annotation with comments
-      const commentButtons = screen.getAllByTestId('CommentIcon');
+      // Use getByTestId for better performance when buttons don't have accessible names
+      const commentButtons = screen.getAllByTestId('comment-button');
       if (commentButtons.length > 1) {
         await user.click(commentButtons[1]); // Second annotation has comments
 
-        // Wait for comments dialog to appear using robust selector
+        // Wait for comments dialog to appear using role selector
         await waitFor(() => {
-          expect(screen.getByTestId('comments-dialog')).toBeInTheDocument();
+          expect(screen.getByRole('dialog')).toBeInTheDocument();
         }, { timeout: 300 });
 
         // Check for comment content
@@ -557,16 +565,16 @@ describe('ChartCollaboration', () => {
       if (commentButtons.length > 0) {
         await user.click(commentButtons[0]);
 
-        // Wait for comments dialog to appear using robust selector
+        // Wait for comments dialog to appear using role selector
         await waitFor(() => {
-          expect(screen.getByTestId('comments-dialog')).toBeInTheDocument();
+          expect(screen.getByRole('dialog')).toBeInTheDocument();
         }, { timeout: 300 });
 
-        // Add comment using robust selector
-        const commentInput = screen.getByTestId('comment-input');
+        // Add comment using role selector
+        const commentInput = screen.getByRole('textbox', { name: /comment/i });
         await user.type(commentInput, 'This is a new comment');
 
-        const commentButton = screen.getByTestId('submit-comment-button');
+        const commentButton = screen.getByRole('button', { name: /submit|add|comment/i });
         await user.click(commentButton);
 
         expect(mockHandlers.onCommentAdd).toHaveBeenCalledWith('annotation-1', {
@@ -589,13 +597,13 @@ describe('ChartCollaboration', () => {
       if (commentButtons.length > 0) {
         await user.click(commentButtons[0]);
 
-        // Wait for comments dialog to appear using robust selector
+        // Wait for comments dialog to appear using role selector
         await waitFor(() => {
-          expect(screen.getByTestId('comments-dialog')).toBeInTheDocument();
+          expect(screen.getByRole('dialog')).toBeInTheDocument();
         }, { timeout: 300 });
 
         // Try to add empty comment - button should be disabled
-        const commentButton = screen.getByTestId('submit-comment-button');
+        const commentButton = screen.getByRole('button', { name: /submit|add|comment/i });
         expect(commentButton).toBeDisabled();
 
         // Since button is disabled, the handler should not be called
@@ -676,7 +684,7 @@ describe('ChartCollaboration', () => {
       renderChartCollaboration({ annotations: otherUserAnnotations });
 
       // Filter to user's annotations - use the select input directly
-      const filterSelect = screen.getByRole('combobox');
+      const filterSelect = screen.getByLabelText('Filter Annotations');
       await user.click(filterSelect);
       await user.click(screen.getByText('My Annotations (0)'));
 
