@@ -145,6 +145,28 @@ else
     echo "✅ cert-manager already installed"
 fi
 
+# Fix kubeflow webhook issues that block cert-manager pods
+echo "🔧 Checking for kubeflow webhook conflicts..."
+if kubectl get validatingwebhookconfigurations | grep -q kubeflow; then
+    echo "⚠️  Found kubeflow validating webhooks that may block cert-manager..."
+    echo "   Temporarily disabling kubeflow webhooks..."
+    kubectl delete validatingwebhookconfigurations $(kubectl get validatingwebhookconfigurations -o name | grep kubeflow) 2>/dev/null || true
+fi
+
+if kubectl get mutatingwebhookconfigurations | grep -q kubeflow; then
+    echo "⚠️  Found kubeflow mutating webhooks that may block cert-manager..."
+    echo "   Temporarily disabling kubeflow webhooks..."
+    kubectl delete mutatingwebhookconfigurations $(kubectl get mutatingwebhookconfigurations -o name | grep kubeflow) 2>/dev/null || true
+fi
+
+# Restart cert-manager deployments if they're not running
+if ! kubectl get pods -n cert-manager | grep -q "Running"; then
+    echo "🔄 Restarting cert-manager deployments..."
+    kubectl rollout restart deployment/cert-manager deployment/cert-manager-webhook deployment/cert-manager-cainjector -n cert-manager
+    echo "⏳ Waiting for cert-manager to be ready..."
+    sleep 30
+fi
+
 # Wait for cert-manager webhook to be ready
 echo "⏳ Waiting for cert-manager webhook to be ready..."
 kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=webhook -n cert-manager --timeout=180s || {
