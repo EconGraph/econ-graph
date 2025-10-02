@@ -1,20 +1,20 @@
+use crate::auth::keycloak::KeycloakAuthService;
 /**
  * REQUIREMENT: Unified authentication service supporting both legacy and Keycloak authentication
  * PURPOSE: Provide seamless authentication that can handle both existing JWT tokens and Keycloak tokens
  * This enables parallel testing of Keycloak integration without disrupting existing auth flows
  */
-
 use crate::auth::models::*;
 use crate::auth::services::AuthService;
-use crate::auth::keycloak::KeycloakAuthService;
 use econ_graph_core::error::{AppError, AppResult};
 use std::env;
+use uuid::Uuid;
 
 /// Authentication method detected from token
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuthMethod {
-    Legacy,     // Existing JWT tokens
-    Keycloak,   // Keycloak OIDC tokens
+    Legacy,   // Existing JWT tokens
+    Keycloak, // Keycloak OIDC tokens
 }
 
 /// Unified authentication service that supports both legacy and Keycloak authentication
@@ -28,21 +28,19 @@ impl UnifiedAuthService {
     /// Create new unified authentication service
     pub fn new(db_pool: econ_graph_core::database::DatabasePool) -> Self {
         let legacy_auth = AuthService::new(db_pool);
-        
+
         // Initialize Keycloak auth if configured
         let keycloak_auth = match Self::is_keycloak_enabled() {
-            true => {
-                match KeycloakAuthService::new() {
-                    Ok(keycloak) => {
-                        tracing::info!("Keycloak authentication enabled");
-                        Some(keycloak)
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to initialize Keycloak auth: {}", e);
-                        None
-                    }
+            true => match KeycloakAuthService::new() {
+                Ok(keycloak) => {
+                    tracing::info!("Keycloak authentication enabled");
+                    Some(keycloak)
                 }
-            }
+                Err(e) => {
+                    tracing::warn!("Failed to initialize Keycloak auth: {}", e);
+                    None
+                }
+            },
             false => {
                 tracing::info!("Keycloak authentication disabled");
                 None
@@ -72,12 +70,14 @@ impl UnifiedAuthService {
                 if let Ok(claims) = jsonwebtoken::decode::<serde_json::Value>(
                     token,
                     &jsonwebtoken::DecodingKey::from_secret("dummy".as_ref()),
-                    &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256)
+                    &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256),
                 ) {
                     // Check issuer field to determine auth method
                     if let Some(iss) = claims.claims.get("iss") {
                         if let Some(iss_str) = iss.as_str() {
-                            if iss_str.contains("keycloak") || iss_str.contains("auth.econ-graph.local") {
+                            if iss_str.contains("keycloak")
+                                || iss_str.contains("auth.econ-graph.local")
+                            {
                                 return Ok(AuthMethod::Keycloak);
                             }
                         }
@@ -100,7 +100,14 @@ impl UnifiedAuthService {
             AuthMethod::Legacy => {
                 // Use existing legacy authentication
                 let claims = self.legacy_auth.verify_token(token)?;
-                let user = self.legacy_auth.get_user_by_id(&claims.sub).await?;
+                let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
+                    AppError::AuthenticationError("Invalid user ID in token".to_string())
+                })?;
+                let user = self
+                    .legacy_auth
+                    .get_user_by_id(user_id)
+                    .await?
+                    .ok_or_else(|| AppError::AuthenticationError("User not found".to_string()))?;
                 Ok((user, AuthMethod::Legacy))
             }
             AuthMethod::Keycloak => {
@@ -110,7 +117,9 @@ impl UnifiedAuthService {
                     let user = keycloak_auth.claims_to_user(&claims)?;
                     Ok((user, AuthMethod::Keycloak))
                 } else {
-                    Err(AppError::AuthenticationError("Keycloak authentication not available".to_string()))
+                    Err(AppError::AuthenticationError(
+                        "Keycloak authentication not available".to_string(),
+                    ))
                 }
             }
         }
@@ -129,18 +138,18 @@ impl UnifiedAuthService {
         match auth_method {
             AuthMethod::Legacy => {
                 // Legacy role checking
-                Ok(user.role.to_string().to_lowercase() == role.to_lowercase())
+                Ok(format!("{:?}", user.role).to_lowercase() == role.to_lowercase())
             }
             AuthMethod::Keycloak => {
                 // Keycloak role checking
                 if let Some(ref mut keycloak_auth) = self.keycloak_auth {
                     // Re-verify token to get claims for role checking
                     let claims = keycloak_auth.validate_token(token).await?;
-                    Ok(keycloak_auth.has_realm_role(&claims, role) || 
-                       keycloak_auth.has_client_role(&claims, role))
+                    Ok(keycloak_auth.has_realm_role(&claims, role)
+                        || keycloak_auth.has_client_role(&claims, role))
                 } else {
                     // Fallback to user role
-                    Ok(user.role.to_string().to_lowercase() == role.to_lowercase())
+                    Ok(format!("{:?}", user.role).to_lowercase() == role.to_lowercase())
                 }
             }
         }
@@ -151,7 +160,9 @@ impl UnifiedAuthService {
         if let Some(ref mut keycloak_auth) = self.keycloak_auth {
             keycloak_auth.get_service_token().await
         } else {
-            Err(AppError::AuthenticationError("Service tokens only available with Keycloak".to_string()))
+            Err(AppError::AuthenticationError(
+                "Service tokens only available with Keycloak".to_string(),
+            ))
         }
     }
 
@@ -160,7 +171,9 @@ impl UnifiedAuthService {
         if let Some(ref mut keycloak_auth) = self.keycloak_auth {
             keycloak_auth.validate_service_token(token).await
         } else {
-            Err(AppError::AuthenticationError("Service tokens only available with Keycloak".to_string()))
+            Err(AppError::AuthenticationError(
+                "Service tokens only available with Keycloak".to_string(),
+            ))
         }
     }
 
@@ -202,17 +215,18 @@ mod tests {
     async fn test_auth_method_detection() {
         // This would require setting up test infrastructure
         // For now, just test the detection logic
-        let legacy_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJlY29uLWdyYXBoIiwic3ViIjoiMTIzIn0.test";
+        let legacy_token =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJlY29uLWdyYXBoIiwic3ViIjoiMTIzIn0.test";
         let keycloak_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwOi8vYXV0aC5lY29uLWdyYXBoLmxvY2FsL3JlYWxtcy9lY29uLWdyYXBoIn0.test";
-        
+
         // Mock database pool for testing
         let db_pool = DatabasePool::new("postgresql://test").unwrap();
         let unified_auth = UnifiedAuthService::new(db_pool);
-        
+
         // Test legacy detection
         let method = unified_auth.get_auth_method(legacy_token).unwrap();
         assert_eq!(method, AuthMethod::Legacy);
-        
+
         // Test Keycloak detection
         let method = unified_auth.get_auth_method(keycloak_token).unwrap();
         assert_eq!(method, AuthMethod::Keycloak);

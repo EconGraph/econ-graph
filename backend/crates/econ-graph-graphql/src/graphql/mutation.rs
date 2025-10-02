@@ -17,6 +17,8 @@
 //! - Database transactions must be atomic and consistent
 //! - All mutations must have comprehensive documentation
 
+use crate::graphql::collaboration::CollaborationMutations;
+use crate::graphql::export::ExportMutations;
 use crate::imports::*;
 use crate::types::*;
 
@@ -458,6 +460,53 @@ impl Mutation {
             .await?;
 
         Ok(true)
+    }
+
+    // === EXPORT MUTATIONS ===
+
+    /// Export a graph with permission-based features
+    async fn export_graph(
+        &self,
+        ctx: &Context<'_>,
+        options: crate::graphql::export::ExportOptions,
+    ) -> Result<crate::graphql::export::ExportResult> {
+        let export_mutations = ExportMutations;
+        export_mutations.export_graph(ctx, options).await
+    }
+
+    // === COLLABORATION MUTATIONS ===
+
+    /// Create a new note on a graph
+    async fn create_note(
+        &self,
+        ctx: &Context<'_>,
+        input: crate::graphql::collaboration::NoteInput,
+    ) -> Result<crate::graphql::collaboration::GraphNote> {
+        let collaboration_mutations = CollaborationMutations;
+        collaboration_mutations.create_note(ctx, input).await
+    }
+
+    /// Update an existing note
+    async fn update_note(
+        &self,
+        ctx: &Context<'_>,
+        note_id: uuid::Uuid,
+        content: String,
+    ) -> Result<crate::graphql::collaboration::GraphNote> {
+        let collaboration_mutations = CollaborationMutations;
+        collaboration_mutations
+            .update_note(ctx, note_id, content)
+            .await
+    }
+
+    /// Create a new workspace
+    async fn create_workspace(
+        &self,
+        ctx: &Context<'_>,
+        input: crate::graphql::collaboration::WorkspaceInput,
+    ) -> Result<crate::graphql::collaboration::Workspace> {
+        let collaboration_mutations = CollaborationMutations;
+        collaboration_mutations.create_workspace(ctx, input).await
     }
 }
 

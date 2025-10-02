@@ -12,7 +12,10 @@ use tracing::info;
 use warp::Filter;
 
 // Import from our new crates
-use econ_graph_auth::auth::{routes::auth_routes, services::AuthService, unified_auth::UnifiedAuthService};
+use econ_graph_auth::auth::{
+    keycloak::KeycloakAuthService, routes::auth_routes, services::AuthService,
+    unified_auth::UnifiedAuthService,
+};
 use econ_graph_core::{create_pool, AppError, AppResult, Config, DatabasePool};
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
 use econ_graph_mcp::mcp_server::{mcp_handler, EconGraphMcpServer};
@@ -240,14 +243,14 @@ async fn main() -> AppResult<()> {
     info!("✅ Database migrations completed successfully");
 
     // Create GraphQL schema
-    let schema = create_schema_with_data(std::sync::Arc::new(pool.clone()), ());
+    let schema = create_schema_with_data(pool.clone(), ());
     info!("🎯 GraphQL schema created");
 
     // Create unified authentication service (supports both legacy and Keycloak)
     let mut unified_auth_service = UnifiedAuthService::new(pool.clone());
     let legacy_auth_service = unified_auth_service.get_legacy_auth().clone();
     info!("🔐 Unified authentication service created");
-    
+
     if unified_auth_service.is_keycloak_available() {
         info!("🔑 Keycloak authentication enabled");
     } else {
@@ -304,15 +307,79 @@ async fn main() -> AppResult<()> {
             )| {
                 let pool_for_graphql = pool_for_graphql.clone();
                 async move {
-                    // Extract JWT token from Authorization header
-                    let user = if let Some(auth_header) = headers.get("authorization") {
+                    // Extract JWT token from Authorization header and create Keycloak context
+                    let keycloak_context = if let Some(auth_header) = headers.get("authorization") {
                         if let Ok(auth_str) = std::str::from_utf8(auth_header.as_bytes()) {
                             if auth_str.starts_with("Bearer ") {
                                 let token = auth_str.trim_start_matches("Bearer ");
                                 // Validate token using unified authentication (supports both legacy and Keycloak)
                                 let mut unified_auth = UnifiedAuthService::new(pool_for_graphql.clone());
                                 match unified_auth.verify_token_user(token).await {
-                                    Ok(user) => Some(user),
+                                    Ok(user) => {
+                                        // Extract JWT claims for permissions
+                                        if let Some(_keycloak_auth) = unified_auth.get_keycloak_auth() {
+                                            // We need to create a new KeycloakAuthService instance since we need mutable access
+                                            if let Ok(mut keycloak_auth) = KeycloakAuthService::new() {
+                                                match keycloak_auth.extract_permissions(token).await {
+                                                    Ok(jwt_permissions) => {
+                                                        let subscription_tier = keycloak_auth.extract_subscription_tier(token).await.ok().flatten();
+                                                        let usage_limits = keycloak_auth.extract_usage_limits(token).await.ok().flatten();
+                                                        let organization = keycloak_auth.extract_organization(token).await.ok().flatten();
+                                                        Some(std::sync::Arc::new(
+                                                            econ_graph_graphql::graphql::context_keycloak::KeycloakGraphQLContext::from_jwt_claims(
+                                                                Some(user),
+                                                                jwt_permissions.clone().into_iter().map(|p| p.to_string()).collect(),
+                                                                jwt_permissions.into_iter().map(|p| p.to_string()).collect(),
+                                                                subscription_tier,
+                                                                usage_limits.map(|ul| econ_graph_graphql::graphql::context_keycloak::UsageLimits {
+                                                                    charts_per_month: ul.graphs_per_month,
+                                                                    data_requests_per_day: ul.api_requests_per_hour,
+                                                                }),
+                                                                organization,
+                                                            )
+                                                        ))
+                                                    }
+                                                    Err(_) => {
+                                                        // Fallback to basic context if JWT claims extraction fails
+                                                        Some(std::sync::Arc::new(
+                                                            econ_graph_graphql::graphql::context_keycloak::KeycloakGraphQLContext::from_jwt_claims(
+                                                                Some(user),
+                                                                vec![],
+                                                                vec![],
+                                                                None,
+                                                                None,
+                                                                None,
+                                                            )
+                                                        ))
+                                                    }
+                                                }
+                                            } else {
+                                                // Fallback to basic context if Keycloak auth initialization fails
+                                                Some(std::sync::Arc::new(
+                                                    econ_graph_graphql::graphql::context_keycloak::KeycloakGraphQLContext::from_jwt_claims(
+                                                        Some(user),
+                                                        vec![],
+                                                        vec![],
+                                                        None,
+                                                        None,
+                                                        None,
+                                                    )
+                                                ))
+                                            }
+                                        } else {
+                                            // No Keycloak auth available, use basic context
+                                            Some(std::sync::Arc::new(
+                                                econ_graph_graphql::graphql::context_keycloak::KeycloakGraphQLContext::from_jwt_claims(
+                                                    Some(user),
+                                                    vec![],
+                                                    vec![],
+                                                    None,
+                                                    None,
+                                                    None,
+                                                )
+                                            ))
+                                        }
+                                    }
                                     Err(_) => None, // Invalid token, continue without user
                                 }
                             } else {
@@ -325,12 +392,16 @@ async fn main() -> AppResult<()> {
                         None
                     };
 
-                    // Create authenticated GraphQL context
-                    let auth_context = std::sync::Arc::new(
-                        econ_graph_graphql::graphql::context::GraphQLContext::new(user),
-                    );
+                    // Create authenticated GraphQL context (convert Keycloak context to regular context)
+                    let auth_context = if let Some(kc_ctx) = keycloak_context {
+                        std::sync::Arc::new((*kc_ctx).clone().into())
+                    } else {
+                        std::sync::Arc::new(
+                            econ_graph_graphql::graphql::context::GraphQLContext::new(None),
+                        )
+                    };
                     let auth_schema = econ_graph_graphql::graphql::schema::create_schema_with_data(
-                        std::sync::Arc::new(pool_for_graphql.clone()),
+                        pool_for_graphql.clone(),
                         auth_context,
                     );
 

@@ -6,6 +6,7 @@
 pub mod handlers;
 pub mod keycloak;
 pub mod middleware;
+pub mod permissions;
 pub mod routes;
 pub mod services;
 pub mod simple_test;
