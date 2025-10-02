@@ -54,15 +54,15 @@ docker build \
 echo "Admin frontend image built successfully"
 
 # Load images into kind cluster
-echo "Loading images into kind cluster..."
-kind load docker-image econ-graph-backend:${VERSION} --name econ-graph || true
-kind load docker-image econ-graph-frontend:${VERSION} --name econ-graph || true
-kind load docker-image econ-graph-chart-api:v1.0.0 --name econ-graph || true
-kind load docker-image econ-graph-admin-frontend:v1.0.0 --name econ-graph || true
+echo "Loading images into MicroK8s..."
+microk8s ctr images import <(docker save econ-graph-backend:${VERSION}) || true
+microk8s ctr images import <(docker save econ-graph-frontend:${VERSION}) || true
+microk8s ctr images import <(docker save econ-graph-chart-api:v1.0.0) || true
+microk8s ctr images import <(docker save econ-graph-admin-frontend:v1.0.0) || true
 
 echo "All images built and loaded successfully!"
 echo ""
-echo "Images available in kind cluster:"
+echo "Images available in MicroK8s:"
 echo "  - econ-graph-backend:${VERSION}"
 echo "  - econ-graph-frontend:${VERSION}"
 echo "  - econ-graph-chart-api:v1.0.0"

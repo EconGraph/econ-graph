@@ -58,19 +58,21 @@ else
     GRAFANA_NODEPORT=30001
 fi
 
-# Check if kind cluster exists
-if ! kind get clusters | grep -q "econ-graph"; then
-    echo "❌ Kind cluster 'econ-graph' not found."
-    echo "Creating new cluster..."
-    cd terraform/k8s
-    terraform init
-    terraform apply -auto-approve
-    cd "$PROJECT_ROOT"
+# Check if MicroK8s is running
+if ! microk8s status | grep -q "microk8s is running"; then
+    echo "❌ MicroK8s is not running."
+    echo "Starting MicroK8s..."
+    microk8s start
+    echo "Enabling required addons..."
+    microk8s enable dns
+    microk8s enable ingress
+    microk8s enable storage
 fi
 
-# Set kubectl context
-echo "🔧 Setting kubectl context..."
-kubectl config use-context kind-econ-graph
+# Set kubectl context to MicroK8s
+echo "🔧 Setting kubectl context to MicroK8s..."
+microk8s kubectl config view --raw > ~/.kube/config
+kubectl config use-context microk8s
 
 # Rebuild Docker images with new version tag
 echo "🏗️  Building Docker images for v3.7.4..."
@@ -82,11 +84,12 @@ docker tag econ-graph-backend:latest econ-graph-backend:v3.7.4
 docker tag econ-graph-frontend:latest econ-graph-frontend:v3.7.4
 docker tag econ-graph-chart-api:latest econ-graph-chart-api:v1.0.0
 
-# Load images into kind cluster
-echo "📦 Loading images into kind cluster..."
-kind load docker-image econ-graph-backend:v3.7.4 --name econ-graph
-kind load docker-image econ-graph-frontend:v3.7.4 --name econ-graph
-kind load docker-image econ-graph-chart-api:v1.0.0 --name econ-graph
+# Load images into MicroK8s
+echo "📦 Loading images into MicroK8s..."
+microk8s ctr images import <(docker save econ-graph-backend:v3.7.4)
+microk8s ctr images import <(docker save econ-graph-frontend:v3.7.4)
+microk8s ctr images import <(docker save econ-graph-chart-api:v1.0.0)
+microk8s ctr images import <(docker save econ-graph-admin-frontend:v1.0.0)
 
 # Check if PostgreSQL is running
 echo "🗄️  Checking PostgreSQL..."
