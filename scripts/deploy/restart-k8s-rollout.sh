@@ -118,6 +118,12 @@ kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
 echo "📋 Applying updated Kubernetes manifests..."
 kubectl apply -f k8s/manifests/
 
+# Apply security configurations
+echo "🔒 Applying security configurations..."
+kubectl apply -f k8s/manifests/security-configmap.yaml
+kubectl apply -f k8s/manifests/network-policy.yaml
+kubectl apply -f k8s/manifests/pod-security-policy.yaml
+
 # Wait for namespace to be ready
 echo "⏳ Waiting for namespace to be ready..."
 echo "📊 Monitoring pod status (updates every 10 seconds):"

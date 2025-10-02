@@ -1,0 +1,141 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: econ-graph-network-policy
+  namespace: econ-graph
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from nginx-ingress controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: ingress-nginx
+  # Allow ingress from same namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: econ-graph
+  egress:
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow HTTPS outbound
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+  # Allow HTTP outbound (for health checks)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 80
+  # Allow inter-pod communication within namespace
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: econ-graph
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: econ-graph-backend-policy
+  namespace: econ-graph
+spec:
+  podSelector:
+    matchLabels:
+      app: econ-graph-backend
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from frontend
+  - from:
+    - podSelector:
+        matchLabels:
+          app: econ-graph-frontend
+    - podSelector:
+        matchLabels:
+          app: econ-graph-admin-frontend
+    - podSelector:
+        matchLabels:
+          app: chart-api-service
+  # Allow ingress from nginx-ingress
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+  egress:
+  # Allow egress to PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgresql
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: econ-graph-frontend-policy
+  namespace: econ-graph
+spec:
+  podSelector:
+    matchLabels:
+      app: econ-graph-frontend
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from nginx-ingress
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+  egress:
+  # Allow egress to backend
+  - to:
+    - podSelector:
+        matchLabels:
+          app: econ-graph-backend
+    ports:
+    - protocol: TCP
+      port: 9876
+  # Allow egress to chart-api
+  - to:
+    - podSelector:
+        matchLabels:
+          app: chart-api-service
+    ports:
+    - protocol: TCP
+      port: 3001
+  # Allow DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow HTTPS outbound for external APIs
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
