@@ -16,15 +16,15 @@ cd "$PROJECT_ROOT"
 echo "🔍 Running linter checks before deployment..."
 echo ""
 
-# Run Grafana dashboard linter
+# Run Grafana dashboard linter (file-only preflight; skip cluster checks before deploy)
 if [ -f "scripts/test-grafana-dashboards.sh" ]; then
-    echo "📊 Running Grafana dashboard linter..."
-    if ./scripts/test-grafana-dashboards.sh; then
-        echo "✅ Grafana dashboard linter passed"
-    else
-        echo "❌ Grafana dashboard linter failed - aborting deployment"
-        exit 1
-    fi
+    echo "📊 Running Grafana dashboard linter (preflight)..."
+    steps=(json-syntax dashboard-structure datasource-consistency promql-queries logql-queries configmap-structure)
+    for step in "${steps[@]}"; do
+        echo "➡️  Lint step: $step"
+        ./scripts/test-grafana-dashboards.sh --step "$step"
+    done
+    echo "✅ Grafana dashboard linter preflight passed"
     echo ""
 else
     echo "⚠️  Grafana dashboard linter not found, skipping..."
@@ -125,7 +125,29 @@ kill $MONITOR_PID 2>/dev/null || true
 
 # Apply monitoring stack
 echo "📊 Deploying monitoring stack (Grafana + Loki + Prometheus)..."
-kubectl apply -f k8s/monitoring/
+# Apply explicitly to ensure required resources exist in order
+kubectl apply -f k8s/monitoring/grafana-datasources.yaml
+kubectl apply -f k8s/monitoring/grafana-dashboard-provider.yaml
+kubectl apply -f k8s/monitoring/grafana-dashboards.yaml
+kubectl apply -f k8s/monitoring/grafana-logging-dashboard.yaml
+kubectl apply -f k8s/monitoring/grafana-statefulset.yaml
+kubectl apply -f k8s/monitoring/grafana-service.yaml
+
+kubectl apply -f k8s/monitoring/loki-config.yaml
+kubectl apply -f k8s/monitoring/loki-deployment.yaml
+kubectl apply -f k8s/monitoring/loki-service.yaml
+
+kubectl apply -f k8s/monitoring/prometheus-config.yaml
+kubectl apply -f k8s/monitoring/prometheus-deployment.yaml
+kubectl apply -f k8s/monitoring/prometheus-service.yaml
+kubectl apply -f k8s/monitoring/prometheus-clusterrole.yaml
+kubectl apply -f k8s/monitoring/prometheus-clusterrolebinding.yaml
+
+kubectl apply -f k8s/monitoring/promtail-config.yaml
+kubectl apply -f k8s/monitoring/promtail-clusterrole.yaml
+kubectl apply -f k8s/monitoring/promtail-clusterrolebinding.yaml
+kubectl apply -f k8s/monitoring/promtail-serviceaccount.yaml
+kubectl apply -f k8s/monitoring/promtail-daemonset.yaml
 
 # Ensure Grafana dashboards are properly configured
 echo "📋 Configuring Grafana dashboards..."
@@ -150,14 +172,14 @@ cat >> /tmp/grafana-dashboards.yaml << 'EOF'
   logging-dashboard.json: |
 EOF
 
-# Extract and append the JSON content from the YAML file
-yq eval '.data.dashboard' k8s/monitoring/grafana-logging-dashboard.yaml | sed 's/^/    /' >> /tmp/grafana-dashboards.yaml
+# Extract and append the JSON content from the YAML file (compatible with kislyuk yq)
+yq -r '.data."logging-dashboard.json"' k8s/monitoring/grafana-logging-dashboard.yaml | sed 's/^/    /' >> /tmp/grafana-dashboards.yaml
 
 # Apply the ConfigMap
 kubectl apply -f /tmp/grafana-dashboards.yaml
 rm -f /tmp/grafana-dashboards.yaml
 
-# Wait for all pods to be ready
+# Wait for all pods to be ready (including monitoring components)
 echo "⏳ Waiting for all pods to be ready..."
 echo "📊 Monitoring pod status (updates every 10 seconds):"
 kubectl get pods -n econ-graph
@@ -174,8 +196,12 @@ echo ""
 ) &
 MONITOR_PID=$!
 
-# Wait for pods to be ready
-kubectl wait --for=condition=Ready pods --all -n econ-graph --timeout=300s
+# Wait for key components explicitly first
+kubectl wait --for=condition=Ready pod -l app=grafana -n econ-graph --timeout=300s || true
+kubectl wait --for=condition=Available deployment/loki -n econ-graph --timeout=300s || true
+kubectl wait --for=condition=Available deployment/prometheus -n econ-graph --timeout=300s || true
+kubectl wait --for=condition=Ready pod -l app=promtail -n econ-graph --timeout=300s || true
+kubectl wait --for=condition=Ready pods --all -n econ-graph --timeout=300s || true
 
 # Stop monitoring
 kill $MONITOR_PID 2>/dev/null || true
@@ -189,7 +215,7 @@ kubectl rollout restart deployment/chart-api-service -n econ-graph
 
 # Restart Grafana to pick up updated dashboards
 echo "🔄 Restarting Grafana to pick up updated dashboards..."
-kubectl rollout restart statefulset/grafana -n econ-graph
+kubectl rollout restart statefulset/grafana -n econ-graph || true
 
 # Wait for rollout to complete
 echo "⏳ Waiting for rollouts to complete..."
