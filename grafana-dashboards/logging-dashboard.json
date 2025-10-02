@@ -1,7 +1,8 @@
 {
-  "id": null,
-  "uid": "econgraph-logging",
-  "title": "EconGraph Logs & Debugging",
+  "dashboard": {
+    "id": null,
+    "uid": "econgraph-logging",
+    "title": "EconGraph Logs & Debugging",
   "description": "Real-time log monitoring and debugging for EconGraph platform",
   "tags": [
     "econgraph",
@@ -144,5 +145,6 @@
   ],
   "templating": {
     "list": []
+  }
   }
 }

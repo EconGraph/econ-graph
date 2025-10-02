@@ -1,5 +1,6 @@
 {
-  "title": "Crawler Overview",
+  "dashboard": {
+    "title": "Crawler Overview",
   "timezone": "browser",
   "schemaVersion": 38,
   "version": 1,
@@ -112,4 +113,5 @@
       ]
     }
   ]
+  }
 }
