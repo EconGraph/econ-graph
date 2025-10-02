@@ -161,12 +161,12 @@ validate_datasource_references() {
     # Extract JSON content (same logic as validate_json_structure)
     local json_content=""
     if [[ "$file" == *.yaml ]] || [[ "$file" == *.yml ]]; then
-        json_content=$(yq -r "$file" 'data.*' 2>/dev/null | head -1)
+        json_content=$(yq -r "$file" '.data."logging-dashboard.json"' 2>/dev/null)
         if [ -z "$json_content" ] || [ "$json_content" = "null" ]; then
-            json_content=$(yq -r "$file" 'data."logging-dashboard.json"' 2>/dev/null)
+            json_content=$(yq -r "$file" '.data | to_entries | .[0].value' 2>/dev/null)
         fi
         if [ -z "$json_content" ] || [ "$json_content" = "null" ]; then
-            json_content=$(yq -r "$file" 'data' 2>/dev/null | grep -o '"[^"]*\.json"' | head -1 | sed 's/"//g' | xargs -I {} yq "$file" "data.{}" 2>/dev/null)
+            json_content=$(yq -r "$file" '.data | to_entries | map(select(.key | endswith(".json"))) | .[0].value' 2>/dev/null)
         fi
     else
         json_content=$(cat "$file")
@@ -209,12 +209,12 @@ validate_loki_queries() {
     # Extract JSON content (same logic as other functions)
     local json_content=""
     if [[ "$file" == *.yaml ]] || [[ "$file" == *.yml ]]; then
-        json_content=$(yq -r "$file" 'data.*' 2>/dev/null | head -1)
+        json_content=$(yq -r "$file" '.data."logging-dashboard.json"' 2>/dev/null)
         if [ -z "$json_content" ] || [ "$json_content" = "null" ]; then
-            json_content=$(yq -r "$file" 'data."logging-dashboard.json"' 2>/dev/null)
+            json_content=$(yq -r "$file" '.data | to_entries | .[0].value' 2>/dev/null)
         fi
         if [ -z "$json_content" ] || [ "$json_content" = "null" ]; then
-            json_content=$(yq -r "$file" 'data' 2>/dev/null | grep -o '"[^"]*\.json"' | head -1 | sed 's/"//g' | xargs -I {} yq "$file" "data.{}" 2>/dev/null)
+            json_content=$(yq -r "$file" '.data | to_entries | map(select(.key | endswith(".json"))) | .[0].value' 2>/dev/null)
         fi
     else
         json_content=$(cat "$file")
@@ -549,12 +549,12 @@ validate_json_syntax() {
     # Extract JSON content
     local json_content=""
     if [[ "$file" == *.yaml ]] || [[ "$file" == *.yml ]]; then
-        json_content=$(yq -r "$file" 'data.*' 2>/dev/null | head -1)
+        json_content=$(yq -r "$file" '.data."logging-dashboard.json"' 2>/dev/null)
         if [ -z "$json_content" ] || [ "$json_content" = "null" ]; then
-            json_content=$(yq -r "$file" 'data."logging-dashboard.json"' 2>/dev/null)
+            json_content=$(yq -r "$file" '.data | to_entries | .[0].value' 2>/dev/null)
         fi
         if [ -z "$json_content" ] || [ "$json_content" = "null" ]; then
-            json_content=$(yq -r "$file" 'data' 2>/dev/null | grep -o '"[^"]*\.json"' | head -1 | sed 's/"//g' | xargs -I {} yq "$file" "data.{}" 2>/dev/null)
+            json_content=$(yq -r "$file" '.data | to_entries | map(select(.key | endswith(".json"))) | .[0].value' 2>/dev/null)
         fi
     else
         json_content=$(cat "$file")
@@ -580,12 +580,12 @@ validate_dashboard_structure() {
     # Extract JSON content
     local json_content=""
     if [[ "$file" == *.yaml ]] || [[ "$file" == *.yml ]]; then
-        json_content=$(yq -r "$file" 'data.*' 2>/dev/null | head -1)
+        json_content=$(yq -r "$file" '.data."logging-dashboard.json"' 2>/dev/null)
         if [ -z "$json_content" ] || [ "$json_content" = "null" ]; then
-            json_content=$(yq -r "$file" 'data."logging-dashboard.json"' 2>/dev/null)
+            json_content=$(yq -r "$file" '.data | to_entries | .[0].value' 2>/dev/null)
         fi
         if [ -z "$json_content" ] || [ "$json_content" = "null" ]; then
-            json_content=$(yq -r "$file" 'data' 2>/dev/null | grep -o '"[^"]*\.json"' | head -1 | sed 's/"//g' | xargs -I {} yq "$file" "data.{}" 2>/dev/null)
+            json_content=$(yq -r "$file" '.data | to_entries | map(select(.key | endswith(".json"))) | .[0].value' 2>/dev/null)
         fi
     else
         json_content=$(cat "$file")
@@ -640,12 +640,12 @@ validate_datasource_consistency() {
     # Extract JSON content
     local json_content=""
     if [[ "$file" == *.yaml ]] || [[ "$file" == *.yml ]]; then
-        json_content=$(yq -r "$file" 'data.*' 2>/dev/null | head -1)
+        json_content=$(yq -r "$file" '.data."logging-dashboard.json"' 2>/dev/null)
         if [ -z "$json_content" ] || [ "$json_content" = "null" ]; then
-            json_content=$(yq -r "$file" 'data."logging-dashboard.json"' 2>/dev/null)
+            json_content=$(yq -r "$file" '.data | to_entries | .[0].value' 2>/dev/null)
         fi
         if [ -z "$json_content" ] || [ "$json_content" = "null" ]; then
-            json_content=$(yq -r "$file" 'data' 2>/dev/null | grep -o '"[^"]*\.json"' | head -1 | sed 's/"//g' | xargs -I {} yq "$file" "data.{}" 2>/dev/null)
+            json_content=$(yq -r "$file" '.data | to_entries | map(select(.key | endswith(".json"))) | .[0].value' 2>/dev/null)
         fi
     else
         json_content=$(cat "$file")
@@ -689,12 +689,12 @@ validate_promql_queries() {
     # Extract JSON content
     local json_content=""
     if [[ "$file" == *.yaml ]] || [[ "$file" == *.yml ]]; then
-        json_content=$(yq -r "$file" 'data.*' 2>/dev/null | head -1)
+        json_content=$(yq -r "$file" '.data."logging-dashboard.json"' 2>/dev/null)
         if [ -z "$json_content" ] || [ "$json_content" = "null" ]; then
-            json_content=$(yq -r "$file" 'data."logging-dashboard.json"' 2>/dev/null)
+            json_content=$(yq -r "$file" '.data | to_entries | .[0].value' 2>/dev/null)
         fi
         if [ -z "$json_content" ] || [ "$json_content" = "null" ]; then
-            json_content=$(yq -r "$file" 'data' 2>/dev/null | grep -o '"[^"]*\.json"' | head -1 | sed 's/"//g' | xargs -I {} yq "$file" "data.{}" 2>/dev/null)
+            json_content=$(yq -r "$file" '.data | to_entries | map(select(.key | endswith(".json"))) | .[0].value' 2>/dev/null)
         fi
     else
         json_content=$(cat "$file")
@@ -755,12 +755,12 @@ validate_logql_queries() {
     # Extract JSON content
     local json_content=""
     if [[ "$file" == *.yaml ]] || [[ "$file" == *.yml ]]; then
-        json_content=$(yq -r "$file" 'data.*' 2>/dev/null | head -1)
+        json_content=$(yq -r "$file" '.data."logging-dashboard.json"' 2>/dev/null)
         if [ -z "$json_content" ] || [ "$json_content" = "null" ]; then
-            json_content=$(yq -r "$file" 'data."logging-dashboard.json"' 2>/dev/null)
+            json_content=$(yq -r "$file" '.data | to_entries | .[0].value' 2>/dev/null)
         fi
         if [ -z "$json_content" ] || [ "$json_content" = "null" ]; then
-            json_content=$(yq -r "$file" 'data' 2>/dev/null | grep -o '"[^"]*\.json"' | head -1 | sed 's/"//g' | xargs -I {} yq "$file" "data.{}" 2>/dev/null)
+            json_content=$(yq -r "$file" '.data | to_entries | map(select(.key | endswith(".json"))) | .[0].value' 2>/dev/null)
         fi
     else
         json_content=$(cat "$file")
