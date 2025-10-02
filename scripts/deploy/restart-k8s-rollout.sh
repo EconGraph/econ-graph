@@ -202,13 +202,16 @@ kubectl wait --for=condition=Available deployment/loki -n econ-graph --timeout=3
 kubectl wait --for=condition=Available deployment/prometheus -n econ-graph --timeout=300s || true
 kubectl wait --for=condition=Ready pod -l app=promtail -n econ-graph --timeout=300s || true
 
-# Only wait for backend if not running linter
-if [ "$1" != "--linter-only" ]; then
+# Wait for backend only if it exists (may not exist on first run)
+if kubectl get deployment econ-graph-backend -n econ-graph >/dev/null 2>&1; then
     echo "Waiting for backend to be ready..."
-    kubectl wait --for=condition=Ready pods --all -n econ-graph --timeout=300s || true
+    kubectl wait --for=condition=Available deployment/econ-graph-backend -n econ-graph --timeout=300s || true
 else
-    echo "Skipping backend readiness wait (linter-only mode)"
+    echo "Backend deployment not found yet, skipping backend wait"
 fi
+
+# Wait for other pods that should exist
+kubectl wait --for=condition=Ready pods --all -n econ-graph --timeout=300s || true
 
 # Stop monitoring
 kill $MONITOR_PID 2>/dev/null || true
