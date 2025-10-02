@@ -12,12 +12,9 @@ export const CI_WAIT_OPTIONS = {
 };
 
 // Robust waitFor wrapper that handles CI timing issues
-export const waitForCI = async (
-  callback: () => void | Promise<void>,
-  options: any = {}
-) => {
+export const waitForCI = async (callback: () => void | Promise<void>, options: any = {}) => {
   const mergedOptions = { ...CI_WAIT_OPTIONS, ...options };
-  
+
   try {
     await waitFor(callback, mergedOptions);
   } catch (error) {
@@ -35,10 +32,11 @@ export const checkMemoryPressure = () => {
   if (process.env.CI && typeof process !== 'undefined') {
     const memUsage = process.memoryUsage();
     const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
-    
-    if (heapUsedMB > 1000) { // 1GB threshold
+
+    if (heapUsedMB > 1000) {
+      // 1GB threshold
       console.warn(`[CI Test Helper] High memory usage: ${heapUsedMB.toFixed(2)}MB`);
-      
+
       // Force garbage collection if available
       if (typeof global !== 'undefined' && global.gc) {
         global.gc();
@@ -55,9 +53,9 @@ export const withCITimeout = <T extends any[], R>(
   return async (...args: T): Promise<R> => {
     return Promise.race([
       fn(...args),
-      new Promise<never>((_, reject) => 
+      new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error(`Test timed out after ${timeoutMs}ms`)), timeoutMs)
-      )
+      ),
     ]);
   };
 };
@@ -69,12 +67,12 @@ export const cleanupCIResources = () => {
     clearTimeout(i);
     clearInterval(i);
   }
-  
+
   // Clear any remaining promises
   if (typeof global !== 'undefined' && global.gc) {
     global.gc();
   }
-  
+
   // Log memory usage in CI
   if (process.env.CI && typeof process !== 'undefined') {
     const memUsage = process.memoryUsage();
