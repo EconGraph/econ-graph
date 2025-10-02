@@ -1661,7 +1661,7 @@ jobs:
     name: Build Optimized E2E Test Containers
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    needs: [frontend-integration-tests]
+    needs: [frontend-integration-tests, frontend-storybook-tests]
     if: ${{ github.event.inputs.run_e2e_tests == true }}
 
     steps:

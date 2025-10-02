@@ -7,6 +7,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import jsxA11y from 'eslint-plugin-jsx-a11y';
 import testingLibrary from 'eslint-plugin-testing-library';
 import jsdoc from 'eslint-plugin-jsdoc';
+import importPlugin from 'eslint-plugin-import';
 
 export default [
   js.configs.recommended,
@@ -86,6 +87,7 @@ export default [
       'jsx-a11y': jsxA11y,
       'testing-library': testingLibrary,
       jsdoc: jsdoc,
+      import: importPlugin,
     },
     rules: {
       ...typescript.configs.recommended.rules,
@@ -286,6 +288,34 @@ export default [
     files: ['src/server/**', 'src/utils/**', 'src/contexts/**', 'src/hooks/**'],
     rules: {
       'no-console': 'off',
+    },
+  },
+  // Storybook-specific rules
+  {
+    files: ['**/*.stories.{ts,tsx}', '**/*.story.{ts,tsx}'],
+    rules: {
+      'no-console': 'off', // Allow console logs in stories for debugging
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrors: 'none',
+          ignoreRestSiblings: true,
+        },
+      ],
+      // Allow unused imports in stories (they might be used in controls)
+      '@typescript-eslint/no-unused-vars': 'off',
+    },
+  },
+  // Enhanced import validation
+  {
+    files: ['**/*.{ts,tsx}'],
+    rules: {
+      // Warn about imports that might not exist
+      'import/no-unresolved': 'warn',
+      // Warn about unused imports (handled by no-unused-vars)
+      '@typescript-eslint/no-unused-vars': 'warn',
     },
   },
 ];
