@@ -62,7 +62,14 @@ fi
 if ! microk8s status | grep -q "microk8s is running"; then
     echo "❌ MicroK8s is not running."
     echo "Starting MicroK8s..."
-    microk8s start
+    if ! microk8s start; then
+        echo "❌ Failed to start MicroK8s. Permission denied."
+        echo "   Please ensure you're in the microk8s group:"
+        echo "   sudo usermod -aG microk8s $USER"
+        echo "   newgrp microk8s"
+        echo "   Then run this script again."
+        exit 1
+    fi
     echo "Enabling required addons..."
     microk8s enable dns
     microk8s enable ingress
@@ -71,8 +78,20 @@ fi
 
 # Set kubectl context to MicroK8s
 echo "🔧 Setting kubectl context to MicroK8s..."
-microk8s kubectl config view --raw > ~/.kube/config
-kubectl config use-context microk8s
+if ! microk8s kubectl config view --raw > ~/.kube/config; then
+    echo "❌ Failed to get MicroK8s kubeconfig. Permission denied."
+    echo "   Please ensure you're in the microk8s group:"
+    echo "   sudo usermod -aG microk8s $USER"
+    echo "   newgrp microk8s"
+    echo "   Then run this script again."
+    exit 1
+fi
+
+if ! kubectl config use-context microk8s; then
+    echo "❌ Failed to switch to microk8s context."
+    echo "   Please check your kubectl configuration."
+    exit 1
+fi
 
 # Rebuild Docker images with new version tag
 echo "🏗️  Building Docker images for v3.7.4..."
