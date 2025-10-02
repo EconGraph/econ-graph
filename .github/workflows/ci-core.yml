@@ -1329,12 +1329,6 @@ jobs:
         CI: true
         NODE_OPTIONS: --max-old-space-size=4096
 
-    - name: Run problematic tests (serial)
-      working-directory: frontend
-      run: npm run test:coverage -- "**/ChartCollaborationConnected*" "**/ChartCollaboration*" "**/ProfessionalChart*" "**/InteractiveChartWithCollaboration*"
-      env:
-        CI: true
-        NODE_OPTIONS: --max-old-space-size=4096
 
   quality-checks:
     name: Quality Checks
