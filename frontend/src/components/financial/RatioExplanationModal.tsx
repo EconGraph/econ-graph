@@ -1,15 +1,26 @@
 import React from 'react';
 
+/**
+ * Props for the RatioExplanationModal component.
+ */
 interface RatioExplanationModalProps {
+  /** Whether the modal is currently open. */
   isOpen: boolean;
+  /** Callback function to close the modal. */
   onClose: () => void;
+  /** The name of the financial ratio being explained. */
   ratioName: string;
+  /** The mathematical formula for the ratio. */
   formula: string;
+  /** A detailed description of what the ratio measures. */
   description: string;
+  /** Guidance on how to interpret the ratio values. */
   interpretation: string;
+  /** Optional link to additional educational resources. */
   educationalLink?: string;
 }
 
+// eslint-disable-next-line jsdoc/require-param, jsdoc/require-returns
 export const RatioExplanationModal: React.FC<RatioExplanationModalProps> = ({
   isOpen,
   onClose,

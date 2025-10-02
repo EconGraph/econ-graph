@@ -6,12 +6,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RatioAnalysisPanel } from '../RatioAnalysisPanel';
 import { ErrorBoundary } from '../../common/ErrorBoundary';
 
-// Mock the child components
+/**
+ * Mock the child components for testing.
+ * Provides simplified implementations that focus on test behavior.
+ */
 vi.mock('../RatioExplanationModal', () => ({
   RatioExplanationModal: ({ isOpen, onClose, ratioName }: any) => (
     isOpen ? (
       <div data-testid={`explanation-modal-${ratioName}`}>
-        <button onClick={onClose}>Close</button>
+        <button onClick={onClose}>×</button>
+        <h2>{ratioName}</h2>
         <div>Explanation for {ratioName}</div>
       </div>
     ) : null
@@ -26,7 +30,10 @@ vi.mock('../BenchmarkComparison', () => ({
   ),
 }));
 
-// Create a test wrapper with QueryClient
+/**
+ * Creates a test wrapper with QueryClient and error boundary for testing.
+ * Provides the necessary context providers for component testing.
+ */
 const createTestWrapper = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -243,13 +250,15 @@ describe('RatioAnalysisPanel', () => {
         button.querySelector('svg') // BookOpen icon
       );
 
+      expect(roeExplanationButton).toBeTruthy();
       if (roeExplanationButton) {
         fireEvent.click(roeExplanationButton);
-
-        await waitFor(() => {
-          expect(screen.getByTestId('explanation-modal-returnOnEquity')).toBeInTheDocument();
-        });
       }
+
+      await waitFor(() => {
+        // Check if modal is rendered by looking for the test ID
+        expect(screen.getByTestId('explanation-modal-returnOnEquity')).toBeInTheDocument();
+      });
     });
 
     it('should open benchmark comparison when benchmark button is clicked', async () => {
