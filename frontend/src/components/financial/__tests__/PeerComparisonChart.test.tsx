@@ -153,8 +153,12 @@ describe('PeerComparisonChart', () => {
     await waitFor(() => {
       expect(screen.getAllByText('Microsoft Corporation').length).toBeGreaterThan(0);
     });
-    expect(screen.getAllByText('Amazon.com Inc.').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Alphabet Inc.').length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.getAllByText('Amazon.com Inc.').length).toBeGreaterThan(0);
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText('Alphabet Inc.').length).toBeGreaterThan(0);
+    });
   });
 
   it('shows company ranking and percentile', () => {
