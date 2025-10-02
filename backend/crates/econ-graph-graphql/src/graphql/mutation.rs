@@ -69,12 +69,17 @@ impl Mutation {
         let user_id = uuid::Uuid::parse_str(&input.user_id)?;
         let series_id = uuid::Uuid::parse_str(&input.series_id)?;
 
+        let annotation_value = input.annotation_value
+            .map(|s| s.parse::<bigdecimal::BigDecimal>())
+            .transpose()
+            .map_err(|e| format!("Invalid annotation value: {}", e))?;
+
         let annotation = collaboration_service
             .create_annotation(
                 user_id,
                 series_id,
                 input.annotation_date,
-                input.annotation_value,
+                annotation_value,
                 input.title,
                 input.content,
                 input.annotation_type,
