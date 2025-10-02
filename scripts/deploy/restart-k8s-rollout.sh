@@ -96,6 +96,21 @@ else
     echo "⚠️  PostgreSQL not found - please deploy PostgreSQL first"
 fi
 
+# Install cert-manager for SSL certificates
+echo "🔒 Installing cert-manager for SSL certificates..."
+if ! kubectl get namespace cert-manager >/dev/null 2>&1; then
+    echo "Installing cert-manager..."
+    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+    echo "Waiting for cert-manager to be ready..."
+    kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=120s
+else
+    echo "✅ cert-manager already installed"
+fi
+
+# Apply Let's Encrypt issuer
+echo "🔐 Configuring Let's Encrypt issuer..."
+kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
+
 # Apply updated manifests
 echo "📋 Applying updated Kubernetes manifests..."
 kubectl apply -f k8s/manifests/
@@ -122,6 +137,10 @@ kubectl wait --for=condition=Ready pods --all -n econ-graph --timeout=300s || tr
 
 # Stop monitoring
 kill $MONITOR_PID 2>/dev/null || true
+
+# Apply SSL ingress for www.econ-graph.com
+echo "🌐 Configuring SSL ingress for www.econ-graph.com..."
+kubectl apply -f k8s/manifests/ssl-ingress.yaml
 
 # Apply monitoring stack
 echo "📊 Deploying monitoring stack (Grafana + Loki + Prometheus)..."
@@ -246,12 +265,15 @@ echo "📊 Current deployment status:"
 kubectl get pods -n econ-graph -o wide
 echo ""
 echo "🌐 Application URLs:"
-echo "  Frontend: http://localhost:${FRONTEND_NODEPORT}"
-echo "  Backend:  http://localhost:${BACKEND_NODEPORT}"
-echo "  GraphQL:  http://localhost:${FRONTEND_NODEPORT}/graphql"
-echo "  Playground: http://localhost:${FRONTEND_NODEPORT}/playground"
-echo "  Health:   http://localhost:${BACKEND_NODEPORT}/health"
-echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT} (admin/admin123)"
+echo "  🌍 Production (SSL): https://www.econ-graph.com"
+echo "  🌍 Production (SSL): https://econ-graph.com"
+echo "  🏠 Local Development:"
+echo "    Frontend: http://localhost:${FRONTEND_NODEPORT}"
+echo "    Backend:  http://localhost:${BACKEND_NODEPORT}"
+echo "    GraphQL:  http://localhost:${FRONTEND_NODEPORT}/graphql"
+echo "    Playground: http://localhost:${FRONTEND_NODEPORT}/playground"
+echo "    Health:   http://localhost:${BACKEND_NODEPORT}/health"
+echo "    Grafana:  http://localhost:${GRAFANA_NODEPORT} (admin/admin123)"
 echo ""
 echo "🎯 Version deployed: v3.7.4"
 echo "   ✅ Integration tests fixed: All auth tests passing (11/11)"

@@ -1,0 +1,108 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: econ-graph-ssl-ingress
+  namespace: econ-graph
+  annotations:
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "5"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "5"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "5"
+    # SSL and cert-manager annotations
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - www.econ-graph.com
+    - econ-graph.com
+    secretName: econ-graph-tls
+  rules:
+  - host: www.econ-graph.com
+    http:
+      paths:
+      - path: /admin
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-admin-frontend-service
+            port:
+              number: 3001
+      - path: /api/admin
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /graphql
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /auth
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /playground
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /health
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /grafana
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana-service
+            port:
+              number: 3000
+      - path: /login
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana-service
+            port:
+              number: 3000
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-frontend-service
+            port:
+              number: 3000
+  - host: econ-graph.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-frontend-service
+            port:
+              number: 3000
