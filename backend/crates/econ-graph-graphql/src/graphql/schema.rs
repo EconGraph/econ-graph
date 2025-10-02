@@ -6,9 +6,9 @@
 use async_graphql::{EmptySubscription, Schema};
 use std::sync::Arc;
 
+use crate::dataloaders::DataLoaders;
 use crate::graphql::{mutation::Mutation, query::Query};
 use crate::security::{SecurityConfig, SecurityMiddleware};
-use crate::dataloaders::DataLoaders;
 use econ_graph_core::database::DatabasePool;
 
 /// GraphQL context containing shared resources

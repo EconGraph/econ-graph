@@ -1,5 +1,5 @@
 //! Financial data models
-//! 
+//!
 //! TODO: Add GraphQL support once dependencies are resolved
 
 use chrono::{DateTime, NaiveDate, Utc};

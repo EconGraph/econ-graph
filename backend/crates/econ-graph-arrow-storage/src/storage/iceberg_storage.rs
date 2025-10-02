@@ -1,5 +1,5 @@
 //! Iceberg storage implementation for financial data
-//! 
+//!
 //! TODO: Implement proper Iceberg storage with Arrow dependencies
 
 use anyhow::Result;
@@ -19,7 +19,6 @@ impl IcebergStorage {
         Self {}
     }
 }
-
 
 #[async_trait]
 impl super::FinancialDataStorage for IcebergStorage {

@@ -6,5 +6,5 @@ pub mod storage;
 pub mod types;
 
 // Re-export commonly used types
-pub use types::*;
 pub use storage::*;
+pub use types::*;

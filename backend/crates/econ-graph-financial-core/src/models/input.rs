@@ -1,5 +1,5 @@
 //! Input types for financial data
-//! 
+//!
 //! TODO: Add GraphQL InputObject support once dependencies are resolved
 
 use crate::models::DecimalScalar;

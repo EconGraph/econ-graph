@@ -30,16 +30,14 @@ pub struct BigDecimalScalar(pub BigDecimal);
 impl ScalarType for BigDecimalScalar {
     fn parse(value: Value) -> InputValueResult<Self> {
         match value {
-            Value::String(s) => {
-                BigDecimal::from_str(&s)
-                    .map(BigDecimalScalar)
-                    .map_err(|e| InputValueError::custom(format!("Invalid decimal value: {}", e)))
-            }
+            Value::String(s) => BigDecimal::from_str(&s)
+                .map(BigDecimalScalar)
+                .map_err(|e| InputValueError::custom(format!("Invalid decimal value: {}", e))),
             Value::Number(n) => {
                 if let Some(f) = n.as_f64() {
-                    BigDecimal::try_from(f)
-                        .map(BigDecimalScalar)
-                        .map_err(|e| InputValueError::custom(format!("Invalid decimal value: {}", e)))
+                    BigDecimal::try_from(f).map(BigDecimalScalar).map_err(|e| {
+                        InputValueError::custom(format!("Invalid decimal value: {}", e))
+                    })
                 } else {
                     Err(InputValueError::custom("Invalid number format"))
                 }

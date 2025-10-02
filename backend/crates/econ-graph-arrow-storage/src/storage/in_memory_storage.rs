@@ -1,5 +1,5 @@
 //! In-memory storage implementation for financial data
-//! 
+//!
 //! Simple in-memory storage for testing and development
 
 use anyhow::Result;
@@ -26,7 +26,6 @@ impl InMemoryStorage {
         }
     }
 }
-
 
 #[async_trait]
 impl super::FinancialDataStorage for InMemoryStorage {

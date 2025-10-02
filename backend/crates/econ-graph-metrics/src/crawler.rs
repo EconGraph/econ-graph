@@ -29,9 +29,7 @@
 
 use crate::DEFAULT_REGISTRY;
 use once_cell::sync::Lazy;
-use prometheus::{
-    HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry,
-};
+use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry};
 
 /// Comprehensive metrics collection for web crawlers
 ///

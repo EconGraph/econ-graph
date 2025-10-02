@@ -1,5 +1,5 @@
 //! Storage trait stub for financial-core
-//! 
+//!
 //! TODO: Import from econ-graph-arrow-storage once dependencies are resolved
 
 use anyhow::Result;
@@ -15,24 +15,29 @@ pub trait FinancialDataStorage: Send + Sync {
     async fn get_series(&self, id: &Uuid) -> Result<Option<EconomicSeries>>;
     async fn store_data_points(&self, points: &[DataPoint]) -> Result<()>;
     async fn get_data_points(&self, series_id: &Uuid) -> Result<Vec<DataPoint>>;
-    
+
     // Additional methods expected by the database module
     async fn read_series(&self, id: &Uuid) -> Result<Option<EconomicSeries>> {
         self.get_series(id).await
     }
-    
-    async fn read_data_points(&self, series_id: &Uuid, _start_date: Option<chrono::NaiveDate>, _end_date: Option<chrono::NaiveDate>) -> Result<Vec<DataPoint>> {
+
+    async fn read_data_points(
+        &self,
+        series_id: &Uuid,
+        _start_date: Option<chrono::NaiveDate>,
+        _end_date: Option<chrono::NaiveDate>,
+    ) -> Result<Vec<DataPoint>> {
         self.get_data_points(series_id).await
     }
-    
+
     async fn write_series(&self, series: &EconomicSeries) -> Result<()> {
         self.store_series(series).await
     }
-    
+
     async fn write_data_points(&self, _series_id: Uuid, points: &[DataPoint]) -> Result<()> {
         self.store_data_points(points).await
     }
-    
+
     async fn list_series(&self) -> Result<Vec<EconomicSeries>> {
         // Default implementation returns empty list
         Ok(vec![])

@@ -1,5 +1,5 @@
 //! Main entry point for econ-graph-financial-core
-//! 
+//!
 //! TODO: Add web server and GraphQL support once dependencies are resolved
 
 use anyhow::Result;
@@ -18,15 +18,13 @@ use crate::monitoring::{HealthChecker, MetricsCollector};
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("info").init();
 
     info!("Starting econ-graph-financial-core");
 
     // Create database with in-memory storage for now
     let _database = Database::new_in_memory().await?;
-    
+
     // Initialize monitoring
     let _health_checker = HealthChecker::new();
     let _metrics_collector = MetricsCollector::new();

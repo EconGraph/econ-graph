@@ -1,5 +1,5 @@
 //! GraphQL query resolvers for financial data
-//! 
+//!
 //! TODO: Implement proper GraphQL queries with async-graphql
 
 /// Financial data query root

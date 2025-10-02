@@ -1,5 +1,5 @@
 //! Parquet storage implementation for financial data
-//! 
+//!
 //! TODO: Implement proper Parquet storage with Arrow dependencies
 
 use anyhow::Result;
@@ -28,7 +28,6 @@ pub trait FinancialDataStorage {
     async fn store_data_points(&self, points: &[DataPoint]) -> Result<()>;
     async fn get_data_points(&self, series_id: &Uuid) -> Result<Vec<DataPoint>>;
 }
-
 
 #[async_trait]
 impl FinancialDataStorage for ParquetStorage {
