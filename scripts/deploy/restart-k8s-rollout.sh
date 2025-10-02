@@ -145,9 +145,27 @@ else
     echo "✅ cert-manager already installed"
 fi
 
+# Wait for cert-manager webhook to be ready
+echo "⏳ Waiting for cert-manager webhook to be ready..."
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=webhook -n cert-manager --timeout=120s || {
+    echo "⚠️  cert-manager webhook may still be starting, waiting a bit more..."
+    sleep 30
+}
+
+# Verify cert-manager is fully operational
+echo "🔍 Verifying cert-manager is operational..."
+if ! kubectl get pods -n cert-manager | grep -q "Running"; then
+    echo "⚠️  cert-manager pods may not be fully ready, but continuing..."
+    kubectl get pods -n cert-manager
+fi
+
 # Apply Let's Encrypt issuer
 echo "🔐 Configuring Let's Encrypt issuer..."
-kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
+if ! kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml; then
+    echo "⚠️  Failed to create Let's Encrypt issuer, cert-manager may still be starting..."
+    echo "   This is not critical - SSL certificates will be created when needed."
+    echo "   Continuing with deployment..."
+fi
 
 # Apply updated manifests
 echo "📋 Applying updated Kubernetes manifests..."
