@@ -102,6 +102,7 @@ describe('FinancialDashboard', () => {
     renderWithProviders(<FinancialDashboard companyId="mock-company-id" />);
 
     await waitFor(() => {
+      // Check that the company name is displayed (most important content)
       expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
     });
 
@@ -140,6 +141,7 @@ describe('FinancialDashboard', () => {
 
     // The error scenario still returns data, so we check for the company name
     await waitFor(() => {
+      // Check that the company name is displayed (most important content)
       expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
     });
   });
@@ -206,6 +208,7 @@ describe('FinancialDashboard', () => {
 
     // The component should still be rendered after refresh
     await waitFor(() => {
+      // Check that the company name is displayed (most important content)
       expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
     });
   });
@@ -214,7 +217,8 @@ describe('FinancialDashboard', () => {
     renderWithProviders(<FinancialDashboard companyId="mock-company-id" />);
 
     await waitFor(() => {
-      // Check if dashboard is rendered
+      // Check if dashboard is rendered with company heading
+      // Check that the company name is displayed (most important content)
       expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
     });
   });
@@ -223,6 +227,8 @@ describe('FinancialDashboard', () => {
     renderWithProviders(<FinancialDashboard companyId="mock-company-id" />);
 
     await waitFor(() => {
+      // Check if dashboard is rendered with company heading
+      // Check that the company name is displayed (most important content)
       expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
     });
   });
@@ -230,7 +236,9 @@ describe('FinancialDashboard', () => {
   it('handles empty ratios gracefully', async () => {
     renderWithProviders(<FinancialDashboard companyId="empty-company-id" />);
 
+    // Check that the dashboard loads with company information
     await waitFor(() => {
+      // Check that the company name is displayed (most important content)
       expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
     });
   });
@@ -238,8 +246,9 @@ describe('FinancialDashboard', () => {
   it('handles missing company data gracefully', async () => {
     renderWithProviders(<FinancialDashboard companyId="error-company-id" />);
 
-    // The error scenario still returns data, so we check for the company name
+    // Check that the dashboard loads with company information
     await waitFor(() => {
+      // Check that the company name is displayed (most important content)
       expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
     });
   });
@@ -248,6 +257,7 @@ describe('FinancialDashboard', () => {
     renderWithProviders(<FinancialDashboard companyId="mock-company-id" />);
 
     await waitFor(() => {
+      // Check that the company name is displayed (most important content)
       expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
     });
   });
