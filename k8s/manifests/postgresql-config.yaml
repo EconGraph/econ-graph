@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-config
+  namespace: econ-graph
+data:
+  postgresql.conf: |
+    # PostgreSQL configuration optimized for 4GB RAM
+    # Connection settings
+    max_connections = 100
+    
+    # Memory settings
+    shared_buffers = 1GB                    # 25% of 4GB RAM
+    effective_cache_size = 3GB               # 75% of 4GB RAM
+    work_mem = 16MB                          # For sorting and hash operations
+    maintenance_work_mem = 256MB             # For maintenance operations
+    
+    # Checkpoint settings
+    checkpoint_completion_target = 0.9
+    wal_buffers = 16MB
+    
+    # Query planner
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+    
+    # Logging
+    log_statement = 'all'
+    log_duration = on
+    log_line_prefix = '%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
+    
+    # Autovacuum
+    autovacuum = on
+    autovacuum_max_workers = 3
+    
+    # Security
+    ssl = off

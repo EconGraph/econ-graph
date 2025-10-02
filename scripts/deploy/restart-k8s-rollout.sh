@@ -2,6 +2,9 @@
 
 # Restart Kubernetes rollout to deploy v3.7.4 with monitoring stack (Grafana + Loki + Prometheus)
 # Run this script when Docker and Kubernetes cluster are available
+#
+# For MicroK8s setup and troubleshooting, see: docs/deployment/MICROK8S_DEPLOYMENT.md
+# For general Kubernetes deployment, see: docs/deployment/KUBERNETES_DEPLOYMENT.md
 
 set -e
 

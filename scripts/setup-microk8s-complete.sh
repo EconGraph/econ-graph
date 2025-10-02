@@ -2,6 +2,9 @@
 
 # Complete MicroK8s setup for EconGraph development
 # This script provides the same functionality as the kind setup script
+#
+# For detailed MicroK8s documentation, see: docs/deployment/MICROK8S_DEPLOYMENT.md
+# For troubleshooting, see the troubleshooting section in the documentation
 
 set -e
 

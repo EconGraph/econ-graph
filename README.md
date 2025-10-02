@@ -372,6 +372,34 @@ econ-graph/
 - **[🚀 Deployment Guide](./docs/deployment/)** - Infrastructure and deployment procedures
 - **[💻 Development Guide](./docs/development/)** - Setup, workflow, and CI/CD
 
+### 🚀 **Quick Start Development**
+
+#### **MicroK8s (Recommended for Production-like Development)**
+```bash
+# Install MicroK8s
+sudo snap install microk8s --classic
+sudo usermod -aG microk8s $USER
+newgrp microk8s
+
+# Deploy application
+./scripts/deploy/restart-k8s-rollout.sh
+```
+
+**Access URLs:**
+- Frontend: https://www.econ-graph.com
+- Backend: https://www.econ-graph.com/api
+- Admin: https://www.econ-graph.com/admin
+- Grafana: https://www.econ-graph.com/grafana
+
+#### **Kind (Alternative for Docker-based Development)**
+```bash
+# Install kind and kubectl
+# Deploy application
+./scripts/deploy/restart-k8s-rollout.sh
+```
+
+**For detailed setup instructions, see**: [Kubernetes Deployment Guide](./docs/deployment/KUBERNETES_DEPLOYMENT.md)
+
 ---
 
 ## 📊 **Performance**

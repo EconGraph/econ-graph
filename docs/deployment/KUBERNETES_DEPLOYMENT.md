@@ -2,7 +2,12 @@
 
 ## Overview
 
-This guide provides comprehensive instructions for deploying the EconGraph application to a local Kubernetes cluster using kind (Kubernetes in Docker). The deployment includes:
+This guide provides comprehensive instructions for deploying the EconGraph application to a local Kubernetes cluster. We support two deployment options:
+
+1. **MicroK8s** (Recommended for production-like development)
+2. **Kind** (Kubernetes in Docker)
+
+The deployment includes:
 
 - **Backend**: Rust API with GraphQL
 - **Frontend**: React application
@@ -11,8 +16,55 @@ This guide provides comprehensive instructions for deploying the EconGraph appli
 - **Monitoring Stack**: Grafana + Loki + Prometheus + Promtail
 - **Database**: PostgreSQL with persistent storage
 
+## Choosing Between MicroK8s and Kind
+
+### MicroK8s (Recommended)
+**Best for:**
+- Production-like local development
+- SSL/TLS testing
+- Security feature testing
+- Performance testing
+- Learning Kubernetes concepts
+
+**Advantages:**
+- Built-in addons (dns, ingress, storage, metrics-server)
+- Native SSL/TLS support with cert-manager
+- Production-like networking
+- Lower resource overhead
+- Easy snap installation
+
+**Requirements:**
+- Ubuntu 18.04+ or compatible Linux
+- 8GB+ RAM recommended
+- 20GB+ free disk space
+
+### Kind (Alternative)
+**Best for:**
+- Docker-based development
+- CI/CD pipelines
+- Cross-platform development
+- Quick testing
+
+**Advantages:**
+- Works on any platform with Docker
+- Easy to reset and recreate
+- Good for CI/CD environments
+- Familiar Docker workflow
+
+**Requirements:**
+- Docker Desktop
+- kubectl and kind installed
+- More resource intensive
+
 ## Prerequisites
 
+### For MicroK8s (Recommended)
+- Ubuntu 18.04+ or compatible Linux distribution
+- 8GB+ RAM (16GB+ recommended for full stack)
+- 20GB+ free disk space
+- Internet connection for image pulls and certificate generation
+
+### For Kind
 - Docker Desktop running
 - kubectl installed
 - kind installed
@@ -20,7 +72,35 @@ This guide provides comprehensive instructions for deploying the EconGraph appli
 
 ## Quick Start
 
-### One-Command Deployment
+### MicroK8s Deployment (Recommended)
+
+```bash
+cd /path/to/EconGraph/FrontEnd-1
+./scripts/deploy/restart-k8s-rollout.sh
+```
+
+This script will:
+- ✅ Check/start MicroK8s
+- ✅ Enable required addons (dns, ingress, storage, metrics-server)
+- ✅ Build Docker images with versioned tags
+- ✅ Load images into MicroK8s
+- ✅ Apply updated manifests
+- ✅ Deploy monitoring stack
+- ✅ Install cert-manager for SSL
+- ✅ Configure Let's Encrypt issuer
+- ✅ Deploy SSL ingress with security features
+- ✅ Wait for rollout completion
+- ✅ Display deployment status
+
+**Access URLs:**
+- Frontend: https://www.econ-graph.com
+- Backend: https://www.econ-graph.com/api
+- Admin: https://www.econ-graph.com/admin
+- Grafana: https://www.econ-graph.com/grafana
+
+**For detailed MicroK8s setup and troubleshooting, see**: [MicroK8s Deployment Guide](MICROK8S_DEPLOYMENT.md)
+
+### Kind Deployment (Alternative)
 
 ```bash
 cd /Users/josephmalicki/src/econ-graph5
