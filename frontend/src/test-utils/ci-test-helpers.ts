@@ -3,10 +3,10 @@
  * in GitHub Actions environment
  */
 
-import { waitFor, WaitForOptions } from '@testing-library/react';
+import { waitFor } from '@testing-library/react';
 
 // CI-specific wait options with longer timeouts
-export const CI_WAIT_OPTIONS: WaitForOptions = {
+export const CI_WAIT_OPTIONS = {
   timeout: process.env.CI ? 15000 : 5000, // 15s in CI, 5s locally
   interval: process.env.CI ? 100 : 50, // Check every 100ms in CI, 50ms locally
 };
@@ -14,7 +14,7 @@ export const CI_WAIT_OPTIONS: WaitForOptions = {
 // Robust waitFor wrapper that handles CI timing issues
 export const waitForCI = async (
   callback: () => void | Promise<void>,
-  options: WaitForOptions = {}
+  options: any = {}
 ) => {
   const mergedOptions = { ...CI_WAIT_OPTIONS, ...options };
   
