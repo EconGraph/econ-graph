@@ -39,7 +39,7 @@ export default defineConfig({
 
   // Build configuration
   build: {
-    outDir: 'build',
+    outDir: 'dist',
     sourcemap: true,
     // Optimize chunks for better caching
     rollupOptions: {
@@ -107,7 +107,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
-    setupFiles: ['./src/setupTests.ts'],
+    setupFiles: ['./src/setupTests.vitest.ts'],
     // Exclude Playwright tests and other non-unit tests
     exclude: [
       '**/node_modules/**',
@@ -133,7 +133,7 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       exclude: [
         'node_modules/',
-        'src/setupTests.ts',
+        'src/setupTests.vitest.ts',
         'src/**/__mocks__/**',
         'src/**/__tests__/**',
         '**/*.d.ts',
