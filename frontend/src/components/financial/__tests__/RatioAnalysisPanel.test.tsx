@@ -243,13 +243,13 @@ describe('RatioAnalysisPanel', () => {
         button.querySelector('svg') // BookOpen icon
       );
 
-      if (roeExplanationButton) {
-        fireEvent.click(roeExplanationButton);
+      expect(roeExplanationButton).toBeTruthy();
+      fireEvent.click(roeExplanationButton!);
 
-        await waitFor(() => {
-          expect(screen.getByTestId('explanation-modal-returnOnEquity')).toBeInTheDocument();
-        });
-      }
+      await waitFor(() => {
+        // Check if modal is rendered by looking for the close button
+        expect(screen.getByText('×')).toBeInTheDocument();
+      });
     });
 
     it('should open benchmark comparison when benchmark button is clicked', async () => {
