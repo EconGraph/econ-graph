@@ -129,53 +129,6 @@ const FinancialDashboardContent: React.FC<FinancialDashboardProps> = ({
     // Implementation for sharing analysis
   }, []);
 
-  const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'completed':
-        return 'text-green-600';
-      case 'processing':
-        return 'text-yellow-600';
-      case 'failed':
-        return 'text-red-600';
-      default:
-        return 'text-gray-600';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'completed':
-        return <CheckCircle className='h-4 w-4' />;
-      case 'processing':
-        return <RefreshCw className='h-4 w-4 animate-spin' />;
-      case 'failed':
-        return <XCircle className='h-4 w-4' />;
-      default:
-        return <AlertTriangle className='h-4 w-4' />;
-    }
-  };
-
-  const formatPercent = (value: number) => {
-    return `${(value * 100).toFixed(1)}%`;
-  };
-
-  if (loading) {
-    return (
-      <div className='flex items-center justify-center p-8'>
-        <Progress value={33} className='w-full max-w-md' />
-        <span className='ml-4'>Loading financial data...</span>
-      </div>
-    );
-  }
-
-  if (isError || error) {
-    return (
-      <Alert variant='destructive'>
-        <AlertDescription>Error loading financial data: {String(error)}</AlertDescription>
-      </Alert>
-    );
-  }
-
   // Validate company data
   if (!company) {
     return (
