@@ -104,8 +104,24 @@ echo "🔒 Installing cert-manager for SSL certificates..."
 if ! kubectl get namespace cert-manager >/dev/null 2>&1; then
     echo "Installing cert-manager..."
     kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
-    echo "Waiting for cert-manager to be ready..."
-    kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=120s
+    
+    echo "Waiting for cert-manager namespace to be created..."
+    kubectl wait --for=condition=ready namespace cert-manager --timeout=30s || true
+    
+    echo "Waiting for cert-manager pods to be ready..."
+    # Wait for pods to be created first
+    sleep 10
+    
+    # Check if pods exist before waiting
+    if kubectl get pods -l app=cert-manager -n cert-manager --no-headers 2>/dev/null | grep -q .; then
+        kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=120s || {
+            echo "⚠️  cert-manager pods may still be starting, continuing..."
+            kubectl get pods -n cert-manager
+        }
+    else
+        echo "⚠️  cert-manager pods not found yet, continuing..."
+        kubectl get pods -n cert-manager
+    fi
 else
     echo "✅ cert-manager already installed"
 fi
