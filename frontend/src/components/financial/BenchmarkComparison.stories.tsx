@@ -27,94 +27,29 @@ const meta: Meta<typeof BenchmarkComparison> = {
 export default meta;
 type Story = StoryObj<typeof BenchmarkComparison>;
 
-// Mock data for benchmark comparison
-const mockRatios = [
-  {
-    id: 'ratio-1',
-    statementId: 'statement-1',
-    ratioName: 'returnOnEquity',
-    ratioDisplayName: 'Return on Equity',
-    value: 0.147,
-    category: 'profitability',
-    formula: 'Net Income / Shareholders Equity',
-    interpretation: 'Strong profitability, above industry average',
-    benchmarkPercentile: 75,
-    periodEndDate: '2023-12-31',
-    fiscalYear: 2023,
-    fiscalQuarter: 4,
-    calculatedAt: '2023-12-31T00:00:00Z',
-    dataQualityScore: 0.95
-  },
-  {
-    id: 'ratio-2',
-    statementId: 'statement-1',
-    ratioName: 'netProfitMargin',
-    ratioDisplayName: 'Net Profit Margin',
-    value: 0.253,
-    category: 'profitability',
-    formula: 'Net Income / Revenue',
-    interpretation: 'Strong profitability, above industry average',
-    benchmarkPercentile: 80,
-    periodEndDate: '2023-12-31',
-    fiscalYear: 2023,
-    fiscalQuarter: 4,
-    calculatedAt: '2023-12-31T00:00:00Z',
-    dataQualityScore: 0.92
-  },
-  {
-    id: 'ratio-3',
-    statementId: 'statement-1',
-    ratioName: 'currentRatio',
-    ratioDisplayName: 'Current Ratio',
-    value: 1.04,
-    category: 'liquidity',
-    formula: 'Current Assets / Current Liabilities',
-    interpretation: 'Adequate liquidity position',
-    benchmarkPercentile: 45,
-    periodEndDate: '2023-12-31',
-    fiscalYear: 2023,
-    fiscalQuarter: 4,
-    calculatedAt: '2023-12-31T00:00:00Z',
-    dataQualityScore: 0.98
-  }
-];
-
-const mockCompany = {
-  id: '0000320193',
-  name: 'Apple Inc.',
-  ticker: 'AAPL',
-  industry: 'Technology Hardware & Equipment',
-  sector: 'Technology'
-};
+// Mock data comes from GraphQL response files via MSW
+// The component will receive data from the MSW handlers
 
 export const Default: Story = {
   args: {
-    ratios: mockRatios,
-    company: mockCompany,
     userType: 'intermediate',
   },
 };
 
 export const BeginnerUser: Story = {
   args: {
-    ratios: mockRatios,
-    company: mockCompany,
     userType: 'beginner',
   },
 };
 
 export const AdvancedUser: Story = {
   args: {
-    ratios: mockRatios,
-    company: mockCompany,
     userType: 'advanced',
   },
 };
 
 export const ExpertUser: Story = {
   args: {
-    ratios: mockRatios,
-    company: mockCompany,
     userType: 'expert',
   },
 };

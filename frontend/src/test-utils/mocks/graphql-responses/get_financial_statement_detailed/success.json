@@ -1,0 +1,167 @@
+{
+  "data": {
+    "financialStatement": {
+      "id": "statement-1",
+      "type": "balanceSheet",
+      "period": "2023-12-31",
+      "data": {
+        "companyId": "0000320193",
+        "filingType": "10-K",
+        "formType": "10-K",
+        "accessionNumber": "0001234567-23-000001",
+        "filingDate": "2023-12-31",
+        "periodEndDate": "2023-12-31",
+        "fiscalYear": 2023,
+        "fiscalQuarter": 4,
+        "documentType": "XBRL",
+        "documentUrl": "http://example.com/filing.xbrl",
+        "xbrlProcessingStatus": "completed",
+        "isAmended": false,
+        "isRestated": false,
+        "createdAt": "2023-12-31T00:00:00Z",
+        "updatedAt": "2023-12-31T00:00:00Z"
+      },
+      "lineItems": [
+        {
+          "id": "item-1",
+          "name": "Total Assets",
+          "value": 352755000000,
+          "category": "assets",
+          "xbrlTag": "us-gaap:Assets",
+          "description": "Total of all assets owned by the company",
+          "unit": "USD",
+          "scale": 1000000,
+          "formattedValue": "$352,755 million",
+          "confidence": 0.98
+        },
+        {
+          "id": "item-2",
+          "name": "Cash and Cash Equivalents",
+          "value": 29800000000,
+          "category": "assets",
+          "xbrlTag": "us-gaap:CashAndCashEquivalentsAtCarryingValue",
+          "description": "Cash and short-term investments",
+          "unit": "USD",
+          "scale": 1000000,
+          "formattedValue": "$29,800 million",
+          "confidence": 0.99
+        },
+        {
+          "id": "item-3",
+          "name": "Marketable Securities",
+          "value": 113700000000,
+          "category": "assets",
+          "xbrlTag": "us-gaap:MarketableSecuritiesCurrent",
+          "description": "Short-term investments in securities",
+          "unit": "USD",
+          "scale": 1000000,
+          "formattedValue": "$113,700 million",
+          "confidence": 0.97
+        },
+        {
+          "id": "item-4",
+          "name": "Accounts Receivable",
+          "value": 23186000000,
+          "category": "assets",
+          "xbrlTag": "us-gaap:AccountsReceivableNetCurrent",
+          "description": "Amounts owed by customers",
+          "unit": "USD",
+          "scale": 1000000,
+          "formattedValue": "$23,186 million",
+          "confidence": 0.95
+        },
+        {
+          "id": "item-5",
+          "name": "Inventory",
+          "value": 6331000000,
+          "category": "assets",
+          "xbrlTag": "us-gaap:InventoryNet",
+          "description": "Finished goods and work in progress",
+          "unit": "USD",
+          "scale": 1000000,
+          "formattedValue": "$6,331 million",
+          "confidence": 0.96
+        },
+        {
+          "id": "item-6",
+          "name": "Property, Plant and Equipment",
+          "value": 43700000000,
+          "category": "assets",
+          "xbrlTag": "us-gaap:PropertyPlantAndEquipmentNet",
+          "description": "Net book value of fixed assets",
+          "unit": "USD",
+          "scale": 1000000,
+          "formattedValue": "$43,700 million",
+          "confidence": 0.94
+        },
+        {
+          "id": "item-7",
+          "name": "Total Liabilities",
+          "value": 258549000000,
+          "category": "liabilities",
+          "xbrlTag": "us-gaap:Liabilities",
+          "description": "Total of all debts and obligations",
+          "unit": "USD",
+          "scale": 1000000,
+          "formattedValue": "$258,549 million",
+          "confidence": 0.98
+        },
+        {
+          "id": "item-8",
+          "name": "Accounts Payable",
+          "value": 64115000000,
+          "category": "liabilities",
+          "xbrlTag": "us-gaap:AccountsPayableCurrent",
+          "description": "Amounts owed to suppliers",
+          "unit": "USD",
+          "scale": 1000000,
+          "formattedValue": "$64,115 million",
+          "confidence": 0.97
+        },
+        {
+          "id": "item-9",
+          "name": "Long-term Debt",
+          "value": 95000000000,
+          "category": "liabilities",
+          "xbrlTag": "us-gaap:LongTermDebt",
+          "description": "Debt obligations due after one year",
+          "unit": "USD",
+          "scale": 1000000,
+          "formattedValue": "$95,000 million",
+          "confidence": 0.99
+        },
+        {
+          "id": "item-10",
+          "name": "Total Equity",
+          "value": 94206000000,
+          "category": "equity",
+          "xbrlTag": "us-gaap:StockholdersEquity",
+          "description": "Shareholders' ownership in the company",
+          "unit": "USD",
+          "scale": 1000000,
+          "formattedValue": "$94,206 million",
+          "confidence": 0.98
+        },
+        {
+          "id": "item-11",
+          "name": "Retained Earnings",
+          "value": 142200000000,
+          "category": "equity",
+          "xbrlTag": "us-gaap:RetainedEarningsAccumulatedDeficit",
+          "description": "Accumulated profits retained in the business",
+          "unit": "USD",
+          "scale": 1000000,
+          "formattedValue": "$142,200 million",
+          "confidence": 0.96
+        }
+      ],
+      "metadata": {
+        "filingStatus": "completed",
+        "dataQualityScore": 0.97,
+        "lastUpdated": "2023-12-31T00:00:00Z",
+        "auditor": "Ernst & Young LLP",
+        "auditOpinion": "unqualified"
+      }
+    }
+  }
+}

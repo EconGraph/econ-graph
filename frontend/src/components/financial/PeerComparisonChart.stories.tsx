@@ -32,8 +32,8 @@ const meta: Meta<typeof PeerComparisonChart> = {
 export default meta;
 type Story = StoryObj<typeof PeerComparisonChart>;
 
-// Mock data for peer comparison
-const mockPeerIds = ['0000789019', '0001018724', '0000320193']; // Microsoft, Amazon, Apple
+// Mock data for peer comparison - using actual peer companies from mock data
+const mockPeerIds = ['0000789019', '0001018724', '0001652044']; // Microsoft, Amazon, Alphabet
 const mockMetrics = [
   'returnOnEquity',
   'netProfitMargin',

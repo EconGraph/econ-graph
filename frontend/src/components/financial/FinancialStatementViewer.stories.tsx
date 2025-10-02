@@ -15,7 +15,7 @@ const meta: Meta<typeof FinancialStatementViewer> = {
     },
     companyId: {
       control: 'text',
-      description: 'The company ID for the statement',
+      description: 'The company ID for the statement (Apple Inc.)',
       defaultValue: '0000320193',
     },
     userType: {
