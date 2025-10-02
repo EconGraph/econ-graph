@@ -1,5 +1,5 @@
 /**
- * Private Chart API Endpoint for MCP Server
+ * Private Chart API Endpoint for MCP Server.
  *
  * This endpoint is only accessible from the backend/MCP server within the private network.
  * It provides chart generation capabilities using the existing frontend charting components.
@@ -10,7 +10,10 @@ import { generateChartConfig, validateChartRequest } from './chartApi';
 
 /**
  * Private chart generation endpoint
- * Only accessible from backend/MCP server (IP whitelist or internal network)
+ * Only accessible from backend/MCP server (IP whitelist or internal network).
+ * @param req - The incoming request object.
+ * @param res - The response object to send back.
+ * @returns Promise that resolves when the request is handled.
  */
 export async function handlePrivateChartRequest(req: Request, res: Response): Promise<void> {
   try {
@@ -64,7 +67,7 @@ export async function handlePrivateChartRequest(req: Request, res: Response): Pr
       message: 'Chart configuration generated successfully',
     });
   } catch (error) {
-    console.error('Private chart API error:', error);
+    // console.error('Private chart API error:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error while generating chart',
@@ -73,7 +76,10 @@ export async function handlePrivateChartRequest(req: Request, res: Response): Pr
 }
 
 /**
- * Check if request is from internal network (backend/MCP server)
+ * Check if request is from internal network (backend/MCP server).
+ * @param clientIP - The client IP address to check.
+ * @param req - The request object for additional checks.
+ * @returns True if the request is from an internal network.
  */
 function isInternalNetworkRequest(clientIP: string, req: Request): boolean {
   // Check for internal network IPs
@@ -110,7 +116,10 @@ function isInternalNetworkRequest(clientIP: string, req: Request): boolean {
 }
 
 /**
- * Check if IP is in CIDR range
+ * Check if IP is in CIDR range.
+ * @param ip - The IP address to check.
+ * @param cidr - The CIDR range to check against.
+ * @returns True if the IP is within the CIDR range.
  */
 function isIPInRange(ip: string, cidr: string): boolean {
   if (!cidr.includes('/')) {
@@ -127,14 +136,19 @@ function isIPInRange(ip: string, cidr: string): boolean {
 }
 
 /**
- * Convert IP address to number
+ * Convert IP address to number.
+ * @param ip - The IP address to convert.
+ * @returns The numeric representation of the IP address.
  */
 function ipToNumber(ip: string): number {
   return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0);
 }
 
 /**
- * Health check endpoint for MCP server
+ * Health check endpoint for MCP server.
+ * @param req - The incoming request object.
+ * @param res - The response object to send back.
+ * @returns Promise that resolves when the health check is complete.
  */
 export async function handleChartHealthCheck(req: Request, res: Response): Promise<void> {
   try {

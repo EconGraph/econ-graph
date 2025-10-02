@@ -81,11 +81,11 @@ export default [
     },
     plugins: {
       '@typescript-eslint': typescript,
-      'react': react,
+      react: react,
       'react-hooks': reactHooks,
       'jsx-a11y': jsxA11y,
       'testing-library': testingLibrary,
-      'jsdoc': jsdoc,
+      jsdoc: jsdoc,
     },
     rules: {
       ...typescript.configs.recommended.rules,
@@ -99,13 +99,16 @@ export default [
       'no-unused-vars': 'off',
       'react/react-in-jsx-scope': 'off', // Not needed with React 17+
       'react/prop-types': 'off', // Using TypeScript for prop validation
-      '@typescript-eslint/no-unused-vars': ['warn', {
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_',
-        // Do not warn on unused catch variables; often needed for control flow
-        caughtErrors: 'none',
-        ignoreRestSiblings: true,
-      }],
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          // Do not warn on unused catch variables; often needed for control flow
+          caughtErrors: 'none',
+          ignoreRestSiblings: true,
+        },
+      ],
       // Temporarily relax any usage while migrating types
       '@typescript-eslint/no-explicit-any': 'off',
       'no-console': 'warn',
@@ -121,21 +124,24 @@ export default [
       'react/display-name': 'warn', // Warn instead of error
 
       // JSDoc rules for documentation quality (initially lenient)
-      'jsdoc/require-jsdoc': ['warn', {
-        require: {
-          FunctionDeclaration: false, // Start with false, enable gradually
-          MethodDefinition: false,
-          ClassDeclaration: false,
-          ArrowFunctionExpression: false,
-          FunctionExpression: false,
+      'jsdoc/require-jsdoc': [
+        'warn',
+        {
+          require: {
+            FunctionDeclaration: false, // Start with false, enable gradually
+            MethodDefinition: false,
+            ClassDeclaration: false,
+            ArrowFunctionExpression: false,
+            FunctionExpression: false,
+          },
+          contexts: [
+            'ExportNamedDeclaration[declaration.type="FunctionDeclaration"]',
+            'ExportDefaultDeclaration[declaration.type="FunctionDeclaration"]',
+            'ExportNamedDeclaration[declaration.type="ClassDeclaration"]',
+            'ExportDefaultDeclaration[declaration.type="ClassDeclaration"]',
+          ],
         },
-        contexts: [
-          'ExportNamedDeclaration[declaration.type="FunctionDeclaration"]',
-          'ExportDefaultDeclaration[declaration.type="FunctionDeclaration"]',
-          'ExportNamedDeclaration[declaration.type="ClassDeclaration"]',
-          'ExportDefaultDeclaration[declaration.type="ClassDeclaration"]',
-        ],
-      }],
+      ],
       'jsdoc/require-description': 'warn',
       'jsdoc/require-description-complete-sentence': 'warn',
       'jsdoc/require-param': 'warn',
@@ -199,7 +205,7 @@ export default [
     files: ['**/*.test.{ts,tsx,js,jsx}', '**/__tests__/**/*'],
     plugins: {
       'testing-library': testingLibrary,
-      'jsdoc': jsdoc,
+      jsdoc: jsdoc,
     },
     rules: {
       ...testingLibrary.configs.react.rules,
@@ -277,12 +283,7 @@ export default [
   },
   // Allow console logs in server, utils, contexts, and hooks (diagnostics)
   {
-    files: [
-      'src/server/**',
-      'src/utils/**',
-      'src/contexts/**',
-      'src/hooks/**',
-    ],
+    files: ['src/server/**', 'src/utils/**', 'src/contexts/**', 'src/hooks/**'],
     rules: {
       'no-console': 'off',
     },

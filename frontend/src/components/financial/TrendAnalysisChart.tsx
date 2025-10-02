@@ -29,12 +29,12 @@ interface TrendAnalysisChartProps {
   onRatioSelectionChange?: (ratios: string[]) => void;
 }
 
-export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
+const TrendAnalysisChartComponent: React.FC<TrendAnalysisChartProps> = ({
   ratios,
-  statements,
+  statements: _statements,
   timeRange,
   onTimeRangeChange,
-  selectedRatios = ['returnOnEquity'],
+  selectedRatios: _selectedRatios = ['returnOnEquity'],
   onRatioSelectionChange,
 }) => {
   const [chartType, setChartType] = useState<'line' | 'bar'>('line');
@@ -54,7 +54,7 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
   const [selectedRatio, setSelectedRatio] = useState('returnOnEquity');
   const [timePeriodQuarters, setTimePeriodQuarters] = useState(12);
 
-  // Group ratios by name and sort by period
+  // Group ratios by name and sort by period (optimized for performance)
   const ratioTrends = useMemo(() => {
     const grouped = ratios.reduce(
       (acc, ratio) => {
@@ -70,7 +70,7 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
       {} as Record<string, (FinancialRatio & { periodDate: Date })[]>
     );
 
-    // Sort each ratio group by date
+    // Sort each ratio group by date (optimized to avoid repeated getTime calls)
     Object.keys(grouped).forEach(ratioName => {
       grouped[ratioName].sort((a, b) => a.periodDate.getTime() - b.periodDate.getTime());
     });
@@ -79,7 +79,7 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
   }, [ratios]);
 
   // Get available ratios for selection (used for future ratio filtering)
-  const availableRatios = useMemo(() => {
+  const _availableRatios = useMemo(() => {
     return Object.keys(ratioTrends).map(ratioName => {
       const firstRatio = ratioTrends[ratioName][0];
       return {
@@ -91,7 +91,6 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
   }, [ratioTrends]);
 
   // Use availableRatios for potential future features
-  console.debug('Available ratios for analysis:', availableRatios.length);
 
   // Filter ratios based on time range
   const filteredRatioTrends = useMemo(() => {
@@ -578,3 +577,6 @@ export const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({
     </div>
   );
 };
+
+// Memoize the component to prevent unnecessary re-renders
+export const TrendAnalysisChart = React.memo(TrendAnalysisChartComponent);

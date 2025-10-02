@@ -114,27 +114,30 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
   const keyMetrics = [
     {
       title: 'ROE',
-      value: ratios.find(r => r.ratioName === 'returnOnEquity')?.value
-        ? formatPercent(ratios.find(r => r.ratioName === 'returnOnEquity')!.value)
-        : '-',
+      value: (() => {
+        const roe = ratios.find(r => r.ratioName === 'returnOnEquity');
+        return roe && roe.value != null ? formatPercent(roe.value) : '-';
+      })(),
       change: '+2.1%',
       trend: 'up',
       icon: TrendingUp,
     },
     {
       title: 'Current Ratio',
-      value: ratios.find(r => r.ratioName === 'currentRatio')?.value
-        ? ratios.find(r => r.ratioName === 'currentRatio')!.value.toFixed(2)
-        : '-',
+      value: (() => {
+        const cr = ratios.find(r => r.ratioName === 'currentRatio');
+        return cr && cr.value != null ? cr.value.toFixed(2) : '-';
+      })(),
       change: '-0.1',
       trend: 'down',
       icon: TrendingUp,
     },
     {
       title: 'Debt/Equity',
-      value: ratios.find(r => r.ratioName === 'debtToEquity')?.value
-        ? ratios.find(r => r.ratioName === 'debtToEquity')!.value.toFixed(2)
-        : '-',
+      value: (() => {
+        const dte = ratios.find(r => r.ratioName === 'debtToEquity');
+        return dte && dte.value != null ? dte.value.toFixed(2) : '-';
+      })(),
       change: '+0.05',
       trend: 'up',
       icon: Activity,
@@ -483,7 +486,7 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
         {/* Mobile Bottom Navigation */}
         <div className='fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg'>
           <div className='flex' role='tablist' aria-label='Mobile navigation tabs'>
-            {mobileTabs.map((tab, index) => (
+            {mobileTabs.map((tab, _index) => (
               <button
                 key={tab.id}
                 role='tab'

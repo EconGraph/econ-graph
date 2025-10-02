@@ -33,6 +33,7 @@ if (typeof global.TransformStream === 'undefined') {
   } catch (e) {
     // Fallback minimal polyfill
     global.TransformStream = class TransformStream {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       constructor(_transformer = {}) {
         this.readable = new global.ReadableStream();
         this.writable = {
@@ -121,6 +122,7 @@ if (typeof global.Headers === 'undefined') {
 
 // Fetch polyfill
 if (typeof global.fetch === 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   global.fetch = async function (_input, _init) {
     return new global.Response('{}', { status: 200 });
   };

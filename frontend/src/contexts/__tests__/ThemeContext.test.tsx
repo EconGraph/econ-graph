@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Test theme context functionality
  * PURPOSE: Verify theme switching and persistence works correctly
- * This ensures user preferences are properly managed and applied
+ * This ensures user preferences are properly managed and applied.
  */
 
 import React from 'react';

@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Chart collaboration features with annotations and comments
  * PURPOSE: Enable real-time collaborative economic analysis with shared annotations
- * This provides Bloomberg Terminal-style collaboration for economic research
+ * This provides Bloomberg Terminal-style collaboration for economic research.
  */
 
 import React, { useState, useCallback } from 'react';
@@ -297,8 +297,9 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
 
           {/* Filter */}
           <FormControl size='small' fullWidth sx={{ mb: 2 }}>
-            <InputLabel>Filter Annotations</InputLabel>
+            <InputLabel id='filter-annotations-label'>Filter Annotations</InputLabel>
             <Select
+              labelId='filter-annotations-label'
               value={filterBy}
               onChange={e => setFilterBy(e.target.value as any)}
               label='Filter Annotations'
@@ -479,7 +480,6 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
               multiline
               rows={3}
               fullWidth
-              inputProps={{ 'data-testid': 'annotation-description-input' }}
               aria-label='Annotation description'
             />
 
@@ -491,7 +491,6 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
               required
               InputLabelProps={{ shrink: true }}
               fullWidth
-              inputProps={{ 'data-testid': 'annotation-date-input' }}
               aria-label='Annotation date'
             />
 
@@ -501,7 +500,6 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
               value={annotationForm.value}
               onChange={e => setAnnotationForm(prev => ({ ...prev, value: e.target.value }))}
               fullWidth
-              inputProps={{ 'data-testid': 'annotation-value-input' }}
               aria-label='Annotation value'
             />
 
@@ -513,7 +511,6 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
                   setAnnotationForm(prev => ({ ...prev, type: e.target.value as any }))
                 }
                 label='Annotation Type'
-                inputProps={{ 'data-testid': 'annotation-type-select' }}
                 aria-label='Annotation type'
               >
                 {ANNOTATION_TYPES.map(type => (
@@ -553,7 +550,6 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
               onChange={e => setAnnotationForm(prev => ({ ...prev, tags: e.target.value }))}
               placeholder='analysis, trend, important'
               fullWidth
-              inputProps={{ 'data-testid': 'annotation-tags-input' }}
               aria-label='Annotation tags'
             />
           </Box>
@@ -648,7 +644,6 @@ const ChartCollaboration: React.FC<ChartCollaborationProps> = ({
                   variant='contained'
                   onClick={handleAddComment}
                   disabled={!newComment.trim()}
-                  data-testid='submit-comment-button'
                 >
                   Comment
                 </Button>

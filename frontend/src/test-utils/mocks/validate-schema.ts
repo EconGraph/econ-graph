@@ -13,6 +13,11 @@ import {
   GET_FINANCIAL_EXPORT,
 } from './graphql/financial-queries';
 
+/**
+ * Validate financial GraphQL queries for schema compliance.
+ * Checks that all financial queries are properly structured.
+ * @returns Validation results for financial queries.
+ */
 export function validateFinancialQueries() {
   const queries = [
     GET_FINANCIAL_DASHBOARD,
@@ -48,6 +53,12 @@ export function validateFinancialQueries() {
   return true;
 }
 
+/**
+ * Validate a single GraphQL query against the schema.
+ * @param query - The GraphQL query string to validate.
+ * @param operationName - Optional operation name for the query.
+ * @returns True if the query is valid, throws error if invalid.
+ */
 export function validateQuery(query: string, operationName?: string) {
   try {
     const parsedQuery = parse(query);

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, Suspense } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -12,7 +12,7 @@ import {
 import {
   Badge,
   Button,
-  Progress,
+  Progress as _Progress,
   Alert,
   AlertDescription,
   Tooltip,
@@ -33,7 +33,7 @@ import {
 // import { FinancialRatio } from '@/types/financial'; // Not used in current implementation
 import { RatioExplanationModal } from './RatioExplanationModal';
 import { BenchmarkComparison } from './BenchmarkComparison';
-import { useQuery } from 'react-query';
+import { useSuspenseQuery } from '@tanstack/react-query';
 import { executeGraphQL } from '../../utils/graphql';
 import { GET_FINANCIAL_RATIOS } from '../../test-utils/mocks/graphql/ratio-queries';
 
@@ -43,7 +43,7 @@ interface RatioAnalysisPanelProps {
   showEducationalContent?: boolean;
 }
 
-export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
+const RatioAnalysisPanelContent: React.FC<RatioAnalysisPanelProps> = ({
   statementId,
   userType,
   showEducationalContent = true,
@@ -52,62 +52,23 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
   const [showExplanation, setShowExplanation] = useState(false);
   const [showBenchmarks, setShowBenchmarks] = useState(false);
 
-  // GraphQL query for financial ratios
-  const {
-    data: ratiosData,
-    isLoading: loading,
-    isError,
-    error,
-  } = useQuery(
-    ['financial-ratios', statementId],
-    async () => {
-      try {
-        const result = await executeGraphQL({
-          query: GET_FINANCIAL_RATIOS,
-          variables: { statementId },
-        });
-        return result.data;
-      } catch (error) {
-        console.error('Failed to fetch financial ratios:', error);
-        // Fallback to empty data for development
-        return { financialRatios: [] };
-      }
+  // GraphQL query for financial ratios - use Suspense for loading state
+  const { data: ratiosData } = useSuspenseQuery({
+    queryKey: ['financial-ratios', statementId],
+    queryFn: async () => {
+      const result = await executeGraphQL({
+        query: GET_FINANCIAL_RATIOS,
+        variables: { statementId },
+      });
+      return result.data;
     },
-    {
-      staleTime: 5 * 60 * 1000, // 5 minutes
-    }
-  );
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 
   const ratios = ratiosData?.financialRatios;
 
-  if (loading) {
-    return (
-      <div className='flex items-center justify-center p-8'>
-        <Progress value={66} className='w-full max-w-md' role='progressbar' />
-        <span className='ml-4'>Calculating financial ratios...</span>
-      </div>
-    );
-  }
-
-  if (isError) {
-    return (
-      <Alert variant='destructive'>
-        <AlertDescription>
-          Failed to load financial ratios: {(error as Error)?.message || 'Unknown error'}
-        </AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (!ratios || ratios.length === 0) {
-    return (
-      <Alert>
-        <AlertDescription>
-          No ratio data available. Please ensure market data is provided for valuation ratios.
-        </AlertDescription>
-      </Alert>
-    );
-  }
+  // Loading state is now handled by Suspense
+  const hasNoRatios = !ratios || ratios.length === 0;
 
   const getRatioCategory = (ratioName: string) => {
     const profitabilityRatios = [
@@ -417,86 +378,102 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
 
   return (
     <div className='space-y-6'>
-      {/* Header with key insights */}
+      {/* Header with key insights - always render for consistent UX/tests */}
       <Card>
         <CardHeader>
           <CardTitle className='flex items-center space-x-2'>
             <Calculator className='h-5 w-5' />
             <span>Financial Ratio Analysis</span>
           </CardTitle>
-          <div className='grid grid-cols-1 md:grid-cols-3 gap-4 mt-4'>
-            {/* Key metrics summary */}
-            <div className='p-4 border rounded-lg'>
-              <h3 className='font-semibold text-green-600'>Profitability</h3>
-              <p className='text-2xl font-bold'>
-                {ratios?.find((r: any) => r.ratioName === 'returnOnEquity')?.value
-                  ? `${(ratios.find((r: any) => r.ratioName === 'returnOnEquity')!.value * 100).toFixed(1)}%`
-                  : '-'}
-              </p>
-              <p className='text-sm text-muted-foreground'>Return on Equity</p>
-            </div>
+          {!hasNoRatios && (
+            <div className='grid grid-cols-1 md:grid-cols-3 gap-4 mt-4'>
+              {/* Key metrics summary */}
+              <div className='p-4 border rounded-lg'>
+                <h3 className='font-semibold text-green-600'>Profitability</h3>
+                <p className='text-2xl font-bold'>
+                  {(() => {
+                    const roe = ratios?.find((r: any) => r.ratioName === 'returnOnEquity');
+                    return roe && roe.value != null ? `${(roe.value * 100).toFixed(1)}%` : '-';
+                  })()}
+                </p>
+                <p className='text-sm text-muted-foreground'>Return on Equity</p>
+              </div>
 
-            <div className='p-4 border rounded-lg'>
-              <h3 className='font-semibold text-blue-600'>Liquidity</h3>
-              <p className='text-2xl font-bold'>
-                {ratios?.find((r: any) => r.ratioName === 'currentRatio')?.value
-                  ? ratios.find((r: any) => r.ratioName === 'currentRatio')!.value.toFixed(2)
-                  : '-'}
-              </p>
-              <p className='text-sm text-muted-foreground'>Current Ratio</p>
-            </div>
+              <div className='p-4 border rounded-lg'>
+                <h3 className='font-semibold text-blue-600'>Liquidity</h3>
+                <p className='text-2xl font-bold'>
+                  {(() => {
+                    const cr = ratios?.find((r: any) => r.ratioName === 'currentRatio');
+                    return cr && cr.value != null ? cr.value.toFixed(2) : '-';
+                  })()}
+                </p>
+                <p className='text-sm text-muted-foreground'>Current Ratio</p>
+              </div>
 
-            <div className='p-4 border rounded-lg'>
-              <h3 className='font-semibold text-purple-600'>Valuation</h3>
-              <p className='text-2xl font-bold'>
-                {ratios?.find((r: any) => r.ratioName === 'enterpriseValueToEbitda')?.value
-                  ? `${ratios.find((r: any) => r.ratioName === 'enterpriseValueToEbitda')!.value.toFixed(1)}x`
-                  : '-'}
-              </p>
-              <p className='text-sm text-muted-foreground'>EV/EBITDA</p>
+              <div className='p-4 border rounded-lg'>
+                <h3 className='font-semibold text-purple-600'>Valuation</h3>
+                <p className='text-2xl font-bold'>
+                  {(() => {
+                    const ev = ratios?.find((r: any) => r.ratioName === 'enterpriseValueToEbitda');
+                    return ev && ev.value != null ? `${ev.value.toFixed(1)}x` : '-';
+                  })()}
+                </p>
+                <p className='text-sm text-muted-foreground'>EV/EBITDA</p>
+              </div>
             </div>
-          </div>
+          )}
         </CardHeader>
       </Card>
 
-      {/* Detailed ratios by category */}
-      <Tabs defaultValue='profitability' className='space-y-4'>
-        <TabsList className='grid w-full grid-cols-6'>
-          <TabsTrigger value='profitability'>Profitability</TabsTrigger>
-          <TabsTrigger value='liquidity'>Liquidity</TabsTrigger>
-          <TabsTrigger value='leverage'>Leverage</TabsTrigger>
-          <TabsTrigger value='valuation'>Valuation</TabsTrigger>
-          <TabsTrigger value='cashFlow'>Cash Flow</TabsTrigger>
-          <TabsTrigger value='growth'>Growth</TabsTrigger>
-        </TabsList>
+      {/* If no data, show an inline alert instead of early-returning */}
+      {hasNoRatios ? (
+        <Alert>
+          <AlertDescription>
+            No ratio data available. Please ensure market data is provided for valuation ratios.
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <>
+          {/* Detailed ratios by category */}
+          <Tabs defaultValue='profitability' className='space-y-4'>
+            <TabsList className='grid w-full grid-cols-6'>
+              <TabsTrigger value='profitability'>Profitability</TabsTrigger>
+              <TabsTrigger value='liquidity'>Liquidity</TabsTrigger>
+              <TabsTrigger value='leverage'>Leverage</TabsTrigger>
+              <TabsTrigger value='valuation'>Valuation</TabsTrigger>
+              <TabsTrigger value='cashFlow'>Cash Flow</TabsTrigger>
+              <TabsTrigger value='growth'>Growth</TabsTrigger>
+            </TabsList>
 
-        {Object.entries(categories).map(([category, ratioList]) => (
-          <TabsContent key={category} value={category}>
-            <Card>
-              <CardHeader>
-                <CardTitle className='flex items-center space-x-2'>
-                  {getRatioIcon(category)}
-                  <span className='capitalize'>{category} Ratios</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Ratio</TableHead>
-                      <TableHead>Value</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {ratioList.map(([ratioName, value]) => renderRatioRow(ratioName, value))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        ))}
-      </Tabs>
+            {Object.entries(categories).map(([category, ratioList]) => (
+              <TabsContent key={category} value={category}>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className='flex items-center space-x-2'>
+                      {getRatioIcon(category)}
+                      <span className='capitalize'>{category} Ratios</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Ratio</TableHead>
+                          <TableHead>Value</TableHead>
+                          <TableHead>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {ratioList.map(([ratioName, value]) => renderRatioRow(ratioName, value))}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            ))}
+          </Tabs>
+        </>
+      )}
 
       {/* Educational content for beginners */}
       {userType === 'beginner' && showEducationalContent && (
@@ -572,3 +549,27 @@ export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = ({
     </div>
   );
 };
+
+/**
+ * RatioAnalysisPanel wrapper with Suspense boundary for loading states.
+ * @param props - The component props.
+ * @returns The RatioAnalysisPanel component with Suspense boundary.
+ */
+export const RatioAnalysisPanel: React.FC<RatioAnalysisPanelProps> = props => (
+  <Suspense
+    fallback={
+      <Card>
+        <CardHeader>
+          <CardTitle>Loading Financial Ratios...</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className='flex justify-center items-center min-h-[200px]'>
+            <div className='text-muted-foreground'>Loading ratio analysis...</div>
+          </div>
+        </CardContent>
+      </Card>
+    }
+  >
+    <RatioAnalysisPanelContent {...props} />
+  </Suspense>
+);

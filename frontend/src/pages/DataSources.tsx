@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -17,7 +17,6 @@ import {
   TableHead,
   TableRow,
   CircularProgress,
-  Alert,
 } from '@mui/material';
 import {
   AccountBalance as FedIcon,
@@ -72,14 +71,14 @@ const getDataSourceCategories = (name: string): string[] => {
 };
 
 /**
- * REQUIREMENT: Support for Federal Reserve and BLS data sources with monitoring
- * PURPOSE: Display available data sources and their status for transparency
- * This provides users with information about data sources and system status
+ * REQUIREMENT: Support for Federal Reserve and BLS data sources with monitoring.
+ * PURPOSE: Display available data sources and their status for transparency.
+ * This provides users with information about data sources and system status.
+ * @returns The DataSourcesContent component.
  */
-const DataSources: React.FC = () => {
-  // Fetch real data sources from backend
-  const hookResult = useDataSources();
-  const { data: backendDataSources, isLoading, error } = hookResult || {};
+const DataSourcesContent: React.FC = () => {
+  // Fetch real data sources from backend - suspense: true eliminates need for isLoading/error checks
+  const { data: backendDataSources } = useDataSources();
 
   // Transform backend data to frontend format
   const dataSources: DataSourceInfo[] = React.useMemo(() => {
@@ -135,30 +134,12 @@ const DataSources: React.FC = () => {
     return date.toLocaleDateString();
   };
 
-  // Handle loading state
-  if (isLoading) {
-    return (
-      <Box
-        sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}
-      >
-        <CircularProgress />
-      </Box>
-    );
-  }
-
-  // Handle error state
-  if (error) {
-    return (
-      <Box>
-        <Typography variant='h4' component='h1' gutterBottom>
-          Data Sources
-        </Typography>
-        <Alert severity='error'>
-          Failed to load data sources: {error instanceof Error ? error.message : 'Unknown error'}
-        </Alert>
-      </Box>
-    );
-  }
+  // Memoize expensive statistics calculations
+  const stats = useMemo(() => {
+    const totalSeries = dataSources.reduce((sum, source) => sum + source.seriesCount, 0);
+    const healthySources = dataSources.filter(s => s.status === 'active').length;
+    return { totalSeries, healthySources };
+  }, [dataSources]);
 
   return (
     <Box>
@@ -188,7 +169,7 @@ const DataSources: React.FC = () => {
           <Grid item xs={12} sm={3}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant='h3' color='primary'>
-                {dataSources.reduce((sum, source) => sum + source.seriesCount, 0).toLocaleString()}
+                {stats.totalSeries.toLocaleString()}
               </Typography>
               <Typography variant='body2' color='text.secondary'>
                 Total Series
@@ -198,7 +179,7 @@ const DataSources: React.FC = () => {
           <Grid item xs={12} sm={3}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant='h3' color='success.main'>
-                {dataSources.filter(s => s.status === 'active').length}
+                {stats.healthySources}
               </Typography>
               <Typography variant='body2' color='text.secondary'>
                 Healthy Sources
@@ -376,5 +357,23 @@ const DataSources: React.FC = () => {
     </Box>
   );
 };
+
+/**
+ * DataSources wrapper with Suspense boundary for loading states.
+ * @returns The DataSources component with Suspense boundary.
+ */
+const DataSources: React.FC = () => (
+  <Suspense
+    fallback={
+      <Box
+        sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}
+      >
+        <CircularProgress />
+      </Box>
+    }
+  >
+    <DataSourcesContent />
+  </Suspense>
+);
 
 export default DataSources;

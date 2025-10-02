@@ -204,7 +204,7 @@ const GlobalEventsExplorer: React.FC = () => {
     return '#2196f3'; // blue
   };
 
-  const getEventIcon = (eventType: string, severity: number) => {
+  const getEventIcon = (eventType: string, _severity: number) => {
     switch (eventType.toLowerCase()) {
       case 'financial crisis':
         return <TrendingDown />;
@@ -310,7 +310,7 @@ const GlobalEventsExplorer: React.FC = () => {
         <Alert severity='info'>No global economic events match the current filters.</Alert>
       ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {filteredEvents.map((eventData, index) => {
+          {filteredEvents.map((eventData, _index) => {
             const { event, countryImpacts, affectedCountryCount } = eventData;
             const isExpanded = expandedEvents.has(event.id);
             const visibleImpacts = showRecoveredCountries

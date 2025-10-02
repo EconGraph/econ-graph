@@ -1,7 +1,7 @@
 /**
  * REQUIREMENT: Professional chart analytics with Bloomberg Terminal-level capabilities
  * PURPOSE: Advanced charting component with technical analysis, multi-series overlay, and annotations
- * This provides sophisticated economic analysis tools for professional users
+ * This provides sophisticated economic analysis tools for professional users.
  */
 
 import React, { useState, useMemo, useCallback } from 'react';
@@ -118,8 +118,8 @@ const ProfessionalChart: React.FC<ProfessionalChartProps> = ({
   height = 600,
   showTechnicalAnalysis = true,
   showEconomicEvents = true,
-  allowAnnotations = true,
-  onAnnotationAdd,
+  allowAnnotations: _allowAnnotations = true,
+  onAnnotationAdd: _onAnnotationAdd,
   onSeriesAdd,
 }) => {
   const [taSettings, setTASettings] = useState<TechnicalAnalysisSettings>({
@@ -506,7 +506,7 @@ const ProfessionalChart: React.FC<ProfessionalChartProps> = ({
 
   const exportChart = useCallback(() => {
     // Implementation for chart export (PNG, PDF, SVG)
-    console.log('Export chart functionality');
+    // Export functionality would be implemented here
   }, []);
 
   return (
@@ -711,4 +711,5 @@ const ProfessionalChart: React.FC<ProfessionalChartProps> = ({
   );
 };
 
-export default ProfessionalChart;
+// Memoize the component to prevent unnecessary re-renders
+export default React.memo(ProfessionalChart);

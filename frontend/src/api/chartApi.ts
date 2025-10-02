@@ -79,7 +79,10 @@ export function generateChartData(
 }
 
 /**
- * Export chart data to various formats
+ * Export chart data to various formats.
+ * @param series - Array of chart series data to export.
+ * @param format - Export format (json, csv, or excel).
+ * @returns Exported data as string or Blob.
  */
 export function exportChartData(
   series: ChartSeries[],
@@ -105,7 +108,9 @@ export function exportChartData(
 }
 
 /**
- * Validate chart configuration
+ * Validate chart configuration.
+ * @param config - Chart configuration object to validate.
+ * @returns Array of validation error messages.
  */
 export function validateChartConfig(config: Partial<ChartConfig>): string[] {
   const errors: string[] = [];
@@ -126,7 +131,9 @@ export function validateChartConfig(config: Partial<ChartConfig>): string[] {
 }
 
 /**
- * Generate chart configuration from request
+ * Generate chart configuration from request.
+ * @param request - The chart request containing series data and configuration.
+ * @returns The generated chart configuration response.
  */
 export function generateChartConfig(request: ChartRequest): ChartResponse {
   try {
@@ -217,7 +224,9 @@ export function generateChartConfig(request: ChartRequest): ChartResponse {
 }
 
 /**
- * Validate chart request
+ * Validate chart request.
+ * @param request - The chart request to validate.
+ * @returns Validation result with success status and any errors.
  */
 export function validateChartRequest(request: any): boolean {
   if (!request) return false;

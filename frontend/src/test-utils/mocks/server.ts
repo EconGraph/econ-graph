@@ -8,29 +8,15 @@
 import { mockSeriesData, mockDataSources, mockSearchResults, mockSuggestions } from './data';
 import { loadGraphQLResponse } from './graphql-response-loader';
 
-// Lazy import MSW to ensure polyfills are loaded first
-let setupServer: any, graphql: any, http: any, HttpResponse: any;
-
-function ensureMSWImported() {
-  if (!setupServer) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const msw = require('msw/node');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mswCore = require('msw');
-    setupServer = msw.setupServer;
-    graphql = mswCore.graphql;
-    http = mswCore.http;
-    HttpResponse = mswCore.HttpResponse;
-  }
-}
+// Import MSW directly
+import { setupServer } from 'msw/node';
+import { graphql, http, HttpResponse } from 'msw';
 
 // GraphQL endpoint
 // Removed unused GRAPHQL_ENDPOINT
 
-// Create handlers function that ensures MSW is imported
+// Create handlers function
 function createHandlers() {
-  ensureMSWImported();
-
   return [
     // GraphQL handlers
     graphql.query('GetSeriesDetail', ({ variables }: { variables: any }) => {
@@ -235,13 +221,154 @@ function createHandlers() {
       });
     }),
 
-    // REST API fallback handlers
-    http.get('/api/health', () => {
-      // REQUIREMENT: Mock health check endpoint
-      return HttpResponse.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
+    // Financial Alerts
+    graphql.query('GetFinancialAlerts', ({ variables }: { variables: any }) => {
+      const { companyId } = variables as { companyId: string };
+
+      let scenario = 'success';
+      if (companyId === 'empty-company') {
+        scenario = 'empty';
+      }
+
+      const response = loadGraphQLResponse('get_financial_alerts', scenario);
+      return HttpResponse.json(response, {
+        status: response.errors ? 400 : 200,
       });
+    }),
+
+    // Peer Comparison
+    graphql.query('GetPeerComparison', ({ variables }: { variables: any }) => {
+      const { companyId } = variables as { companyId: string };
+
+      const scenario = companyId === 'invalid-company-id' ? 'not_found' : 'success';
+      const response = loadGraphQLResponse('get_peer_comparison', scenario);
+      return HttpResponse.json(response, {
+        status: response.errors ? 400 : 200,
+      });
+    }),
+
+    // Trend Analysis
+    graphql.query('GetTrendAnalysis', ({ variables }: { variables: any }) => {
+      const { companyId } = variables as { companyId: string };
+
+      const scenario = companyId === 'loading-company' ? 'loading' : 'success';
+      const response = loadGraphQLResponse('get_trend_analysis', scenario);
+      return HttpResponse.json(response, {
+        status: response.errors ? 400 : 200,
+      });
+    }),
+
+    // Financial Export
+    graphql.query('GetFinancialExport', ({ variables }: { variables: any }) => {
+      const { companyId } = variables as { companyId: string };
+
+      const scenario = companyId === 'empty-company' ? 'empty' : 'success';
+      const response = loadGraphQLResponse('get_financial_export', scenario);
+      return HttpResponse.json(response, {
+        status: response.errors ? 400 : 200,
+      });
+    }),
+
+    // REST API fallback handlers (intentionally minimal; no health endpoint mocking)
+
+    // Handle GraphQL POST requests
+    http.post('/graphql', async ({ request }: { request: any }) => {
+      const body = await request.json();
+      const { query, variables, operationName } = body;
+
+      // Extract operation name from query
+      const operationMatch = query.match(/(?:query|mutation|subscription)\s+(\w+)/);
+      const extractedOperationName = operationMatch ? operationMatch[1] : operationName;
+
+      if (process.env.MSW_DEBUG) {
+        console.log('🔧 MSW GraphQL Request:', {
+          query: query.substring(0, 100) + '...',
+          variables,
+          operationName: extractedOperationName,
+        });
+      }
+
+      // Route to appropriate handler based on operation name
+      if (extractedOperationName === 'GetFinancialStatement') {
+        try {
+          const { statementId } = variables || {};
+          let scenario = 'success';
+          if (statementId === 'invalid-statement-id') {
+            scenario = 'not_found';
+          } else if (statementId === 'processing-statement-id') {
+            scenario = 'processing';
+          } else if (statementId === 'error-statement-id') {
+            scenario = 'error';
+          }
+
+          if (process.env.MSW_DEBUG) {
+            console.log('🔧 Loading GraphQL response for get_financial_statement:', scenario);
+          }
+
+          const response = loadGraphQLResponse('get_financial_statement', scenario);
+
+          if (process.env.MSW_DEBUG) {
+            console.log('🔧 GraphQL response loaded:', response);
+          }
+
+          return HttpResponse.json(response, {
+            status: response.errors ? 400 : 200,
+          });
+        } catch (error) {
+          if (process.env.MSW_DEBUG) {
+            console.error('🔧 Error in GetFinancialStatement handler:', error);
+          }
+          return HttpResponse.json(
+            {
+              data: null,
+              errors: [{ message: 'Internal server error' }],
+            },
+            { status: 500 }
+          );
+        }
+      }
+
+      if (extractedOperationName === 'GetFinancialDashboard') {
+        const { companyId } = variables || {};
+        let scenario = 'success';
+        if (companyId === 'invalid-company-id') {
+          scenario = 'not_found';
+        } else if (companyId === 'error-company-id') {
+          scenario = 'error';
+        }
+
+        const response = loadGraphQLResponse('get_financial_dashboard', scenario);
+        return HttpResponse.json(response, {
+          status: response.errors ? 400 : 200,
+        });
+      }
+
+      if (extractedOperationName === 'GetFinancialRatios') {
+        const { statementId } = variables || {};
+        let scenario = 'success';
+        if (statementId === 'empty-statement-id') {
+          scenario = 'empty';
+        } else if (statementId === 'partial-statement-id') {
+          scenario = 'partial';
+        } else if (statementId === 'error-statement-id') {
+          scenario = 'error';
+        }
+
+        const response = loadGraphQLResponse('get_financial_ratios', scenario);
+        return HttpResponse.json(response, {
+          status: response.errors ? 400 : 200,
+        });
+      }
+
+      // Default fallback
+      console.warn(`Unhandled GraphQL operation: ${extractedOperationName}`);
+      return HttpResponse.json(
+        {
+          data: null,
+          errors: [{ message: `Unhandled operation: ${extractedOperationName}` }],
+        },
+        { status: 400 }
+      );
     }),
 
     // Handle unmatched GraphQL requests
@@ -255,25 +382,25 @@ function createHandlers() {
   ];
 }
 
-// Export handlers and server as getters to ensure lazy loading
-export let handlers: any, server: any;
+// Create handlers and server
+const handlers = createHandlers();
+const server = setupServer(...handlers);
 
-// Initialize handlers and server when first accessed
-function initializeMSW() {
-  if (!handlers) {
-    handlers = createHandlers();
-  }
-  if (!server) {
-    ensureMSWImported();
-    server = setupServer(...handlers);
-  }
-}
+// Configure server to not fallback to network for unhandled requests
+server.use(
+  http.get('*', () => {
+    throw new Error('Unhandled GET request - add handler or check URL');
+  }),
+  http.post('*', () => {
+    throw new Error('Unhandled POST request - add handler or check URL');
+  }),
+  http.put('*', () => {
+    throw new Error('Unhandled PUT request - add handler or check URL');
+  }),
+  http.delete('*', () => {
+    throw new Error('Unhandled DELETE request - add handler or check URL');
+  })
+);
 
-// Initialize immediately for Vitest compatibility
-initializeMSW();
-
-// Export initialization function for setupTests.ts
-export function getMSWServer() {
-  initializeMSW();
-  return server;
-}
+// Export handlers and server
+export { handlers, server };

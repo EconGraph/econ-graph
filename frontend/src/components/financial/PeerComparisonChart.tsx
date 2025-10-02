@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -21,6 +21,9 @@ import {
   Table,
 } from 'lucide-react';
 import { FinancialRatio, Company } from '@/types/financial';
+import { useQuery } from '@tanstack/react-query';
+import { executeGraphQL } from '../../utils/graphql';
+import { GET_PEER_COMPANIES } from '../../test-utils/mocks/graphql/financial-queries';
 
 interface PeerCompany {
   id: string;
@@ -40,115 +43,36 @@ interface PeerComparisonChartProps {
   onRatioSelectionChange?: (ratios: string[]) => void;
 }
 
-export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
+const PeerComparisonChartComponent: React.FC<PeerComparisonChartProps> = ({
   ratios,
   company,
-  userType = 'intermediate',
+  userType: _userType = 'intermediate',
   selectedRatios = [],
-  onRatioSelectionChange,
+  onRatioSelectionChange: _onRatioSelectionChange,
 }) => {
   const [viewMode, setViewMode] = useState<'table' | 'chart' | 'radar'>('chart');
   const [industryFilter, setIndustryFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'name' | 'performance' | 'marketCap'>('performance');
 
-  // Mock peer companies data - in real implementation, this would come from API
-  const peerCompanies = useMemo(
-    (): PeerCompany[] => [
-      {
-        id: '1',
-        name: 'Microsoft Corporation',
-        ticker: 'MSFT',
-        industry: 'Technology',
-        marketCap: 2800000000000,
-        ratios: {
-          returnOnEquity: 0.382,
-          currentRatio: 2.51,
-          debtToEquity: 0.31,
-          grossMargin: 0.688,
-          netMargin: 0.366,
-          priceToEarnings: 28.5,
-        },
-        percentile: {
-          returnOnEquity: 85,
-          currentRatio: 90,
-          debtToEquity: 75,
-          grossMargin: 88,
-          netMargin: 92,
-          priceToEarnings: 60,
-        },
-      },
-      {
-        id: '2',
-        name: 'Amazon.com Inc.',
-        ticker: 'AMZN',
-        industry: 'Technology',
-        marketCap: 1500000000000,
-        ratios: {
-          returnOnEquity: 0.156,
-          currentRatio: 1.12,
-          debtToEquity: 0.45,
-          grossMargin: 0.431,
-          netMargin: 0.028,
-          priceToEarnings: 65.2,
-        },
-        percentile: {
-          returnOnEquity: 45,
-          currentRatio: 25,
-          debtToEquity: 55,
-          grossMargin: 35,
-          netMargin: 15,
-          priceToEarnings: 85,
-        },
-      },
-      {
-        id: '3',
-        name: 'Alphabet Inc.',
-        ticker: 'GOOGL',
-        industry: 'Technology',
-        marketCap: 1800000000000,
-        ratios: {
-          returnOnEquity: 0.187,
-          currentRatio: 2.89,
-          debtToEquity: 0.12,
-          grossMargin: 0.554,
-          netMargin: 0.211,
-          priceToEarnings: 24.8,
-        },
-        percentile: {
-          returnOnEquity: 55,
-          currentRatio: 95,
-          debtToEquity: 85,
-          grossMargin: 65,
-          netMargin: 70,
-          priceToEarnings: 40,
-        },
-      },
-      {
-        id: '4',
-        name: 'Meta Platforms Inc.',
-        ticker: 'META',
-        industry: 'Technology',
-        marketCap: 850000000000,
-        ratios: {
-          returnOnEquity: 0.221,
-          currentRatio: 4.12,
-          debtToEquity: 0.08,
-          grossMargin: 0.802,
-          netMargin: 0.208,
-          priceToEarnings: 22.1,
-        },
-        percentile: {
-          returnOnEquity: 65,
-          currentRatio: 98,
-          debtToEquity: 95,
-          grossMargin: 95,
-          netMargin: 68,
-          priceToEarnings: 35,
-        },
-      },
-    ],
-    []
+  // Fetch peer companies data from GraphQL
+  const { data: peerCompaniesData, isLoading: _peerCompaniesLoading } = useQuery(
+    ['peer-companies', company.id],
+    async () => {
+      const result = await executeGraphQL({
+        query: GET_PEER_COMPANIES,
+        variables: { companyId: company.id },
+      });
+      return result.data;
+    },
+    {
+      staleTime: 5 * 60 * 1000, // 5 minutes
+    }
   );
+
+  // Memoize to avoid new array identity when data is missing, satisfying exhaustive-deps
+  const peerCompanies = useMemo(() => {
+    return peerCompaniesData?.peerCompanies ?? [];
+  }, [peerCompaniesData?.peerCompanies]);
 
   // Current company data
   const currentCompanyData = useMemo(() => {
@@ -165,7 +89,7 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
       name: company.name,
       ticker: company.ticker || 'N/A',
       industry: company.gicsDescription || 'Unknown',
-      marketCap: 3000000000000, // Mock data
+      marketCap: company.marketCap || 0,
       ratios: companyRatios,
       percentile: ratios.reduce(
         (acc, ratio) => {
@@ -177,21 +101,42 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
     };
   }, [company, ratios]);
 
-  // Available ratios for selection
+  // Available ratios for selection (optimized to avoid O(n²) complexity)
   const availableRatios = useMemo(() => {
     const ratioNames = new Set<string>();
     [...peerCompanies, currentCompanyData].forEach(company => {
       Object.keys(company.ratios).forEach(ratio => ratioNames.add(ratio));
     });
 
-    return Array.from(ratioNames).map(ratioName => ({
-      name: ratioName,
-      displayName: ratios.find(r => r.ratioName === ratioName)?.ratioDisplayName || ratioName,
-      category: ratios.find(r => r.ratioName === ratioName)?.category || 'other',
-    }));
+    // Create a lookup map for ratios to avoid nested find operations
+    const ratioLookup = new Map(
+      ratios.map(ratio => [
+        ratio.ratioName,
+        { displayName: ratio.ratioDisplayName, category: ratio.category },
+      ])
+    );
+
+    return Array.from(ratioNames).map(ratioName => {
+      const ratioInfo = ratioLookup.get(ratioName);
+      return {
+        name: ratioName,
+        displayName: ratioInfo?.displayName || ratioName,
+        category: ratioInfo?.category || 'other',
+      };
+    });
   }, [peerCompanies, currentCompanyData, ratios]);
 
-  // Filter and sort companies
+  // Memoize performance score calculation to avoid recalculating
+  const companyPerformanceScores = useMemo(() => {
+    const scores = new Map<string, number>();
+    [...peerCompanies, currentCompanyData].forEach(company => {
+      const percentiles = Object.values(company.percentile) as number[];
+      scores.set(company.id, percentiles.reduce((sum, p) => sum + p, 0) / percentiles.length);
+    });
+    return scores;
+  }, [peerCompanies, currentCompanyData]);
+
+  // Filter and sort companies (optimized with memoized performance scores)
   const filteredCompanies = useMemo(() => {
     let filtered = [...peerCompanies];
 
@@ -199,7 +144,7 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
       filtered = filtered.filter(company => company.industry === industryFilter);
     }
 
-    // Sort companies
+    // Sort companies using pre-calculated performance scores
     filtered.sort((a, b) => {
       switch (sortBy) {
         case 'name':
@@ -208,25 +153,23 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
           return (b.marketCap || 0) - (a.marketCap || 0);
         case 'performance':
         default:
-          // Sort by average percentile ranking
-          const aAvg =
-            Object.values(a.percentile).reduce((sum, p) => sum + p, 0) /
-            Object.keys(a.percentile).length;
-          const bAvg =
-            Object.values(b.percentile).reduce((sum, p) => sum + p, 0) /
-            Object.keys(b.percentile).length;
-          return bAvg - aAvg;
+          const aScore = companyPerformanceScores.get(a.id) || 0;
+          const bScore = companyPerformanceScores.get(b.id) || 0;
+          return bScore - aScore;
       }
     });
 
     return filtered;
-  }, [peerCompanies, industryFilter, sortBy]);
+  }, [peerCompanies, industryFilter, sortBy, companyPerformanceScores]);
 
-  // Calculate overall performance score
-  const calculatePerformanceScore = (company: PeerCompany | typeof currentCompanyData) => {
-    const percentiles = Object.values(company.percentile);
-    return percentiles.reduce((sum, p) => sum + p, 0) / percentiles.length;
-  };
+  // Calculate overall performance score (memoized for performance)
+  const calculatePerformanceScore = useCallback(
+    (company: PeerCompany | typeof currentCompanyData) => {
+      const percentiles = Object.values(company.percentile);
+      return percentiles.reduce((sum, p) => sum + p, 0) / percentiles.length;
+    },
+    []
+  );
 
   // Format ratio values
   const formatRatioValue = (value: number, ratioName: string) => {
@@ -404,9 +347,9 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
                   value={selectedRatios.length > 0 ? selectedRatios.join(',') : 'all'}
                   onValueChange={(value: string) => {
                     if (value === 'all') {
-                      onRatioSelectionChange?.([]);
+                      _onRatioSelectionChange?.([]);
                     } else {
-                      onRatioSelectionChange?.(value.split(','));
+                      _onRatioSelectionChange?.(value.split(','));
                     }
                   }}
                 >
@@ -679,3 +622,6 @@ export const PeerComparisonChart: React.FC<PeerComparisonChartProps> = ({
     </div>
   );
 };
+
+// Memoize the component to prevent unnecessary re-renders
+export const PeerComparisonChart = React.memo(PeerComparisonChartComponent);

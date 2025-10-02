@@ -1,5 +1,5 @@
 /**
- * Sample Country Data
+ * Sample Country Data.
  *
  * Sample data for testing the global analysis components.
  * This includes country information and economic indicators.

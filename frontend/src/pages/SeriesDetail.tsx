@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -9,7 +9,6 @@ import {
   Chip,
   Button,
   IconButton,
-  // Paper, // Unused import
   Table,
   TableBody,
   TableCell,
@@ -29,6 +28,7 @@ import {
   Info as InfoIcon,
   TrendingUp as TrendingUpIcon,
 } from '@mui/icons-material';
+import { useQuery } from '@tanstack/react-query';
 
 import InteractiveChartWithCollaboration from '../components/charts/InteractiveChartWithCollaboration';
 
@@ -51,225 +51,201 @@ interface SeriesData {
   }>;
 }
 
+// Generate mock data points for demonstration
+function generateMockDataPoints(seriesId: string) {
+  const points = [];
+  const startDate = new Date('2020-01-01');
+  const endDate = new Date('2024-12-01');
+  // Determine frequency based on series type
+  const isQuarterly = ['test-series-1', 'gdp-real', 'gdp-nominal'].includes(seriesId);
+  const isAnnual = seriesId === 'gdp-per-capita';
+  const isDaily = seriesId === 'fed-funds-rate';
+
+  // Generate appropriate base values for different series types
+  let baseValue: number;
+  switch (seriesId) {
+    case 'test-series-1':
+    case 'gdp-real':
+    case 'gdp-nominal':
+      baseValue = 21000; // GDP in billions
+      break;
+    case 'gdp-per-capita':
+      baseValue = 65000; // GDP per capita in dollars
+      break;
+    case 'unemployment-rate':
+      baseValue = 5.0; // Unemployment rate as percentage
+      break;
+    case 'cpi-all':
+      baseValue = 280; // CPI index value
+      break;
+    case 'fed-funds-rate':
+      baseValue = 2.5; // Fed funds rate as percentage
+      break;
+    case 'industrial-production':
+      baseValue = 105; // Industrial production index
+      break;
+    default:
+      baseValue = 100; // Generic index value
+  }
+  let currentDate = new Date(startDate);
+
+  while (currentDate <= endDate) {
+    // Add some realistic variation
+    const variation = (Math.random() - 0.5) * 0.02; // ±1% variation
+    baseValue *= 1 + variation;
+
+    points.push({
+      date: currentDate.toISOString().split('T')[0],
+      value: Math.round(baseValue * 100) / 100,
+      isOriginalRelease: Math.random() > 0.8, // 20% original releases
+      revisionDate: currentDate.toISOString().split('T')[0],
+    });
+
+    // Increment date based on frequency
+    if (isDaily) {
+      currentDate.setDate(currentDate.getDate() + 7); // Weekly for demo (daily would be too many points)
+    } else if (isQuarterly) {
+      currentDate.setMonth(currentDate.getMonth() + 3);
+    } else if (isAnnual) {
+      currentDate.setFullYear(currentDate.getFullYear() + 1);
+    } else {
+      currentDate.setMonth(currentDate.getMonth() + 1); // Monthly default
+    }
+  }
+
+  return points;
+}
+
+// Mock data generator - in real app this would come from GraphQL
+function getMockSeriesInfo(seriesId: string) {
+  switch (seriesId) {
+    case 'test-series-1':
+    case 'gdp-real':
+      return {
+        title: 'Real Gross Domestic Product',
+        description:
+          'Real GDP measures the inflation-adjusted value of all goods and services produced',
+        source: 'Federal Reserve Economic Data',
+        frequency: 'Quarterly',
+        units: 'Billions of Chained 2017 Dollars',
+      };
+    case 'gdp-nominal':
+      return {
+        title: 'Nominal GDP',
+        description: 'Current dollar value of all goods and services produced',
+        source: 'Bureau of Economic Analysis',
+        frequency: 'Quarterly',
+        units: 'Billions of Dollars',
+      };
+    case 'gdp-per-capita':
+      return {
+        title: 'Real GDP Per Capita',
+        description: 'Real GDP divided by population',
+        source: 'Federal Reserve Economic Data',
+        frequency: 'Annual',
+        units: 'Chained 2017 Dollars',
+      };
+    case 'unemployment-rate':
+      return {
+        title: 'Unemployment Rate',
+        description: 'Percent of labor force that is unemployed',
+        source: 'Bureau of Labor Statistics',
+        frequency: 'Monthly',
+        units: 'Percent',
+      };
+    case 'inflation':
+      return {
+        title: 'Consumer Price Index for All Urban Consumers: All Items',
+        description:
+          'Measure of average change in prices paid by urban consumers for goods and services. The CPI is the most widely used measure of inflation.',
+        source: 'Bureau of Labor Statistics',
+        frequency: 'Monthly',
+        units: 'Index 1982-84=100',
+      };
+    case 'cpi-all':
+      return {
+        title: 'Consumer Price Index for All Urban Consumers: All Items',
+        description: 'Measure of average change in prices paid by urban consumers',
+        source: 'Bureau of Labor Statistics',
+        frequency: 'Monthly',
+        units: 'Index 1982-84=100',
+      };
+    case 'fed-funds-rate':
+      return {
+        title: 'Federal Funds Effective Rate',
+        description: 'Interest rate at which banks lend to each other overnight',
+        source: 'Federal Reserve Economic Data',
+        frequency: 'Daily',
+        units: 'Percent',
+      };
+    case 'industrial-production':
+      return {
+        title: 'Industrial Production Index',
+        description: 'Measure of real output of manufacturing, mining, and utilities',
+        source: 'Federal Reserve Economic Data',
+        frequency: 'Monthly',
+        units: 'Index 2017=100',
+      };
+    default:
+      return {
+        title: `Economic Series (${seriesId})`,
+        description: 'Economic time series data',
+        source: 'Economic Data Source',
+        frequency: 'Monthly',
+        units: 'Various',
+      };
+  }
+}
+
+// Hook to fetch series data with React Query + Suspense
+const useSeriesData = (seriesId: string | undefined) => {
+  return useQuery({
+    queryKey: ['series-data', seriesId],
+    queryFn: async (): Promise<SeriesData> => {
+      if (!seriesId) {
+        throw new Error('Series ID is required');
+      }
+
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const seriesInfo = getMockSeriesInfo(seriesId);
+      return {
+        id: seriesId,
+        title: seriesInfo.title,
+        description: seriesInfo.description,
+        source: seriesInfo.source,
+        frequency: seriesInfo.frequency,
+        units: seriesInfo.units,
+        seasonalAdjustment: 'Seasonally Adjusted Annual Rate',
+        startDate: '1947-01-01',
+        endDate: '2024-09-30',
+        lastUpdated: '2024-12-15',
+        dataPoints: generateMockDataPoints(seriesId),
+      };
+    },
+    suspense: true,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    enabled: !!seriesId,
+  });
+};
+
 /**
  * REQUIREMENT: Detailed series view with interactive charts and data transformation options
  * PURPOSE: Provide comprehensive analysis tools for individual economic time series
- * This creates a detailed view similar to FRED's series pages but with modern UX
+ * This creates a detailed view similar to FRED's series pages but with modern UX.
  */
-const SeriesDetail: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
+
+// Main content component - assumes data is loaded via Suspense
+const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
   const navigate = useNavigate();
+  const { data: seriesData } = useSeriesData(seriesId);
 
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
-  const [seriesData, setSeriesData] = React.useState<SeriesData | null>(null);
-
-  // Mock data - in real app this would come from GraphQL queries
-  React.useEffect(() => {
-    const fetchSeriesData = async () => {
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // Mock data based on series ID - FIX: Handle all actual series IDs from SeriesExplorer
-        const getSeriesData = (seriesId: string) => {
-          switch (seriesId) {
-            case 'test-series-1':
-            case 'gdp-real':
-              return {
-                title: 'Real Gross Domestic Product',
-                description:
-                  'Real GDP measures the inflation-adjusted value of all goods and services produced',
-                source: 'Federal Reserve Economic Data',
-                frequency: 'Quarterly',
-                units: 'Billions of Chained 2017 Dollars',
-              };
-            case 'gdp-nominal':
-              return {
-                title: 'Nominal GDP',
-                description: 'Current dollar value of all goods and services produced',
-                source: 'Bureau of Economic Analysis',
-                frequency: 'Quarterly',
-                units: 'Billions of Dollars',
-              };
-            case 'gdp-per-capita':
-              return {
-                title: 'Real GDP Per Capita',
-                description: 'Real GDP divided by population',
-                source: 'Federal Reserve Economic Data',
-                frequency: 'Annual',
-                units: 'Chained 2017 Dollars',
-              };
-            case 'unemployment-rate':
-              return {
-                title: 'Unemployment Rate',
-                description: 'Percent of labor force that is unemployed',
-                source: 'Bureau of Labor Statistics',
-                frequency: 'Monthly',
-                units: 'Percent',
-              };
-            case 'inflation':
-              return {
-                title: 'Consumer Price Index for All Urban Consumers: All Items',
-                description:
-                  'Measure of average change in prices paid by urban consumers for goods and services. The CPI is the most widely used measure of inflation.',
-                source: 'Bureau of Labor Statistics',
-                frequency: 'Monthly',
-                units: 'Index 1982-84=100',
-              };
-            case 'cpi-all':
-              return {
-                title: 'Consumer Price Index for All Urban Consumers: All Items',
-                description: 'Measure of average change in prices paid by urban consumers',
-                source: 'Bureau of Labor Statistics',
-                frequency: 'Monthly',
-                units: 'Index 1982-84=100',
-              };
-            case 'fed-funds-rate':
-              return {
-                title: 'Federal Funds Effective Rate',
-                description: 'Interest rate at which banks lend to each other overnight',
-                source: 'Federal Reserve Economic Data',
-                frequency: 'Daily',
-                units: 'Percent',
-              };
-            case 'industrial-production':
-              return {
-                title: 'Industrial Production Index',
-                description: 'Measure of real output of manufacturing, mining, and utilities',
-                source: 'Federal Reserve Economic Data',
-                frequency: 'Monthly',
-                units: 'Index 2017=100',
-              };
-            default:
-              return {
-                title: `Economic Series (${seriesId})`,
-                description: 'Economic time series data',
-                source: 'Economic Data Source',
-                frequency: 'Monthly',
-                units: 'Various',
-              };
-          }
-        };
-
-        const seriesInfo = getSeriesData(id || 'unknown');
-        const mockData: SeriesData = {
-          id: id || 'unknown',
-          title: seriesInfo.title,
-          description: seriesInfo.description,
-          source: seriesInfo.source,
-          frequency: seriesInfo.frequency,
-          units: seriesInfo.units,
-          seasonalAdjustment: 'Seasonally Adjusted Annual Rate',
-          startDate: '1947-01-01',
-          endDate: '2024-09-30',
-          lastUpdated: '2024-12-15',
-          dataPoints: generateMockDataPoints(id || 'gdp-real'),
-        };
-
-        setSeriesData(mockData);
-      } catch (err) {
-        setError('Failed to load series data');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    if (id) {
-      fetchSeriesData();
-    }
-  }, [id]);
-
-  // Generate mock data points for demonstration
-  function generateMockDataPoints(seriesId: string) {
-    const points = [];
-    const startDate = new Date('2020-01-01');
-    const endDate = new Date('2024-12-01');
-    // Determine frequency based on series type
-    const isQuarterly = ['test-series-1', 'gdp-real', 'gdp-nominal'].includes(seriesId);
-    const isAnnual = seriesId === 'gdp-per-capita';
-    const isDaily = seriesId === 'fed-funds-rate';
-
-    // Generate appropriate base values for different series types
-    let baseValue: number;
-    switch (seriesId) {
-      case 'test-series-1':
-      case 'gdp-real':
-      case 'gdp-nominal':
-        baseValue = 21000; // GDP in billions
-        break;
-      case 'gdp-per-capita':
-        baseValue = 65000; // GDP per capita in dollars
-        break;
-      case 'unemployment-rate':
-        baseValue = 5.0; // Unemployment rate as percentage
-        break;
-      case 'cpi-all':
-        baseValue = 280; // CPI index value
-        break;
-      case 'fed-funds-rate':
-        baseValue = 2.5; // Fed funds rate as percentage
-        break;
-      case 'industrial-production':
-        baseValue = 105; // Industrial production index
-        break;
-      default:
-        baseValue = 100; // Generic index value
-    }
-    let currentDate = new Date(startDate);
-
-    while (currentDate <= endDate) {
-      // Add some realistic variation
-      const variation = (Math.random() - 0.5) * 0.02; // ±1% variation
-      baseValue *= 1 + variation;
-
-      points.push({
-        date: currentDate.toISOString().split('T')[0],
-        value: Math.round(baseValue * 100) / 100,
-        isOriginalRelease: Math.random() > 0.8, // 20% original releases
-        revisionDate: currentDate.toISOString().split('T')[0],
-      });
-
-      // Increment date based on frequency
-      if (isDaily) {
-        currentDate.setDate(currentDate.getDate() + 7); // Weekly for demo (daily would be too many points)
-      } else if (isQuarterly) {
-        currentDate.setMonth(currentDate.getMonth() + 3);
-      } else if (isAnnual) {
-        currentDate.setFullYear(currentDate.getFullYear() + 1);
-      } else {
-        currentDate.setMonth(currentDate.getMonth() + 1); // Monthly default
-      }
-    }
-
-    return points;
-  }
-
-  if (isLoading) {
-    return (
-      <Box>
-        <Skeleton variant='text' width='60%' height={40} sx={{ mb: 2 }} />
-        <Skeleton variant='text' width='80%' height={24} sx={{ mb: 4 }} />
-        <Grid container spacing={3}>
-          <Grid item xs={12} lg={8}>
-            <Skeleton variant='rectangular' height={500} />
-          </Grid>
-          <Grid item xs={12} lg={4}>
-            <Skeleton variant='rectangular' height={300} />
-          </Grid>
-        </Grid>
-      </Box>
-    );
-  }
-
-  if (error || !seriesData) {
+  if (!seriesData) {
     return (
       <Box>
         <Alert severity='error' sx={{ mb: 3 }}>
-          {error || 'Series not found'}
+          Series not found
         </Alert>
         <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/explore')}>
           Back to Explorer
@@ -471,6 +447,46 @@ const SeriesDetail: React.FC = () => {
         </Grid>
       </Grid>
     </Box>
+  );
+};
+
+// Wrapper component with Suspense boundary
+const SeriesDetail: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+
+  if (!id) {
+    return (
+      <Box>
+        <Alert severity='error' sx={{ mb: 3 }}>
+          No series ID provided
+        </Alert>
+        <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/explore')}>
+          Back to Explorer
+        </Button>
+      </Box>
+    );
+  }
+
+  return (
+    <Suspense
+      fallback={
+        <Box>
+          <Skeleton variant='text' width='60%' height={40} sx={{ mb: 2 }} />
+          <Skeleton variant='text' width='80%' height={24} sx={{ mb: 4 }} />
+          <Grid container spacing={3}>
+            <Grid item xs={12} lg={8}>
+              <Skeleton variant='rectangular' height={500} />
+            </Grid>
+            <Grid item xs={12} lg={4}>
+              <Skeleton variant='rectangular' height={300} />
+            </Grid>
+          </Grid>
+        </Box>
+      }
+    >
+      <SeriesDetailContent seriesId={id} />
+    </Suspense>
   );
 };
 

@@ -3,10 +3,12 @@
 // This ensures components have access to routing, theming, and data fetching contexts
 
 import React from 'react';
-import { QueryClient, QueryClientProvider } from 'react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline } from '@mui/material';
 import { render } from '@testing-library/react';
+import { AuthProvider } from '../contexts/AuthContext';
+import { ThemeProvider as CustomThemeProvider } from '../contexts/ThemeContext';
 
 interface TestProvidersProps {
   children: React.ReactNode;
@@ -15,7 +17,11 @@ interface TestProvidersProps {
 
 /**
  * Test wrapper component that provides all necessary contexts
- * REQUIREMENT: Isolated testing environment with all required providers
+ * REQUIREMENT: Isolated testing environment with all required providers.
+ * @param root0 - The component props object.
+ * @param root0.children - Child components to render.
+ * @param root0.queryClient - Optional QueryClient instance.
+ * @returns JSX element with all test providers.
  */
 export function TestProviders({ children, queryClient }: TestProvidersProps) {
   // Create a fresh QueryClient for each test to avoid cache interference
@@ -49,19 +55,28 @@ export function TestProviders({ children, queryClient }: TestProvidersProps) {
 
   return (
     <QueryClientProvider client={testQueryClient}>
-      <RouterWrapper>
-        <ThemeProvider theme={testTheme}>
-          <CssBaseline />
-          {children}
-        </ThemeProvider>
-      </RouterWrapper>
+      <AuthProvider>
+        <CustomThemeProvider>
+          <RouterWrapper>
+            <ThemeProvider theme={testTheme}>
+              <CssBaseline />
+              {children}
+            </ThemeProvider>
+          </RouterWrapper>
+        </CustomThemeProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
 
 /**
  * Custom render function that includes all providers
- * REQUIREMENT: Simplified testing setup with automatic provider wrapping
+ * REQUIREMENT: Simplified testing setup with automatic provider wrapping.
+ * @param ui - The component to render.
+ * @param options - Render options.
+ * @param options.queryClient - Optional QueryClient instance.
+ * @param options.initialEntries - Optional initial router entries.
+ * @returns Render result with all providers.
  */
 export function renderWithProviders(
   ui: React.ReactElement,
@@ -88,7 +103,9 @@ export * from '@testing-library/react';
 
 /**
  * Create a mock QueryClient with custom configuration
- * REQUIREMENT: Configurable query client for different test scenarios
+ * REQUIREMENT: Configurable query client for different test scenarios.
+ * @param overrides - Partial QueryClient configuration to override defaults.
+ * @returns Configured QueryClient instance.
  */
 export function createMockQueryClient(overrides: Partial<QueryClient> = {}) {
   return new QueryClient({
@@ -108,7 +125,7 @@ export function createMockQueryClient(overrides: Partial<QueryClient> = {}) {
 
 /**
  * Wait for React Query to finish loading
- * REQUIREMENT: Utility for waiting for async data fetching in tests
+ * REQUIREMENT: Utility for waiting for async data fetching in tests.
  */
 export async function waitForLoadingToFinish() {
   const { waitFor } = await import('@testing-library/react');
