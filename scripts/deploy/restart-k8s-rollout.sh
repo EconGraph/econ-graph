@@ -86,10 +86,10 @@ docker tag econ-graph-chart-api:latest econ-graph-chart-api:v1.0.0
 
 # Load images into MicroK8s
 echo "📦 Loading images into MicroK8s..."
-microk8s ctr images import <(docker save econ-graph-backend:v3.7.4)
-microk8s ctr images import <(docker save econ-graph-frontend:v3.7.4)
-microk8s ctr images import <(docker save econ-graph-chart-api:v1.0.0)
-microk8s ctr images import <(docker save econ-graph-admin-frontend:v1.0.0)
+docker save econ-graph-backend:v3.7.4 | microk8s ctr images import - || true
+docker save econ-graph-frontend:v3.7.4 | microk8s ctr images import - || true
+docker save econ-graph-chart-api:v1.0.0 | microk8s ctr images import - || true
+docker save econ-graph-admin-frontend:v1.0.0 | microk8s ctr images import - || true
 
 # Check if PostgreSQL is running
 echo "🗄️  Checking PostgreSQL..."

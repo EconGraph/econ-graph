@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Setup MicroK8s for EconGraph development
-# This script configures MicroK8s with required addons
+# Complete MicroK8s setup for EconGraph development
+# This script provides the same functionality as the kind setup script
 
 set -e
 
-echo "🚀 Setting up MicroK8s for EconGraph development..."
+echo "🚀 Setting up MicroK8s for EconGraph development (complete setup)..."
 echo ""
 
 # Check if MicroK8s is installed
@@ -52,6 +52,10 @@ echo "🔧 Configuring kubectl..."
 microk8s kubectl config view --raw > ~/.kube/config
 kubectl config use-context microk8s
 
+# Create namespace
+echo "📋 Creating econ-graph namespace..."
+kubectl create namespace econ-graph --dry-run=client -o yaml | kubectl apply -f -
+
 # Check status
 echo "📊 MicroK8s status:"
 microk8s status
@@ -63,15 +67,16 @@ echo "🌐 Access your cluster:"
 echo "  kubectl get nodes"
 echo "  kubectl get pods --all-namespaces"
 echo ""
-echo "🌐 Port mappings (MicroK8s uses ingress, not NodePort):"
-echo "  - Frontend: https://www.econ-graph.com (SSL)"
-echo "  - Backend:  https://www.econ-graph.com/api (SSL)"
-echo "  - Grafana:  https://www.econ-graph.com/grafana (SSL)"
-echo "  - Admin UI: https://www.econ-graph.com/admin (SSL)"
+echo "🌐 Production URLs (with SSL):"
+echo "  - Frontend: https://www.econ-graph.com"
+echo "  - Backend:  https://www.econ-graph.com/api"
+echo "  - Grafana:  https://www.econ-graph.com/grafana"
+echo "  - Admin UI: https://www.econ-graph.com/admin"
 echo ""
-echo "🔧 For local development (if needed):"
+echo "🔧 For local development:"
 echo "  - Check ingress status: kubectl get ingress -n econ-graph"
 echo "  - Check services: kubectl get svc -n econ-graph"
+echo "  - Check pods: kubectl get pods -n econ-graph"
 echo ""
 echo "🔧 MicroK8s commands:"
 echo "  microk8s kubectl <command>  # Use microk8s kubectl"
@@ -81,4 +86,11 @@ echo "  microk8s start              # Start cluster"
 echo ""
 echo "📋 Next steps:"
 echo "  1. Run: ./scripts/deploy/restart-k8s-rollout.sh"
-echo "  2. Your application will be available at the configured URLs"
+echo "  2. Your application will be available at the production URLs above"
+echo ""
+echo "🔒 Security features enabled:"
+echo "  - SSL/TLS termination with Let's Encrypt"
+echo "  - CORS configuration"
+echo "  - Security headers"
+echo "  - Rate limiting"
+echo "  - Network policies"

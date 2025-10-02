@@ -55,10 +55,11 @@ echo "Admin frontend image built successfully"
 
 # Load images into kind cluster
 echo "Loading images into MicroK8s..."
-microk8s ctr images import <(docker save econ-graph-backend:${VERSION}) || true
-microk8s ctr images import <(docker save econ-graph-frontend:${VERSION}) || true
-microk8s ctr images import <(docker save econ-graph-chart-api:v1.0.0) || true
-microk8s ctr images import <(docker save econ-graph-admin-frontend:v1.0.0) || true
+# Save images to temporary files and import
+docker save econ-graph-backend:${VERSION} | microk8s ctr images import - || true
+docker save econ-graph-frontend:${VERSION} | microk8s ctr images import - || true
+docker save econ-graph-chart-api:v1.0.0 | microk8s ctr images import - || true
+docker save econ-graph-admin-frontend:v1.0.0 | microk8s ctr images import - || true
 
 echo "All images built and loaded successfully!"
 echo ""
