@@ -11,13 +11,13 @@ const cleanupTestResources = () => {
   // Clean up React Testing Library
   cleanup();
 
-  // Clear all timers and intervals
-  for (let i = 1; i < 10000; i++) {
+  // Clear all timers and intervals (expanded range for CI)
+  for (let i = 1; i < 50000; i++) {
     clearTimeout(i);
     clearInterval(i);
   }
 
-  // Clean up DOM elements
+  // Clean up DOM elements more aggressively
   const containers = document.querySelectorAll('[data-testid="test-container"]');
   containers.forEach(container => container.remove());
 
@@ -49,6 +49,11 @@ const cleanupTestResources = () => {
   // Clear console to prevent memory leaks from console.log
   // eslint-disable-next-line no-console
   console.clear();
+
+  // Force garbage collection if available (helps with memory pressure in CI)
+  if (typeof global !== 'undefined' && global.gc) {
+    global.gc();
+  }
 };
 
 // Start MSW server for all tests

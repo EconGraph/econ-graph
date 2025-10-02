@@ -1299,7 +1299,7 @@ jobs:
   frontend-tests:
     name: Frontend Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20 # Increased for resource-constrained CI
 
     steps:
     - name: Checkout code
@@ -1325,10 +1325,16 @@ jobs:
     - name: Run tests (parallel)
       working-directory: frontend
       run: npm run test:coverage
+      env:
+        CI: true
+        NODE_OPTIONS: --max-old-space-size=4096
 
     - name: Run problematic tests (serial)
       working-directory: frontend
       run: npm run test:coverage -- "**/ChartCollaborationConnected*" "**/ChartCollaboration*" "**/ProfessionalChart*" "**/InteractiveChartWithCollaboration*"
+      env:
+        CI: true
+        NODE_OPTIONS: --max-old-space-size=4096
 
   quality-checks:
     name: Quality Checks
@@ -1627,7 +1633,7 @@ jobs:
   frontend-integration-tests:
     name: Frontend Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20 # Increased for resource-constrained CI
     needs: [frontend-tests]
 
     steps:

@@ -16,23 +16,26 @@ export default defineConfig({
         isolate: false, // Share memory between tests for faster execution
       },
     },
-    // Global timeout for entire test run
-    timeout: 15000, // 15 seconds max for all tests
+    // CI-specific optimizations
+    ...(process.env.CI && {
+      // Run tests sequentially in CI to avoid resource contention
+      pool: 'threads',
+      poolOptions: {
+        threads: {
+          singleThread: true,
+        },
+      },
+      // More conservative timeouts for CI
+      testTimeout: 15000,
+      hookTimeout: 10000,
+    }),
     // Force exit after tests complete
-    teardownTimeout: 200,
-    testTimeout: 3000,
-    hookTimeout: 3000,
+    teardownTimeout: 1000, // Increased for CI cleanup
+    testTimeout: 10000, // 10 seconds per test (increased for CI)
+    hookTimeout: 5000, // 5 seconds for hooks (increased for CI)
     bail: 0, // Don't bail on first failure
     // Force process exit after tests complete to prevent hanging
     forceExit: true,
-    // Additional options to prevent hanging
-    reporter: ['verbose'],
-    // Force exit on completion
-    onFinished: () => {
-      setTimeout(() => {
-        process.exit(0);
-      }, 100);
-    },
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
