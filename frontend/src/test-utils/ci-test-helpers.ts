@@ -1,6 +1,6 @@
 /**
  * CI-specific test helpers to handle timing and resource constraints
- * in GitHub Actions environment
+ * in GitHub Actions environment.
  */
 
 import { waitFor } from '@testing-library/react';
