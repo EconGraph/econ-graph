@@ -15,6 +15,30 @@ export const GET_FINANCIAL_DASHBOARD = `
         period
         data
       }
+      financialRatios {
+        id
+        statementId
+        ratioName
+        ratioDisplayName
+        value
+        category
+        formula
+        interpretation
+        benchmarkPercentile
+        periodEndDate
+        fiscalYear
+        fiscalQuarter
+        calculatedAt
+        dataQualityScore
+      }
+      trends {
+        id
+        ratioName
+        period
+        value
+        change
+        direction
+      }
     }
   }
 `;

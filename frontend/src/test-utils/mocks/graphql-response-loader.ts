@@ -1,11 +1,27 @@
 // GraphQL Response Loader for MSW
-// Loads JSON response files for different GraphQL operations and scenarios
+// Browser-compatible version that uses static imports instead of file system operations
 
-import * as fs from 'fs';
-import * as path from 'path';
+// Import JSON files with proper typing
+import getFinancialDashboardSuccess from './graphql-responses/get_financial_dashboard/success.json';
+import getFinancialDashboardError from './graphql-responses/get_financial_dashboard/error.json';
+import getFinancialDashboardLoading from './graphql-responses/get_financial_dashboard/loading.json';
+import getFinancialStatementSuccess from './graphql-responses/get_financial_statement/success.json';
+import getFinancialStatementError from './graphql-responses/get_financial_statement/error.json';
+import getFinancialStatementLoading from './graphql-responses/get_financial_statement/loading.json';
 
-// eslint-disable-next-line no-undef
-const RESPONSES_DIR = path.join(__dirname, 'graphql-responses');
+// Response mapping for browser compatibility
+const RESPONSE_MAP: Record<string, Record<string, any>> = {
+  get_financial_dashboard: {
+    success: getFinancialDashboardSuccess,
+    error: getFinancialDashboardError,
+    loading: getFinancialDashboardLoading,
+  },
+  get_financial_statement: {
+    success: getFinancialStatementSuccess,
+    error: getFinancialStatementError,
+    loading: getFinancialStatementLoading,
+  },
+};
 
 export interface ResponseScenario {
   operation: string;
@@ -20,16 +36,28 @@ export interface ResponseScenario {
  * @returns GraphQL response object.
  */
 export function loadGraphQLResponse(operation: string, scenario: string): any {
-  const filePath = path.join(RESPONSES_DIR, operation, `${scenario}.json`);
-
   try {
-    const fileContent = fs.readFileSync(filePath, 'utf-8');
-    return JSON.parse(fileContent);
+    const operationResponses = RESPONSE_MAP[operation];
+    if (!operationResponses) {
+      throw new Error(`Operation ${operation} not found in response map`);
+    }
+    
+    const response = operationResponses[scenario];
+    if (!response) {
+      throw new Error(`Scenario ${scenario} not found for operation ${operation}`);
+    }
+    
+    return response;
   } catch (error) {
     console.warn(`Failed to load GraphQL response: ${operation}/${scenario}`, error);
     return {
       data: null,
-      errors: [{ message: `Mock response not found: ${operation}/${scenario}` }],
+      errors: [
+        {
+          message: `Mock response not found for ${operation}/${scenario}`,
+          extensions: { code: 'MOCK_NOT_FOUND' },
+        },
+      ],
     };
   }
 }
@@ -40,72 +68,9 @@ export function loadGraphQLResponse(operation: string, scenario: string): any {
  * @returns Array of available scenario names.
  */
 export function getAvailableScenarios(operation: string): string[] {
-  const operationDir = path.join(RESPONSES_DIR, operation);
-
-  try {
-    const files = fs.readdirSync(operationDir);
-    return files.filter(file => file.endsWith('.json')).map(file => file.replace('.json', ''));
-  } catch (error) {
-    console.warn(`Failed to read scenarios for operation: ${operation}`, error);
+  const operationResponses = RESPONSE_MAP[operation];
+  if (!operationResponses) {
     return [];
   }
-}
-
-/**
- * Get all available GraphQL operations.
- * @returns Array of operation names.
- */
-export function getAvailableOperations(): string[] {
-  try {
-    const dirs = fs.readdirSync(RESPONSES_DIR);
-    return dirs.filter(dir => {
-      const dirPath = path.join(RESPONSES_DIR, dir);
-      return fs.statSync(dirPath).isDirectory();
-    });
-  } catch (error) {
-    console.warn('Failed to read GraphQL operations directory', error);
-    return [];
-  }
-}
-
-/**
- * Create a response handler for MSW that uses the specified scenario.
- * @param operation - GraphQL operation name.
- * @param scenario - Response scenario to use.
- * @returns MSW response handler.
- */
-export function createResponseHandler(operation: string, scenario = 'success') {
-  return () => {
-    const response = loadGraphQLResponse(operation, scenario);
-    // eslint-disable-next-line no-undef
-    return new Response(JSON.stringify(response), {
-      status: response.errors ? 400 : 200,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-  };
-}
-
-/**
- * Validate that all response files are valid JSON.
- * @returns Array of validation errors.
- */
-export function validateResponseFiles(): string[] {
-  const errors: string[] = [];
-  const operations = getAvailableOperations();
-
-  operations.forEach(operation => {
-    const scenarios = getAvailableScenarios(operation);
-
-    scenarios.forEach(scenario => {
-      try {
-        loadGraphQLResponse(operation, scenario);
-      } catch (error) {
-        errors.push(`${operation}/${scenario}: ${error}`);
-      }
-    });
-  });
-
-  return errors;
+  return Object.keys(operationResponses);
 }

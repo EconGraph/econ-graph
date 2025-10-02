@@ -60,6 +60,15 @@
     "@apollo/client": "4.0.4",
     "@graphql-tools/mock": "^9.0.25",
     "@playwright/test": "^1.55.0",
+    "@storybook/addon-essentials": "^8.6.14",
+    "@storybook/addon-interactions": "^8.6.14",
+    "@storybook/addon-links": "^8.6.14",
+    "@storybook/addon-onboarding": "^8.6.14",
+    "@storybook/blocks": "^8.6.14",
+    "@storybook/react": "^8.6.14",
+    "@storybook/react-vite": "^8.6.14",
+    "@storybook/test": "^8.6.14",
+    "@storybook/test-runner": "^0.19.1",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^14.3.1",
     "@testing-library/user-event": "^14.6.1",
@@ -118,7 +127,12 @@
     "test:e2e:global-analysis": "playwright test --config=ci/configs/playwright-global-analysis.config.ts",
     "test:e2e:professional-analysis": "playwright test --config=ci/configs/playwright-professional-analysis.config.ts",
     "test:e2e:mobile:global-analysis": "playwright test --config=ci/configs/playwright-mobile-global-analysis.config.ts",
-    "test:e2e:mobile:professional-analysis": "playwright test --config=ci/configs/playwright-mobile-professional-analysis.config.ts"
+    "test:e2e:mobile:professional-analysis": "playwright test --config=ci/configs/playwright-mobile-professional-analysis.config.ts",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build",
+    "test-storybook": "@storybook/test-runner --config-dir=.storybook",
+    "test-storybook:ui": "@storybook/test-runner --config-dir=.storybook --ui",
+    "test-storybook:headed": "@storybook/test-runner --config-dir=.storybook --headed"
   },
   "eslintConfig": {
     "extends": [

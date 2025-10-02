@@ -1,7 +1,7 @@
 // Financial UI Components Export Index
 // This file exports all financial-related UI components for easy importing
 
-export { FinancialDashboard } from './FinancialDashboard';
+export { FinancialDashboardFixed as FinancialDashboard } from './FinancialDashboardFixed';
 export { FinancialStatementViewer } from './FinancialStatementViewer';
 export { RatioAnalysisPanel } from './RatioAnalysisPanel';
 export { BenchmarkComparison } from './BenchmarkComparison';

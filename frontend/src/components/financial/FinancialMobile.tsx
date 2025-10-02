@@ -29,7 +29,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { FinancialStatement, FinancialRatio, Company } from '@/types/financial';
-import { FinancialDashboard } from './FinancialDashboard';
+import { FinancialDashboardFixed as FinancialDashboard } from './FinancialDashboardFixed';
 import { FinancialStatementViewer } from './FinancialStatementViewer';
 import { RatioAnalysisPanel } from './RatioAnalysisPanel';
 import { TrendAnalysisChart } from './TrendAnalysisChart';

@@ -2,7 +2,7 @@ import React, { Suspense } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { vi } from 'vitest';
-import { FinancialDashboard } from '../FinancialDashboard';
+import { FinancialDashboardFixed as FinancialDashboard } from '../FinancialDashboardFixed';
 import { FinancialStatement as _FinancialStatement, Company as _Company, FinancialRatio as _FinancialRatio } from '../../../types/financial';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ErrorBoundary } from '../../common/ErrorBoundary';
