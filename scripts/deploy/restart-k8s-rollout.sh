@@ -210,8 +210,7 @@ else
     echo "Backend deployment not found yet, skipping backend wait"
 fi
 
-# Wait for other pods that should exist
-kubectl wait --for=condition=Ready pods --all -n econ-graph --timeout=300s || true
+# Do not wait on all pods here; backend may not exist on first run
 
 # Stop monitoring
 kill $MONITOR_PID 2>/dev/null || true
