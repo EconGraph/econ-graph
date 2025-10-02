@@ -1,0 +1,57 @@
+{
+  "data": {
+    "peerCompanies": [
+      {
+        "id": "0000789019",
+        "name": "Microsoft Corporation",
+        "ticker": "MSFT",
+        "industry": "Software",
+        "marketCap": 2800000000000,
+        "ratios": {
+          "currentRatio": 2.5,
+          "debtToEquity": 0.3,
+          "returnOnEquity": 0.25
+        },
+        "percentile": {
+          "currentRatio": 75,
+          "debtToEquity": 60,
+          "returnOnEquity": 80
+        }
+      },
+      {
+        "id": "0001018724",
+        "name": "Amazon.com Inc.",
+        "ticker": "AMZN",
+        "industry": "E-commerce",
+        "marketCap": 1500000000000,
+        "ratios": {
+          "currentRatio": 1.2,
+          "debtToEquity": 0.8,
+          "returnOnEquity": 0.15
+        },
+        "percentile": {
+          "currentRatio": 45,
+          "debtToEquity": 70,
+          "returnOnEquity": 55
+        }
+      },
+      {
+        "id": "0001652044",
+        "name": "Alphabet Inc.",
+        "ticker": "GOOGL",
+        "industry": "Internet Services",
+        "marketCap": 1800000000000,
+        "ratios": {
+          "currentRatio": 3.1,
+          "debtToEquity": 0.1,
+          "returnOnEquity": 0.18
+        },
+        "percentile": {
+          "currentRatio": 85,
+          "debtToEquity": 25,
+          "returnOnEquity": 65
+        }
+      }
+    ]
+  }
+}

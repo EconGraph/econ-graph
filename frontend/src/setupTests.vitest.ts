@@ -76,12 +76,6 @@ afterAll(async () => {
       clearTimeout(i);
       clearInterval(i);
     }
-
-    // Force exit after cleanup with a short delay to allow cleanup to complete
-    setTimeout(() => {
-      // Force exit to prevent hanging processes
-      process.exit(0);
-    }, 500);
   }
 });
 

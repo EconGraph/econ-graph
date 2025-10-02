@@ -31,7 +31,7 @@ import { FinancialRatio, FinancialStatement } from '@/types/financial';
 
 interface FinancialAlert {
   id: string;
-  type:
+  alertType:
     | 'ratio_threshold'
     | 'trend_change'
     | 'filing_deadline'
@@ -42,16 +42,19 @@ interface FinancialAlert {
   title: string;
   description: string;
   companyId: string;
-  companyName: string;
+  companyName?: string;
   ratioName?: string;
   currentValue?: number;
   thresholdValue?: number;
-  direction: 'decline' | 'improvement' | 'change';
-  isActive: boolean;
-  isRead: boolean;
+  direction?: 'decline' | 'improvement' | 'change';
+  isActive?: boolean;
+  isRead?: boolean;
   createdAt: string;
   triggeredAt?: string;
   expiresAt?: string;
+  isResolved?: boolean;
+  resolvedAt?: string;
+  updatedAt?: string;
   metadata?: Record<string, any>;
 }
 
@@ -111,8 +114,8 @@ const getSeverityConfig = (severity: string) => {
   }
 };
 
-const getAlertTypeIcon = (type: string) => {
-  switch (type) {
+const getAlertTypeIcon = (alertType: string) => {
+  switch (alertType) {
     case 'ratio_threshold':
       return <DollarSign className='h-4 w-4' />;
     case 'trend_change':
@@ -200,7 +203,7 @@ const AlertCard = React.memo<AlertCardProps>(
                   <Badge className={severityConfig.badge}>
                     {alert.severity.charAt(0).toUpperCase() + alert.severity.slice(1)}
                   </Badge>
-                  <Badge variant='outline'>{alert.type.replace('_', ' ')}</Badge>
+                  <Badge variant='outline'>{alert.alertType?.replace('_', ' ') || 'Unknown'}</Badge>
                 </div>
               </div>
 
@@ -209,8 +212,8 @@ const AlertCard = React.memo<AlertCardProps>(
               <div className='flex items-center justify-between'>
                 <div className='flex items-center space-x-4 text-sm text-gray-500'>
                   <div className='flex items-center space-x-1'>
-                    {getAlertTypeIcon(alert.type)}
-                    <span>{alert.companyName}</span>
+                    {getAlertTypeIcon(alert.alertType || 'custom')}
+                    <span>{alert.companyName || 'Unknown Company'}</span>
                   </div>
 
                   {alert.ratioName && alert.currentValue && (
@@ -255,6 +258,7 @@ const AlertCard = React.memo<AlertCardProps>(
                       {alert.direction === 'decline' && 'decline'}
                       {alert.direction === 'improvement' && 'improvement'}
                       {alert.direction === 'change' && 'change'}
+                      {!alert.direction && 'unknown'}
                     </span>
                   </div>
                 </div>
@@ -345,9 +349,9 @@ const FinancialAlertsContentComponent: React.FC<FinancialAlertsProps> = ({
 
   useEffect(() => {
     if (alertsData) {
-      setAlerts(alertsData.company?.alerts || []);
+      setAlerts(alertsData.financialAlerts || []);
       setIsLoading(false);
-      setIsEmpty((alertsData.company?.alerts || []).length === 0);
+      setIsEmpty((alertsData.financialAlerts || []).length === 0);
     }
   }, [alertsData]);
 
@@ -368,7 +372,7 @@ const FinancialAlertsContentComponent: React.FC<FinancialAlertsProps> = ({
 
     let filtered = alerts.filter(alert => {
       if (!showRead && alert.isRead) return false;
-      if (filterType !== 'all' && alert.type !== filterType) return false;
+      if (filterType !== 'all' && alert.alertType !== filterType) return false;
       if (filterSeverity !== 'all' && alert.severity !== filterSeverity) return false;
       if (
         searchTerm &&
@@ -385,7 +389,7 @@ const FinancialAlertsContentComponent: React.FC<FinancialAlertsProps> = ({
         case 'severity':
           return severityOrder[b.severity] - severityOrder[a.severity];
         case 'type':
-          return a.type.localeCompare(b.type);
+          return (a.alertType || '').localeCompare(b.alertType || '');
         case 'date':
         default:
           // Pre-compute dates to avoid repeated Date object creation

@@ -15,7 +15,7 @@ const mockAlerts = [
     title: 'Current Ratio Below Threshold',
     description: 'Current ratio of 0.95 is below the recommended threshold of 1.0',
     companyId: 'test-company',
-    companyName: 'Test Company Inc.',
+    companyName: 'Apple Inc.',
     direction: 'decline',
     isActive: true,
     isRead: false,
@@ -29,7 +29,7 @@ const mockAlerts = [
     title: '10-Q Filing Due Soon',
     description: 'Quarterly report (10-Q) is due within 5 business days',
     companyId: 'test-company',
-    companyName: 'Test Company Inc.',
+    companyName: 'Apple Inc.',
     direction: 'change',
     isActive: true,
     isRead: false,
@@ -43,7 +43,7 @@ const mockAlerts = [
     title: 'Data Quality Warning',
     description: 'Some financial data has low confidence scores',
     companyId: 'test-company',
-    companyName: 'Test Company Inc.',
+    companyName: 'Apple Inc.',
     direction: 'stable',
     isActive: true,
     isRead: true,
@@ -57,7 +57,7 @@ const mockAlerts = [
     title: 'Industry Benchmark Updated',
     description: 'Industry benchmarks have been updated with latest data',
     companyId: 'test-company',
-    companyName: 'Test Company Inc.',
+    companyName: 'Apple Inc.',
     direction: 'improvement',
     isActive: false,
     isRead: true,
@@ -132,8 +132,8 @@ describe('FinancialAlerts', () => {
     renderWithProviders({ companyId: "test-company", ratios: [], statements: [] });
 
     await waitFor(() => {
-      // Should show count of unread alerts (2 unread out of 4 total)
-      expect(screen.getAllByText('2 Unread').length).toBeGreaterThan(0);
+      // Should show count of unread alerts (3 unread out of 4 total)
+      expect(screen.getAllByText('3 Unread').length).toBeGreaterThan(0);
     });
   });
 
@@ -218,8 +218,8 @@ describe('FinancialAlerts', () => {
       expect(jan15Elements.length).toBeGreaterThan(0);
     });
     await waitFor(() => {
-      const jan25Elements = screen.getAllByText(/Jan 25, 2024/i);
-      expect(jan25Elements.length).toBeGreaterThan(0);
+      const jan12Elements = screen.getAllByText(/Jan 12, 2024/i);
+      expect(jan12Elements.length).toBeGreaterThan(0);
     });
   });
 
@@ -373,8 +373,8 @@ describe('FinancialAlerts', () => {
       expect(fourElements.length).toBeGreaterThan(0); // Total alerts
     });
     await waitFor(() => {
-      const twoElements = screen.getAllByText('2');
-      expect(twoElements.length).toBeGreaterThan(0); // Unread alerts
+      const threeElements = screen.getAllByText('3');
+      expect(threeElements.length).toBeGreaterThan(0); // Unread alerts
     });
   });
 

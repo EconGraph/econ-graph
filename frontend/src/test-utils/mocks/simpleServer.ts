@@ -53,6 +53,7 @@ const getMockResponse = (operationName: string, scenario: MockScenarios, variabl
       GetSeriesDetail: 'get_series_detail',
       SearchSeriesFulltext: 'search_series_fulltext',
       GetSeriesData: 'get_series_data',
+      GetPeerCompanies: 'get_peer_companies',
     };
 
     const responseFile = operationMap[operationName];
