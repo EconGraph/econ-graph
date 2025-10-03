@@ -81,6 +81,24 @@
           "dataQualityScore": 0.98
         }
       ],
+      "trends": [
+        {
+          "id": "trend-1",
+          "ratioName": "returnOnEquity",
+          "period": "2023-12-31",
+          "value": 0.147,
+          "change": 0.02,
+          "direction": "up"
+        },
+        {
+          "id": "trend-2",
+          "ratioName": "netProfitMargin",
+          "period": "2023-12-31",
+          "value": 0.253,
+          "change": 0.01,
+          "direction": "up"
+        }
+      ],
       "alerts": [
         {
           "id": "alert-1",

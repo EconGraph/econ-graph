@@ -1,0 +1,134 @@
+{
+  "data": {
+    "trendAnalysis": {
+      "companyId": "0000320193",
+      "companyName": "Apple Inc.",
+      "timeRange": "3Y",
+      "ratios": [
+        {
+          "ratioName": "returnOnEquity",
+          "ratioDisplayName": "Return on Equity",
+          "category": "profitability",
+          "trends": [
+            {
+              "period": "2021-12-31",
+              "value": 0.147,
+              "change": 0.02,
+              "direction": "up"
+            },
+            {
+              "period": "2022-12-31", 
+              "value": 0.163,
+              "change": 0.016,
+              "direction": "up"
+            },
+            {
+              "period": "2023-12-31",
+              "value": 0.147,
+              "change": -0.016,
+              "direction": "down"
+            }
+          ]
+        },
+        {
+          "ratioName": "netProfitMargin",
+          "ratioDisplayName": "Net Profit Margin",
+          "category": "profitability",
+          "trends": [
+            {
+              "period": "2021-12-31",
+              "value": 0.253,
+              "change": 0.01,
+              "direction": "up"
+            },
+            {
+              "period": "2022-12-31",
+              "value": 0.255,
+              "change": 0.002,
+              "direction": "up"
+            },
+            {
+              "period": "2023-12-31",
+              "value": 0.253,
+              "change": -0.002,
+              "direction": "down"
+            }
+          ]
+        },
+        {
+          "ratioName": "currentRatio",
+          "ratioDisplayName": "Current Ratio",
+          "category": "liquidity",
+          "trends": [
+            {
+              "period": "2021-12-31",
+              "value": 1.04,
+              "change": -0.05,
+              "direction": "down"
+            },
+            {
+              "period": "2022-12-31",
+              "value": 1.06,
+              "change": 0.02,
+              "direction": "up"
+            },
+            {
+              "period": "2023-12-31",
+              "value": 1.04,
+              "change": -0.02,
+              "direction": "down"
+            }
+          ]
+        },
+        {
+          "ratioName": "debtToEquity",
+          "ratioDisplayName": "Debt to Equity",
+          "category": "leverage",
+          "trends": [
+            {
+              "period": "2021-12-31",
+              "value": 0.35,
+              "change": 0.02,
+              "direction": "up"
+            },
+            {
+              "period": "2022-12-31",
+              "value": 0.33,
+              "change": -0.02,
+              "direction": "down"
+            },
+            {
+              "period": "2023-12-31",
+              "value": 0.35,
+              "change": 0.02,
+              "direction": "up"
+            }
+          ]
+        }
+      ],
+      "insights": [
+        {
+          "type": "trend",
+          "severity": "medium",
+          "title": "ROE Declining",
+          "description": "Return on Equity has declined from 16.3% to 14.7% over the past year",
+          "impact": "May indicate reduced efficiency in generating profits from shareholders' equity"
+        },
+        {
+          "type": "stability",
+          "severity": "low",
+          "title": "Stable Profit Margins",
+          "description": "Net profit margin has remained stable around 25.3%",
+          "impact": "Consistent operational efficiency maintained"
+        },
+        {
+          "type": "liquidity",
+          "severity": "low",
+          "title": "Adequate Liquidity",
+          "description": "Current ratio has remained above 1.0, indicating good short-term liquidity",
+          "impact": "Company can meet short-term obligations comfortably"
+        }
+      ]
+    }
+  }
+}

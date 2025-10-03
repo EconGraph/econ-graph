@@ -35,6 +35,10 @@ bls_api_key = "your-bls-api-key-here"
 # SSL/TLS configuration (uncomment to disable automatic certificates)
 # enable_cert_manager = false
 
+# DNS-01 challenge configuration for wildcard certificates with Cloudflare
+# enable_dns01_challenge = true
+# cloudflare_api_token = "your-cloudflare-api-token"
+
 # Monitoring configuration (uncomment to customize)
 # prometheus_retention = "30d"
 # prometheus_storage_size = "50Gi"

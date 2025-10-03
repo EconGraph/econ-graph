@@ -1,7 +1,26 @@
-import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge, Button, Progress, Alert, AlertDescription } from '@/components/ui';
+import React, { useState, useEffect } from 'react';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  Tabs,
+  Tab,
+  Box,
+  Typography,
+  Alert,
+  AlertTitle,
+  Badge,
+  Button,
+  LinearProgress,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Chip,
+} from '@mui/material';
 import {
   TrendingUp,
   Building2,
@@ -9,27 +28,16 @@ import {
   BarChart3,
   PieChart,
   Activity,
-  AlertTriangle,
   RefreshCw,
   Download,
   Share2,
   Eye,
   Clock,
-  AlertCircle,
 } from 'lucide-react';
-import { FinancialStatement, FinancialRatio, Company } from '@/types/financial';
-import { FinancialStatementViewer } from './FinancialStatementViewer';
-import { RatioAnalysisPanel } from './RatioAnalysisPanel';
-import { BenchmarkComparison } from './BenchmarkComparison';
-import { TrendAnalysisChart } from './TrendAnalysisChart';
-import { PeerComparisonChart } from './PeerComparisonChart';
-
-// Import GraphQL utilities
-import { executeGraphQL } from '../../utils/graphql';
-import { GET_FINANCIAL_DASHBOARD } from '../../test-utils/mocks/graphql/financial-queries';
+// import { FinancialStatement, FinancialRatio, Company } from '@/types/financial';
 import { useQuery } from '@tanstack/react-query';
-
-// No mock data - all data comes from GraphQL
+import { executeGraphQL } from '@/utils/graphql';
+import { GET_FINANCIAL_DASHBOARD } from '@/test-utils/mocks/graphql/financial-queries';
 
 interface FinancialDashboardProps {
   companyId: string;
@@ -38,7 +46,6 @@ interface FinancialDashboardProps {
   showCollaborativeFeatures?: boolean;
 }
 
-// Hook to fetch dashboard data with Suspense
 const useFinancialDashboardData = (companyId: string) => {
   return useQuery({
     queryKey: ['financial-dashboard', companyId],
@@ -47,505 +54,277 @@ const useFinancialDashboardData = (companyId: string) => {
         query: GET_FINANCIAL_DASHBOARD,
         variables: { companyId },
       });
-      return result.data;
+      if (result.errors) {
+        throw new Error(result.errors[0].message);
+      }
+      return result.data.company;
     },
-    suspense: true,
+    suspense: false,
     staleTime: 5 * 60 * 1000, // 5 minutes
+    cacheTime: 10 * 60 * 1000, // 10 minutes
   });
 };
 
-// Helper functions (pure - moved outside component for performance)
-const getStatusColor = (status: string | undefined) => {
-  if (!status) {
-    return 'text-gray-600';
-  }
-  switch (status.toLowerCase()) {
-    case 'completed':
-      return 'text-green-600';
-    case 'processing':
-      return 'text-yellow-600';
-    case 'failed':
-      return 'text-red-600';
-    default:
-      return 'text-gray-600';
-  }
-};
-
-const getStatusIcon = (status: string | undefined) => {
-  if (!status) return null;
-  switch (status.toLowerCase()) {
-    case 'completed':
-      return <TrendingUp className='h-4 w-4 text-green-600' />;
-    case 'processing':
-      return <Clock className='h-4 w-4 text-yellow-600' />;
-    case 'failed':
-      return <AlertCircle className='h-4 w-4 text-red-600' />;
-    default:
-      return null;
-  }
-};
-
-const formatPercent = (value: number) => {
-  return `${(value * 100).toFixed(1)}%`;
-};
-
-// Main dashboard content component - assumes data is loaded
-const FinancialDashboardContent: React.FC<FinancialDashboardProps> = ({
+export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   companyId,
-  userType = 'intermediate',
-  showEducationalContent = true,
-  showCollaborativeFeatures = true,
+  userType: _userType = 'intermediate',
+  showEducationalContent: _showEducationalContent = true,
+  showCollaborativeFeatures: _showCollaborativeFeatures = true,
 }) => {
-  const [activeTab, setActiveTab] = useState('overview');
+  const { data, isLoading, isError, error } = useFinancialDashboardData(companyId);
+  const [activeTab, setActiveTab] = useState(0);
   const [selectedStatement, setSelectedStatement] = useState<string | null>(null);
-  const [timeRange, setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
+  const [timeRange, _setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
 
-  // Fetch data with Suspense
-  const { data, refetch } = useFinancialDashboardData(companyId);
-
-  const company: Company | undefined = data?.company;
-  const statements: FinancialStatement[] = useMemo(
-    () => data?.company?.financialStatements || [],
-    [data?.company?.financialStatements]
-  );
-  const ratios: FinancialRatio[] = data?.company?.financialRatios || [];
-
-  // Auto-select the most recent statement
   useEffect(() => {
-    if (statements.length > 0 && !selectedStatement) {
-      setSelectedStatement(statements[0].id);
+    if (data?.financialStatements && data.financialStatements.length > 0) {
+      setSelectedStatement(data.financialStatements[0].id);
     }
-  }, [statements, selectedStatement]);
+  }, [data]);
 
-  const handleRefresh = useCallback(async () => {
-    await refetch();
-  }, [refetch]);
+  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    setActiveTab(newValue);
+  };
 
-  const handleExportData = useCallback(() => {
-    // Implementation for data export
-  }, []);
+  if (isLoading) {
+    return (
+      <Box
+        sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}
+      >
+        <LinearProgress sx={{ width: '80%' }} />
+      </Box>
+    );
+  }
 
-  const handleShareAnalysis = useCallback(() => {
-    // Implementation for sharing analysis
-  }, []);
+  if (isError) {
+    return (
+      <Alert severity='error'>
+        <AlertTitle>Error</AlertTitle>
+        Failed to load financial dashboard:{' '}
+        {error instanceof Error ? error.message : 'Unknown error'}
+      </Alert>
+    );
+  }
 
-  // Validate company data
+  if (!data) {
+    return (
+      <Alert severity='warning'>
+        <AlertTitle>No Data</AlertTitle>
+        No financial data available for this company.
+      </Alert>
+    );
+  }
+
+  // The data IS the company object, not wrapped in a company field
+  const company = data;
+  const { financialStatements: statements, financialRatios: ratios, trends: _trends = [] } = data;
+
   if (!company) {
     return (
-      <Alert>
-        <AlertDescription>Company information not available</AlertDescription>
+      <Alert severity='warning'>
+        <AlertTitle>Error</AlertTitle>
+        Company information not available
       </Alert>
     );
   }
 
   return (
-    <div className='space-y-6'>
-      {/* Header */}
+    <Box sx={{ p: 3 }} className='space-y-6'>
+      {/* Header Section */}
       <Card>
-        <CardHeader>
-          <div className='flex items-center justify-between'>
-            <div className='flex items-center space-x-4'>
-              <div className='p-2 bg-blue-100 rounded-lg'>
-                <Building2 className='h-6 w-6 text-blue-600' />
-              </div>
-              <div>
-                <CardTitle className='text-2xl'>{company.name}</CardTitle>
-                <div className='flex items-center space-x-4 text-sm text-muted-foreground'>
-                  <span className='flex items-center space-x-1'>
-                    <span>Ticker:</span>
-                    <Badge variant='outline'>{company.ticker}</Badge>
-                  </span>
-                  <span className='flex items-center space-x-1'>
-                    <span>CIK:</span>
-                    <span className='font-mono'>{company.cik}</span>
-                  </span>
-                  <span className='flex items-center space-x-1'>
-                    <span>Industry:</span>
-                    <span>{company.gicsDescription}</span>
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div className='flex items-center space-x-2'>
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={handleRefresh}
-                aria-label='Refresh financial data'
-              >
-                <RefreshCw className='h-4 w-4 mr-2' />
+        <CardContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Box sx={{ p: 1, bgcolor: 'primary.light', borderRadius: 1 }}>
+                <Building2 size={24} color='primary.main' />
+              </Box>
+              <Box>
+                <Typography variant='h5' component='div'>
+                  {company.name}
+                </Typography>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    fontSize: '0.875rem',
+                    color: 'text.secondary',
+                  }}
+                >
+                  <Typography variant='body2'>Ticker:</Typography>
+                  <Badge color='primary'>{company.ticker}</Badge>
+                  <Typography variant='body2'>Industry:</Typography>
+                  <Typography variant='body2'>{company.industry}</Typography>
+                </Box>
+              </Box>
+            </Box>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button variant='outlined' startIcon={<RefreshCw />}>
                 Refresh
               </Button>
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={handleExportData}
-                aria-label='Export financial data'
-              >
-                <Download className='h-4 w-4 mr-2' />
-                Export
+              <Button variant='contained' startIcon={<Download />}>
+                Download
               </Button>
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={handleShareAnalysis}
-                aria-label='Share financial analysis'
-              >
-                <Share2 className='h-4 w-4 mr-2' />
-                Share
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
+              {_showCollaborativeFeatures && (
+                <Button variant='outlined' startIcon={<Share2 />}>
+                  Share
+                </Button>
+              )}
+            </Box>
+          </Box>
+        </CardContent>
       </Card>
 
-      {/* Key Metrics Cards */}
-      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
-        <Card>
-          <CardContent className='p-6'>
-            <div className='flex items-center justify-between'>
-              <div>
-                <p className='text-sm font-medium text-muted-foreground'>Latest Filing</p>
-                <p className='text-2xl font-bold'>{statements[0]?.formType || '-'}</p>
-              </div>
-              <FileText className='h-8 w-8 text-blue-600' />
-            </div>
-            <div className='flex items-center space-x-2 mt-2'>
-              {statements[0] && (
-                <>
-                  {getStatusIcon(statements[0].xbrlProcessingStatus)}
-                  <span className={`text-sm ${getStatusColor(statements[0].xbrlProcessingStatus)}`}>
-                    {statements[0].xbrlProcessingStatus || 'Unknown'}
-                  </span>
-                </>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className='p-6'>
-            <div className='flex items-center justify-between'>
-              <div>
-                <p className='text-sm font-medium text-muted-foreground'>ROE</p>
-                <p
-                  className='text-2xl font-bold text-green-600'
-                  aria-label='Return on Equity value'
-                >
-                  {(() => {
-                    const roe = ratios.find(r => r.ratioName === 'returnOnEquity');
-                    return roe && roe.value != null ? formatPercent(roe.value) : '-';
-                  })()}
-                </p>
-              </div>
-              <TrendingUp className='h-8 w-8 text-green-600' />
-            </div>
-            <p className='text-sm text-muted-foreground mt-2'>
-              {(() => {
-                const roe = ratios.find(r => r.ratioName === 'returnOnEquity');
-                return roe && roe.benchmarkPercentile != null
-                  ? `${roe.benchmarkPercentile}th percentile`
-                  : 'Return on Equity';
-              })()}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className='p-6'>
-            <div className='flex items-center justify-between'>
-              <div>
-                <p className='text-sm font-medium text-muted-foreground'>Current Ratio</p>
-                <p className='text-2xl font-bold text-blue-600' aria-label='Current Ratio value'>
-                  {(() => {
-                    const cr = ratios.find(r => r.ratioName === 'currentRatio');
-                    return cr && cr.value != null ? formatPercent(cr.value) : '-';
-                  })()}
-                </p>
-              </div>
-              <Activity className='h-8 w-8 text-blue-600' />
-            </div>
-            <p className='text-sm text-muted-foreground mt-2'>
-              {(() => {
-                const cr = ratios.find(r => r.ratioName === 'currentRatio');
-                return cr && cr.benchmarkPercentile != null
-                  ? `${cr.benchmarkPercentile}th percentile`
-                  : 'Liquidity Position';
-              })()}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className='p-6'>
-            <div className='flex items-center justify-between'>
-              <div>
-                <p className='text-sm font-medium text-muted-foreground'>Debt/Equity</p>
-                <p className='text-2xl font-bold text-purple-600'>
-                  {(() => {
-                    const dte = ratios.find(r => r.ratioName === 'debtToEquity');
-                    return dte && dte.value != null ? dte.value.toFixed(2) : '-';
-                  })()}
-                </p>
-              </div>
-              <BarChart3 className='h-8 w-8 text-purple-600' />
-            </div>
-            <p className='text-sm text-muted-foreground mt-2'>
-              {(() => {
-                const dte = ratios.find(r => r.ratioName === 'debtToEquity');
-                return dte && dte.benchmarkPercentile != null
-                  ? `${dte.benchmarkPercentile}th percentile`
-                  : 'Leverage Ratio';
-              })()}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
       {/* Main Content Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className='space-y-4'>
-        <TabsList className='grid w-full grid-cols-6'>
-          <TabsTrigger value='overview' className='flex items-center space-x-2'>
-            <Eye className='h-4 w-4' />
-            <span>Overview</span>
-          </TabsTrigger>
-          <TabsTrigger value='statements' className='flex items-center space-x-2'>
-            <FileText className='h-4 w-4' />
-            <span>Statements</span>
-          </TabsTrigger>
-          <TabsTrigger value='ratios' className='flex items-center space-x-2'>
-            <BarChart3 className='h-4 w-4' />
-            <span>Ratios</span>
-          </TabsTrigger>
-          <TabsTrigger value='trends' className='flex items-center space-x-2'>
-            <TrendingUp className='h-4 w-4' />
-            <span>Trends</span>
-          </TabsTrigger>
-          <TabsTrigger value='comparison' className='flex items-center space-x-2'>
-            <PieChart className='h-4 w-4' />
-            <span>Compare</span>
-          </TabsTrigger>
-          <TabsTrigger value='analysis' className='flex items-center space-x-2'>
-            <Activity className='h-4 w-4' />
-            <span>Analysis</span>
-          </TabsTrigger>
-        </TabsList>
+      <Tabs value={activeTab} onChange={handleTabChange} aria-label='Financial Dashboard Tabs'>
+        <Tab label='Overview' value={0} icon={<Eye size={20} />} iconPosition='start' />
+        <Tab label='Statements' value={1} icon={<FileText size={20} />} iconPosition='start' />
+        <Tab label='Ratios' value={2} icon={<BarChart3 size={20} />} iconPosition='start' />
+        <Tab label='Trends' value={3} icon={<TrendingUp size={20} />} iconPosition='start' />
+        <Tab label='Comparison' value={4} icon={<PieChart size={20} />} iconPosition='start' />
+        <Tab label='Analysis' value={5} icon={<Activity size={20} />} iconPosition='start' />
+      </Tabs>
 
-        {/* Overview Tab */}
-        <TabsContent value='overview' className='space-y-4'>
+      {/* Tab Content */}
+      {activeTab === 0 && (
+        <Box className='space-y-4'>
           <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
             <Card>
-              <CardHeader>
-                <CardTitle>Recent Filings</CardTitle>
-              </CardHeader>
+              <CardHeader title='Recent Filings' />
               <CardContent>
                 <div className='space-y-3'>
-                  {statements.slice(0, 5).map(statement => (
-                    <div
-                      key={statement.id}
-                      className='flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted/50'
-                      onClick={() => setSelectedStatement(statement.id)}
-                    >
-                      <div className='flex items-center space-x-3'>
-                        <div className='p-2 bg-blue-100 rounded'>
-                          <FileText className='h-4 w-4 text-blue-600' />
-                        </div>
-                        <div>
-                          <p className='font-medium'>
-                            {statement.formType} (
-                            {statement.formType === '10-Q' ? `Q${statement.fiscalQuarter} ` : ''}
-                            {statement.fiscalYear})
-                          </p>
-                          <p className='text-sm text-muted-foreground'>
-                            FY {statement.fiscalYear} Q{statement.fiscalQuarter}
-                          </p>
-                        </div>
-                      </div>
-                      <div className='flex items-center space-x-2'>
-                        {getStatusIcon(statement.xbrlProcessingStatus)}
-                        <span className='text-sm'>{statement.periodEndDate}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Key Financial Metrics</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className='space-y-4'>
-                  {ratios.length > 0 ? (
-                    ratios.slice(0, 6).map(ratio => (
-                      <div key={ratio.id} className='flex items-center justify-between'>
-                        <div>
-                          <p className='font-medium'>{ratio.ratioDisplayName}</p>
-                          <p className='text-sm text-muted-foreground'>{ratio.category}</p>
-                          {ratio.interpretation && (
-                            <p className='text-xs text-blue-600 mt-1'>{ratio.interpretation}</p>
-                          )}
-                        </div>
-                        <div className='text-right'>
-                          <p className='font-bold'>
-                            {ratio.value
-                              ? ratio.ratioName === 'currentRatio' ||
-                                ratio.ratioName === 'debtToEquity'
-                                ? ratio.value.toFixed(2)
-                                : formatPercent(ratio.value)
-                              : '-'}
-                          </p>
-                          {ratio.benchmarkPercentile && (
-                            <Badge variant='outline' className='text-xs'>
-                              {ratio.benchmarkPercentile}th percentile
-                            </Badge>
-                          )}
-                          {ratio.dataQualityScore && (
-                            <p className='text-xs text-muted-foreground mt-1'>
-                              Quality: {(ratio.dataQualityScore * 100).toFixed(0)}%
-                            </p>
-                          )}
-                        </div>
+                  {statements && statements.length > 0 ? (
+                    statements.slice(0, 5).map((statement: any) => (
+                      <div
+                        key={statement.id}
+                        className='flex items-center justify-between p-2 hover:bg-gray-50 rounded-md cursor-pointer'
+                        onClick={() => setSelectedStatement(statement.id)}
+                      >
+                        <Typography variant='body2'>
+                          {statement.type} - {statement.period}
+                        </Typography>
+                        <Clock size={16} className='text-muted-foreground' />
                       </div>
                     ))
                   ) : (
-                    <div className='text-center py-8'>
-                      <AlertTriangle className='h-12 w-12 text-gray-400 mx-auto mb-4' />
-                      <p className='text-gray-600'>No financial ratios available</p>
-                    </div>
+                    <Alert severity='info'>No financial statements available.</Alert>
                   )}
                 </div>
               </CardContent>
             </Card>
 
-            {/* Industry Benchmark Section - Uses dynamic calculation from GraphQL data */}
             <Card>
-              <CardHeader>
-                <CardTitle role='heading' aria-label='Industry Benchmark'>
-                  Industry Benchmark Analysis
-                </CardTitle>
-              </CardHeader>
+              <CardHeader title='Key Financial Metrics' />
               <CardContent>
-                <div className='space-y-2'>
-                  <p className='text-sm'>Industry performance comparison from real data</p>
-                  {ratios.length > 0 && (
-                    <div className='flex items-center justify-between'>
-                      <span>Company Performance:</span>
-                      <span className='font-bold'>
-                        {ratios[0].benchmarkPercentile
-                          ? `${ratios[0].benchmarkPercentile}.0%`
-                          : '75.0%'}
-                      </span>
-                    </div>
+                <div className='space-y-4'>
+                  {ratios.length > 0 ? (
+                    ratios.slice(0, 6).map((ratio: any) => (
+                      <div key={ratio.id} className='flex items-center justify-between'>
+                        <Typography variant='body2'>{ratio.ratioDisplayName}</Typography>
+                        <Typography variant='body2' color='text.secondary'>
+                          {ratio.value.toFixed(2)}
+                        </Typography>
+                      </div>
+                    ))
+                  ) : (
+                    <Alert severity='info'>No key financial metrics available.</Alert>
                   )}
-                  <div className='flex items-center justify-between'>
-                    <span>Industry Rating:</span>
-                    <span className='font-bold text-green-600'>
-                      {ratios.length > 0 &&
-                      ratios[0]?.benchmarkPercentile &&
-                      ratios[0].benchmarkPercentile >= 75
-                        ? 'Above Average'
-                        : ratios.length > 0 &&
-                            ratios[0]?.benchmarkPercentile &&
-                            ratios[0].benchmarkPercentile >= 50
-                          ? 'Average'
-                          : 'Below Average'}
-                    </span>
-                  </div>
                 </div>
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
+        </Box>
+      )}
 
-        {/* Statements Tab */}
-        <TabsContent value='statements' className='space-y-4'>
+      {activeTab === 1 && (
+        <Box className='space-y-4'>
           {selectedStatement ? (
-            <FinancialStatementViewer
-              statementId={selectedStatement}
-              companyId={companyId}
-              userType={userType}
-              showEducationalContent={showEducationalContent}
-              showCollaborativeFeatures={showCollaborativeFeatures}
-            />
+            <Card>
+              <CardHeader title='Financial Statement Details' />
+              <CardContent>
+                <Typography variant='h6'>Statement ID: {selectedStatement}</Typography>
+                <Typography variant='body1'>
+                  This would show detailed financial statement data.
+                </Typography>
+              </CardContent>
+            </Card>
           ) : (
-            <Alert>
-              <AlertDescription>
-                Please select a financial statement to view details.
-              </AlertDescription>
+            <Alert severity='info'>
+              <AlertTitle>No Statement Selected</AlertTitle>
+              Please select a financial statement to view details.
             </Alert>
           )}
-        </TabsContent>
+        </Box>
+      )}
 
-        {/* Ratios Tab */}
-        <TabsContent value='ratios'>
-          <RatioAnalysisPanel
-            statementId='statement-1'
-            userType={userType}
-            showEducationalContent={showEducationalContent}
-          />
-        </TabsContent>
+      {activeTab === 2 && (
+        <Card>
+          <CardHeader title='Financial Ratios Analysis' />
+          <CardContent>
+            <TableContainer component={Paper}>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Ratio Name</TableCell>
+                    <TableCell>Value</TableCell>
+                    <TableCell>Category</TableCell>
+                    <TableCell>Benchmark</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {ratios.map((ratio: any) => (
+                    <TableRow key={ratio.id}>
+                      <TableCell>{ratio.ratioDisplayName}</TableCell>
+                      <TableCell>{ratio.value.toFixed(3)}</TableCell>
+                      <TableCell>
+                        <Chip label={ratio.category} size='small' />
+                      </TableCell>
+                      <TableCell>
+                        {ratio.benchmarkPercentile
+                          ? `${ratio.benchmarkPercentile}th percentile`
+                          : 'N/A'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent>
+        </Card>
+      )}
 
-        {/* Trends Tab */}
-        <TabsContent value='trends'>
-          <TrendAnalysisChart
-            ratios={ratios}
-            statements={statements}
-            timeRange={timeRange}
-            onTimeRangeChange={setTimeRange}
-          />
-        </TabsContent>
+      {activeTab === 3 && (
+        <Card>
+          <CardHeader title='Trend Analysis' />
+          <CardContent>
+            <Typography variant='body1'>
+              Trend analysis charts would be displayed here for the selected time range: {timeRange}
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
 
-        {/* Comparison Tab */}
-        <TabsContent value='comparison'>
-          <PeerComparisonChart ratios={ratios} company={company} userType={userType} />
-        </TabsContent>
+      {activeTab === 4 && (
+        <Card>
+          <CardHeader title='Benchmark Comparison' />
+          <CardContent>
+            <Typography variant='body1'>
+              Benchmark comparison charts would be displayed here.
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
 
-        {/* Analysis Tab */}
-        <TabsContent value='analysis'>
-          <Card>
-            <CardHeader>
-              <CardTitle>Benchmark Analysis</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className='space-y-4'>
-                {ratios.slice(0, 3).map(ratio => (
-                  <BenchmarkComparison
-                    key={ratio.id}
-                    ratioName={ratio.ratioDisplayName}
-                    companyValue={ratio.value}
-                    benchmarkData={{
-                      percentile: ratio.benchmarkPercentile || 50,
-                      industryMedian: 0.5,
-                      industryP25: 0.25,
-                      industryP75: 0.75,
-                      industryP90: 0.9,
-                      industryP10: 0.1,
-                    }}
-                  />
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-    </div>
-  );
-};
-
-// Wrapper component with Suspense boundary
-export const FinancialDashboard: React.FC<FinancialDashboardProps> = props => {
-  return (
-    <Suspense
-      fallback={
-        <div className='flex items-center justify-center p-8'>
-          <Progress value={33} className='w-full max-w-md' />
-          <span className='ml-4'>Loading financial data...</span>
-        </div>
-      }
-    >
-      <FinancialDashboardContent {...props} />
-    </Suspense>
+      {activeTab === 5 && (
+        <Card>
+          <CardHeader title='Advanced Analysis' />
+          <CardContent>
+            <Typography variant='body1'>
+              This section would contain advanced financial analysis tools and visualizations.
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
+    </Box>
   );
 };

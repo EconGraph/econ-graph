@@ -18,6 +18,19 @@ variable "enable_cert_manager" {
   default     = true
 }
 
+variable "enable_dns01_challenge" {
+  description = "Enable DNS-01 challenge for wildcard certificates"
+  type        = bool
+  default     = false
+}
+
+variable "cloudflare_api_token" {
+  description = "Cloudflare API token for DNS-01 challenge"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # Install NGINX Ingress Controller
 resource "helm_release" "nginx_ingress" {
   name       = "nginx-ingress"
@@ -248,6 +261,94 @@ resource "kubernetes_manifest" "letsencrypt_staging" {
   depends_on = [helm_release.cert_manager]
 }
 
+# Cloudflare API credentials secret for DNS-01 challenge
+resource "kubernetes_secret" "cloudflare_api_credentials" {
+  count = var.enable_dns01_challenge && var.cloudflare_api_token != "" ? 1 : 0
+
+  metadata {
+    name      = "cloudflare-api-token-secret"
+    namespace = "cert-manager"
+  }
+
+  data = {
+    "api-token" = var.cloudflare_api_token
+  }
+
+  type = "Opaque"
+}
+
+# DNS-01 ClusterIssuer for Let's Encrypt with Cloudflare
+resource "kubernetes_manifest" "letsencrypt_prod_cloudflare" {
+  count = var.enable_dns01_challenge && var.cloudflare_api_token != "" ? 1 : 0
+
+  manifest = {
+    apiVersion = "cert-manager.io/v1"
+    kind       = "ClusterIssuer"
+    metadata = {
+      name = "letsencrypt-prod-cloudflare"
+    }
+    spec = {
+      acme = {
+        server = "https://acme-v02.api.letsencrypt.org/directory"
+        email  = "admin@${var.domain}"
+        privateKeySecretRef = {
+          name = "letsencrypt-prod-cloudflare"
+        }
+        solvers = [
+          {
+            dns01 = {
+              cloudflare = {
+                apiTokenSecretRef = {
+                  name = "cloudflare-api-token-secret"
+                  key  = "api-token"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+
+  depends_on = [helm_release.cert_manager, kubernetes_secret.cloudflare_api_credentials]
+}
+
+# DNS-01 ClusterIssuer for Let's Encrypt staging with Cloudflare (for testing)
+resource "kubernetes_manifest" "letsencrypt_staging_cloudflare" {
+  count = var.enable_dns01_challenge && var.cloudflare_api_token != "" ? 1 : 0
+
+  manifest = {
+    apiVersion = "cert-manager.io/v1"
+    kind       = "ClusterIssuer"
+    metadata = {
+      name = "letsencrypt-staging-cloudflare"
+    }
+    spec = {
+      acme = {
+        server = "https://acme-staging-v02.api.letsencrypt.org/directory"
+        email  = "admin@${var.domain}"
+        privateKeySecretRef = {
+          name = "letsencrypt-staging-cloudflare"
+        }
+        solvers = [
+          {
+            dns01 = {
+              cloudflare = {
+                apiTokenSecretRef = {
+                  name = "cloudflare-api-token-secret"
+                  key  = "api-token"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+
+  depends_on = [helm_release.cert_manager, kubernetes_secret.cloudflare_api_credentials]
+}
+
 # Main application ingress
 resource "kubernetes_ingress_v1" "econgraph" {
   metadata {
@@ -333,6 +434,211 @@ resource "kubernetes_ingress_v1" "econgraph" {
   }
 
   depends_on = [helm_release.nginx_ingress]
+}
+
+# Production SSL ingress with Cloudflare DNS-01 certificate
+resource "kubernetes_ingress_v1" "production_ssl" {
+  count = var.enable_dns01_challenge && var.cloudflare_api_token != "" ? 1 : 0
+
+  metadata {
+    name      = "econ-graph-ssl-ingress"
+    namespace = var.namespace
+    annotations = {
+      "cert-manager.io/cluster-issuer"                = "letsencrypt-prod-cloudflare"
+      "nginx.ingress.kubernetes.io/ssl-redirect"      = "true"
+      "nginx.ingress.kubernetes.io/cloudflare-real-ip" = "true"
+      "nginx.ingress.kubernetes.io/backend-protocol"  = "HTTP"
+      "nginx.ingress.kubernetes.io/configuration-snippet" = <<-EOT
+        # Allow ACME challenges without HTTPS redirect
+        if ($uri ~ "^/\.well-known/acme-challenge/") {
+          return 200;
+        }
+        # Security headers for all other requests
+        more_set_headers "X-Frame-Options: DENY";
+        more_set_headers "X-Content-Type-Options: nosniff";
+        more_set_headers "X-XSS-Protection: 1; mode=block";
+        more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+        more_set_headers "Permissions-Policy: geolocation=(), microphone=(), camera=()";
+        more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload";
+      EOT
+      "nginx.ingress.kubernetes.io/cors-allow-credentials" = "true"
+      "nginx.ingress.kubernetes.io/cors-allow-headers"     = "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,Accept,Origin,X-CSRF-Token"
+      "nginx.ingress.kubernetes.io/cors-allow-methods"     = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+      "nginx.ingress.kubernetes.io/cors-allow-origin"      = "https://${var.domain},https://*.${var.domain}"
+      "nginx.ingress.kubernetes.io/cors-max-age"           = "86400"
+      "nginx.ingress.kubernetes.io/proxy-body-size"        = "10m"
+      "nginx.ingress.kubernetes.io/proxy-buffer-size"      = "16k"
+      "nginx.ingress.kubernetes.io/proxy-buffers-number"   = "8"
+      "nginx.ingress.kubernetes.io/proxy-connect-timeout"  = "5"
+      "nginx.ingress.kubernetes.io/proxy-read-timeout"     = "30"
+      "nginx.ingress.kubernetes.io/proxy-send-timeout"     = "30"
+      "nginx.ingress.kubernetes.io/rate-limit"             = "100"
+      "nginx.ingress.kubernetes.io/rate-limit-connections" = "10"
+      "nginx.ingress.kubernetes.io/rate-limit-window"      = "1m"
+      "nginx.ingress.kubernetes.io/upstream-keepalive-connections" = "32"
+      "nginx.ingress.kubernetes.io/upstream-keepalive-timeout"     = "60"
+    }
+  }
+
+  spec {
+    ingress_class_name = "nginx"
+
+    tls {
+      hosts       = [var.domain, "*.${var.domain}"]
+      secret_name = "${replace(var.domain, ".", "-")}-wildcard-tls"
+    }
+
+    # Main domain rules
+    rule {
+      host = var.domain
+      http {
+        path {
+          path      = "/admin"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "econ-graph-admin-frontend-service"
+              port {
+                number = 3001
+              }
+            }
+          }
+        }
+        path {
+          path      = "/api/admin"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "econ-graph-backend-service"
+              port {
+                number = 9876
+              }
+            }
+          }
+        }
+        path {
+          path      = "/api"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "econ-graph-backend-service"
+              port {
+                number = 9876
+              }
+            }
+          }
+        }
+        path {
+          path      = "/graphql"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "econ-graph-backend-service"
+              port {
+                number = 9876
+              }
+            }
+          }
+        }
+        path {
+          path      = "/auth"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "econ-graph-backend-service"
+              port {
+                number = 9876
+              }
+            }
+          }
+        }
+        path {
+          path      = "/playground"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "econ-graph-backend-service"
+              port {
+                number = 9876
+              }
+            }
+          }
+        }
+        path {
+          path      = "/health"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "econ-graph-backend-service"
+              port {
+                number = 9876
+              }
+            }
+          }
+        }
+        path {
+          path      = "/grafana"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "grafana-service"
+              port {
+                number = 3000
+              }
+            }
+          }
+        }
+        path {
+          path      = "/login"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "grafana-service"
+              port {
+                number = 3000
+              }
+            }
+          }
+        }
+        path {
+          path      = "/"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "econ-graph-frontend-service"
+              port {
+                number = 3000
+              }
+            }
+          }
+        }
+      }
+    }
+
+    # Wildcard subdomain rules
+    rule {
+      host = "*.${var.domain}"
+      http {
+        path {
+          path      = "/"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "econ-graph-frontend-service"
+              port {
+                number = 3000
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [
+    helm_release.nginx_ingress,
+    kubernetes_manifest.letsencrypt_prod_cloudflare
+  ]
 }
 
 # Monitoring ingress (Grafana)

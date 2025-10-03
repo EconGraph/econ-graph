@@ -6,7 +6,10 @@
  */
 
 // Debug flag - set to true to enable MSW debug output
-const MSW_DEBUG = process.env.MSW_DEBUG === 'true' || false;
+// Browser-compatible: no process.env access
+const MSW_DEBUG = true; // Enable debugging for Storybook
+
+console.log('🔧 simpleServer.ts: MSW server module loaded');
 
 // Import GraphQL mock responses
 import { loadGraphQLResponse } from './graphql-response-loader';
@@ -109,18 +112,29 @@ const getMockResponse = (operationName: string, scenario: MockScenarios, variabl
 // Mock fetch to intercept GraphQL requests
 // Store original fetch to properly restore it
 let originalFetch: typeof global.fetch;
+let isMSWSetup = false;
 
 export const setupSimpleMSW = async () => {
+  console.log('🔧 setupSimpleMSW called');
+  console.log('🔧 Current fetch type:', typeof global.fetch);
+  console.log('🔧 isMSWSetup:', isMSWSetup);
+
+  // Only set up once
+  if (isMSWSetup) {
+    if (MSW_DEBUG) console.log('[Simple MSW] Already set up, skipping...');
+    return;
+  }
+
   if (MSW_DEBUG) {
     console.log('[Simple MSW] Setting up MSW...');
     console.log('[Simple MSW] Original fetch type:', typeof global.fetch);
   }
-  originalFetch = global.fetch;
 
-  // Use vi.spyOn for Vitest instead of jest.spyOn
-  const vitestModule = await import('vitest');
-  const vi = vitestModule.vi;
-  vi.spyOn(global, 'fetch').mockImplementation((input: string | URL | any, options?: any) => {
+  originalFetch = global.fetch;
+  isMSWSetup = true;
+
+  // Override global fetch with our mock implementation
+  global.fetch = (input: string | URL | any, options?: any) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (MSW_DEBUG) {
       console.log(`[Simple MSW] ===== FETCH INTERCEPTED =====`);
@@ -155,6 +169,7 @@ export const setupSimpleMSW = async () => {
 
         if (MSW_DEBUG) {
           console.log(`[Simple MSW] Returning mock response:`, response);
+          console.log(`[Simple MSW] Response structure:`, JSON.stringify(response, null, 2));
         }
 
         return Promise.resolve({
@@ -173,39 +188,22 @@ export const setupSimpleMSW = async () => {
     // For non-GraphQL requests, pass through to original fetch
     if (MSW_DEBUG) console.log(`[Simple MSW] Passing through request: ${url}`);
     return originalFetch(input, options);
-  });
+  };
 
   if (MSW_DEBUG) {
     console.log('[Simple MSW] MSW setup complete');
     console.log('[Simple MSW] Fetch mock applied:', typeof global.fetch);
-    const vitestModule2 = await import('vitest');
-    const vi2 = vitestModule2.vi;
-    console.log('[Simple MSW] Vitest mock function:', vi2.isMockFunction(global.fetch));
   }
 };
 
 export const cleanupSimpleMSW = async () => {
-  // Restore original fetch using vi.restoreAllMocks()
-  const vitestModule3 = await import('vitest');
-  const vi3 = vitestModule3.vi;
-  vi3.restoreAllMocks();
-
-  // Clear any remaining fetch mocks
+  // Restore original fetch
   if (originalFetch) {
     global.fetch = originalFetch;
   }
 
-  // Clear any remaining handlers
-  if (typeof global !== 'undefined' && global.fetch) {
-    // Reset fetch to original implementation
-    global.fetch = originalFetch || fetch;
-  }
-
-  // Clear any remaining timers that might be related to MSW
-  for (let i = 1; i < 1000; i++) {
-    clearTimeout(i);
-    clearInterval(i);
-  }
+  // Reset setup flag
+  isMSWSetup = false;
 
   if (MSW_DEBUG) {
     console.log('[Simple MSW] Cleanup completed');

@@ -1,6 +1,12 @@
 {
-  "data": {
-    "financialRatios": null
-  },
-  "loading": true
+  "data": null,
+  "errors": [
+    {
+      "message": "Loading financial ratios...",
+      "extensions": {
+        "code": "LOADING",
+        "details": "Financial ratios are being calculated"
+      }
+    }
+  ]
 }
