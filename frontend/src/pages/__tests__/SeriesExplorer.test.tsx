@@ -744,6 +744,9 @@ describe('SeriesExplorer', () => {
     // Should handle both empty states without conflicts
     await waitFor(() => {
       expect(screen.getByText(/series explorer/i)).toBeInTheDocument();
+    });
+    
+    await waitFor(() => {
       expect(screen.getByText(/no series found/i)).toBeInTheDocument();
     });
 
