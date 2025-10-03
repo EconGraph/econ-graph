@@ -10,7 +10,7 @@ metadata:
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     
     # CORS Configuration
-    nginx.ingress.kubernetes.io/cors-allow-origin: "https://www.econ-graph.com,https://econ-graph.com"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://www.econgraph.com,https://econgraph.com"
     nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS, PATCH"
     nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,Accept,Origin,X-CSRF-Token"
     nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
@@ -52,11 +52,11 @@ spec:
   ingressClassName: nginx
   tls:
   - hosts:
-    - www.econ-graph.com
-    - econ-graph.com
+    - www.econgraph.com
+    - econgraph.com
     secretName: econ-graph-tls
   rules:
-  - host: www.econ-graph.com
+  - host: www.econgraph.com
     http:
       paths:
       - path: /admin
@@ -129,7 +129,7 @@ spec:
             name: econ-graph-frontend-service
             port:
               number: 3000
-  - host: econ-graph.com
+  - host: econgraph.com
     http:
       paths:
       - path: /

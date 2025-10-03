@@ -357,8 +357,8 @@ echo "📊 Current deployment status:"
 kubectl get pods -n econ-graph -o wide
 echo ""
 echo "🌐 Application URLs:"
-echo "  🌍 Production (SSL): https://www.econ-graph.com"
-echo "  🌍 Production (SSL): https://econ-graph.com"
+echo "  🌍 Production (SSL): https://www.econgraph.com"
+echo "  🌍 Production (SSL): https://econgraph.com"
 echo "  🏠 Local Development:"
 echo "    Frontend: http://localhost:${FRONTEND_NODEPORT}"
 echo "    Backend:  http://localhost:${BACKEND_NODEPORT}"
@@ -406,20 +406,20 @@ else
     echo "  ❌ Main Entry Point: http://localhost - Not accessible (ingress controller may be missing)"
 fi
 
-# Test HTTPS Termination (www.econ-graph.com)
+# Test HTTPS Termination (www.econgraph.com)
 echo ""
 echo "🔒 Testing HTTPS termination..."
-if curl -s -o /dev/null -w "%{http_code}" -k https://www.econ-graph.com | grep -q "200\|302"; then
-    echo "  ✅ HTTPS Production: https://www.econ-graph.com - Accessible"
+if curl -s -o /dev/null -w "%{http_code}" -k https://www.econgraph.com | grep -q "200\|302"; then
+    echo "  ✅ HTTPS Production: https://www.econgraph.com - Accessible"
 else
-    echo "  ❌ HTTPS Production: https://www.econ-graph.com - Not accessible (SSL certificate may not be ready)"
+    echo "  ❌ HTTPS Production: https://www.econgraph.com - Not accessible (SSL certificate may not be ready)"
 fi
 
-# Test HTTPS Termination (econ-graph.com)
-if curl -s -o /dev/null -w "%{http_code}" -k https://econ-graph.com | grep -q "200\|302"; then
-    echo "  ✅ HTTPS Production: https://econ-graph.com - Accessible"
+# Test HTTPS Termination (econgraph.com)
+if curl -s -o /dev/null -w "%{http_code}" -k https://econgraph.com | grep -q "200\|302"; then
+    echo "  ✅ HTTPS Production: https://econgraph.com - Accessible"
 else
-    echo "  ❌ HTTPS Production: https://econ-graph.com - Not accessible (SSL certificate may not be ready)"
+    echo "  ❌ HTTPS Production: https://econgraph.com - Not accessible (SSL certificate may not be ready)"
 fi
 
 # Test SSL Certificate Status
