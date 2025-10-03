@@ -14,14 +14,15 @@ import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
+import { vi } from "vitest";
 import { SecCrawlerManager } from "../SecCrawlerManager";
 import { useSecCrawler } from "../../../hooks/useSecCrawler";
 import { Company, SecCrawlResult } from "../../../types";
 
 // Mock the useSecCrawler hook
-jest.mock("../../../hooks/useSecCrawler");
+vi.mock("../../../hooks/useSecCrawler");
 
-const mockUseSecCrawler = useSecCrawler as jest.MockedFunction<
+const mockUseSecCrawler = useSecCrawler as vi.MockedFunction<
   typeof useSecCrawler
 >;
 
@@ -72,16 +73,16 @@ const mockCrawlResult: SecCrawlResult = {
 };
 
 describe("SecCrawlerManager", () => {
-  const mockOnCrawlComplete = jest.fn();
-  const mockOnCrawlError = jest.fn();
+  const mockOnCrawlComplete = vi.fn();
+  const mockOnCrawlError = vi.fn();
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     // Default mock implementation
     mockUseSecCrawler.mockReturnValue({
-      crawlCompany: jest.fn(),
-      importRssFeed: jest.fn(),
+      crawlCompany: vi.fn(),
+      importRssFeed: vi.fn(),
       isCrawling: false,
       progress: 0,
       status: "idle",
@@ -309,10 +310,10 @@ describe("SecCrawlerManager", () => {
 
   describe("Crawl Execution", () => {
     it("starts crawl with default parameters", async () => {
-      const mockCrawlCompany = jest.fn().mockResolvedValue(mockCrawlResult);
+      const mockCrawlCompany = vi.fn().mockResolvedValue(mockCrawlResult);
       mockUseSecCrawler.mockReturnValue({
         crawlCompany: mockCrawlCompany,
-        importRssFeed: jest.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: false,
         progress: 0,
         status: "idle",
@@ -349,10 +350,10 @@ describe("SecCrawlerManager", () => {
     });
 
     it("starts crawl with custom parameters", async () => {
-      const mockCrawlCompany = jest.fn().mockResolvedValue(mockCrawlResult);
+      const mockCrawlCompany = vi.fn().mockResolvedValue(mockCrawlResult);
       mockUseSecCrawler.mockReturnValue({
         crawlCompany: mockCrawlCompany,
-        importRssFeed: jest.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: false,
         progress: 0,
         status: "idle",
@@ -417,7 +418,7 @@ describe("SecCrawlerManager", () => {
         .mockRejectedValue(new Error("Crawl failed"));
       mockUseSecCrawler.mockReturnValue({
         crawlCompany: mockCrawlCompany,
-        importRssFeed: jest.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: false,
         progress: 0,
         status: "idle",
@@ -446,8 +447,8 @@ describe("SecCrawlerManager", () => {
   describe("Progress Monitoring", () => {
     it("displays crawling status", () => {
       mockUseSecCrawler.mockReturnValue({
-        crawlCompany: jest.fn(),
-        importRssFeed: jest.fn(),
+        crawlCompany: vi.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: true,
         progress: 45,
         status: "crawling",
@@ -470,8 +471,8 @@ describe("SecCrawlerManager", () => {
 
     it("displays progress bar", () => {
       mockUseSecCrawler.mockReturnValue({
-        crawlCompany: jest.fn(),
-        importRssFeed: jest.fn(),
+        crawlCompany: vi.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: true,
         progress: 75,
         status: "crawling",
@@ -495,8 +496,8 @@ describe("SecCrawlerManager", () => {
 
     it("displays status messages", () => {
       mockUseSecCrawler.mockReturnValue({
-        crawlCompany: jest.fn(),
-        importRssFeed: jest.fn(),
+        crawlCompany: vi.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: true,
         progress: 30,
         status: "downloading",
@@ -518,8 +519,8 @@ describe("SecCrawlerManager", () => {
 
     it("displays completion status", () => {
       mockUseSecCrawler.mockReturnValue({
-        crawlCompany: jest.fn(),
-        importRssFeed: jest.fn(),
+        crawlCompany: vi.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: false,
         progress: 100,
         status: "completed",
@@ -545,8 +546,8 @@ describe("SecCrawlerManager", () => {
   describe("Crawl Results", () => {
     it("displays crawl results", () => {
       mockUseSecCrawler.mockReturnValue({
-        crawlCompany: jest.fn(),
-        importRssFeed: jest.fn(),
+        crawlCompany: vi.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: false,
         progress: 100,
         status: "completed",
@@ -574,8 +575,8 @@ describe("SecCrawlerManager", () => {
 
     it("displays warnings", () => {
       mockUseSecCrawler.mockReturnValue({
-        crawlCompany: jest.fn(),
-        importRssFeed: jest.fn(),
+        crawlCompany: vi.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: false,
         progress: 100,
         status: "completed",
@@ -600,8 +601,8 @@ describe("SecCrawlerManager", () => {
 
     it("displays errors", () => {
       mockUseSecCrawler.mockReturnValue({
-        crawlCompany: jest.fn(),
-        importRssFeed: jest.fn(),
+        crawlCompany: vi.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: false,
         progress: 100,
         status: "completed",
@@ -627,8 +628,8 @@ describe("SecCrawlerManager", () => {
   describe("Error Handling", () => {
     it("displays crawl errors", () => {
       mockUseSecCrawler.mockReturnValue({
-        crawlCompany: jest.fn(),
-        importRssFeed: jest.fn(),
+        crawlCompany: vi.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: false,
         progress: 0,
         status: "error",
@@ -652,8 +653,8 @@ describe("SecCrawlerManager", () => {
 
     it("provides retry functionality", () => {
       mockUseSecCrawler.mockReturnValue({
-        crawlCompany: jest.fn(),
-        importRssFeed: jest.fn(),
+        crawlCompany: vi.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: false,
         progress: 0,
         status: "error",
@@ -740,8 +741,8 @@ describe("SecCrawlerManager", () => {
 
     it("announces status changes to screen readers", () => {
       mockUseSecCrawler.mockReturnValue({
-        crawlCompany: jest.fn(),
-        importRssFeed: jest.fn(),
+        crawlCompany: vi.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: true,
         progress: 50,
         status: "crawling",
@@ -765,8 +766,8 @@ describe("SecCrawlerManager", () => {
   describe("Performance", () => {
     it("handles large result sets efficiently", () => {
       mockUseSecCrawler.mockReturnValue({
-        crawlCompany: jest.fn(),
-        importRssFeed: jest.fn(),
+        crawlCompany: vi.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: false,
         progress: 100,
         status: "completed",
@@ -815,10 +816,10 @@ describe("SecCrawlerManager", () => {
 
   describe("Integration", () => {
     it("integrates with SEC crawler service", async () => {
-      const mockCrawlCompany = jest.fn().mockResolvedValue(mockCrawlResult);
+      const mockCrawlCompany = vi.fn().mockResolvedValue(mockCrawlResult);
       mockUseSecCrawler.mockReturnValue({
         crawlCompany: mockCrawlCompany,
-        importRssFeed: jest.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: false,
         progress: 0,
         status: "idle",
@@ -845,8 +846,8 @@ describe("SecCrawlerManager", () => {
 
     it("handles service errors gracefully", () => {
       mockUseSecCrawler.mockReturnValue({
-        crawlCompany: jest.fn(),
-        importRssFeed: jest.fn(),
+        crawlCompany: vi.fn(),
+        importRssFeed: vi.fn(),
         isCrawling: false,
         progress: 0,
         status: "error",

@@ -14,14 +14,15 @@ import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
+import { vi } from "vitest";
 import { CompanySearch } from "../CompanySearch";
 import { useCompanySearch } from "../../../hooks/useCompanySearch";
 import { Company } from "../../../types";
 
 // Mock the useCompanySearch hook
-jest.mock("../../../hooks/useCompanySearch");
+vi.mock("../../../hooks/useCompanySearch");
 
-const mockUseCompanySearch = useCompanySearch as jest.MockedFunction<
+const mockUseCompanySearch = useCompanySearch as vi.MockedFunction<
   typeof useCompanySearch
 >;
 
@@ -73,22 +74,22 @@ const mockCompanies: Company[] = [
 ];
 
 describe("CompanySearch", () => {
-  const mockOnCompanySelect = jest.fn();
-  const mockOnCrawlStart = jest.fn();
+  const mockOnCompanySelect = vi.fn();
+  const mockOnCrawlStart = vi.fn();
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     // Default mock implementation
     mockUseCompanySearch.mockReturnValue({
       query: "",
-      setQuery: jest.fn(),
+      setQuery: vi.fn(),
       companies: [],
       loading: false,
       error: undefined,
-      searchCompanies: jest.fn(),
+      searchCompanies: vi.fn(),
       totalCount: 0,
-      getCompany: jest.fn(),
+      getCompany: vi.fn(),
     });
   });
 
@@ -140,16 +141,16 @@ describe("CompanySearch", () => {
 
   describe("Search Functionality", () => {
     it("handles search input changes", async () => {
-      const mockSetQuery = jest.fn();
+      const mockSetQuery = vi.fn();
       mockUseCompanySearch.mockReturnValue({
         query: "",
         setQuery: mockSetQuery,
         companies: [],
         loading: false,
         error: undefined,
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -168,16 +169,16 @@ describe("CompanySearch", () => {
     });
 
     it("triggers search on button click", async () => {
-      const mockSearchCompanies = jest.fn();
+      const mockSearchCompanies = vi.fn();
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: [],
         loading: false,
         error: undefined,
         searchCompanies: mockSearchCompanies,
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -196,16 +197,16 @@ describe("CompanySearch", () => {
     });
 
     it("triggers search on Enter key press", async () => {
-      const mockSearchCompanies = jest.fn();
+      const mockSearchCompanies = vi.fn();
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: [],
         loading: false,
         error: undefined,
         searchCompanies: mockSearchCompanies,
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -224,16 +225,16 @@ describe("CompanySearch", () => {
     });
 
     it("handles empty search query", async () => {
-      const mockSearchCompanies = jest.fn();
+      const mockSearchCompanies = vi.fn();
       mockUseCompanySearch.mockReturnValue({
         query: "",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: [],
         loading: false,
         error: undefined,
         searchCompanies: mockSearchCompanies,
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -256,13 +257,13 @@ describe("CompanySearch", () => {
     it("displays search companies", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: mockCompanies,
         loading: false,
         error: undefined,
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -281,13 +282,13 @@ describe("CompanySearch", () => {
     it("displays company information correctly", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: [mockCompanies[0]],
         loading: false,
         error: undefined,
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -310,13 +311,13 @@ describe("CompanySearch", () => {
     it("handles empty search companies", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "NonExistentCompany",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: [],
         loading: false,
         error: undefined,
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -334,13 +335,13 @@ describe("CompanySearch", () => {
     it("displays loading state", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: [],
         loading: true,
         error: undefined,
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -358,13 +359,13 @@ describe("CompanySearch", () => {
     it("displays error state", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: [],
         loading: false,
         error: new Error("Search failed"),
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -384,13 +385,13 @@ describe("CompanySearch", () => {
     it("handles company selection", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: mockCompanies,
         loading: false,
         error: undefined,
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -411,13 +412,13 @@ describe("CompanySearch", () => {
     it("handles crawl start", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: mockCompanies,
         loading: false,
         error: undefined,
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -440,13 +441,13 @@ describe("CompanySearch", () => {
     it("handles include inactive toggle", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: mockCompanies,
         loading: false,
         error: undefined,
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -467,13 +468,13 @@ describe("CompanySearch", () => {
     it("handles limit input", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: mockCompanies,
         loading: false,
         error: undefined,
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -511,13 +512,13 @@ describe("CompanySearch", () => {
     it("supports keyboard navigation", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: mockCompanies,
         loading: false,
         error: undefined,
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -539,13 +540,13 @@ describe("CompanySearch", () => {
     it("announces search companies to screen readers", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: mockCompanies,
         loading: false,
         error: undefined,
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -565,16 +566,16 @@ describe("CompanySearch", () => {
 
   describe("Performance", () => {
     it("debounces search input", async () => {
-      const mockSearchCompanies = jest.fn();
+      const mockSearchCompanies = vi.fn();
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: [],
         loading: false,
         error: undefined,
         searchCompanies: mockSearchCompanies,
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -617,13 +618,13 @@ describe("CompanySearch", () => {
 
       mockUseCompanySearch.mockReturnValue({
         query: "Company",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: largeResultSet,
         loading: false,
         error: undefined,
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -644,13 +645,13 @@ describe("CompanySearch", () => {
     it("handles network errors gracefully", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: [],
         loading: false,
         error: new Error("Network error"),
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -668,13 +669,13 @@ describe("CompanySearch", () => {
     it("handles timeout errors", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: [],
         loading: false,
         error: new Error("Request timeout"),
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -692,13 +693,13 @@ describe("CompanySearch", () => {
     it("provides retry functionality", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: [],
         loading: false,
         error: new Error("Search failed"),
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -716,16 +717,16 @@ describe("CompanySearch", () => {
 
   describe("Integration", () => {
     it("integrates with GraphQL API", async () => {
-      const mockSearchCompanies = jest.fn();
+      const mockSearchCompanies = vi.fn();
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: mockCompanies,
         loading: false,
         error: undefined,
         searchCompanies: mockSearchCompanies,
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
@@ -746,13 +747,13 @@ describe("CompanySearch", () => {
     it("handles GraphQL errors", () => {
       mockUseCompanySearch.mockReturnValue({
         query: "Apple",
-        setQuery: jest.fn(),
+        setQuery: vi.fn(),
         companies: [],
         loading: false,
         error: new Error("GraphQL error: Field not found"),
-        searchCompanies: jest.fn(),
+        searchCompanies: vi.fn(),
         totalCount: 0,
-        getCompany: jest.fn(),
+        getCompany: vi.fn(),
       });
 
       render(
