@@ -18,6 +18,38 @@
 //! - All types must have comprehensive documentation
 
 use crate::imports::*;
+use async_graphql::{InputValueError, InputValueResult, Scalar, ScalarType, Value};
+use bigdecimal::BigDecimal;
+use std::str::FromStr;
+
+/// Custom GraphQL scalar for BigDecimal
+#[derive(Clone)]
+pub struct BigDecimalScalar(pub BigDecimal);
+
+#[Scalar]
+impl ScalarType for BigDecimalScalar {
+    fn parse(value: Value) -> InputValueResult<Self> {
+        match value {
+            Value::String(s) => BigDecimal::from_str(&s)
+                .map(BigDecimalScalar)
+                .map_err(|e| InputValueError::custom(format!("Invalid decimal value: {}", e))),
+            Value::Number(n) => {
+                if let Some(f) = n.as_f64() {
+                    BigDecimal::try_from(f).map(BigDecimalScalar).map_err(|e| {
+                        InputValueError::custom(format!("Invalid decimal value: {}", e))
+                    })
+                } else {
+                    Err(InputValueError::custom("Invalid number format"))
+                }
+            }
+            _ => Err(InputValueError::expected_type(value)),
+        }
+    }
+
+    fn to_value(&self) -> Value {
+        Value::String(self.0.to_string())
+    }
+}
 
 /// GraphQL representation of an economic series
 #[derive(Clone)]
@@ -266,7 +298,7 @@ pub struct DataPointType {
     pub id: ID,
     pub series_id: ID,
     pub date: NaiveDate,
-    pub value: Option<BigDecimal>,
+    pub value: Option<String>,
     pub revision_date: NaiveDate,
     pub is_original_release: bool,
     pub created_at: DateTime<Utc>,
@@ -279,7 +311,7 @@ impl From<DataPoint> for DataPointType {
             id: ID::from(data_point.id.to_string()),
             series_id: ID::from(data_point.series_id.to_string()),
             date: data_point.date,
-            value: data_point.value,
+            value: data_point.value.map(|v| v.to_string()),
             revision_date: data_point.revision_date,
             is_original_release: data_point.is_original_release,
             created_at: data_point.created_at,
@@ -432,8 +464,8 @@ impl From<DataSource> for DataSourceType {
 #[graphql(name = "TransformedDataPoint")]
 pub struct TransformedDataPointType {
     pub date: NaiveDate,
-    pub original_value: Option<BigDecimal>,
-    pub transformed_value: Option<BigDecimal>,
+    pub original_value: Option<String>,
+    pub transformed_value: Option<String>,
     pub transformation: DataTransformationType,
     pub revision_date: NaiveDate,
     pub is_original_release: bool,
@@ -758,7 +790,7 @@ pub struct ChartAnnotationType {
     /// Date the annotation refers to
     pub annotation_date: NaiveDate,
     /// Value the annotation refers to (if applicable)
-    pub annotation_value: Option<BigDecimal>,
+    pub annotation_value: Option<String>,
     /// Annotation title
     pub title: String,
     /// Annotation description/content
@@ -787,7 +819,7 @@ impl From<ChartAnnotation> for ChartAnnotationType {
             series_id: annotation.series_id,
             chart_id: annotation.chart_id.map(ID::from),
             annotation_date: annotation.annotation_date,
-            annotation_value: annotation.annotation_value,
+            annotation_value: annotation.annotation_value.map(|v| v.to_string()),
             title: annotation.title,
             description: annotation.description,
             color: annotation.color,
@@ -942,7 +974,7 @@ pub struct CreateAnnotationInput {
     /// Date the annotation refers to
     pub annotation_date: NaiveDate,
     /// Value the annotation refers to (optional)
-    pub annotation_value: Option<BigDecimal>,
+    pub annotation_value: Option<String>,
     /// Annotation title
     pub title: String,
     /// Annotation content/description

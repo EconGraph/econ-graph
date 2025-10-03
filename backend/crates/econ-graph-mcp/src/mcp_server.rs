@@ -19,7 +19,7 @@ use econ_graph_graphql::graphql::schema::create_schema_with_data;
 #[derive(Clone)]
 pub struct EconGraphMcpServer {
     /// Database connection pool
-    pool: Arc<DatabasePool>,
+    _pool: Arc<DatabasePool>,
     /// GraphQL schema for data operations
     schema: async_graphql::Schema<
         econ_graph_graphql::graphql::query::Query,
@@ -42,7 +42,7 @@ impl EconGraphMcpServer {
         });
 
         Self {
-            pool,
+            _pool: pool,
             schema,
             http_client,
             frontend_chart_api_url,

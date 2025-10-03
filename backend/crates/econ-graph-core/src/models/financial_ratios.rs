@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Comprehensive financial ratios for investment analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -593,7 +592,7 @@ impl EducationalContentLibrary {
     }
 
     /// Get benchmark data for a ratio by industry
-    pub fn get_benchmark_data(ratio_name: &str, industry: &str) -> Option<BenchmarkData> {
+    pub fn get_benchmark_data(ratio_name: &str, _industry: &str) -> Option<BenchmarkData> {
         if let Some(explanation) = Self::get_ratio_explanation(ratio_name) {
             Some(explanation.benchmark)
         } else {

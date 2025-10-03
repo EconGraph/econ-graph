@@ -34,7 +34,7 @@ impl TestContainer {
             // Don't run migrations automatically - let tests handle this after cleaning
 
             // Create a dummy container for the struct
-            let postgres_image = GenericImage::new("postgres", "17")
+            let postgres_image = GenericImage::new("postgres", "18")
                 .with_wait_for(WaitFor::message_on_stderr(
                     "database system is ready to accept connections",
                 ))
@@ -54,7 +54,7 @@ impl TestContainer {
         } else {
             println!("DEBUG: Using testcontainers for ephemeral database");
             // Use testcontainers for ephemeral database
-            let postgres_image = GenericImage::new("postgres", "17")
+            let postgres_image = GenericImage::new("postgres", "18")
                 .with_wait_for(WaitFor::message_on_stderr(
                     "database system is ready to accept connections",
                 ))
@@ -110,8 +110,6 @@ impl TestContainer {
 
     /// Clean the database for testing
     pub async fn clean_database(&self) -> Result<(), Box<dyn std::error::Error>> {
-        use diesel::prelude::*;
-        use diesel_async::AsyncPgConnection;
         use diesel_async::RunQueryDsl;
 
         let mut conn = self.pool.get().await?;

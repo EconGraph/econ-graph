@@ -9,6 +9,13 @@ members = [
     "crates/econ-graph-mcp",
     "crates/econ-graph-backend",
     "crates/econ-graph-metrics",
+    # New financial data crates
+    "crates/econ-graph-arrow-storage",
+    "crates/econ-graph-financial-graphql",
+    "crates/econ-graph-financial-core",
+]
+exclude = [
+    "crates/econ-graph-financial-data",  # Replaced by new split crates
 ]
 resolver = "2"
 
@@ -83,10 +90,13 @@ tracing-test = "0.2"
 warp = { version = "0.3", features = ["tls"] }
 tokio-stream = "0.1"
 
-# GraphQL
-async-graphql = { version = "7.0", features = ["chrono", "uuid", "bigdecimal"] }
-async-graphql-warp = "7.0"
+# GraphQL (compatible with Rust 1.74.1)
+async-graphql = { version = "6.0", features = ["chrono", "uuid", "bigdecimal"] }
+async-graphql-warp = "6.0"
 dataloader = { version = "0.18", default-features = false, features = ["runtime-tokio"] }
+
+# Financial data crates (internal dependencies)
+# Note: These are defined as workspace dependencies but used as path dependencies in individual crates
 
 # Testing
 tokio-test = "0.4"

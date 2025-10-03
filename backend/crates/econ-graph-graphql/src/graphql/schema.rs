@@ -6,7 +6,7 @@
 use async_graphql::{EmptySubscription, Schema};
 use std::sync::Arc;
 
-use crate::graphql::dataloaders::DataLoaders;
+use crate::dataloaders::DataLoaders;
 use crate::graphql::{mutation::Mutation, query::Query};
 use crate::security::{SecurityConfig, SecurityMiddleware};
 use econ_graph_core::database::DatabasePool;
@@ -57,7 +57,6 @@ pub fn create_schema(pool: DatabasePool) -> Schema<Query, Mutation, EmptySubscri
 
     Schema::build(Query, Mutation, EmptySubscription)
         .data(context)
-        .data(pool) // Add pool as separate context data
         .finish()
 }
 
@@ -85,7 +84,6 @@ pub fn create_schema_with_data<T: Send + Sync + 'static>(
 
     Schema::build(Query, Mutation, EmptySubscription)
         .data(context)
-        .data(pool) // Add pool as separate context data
         .data(additional_data)
         .finish()
 }

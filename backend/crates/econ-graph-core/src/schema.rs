@@ -1,7 +1,5 @@
 // @generated automatically by Diesel CLI.
 
-use diesel::sql_types::*;
-
 diesel::table! {
     annotation_assignments (id) {
         id -> Uuid,

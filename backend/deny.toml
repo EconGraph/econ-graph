@@ -127,6 +127,7 @@ exceptions = [
     { allow = ["MS-PL"], crate = "econ-graph-auth" },
     { allow = ["MS-PL"], crate = "econ-graph-core" },
     { allow = ["MS-PL"], crate = "econ-graph-crawler" },
+    { allow = ["MS-PL"], crate = "econ-graph-financial-data" },
     { allow = ["MS-PL"], crate = "econ-graph-graphql" },
     { allow = ["MS-PL"], crate = "econ-graph-mcp" },
     { allow = ["MS-PL"], crate = "econ-graph-metrics" },

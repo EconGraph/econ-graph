@@ -11,9 +11,6 @@ pub mod mutation;
 pub mod query;
 pub mod schema;
 
-#[cfg(test)]
-pub mod n_plus_one_tests;
-
 // Re-export commonly used types
 pub use mutation::Mutation;
 pub use query::Query;

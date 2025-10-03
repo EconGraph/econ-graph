@@ -297,7 +297,7 @@ impl GlobalAnalysisQuery {
     ) -> Result<Vec<CountryWithEconomicDataType>> {
         let pool = ctx.data::<DatabasePool>()?;
 
-        let countries = GlobalAnalysisService::get_countries_with_economic_data(&pool)
+        let countries = GlobalAnalysisService::get_countries_with_economic_data(pool)
             .await
             .map_err(|e| async_graphql::Error::new(format!("Failed to get countries: {}", e)))?;
 
@@ -315,7 +315,7 @@ impl GlobalAnalysisQuery {
         let min_corr = min_correlation.unwrap_or(0.3);
 
         let network = GlobalAnalysisService::get_correlation_network(
-            &pool,
+            pool,
             &indicator_category.to_string(),
             min_corr,
         )
@@ -345,7 +345,7 @@ impl GlobalAnalysisQuery {
             .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
         let events = GlobalAnalysisService::get_global_events_with_impacts(
-            &pool,
+            pool,
             start,
             end,
             min_impact_score,
@@ -375,7 +375,7 @@ impl GlobalAnalysisQuery {
         let min_corr = min_correlation.unwrap_or(0.3);
 
         let correlations = GlobalAnalysisService::calculate_country_correlations(
-            &pool,
+            pool,
             &indicator_category.to_string(),
             start,
             end,
