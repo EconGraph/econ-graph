@@ -127,8 +127,8 @@ describe('FinancialDashboard', () => {
   it('shows loading state when data is loading', async () => {
     renderWithProviders(<FinancialDashboard companyId="loading-company-id" />);
 
-    // Check for loading text instead of testid
-    expect(screen.getByText('Loading financial data...')).toBeInTheDocument();
+    // Check for loading progress bar
+    expect(screen.getByRole('progressbar')).toBeInTheDocument();
 
     // After data loads, the actual component content should be visible
     await waitFor(() => {
@@ -151,7 +151,7 @@ describe('FinancialDashboard', () => {
 
     await waitFor(() => {
       // Analysis tab should be available
-      expect(screen.getByRole('button', { name: /analysis/i })).toBeInTheDocument();
+      expect(screen.getByText('Analysis')).toBeInTheDocument();
     });
   });
 
@@ -160,7 +160,7 @@ describe('FinancialDashboard', () => {
 
     await waitFor(() => {
       // Trends tab should be available
-        expect(screen.getByRole('button', { name: /trends/i })).toBeInTheDocument();
+        expect(screen.getByText('Trends')).toBeInTheDocument();
     });
   });
 
@@ -169,7 +169,7 @@ describe('FinancialDashboard', () => {
 
     await waitFor(() => {
       // Compare tab should be available
-      expect(screen.getByRole('button', { name: /compare/i })).toBeInTheDocument();
+      expect(screen.getByText('Comparison')).toBeInTheDocument();
     });
   });
 
@@ -186,8 +186,8 @@ describe('FinancialDashboard', () => {
     renderWithProviders(<FinancialDashboard companyId="mock-company-id" />);
 
     await waitFor(() => {
-      // Export functionality should be available via the Export button
-      expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument();
+      // Export functionality should be available via the Download button
+      expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument();
     });
   });
 

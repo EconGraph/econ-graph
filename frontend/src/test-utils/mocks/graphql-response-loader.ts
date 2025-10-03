@@ -8,6 +8,14 @@ import getFinancialDashboardLoading from './graphql-responses/get_financial_dash
 import getFinancialStatementSuccess from './graphql-responses/get_financial_statement/success.json';
 import getFinancialStatementError from './graphql-responses/get_financial_statement/error.json';
 import getFinancialStatementLoading from './graphql-responses/get_financial_statement/loading.json';
+import getFinancialRatiosSuccess from './graphql-responses/get_financial_ratios/success.json';
+import getFinancialRatiosError from './graphql-responses/get_financial_ratios/error.json';
+import getFinancialRatiosEmpty from './graphql-responses/get_financial_ratios/empty.json';
+import getFinancialRatiosLoading from './graphql-responses/get_financial_ratios/loading.json';
+import getFinancialAlertsSuccess from './graphql-responses/get_financial_alerts/success.json';
+import getPeerCompaniesSuccess from './graphql-responses/get_peer_companies/success.json';
+import getRatioBenchmarksSuccess from './graphql-responses/get_ratio_benchmarks/success.json';
+import getRatioBenchmarksNotFound from './graphql-responses/get_ratio_benchmarks/not_found.json';
 
 // Response mapping for browser compatibility
 const RESPONSE_MAP: Record<string, Record<string, any>> = {
@@ -20,6 +28,22 @@ const RESPONSE_MAP: Record<string, Record<string, any>> = {
     success: getFinancialStatementSuccess,
     error: getFinancialStatementError,
     loading: getFinancialStatementLoading,
+  },
+  get_financial_ratios: {
+    success: getFinancialRatiosSuccess,
+    error: getFinancialRatiosError,
+    empty: getFinancialRatiosEmpty,
+    loading: getFinancialRatiosLoading,
+  },
+  get_financial_alerts: {
+    success: getFinancialAlertsSuccess,
+  },
+  get_peer_companies: {
+    success: getPeerCompaniesSuccess,
+  },
+  get_ratio_benchmarks: {
+    success: getRatioBenchmarksSuccess,
+    not_found: getRatioBenchmarksNotFound,
   },
 };
 
