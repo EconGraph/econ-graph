@@ -79,11 +79,77 @@ jobs:
             - 'scripts/**'
             - 'docker-compose.yml'
             - 'package.json'
-  backend-build-cache:
-    name: Backend Build Cache
+  backend-build-cache-main:
+    name: Backend Build Cache (Main)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    timeout-minutes: 90
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Install shared tools
+      run: |
+        echo "Installing shared tools..."
+        echo "Current PATH: $PATH"
+        echo "CARGO_HOME: $CARGO_HOME"
+        echo "HOME: $HOME"
+
+        # Set up cargo bin directory and PATH
+        export CARGO_BIN_DIR="$HOME/.cargo/bin"
+        export PATH="$CARGO_BIN_DIR:$PATH"
+
+        # Install diesel_cli
+        echo "Installing diesel_cli..."
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+
+        # Install cargo-audit
+        echo "Installing cargo-audit..."
+        cargo install cargo-audit --verbose --force
+
+        # Install cargo-deny
+        echo "Installing cargo-deny..."
+        cargo install cargo-deny --verbose --force
+
+        # Verify installations
+        echo "Verifying installations..."
+        ls -la "$CARGO_BIN_DIR/"
+        diesel --version || echo "diesel not found"
+        cargo-audit --version || echo "cargo-audit not found"
+        cargo-deny --version || echo "cargo-deny not found"
+      working-directory: backend
+
+    - name: Build backend
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo build --verbose --workspace --jobs 4
+      working-directory: backend
+
+  backend-build-cache-branch:
+    name: Backend Build Cache (Branch)
     runs-on: ubuntu-latest
     needs: [changes]
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || (needs.changes.outputs.frontend_only != 'true')
+    if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' && (needs.changes.outputs.frontend_only != 'true')
     timeout-minutes: 90
 
     steps:
@@ -190,7 +256,7 @@ jobs:
     name: Backend Smoke Tests (Fast)
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    needs: [backend-build-cache]
+    needs: [backend-build-cache-main, backend-build-cache-branch]
 
     steps:
     - name: Checkout code
@@ -536,7 +602,7 @@ jobs:
     name: Backend Crawler Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs: [backend-build-cache]
+    needs: [backend-build-cache-main, backend-build-cache-branch]
 
     services:
       postgres:
@@ -602,7 +668,7 @@ jobs:
     name: Backend Crawler Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs: [backend-build-cache]
+    needs: [backend-build-cache-main, backend-build-cache-branch]
 
     services:
       postgres:
@@ -668,7 +734,7 @@ jobs:
     name: Backend Queue Basic Tests
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs: [backend-build-cache]
+    needs: [backend-build-cache-main, backend-build-cache-branch]
 
     services:
       postgres:
@@ -734,7 +800,7 @@ jobs:
     name: Backend Queue Advanced Tests
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs: [backend-build-cache]
+    needs: [backend-build-cache-main, backend-build-cache-branch]
 
     services:
       postgres:
@@ -800,7 +866,7 @@ jobs:
     name: Backend Global Analysis Basic Tests
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs: [backend-build-cache]
+    needs: [backend-build-cache-main, backend-build-cache-branch]
 
     services:
       postgres:
@@ -866,7 +932,7 @@ jobs:
     name: Backend Global Analysis Advanced Tests
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs: [backend-build-cache]
+    needs: [backend-build-cache-main, backend-build-cache-branch]
 
     services:
       postgres:
@@ -932,7 +998,7 @@ jobs:
     name: Backend Series Discovery Basic Tests
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs: [backend-build-cache]
+    needs: [backend-build-cache-main, backend-build-cache-branch]
 
     services:
       postgres:
@@ -998,7 +1064,7 @@ jobs:
     name: Backend Series Discovery Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs: [backend-build-cache]
+    needs: [backend-build-cache-main, backend-build-cache-branch]
 
     services:
       postgres:
@@ -1064,7 +1130,7 @@ jobs:
     name: Backend Auth Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs: [backend-build-cache]
+    needs: [backend-build-cache-main, backend-build-cache-branch]
 
     services:
       postgres:
@@ -1130,7 +1196,7 @@ jobs:
     name: Backend Collaboration Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs: [backend-build-cache]
+    needs: [backend-build-cache-main, backend-build-cache-branch]
 
     services:
       postgres:
@@ -1196,7 +1262,7 @@ jobs:
     name: Backend Remaining Service Tests
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs: [backend-build-cache]
+    needs: [backend-build-cache-main, backend-build-cache-branch]
 
     services:
       postgres:
