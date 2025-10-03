@@ -644,7 +644,12 @@ main() {
 
     # Step 2: Wait for services
     print_status "INFO" "Step 2: Waiting for services to be ready"
-    wait_for_service "Backend" "$BACKEND_URL" || exit 1
+    # Only wait for Backend if the deployment exists (first run may not have backend yet)
+    if kubectl get deployment econ-graph-backend -n $NAMESPACE >/dev/null 2>&1; then
+        wait_for_service "Backend" "$BACKEND_URL" || exit 1
+    else
+        print_status "INFO" "Backend deployment not found yet; skipping backend readiness wait"
+    fi
     wait_for_service "Grafana" "$GRAFANA_URL" || exit 1
     echo
 

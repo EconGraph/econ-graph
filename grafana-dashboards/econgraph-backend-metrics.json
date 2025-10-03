@@ -1,7 +1,8 @@
 {
-  "id": null,
-  "uid": "econgraph-backend-metrics",
-  "title": "EconGraph Backend Metrics",
+  "dashboard": {
+    "id": null,
+    "uid": "econgraph-backend-metrics",
+    "title": "EconGraph Backend Metrics",
   "description": "Comprehensive monitoring of EconGraph backend application metrics",
   "tags": [
     "econgraph",
@@ -967,5 +968,6 @@
         "type": "dashboard"
       }
     ]
+  }
   }
 }

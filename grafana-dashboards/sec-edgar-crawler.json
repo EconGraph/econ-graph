@@ -1,5 +1,6 @@
 {
-  "title": "SEC EDGAR Crawler",
+  "dashboard": {
+    "title": "SEC EDGAR Crawler",
   "schemaVersion": 38,
   "version": 1,
   "refresh": "30s",
@@ -47,4 +48,5 @@
       ]
     }
   ]
+  }
 }

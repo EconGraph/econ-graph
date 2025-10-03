@@ -1,5 +1,6 @@
 {
-  "title": "Crawler Politeness",
+  "dashboard": {
+    "title": "Crawler Politeness",
   "schemaVersion": 38,
   "version": 1,
   "refresh": "30s",
@@ -44,4 +45,5 @@
       ]
     }
   ]
+  }
 }
