@@ -406,6 +406,37 @@ else
     echo "  ❌ Main Entry Point: http://localhost - Not accessible (ingress controller may be missing)"
 fi
 
+# Test HTTPS Termination (www.econ-graph.com)
+echo ""
+echo "🔒 Testing HTTPS termination..."
+if curl -s -o /dev/null -w "%{http_code}" -k https://www.econ-graph.com | grep -q "200\|302"; then
+    echo "  ✅ HTTPS Production: https://www.econ-graph.com - Accessible"
+else
+    echo "  ❌ HTTPS Production: https://www.econ-graph.com - Not accessible (SSL certificate may not be ready)"
+fi
+
+# Test HTTPS Termination (econ-graph.com)
+if curl -s -o /dev/null -w "%{http_code}" -k https://econ-graph.com | grep -q "200\|302"; then
+    echo "  ✅ HTTPS Production: https://econ-graph.com - Accessible"
+else
+    echo "  ❌ HTTPS Production: https://econ-graph.com - Not accessible (SSL certificate may not be ready)"
+fi
+
+# Test SSL Certificate Status
+echo ""
+echo "🔐 Checking SSL certificate status..."
+if kubectl get secret econ-graph-tls -n econ-graph >/dev/null 2>&1; then
+    echo "  ✅ SSL Certificate: econ-graph-tls secret exists"
+    
+    # Check certificate expiry
+    CERT_INFO=$(kubectl get secret econ-graph-tls -n econ-graph -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -dates 2>/dev/null || echo "Unable to parse certificate")
+    if [[ "$CERT_INFO" != "Unable to parse certificate" ]]; then
+        echo "  📋 Certificate Info: $CERT_INFO"
+    fi
+else
+    echo "  ⚠️  SSL Certificate: econ-graph-tls secret not found (cert-manager may still be provisioning)"
+fi
+
 # Test Grafana
 if curl -s -o /dev/null -w "%{http_code}" http://localhost:${GRAFANA_NODEPORT} | grep -q "302\|200"; then
     echo "  ✅ Grafana: http://localhost:${GRAFANA_NODEPORT} - Accessible"
