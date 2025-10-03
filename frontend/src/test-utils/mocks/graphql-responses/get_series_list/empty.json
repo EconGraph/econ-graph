@@ -1,0 +1,14 @@
+{
+  "data": {
+    "seriesList": {
+      "nodes": [],
+      "totalCount": 0,
+      "pageInfo": {
+        "hasNextPage": false,
+        "hasPreviousPage": false,
+        "startCursor": null,
+        "endCursor": null
+      }
+    }
+  }
+}

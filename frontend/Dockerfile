@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for EconGraph Frontend
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -29,14 +29,14 @@ ENV VITE_FACEBOOK_APP_ID=$VITE_FACEBOOK_APP_ID
 ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
 ENV NODE_ENV=$NODE_ENV
 
-# Build the application
+# Build the application (Vite)
 RUN npm run build
 
 # Production stage
 FROM nginx:alpine
 
-# Copy built application from builder stage
-COPY --from=builder /app/build /usr/share/nginx/html
+# Copy built application from builder stage (Vite outputs to dist)
+COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf

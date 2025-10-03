@@ -1,7 +1,8 @@
 {
-  "id": null,
-  "uid": "econgraph-database",
-  "title": "EconGraph Database Statistics",
+  "dashboard": {
+    "id": null,
+    "uid": "econgraph-database",
+    "title": "EconGraph Database Statistics",
   "description": "Comprehensive PostgreSQL database monitoring for economic time series data",
   "tags": [
     "econgraph",
@@ -806,5 +807,6 @@
         "type": "dashboard"
       }
     ]
+  }
   }
 }

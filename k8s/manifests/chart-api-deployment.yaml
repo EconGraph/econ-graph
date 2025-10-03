@@ -21,8 +21,8 @@ spec:
     spec:
       containers:
       - name: chart-api-service
-        image: econ-graph-chart-api:latest
-        imagePullPolicy: IfNotPresent
+        image: econ-graph-chart-api:v1.0.0
+        imagePullPolicy: Never
         ports:
         - containerPort: 3001
           name: http
@@ -65,7 +65,11 @@ spec:
           capabilities:
             drop:
             - ALL
+          seccompProfile:
+            type: RuntimeDefault
       securityContext:
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       restartPolicy: Always
       terminationGracePeriodSeconds: 30

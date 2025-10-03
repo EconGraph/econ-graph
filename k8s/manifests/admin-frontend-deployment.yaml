@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: admin-frontend
-        image: econ-graph-admin-frontend:latest
+        image: econ-graph-admin-frontend:v1.0.0
         imagePullPolicy: Never  # Use local image
         ports:
         - containerPort: 3001
@@ -88,6 +88,10 @@ spec:
         - name: nginx-config
           mountPath: /etc/nginx/nginx.conf
           subPath: nginx.conf
+        - name: nginx-cache
+          mountPath: /var/cache/nginx
+        - name: nginx-run
+          mountPath: /var/run
         livenessProbe:
           httpGet:
             path: /health
@@ -100,8 +104,26 @@ spec:
             port: 3001
           initialDelaySeconds: 5
           periodSeconds: 5
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       volumes:
       - name: nginx-config
         configMap:
           name: admin-frontend-nginx-config
+      - name: nginx-cache
+        emptyDir: {}
+      - name: nginx-run
+        emptyDir: {}
       restartPolicy: Always

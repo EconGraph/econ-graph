@@ -1,7 +1,8 @@
 {
-  "id": null,
-  "uid": "econgraph-crawler",
-  "title": "EconGraph Crawler Status",
+  "dashboard": {
+    "id": null,
+    "uid": "econgraph-crawler",
+    "title": "EconGraph Crawler Status",
   "description": "Comprehensive monitoring of data crawler operations, queue processing, and data source status",
   "tags": [
     "econgraph",
@@ -985,5 +986,6 @@
         "type": "dashboard"
       }
     ]
+  }
   }
 }

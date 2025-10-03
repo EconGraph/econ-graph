@@ -34,6 +34,16 @@ spec:
           requests:
             cpu: 100m
             memory: 256Mi
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 472
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false  # Grafana needs to write to /var/lib/grafana
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
         volumeMounts:
         - name: grafana-storage
           mountPath: /var/lib/grafana

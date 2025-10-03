@@ -1,7 +1,8 @@
 {
-  "id": null,
-  "uid": "econgraph-overview",
-  "title": "EconGraph Platform Overview",
+  "dashboard": {
+    "id": null,
+    "uid": "econgraph-overview",
+    "title": "EconGraph Platform Overview",
   "description": "High-level overview of the EconGraph platform performance and health",
   "tags": [
     "econgraph",
@@ -709,5 +710,6 @@
         "type": "dashboard"
       }
     ]
+  }
   }
 }

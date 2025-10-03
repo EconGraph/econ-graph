@@ -24,7 +24,7 @@ spec:
         args:
         - |
           echo "Waiting for PostgreSQL to be ready..."
-          until nc -z postgres-service 5432; do
+          until nc -z postgres-service.econ-graph.svc.cluster.local 5432; do
             echo "PostgreSQL is unavailable - sleeping"
             sleep 2
           done
@@ -36,9 +36,19 @@ spec:
           limits:
             memory: "32Mi"
             cpu: "50m"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
       containers:
       - name: backend
-        image: econ-graph-backend:v3.7.2
+        image: econ-graph-backend:v3.7.4
         imagePullPolicy: Never  # Use local image
         ports:
         # Note: containerPort must be static in Kubernetes, but the application
@@ -129,4 +139,18 @@ spec:
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       restartPolicy: Always

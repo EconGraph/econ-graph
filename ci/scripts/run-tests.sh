@@ -10,7 +10,7 @@ DOCKER_DIR="$(dirname "$SCRIPT_DIR")/docker"
 # Default values
 TEST_GROUP="all"
 CLEANUP=true
-BUILD_IMAGES=true
+BUILD_IMAGES=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -47,12 +47,6 @@ cd "$DOCKER_DIR"
 
 echo "🧪 Starting E2E Tests - Group: $TEST_GROUP"
 
-# Build images if requested
-if [ "$BUILD_IMAGES" = true ]; then
-    echo "🔨 Building test images..."
-    docker-compose -f docker-compose.best-practice.yml build
-fi
-
 # Create test results directory
 mkdir -p test-results/{core,analysis,debug,comprehensive,mobile-core,mobile-analysis,mobile-comprehensive,xbrl-financial}
 
@@ -63,13 +57,13 @@ run_test_group() {
 
     if [ "$group" = "all" ]; then
         # Run all test groups in parallel
-        docker-compose -f docker-compose.best-practice.yml up \
+        docker-compose -f docker-compose.best-practice.yml up --no-build \
             test-core test-analysis test-debug test-comprehensive \
             test-mobile-core test-mobile-analysis test-mobile-comprehensive \
             test-xbrl-financial
     else
         # Run specific test group
-        docker-compose -f docker-compose.best-practice.yml up "test-$group"
+        docker-compose -f docker-compose.best-practice.yml up --no-build "test-$group"
     fi
 }
 

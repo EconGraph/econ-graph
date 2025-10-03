@@ -1,0 +1,146 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: econ-graph-ssl-ingress
+  namespace: econ-graph
+  annotations:
+    # SSL and cert-manager annotations
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"
+    # Temporarily disable SSL redirect to allow ACME validation
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # CORS Configuration
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://www.econgraph.com,https://econgraph.com"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,Accept,Origin,X-CSRF-Token"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+    nginx.ingress.kubernetes.io/cors-max-age: "86400"
+    
+    # Security Headers with ACME exception
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      # Allow ACME challenges without HTTPS redirect
+      if ($uri ~ "^/\.well-known/acme-challenge/") {
+        return 200;
+      }
+      # Security headers for all other requests
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+      more_set_headers "Permissions-Policy: geolocation=(), microphone=(), camera=()";
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload";
+      more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.econ-graph.com wss:; frame-ancestors 'none';";
+    
+    # Rate Limiting
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    nginx.ingress.kubernetes.io/rate-limit-connections: "10"
+    
+    # Proxy Configuration
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "5"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    
+    # Client Max Body Size
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    
+    # Buffer Configuration
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+    nginx.ingress.kubernetes.io/proxy-buffers-number: "8"
+    
+    # Connection Settings
+    nginx.ingress.kubernetes.io/upstream-keepalive-connections: "32"
+    nginx.ingress.kubernetes.io/upstream-keepalive-timeout: "60"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - www.econgraph.com
+    - econgraph.com
+    secretName: econ-graph-tls
+  rules:
+  - host: www.econgraph.com
+    http:
+      paths:
+      - path: /admin
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-admin-frontend-service
+            port:
+              number: 3001
+      - path: /api/admin
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /graphql
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /auth
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /playground
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /health
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /grafana
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana-service
+            port:
+              number: 3000
+      - path: /login
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana-service
+            port:
+              number: 3000
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-frontend-service
+            port:
+              number: 3000
+  - host: econgraph.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-frontend-service
+            port:
+              number: 3000

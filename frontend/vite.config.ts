@@ -39,7 +39,7 @@ export default defineConfig({
 
   // Build configuration
   build: {
-    outDir: 'build',
+    outDir: 'dist',
     sourcemap: true,
     // Optimize chunks for better caching
     rollupOptions: {
@@ -51,7 +51,7 @@ export default defineConfig({
           d3: ['d3', 'd3-geo', 'd3-zoom', 'd3-scale', 'd3-selection'],
           charts: ['chart.js', 'react-chartjs-2'],
           router: ['react-router-dom'],
-          query: ['react-query'],
+          query: ['@tanstack/react-query'],
         },
       },
     },
@@ -86,7 +86,7 @@ export default defineConfig({
       'react',
       'react-dom',
       'react-router-dom',
-      'react-query',
+      '@tanstack/react-query',
       '@mui/material',
       '@mui/icons-material',
       '@emotion/react',
@@ -107,7 +107,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
-    setupFiles: ['./src/setupTests.ts'],
+    setupFiles: ['./src/setupTests.vitest.ts'],
     // Exclude Playwright tests and other non-unit tests
     exclude: [
       '**/node_modules/**',
@@ -133,7 +133,7 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       exclude: [
         'node_modules/',
-        'src/setupTests.ts',
+        'src/setupTests.vitest.ts',
         'src/**/__mocks__/**',
         'src/**/__tests__/**',
         '**/*.d.ts',
