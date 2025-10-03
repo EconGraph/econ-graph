@@ -1,0 +1,95 @@
+# Let's Encrypt ClusterIssuer with DNS-01 challenge for Cloudflare
+# This configuration enables automatic SSL certificate generation using Cloudflare DNS
+
+---
+# Cloudflare API credentials secret template
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudflare-api-token-secret
+  namespace: cert-manager
+  labels:
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/component: cloudflare-webhook
+type: Opaque
+stringData:
+  # Replace with your actual Cloudflare API token
+  # Get from: https://dash.cloudflare.com/profile/api-tokens
+  # Required permissions: Zone - DNS - Edit, Zone - Zone - Read
+  api-token: "YOUR_CLOUDFLARE_API_TOKEN"
+
+---
+# Production Let's Encrypt ClusterIssuer with Cloudflare DNS-01 challenge
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod-cloudflare
+  labels:
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/component: clusterissuer
+spec:
+  acme:
+    # Let's Encrypt production server
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@econgraph.example.com  # Replace with your actual email
+    privateKeySecretRef:
+      name: letsencrypt-prod-cloudflare
+    solvers:
+    - dns01:
+        cloudflare:
+          apiTokenSecretRef:
+            name: cloudflare-api-token-secret
+            key: api-token
+
+---
+# Staging Let's Encrypt ClusterIssuer with Cloudflare DNS-01 challenge (for testing)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging-cloudflare
+  labels:
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/component: clusterissuer
+spec:
+  acme:
+    # Let's Encrypt staging server (for testing)
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: admin@econgraph.example.com  # Replace with your actual email
+    privateKeySecretRef:
+      name: letsencrypt-staging-cloudflare
+    solvers:
+    - dns01:
+        cloudflare:
+          apiTokenSecretRef:
+            name: cloudflare-api-token-secret
+            key: api-token
+
+---
+# Wildcard certificate example for your domain
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: econgraph-wildcard-tls
+  namespace: econ-graph
+  labels:
+    app.kubernetes.io/name: econgraph
+    app.kubernetes.io/component: certificate
+spec:
+  # Secret name where the certificate will be stored
+  secretName: econgraph-wildcard-tls
+  # Reference to the ClusterIssuer
+  issuerRef:
+    name: letsencrypt-prod-cloudflare
+    kind: ClusterIssuer
+  # Certificate details
+  commonName: "*.econgraph.example.com"  # Replace with your actual domain
+  dnsNames:
+  - "econgraph.example.com"      # Replace with your actual domain
+  - "*.econgraph.example.com"    # Wildcard for subdomains
+  - "api.econgraph.example.com"  # API subdomain
+  - "admin.econgraph.example.com" # Admin subdomain
+  - "grafana.econgraph.example.com" # Monitoring subdomain
+  # Certificate duration (Let's Encrypt certificates are valid for 90 days)
+  duration: 2160h  # 90 days
+  # Renewal settings
+  renewBefore: 720h  # Renew 30 days before expiration
