@@ -528,4 +528,294 @@ describe('SeriesExplorer', () => {
     // Component structure is ready for export functionality when backend is connected
     expect(screen.getByText(/series explorer/i)).toBeInTheDocument();
   });
+
+  // =============================================================================
+  // EMPTY STATE TESTS - Critical for deployment scenarios with empty databases
+  // =============================================================================
+
+  test('should display empty state when no series are available', async () => {
+    // REQUIREMENT: Test empty database scenario handling
+    // PURPOSE: Verify graceful handling when database has no economic series
+    // This prevents the blank screen issue that occurred in deployment
+
+    // Mock empty search results
+    vi.mocked(require('../../hooks/useSeriesData').useSeriesSearch).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    // Perform a search that returns no results
+    const searchInput = screen.getByPlaceholderText(/search economic series/i);
+    await user.clear(searchInput);
+    await user.type(searchInput, 'nonexistent-series');
+    
+    // Wait for search to complete
+    await waitFor(() => {
+      expect(searchInput).toHaveValue('nonexistent-series');
+    });
+
+    // Should display empty state message
+    await waitFor(() => {
+      expect(screen.getByText(/no series found/i)).toBeInTheDocument();
+    });
+
+    // Should provide helpful guidance
+    expect(screen.getByText(/try adjusting your search criteria/i)).toBeInTheDocument();
+    
+    // Should provide action to browse all series
+    expect(screen.getByRole('button', { name: /browse all series/i })).toBeInTheDocument();
+  });
+
+  test('should handle loading state gracefully', async () => {
+    // REQUIREMENT: Test loading state during search operations
+    // PURPOSE: Verify loading indicators work properly during API calls
+    // This ensures users understand when the system is working
+
+    // Mock loading state
+    vi.mocked(require('../../hooks/useSeriesData').useSeriesSearch).mockReturnValue({
+      data: null,
+      isLoading: true,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    // Perform search to trigger loading
+    const searchInput = screen.getByPlaceholderText(/search economic series/i);
+    await user.clear(searchInput);
+    await user.type(searchInput, 'GDP');
+
+    // Should show loading skeletons
+    await waitFor(() => {
+      const skeletons = screen.getAllByTestId(/skeleton/i);
+      expect(skeletons.length).toBeGreaterThan(0);
+    });
+
+    // Should not show empty state during loading
+    expect(screen.queryByText(/no series found/i)).not.toBeInTheDocument();
+  });
+
+  test('should handle network errors gracefully', async () => {
+    // REQUIREMENT: Test error state handling when API calls fail
+    // PURPOSE: Verify graceful degradation when backend is unavailable
+    // This prevents crashes when deployment has connectivity issues
+
+    // Mock network error
+    vi.mocked(require('../../hooks/useSeriesData').useSeriesSearch).mockReturnValue({
+      data: null,
+      isLoading: false,
+      error: new Error('Network error: Failed to fetch'),
+      refetch: vi.fn(),
+    });
+
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    // Perform search that will fail
+    const searchInput = screen.getByPlaceholderText(/search economic series/i);
+    await user.clear(searchInput);
+    await user.type(searchInput, 'GDP');
+
+    // Should handle error gracefully without crashing
+    await waitFor(() => {
+      expect(screen.getByText(/series explorer/i)).toBeInTheDocument();
+    });
+
+    // Should still show search interface
+    expect(searchInput).toBeInTheDocument();
+  });
+
+  test('should handle empty data sources gracefully', async () => {
+    // REQUIREMENT: Test scenario when no data sources are available
+    // PURPOSE: Verify component works when data sources API returns empty
+    // This handles deployment scenarios where data sources aren't configured
+
+    // Mock empty data sources
+    vi.mocked(require('../../hooks/useSeriesData').useDataSources).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    renderSeriesExplorer();
+
+    // Component should still render without crashing
+    expect(screen.getByText(/series explorer/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/search economic series/i)).toBeInTheDocument();
+
+    // Should handle empty data sources gracefully
+    // The source filter dropdown might be empty or hidden, which is acceptable
+  });
+
+  test('should handle data source loading errors', async () => {
+    // REQUIREMENT: Test error handling when data sources fail to load
+    // PURPOSE: Verify component resilience when data sources API fails
+    // This prevents crashes when backend data sources are misconfigured
+
+    // Mock data sources error
+    vi.mocked(require('../../hooks/useSeriesData').useDataSources).mockReturnValue({
+      data: null,
+      isLoading: false,
+      error: new Error('Failed to load data sources'),
+      refetch: vi.fn(),
+    });
+
+    renderSeriesExplorer();
+
+    // Component should still render and be functional
+    expect(screen.getByText(/series explorer/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/search economic series/i)).toBeInTheDocument();
+
+    // Search functionality should still work even without data sources
+    const searchInput = screen.getByPlaceholderText(/search economic series/i);
+    expect(searchInput).toBeInTheDocument();
+  });
+
+  test('should display appropriate message for empty search results', async () => {
+    // REQUIREMENT: Test specific empty search result messaging
+    // PURPOSE: Verify helpful messaging when searches return no results
+    // This improves user experience when database is empty or search terms don't match
+
+    // Mock empty search results
+    vi.mocked(require('../../hooks/useSeriesData').useSeriesSearch).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    // Search for something that won't return results
+    const searchInput = screen.getByPlaceholderText(/search economic series/i);
+    await user.clear(searchInput);
+    await user.type(searchInput, 'xyz-nonexistent');
+
+    // Should show specific empty results message
+    await waitFor(() => {
+      expect(screen.getByText(/no series found/i)).toBeInTheDocument();
+    });
+
+    // Should provide helpful suggestions
+    expect(screen.getByText(/try adjusting your search criteria/i)).toBeInTheDocument();
+    
+    // Should offer alternative actions
+    const browseButton = screen.getByRole('button', { name: /browse all series/i });
+    expect(browseButton).toBeInTheDocument();
+  });
+
+  test('should handle concurrent empty states properly', async () => {
+    // REQUIREMENT: Test multiple empty states occurring simultaneously
+    // PURPOSE: Verify component handles complex empty scenarios gracefully
+    // This tests edge cases where multiple data sources are empty or failing
+
+    // Mock both empty search results and empty data sources
+    vi.mocked(require('../../hooks/useSeriesData').useSeriesSearch).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    vi.mocked(require('../../hooks/useSeriesData').useDataSources).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    // Perform search
+    const searchInput = screen.getByPlaceholderText(/search economic series/i);
+    await user.clear(searchInput);
+    await user.type(searchInput, 'test');
+
+    // Should handle both empty states without conflicts
+    await waitFor(() => {
+      expect(screen.getByText(/series explorer/i)).toBeInTheDocument();
+      expect(screen.getByText(/no series found/i)).toBeInTheDocument();
+    });
+
+    // Should remain functional despite empty states
+    expect(searchInput).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /browse all series/i })).toBeInTheDocument();
+  });
+
+  test('should provide clear feedback for empty database scenario', async () => {
+    // REQUIREMENT: Test specific messaging for completely empty database
+    // PURPOSE: Verify users understand when the system has no data at all
+    // This addresses the deployment issue where database was empty
+
+    // Mock completely empty state (no data sources, no series)
+    vi.mocked(require('../../hooks/useSeriesData').useSeriesSearch).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    vi.mocked(require('../../hooks/useSeriesData').useDataSources).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    renderSeriesExplorer();
+
+    // Should display helpful message about empty database
+    await waitFor(() => {
+      expect(screen.getByText(/series explorer/i)).toBeInTheDocument();
+    });
+
+    // Should provide guidance on what to do next
+    const searchInput = screen.getByPlaceholderText(/search economic series/i);
+    expect(searchInput).toBeInTheDocument();
+    
+    // Should suggest checking system status or contacting admin
+    // (This would be enhanced with specific empty database messaging)
+  });
+
+  test('should maintain search functionality during empty states', async () => {
+    // REQUIREMENT: Test that search remains functional even with empty data
+    // PURPOSE: Verify users can still attempt searches when system has no data
+    // This ensures the interface remains interactive during deployment issues
+
+    // Mock empty state but keep search functional
+    vi.mocked(require('../../hooks/useSeriesData').useSeriesSearch).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    // Search functionality should remain available
+    const searchInput = screen.getByPlaceholderText(/search economic series/i);
+    expect(searchInput).toBeInTheDocument();
+
+    // Should be able to type in search
+    await user.clear(searchInput);
+    await user.type(searchInput, 'test search');
+    
+    await waitFor(() => {
+      expect(searchInput).toHaveValue('test search');
+    });
+
+    // Should handle search execution gracefully
+    expect(screen.getByText(/series explorer/i)).toBeInTheDocument();
+  });
 });

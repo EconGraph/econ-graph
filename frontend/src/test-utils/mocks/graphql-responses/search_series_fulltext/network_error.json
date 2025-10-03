@@ -1,0 +1,17 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Network error: Failed to fetch",
+      "locations": [
+        {
+          "line": 2,
+          "column": 3
+        }
+      ],
+      "path": [
+        "searchSeries"
+      ]
+    }
+  ]
+}
