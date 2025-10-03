@@ -1,0 +1,28 @@
+{
+  "data": {
+    "dataSources": [
+      {
+        "id": "fred",
+        "name": "Federal Reserve Economic Data",
+        "description": "Economic data from the Federal Reserve",
+        "base_url": "https://fred.stlouisfed.org",
+        "api_key_required": false,
+        "rate_limit_per_minute": 120,
+        "series_count": 800000,
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-12-15T10:00:00Z"
+      },
+      {
+        "id": "bls",
+        "name": "Bureau of Labor Statistics",
+        "description": "Labor market and economic statistics",
+        "base_url": "https://www.bls.gov",
+        "api_key_required": true,
+        "rate_limit_per_minute": 60,
+        "series_count": 50000,
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-12-15T10:00:00Z"
+      }
+    ]
+  }
+}
