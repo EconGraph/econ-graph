@@ -76,11 +76,19 @@ spec:
         matchLabels:
           kubernetes.io/metadata.name: ingress
   egress:
-  # Allow egress to PostgreSQL
+  # Allow egress to PostgreSQL (both pod and service)
   - to:
     - podSelector:
         matchLabels:
           app: postgresql
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow egress to PostgreSQL service
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: econ-graph
     ports:
     - protocol: TCP
       port: 5432

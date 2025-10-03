@@ -151,7 +151,34 @@ kubectl patch statefulset postgresql -n econ-graph -p '{
 kubectl delete pod postgresql-0 -n econ-graph
 ```
 
-### 7. SSL Certificate Issues
+### 7. Backend Pods Stuck in Init:0/1
+
+#### Problem
+```bash
+kubectl get pods -n econ-graph | grep backend
+# Shows: econ-graph-backend-xxx   0/1     Init:0/1   0          XXm
+
+kubectl logs <backend-pod> -n econ-graph -c wait-for-postgres
+# Shows: "PostgreSQL is unavailable - sleeping" repeatedly
+```
+
+#### Solution
+```bash
+# Check PostgreSQL status
+kubectl get pods -n econ-graph | grep postgres
+kubectl get svc -n econ-graph | grep postgres
+
+# Test connectivity (if network policies are blocking)
+kubectl delete networkpolicy --all -n econ-graph
+
+# Restart backend deployment
+kubectl rollout restart deployment/econ-graph-backend -n econ-graph
+
+# Re-apply network policies after connectivity is established
+kubectl apply -f k8s/manifests/network-policy.yaml
+```
+
+### 8. SSL Certificate Issues
 
 #### Problem
 ```bash
@@ -174,7 +201,7 @@ kubectl logs -f deployment/cert-manager -n cert-manager
 kubectl rollout restart deployment/cert-manager -n cert-manager
 ```
 
-### 8. Memory Issues
+### 9. Memory Issues
 
 #### Problem
 ```bash
@@ -197,7 +224,7 @@ kubectl get pods -A | grep kubeflow
 kubectl delete namespace kubeflow
 ```
 
-### 9. Ingress Not Working
+### 10. Ingress Not Working
 
 #### Problem
 ```bash
@@ -218,7 +245,7 @@ kubectl describe ingress econ-graph-ssl-ingress -n econ-graph
 kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=controller -n ingress-nginx --timeout=180s
 ```
 
-### 10. Pod Limit Exceeded
+### 11. Pod Limit Exceeded
 
 #### Problem
 ```bash

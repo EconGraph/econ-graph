@@ -229,7 +229,35 @@ kubectl get namespace econ-graph -o yaml
 kubectl get namespace econ-graph -o jsonpath='{.metadata.labels}'
 ```
 
-#### 2. Network Policy Blocking Traffic
+#### 2. Backend Pods Stuck in Init:0/1 (PostgreSQL Connectivity)
+**Symptoms**: Backend pods fail to start with init container hanging
+```bash
+kubectl get pods -n econ-graph | grep backend
+# Shows: econ-graph-backend-xxx   0/1     Init:0/1   0          XXm
+
+kubectl logs <backend-pod> -n econ-graph -c wait-for-postgres
+# Shows: "PostgreSQL is unavailable - sleeping" repeatedly
+```
+
+**Root Cause**: Network connectivity issues between backend pods and PostgreSQL service, often due to Network Policy misconfiguration.
+
+**Solution**:
+```bash
+# Check PostgreSQL status
+kubectl get pods -n econ-graph | grep postgres
+kubectl get svc -n econ-graph | grep postgres
+
+# Test connectivity (if network policies are blocking)
+kubectl delete networkpolicy --all -n econ-graph
+
+# Restart backend deployment
+kubectl rollout restart deployment/econ-graph-backend -n econ-graph
+
+# Re-apply network policies after connectivity is established
+kubectl apply -f k8s/manifests/network-policy.yaml
+```
+
+#### 3. Network Policy Blocking Traffic
 **Symptoms**: Services can't communicate, ACME challenges fail
 ```bash
 # Check network policies
@@ -248,7 +276,7 @@ kubectl get namespace ingress -o yaml | grep -A5 labels
 kubectl describe networkpolicy econ-graph-network-policy -n econ-graph
 ```
 
-#### 3. SSL Certificate Issues
+#### 4. SSL Certificate Issues
 **Symptoms**: HTTPS endpoints return certificate errors
 ```bash
 # Check certificate status
@@ -269,7 +297,7 @@ curl -s -o /dev/null -w "%{http_code}" http://econgraph.com/.well-known/acme-cha
 # Should return 200, not 504
 ```
 
-#### 4. PostgreSQL Issues
+#### 5. PostgreSQL Issues
 **Symptoms**: Database pods crash or fail to start
 ```bash
 # Check PostgreSQL logs
@@ -281,7 +309,7 @@ kubectl describe pod postgresql-0 -n econ-graph
 
 **Solution**: PostgreSQL 18 configuration includes proper volume mounts and security contexts.
 
-#### 5. Image Pull Issues
+#### 6. Image Pull Issues
 **Symptoms**: Pods stuck in `ErrImageNeverPull` or `ErrImagePull`
 ```bash
 # Check available images in MicroK8s
