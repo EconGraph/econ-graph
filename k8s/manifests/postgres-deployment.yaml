@@ -6,7 +6,7 @@ metadata:
   namespace: econ-graph
   labels:
     app: postgresql
-    version: "15"
+    version: "18"
 spec:
   serviceName: postgresql
   replicas: 1
@@ -17,11 +17,11 @@ spec:
     metadata:
       labels:
         app: postgresql
-        version: "15"
+        version: "18"
     spec:
       containers:
       - name: postgresql
-        image: postgres:15-alpine
+        image: postgres:18
         ports:
         - containerPort: 5432
           name: postgresql
@@ -33,10 +33,10 @@ spec:
         - name: POSTGRES_PASSWORD
           value: "password"
         - name: PGDATA
-          value: "/var/lib/postgresql/data/pgdata"
+          value: "/data/pgdata"
         volumeMounts:
         - name: postgresql-data
-          mountPath: /var/lib/postgresql/data
+          mountPath: /data
         - name: postgresql-init
           mountPath: /docker-entrypoint-initdb.d
         resources:
@@ -46,6 +46,16 @@ spec:
           limits:
             memory: "4Gi"
             cpu: "1000m"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 999
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false  # PostgreSQL needs to write to /var/lib/postgresql/data
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
         livenessProbe:
           exec:
             command:

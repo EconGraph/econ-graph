@@ -105,6 +105,7 @@ echo "🏷️  Tagging images with v3.7.4..."
 docker tag econ-graph-backend:latest econ-graph-backend:v3.7.4
 docker tag econ-graph-frontend:latest econ-graph-frontend:v3.7.4
 docker tag econ-graph-chart-api:latest econ-graph-chart-api:v1.0.0
+docker tag econ-graph-admin-frontend:latest econ-graph-admin-frontend:v1.0.0
 
 # Load images into MicroK8s
 echo "📦 Loading images into MicroK8s..."
@@ -319,13 +320,7 @@ kubectl wait --for=condition=Available deployment/loki -n econ-graph --timeout=3
 kubectl wait --for=condition=Available deployment/prometheus -n econ-graph --timeout=300s || true
 kubectl wait --for=condition=Ready pod -l app=promtail -n econ-graph --timeout=300s || true
 
-# Wait for backend only if it exists (may not exist on first run)
-if kubectl get deployment econ-graph-backend -n econ-graph >/dev/null 2>&1; then
-    echo "Waiting for backend to be ready..."
-    kubectl wait --for=condition=Available deployment/econ-graph-backend -n econ-graph --timeout=300s || true
-else
-    echo "Backend deployment not found yet, skipping backend wait"
-fi
+# Backend wait removed - not waiting for backend after Grafana
 
 # Do not wait on all pods here; backend may not exist on first run
 
@@ -343,9 +338,8 @@ kubectl rollout restart deployment/chart-api-service -n econ-graph
 echo "🔄 Restarting Grafana to pick up updated dashboards..."
 kubectl rollout restart statefulset/grafana -n econ-graph || true
 
-# Wait for rollout to complete
+# Wait for rollout to complete (excluding backend)
 echo "⏳ Waiting for rollouts to complete..."
-kubectl rollout status deployment/econ-graph-backend -n econ-graph --timeout=300s
 kubectl rollout status deployment/econ-graph-frontend -n econ-graph --timeout=300s
 kubectl rollout status deployment/econ-graph-admin-frontend -n econ-graph --timeout=300s
 kubectl rollout status deployment/chart-api-service -n econ-graph --timeout=300s

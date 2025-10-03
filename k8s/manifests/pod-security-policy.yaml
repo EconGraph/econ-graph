@@ -1,49 +1,20 @@
-apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  name: econ-graph-psp
-  namespace: econ-graph
-spec:
-  privileged: false
-  allowPrivilegeEscalation: false
-  requiredDropCapabilities:
-    - ALL
-  volumes:
-    - 'configMap'
-    - 'emptyDir'
-    - 'projected'
-    - 'secret'
-    - 'downwardAPI'
-    - 'persistentVolumeClaim'
-  runAsUser:
-    rule: 'MustRunAsNonRoot'
-  seLinux:
-    rule: 'RunAsAny'
-  fsGroup:
-    rule: 'RunAsAny'
-  supplementalGroups:
-    rule: 'RunAsAny'
+# PodSecurityPolicy has been deprecated and removed in Kubernetes 1.25+
+# This file is replaced with Pod Security Standards using namespace labels
+# For Kubernetes 1.25+, use Pod Security Admission instead
+
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+# Update the existing econ-graph namespace with Pod Security Standards
+apiVersion: v1
+kind: Namespace
 metadata:
-  name: econ-graph-psp-user
-rules:
-- apiGroups: ['policy']
-  resources: ['podsecuritypolicies']
-  verbs: ['use']
-  resourceNames:
-  - econ-graph-psp
+  name: econ-graph
+  labels:
+    # Enforce "restricted" Pod Security Standard
+    # This is equivalent to the old PSP with privileged: false, etc.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: econ-graph-psp-binding
-roleRef:
-  kind: ClusterRole
-  name: econ-graph-psp-user
-  apiGroup: rbac.authorization.k8s.io
-subjects:
-- kind: ServiceAccount
-  name: default
-  namespace: econ-graph
+# Alternative: If you need more granular control, you can create a PodSecurityPolicy-like
+# configuration using Pod Security Standards with custom ValidatingAdmissionPolicy
+# This is for reference - the namespace labels above should be sufficient for most use cases

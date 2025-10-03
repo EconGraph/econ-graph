@@ -40,6 +40,16 @@ spec:
           limits:
             memory: "1Gi"
             cpu: "500m"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false  # Prometheus needs to write to /prometheus
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
       volumes:
       - name: prometheus-config
         configMap:

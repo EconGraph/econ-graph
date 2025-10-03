@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: econ-graph-frontend:v3.7.2
+        image: econ-graph-frontend:v3.7.4
         imagePullPolicy: Never  # Use local image
         ports:
         - containerPort: 3000
@@ -86,4 +86,28 @@ spec:
             port: 3000
           initialDelaySeconds: 5
           periodSeconds: 5
+        volumeMounts:
+        - name: nginx-cache
+          mountPath: /var/cache/nginx
+        - name: nginx-run
+          mountPath: /var/run
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: nginx-cache
+        emptyDir: {}
+      - name: nginx-run
+        emptyDir: {}
       restartPolicy: Always
