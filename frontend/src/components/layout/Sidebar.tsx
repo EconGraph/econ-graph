@@ -174,7 +174,7 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onClose }) => {
       data-testid='sidebar-content'
       style={{ overflow: 'auto', height: '100%', position: 'relative' }}
     >
-      {/* Sidebar header */}
+      {/* Sidebar header - only show logo on mobile */}
       <Box
         data-testid='sidebar-header'
         sx={{
@@ -183,15 +183,24 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onClose }) => {
           color: theme.palette.primary.contrastText,
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-          <TrendingUpIcon sx={{ mr: 1 }} />
-          <Typography data-testid='sidebar-title' variant='h6' sx={{ fontWeight: 600 }}>
-            EconGraph
+        {isMobile && (
+          <>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <TrendingUpIcon sx={{ mr: 1 }} />
+              <Typography data-testid='sidebar-title' variant='h6' sx={{ fontWeight: 600 }}>
+                EconGraph
+              </Typography>
+            </Box>
+            <Typography data-testid='sidebar-subtitle' variant='body2' sx={{ opacity: 0.8 }}>
+              Economic Data Visualization
+            </Typography>
+          </>
+        )}
+        {!isMobile && (
+          <Typography data-testid='sidebar-subtitle' variant='body2' sx={{ opacity: 0.8 }}>
+            Economic Data Visualization
           </Typography>
-        </Box>
-        <Typography data-testid='sidebar-subtitle' variant='body2' sx={{ opacity: 0.8 }}>
-          Economic Data Visualization
-        </Typography>
+        )}
       </Box>
 
       {/* Navigation items */}
