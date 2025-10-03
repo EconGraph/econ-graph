@@ -8,23 +8,26 @@ const meta: Meta<typeof PeerComparisonChart> = {
     layout: 'fullscreen',
   },
   argTypes: {
-    companyId: {
-      control: 'text',
-      description: 'The company ID for comparison',
-      defaultValue: '0000320193',
-    },
-    peerIds: {
+    ratios: {
       control: 'object',
-      description: 'Array of peer company IDs for comparison',
+      description: 'Array of financial ratios for comparison',
     },
-    metrics: {
+    company: {
       control: 'object',
-      description: 'Array of metrics to compare',
+      description: 'Company information for comparison',
     },
     userType: {
       control: 'select',
       options: ['beginner', 'intermediate', 'advanced', 'expert'],
       description: 'The type of user viewing the comparison',
+    },
+    selectedRatios: {
+      control: 'object',
+      description: 'Array of selected ratios to display',
+    },
+    onRatioSelectionChange: {
+      action: 'ratioSelectionChanged',
+      description: 'Callback when ratio selection changes',
     },
   },
 };
@@ -32,56 +35,29 @@ const meta: Meta<typeof PeerComparisonChart> = {
 export default meta;
 type Story = StoryObj<typeof PeerComparisonChart>;
 
-// Mock data for peer comparison - using actual peer companies from mock data
-const mockPeerIds = ['0000789019', '0001018724', '0001652044']; // Microsoft, Amazon, Alphabet
-const mockMetrics = [
-  'returnOnEquity',
-  'netProfitMargin',
-  'currentRatio',
-  'debtToEquity'
-];
+// Mock data comes from GraphQL response files via MSW
+// The component will receive data from the MSW handlers
 
 export const Default: Story = {
   args: {
-    companyId: '0000320193',
-    peerIds: mockPeerIds,
-    metrics: mockMetrics,
     userType: 'intermediate',
   },
 };
 
 export const BeginnerUser: Story = {
   args: {
-    companyId: '0000320193',
-    peerIds: mockPeerIds,
-    metrics: mockMetrics,
     userType: 'beginner',
   },
 };
 
 export const AdvancedUser: Story = {
   args: {
-    companyId: '0000320193',
-    peerIds: mockPeerIds,
-    metrics: mockMetrics,
     userType: 'advanced',
   },
 };
 
 export const ExpertUser: Story = {
   args: {
-    companyId: '0000320193',
-    peerIds: mockPeerIds,
-    metrics: mockMetrics,
     userType: 'expert',
-  },
-};
-
-export const LimitedMetrics: Story = {
-  args: {
-    companyId: '0000320193',
-    peerIds: mockPeerIds,
-    metrics: ['returnOnEquity', 'netProfitMargin'],
-    userType: 'intermediate',
   },
 };

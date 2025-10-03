@@ -118,21 +118,21 @@ export const setupSimpleMSW = async () => {
   console.log('🔧 setupSimpleMSW called');
   console.log('🔧 Current fetch type:', typeof global.fetch);
   console.log('🔧 isMSWSetup:', isMSWSetup);
-  
+
   // Only set up once
   if (isMSWSetup) {
     if (MSW_DEBUG) console.log('[Simple MSW] Already set up, skipping...');
     return;
   }
-  
+
   if (MSW_DEBUG) {
     console.log('[Simple MSW] Setting up MSW...');
     console.log('[Simple MSW] Original fetch type:', typeof global.fetch);
   }
-  
+
   originalFetch = global.fetch;
   isMSWSetup = true;
-  
+
   // Override global fetch with our mock implementation
   global.fetch = (input: string | URL | any, options?: any) => {
     const url = typeof input === 'string' ? input : input.toString();
@@ -201,10 +201,10 @@ export const cleanupSimpleMSW = async () => {
   if (originalFetch) {
     global.fetch = originalFetch;
   }
-  
+
   // Reset setup flag
   isMSWSetup = false;
-  
+
   if (MSW_DEBUG) {
     console.log('[Simple MSW] Cleanup completed');
   }

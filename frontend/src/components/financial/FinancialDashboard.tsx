@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Card, 
-  CardContent, 
-  CardHeader, 
-  Tabs, 
-  Tab, 
-  Box, 
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  Tabs,
+  Tab,
+  Box,
   Typography,
   Alert,
   AlertTitle,
@@ -19,7 +19,7 @@ import {
   TableHead,
   TableRow,
   Paper,
-  Chip
+  Chip,
 } from '@mui/material';
 import {
   TrendingUp,
@@ -41,7 +41,7 @@ import { useQuery } from '@tanstack/react-query';
 import { executeGraphQL } from '@/utils/graphql';
 import { GET_FINANCIAL_DASHBOARD } from '@/test-utils/mocks/graphql/financial-queries';
 
-interface FinancialDashboardFixedProps {
+interface FinancialDashboardProps {
   companyId: string;
   userType?: 'beginner' | 'intermediate' | 'advanced' | 'expert';
   showEducationalContent?: boolean;
@@ -67,7 +67,7 @@ const useFinancialDashboardData = (companyId: string) => {
   });
 };
 
-export const FinancialDashboardFixed: React.FC<FinancialDashboardFixedProps> = ({
+export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   companyId,
   userType = 'intermediate',
   showEducationalContent = true,
@@ -77,7 +77,6 @@ export const FinancialDashboardFixed: React.FC<FinancialDashboardFixedProps> = (
   const [activeTab, setActiveTab] = useState(0);
   const [selectedStatement, setSelectedStatement] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
-
 
   useEffect(() => {
     if (data?.financialStatements && data.financialStatements.length > 0) {
@@ -91,7 +90,9 @@ export const FinancialDashboardFixed: React.FC<FinancialDashboardFixedProps> = (
 
   if (isLoading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+      <Box
+        sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}
+      >
         <LinearProgress sx={{ width: '80%' }} />
       </Box>
     );
@@ -99,16 +100,16 @@ export const FinancialDashboardFixed: React.FC<FinancialDashboardFixedProps> = (
 
   if (isError) {
     return (
-      <Alert severity="error">
+      <Alert severity='error'>
         <AlertTitle>Error</AlertTitle>
-        Failed to load financial dashboard: {error?.message || 'Unknown error'}
+        Failed to load financial dashboard: {error instanceof Error ? error.message : 'Unknown error'}
       </Alert>
     );
   }
 
   if (!data) {
     return (
-      <Alert severity="warning">
+      <Alert severity='warning'>
         <AlertTitle>No Data</AlertTitle>
         No financial data available for this company.
       </Alert>
@@ -121,7 +122,7 @@ export const FinancialDashboardFixed: React.FC<FinancialDashboardFixedProps> = (
 
   if (!company) {
     return (
-      <Alert severity="warning">
+      <Alert severity='warning'>
         <AlertTitle>Error</AlertTitle>
         Company information not available
       </Alert>
@@ -139,20 +140,36 @@ export const FinancialDashboardFixed: React.FC<FinancialDashboardFixedProps> = (
                 <Building2 size={24} color='primary.main' />
               </Box>
               <Box>
-                <Typography variant="h5" component="div">{company.name}</Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: '0.875rem', color: 'text.secondary' }}>
-                  <Typography variant="body2">Ticker:</Typography>
-                  <Badge color="primary">{company.ticker}</Badge>
-                  <Typography variant="body2">Industry:</Typography>
-                  <Typography variant="body2">{company.industry}</Typography>
+                <Typography variant='h5' component='div'>
+                  {company.name}
+                </Typography>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    fontSize: '0.875rem',
+                    color: 'text.secondary',
+                  }}
+                >
+                  <Typography variant='body2'>Ticker:</Typography>
+                  <Badge color='primary'>{company.ticker}</Badge>
+                  <Typography variant='body2'>Industry:</Typography>
+                  <Typography variant='body2'>{company.industry}</Typography>
                 </Box>
               </Box>
             </Box>
             <Box sx={{ display: 'flex', gap: 1 }}>
-              <Button variant="outlined" startIcon={<RefreshCw />}>Refresh</Button>
-              <Button variant="contained" startIcon={<Download />}>Download</Button>
+              <Button variant='outlined' startIcon={<RefreshCw />}>
+                Refresh
+              </Button>
+              <Button variant='contained' startIcon={<Download />}>
+                Download
+              </Button>
               {showCollaborativeFeatures && (
-                <Button variant="outlined" startIcon={<Share2 />}>Share</Button>
+                <Button variant='outlined' startIcon={<Share2 />}>
+                  Share
+                </Button>
               )}
             </Box>
           </Box>
@@ -160,13 +177,13 @@ export const FinancialDashboardFixed: React.FC<FinancialDashboardFixedProps> = (
       </Card>
 
       {/* Main Content Tabs */}
-      <Tabs value={activeTab} onChange={handleTabChange} aria-label="Financial Dashboard Tabs">
-        <Tab label="Overview" value={0} icon={<Eye size={20} />} iconPosition="start" />
-        <Tab label="Statements" value={1} icon={<FileText size={20} />} iconPosition="start" />
-        <Tab label="Ratios" value={2} icon={<BarChart3 size={20} />} iconPosition="start" />
-        <Tab label="Trends" value={3} icon={<TrendingUp size={20} />} iconPosition="start" />
-        <Tab label="Comparison" value={4} icon={<PieChart size={20} />} iconPosition="start" />
-        <Tab label="Analysis" value={5} icon={<Activity size={20} />} iconPosition="start" />
+      <Tabs value={activeTab} onChange={handleTabChange} aria-label='Financial Dashboard Tabs'>
+        <Tab label='Overview' value={0} icon={<Eye size={20} />} iconPosition='start' />
+        <Tab label='Statements' value={1} icon={<FileText size={20} />} iconPosition='start' />
+        <Tab label='Ratios' value={2} icon={<BarChart3 size={20} />} iconPosition='start' />
+        <Tab label='Trends' value={3} icon={<TrendingUp size={20} />} iconPosition='start' />
+        <Tab label='Comparison' value={4} icon={<PieChart size={20} />} iconPosition='start' />
+        <Tab label='Analysis' value={5} icon={<Activity size={20} />} iconPosition='start' />
       </Tabs>
 
       {/* Tab Content */}
@@ -174,38 +191,44 @@ export const FinancialDashboardFixed: React.FC<FinancialDashboardFixedProps> = (
         <Box className='space-y-4'>
           <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
             <Card>
-              <CardHeader title="Recent Filings" />
+              <CardHeader title='Recent Filings' />
               <CardContent>
                 <div className='space-y-3'>
-                  {statements && statements.length > 0 ? statements.slice(0, 5).map(statement => (
-                    <div
-                      key={statement.id}
-                      className='flex items-center justify-between p-2 hover:bg-gray-50 rounded-md cursor-pointer'
-                      onClick={() => setSelectedStatement(statement.id)}
-                    >
-                      <Typography variant="body2">{statement.type} - {statement.period}</Typography>
-                      <Clock size={16} className='text-muted-foreground' />
-                    </div>
-                  )) : (
-                    <Alert severity="info">No financial statements available.</Alert>
+                  {statements && statements.length > 0 ? (
+                    statements.slice(0, 5).map((statement: any) => (
+                      <div
+                        key={statement.id}
+                        className='flex items-center justify-between p-2 hover:bg-gray-50 rounded-md cursor-pointer'
+                        onClick={() => setSelectedStatement(statement.id)}
+                      >
+                        <Typography variant='body2'>
+                          {statement.type} - {statement.period}
+                        </Typography>
+                        <Clock size={16} className='text-muted-foreground' />
+                      </div>
+                    ))
+                  ) : (
+                    <Alert severity='info'>No financial statements available.</Alert>
                   )}
                 </div>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader title="Key Financial Metrics" />
+              <CardHeader title='Key Financial Metrics' />
               <CardContent>
                 <div className='space-y-4'>
                   {ratios.length > 0 ? (
-                    ratios.slice(0, 6).map(ratio => (
+                        ratios.slice(0, 6).map((ratio: any) => (
                       <div key={ratio.id} className='flex items-center justify-between'>
-                        <Typography variant="body2">{ratio.ratioDisplayName}</Typography>
-                        <Typography variant="body2" color="text.secondary">{ratio.value.toFixed(2)}</Typography>
+                        <Typography variant='body2'>{ratio.ratioDisplayName}</Typography>
+                        <Typography variant='body2' color='text.secondary'>
+                          {ratio.value.toFixed(2)}
+                        </Typography>
                       </div>
                     ))
                   ) : (
-                    <Alert severity="info">No key financial metrics available.</Alert>
+                    <Alert severity='info'>No key financial metrics available.</Alert>
                   )}
                 </div>
               </CardContent>
@@ -218,14 +241,16 @@ export const FinancialDashboardFixed: React.FC<FinancialDashboardFixedProps> = (
         <Box className='space-y-4'>
           {selectedStatement ? (
             <Card>
-              <CardHeader title="Financial Statement Details" />
+              <CardHeader title='Financial Statement Details' />
               <CardContent>
-                <Typography variant="h6">Statement ID: {selectedStatement}</Typography>
-                <Typography variant="body1">This would show detailed financial statement data.</Typography>
+                <Typography variant='h6'>Statement ID: {selectedStatement}</Typography>
+                <Typography variant='body1'>
+                  This would show detailed financial statement data.
+                </Typography>
               </CardContent>
             </Card>
           ) : (
-            <Alert severity="info">
+            <Alert severity='info'>
               <AlertTitle>No Statement Selected</AlertTitle>
               Please select a financial statement to view details.
             </Alert>
@@ -235,7 +260,7 @@ export const FinancialDashboardFixed: React.FC<FinancialDashboardFixedProps> = (
 
       {activeTab === 2 && (
         <Card>
-          <CardHeader title="Financial Ratios Analysis" />
+          <CardHeader title='Financial Ratios Analysis' />
           <CardContent>
             <TableContainer component={Paper}>
               <Table>
@@ -248,15 +273,17 @@ export const FinancialDashboardFixed: React.FC<FinancialDashboardFixedProps> = (
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {ratios.map((ratio) => (
+                  {ratios.map((ratio: any) => (
                     <TableRow key={ratio.id}>
                       <TableCell>{ratio.ratioDisplayName}</TableCell>
                       <TableCell>{ratio.value.toFixed(3)}</TableCell>
                       <TableCell>
-                        <Chip label={ratio.category} size="small" />
+                        <Chip label={ratio.category} size='small' />
                       </TableCell>
                       <TableCell>
-                        {ratio.benchmarkPercentile ? `${ratio.benchmarkPercentile}th percentile` : 'N/A'}
+                        {ratio.benchmarkPercentile
+                          ? `${ratio.benchmarkPercentile}th percentile`
+                          : 'N/A'}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -269,9 +296,9 @@ export const FinancialDashboardFixed: React.FC<FinancialDashboardFixedProps> = (
 
       {activeTab === 3 && (
         <Card>
-          <CardHeader title="Trend Analysis" />
+          <CardHeader title='Trend Analysis' />
           <CardContent>
-            <Typography variant="body1">
+            <Typography variant='body1'>
               Trend analysis charts would be displayed here for the selected time range: {timeRange}
             </Typography>
           </CardContent>
@@ -280,9 +307,9 @@ export const FinancialDashboardFixed: React.FC<FinancialDashboardFixedProps> = (
 
       {activeTab === 4 && (
         <Card>
-          <CardHeader title="Benchmark Comparison" />
+          <CardHeader title='Benchmark Comparison' />
           <CardContent>
-            <Typography variant="body1">
+            <Typography variant='body1'>
               Benchmark comparison charts would be displayed here.
             </Typography>
           </CardContent>
@@ -291,9 +318,9 @@ export const FinancialDashboardFixed: React.FC<FinancialDashboardFixedProps> = (
 
       {activeTab === 5 && (
         <Card>
-          <CardHeader title="Advanced Analysis" />
+          <CardHeader title='Advanced Analysis' />
           <CardContent>
-            <Typography variant="body1">
+            <Typography variant='body1'>
               This section would contain advanced financial analysis tools and visualizations.
             </Typography>
           </CardContent>

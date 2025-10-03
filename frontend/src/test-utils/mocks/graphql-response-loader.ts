@@ -41,12 +41,12 @@ export function loadGraphQLResponse(operation: string, scenario: string): any {
     if (!operationResponses) {
       throw new Error(`Operation ${operation} not found in response map`);
     }
-    
+
     const response = operationResponses[scenario];
     if (!response) {
       throw new Error(`Scenario ${scenario} not found for operation ${operation}`);
     }
-    
+
     return response;
   } catch (error) {
     console.warn(`Failed to load GraphQL response: ${operation}/${scenario}`, error);

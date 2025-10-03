@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { FinancialDashboardFixed } from './FinancialDashboardFixed';
+import { FinancialDashboard } from './FinancialDashboard';
 
-const meta: Meta<typeof FinancialDashboardFixed> = {
-  title: 'Financial/FinancialDashboardFixed',
-  component: FinancialDashboardFixed,
+const meta: Meta<typeof FinancialDashboard> = {
+  title: 'Financial/FinancialDashboard',
+  component: FinancialDashboard,
   parameters: {
     layout: 'fullscreen',
   },
@@ -30,7 +30,7 @@ const meta: Meta<typeof FinancialDashboardFixed> = {
 };
 
 export default meta;
-type Story = StoryObj<typeof FinancialDashboardFixed>;
+type Story = StoryObj<typeof FinancialDashboard>;
 
 export const Default: Story = {
   args: {

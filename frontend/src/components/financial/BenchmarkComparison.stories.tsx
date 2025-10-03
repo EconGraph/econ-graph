@@ -8,18 +8,17 @@ const meta: Meta<typeof BenchmarkComparison> = {
     layout: 'fullscreen',
   },
   argTypes: {
-    ratios: {
-      control: 'object',
-      description: 'Array of financial ratios for comparison',
+    ratioName: {
+      control: 'text',
+      description: 'Name of the financial ratio being compared',
     },
-    company: {
-      control: 'object',
-      description: 'Company information for comparison',
+    companyValue: {
+      control: 'number',
+      description: 'Company value for the ratio',
     },
-    userType: {
-      control: 'select',
-      options: ['beginner', 'intermediate', 'advanced', 'expert'],
-      description: 'The type of user viewing the comparison',
+    benchmarkData: {
+      control: 'object',
+      description: 'Benchmark data for comparison',
     },
   },
 };
@@ -32,24 +31,45 @@ type Story = StoryObj<typeof BenchmarkComparison>;
 
 export const Default: Story = {
   args: {
-    userType: 'intermediate',
+    ratioName: 'Return on Equity',
+    companyValue: 0.147,
+    benchmarkData: {
+      percentile: 75,
+      industryMedian: 0.12,
+      industryP25: 0.08,
+      industryP75: 0.16,
+      industryP90: 0.20,
+      industryP10: 0.05,
+    },
   },
 };
 
-export const BeginnerUser: Story = {
+export const HighPerformance: Story = {
   args: {
-    userType: 'beginner',
+    ratioName: 'Net Profit Margin',
+    companyValue: 0.253,
+    benchmarkData: {
+      percentile: 85,
+      industryMedian: 0.15,
+      industryP25: 0.10,
+      industryP75: 0.20,
+      industryP90: 0.25,
+      industryP10: 0.08,
+    },
   },
 };
 
-export const AdvancedUser: Story = {
+export const LowPerformance: Story = {
   args: {
-    userType: 'advanced',
-  },
-};
-
-export const ExpertUser: Story = {
-  args: {
-    userType: 'expert',
+    ratioName: 'Current Ratio',
+    companyValue: 1.04,
+    benchmarkData: {
+      percentile: 30,
+      industryMedian: 1.5,
+      industryP25: 1.2,
+      industryP75: 1.8,
+      industryP90: 2.2,
+      industryP10: 1.0,
+    },
   },
 };

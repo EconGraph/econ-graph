@@ -20,7 +20,7 @@ import { loadGraphQLResponse } from '../../test-utils/mocks/graphql-response-loa
 // No need to unmock since we're using a separate setup file
 
 // Import the components we're testing
-import { FinancialDashboardFixed as FinancialDashboard } from '../../components/financial/FinancialDashboardFixed';
+import { FinancialDashboard } from '../../components/financial/FinancialDashboard';
 import { FinancialStatementViewer } from '../../components/financial/FinancialStatementViewer';
 import { BenchmarkComparison } from '../../components/financial/BenchmarkComparison';
 import { TrendAnalysisChart } from '../../components/financial/TrendAnalysisChart';

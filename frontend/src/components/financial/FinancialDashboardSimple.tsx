@@ -17,18 +17,18 @@ export const FinancialDashboardSimple: React.FC<FinancialDashboardSimpleProps> =
   return (
     <Box sx={{ p: 3 }}>
       <Card>
-        <CardHeader title="Financial Dashboard" />
+        <CardHeader title='Financial Dashboard' />
         <CardContent>
-          <Typography variant="h6" gutterBottom>
+          <Typography variant='h6' gutterBottom>
             Company ID: {companyId}
           </Typography>
-          <Typography variant="body1" gutterBottom>
+          <Typography variant='body1' gutterBottom>
             User Type: {userType}
           </Typography>
-          <Typography variant="body1" gutterBottom>
+          <Typography variant='body1' gutterBottom>
             Educational Content: {showEducationalContent ? 'Enabled' : 'Disabled'}
           </Typography>
-          <Typography variant="body1">
+          <Typography variant='body1'>
             Collaborative Features: {showCollaborativeFeatures ? 'Enabled' : 'Disabled'}
           </Typography>
         </CardContent>

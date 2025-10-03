@@ -6,10 +6,12 @@ const TestFinancial = ({ companyName }: { companyName: string }) => {
   return (
     <Box sx={{ p: 3 }}>
       <Card>
-        <CardHeader title="Test Financial Component" />
+        <CardHeader title='Test Financial Component' />
         <CardContent>
-          <Typography variant="h6">Company: {companyName}</Typography>
-          <Typography variant="body1">This is a simple test component to verify Material-UI rendering.</Typography>
+          <Typography variant='h6'>Company: {companyName}</Typography>
+          <Typography variant='body1'>
+            This is a simple test component to verify Material-UI rendering.
+          </Typography>
         </CardContent>
       </Card>
     </Box>
