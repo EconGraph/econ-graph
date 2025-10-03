@@ -64,7 +64,7 @@ jobs:
 
     - name: Build backend
       working-directory: ./backend
-      run: cargo build --release
+      run: cargo build --release --workspace --jobs 4
       env:
         DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
 

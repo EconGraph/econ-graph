@@ -68,7 +68,7 @@ jobs:
       working-directory: backend
       run: |
         echo "Building with RAM disk cache..."
-        time cargo build --release
+        time cargo build --release --workspace --jobs 4
         echo "Build completed"
 
     - name: Run tests with RAM disk cache

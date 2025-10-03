@@ -143,7 +143,7 @@ jobs:
     - name: Build backend
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo build --verbose
+        cargo build --verbose --workspace --jobs 4
       working-directory: backend
 
   backend-migration-validation-tests:
@@ -372,7 +372,7 @@ jobs:
     - name: Start backend service
       working-directory: backend
       run: |
-        cargo build --release
+        cargo build --release --workspace --jobs 4
         ./target/release/econ-graph-backend &
         sleep 15
         curl -f http://localhost:9877/health || exit 1
@@ -1615,7 +1615,7 @@ jobs:
     - name: Build backend
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo build --verbose
+        cargo build --verbose --workspace --jobs 4
       working-directory: backend
 
     - name: Run backend integration tests
