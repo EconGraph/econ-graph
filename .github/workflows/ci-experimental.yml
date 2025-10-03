@@ -68,7 +68,7 @@ jobs:
       working-directory: backend
       run: |
         echo "Building with RAM disk cache..."
-        time cargo build --release
+        time cargo build --release --workspace --jobs 4
         echo "Build completed"
 
     - name: Run tests with RAM disk cache
@@ -85,4 +85,6 @@ jobs:
         echo "RAM disk contents:"
         ls -la /tmp/cargo-ramdisk
 
-# Workflow cache refresh: 2025-09-17 08:25:07 PDT
+
+
+# Workflow cache refresh: 2025-10-03 01:21:06 PDT
