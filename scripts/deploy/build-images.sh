@@ -8,7 +8,7 @@ set -e
 echo "Building EconGraph Docker images..."
 
 # Version to tag images with (can be overridden: export VERSION=vX.Y.Z)
-VERSION=${VERSION:-v3.7.4}
+VERSION=${VERSION:-v3.8.0-permissions}
 
 # Get the project root directory
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

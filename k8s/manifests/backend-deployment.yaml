@@ -108,6 +108,37 @@ spec:
             secretKeyRef:
               name: econ-graph-secrets
               key: facebook-app-secret
+        # Keycloak Configuration
+        - name: KEYCLOAK_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: KEYCLOAK_ENABLED
+              optional: true
+        - name: KEYCLOAK_URL
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: KEYCLOAK_URL
+              optional: true
+        - name: KEYCLOAK_REALM
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: KEYCLOAK_REALM
+              optional: true
+        - name: KEYCLOAK_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: KEYCLOAK_CLIENT_ID
+              optional: true
+        - name: KEYCLOAK_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-secrets
+              key: econ-graph-backend-secret
+              optional: true
         resources:
           requests:
             memory: "256Mi"

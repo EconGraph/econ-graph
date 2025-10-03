@@ -100,6 +100,12 @@ echo "📊 Deploying chart API service..."
 kubectl apply -f k8s/manifests/chart-api-deployment.yaml
 kubectl apply -f k8s/manifests/chart-api-service.yaml
 
+# Deploy Keycloak (if requested)
+if [ "${DEPLOY_KEYCLOAK:-false}" = "true" ]; then
+    echo "🔐 Deploying Keycloak..."
+    ./scripts/deploy/deploy-keycloak.sh
+fi
+
 echo "⏳ Waiting for deployments to be ready..."
 echo "📊 Monitoring pod status (updates every 10 seconds):"
 kubectl get pods -n econ-graph

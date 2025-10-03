@@ -39,3 +39,9 @@ data:
 
   # Environment
   NODE_ENV: "development"
+
+  # Keycloak Configuration (optional)
+  KEYCLOAK_ENABLED: "false"
+  KEYCLOAK_URL: "http://keycloak-service:8080"
+  KEYCLOAK_REALM: "econ-graph"
+  KEYCLOAK_CLIENT_ID: "econ-graph-backend"

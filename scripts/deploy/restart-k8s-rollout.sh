@@ -8,7 +8,7 @@
 
 set -e
 
-echo "🚀 Restarting EconGraph Kubernetes rollout for v3.7.4 (with monitoring stack)..."
+echo "🚀 Restarting EconGraph Kubernetes rollout for v3.8.0-permissions (with fine-grained JWT permissions)..."
 echo ""
 
 # Get the project root directory
@@ -97,20 +97,20 @@ if ! kubectl config use-context microk8s; then
 fi
 
 # Rebuild Docker images with new version tag
-echo "🏗️  Building Docker images for v3.7.4..."
+echo "🏗️  Building Docker images for v3.8.0-permissions..."
 ./scripts/deploy/build-images.sh
 
 # Tag images with new version
-echo "🏷️  Tagging images with v3.7.4..."
-docker tag econ-graph-backend:latest econ-graph-backend:v3.7.4
-docker tag econ-graph-frontend:latest econ-graph-frontend:v3.7.4
+echo "🏷️  Tagging images with v3.8.0-permissions..."
+docker tag econ-graph-backend:latest econ-graph-backend:v3.8.0-permissions
+docker tag econ-graph-frontend:latest econ-graph-frontend:v3.8.0-permissions
 docker tag econ-graph-chart-api:latest econ-graph-chart-api:v1.0.0
 docker tag econ-graph-admin-frontend:latest econ-graph-admin-frontend:v1.0.0
 
 # Load images into MicroK8s
 echo "📦 Loading images into MicroK8s..."
-docker save econ-graph-backend:v3.7.4 | microk8s ctr images import - || true
-docker save econ-graph-frontend:v3.7.4 | microk8s ctr images import - || true
+docker save econ-graph-backend:v3.8.0-permissions | microk8s ctr images import - || true
+docker save econ-graph-frontend:v3.8.0-permissions | microk8s ctr images import - || true
 docker save econ-graph-chart-api:v1.0.0 | microk8s ctr images import - || true
 docker save econ-graph-admin-frontend:v1.0.0 | microk8s ctr images import - || true
 
@@ -207,6 +207,12 @@ fi
 # Apply updated manifests
 echo "📋 Applying updated Kubernetes manifests..."
 kubectl apply -f k8s/manifests/
+
+# Deploy Keycloak (if requested)
+if [ "${DEPLOY_KEYCLOAK:-false}" = "true" ]; then
+    echo "🔐 Deploying Keycloak..."
+    ./scripts/deploy/deploy-keycloak.sh
+fi
 
 # Apply security configurations
 echo "🔒 Applying security configurations..."
@@ -367,7 +373,13 @@ echo "    Playground: http://localhost:${FRONTEND_NODEPORT}/playground"
 echo "    Health:   http://localhost:${BACKEND_NODEPORT}/health"
 echo "    Grafana:  http://localhost:${GRAFANA_NODEPORT} (admin/admin123)"
 echo ""
-echo "🎯 Version deployed: v3.7.4"
+echo "🎯 Version deployed: v3.8.0-permissions"
+echo "   ✅ Fine-grained JWT permissions system implemented"
+echo "   ✅ News data permissions (basic, premium, realtime, historical)"
+echo "   ✅ Stock data tiered access (basic, realtime, intraday with configurable history)"
+echo "   ✅ Subscription tiers with permission mapping (Free, Basic, Professional, Enterprise)"
+echo "   ✅ Parameterized permissions support (e.g., stock:intraday:30, api:rate-limit:1000)"
+echo "   ✅ Comprehensive test coverage for permission system"
 echo "   ✅ Integration tests fixed: All auth tests passing (11/11)"
 echo "   ✅ Collaboration tests fixed: 6/7 tests passing"
 echo "   ✅ GitHub Actions release/deploy workflow disabled"
