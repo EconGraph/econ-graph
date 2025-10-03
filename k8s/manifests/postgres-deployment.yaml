@@ -8,7 +8,7 @@ metadata:
     app: postgresql
     version: "18"
 spec:
-  serviceName: postgresql
+  serviceName: postgres-service
   replicas: 1
   selector:
     matchLabels:
