@@ -102,7 +102,8 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     return (
       <Alert severity='error'>
         <AlertTitle>Error</AlertTitle>
-        Failed to load financial dashboard: {error instanceof Error ? error.message : 'Unknown error'}
+        Failed to load financial dashboard:{' '}
+        {error instanceof Error ? error.message : 'Unknown error'}
       </Alert>
     );
   }
@@ -219,7 +220,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               <CardContent>
                 <div className='space-y-4'>
                   {ratios.length > 0 ? (
-                        ratios.slice(0, 6).map((ratio: any) => (
+                    ratios.slice(0, 6).map((ratio: any) => (
                       <div key={ratio.id} className='flex items-center justify-between'>
                         <Typography variant='body2'>{ratio.ratioDisplayName}</Typography>
                         <Typography variant='body2' color='text.secondary'>
