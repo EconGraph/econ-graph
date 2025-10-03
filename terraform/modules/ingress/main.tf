@@ -18,6 +18,19 @@ variable "enable_cert_manager" {
   default     = true
 }
 
+variable "enable_dns01_challenge" {
+  description = "Enable DNS-01 challenge for wildcard certificates"
+  type        = bool
+  default     = false
+}
+
+variable "cloudflare_api_token" {
+  description = "Cloudflare API token for DNS-01 challenge"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # Install NGINX Ingress Controller
 resource "helm_release" "nginx_ingress" {
   name       = "nginx-ingress"
@@ -246,6 +259,94 @@ resource "kubernetes_manifest" "letsencrypt_staging" {
   }
 
   depends_on = [helm_release.cert_manager]
+}
+
+# Cloudflare API credentials secret for DNS-01 challenge
+resource "kubernetes_secret" "cloudflare_api_credentials" {
+  count = var.enable_dns01_challenge && var.cloudflare_api_token != "" ? 1 : 0
+
+  metadata {
+    name      = "cloudflare-api-token-secret"
+    namespace = "cert-manager"
+  }
+
+  data = {
+    "api-token" = var.cloudflare_api_token
+  }
+
+  type = "Opaque"
+}
+
+# DNS-01 ClusterIssuer for Let's Encrypt with Cloudflare
+resource "kubernetes_manifest" "letsencrypt_prod_cloudflare" {
+  count = var.enable_dns01_challenge && var.cloudflare_api_token != "" ? 1 : 0
+
+  manifest = {
+    apiVersion = "cert-manager.io/v1"
+    kind       = "ClusterIssuer"
+    metadata = {
+      name = "letsencrypt-prod-cloudflare"
+    }
+    spec = {
+      acme = {
+        server = "https://acme-v02.api.letsencrypt.org/directory"
+        email  = "admin@${var.domain}"
+        privateKeySecretRef = {
+          name = "letsencrypt-prod-cloudflare"
+        }
+        solvers = [
+          {
+            dns01 = {
+              cloudflare = {
+                apiTokenSecretRef = {
+                  name = "cloudflare-api-token-secret"
+                  key  = "api-token"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+
+  depends_on = [helm_release.cert_manager, kubernetes_secret.cloudflare_api_credentials]
+}
+
+# DNS-01 ClusterIssuer for Let's Encrypt staging with Cloudflare (for testing)
+resource "kubernetes_manifest" "letsencrypt_staging_cloudflare" {
+  count = var.enable_dns01_challenge && var.cloudflare_api_token != "" ? 1 : 0
+
+  manifest = {
+    apiVersion = "cert-manager.io/v1"
+    kind       = "ClusterIssuer"
+    metadata = {
+      name = "letsencrypt-staging-cloudflare"
+    }
+    spec = {
+      acme = {
+        server = "https://acme-staging-v02.api.letsencrypt.org/directory"
+        email  = "admin@${var.domain}"
+        privateKeySecretRef = {
+          name = "letsencrypt-staging-cloudflare"
+        }
+        solvers = [
+          {
+            dns01 = {
+              cloudflare = {
+                apiTokenSecretRef = {
+                  name = "cloudflare-api-token-secret"
+                  key  = "api-token"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+
+  depends_on = [helm_release.cert_manager, kubernetes_secret.cloudflare_api_credentials]
 }
 
 # Main application ingress

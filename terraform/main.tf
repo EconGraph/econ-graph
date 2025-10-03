@@ -80,6 +80,19 @@ variable "bls_api_key" {
   default     = ""
 }
 
+variable "enable_dns01_challenge" {
+  description = "Enable DNS-01 challenge for wildcard certificates"
+  type        = bool
+  default     = false
+}
+
+variable "cloudflare_api_token" {
+  description = "Cloudflare API token for DNS-01 challenge"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # Generate random passwords for internal services
 resource "random_password" "database_password" {
   length  = 32
@@ -213,6 +226,10 @@ module "ingress" {
 
   namespace = kubernetes_namespace.econgraph.metadata[0].name
   domain    = var.domain
+  
+  # DNS-01 challenge configuration
+  enable_dns01_challenge = var.enable_dns01_challenge
+  cloudflare_api_token   = var.cloudflare_api_token
 
   depends_on = [module.frontend, module.backend, module.monitoring]
 }
