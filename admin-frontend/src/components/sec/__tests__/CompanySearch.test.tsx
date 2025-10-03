@@ -14,9 +14,11 @@ import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
+import { ApolloProvider } from "@apollo/client/react";
+import { ApolloClient, InMemoryCache, createHttpLink } from "@apollo/client";
 import { vi } from "vitest";
 import type { MockedFunction } from "vitest";
-import { CompanySearch } from "../CompanySearch";
+import CompanySearch from "../CompanySearch";
 import { useCompanySearch } from "../../../hooks/useCompanySearch";
 import { Company } from "../../../types";
 
@@ -30,6 +32,14 @@ const mockUseCompanySearch = useCompanySearch as MockedFunction<
 // Create test theme
 const theme = createTheme();
 
+// Create Apollo Client for tests
+const apolloClient = new ApolloClient({
+  link: createHttpLink({
+    uri: "http://localhost:4000/graphql",
+  }),
+  cache: new InMemoryCache(),
+});
+
 // Test wrapper with providers
 const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const queryClient = new QueryClient({
@@ -40,9 +50,11 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   });
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider theme={theme}>{children}</ThemeProvider>
-    </QueryClientProvider>
+    <ApolloProvider client={apolloClient}>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider theme={theme}>{children}</ThemeProvider>
+      </QueryClientProvider>
+    </ApolloProvider>
   );
 };
 
