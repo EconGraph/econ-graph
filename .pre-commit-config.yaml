@@ -21,6 +21,13 @@ repos:
         files: '^backend/.*\.rs$'
         pass_filenames: false
 
+      - id: rust-doc
+        name: Rust Documentation Check
+        entry: bash -c 'cd backend && cargo doc --no-deps --document-private-items --all-features'
+        language: system
+        files: '^backend/.*\.rs$'
+        pass_filenames: false
+
   # Frontend formatting and linting
   - repo: local
     hooks:
