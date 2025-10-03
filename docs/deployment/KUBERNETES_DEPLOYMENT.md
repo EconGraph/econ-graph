@@ -2,6 +2,8 @@
 
 ## Overview
 
+**📚 For the most up-to-date and comprehensive deployment guide, see [K8S_DEPLOYMENT_GUIDE.md](K8S_DEPLOYMENT_GUIDE.md)**
+
 This guide provides comprehensive instructions for deploying the EconGraph application to a local Kubernetes cluster. We support two deployment options:
 
 1. **MicroK8s** (Recommended for production-like development)
@@ -64,11 +66,13 @@ The deployment includes:
 - 20GB+ free disk space
 - Internet connection for image pulls and certificate generation
 
-### For Kind
+### For Kind (Deprecated)
 - Docker Desktop running
 - kubectl installed
 - kind installed
 - terraform installed (for cluster setup)
+
+**Note**: Kind deployment is deprecated in favor of MicroK8s for better security and SSL support.
 
 ## Quick Start
 
@@ -93,10 +97,10 @@ This script will:
 - ✅ Display deployment status
 
 **Access URLs:**
-- Frontend: https://www.econ-graph.com
-- Backend: https://www.econ-graph.com/api
-- Admin: https://www.econ-graph.com/admin
-- Grafana: https://www.econ-graph.com/grafana
+- Frontend: https://www.econgraph.com
+- Backend: https://www.econgraph.com/api
+- Admin: https://www.econgraph.com/admin
+- Grafana: https://www.econgraph.com/grafana
 
 **For detailed MicroK8s setup and troubleshooting, see**: [MicroK8s Deployment Guide](MICROK8S_DEPLOYMENT.md)
 

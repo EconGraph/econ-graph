@@ -1,10 +1,10 @@
-# 🚀 IMMEDIATE K8S RESTART COMMANDS
+# 🚀 K8S RESTART COMMANDS
 
 ## ⚡ **ONE-COMMAND RESTART** (Recommended)
 
 ```bash
 # Navigate to project root and run the automated restart script
-cd /Users/josephmalicki/src/econ-graph5
+cd /path/to/EconGraph/FrontEnd-1
 ./scripts/deploy/restart-k8s-rollout.sh
 ```
 
@@ -12,14 +12,14 @@ cd /Users/josephmalicki/src/econ-graph5
 
 ### Step 1: Environment Setup
 ```bash
-cd /Users/josephmalicki/src/econ-graph5
+cd /path/to/EconGraph/FrontEnd-1
 export KUBECONFIG=~/.kube/config
 
 # Load port configuration
-source ports.env
+source config/ports.env
 
-# Verify cluster exists
-kind get clusters
+# Verify MicroK8s is running
+microk8s status
 kubectl config current-context
 ```
 
@@ -58,18 +58,16 @@ docker build -t econ-graph-chart-api:latest .
 cd ..
 ```
 
-### Step 3: Load Images into Kind Cluster  
+### Step 3: Load Images into MicroK8s
 ```bash
-kind load docker-image econ-graph-backend:latest --name econ-graph
-kind load docker-image econ-graph-frontend:latest --name econ-graph
-kind load docker-image econ-graph-admin-frontend:latest --name econ-graph
-kind load docker-image econ-graph-chart-api:latest --name econ-graph
+# Images are automatically loaded by the build script
+# No separate load commands needed for MicroK8s
 ```
 
 ### Step 4: Apply Updated Manifests
 ```bash
-kubectl config use-context kind-econ-graph
 kubectl apply -f k8s/manifests/
+kubectl apply -f k8s/monitoring/
 ```
 
 ### Step 5: Force Restart Deployments

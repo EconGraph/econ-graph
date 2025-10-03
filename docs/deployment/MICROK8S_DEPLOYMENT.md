@@ -137,16 +137,16 @@ kubectl apply -f k8s/manifests/ssl-ingress.yaml
 ## Service URLs
 
 ### HTTPS Access (Production-like)
-- **Frontend**: https://www.econ-graph.com
-- **Backend**: https://www.econ-graph.com/api
-- **GraphQL**: https://www.econ-graph.com/graphql
-- **Admin UI**: https://www.econ-graph.com/admin
-- **Grafana**: https://www.econ-graph.com/grafana
+- **Frontend**: https://www.econgraph.com
+- **Backend**: https://www.econgraph.com/api
+- **GraphQL**: https://www.econgraph.com/graphql
+- **Admin UI**: https://www.econgraph.com/admin
+- **Grafana**: https://www.econgraph.com/grafana
 
 ### Local Development Access
 Add to `/etc/hosts`:
 ```
-127.0.0.1 www.econ-graph.com econ-graph.com
+127.0.0.1 www.econgraph.com econgraph.com
 ```
 
 ### Port Forwarding (Alternative)
@@ -181,7 +181,7 @@ kubectl port-forward service/grafana-service 3000:3000 -n econ-graph
 - **Permissions-Policy**: Restricted permissions
 
 ### CORS Configuration
-- **Allowed Origins**: https://www.econ-graph.com, https://econ-graph.com
+- **Allowed Origins**: https://www.econgraph.com, https://econgraph.com
 - **Allowed Methods**: GET, POST, PUT, DELETE, OPTIONS, PATCH
 - **Allowed Headers**: Comprehensive header list
 - **Credentials**: Enabled
@@ -213,9 +213,9 @@ kubectl port-forward service/grafana-service 3000:3000 -n econ-graph
 ### Health Checks
 ```bash
 # Test service accessibility
-curl -k -s -o /dev/null -w "%{http_code}" https://www.econ-graph.com
-curl -k -s -o /dev/null -w "%{http_code}" https://www.econ-graph.com/api/health
-curl -k -s -o /dev/null -w "%{http_code}" https://www.econ-graph.com/grafana
+curl -k -s -o /dev/null -w "%{http_code}" https://www.econgraph.com
+curl -k -s -o /dev/null -w "%{http_code}" https://www.econgraph.com/api/health
+curl -k -s -o /dev/null -w "%{http_code}" https://www.econgraph.com/grafana
 ```
 
 ## Troubleshooting
