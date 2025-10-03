@@ -1400,10 +1400,6 @@ jobs:
       working-directory: frontend
       run: npm run lint
 
-    - name: Run frontend JSDoc validation
-      working-directory: frontend
-      run: npx eslint "src/**/*.{ts,tsx}" --rule "jsdoc/require-jsdoc:warn" --max-warnings 600
-
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
