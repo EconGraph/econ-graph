@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::{
     database::DatabasePool,
     graphql::{context::require_admin, types::*},
-    services::{search_service::SearchService, series_service},
+    services::{search_service::SearchService, series_service, CompanyService, FinancialStatementService},
 };
 use std::sync::Arc;
 
@@ -650,6 +650,107 @@ impl Query {
             total_count: 0,
             page_info: PageInfo {
                 has_next_page: false,
+                has_previous_page: false,
+                start_cursor: None,
+                end_cursor: None,
+            },
+        })
+    }
+
+    // ============================================================================
+    // SEC CRAWLER QUERIES
+    // ============================================================================
+
+    /// Search for companies using fulltext search
+    async fn search_companies(
+        &self,
+        ctx: &Context<'_>,
+        input: CompanySearchInput,
+    ) -> Result<CompanyConnection> {
+        let pool = ctx.data::<DatabasePool>()?;
+        let company_service = CompanyService::new(Arc::new(pool.clone()));
+        
+        // Search for companies
+        let companies = company_service
+            .search_companies(
+                &input.query,
+                input.limit,
+                input.include_inactive,
+            )
+            .await?;
+
+        // Get total count
+        let total_count = company_service
+            .count_companies(&input.query, input.include_inactive)
+            .await? as i32;
+
+        // Convert to GraphQL types
+        let company_types: Vec<CompanyType> = companies
+            .into_iter()
+            .map(|company| company.into())
+            .collect();
+
+        Ok(CompanyConnection {
+            nodes: company_types,
+            total_count,
+            page_info: PageInfo {
+                has_next_page: false, // TODO: Implement proper pagination
+                has_previous_page: false,
+                start_cursor: None,
+                end_cursor: None,
+            },
+        })
+    }
+
+    /// Get a specific company by ID
+    async fn company(&self, ctx: &Context<'_>, id: ID) -> Result<Option<CompanyType>> {
+        let pool = ctx.data::<DatabasePool>()?;
+        let company_uuid = Uuid::parse_str(&id)?;
+        let company_service = CompanyService::new(Arc::new(pool.clone()));
+        
+        let company = company_service.get_company_by_id(company_uuid).await?;
+        Ok(company.map(|c| c.into()))
+    }
+
+    /// Get financial statements for a company
+    async fn company_financial_statements(
+        &self,
+        ctx: &Context<'_>,
+        company_id: ID,
+        pagination: Option<PaginationInput>,
+    ) -> Result<FinancialStatementConnection> {
+        let pool = ctx.data::<DatabasePool>()?;
+        let company_uuid = Uuid::parse_str(&company_id)?;
+        let financial_statement_service = FinancialStatementService::new(Arc::new(pool.clone()));
+        
+        // Apply pagination
+        let pagination = pagination.unwrap_or_default();
+        let limit = pagination.first.unwrap_or(50).min(100);
+        let offset = pagination.after
+            .and_then(|cursor| cursor.parse::<i32>().ok())
+            .unwrap_or(0);
+        
+        // Get financial statements
+        let statements = financial_statement_service
+            .get_company_financial_statements(company_uuid, Some(limit), Some(offset))
+            .await?;
+
+        // Get total count
+        let total_count = financial_statement_service
+            .count_company_financial_statements(company_uuid)
+            .await? as i32;
+
+        // Convert to GraphQL types
+        let statement_types: Vec<FinancialStatementType> = statements
+            .into_iter()
+            .map(|statement| statement.into())
+            .collect();
+
+        Ok(FinancialStatementConnection {
+            nodes: statement_types,
+            total_count,
+            page_info: PageInfo {
+                has_next_page: false, // TODO: Implement proper pagination
                 has_previous_page: false,
                 start_cursor: None,
                 end_cursor: None,
