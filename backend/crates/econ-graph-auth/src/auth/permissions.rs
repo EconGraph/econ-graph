@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::collections::HashMap;
+use std::fmt;
 
 /// Fine-grained permissions for EconGraph features
 /// Each permission represents a specific capability that can be granted to users
@@ -243,13 +243,17 @@ impl EconGraphPermission {
             _ => {
                 // Handle rate limit permissions
                 if s.starts_with("api:rate-limit:") {
-                    if let Ok(requests) = s.strip_prefix("api:rate-limit:").unwrap().parse::<u32>() {
-                        return Some(Self::ApiRateLimit { requests_per_hour: requests });
+                    if let Ok(requests) = s.strip_prefix("api:rate-limit:").unwrap().parse::<u32>()
+                    {
+                        return Some(Self::ApiRateLimit {
+                            requests_per_hour: requests,
+                        });
                     }
                 }
                 // Handle intraday stock data with days_back parameter
                 if s.starts_with("stock:intraday:") {
-                    if let Ok(days_back) = s.strip_prefix("stock:intraday:").unwrap().parse::<u32>() {
+                    if let Ok(days_back) = s.strip_prefix("stock:intraday:").unwrap().parse::<u32>()
+                    {
                         return Some(Self::StockDataIntraday { days_back });
                     }
                 }
@@ -267,23 +271,47 @@ impl EconGraphPermission {
             Self::NewsRead | Self::NewsPremium | Self::NewsRealTime | Self::NewsHistorical => {
                 PermissionCategory::Data
             }
-            Self::StockDataBasic | Self::StockDataRealtime | Self::StockDataIntraday { .. }
-            | Self::StockDataOptions | Self::StockDataForex | Self::StockDataCrypto | Self::StockDataFutures => {
-                PermissionCategory::Data
-            }
-            Self::GraphCreate | Self::GraphAdvanced | Self::GraphSave | Self::GraphShare
-            | Self::GraphCollaborate | Self::GraphPublic => PermissionCategory::Graphs,
-            Self::ExportImage | Self::ExportVector | Self::ExportWatermarkFree | Self::ExportData
+            Self::StockDataBasic
+            | Self::StockDataRealtime
+            | Self::StockDataIntraday { .. }
+            | Self::StockDataOptions
+            | Self::StockDataForex
+            | Self::StockDataCrypto
+            | Self::StockDataFutures => PermissionCategory::Data,
+            Self::GraphCreate
+            | Self::GraphAdvanced
+            | Self::GraphSave
+            | Self::GraphShare
+            | Self::GraphCollaborate
+            | Self::GraphPublic => PermissionCategory::Graphs,
+            Self::ExportImage
+            | Self::ExportVector
+            | Self::ExportWatermarkFree
+            | Self::ExportData
             | Self::ExportBulk => PermissionCategory::Export,
-            Self::NotesAdd | Self::NotesEdit | Self::NotesView | Self::NotesModerate
-            | Self::WorkspaceCreate | Self::WorkspaceInvite => PermissionCategory::Collaboration,
-            Self::ApiAccess | Self::ApiGraphQL | Self::ApiWebhooks | Self::ApiRateLimit { .. }
+            Self::NotesAdd
+            | Self::NotesEdit
+            | Self::NotesView
+            | Self::NotesModerate
+            | Self::WorkspaceCreate
+            | Self::WorkspaceInvite => PermissionCategory::Collaboration,
+            Self::ApiAccess
+            | Self::ApiGraphQL
+            | Self::ApiWebhooks
+            | Self::ApiRateLimit { .. }
             | Self::ApiBulk => PermissionCategory::Api,
-            Self::AnalyticsBasic | Self::AnalyticsAdvanced | Self::AnalyticsPredictive
+            Self::AnalyticsBasic
+            | Self::AnalyticsAdvanced
+            | Self::AnalyticsPredictive
             | Self::AnalyticsExport => PermissionCategory::Analytics,
-            Self::CustomizeThemes | Self::CustomizeDataSources | Self::CustomizeIndicators
+            Self::CustomizeThemes
+            | Self::CustomizeDataSources
+            | Self::CustomizeIndicators
             | Self::CustomizeWhiteLabel => PermissionCategory::Customization,
-            Self::AdminUsers | Self::AdminSystem | Self::AdminAudit | Self::AdminSecurity
+            Self::AdminUsers
+            | Self::AdminSystem
+            | Self::AdminAudit
+            | Self::AdminSecurity
             | Self::AdminBilling => PermissionCategory::Administration,
         }
     }
@@ -440,7 +468,9 @@ impl SubscriptionPermissionService {
                     EconGraphPermission::ApiAccess,
                     EconGraphPermission::ApiGraphQL,
                     EconGraphPermission::ApiWebhooks,
-                    EconGraphPermission::ApiRateLimit { requests_per_hour: 10000 },
+                    EconGraphPermission::ApiRateLimit {
+                        requests_per_hour: 10000,
+                    },
                     EconGraphPermission::AnalyticsBasic,
                     EconGraphPermission::AnalyticsAdvanced,
                     EconGraphPermission::AnalyticsPredictive,
@@ -501,7 +531,9 @@ impl SubscriptionPermissionService {
                     EconGraphPermission::ApiAccess,
                     EconGraphPermission::ApiGraphQL,
                     EconGraphPermission::ApiWebhooks,
-                    EconGraphPermission::ApiRateLimit { requests_per_hour: 50000 },
+                    EconGraphPermission::ApiRateLimit {
+                        requests_per_hour: 50000,
+                    },
                     EconGraphPermission::ApiBulk,
                     EconGraphPermission::AnalyticsBasic,
                     EconGraphPermission::AnalyticsAdvanced,
@@ -576,7 +608,9 @@ mod tests {
 
     #[test]
     fn test_rate_limit_permission() {
-        let permission = EconGraphPermission::ApiRateLimit { requests_per_hour: 1000 };
+        let permission = EconGraphPermission::ApiRateLimit {
+            requests_per_hour: 1000,
+        };
         assert_eq!(permission.to_string(), "api:rate-limit:1000");
         assert_eq!(
             EconGraphPermission::from_string("api:rate-limit:1000"),
@@ -588,11 +622,19 @@ mod tests {
     fn test_subscription_tiers() {
         let service = SubscriptionPermissionService::new();
         let free_tier = service.get_tier("free").unwrap();
-        assert!(free_tier.permissions.contains(&EconGraphPermission::DataRead));
-        assert!(!free_tier.permissions.contains(&EconGraphPermission::ExportWatermarkFree));
+        assert!(free_tier
+            .permissions
+            .contains(&EconGraphPermission::DataRead));
+        assert!(!free_tier
+            .permissions
+            .contains(&EconGraphPermission::ExportWatermarkFree));
 
         let enterprise_tier = service.get_tier("enterprise").unwrap();
-        assert!(enterprise_tier.permissions.contains(&EconGraphPermission::ExportWatermarkFree));
-        assert!(enterprise_tier.permissions.contains(&EconGraphPermission::AdminUsers));
+        assert!(enterprise_tier
+            .permissions
+            .contains(&EconGraphPermission::ExportWatermarkFree));
+        assert!(enterprise_tier
+            .permissions
+            .contains(&EconGraphPermission::AdminUsers));
     }
 }
