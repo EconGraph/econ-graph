@@ -9,6 +9,7 @@ use crate::models::{
     AnnotationComment, ChartAnnotation, ChartCollaborator, DataPoint, DataSource, EconomicSeries,
     SearchSortOrder, SearchSuggestion, SeriesSearchResult, SuggestionType, User,
 };
+use econ_graph_core::models::{Company, FinancialStatement};
 
 /// GraphQL representation of an economic series
 #[derive(Clone)]
@@ -1165,4 +1166,373 @@ pub struct AuditLogConnection {
     pub total_count: i32,
     /// Pagination info
     pub page_info: PageInfo,
+}
+
+// ============================================================================
+// SEC CRAWLER TYPES
+// ============================================================================
+
+/// GraphQL representation of a company
+#[derive(Clone)]
+pub struct CompanyType {
+    pub id: ID,
+    pub cik: String,
+    pub ticker: Option<String>,
+    pub name: String,
+    pub legal_name: Option<String>,
+    pub sic_code: Option<String>,
+    pub sic_description: Option<String>,
+    pub industry: Option<String>,
+    pub sector: Option<String>,
+    pub business_address: Option<serde_json::Value>,
+    pub mailing_address: Option<serde_json::Value>,
+    pub phone: Option<String>,
+    pub website: Option<String>,
+    pub state_of_incorporation: Option<String>,
+    pub state_of_incorporation_description: Option<String>,
+    pub fiscal_year_end: Option<String>,
+    pub entity_type: Option<String>,
+    pub entity_size: Option<String>,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[Object]
+impl CompanyType {
+    async fn id(&self) -> &ID {
+        &self.id
+    }
+
+    async fn cik(&self) -> &str {
+        &self.cik
+    }
+
+    async fn ticker(&self) -> &Option<String> {
+        &self.ticker
+    }
+
+    async fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn legal_name(&self) -> &Option<String> {
+        &self.legal_name
+    }
+
+    async fn sic_code(&self) -> &Option<String> {
+        &self.sic_code
+    }
+
+    async fn sic_description(&self) -> &Option<String> {
+        &self.sic_description
+    }
+
+    async fn industry(&self) -> &Option<String> {
+        &self.industry
+    }
+
+    async fn sector(&self) -> &Option<String> {
+        &self.sector
+    }
+
+    async fn business_address(&self) -> &Option<serde_json::Value> {
+        &self.business_address
+    }
+
+    async fn mailing_address(&self) -> &Option<serde_json::Value> {
+        &self.mailing_address
+    }
+
+    async fn phone(&self) -> &Option<String> {
+        &self.phone
+    }
+
+    async fn website(&self) -> &Option<String> {
+        &self.website
+    }
+
+    async fn state_of_incorporation(&self) -> &Option<String> {
+        &self.state_of_incorporation
+    }
+
+    async fn state_of_incorporation_description(&self) -> &Option<String> {
+        &self.state_of_incorporation_description
+    }
+
+    async fn fiscal_year_end(&self) -> &Option<String> {
+        &self.fiscal_year_end
+    }
+
+    async fn entity_type(&self) -> &Option<String> {
+        &self.entity_type
+    }
+
+    async fn entity_size(&self) -> &Option<String> {
+        &self.entity_size
+    }
+
+    async fn is_active(&self) -> bool {
+        self.is_active
+    }
+
+    async fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+
+    async fn updated_at(&self) -> DateTime<Utc> {
+        self.updated_at
+    }
+}
+
+/// GraphQL representation of a financial statement
+#[derive(Clone)]
+pub struct FinancialStatementType {
+    pub id: ID,
+    pub company_id: ID,
+    pub filing_type: String,
+    pub form_type: String,
+    pub accession_number: String,
+    pub filing_date: NaiveDate,
+    pub period_end_date: NaiveDate,
+    pub fiscal_year: i32,
+    pub fiscal_quarter: Option<i32>,
+    pub document_type: String,
+    pub document_url: String,
+    pub xbrl_file_oid: Option<i32>,
+    pub xbrl_file_size_bytes: Option<i64>,
+    pub xbrl_file_compressed: bool,
+    pub xbrl_processing_status: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[Object]
+impl FinancialStatementType {
+    async fn id(&self) -> &ID {
+        &self.id
+    }
+
+    async fn company_id(&self) -> &ID {
+        &self.company_id
+    }
+
+    async fn filing_type(&self) -> &str {
+        &self.filing_type
+    }
+
+    async fn form_type(&self) -> &str {
+        &self.form_type
+    }
+
+    async fn accession_number(&self) -> &str {
+        &self.accession_number
+    }
+
+    async fn filing_date(&self) -> NaiveDate {
+        self.filing_date
+    }
+
+    async fn period_end_date(&self) -> NaiveDate {
+        self.period_end_date
+    }
+
+    async fn fiscal_year(&self) -> i32 {
+        self.fiscal_year
+    }
+
+    async fn fiscal_quarter(&self) -> &Option<i32> {
+        &self.fiscal_quarter
+    }
+
+    async fn document_type(&self) -> &str {
+        &self.document_type
+    }
+
+    async fn document_url(&self) -> &str {
+        &self.document_url
+    }
+
+    async fn xbrl_file_oid(&self) -> &Option<i32> {
+        &self.xbrl_file_oid
+    }
+
+    async fn xbrl_file_size_bytes(&self) -> &Option<i64> {
+        &self.xbrl_file_size_bytes
+    }
+
+    async fn xbrl_file_compressed(&self) -> bool {
+        self.xbrl_file_compressed
+    }
+
+    async fn xbrl_processing_status(&self) -> &str {
+        &self.xbrl_processing_status
+    }
+
+    async fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+
+    async fn updated_at(&self) -> DateTime<Utc> {
+        self.updated_at
+    }
+}
+
+/// Input for company search
+#[derive(InputObject)]
+pub struct CompanySearchInput {
+    /// Search query (company name, ticker, or CIK)
+    pub query: String,
+    /// Maximum number of results
+    pub limit: Option<i32>,
+    /// Include inactive companies
+    pub include_inactive: Option<bool>,
+}
+
+/// Input for triggering SEC crawl
+#[derive(InputObject)]
+pub struct SecCrawlInput {
+    /// Company CIK to crawl
+    pub cik: String,
+    /// Form types to include (comma-separated)
+    pub form_types: Option<String>,
+    /// Start date for filing search (YYYY-MM-DD)
+    pub start_date: Option<String>,
+    /// End date for filing search (YYYY-MM-DD)
+    pub end_date: Option<String>,
+    /// Exclude amended filings
+    pub exclude_amended: Option<bool>,
+    /// Exclude restated filings
+    pub exclude_restated: Option<bool>,
+    /// Maximum file size to download (bytes)
+    pub max_file_size: Option<i64>,
+}
+
+/// Input for importing SEC EDGAR RSS feed
+#[derive(InputObject)]
+pub struct SecRssImportInput {
+    /// RSS feed URL (optional, defaults to SEC EDGAR RSS)
+    pub rss_url: Option<String>,
+    /// Maximum number of filings to import
+    pub max_filings: Option<i32>,
+    /// Form types to include (comma-separated)
+    pub form_types: Option<String>,
+}
+
+/// Result of SEC crawl operation
+#[derive(SimpleObject)]
+pub struct SecCrawlResult {
+    /// Operation ID
+    pub operation_id: ID,
+    /// Company CIK
+    pub cik: String,
+    /// Number of filings downloaded
+    pub filings_downloaded: i32,
+    /// Number of filings processed
+    pub filings_processed: i32,
+    /// Number of errors
+    pub errors: i32,
+    /// Start time
+    pub start_time: DateTime<Utc>,
+    /// End time
+    pub end_time: Option<DateTime<Utc>>,
+    /// Status
+    pub status: String,
+}
+
+/// Result of SEC RSS import
+#[derive(SimpleObject)]
+pub struct SecRssImportResult {
+    /// Operation ID
+    pub operation_id: ID,
+    /// Number of filings imported
+    pub filings_imported: i32,
+    /// Number of companies added
+    pub companies_added: i32,
+    /// Number of errors
+    pub errors: i32,
+    /// Start time
+    pub start_time: DateTime<Utc>,
+    /// End time
+    pub end_time: Option<DateTime<Utc>>,
+    /// Status
+    pub status: String,
+}
+
+/// Connection for companies
+#[derive(SimpleObject)]
+pub struct CompanyConnection {
+    /// List of companies
+    pub nodes: Vec<CompanyType>,
+    /// Total count
+    pub total_count: i32,
+    /// Pagination info
+    pub page_info: PageInfo,
+}
+
+/// Connection for financial statements
+#[derive(SimpleObject)]
+pub struct FinancialStatementConnection {
+    /// List of financial statements
+    pub nodes: Vec<FinancialStatementType>,
+    /// Total count
+    pub total_count: i32,
+    /// Pagination info
+    pub page_info: PageInfo,
+}
+
+// ============================================================================
+// CONVERSION IMPLEMENTATIONS
+// ============================================================================
+
+impl From<Company> for CompanyType {
+    fn from(company: Company) -> Self {
+        CompanyType {
+            id: company.id.into(),
+            cik: company.cik,
+            ticker: company.ticker,
+            name: company.name,
+            legal_name: company.legal_name,
+            sic_code: company.sic_code,
+            sic_description: company.sic_description,
+            industry: company.industry,
+            sector: company.sector,
+            business_address: company.business_address,
+            mailing_address: company.mailing_address,
+            phone: company.phone,
+            website: company.website,
+            state_of_incorporation: company.state_of_incorporation,
+            state_of_incorporation_description: company.state_of_incorporation_description,
+            fiscal_year_end: company.fiscal_year_end,
+            entity_type: company.entity_type,
+            entity_size: company.entity_size,
+            is_active: company.is_active,
+            created_at: company.created_at,
+            updated_at: company.updated_at,
+        }
+    }
+}
+
+impl From<FinancialStatement> for FinancialStatementType {
+    fn from(statement: FinancialStatement) -> Self {
+        FinancialStatementType {
+            id: statement.id.into(),
+            company_id: statement.company_id.into(),
+            filing_type: statement.filing_type,
+            form_type: statement.form_type,
+            accession_number: statement.accession_number,
+            filing_date: statement.filing_date,
+            period_end_date: statement.period_end_date,
+            fiscal_year: statement.fiscal_year,
+            fiscal_quarter: statement.fiscal_quarter,
+            document_type: statement.document_type,
+            document_url: statement.document_url,
+            xbrl_file_oid: statement.xbrl_file_oid,
+            xbrl_file_size_bytes: statement.xbrl_file_size_bytes,
+            xbrl_file_compressed: statement.xbrl_file_compressed,
+            xbrl_processing_status: statement.xbrl_processing_status.to_string(),
+            created_at: statement.created_at,
+            updated_at: statement.updated_at,
+        }
+    }
 }

@@ -3,7 +3,9 @@ use async_graphql::*;
 use crate::{
     database::DatabasePool,
     graphql::{context::require_admin, types::*},
+    services::SecCrawlerService,
 };
+use std::sync::Arc;
 
 /// Root mutation object
 pub struct Mutation;
@@ -443,6 +445,75 @@ impl Mutation {
             .await?;
 
         Ok(true)
+    }
+
+    // ============================================================================
+    // SEC CRAWLER MUTATIONS
+    // ============================================================================
+
+    /// Trigger SEC crawl for a specific company
+    async fn trigger_sec_crawl(
+        &self,
+        ctx: &Context<'_>,
+        input: SecCrawlInput,
+    ) -> Result<SecCrawlResult> {
+        let pool = ctx.data::<DatabasePool>()?;
+        let sec_crawler_service = SecCrawlerService::new(Arc::new(pool.clone()));
+        
+        // Trigger the crawl
+        let result = sec_crawler_service
+            .crawl_company(
+                &input.cik,
+                input.form_types,
+                input.start_date,
+                input.end_date,
+                input.exclude_amended,
+                input.exclude_restated,
+                input.max_file_size,
+            )
+            .await?;
+
+        // Convert to GraphQL result
+        Ok(SecCrawlResult {
+            operation_id: result.operation_id.into(),
+            cik: result.cik,
+            filings_downloaded: result.filings_downloaded,
+            filings_processed: result.filings_processed,
+            errors: result.errors,
+            start_time: result.start_time,
+            end_time: result.end_time,
+            status: result.status,
+        })
+    }
+
+    /// Import SEC EDGAR RSS feed
+    async fn import_sec_rss(
+        &self,
+        ctx: &Context<'_>,
+        input: SecRssImportInput,
+    ) -> Result<SecRssImportResult> {
+        let pool = ctx.data::<DatabasePool>()?;
+        let sec_crawler_service = SecCrawlerService::new(Arc::new(pool.clone()));
+        
+        // Import RSS feed
+        let result = sec_crawler_service
+            .import_rss_feed(
+                input.rss_url,
+                input.max_filings,
+                input.form_types,
+            )
+            .await?;
+
+        // Convert to GraphQL result
+        Ok(SecRssImportResult {
+            operation_id: result.operation_id.into(),
+            filings_imported: result.filings_imported,
+            companies_added: result.companies_added,
+            errors: result.errors,
+            start_time: result.start_time,
+            end_time: result.end_time,
+            status: result.status,
+        })
     }
 }
 
