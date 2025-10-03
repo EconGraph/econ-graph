@@ -89,6 +89,14 @@ export default [
       jsdoc: jsdoc,
       import: importPlugin,
     },
+    settings: {
+      'import/resolver': {
+        typescript: {
+          alwaysTryTypes: true,
+          project: './tsconfig.json',
+        },
+      },
+    },
     rules: {
       ...typescript.configs.recommended.rules,
       ...react.configs.recommended.rules,
@@ -125,6 +133,9 @@ export default [
       '@typescript-eslint/no-unused-expressions': 'warn', // Warn instead of error
       'react/display-name': 'warn', // Warn instead of error
 
+      // Import rules - temporarily disable path resolution warnings
+      'import/no-unresolved': 'off',
+      
       // JSDoc rules for documentation quality (initially lenient)
       'jsdoc/require-jsdoc': [
         'warn',

@@ -20,7 +20,6 @@ interface RatioExplanationModalProps {
   educationalLink?: string;
 }
 
-// eslint-disable-next-line jsdoc/require-param, jsdoc/require-returns
 export const RatioExplanationModal: React.FC<RatioExplanationModalProps> = ({
   isOpen,
   onClose,

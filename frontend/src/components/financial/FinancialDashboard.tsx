@@ -28,15 +28,13 @@ import {
   BarChart3,
   PieChart,
   Activity,
-  AlertTriangle,
   RefreshCw,
   Download,
   Share2,
   Eye,
   Clock,
-  AlertCircle,
 } from 'lucide-react';
-import { FinancialStatement, FinancialRatio, Company } from '@/types/financial';
+// import { FinancialStatement, FinancialRatio, Company } from '@/types/financial';
 import { useQuery } from '@tanstack/react-query';
 import { executeGraphQL } from '@/utils/graphql';
 import { GET_FINANCIAL_DASHBOARD } from '@/test-utils/mocks/graphql/financial-queries';
@@ -69,14 +67,14 @@ const useFinancialDashboardData = (companyId: string) => {
 
 export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   companyId,
-  userType = 'intermediate',
-  showEducationalContent = true,
-  showCollaborativeFeatures = true,
+  userType: _userType = 'intermediate',
+  showEducationalContent: _showEducationalContent = true,
+  showCollaborativeFeatures: _showCollaborativeFeatures = true,
 }) => {
   const { data, isLoading, isError, error } = useFinancialDashboardData(companyId);
   const [activeTab, setActiveTab] = useState(0);
   const [selectedStatement, setSelectedStatement] = useState<string | null>(null);
-  const [timeRange, setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
+  const [timeRange, _setTimeRange] = useState<'1Y' | '3Y' | '5Y' | '10Y'>('3Y');
 
   useEffect(() => {
     if (data?.financialStatements && data.financialStatements.length > 0) {
@@ -119,7 +117,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
 
   // The data IS the company object, not wrapped in a company field
   const company = data;
-  const { financialStatements: statements, financialRatios: ratios, trends = [] } = data;
+  const { financialStatements: statements, financialRatios: ratios, trends: _trends = [] } = data;
 
   if (!company) {
     return (
@@ -167,7 +165,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               <Button variant='contained' startIcon={<Download />}>
                 Download
               </Button>
-              {showCollaborativeFeatures && (
+              {_showCollaborativeFeatures && (
                 <Button variant='outlined' startIcon={<Share2 />}>
                   Share
                 </Button>
