@@ -1,27 +1,29 @@
 /**
  * Comprehensive tests for CompanySearch component
- * 
+ *
  * Tests cover:
  * - Component rendering and basic functionality
  * - Search input handling and validation
- * - Search results display and interaction
+ * - Search companies display and interaction
  * - Error handling and loading states
  * - Accessibility and user experience
  * - Integration with GraphQL API
  */
 
-import React from 'react';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { CompanySearch } from '../CompanySearch';
-import { useCompanySearch } from '../../../hooks/useCompanySearch';
-import { Company } from '../../../types';
+import React from "react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ThemeProvider, createTheme } from "@mui/material/styles";
+import { CompanySearch } from "../CompanySearch";
+import { useCompanySearch } from "../../../hooks/useCompanySearch";
+import { Company } from "../../../types";
 
 // Mock the useCompanySearch hook
-jest.mock('../../../hooks/useCompanySearch');
+jest.mock("../../../hooks/useCompanySearch");
 
-const mockUseCompanySearch = useCompanySearch as jest.MockedFunction<typeof useCompanySearch>;
+const mockUseCompanySearch = useCompanySearch as jest.MockedFunction<
+  typeof useCompanySearch
+>;
 
 // Create test theme
 const theme = createTheme();
@@ -37,9 +39,7 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider theme={theme}>
-        {children}
-      </ThemeProvider>
+      <ThemeProvider theme={theme}>{children}</ThemeProvider>
     </QueryClientProvider>
   );
 };
@@ -47,511 +47,553 @@ const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 // Mock company data
 const mockCompanies: Company[] = [
   {
-    id: '1',
-    cik: '0000320193',
-    ticker: 'AAPL',
-    name: 'Apple Inc.',
-    legalName: 'Apple Inc.',
-    industry: 'Technology Hardware & Equipment',
-    sector: 'Technology',
-    isActive: true,
-    createdAt: '2023-01-01T00:00:00Z',
-    updatedAt: '2023-01-01T00:00:00Z',
+    id: "1",
+    cik: "0000320193",
+    ticker: "AAPL",
+    name: "Apple Inc.",
+    legal_name: "Apple Inc.",
+    industry: "Technology Hardware & Equipment",
+    sector: "Technology",
+    is_active: true,
+    created_at: "2023-01-01T00:00:00Z",
+    updated_at: "2023-01-01T00:00:00Z",
   },
   {
-    id: '2',
-    cik: '0000789019',
-    ticker: 'MSFT',
-    name: 'Microsoft Corporation',
-    legalName: 'Microsoft Corporation',
-    industry: 'Software',
-    sector: 'Technology',
-    isActive: true,
-    createdAt: '2023-01-01T00:00:00Z',
-    updatedAt: '2023-01-01T00:00:00Z',
+    id: "2",
+    cik: "0000789019",
+    ticker: "MSFT",
+    name: "Microsoft Corporation",
+    legal_name: "Microsoft Corporation",
+    industry: "Software",
+    sector: "Technology",
+    is_active: true,
+    created_at: "2023-01-01T00:00:00Z",
+    updated_at: "2023-01-01T00:00:00Z",
   },
 ];
 
-describe('CompanySearch', () => {
+describe("CompanySearch", () => {
   const mockOnCompanySelect = jest.fn();
   const mockOnCrawlStart = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
-    
+
     // Default mock implementation
     mockUseCompanySearch.mockReturnValue({
-      query: '',
+      query: "",
       setQuery: jest.fn(),
-      results: [],
+      companies: [],
       loading: false,
-      error: null,
+      error: undefined,
       searchCompanies: jest.fn(),
+      totalCount: 0,
+      getCompany: jest.fn(),
     });
   });
 
-  describe('Rendering', () => {
-    it('renders search input', () => {
+  describe("Rendering", () => {
+    it("renders search input", () => {
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      expect(screen.getByPlaceholderText('Search companies...')).toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText("Search companies..."),
+      ).toBeInTheDocument();
     });
 
-    it('renders search button', () => {
+    it("renders search button", () => {
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      expect(screen.getByRole('button', { name: /search/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /search/i }),
+      ).toBeInTheDocument();
     });
 
-    it('renders filter options', () => {
+    it("renders filter options", () => {
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      expect(screen.getByText('Include Inactive')).toBeInTheDocument();
-      expect(screen.getByText('Limit Results')).toBeInTheDocument();
+      expect(screen.getByText("Include Inactive")).toBeInTheDocument();
+      expect(screen.getByText("Limit Results")).toBeInTheDocument();
     });
   });
 
-  describe('Search Functionality', () => {
-    it('handles search input changes', async () => {
+  describe("Search Functionality", () => {
+    it("handles search input changes", async () => {
       const mockSetQuery = jest.fn();
       mockUseCompanySearch.mockReturnValue({
-        query: '',
+        query: "",
         setQuery: mockSetQuery,
-        results: [],
+        companies: [],
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      const searchInput = screen.getByPlaceholderText('Search companies...');
-      fireEvent.change(searchInput, { target: { value: 'Apple' } });
+      const searchInput = screen.getByPlaceholderText("Search companies...");
+      fireEvent.change(searchInput, { target: { value: "Apple" } });
 
-      expect(mockSetQuery).toHaveBeenCalledWith('Apple');
+      expect(mockSetQuery).toHaveBeenCalledWith("Apple");
     });
 
-    it('triggers search on button click', async () => {
+    it("triggers search on button click", async () => {
       const mockSearchCompanies = jest.fn();
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: [],
+        companies: [],
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: mockSearchCompanies,
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      const searchButton = screen.getByRole('button', { name: /search/i });
+      const searchButton = screen.getByRole("button", { name: /search/i });
       fireEvent.click(searchButton);
 
-      expect(mockSearchCompanies).toHaveBeenCalledWith('Apple');
+      expect(mockSearchCompanies).toHaveBeenCalledWith("Apple");
     });
 
-    it('triggers search on Enter key press', async () => {
+    it("triggers search on Enter key press", async () => {
       const mockSearchCompanies = jest.fn();
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: [],
+        companies: [],
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: mockSearchCompanies,
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      const searchInput = screen.getByPlaceholderText('Search companies...');
-      fireEvent.keyDown(searchInput, { key: 'Enter', code: 'Enter' });
+      const searchInput = screen.getByPlaceholderText("Search companies...");
+      fireEvent.keyDown(searchInput, { key: "Enter", code: "Enter" });
 
-      expect(mockSearchCompanies).toHaveBeenCalledWith('Apple');
+      expect(mockSearchCompanies).toHaveBeenCalledWith("Apple");
     });
 
-    it('handles empty search query', async () => {
+    it("handles empty search query", async () => {
       const mockSearchCompanies = jest.fn();
       mockUseCompanySearch.mockReturnValue({
-        query: '',
+        query: "",
         setQuery: jest.fn(),
-        results: [],
+        companies: [],
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: mockSearchCompanies,
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      const searchButton = screen.getByRole('button', { name: /search/i });
+      const searchButton = screen.getByRole("button", { name: /search/i });
       fireEvent.click(searchButton);
 
-      expect(mockSearchCompanies).toHaveBeenCalledWith('');
+      expect(mockSearchCompanies).toHaveBeenCalledWith("");
     });
   });
 
-  describe('Search Results', () => {
-    it('displays search results', () => {
+  describe("Search Results", () => {
+    it("displays search companies", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: mockCompanies,
+        companies: mockCompanies,
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
-      expect(screen.getByText('Microsoft Corporation')).toBeInTheDocument();
+      expect(screen.getByText("Apple Inc.")).toBeInTheDocument();
+      expect(screen.getByText("Microsoft Corporation")).toBeInTheDocument();
     });
 
-    it('displays company information correctly', () => {
+    it("displays company information correctly", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: [mockCompanies[0]],
+        companies: [mockCompanies[0]],
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
-      expect(screen.getByText('AAPL')).toBeInTheDocument();
-      expect(screen.getByText('Technology Hardware & Equipment')).toBeInTheDocument();
-      expect(screen.getByText('Technology')).toBeInTheDocument();
+      expect(screen.getByText("Apple Inc.")).toBeInTheDocument();
+      expect(screen.getByText("AAPL")).toBeInTheDocument();
+      expect(
+        screen.getByText("Technology Hardware & Equipment"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Technology")).toBeInTheDocument();
     });
 
-    it('handles empty search results', () => {
+    it("handles empty search companies", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'NonExistentCompany',
+        query: "NonExistentCompany",
         setQuery: jest.fn(),
-        results: [],
+        companies: [],
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      expect(screen.getByText('No companies found')).toBeInTheDocument();
+      expect(screen.getByText("No companies found")).toBeInTheDocument();
     });
 
-    it('displays loading state', () => {
+    it("displays loading state", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: [],
+        companies: [],
         loading: true,
-        error: null,
+        error: undefined,
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      expect(screen.getByText('Searching...')).toBeInTheDocument();
+      expect(screen.getByText("Searching...")).toBeInTheDocument();
     });
 
-    it('displays error state', () => {
+    it("displays error state", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: [],
+        companies: [],
         loading: false,
-        error: 'Search failed',
+        error: new Error("Search failed"),
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      expect(screen.getByText('Error: Search failed')).toBeInTheDocument();
+      expect(screen.getByText("Error: Search failed")).toBeInTheDocument();
     });
   });
 
-  describe('Company Selection', () => {
-    it('handles company selection', () => {
+  describe("Company Selection", () => {
+    it("handles company selection", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: mockCompanies,
+        companies: mockCompanies,
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      const companyCard = screen.getByText('Apple Inc.');
+      const companyCard = screen.getByText("Apple Inc.");
       fireEvent.click(companyCard);
 
       expect(mockOnCompanySelect).toHaveBeenCalledWith(mockCompanies[0]);
     });
 
-    it('handles crawl start', () => {
+    it("handles crawl start", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: mockCompanies,
+        companies: mockCompanies,
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      const crawlButton = screen.getByText('Start Crawl');
+      const crawlButton = screen.getByText("Start Crawl");
       fireEvent.click(crawlButton);
 
       expect(mockOnCrawlStart).toHaveBeenCalledWith(mockCompanies[0]);
     });
   });
 
-  describe('Filtering', () => {
-    it('handles include inactive toggle', () => {
+  describe("Filtering", () => {
+    it("handles include inactive toggle", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: mockCompanies,
+        companies: mockCompanies,
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      const includeInactiveCheckbox = screen.getByLabelText('Include Inactive');
+      const includeInactiveCheckbox = screen.getByLabelText("Include Inactive");
       fireEvent.click(includeInactiveCheckbox);
 
       expect(includeInactiveCheckbox).toBeChecked();
     });
 
-    it('handles limit input', () => {
+    it("handles limit input", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: mockCompanies,
+        companies: mockCompanies,
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      const limitInput = screen.getByLabelText('Limit Results');
-      fireEvent.change(limitInput, { target: { value: '50' } });
+      const limitInput = screen.getByLabelText("Limit Results");
+      fireEvent.change(limitInput, { target: { value: "50" } });
 
       expect(limitInput).toHaveValue(50);
     });
   });
 
-  describe('Accessibility', () => {
-    it('has proper ARIA labels', () => {
+  describe("Accessibility", () => {
+    it("has proper ARIA labels", () => {
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      expect(screen.getByLabelText('Search companies')).toBeInTheDocument();
-      expect(screen.getByLabelText('Include Inactive')).toBeInTheDocument();
-      expect(screen.getByLabelText('Limit Results')).toBeInTheDocument();
+      expect(screen.getByLabelText("Search companies")).toBeInTheDocument();
+      expect(screen.getByLabelText("Include Inactive")).toBeInTheDocument();
+      expect(screen.getByLabelText("Limit Results")).toBeInTheDocument();
     });
 
-    it('supports keyboard navigation', () => {
+    it("supports keyboard navigation", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: mockCompanies,
+        companies: mockCompanies,
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      const searchInput = screen.getByPlaceholderText('Search companies...');
+      const searchInput = screen.getByPlaceholderText("Search companies...");
       searchInput.focus();
-      
-      fireEvent.keyDown(searchInput, { key: 'Tab' });
+
+      fireEvent.keyDown(searchInput, { key: "Tab" });
       // Should move to next focusable element
     });
 
-    it('announces search results to screen readers', () => {
+    it("announces search companies to screen readers", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: mockCompanies,
+        companies: mockCompanies,
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      expect(screen.getByRole('region', { name: /search results/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole("region", { name: /search companies/i }),
+      ).toBeInTheDocument();
     });
   });
 
-  describe('Performance', () => {
-    it('debounces search input', async () => {
+  describe("Performance", () => {
+    it("debounces search input", async () => {
       const mockSearchCompanies = jest.fn();
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: [],
+        companies: [],
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: mockSearchCompanies,
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      const searchInput = screen.getByPlaceholderText('Search companies...');
-      
+      const searchInput = screen.getByPlaceholderText("Search companies...");
+
       // Type multiple characters quickly
-      fireEvent.change(searchInput, { target: { value: 'A' } });
-      fireEvent.change(searchInput, { target: { value: 'Ap' } });
-      fireEvent.change(searchInput, { target: { value: 'App' } });
-      fireEvent.change(searchInput, { target: { value: 'Appl' } });
-      fireEvent.change(searchInput, { target: { value: 'Apple' } });
+      fireEvent.change(searchInput, { target: { value: "A" } });
+      fireEvent.change(searchInput, { target: { value: "Ap" } });
+      fireEvent.change(searchInput, { target: { value: "App" } });
+      fireEvent.change(searchInput, { target: { value: "Appl" } });
+      fireEvent.change(searchInput, { target: { value: "Apple" } });
 
       // Wait for debounce
       await waitFor(() => {
@@ -559,158 +601,172 @@ describe('CompanySearch', () => {
       });
     });
 
-    it('handles large result sets efficiently', () => {
+    it("handles large result sets efficiently", () => {
       const largeResultSet = Array.from({ length: 1000 }, (_, i) => ({
         id: i.toString(),
-        cik: `000000${i.toString().padStart(4, '0')}`,
+        cik: `000000${i.toString().padStart(4, "0")}`,
         ticker: `TICK${i}`,
         name: `Company ${i}`,
-        legalName: `Company ${i} Inc.`,
-        industry: 'Technology',
-        sector: 'Technology',
-        isActive: true,
-        createdAt: '2023-01-01T00:00:00Z',
-        updatedAt: '2023-01-01T00:00:00Z',
+        legal_name: `Company ${i} Inc.`,
+        industry: "Technology",
+        sector: "Technology",
+        is_active: true,
+        created_at: "2023-01-01T00:00:00Z",
+        updated_at: "2023-01-01T00:00:00Z",
       }));
 
       mockUseCompanySearch.mockReturnValue({
-        query: 'Company',
+        query: "Company",
         setQuery: jest.fn(),
-        results: largeResultSet,
+        companies: largeResultSet,
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
       // Should render without performance issues
-      expect(screen.getByText('Company 0')).toBeInTheDocument();
+      expect(screen.getByText("Company 0")).toBeInTheDocument();
     });
   });
 
-  describe('Error Handling', () => {
-    it('handles network errors gracefully', () => {
+  describe("Error Handling", () => {
+    it("handles network errors gracefully", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: [],
+        companies: [],
         loading: false,
-        error: 'Network error',
+        error: new Error("Network error"),
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      expect(screen.getByText('Error: Network error')).toBeInTheDocument();
+      expect(screen.getByText("Error: Network error")).toBeInTheDocument();
     });
 
-    it('handles timeout errors', () => {
+    it("handles timeout errors", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: [],
+        companies: [],
         loading: false,
-        error: 'Request timeout',
+        error: new Error("Request timeout"),
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      expect(screen.getByText('Error: Request timeout')).toBeInTheDocument();
+      expect(screen.getByText("Error: Request timeout")).toBeInTheDocument();
     });
 
-    it('provides retry functionality', () => {
+    it("provides retry functionality", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: [],
+        companies: [],
         loading: false,
-        error: 'Search failed',
+        error: new Error("Search failed"),
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      expect(screen.getByText('Retry')).toBeInTheDocument();
+      expect(screen.getByText("Retry")).toBeInTheDocument();
     });
   });
 
-  describe('Integration', () => {
-    it('integrates with GraphQL API', async () => {
+  describe("Integration", () => {
+    it("integrates with GraphQL API", async () => {
       const mockSearchCompanies = jest.fn();
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: mockCompanies,
+        companies: mockCompanies,
         loading: false,
-        error: null,
+        error: undefined,
         searchCompanies: mockSearchCompanies,
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      const searchButton = screen.getByRole('button', { name: /search/i });
+      const searchButton = screen.getByRole("button", { name: /search/i });
       fireEvent.click(searchButton);
 
-      expect(mockSearchCompanies).toHaveBeenCalledWith('Apple');
+      expect(mockSearchCompanies).toHaveBeenCalledWith("Apple");
     });
 
-    it('handles GraphQL errors', () => {
+    it("handles GraphQL errors", () => {
       mockUseCompanySearch.mockReturnValue({
-        query: 'Apple',
+        query: "Apple",
         setQuery: jest.fn(),
-        results: [],
+        companies: [],
         loading: false,
-        error: 'GraphQL error: Field not found',
+        error: new Error("GraphQL error: Field not found"),
         searchCompanies: jest.fn(),
+        totalCount: 0,
+        getCompany: jest.fn(),
       });
 
       render(
         <TestWrapper>
-          <CompanySearch 
+          <CompanySearch
             onCompanySelect={mockOnCompanySelect}
             onCrawlStart={mockOnCrawlStart}
           />
-        </TestWrapper>
+        </TestWrapper>,
       );
 
-      expect(screen.getByText('Error: GraphQL error: Field not found')).toBeInTheDocument();
+      expect(
+        screen.getByText("Error: GraphQL error: Field not found"),
+      ).toBeInTheDocument();
     });
   });
 });

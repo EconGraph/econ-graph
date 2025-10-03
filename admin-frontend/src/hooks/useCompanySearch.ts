@@ -1,13 +1,13 @@
 /**
  * Company Search Hook
- * 
+ *
  * Provides GraphQL integration for company search functionality.
  * Includes fulltext search with PostgreSQL indices and fuzzy matching.
  */
 
-import { useState, useCallback } from 'react';
-import { useQuery, useLazyQuery } from '@apollo/client';
-import { gql } from '@apollo/client';
+import { useState, useCallback } from "react";
+import { useLazyQuery } from "@apollo/client/react";
+import { gql } from "@apollo/client";
 
 // GraphQL query for searching companies
 const SEARCH_COMPANIES = gql`
@@ -118,6 +118,8 @@ export interface CompanySearchResult {
 }
 
 export interface UseCompanySearchReturn {
+  query: string;
+  setQuery: (query: string) => void;
   companies: Company[];
   loading: boolean;
   error?: Error;
@@ -127,25 +129,15 @@ export interface UseCompanySearchReturn {
 }
 
 export const useCompanySearch = (): UseCompanySearchReturn => {
+  const [query, setQuery] = useState("");
   const [companies, setCompanies] = useState<Company[]>([]);
   const [totalCount, setTotalCount] = useState(0);
 
   // Lazy query for searching companies
-  const [searchCompaniesQuery, { loading: searchLoading, error: searchError }] = useLazyQuery<{
-    searchCompanies: CompanySearchResult;
-  }>(SEARCH_COMPANIES, {
-    onCompleted: (data) => {
-      if (data.searchCompanies) {
-        setCompanies(data.searchCompanies.nodes);
-        setTotalCount(data.searchCompanies.total_count);
-      }
-    },
-    onError: (error) => {
-      console.error('Company search error:', error);
-      setCompanies([]);
-      setTotalCount(0);
-    },
-  });
+  const [searchCompaniesQuery, { loading: searchLoading, error: searchError }] =
+    useLazyQuery<{
+      searchCompanies: CompanySearchResult;
+    }>(SEARCH_COMPANIES);
 
   // Lazy query for getting a specific company
   const [getCompanyQuery, { loading: getCompanyLoading }] = useLazyQuery<{
@@ -156,16 +148,22 @@ export const useCompanySearch = (): UseCompanySearchReturn => {
   const searchCompanies = useCallback(
     async (input: CompanySearchInput): Promise<void> => {
       try {
-        await searchCompaniesQuery({
+        const result = await searchCompaniesQuery({
           variables: { input },
-          fetchPolicy: 'cache-first',
         });
+
+        if (result.data?.searchCompanies) {
+          setCompanies(result.data.searchCompanies.nodes);
+          setTotalCount(result.data.searchCompanies.total_count);
+        }
       } catch (error) {
-        console.error('Error searching companies:', error);
+        console.error("Error searching companies:", error);
+        setCompanies([]);
+        setTotalCount(0);
         throw error;
       }
     },
-    [searchCompaniesQuery]
+    [searchCompaniesQuery],
   );
 
   // Get specific company function
@@ -174,18 +172,19 @@ export const useCompanySearch = (): UseCompanySearchReturn => {
       try {
         const result = await getCompanyQuery({
           variables: { id },
-          fetchPolicy: 'cache-first',
         });
         return result.data?.company || null;
       } catch (error) {
-        console.error('Error getting company:', error);
+        console.error("Error getting company:", error);
         return null;
       }
     },
-    [getCompanyQuery]
+    [getCompanyQuery],
   );
 
   return {
+    query,
+    setQuery,
     companies,
     loading: searchLoading || getCompanyLoading,
     error: searchError,

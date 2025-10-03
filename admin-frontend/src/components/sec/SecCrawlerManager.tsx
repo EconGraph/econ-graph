@@ -1,6 +1,6 @@
 /**
  * SEC Crawler Manager Component
- * 
+ *
  * Features:
  * - Company search and selection
  * - Crawl configuration (form types, date ranges, filters)
@@ -9,7 +9,7 @@
  * - Crawl history and status tracking
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback } from "react";
 import {
   Box,
   Card,
@@ -18,10 +18,6 @@ import {
   Grid,
   Button,
   TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   Switch,
   FormControlLabel,
   Chip,
@@ -35,34 +31,25 @@ import {
   Step,
   StepLabel,
   StepContent,
-  Paper,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
-  Divider,
-  IconButton,
-  Tooltip,
-} from '@mui/material';
+} from "@mui/material";
 import {
   PlayArrow,
-  Stop,
-  Refresh,
   Download,
   Business,
-  Description,
-  Schedule,
   CheckCircle,
   Error,
   Warning,
-  Info,
   History,
   Settings,
-} from '@mui/icons-material';
-import CompanySearch from './CompanySearch';
-import { useSecCrawler } from '../../hooks/useSecCrawler';
+} from "@mui/icons-material";
+import CompanySearch from "./CompanySearch";
+import { useSecCrawler } from "../../hooks/useSecCrawler";
+import { Company, SecCrawlResult } from "../../types";
 
 interface SecCrawlerManagerProps {
+  company?: Company;
+  onCrawlComplete?: (result: SecCrawlResult) => void;
+  onCrawlError?: (error: Error) => void;
   className?: string;
 }
 
@@ -71,9 +58,9 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
 }) => {
   const [selectedCompany, setSelectedCompany] = useState<any>(null);
   const [crawlConfig, setCrawlConfig] = useState({
-    formTypes: '10-K,10-Q',
-    startDate: '',
-    endDate: '',
+    formTypes: "10-K,10-Q",
+    startDate: "",
+    endDate: "",
     excludeAmended: false,
     excludeRestated: false,
     maxFileSize: 52428800, // 50MB
@@ -82,13 +69,8 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
   const [crawlDialogOpen, setCrawlDialogOpen] = useState(false);
   const [rssDialogOpen, setRssDialogOpen] = useState(false);
 
-  const {
-    triggerCrawl,
-    importRss,
-    crawlResults,
-    loading,
-    error,
-  } = useSecCrawler();
+  const { crawlCompany, importRssFeed, isCrawling, progress, status, error } =
+    useSecCrawler();
 
   // Handle company selection
   const handleCompanySelect = useCallback((company: any) => {
@@ -98,7 +80,7 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
 
   // Handle crawl configuration change
   const handleConfigChange = useCallback((field: string, value: any) => {
-    setCrawlConfig(prev => ({
+    setCrawlConfig((prev) => ({
       ...prev,
       [field]: value,
     }));
@@ -109,7 +91,7 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
     if (!selectedCompany) return;
 
     try {
-      await triggerCrawl({
+      await crawlCompany({
         cik: selectedCompany.cik,
         form_types: crawlConfig.formTypes,
         start_date: crawlConfig.startDate || undefined,
@@ -120,28 +102,28 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
       });
       setCrawlDialogOpen(false);
     } catch (err) {
-      console.error('Crawl error:', err);
+      console.error("Crawl error:", err);
     }
-  }, [selectedCompany, crawlConfig, triggerCrawl]);
+  }, [selectedCompany, crawlConfig, crawlCompany]);
 
   // Handle RSS import
   const handleRssImport = useCallback(async () => {
     try {
-      await importRss({
+      await importRssFeed({
         rss_url: undefined, // Use default SEC RSS
         max_filings: 100,
-        form_types: '10-K,10-Q,8-K',
+        form_types: "10-K,10-Q,8-K",
       });
       setRssDialogOpen(false);
     } catch (err) {
-      console.error('RSS import error:', err);
+      console.error("RSS import error:", err);
     }
-  }, [importRss]);
+  }, [importRssFeed]);
 
   const steps = [
     {
-      label: 'Select Company',
-      description: 'Search and select a company to crawl',
+      label: "Select Company",
+      description: "Search and select a company to crawl",
       content: (
         <Box>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -157,8 +139,8 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
       ),
     },
     {
-      label: 'Configure Crawl',
-      description: 'Set crawl parameters and filters',
+      label: "Configure Crawl",
+      description: "Set crawl parameters and filters",
       content: (
         <Box>
           <Grid container spacing={3}>
@@ -167,7 +149,9 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
                 fullWidth
                 label="Form Types"
                 value={crawlConfig.formTypes}
-                onChange={(e) => handleConfigChange('formTypes', e.target.value)}
+                onChange={(e) =>
+                  handleConfigChange("formTypes", e.target.value)
+                }
                 helperText="Comma-separated list (e.g., 10-K,10-Q,8-K)"
                 placeholder="10-K,10-Q"
               />
@@ -178,7 +162,9 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
                 label="Start Date"
                 type="date"
                 value={crawlConfig.startDate}
-                onChange={(e) => handleConfigChange('startDate', e.target.value)}
+                onChange={(e) =>
+                  handleConfigChange("startDate", e.target.value)
+                }
                 InputLabelProps={{ shrink: true }}
               />
             </Grid>
@@ -188,7 +174,7 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
                 label="End Date"
                 type="date"
                 value={crawlConfig.endDate}
-                onChange={(e) => handleConfigChange('endDate', e.target.value)}
+                onChange={(e) => handleConfigChange("endDate", e.target.value)}
                 InputLabelProps={{ shrink: true }}
               />
             </Grid>
@@ -198,17 +184,21 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
                 label="Max File Size (bytes)"
                 type="number"
                 value={crawlConfig.maxFileSize}
-                onChange={(e) => handleConfigChange('maxFileSize', parseInt(e.target.value))}
+                onChange={(e) =>
+                  handleConfigChange("maxFileSize", parseInt(e.target.value))
+                }
                 helperText="Maximum file size to download"
               />
             </Grid>
             <Grid item xs={12} md={6}>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                 <FormControlLabel
                   control={
                     <Switch
                       checked={crawlConfig.excludeAmended}
-                      onChange={(e) => handleConfigChange('excludeAmended', e.target.checked)}
+                      onChange={(e) =>
+                        handleConfigChange("excludeAmended", e.target.checked)
+                      }
                     />
                   }
                   label="Exclude Amended Filings"
@@ -217,7 +207,9 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
                   control={
                     <Switch
                       checked={crawlConfig.excludeRestated}
-                      onChange={(e) => handleConfigChange('excludeRestated', e.target.checked)}
+                      onChange={(e) =>
+                        handleConfigChange("excludeRestated", e.target.checked)
+                      }
                     />
                   }
                   label="Exclude Restated Filings"
@@ -229,8 +221,8 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
       ),
     },
     {
-      label: 'Execute Crawl',
-      description: 'Review and start the crawl operation',
+      label: "Execute Crawl",
+      description: "Review and start the crawl operation",
       content: (
         <Box>
           {selectedCompany && (
@@ -239,7 +231,9 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
                 <Typography variant="h6" gutterBottom>
                   Selected Company
                 </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <Box
+                  sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}
+                >
                   <Business color="primary" />
                   <Typography variant="subtitle1">
                     {selectedCompany.name}
@@ -261,7 +255,7 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
                 variant="contained"
                 startIcon={<PlayArrow />}
                 onClick={() => setCrawlDialogOpen(true)}
-                disabled={!selectedCompany || loading}
+                disabled={!selectedCompany || isCrawling}
                 fullWidth
               >
                 Start Crawl
@@ -272,7 +266,7 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
                 variant="outlined"
                 startIcon={<Download />}
                 onClick={() => setRssDialogOpen(true)}
-                disabled={loading}
+                disabled={isCrawling}
                 fullWidth
               >
                 Import RSS Feed
@@ -290,8 +284,8 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
         SEC Crawler Management
       </Typography>
       <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-        Search for companies and crawl their SEC EDGAR filings. Use fulltext search
-        with fuzzy matching to find companies by name, ticker, or CIK.
+        Search for companies and crawl their SEC EDGAR filings. Use fulltext
+        search with fuzzy matching to find companies by name, ticker, or CIK.
       </Typography>
 
       {/* Error Display */}
@@ -302,11 +296,11 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
       )}
 
       {/* Loading Indicator */}
-      {loading && (
+      {isCrawling && (
         <Box sx={{ mb: 3 }}>
-          <LinearProgress />
+          <LinearProgress variant="determinate" value={progress} />
           <Typography variant="body2" sx={{ mt: 1 }}>
-            Processing crawl operation...
+            Processing crawl operation... {progress}%
           </Typography>
         </Box>
       )}
@@ -320,13 +314,17 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
               <Typography variant="h6" gutterBottom>
                 Crawl Configuration
               </Typography>
-              
+
               <Stepper activeStep={activeStep} orientation="vertical">
                 {steps.map((step, index) => (
                   <Step key={step.label}>
                     <StepLabel>{step.label}</StepLabel>
                     <StepContent>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ mb: 2 }}
+                      >
                         {step.description}
                       </Typography>
                       {step.content}
@@ -337,12 +335,10 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
                           disabled={index === 0 && !selectedCompany}
                           sx={{ mr: 1 }}
                         >
-                          {index === steps.length - 1 ? 'Finish' : 'Continue'}
+                          {index === steps.length - 1 ? "Finish" : "Continue"}
                         </Button>
                         {index > 0 && (
-                          <Button
-                            onClick={() => setActiveStep(index - 1)}
-                          >
+                          <Button onClick={() => setActiveStep(index - 1)}>
                             Back
                           </Button>
                         )}
@@ -362,29 +358,29 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
               <Typography variant="h6" gutterBottom>
                 Quick Actions
               </Typography>
-              
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
                 <Button
                   variant="outlined"
                   startIcon={<Download />}
                   onClick={() => setRssDialogOpen(true)}
-                  disabled={loading}
+                  disabled={isCrawling}
                 >
                   Import RSS Feed
                 </Button>
-                
+
                 <Button
                   variant="outlined"
                   startIcon={<History />}
-                  disabled={loading}
+                  disabled={isCrawling}
                 >
                   View Crawl History
                 </Button>
-                
+
                 <Button
                   variant="outlined"
                   startIcon={<Settings />}
-                  disabled={loading}
+                  disabled={isCrawling}
                 >
                   Crawler Settings
                 </Button>
@@ -392,35 +388,25 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
             </CardContent>
           </Card>
 
-          {/* Recent Results */}
-          {crawlResults.length > 0 && (
+          {/* Status Display */}
+          {status !== "idle" && (
             <Card sx={{ mt: 2 }}>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
-                  Recent Crawls
+                  Crawl Status
                 </Typography>
-                <List dense>
-                  {crawlResults.slice(0, 3).map((result, index) => (
-                    <React.Fragment key={result.operation_id}>
-                      <ListItem>
-                        <ListItemIcon>
-                          {result.status === 'completed' ? (
-                            <CheckCircle color="success" />
-                          ) : result.status === 'failed' ? (
-                            <Error color="error" />
-                          ) : (
-                            <Warning color="warning" />
-                          )}
-                        </ListItemIcon>
-                        <ListItemText
-                          primary={`CIK: ${result.cik}`}
-                          secondary={`${result.filings_downloaded} filings • ${result.status}`}
-                        />
-                      </ListItem>
-                      {index < crawlResults.length - 1 && <Divider />}
-                    </React.Fragment>
-                  ))}
-                </List>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  {status === "completed" ? (
+                    <CheckCircle color="success" />
+                  ) : status === "error" ? (
+                    <Error color="error" />
+                  ) : (
+                    <Warning color="warning" />
+                  )}
+                  <Typography variant="body2">
+                    Status: {status} {isCrawling && `(${progress}%)`}
+                  </Typography>
+                </Box>
               </CardContent>
             </Card>
           )}
@@ -437,21 +423,20 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
         <DialogTitle>Confirm Crawl Operation</DialogTitle>
         <DialogContent>
           <Typography variant="body1" gutterBottom>
-            Are you sure you want to start crawling SEC filings for{' '}
+            Are you sure you want to start crawling SEC filings for{" "}
             <strong>{selectedCompany?.name}</strong>?
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            This operation may take several minutes depending on the number of filings.
+            This operation may take several minutes depending on the number of
+            filings.
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCrawlDialogOpen(false)}>
-            Cancel
-          </Button>
+          <Button onClick={() => setCrawlDialogOpen(false)}>Cancel</Button>
           <Button
             variant="contained"
             onClick={handleCrawl}
-            disabled={loading}
+            disabled={isCrawling}
           >
             Start Crawl
           </Button>
@@ -475,13 +460,11 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setRssDialogOpen(false)}>
-            Cancel
-          </Button>
+          <Button onClick={() => setRssDialogOpen(false)}>Cancel</Button>
           <Button
             variant="contained"
             onClick={handleRssImport}
-            disabled={loading}
+            disabled={isCrawling}
           >
             Import RSS
           </Button>

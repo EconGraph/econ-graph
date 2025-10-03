@@ -1,13 +1,13 @@
 /**
  * SEC Crawler Hook
- * 
+ *
  * Provides GraphQL integration for SEC crawler operations.
  * Includes company crawling, RSS import, and status monitoring.
  */
 
-import { useState, useCallback } from 'react';
-import { useMutation } from '@apollo/client';
-import { gql } from '@apollo/client';
+import { useState, useCallback } from "react";
+import { useMutation } from "@apollo/client/react";
+import { gql } from "@apollo/client";
 
 // GraphQL mutation for triggering SEC crawl
 const TRIGGER_SEC_CRAWL = gql`
@@ -78,103 +78,88 @@ export interface SecRssImportResult {
 }
 
 export interface UseSecCrawlerReturn {
-  crawlResults: SecCrawlResult[];
-  rssResults: SecRssImportResult[];
-  loading: boolean;
+  crawlCompany: (input: SecCrawlInput) => Promise<SecCrawlResult>;
+  importRssFeed: (input: SecRssImportInput) => Promise<SecRssImportResult>;
+  isCrawling: boolean;
+  progress: number;
+  status: string;
   error?: Error;
-  triggerCrawl: (input: SecCrawlInput) => Promise<SecCrawlResult>;
-  importRss: (input: SecRssImportInput) => Promise<SecRssImportResult>;
-  clearResults: () => void;
 }
 
 export const useSecCrawler = (): UseSecCrawlerReturn => {
-  const [crawlResults, setCrawlResults] = useState<SecCrawlResult[]>([]);
-  const [rssResults, setRssResults] = useState<SecRssImportResult[]>([]);
+  const [isCrawling, setIsCrawling] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [status, setStatus] = useState("idle");
 
   // Mutation for triggering SEC crawl
-  const [triggerCrawlMutation, { loading: crawlLoading, error: crawlError }] = useMutation<{
+  const [triggerCrawlMutation, { error: crawlError }] = useMutation<{
     triggerSecCrawl: SecCrawlResult;
-  }>(TRIGGER_SEC_CRAWL, {
-    onCompleted: (data) => {
-      if (data.triggerSecCrawl) {
-        setCrawlResults(prev => [data.triggerSecCrawl, ...prev]);
-      }
-    },
-    onError: (error) => {
-      console.error('SEC crawl error:', error);
-    },
-  });
+  }>(TRIGGER_SEC_CRAWL);
 
   // Mutation for importing RSS feed
-  const [importRssMutation, { loading: rssLoading, error: rssError }] = useMutation<{
+  const [importRssMutation, { error: rssError }] = useMutation<{
     importSecRss: SecRssImportResult;
-  }>(IMPORT_SEC_RSS, {
-    onCompleted: (data) => {
-      if (data.importSecRss) {
-        setRssResults(prev => [data.importSecRss, ...prev]);
-      }
-    },
-    onError: (error) => {
-      console.error('RSS import error:', error);
-    },
-  });
+  }>(IMPORT_SEC_RSS);
 
   // Trigger SEC crawl
-  const triggerCrawl = useCallback(
+  const crawlCompany = useCallback(
     async (input: SecCrawlInput): Promise<SecCrawlResult> => {
       try {
+        setIsCrawling(true);
+        setStatus("crawling");
+        setProgress(0);
+
         const result = await triggerCrawlMutation({
           variables: { input },
         });
-        
+
         if (!result.data?.triggerSecCrawl) {
-          throw new Error('No crawl result returned');
+          throw new Error("No crawl result returned");
         }
-        
+
+        setProgress(100);
+        setStatus("completed");
+        setIsCrawling(false);
+
         return result.data.triggerSecCrawl;
       } catch (error) {
-        console.error('Error triggering SEC crawl:', error);
+        console.error("Error triggering SEC crawl:", error);
+        setStatus("error");
+        setIsCrawling(false);
         throw error;
       }
     },
-    [triggerCrawlMutation]
+    [triggerCrawlMutation],
   );
 
   // Import RSS feed
-  const importRss = useCallback(
+  const importRssFeed = useCallback(
     async (input: SecRssImportInput): Promise<SecRssImportResult> => {
       try {
         const result = await importRssMutation({
           variables: { input },
         });
-        
+
         if (!result.data?.importSecRss) {
-          throw new Error('No RSS import result returned');
+          throw new Error("No RSS import result returned");
         }
-        
+
         return result.data.importSecRss;
       } catch (error) {
-        console.error('Error importing RSS feed:', error);
+        console.error("Error importing RSS feed:", error);
         throw error;
       }
     },
-    [importRssMutation]
+    [importRssMutation],
   );
 
-  // Clear results
-  const clearResults = useCallback(() => {
-    setCrawlResults([]);
-    setRssResults([]);
-  }, []);
-
   return {
-    crawlResults,
-    rssResults,
-    loading: crawlLoading || rssLoading,
+    crawlCompany,
+    importRssFeed,
+    isCrawling,
+    progress,
+    status,
     error: crawlError || rssError,
-    triggerCrawl,
-    importRss,
-    clearResults,
   };
 };
 

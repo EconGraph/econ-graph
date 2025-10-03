@@ -1,6 +1,6 @@
 /**
  * Financial Data Hook
- * 
+ *
  * Provides GraphQL integration for financial data and company information.
  * Includes company details, financial statements, and financial metrics.
  */
@@ -152,30 +152,28 @@ export const useFinancialData = (): UseFinancialDataReturn => {
   const [getCompanyQuery, { loading: companyLoading, error: companyError }] = useLazyQuery<{
     company: Company | null;
   }>(GET_COMPANY, {
-    onCompleted: (data) => {
+    onCompleted: data => {
       setCompany(data.company);
     },
-    onError: (error) => {
+    onError: error => {
       console.error('Error loading company:', error);
     },
   });
 
   // Lazy query for getting financial statements
-  const [getFinancialStatementsQuery, { 
-    loading: statementsLoading, 
-    error: statementsError 
-  }] = useLazyQuery<{
-    companyFinancialStatements: FinancialStatementConnection;
-  }>(GET_COMPANY_FINANCIAL_STATEMENTS, {
-    onCompleted: (data) => {
-      if (data.companyFinancialStatements) {
-        setFinancialStatements(data.companyFinancialStatements.nodes);
-      }
-    },
-    onError: (error) => {
-      console.error('Error loading financial statements:', error);
-    },
-  });
+  const [getFinancialStatementsQuery, { loading: statementsLoading, error: statementsError }] =
+    useLazyQuery<{
+      companyFinancialStatements: FinancialStatementConnection;
+    }>(GET_COMPANY_FINANCIAL_STATEMENTS, {
+      onCompleted: data => {
+        if (data.companyFinancialStatements) {
+          setFinancialStatements(data.companyFinancialStatements.nodes);
+        }
+      },
+      onError: error => {
+        console.error('Error loading financial statements:', error);
+      },
+    });
 
   // Load company
   const loadCompany = useCallback(
@@ -198,9 +196,9 @@ export const useFinancialData = (): UseFinancialDataReturn => {
     async (companyId: string, pagination?: PaginationInput): Promise<void> => {
       try {
         await getFinancialStatementsQuery({
-          variables: { 
+          variables: {
             companyId,
-            pagination: pagination || { first: 50 }
+            pagination: pagination || { first: 50 },
           },
           fetchPolicy: 'cache-first',
         });

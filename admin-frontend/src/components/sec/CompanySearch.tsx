@@ -1,6 +1,6 @@
 /**
  * Company Search Component
- * 
+ *
  * Features:
  * - Fulltext search for companies using PostgreSQL indices
  * - Search by company name, ticker, or CIK
@@ -9,11 +9,10 @@
  * - Company selection for crawling
  */
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback } from "react";
 import {
   Box,
   TextField,
-  Autocomplete,
   Chip,
   Typography,
   Card,
@@ -29,19 +28,16 @@ import {
   ListItemText,
   ListItemSecondaryAction,
   Divider,
-} from '@mui/material';
+} from "@mui/material";
 import {
   Search,
   Business,
   TrendingUp,
-  Public,
-  Phone,
   Language,
-  LocationOn,
   Info,
   PlayArrow,
-} from '@mui/icons-material';
-import { useCompanySearch } from '../../hooks/useCompanySearch';
+} from "@mui/icons-material";
+import { useCompanySearch } from "../../hooks/useCompanySearch";
 
 interface Company {
   id: string;
@@ -59,7 +55,7 @@ interface Company {
 
 interface CompanySearchProps {
   onCompanySelect?: (company: Company) => void;
-  onCrawlCompany?: (company: Company) => void;
+  onCrawlStart?: (company: Company) => void;
   placeholder?: string;
   showCrawlButton?: boolean;
   maxResults?: number;
@@ -67,28 +63,23 @@ interface CompanySearchProps {
 
 export const CompanySearch: React.FC<CompanySearchProps> = ({
   onCompanySelect,
-  onCrawlCompany,
+  onCrawlStart,
   placeholder = "Search companies by name, ticker, or CIK...",
   showCrawlButton = true,
   maxResults = 50,
 }) => {
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [isSearching, setIsSearching] = useState(false);
 
-  const {
-    searchCompanies,
-    companies,
-    loading,
-    error,
-    totalCount,
-  } = useCompanySearch();
+  const { searchCompanies, companies, loading, error, totalCount } =
+    useCompanySearch();
 
   // Debounced search function
   const debouncedSearch = useCallback(
     async (query: string) => {
       if (query.length < 2) return;
-      
+
       setIsSearching(true);
       try {
         await searchCompanies({
@@ -97,12 +88,12 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
           include_inactive: false,
         });
       } catch (err) {
-        console.error('Search error:', err);
+        console.error("Search error:", err);
       } finally {
         setIsSearching(false);
       }
     },
-    [searchCompanies, maxResults]
+    [searchCompanies, maxResults],
   );
 
   // Handle search input change
@@ -110,12 +101,12 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
     (event: React.ChangeEvent<HTMLInputElement>) => {
       const query = event.target.value;
       setSearchQuery(query);
-      
+
       if (query.length >= 2) {
         debouncedSearch(query);
       }
     },
-    [debouncedSearch]
+    [debouncedSearch],
   );
 
   // Handle company selection
@@ -124,15 +115,15 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
       setSelectedCompany(company);
       onCompanySelect?.(company);
     },
-    [onCompanySelect]
+    [onCompanySelect],
   );
 
   // Handle crawl company
   const handleCrawlCompany = useCallback(
     (company: Company) => {
-      onCrawlCompany?.(company);
+      onCrawlStart?.(company);
     },
-    [onCrawlCompany]
+    [onCrawlStart],
   );
 
   // Format company display name
@@ -144,7 +135,7 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
     if (company.cik) {
       parts.push(`CIK: ${company.cik}`);
     }
-    return parts.join(' ');
+    return parts.join(" ");
   }, []);
 
   // Get company industry/sector info
@@ -152,11 +143,11 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
     const info = [];
     if (company.industry) info.push(company.industry);
     if (company.sector) info.push(company.sector);
-    return info.join(' • ');
+    return info.join(" • ");
   }, []);
 
   return (
-    <Box sx={{ width: '100%' }}>
+    <Box sx={{ width: "100%" }}>
       {/* Search Input */}
       <TextField
         fullWidth
@@ -164,9 +155,7 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
         value={searchQuery}
         onChange={handleSearchChange}
         InputProps={{
-          startAdornment: (
-            <Search sx={{ color: 'text.secondary', mr: 1 }} />
-          ),
+          startAdornment: <Search sx={{ color: "text.secondary", mr: 1 }} />,
           endAdornment: (loading || isSearching) && (
             <CircularProgress size={20} />
           ),
@@ -176,9 +165,9 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
 
       {/* Search Results */}
       {searchQuery.length >= 2 && (
-        <Paper elevation={2} sx={{ maxHeight: 400, overflow: 'auto' }}>
+        <Paper elevation={2} sx={{ maxHeight: 400, overflow: "auto" }}>
           {loading || isSearching ? (
-            <Box sx={{ p: 2, textAlign: 'center' }}>
+            <Box sx={{ p: 2, textAlign: "center" }}>
               <CircularProgress size={24} />
               <Typography variant="body2" sx={{ mt: 1 }}>
                 Searching companies...
@@ -189,7 +178,7 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
               Error searching companies: {error.message}
             </Alert>
           ) : companies.length === 0 ? (
-            <Box sx={{ p: 2, textAlign: 'center' }}>
+            <Box sx={{ p: 2, textAlign: "center" }}>
               <Typography variant="body2" color="text.secondary">
                 No companies found for "{searchQuery}"
               </Typography>
@@ -202,14 +191,16 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
                     button
                     onClick={() => handleCompanySelect(company)}
                     sx={{
-                      '&:hover': {
-                        backgroundColor: 'action.hover',
+                      "&:hover": {
+                        backgroundColor: "action.hover",
                       },
                     }}
                   >
                     <ListItemText
                       primary={
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Box
+                          sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                        >
                           <Business fontSize="small" color="primary" />
                           <Typography variant="subtitle2" noWrap>
                             {formatCompanyName(company)}
@@ -227,14 +218,28 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
                       secondary={
                         <Box>
                           {getCompanyInfo(company) && (
-                            <Typography variant="body2" color="text.secondary" noWrap>
+                            <Typography
+                              variant="body2"
+                              color="text.secondary"
+                              noWrap
+                            >
                               {getCompanyInfo(company)}
                             </Typography>
                           )}
                           {company.website && (
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                            <Box
+                              sx={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 0.5,
+                                mt: 0.5,
+                              }}
+                            >
                               <Language fontSize="small" color="action" />
-                              <Typography variant="caption" color="text.secondary">
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
                                 {company.website}
                               </Typography>
                             </Box>
@@ -243,7 +248,7 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
                       }
                     />
                     <ListItemSecondaryAction>
-                      <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Box sx={{ display: "flex", gap: 1 }}>
                         <Tooltip title="View Details">
                           <IconButton
                             size="small"
@@ -278,11 +283,9 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
       {selectedCompany && (
         <Card sx={{ mt: 2 }}>
           <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
               <Business color="primary" />
-              <Typography variant="h6">
-                {selectedCompany.name}
-              </Typography>
+              <Typography variant="h6">{selectedCompany.name}</Typography>
               {selectedCompany.ticker && (
                 <Chip
                   label={selectedCompany.ticker}
@@ -292,8 +295,8 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
                 />
               )}
             </Box>
-            
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+
+            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 2 }}>
               <Chip
                 icon={<TrendingUp />}
                 label={`CIK: ${selectedCompany.cik}`}
@@ -332,7 +335,11 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
 
       {/* Search Stats */}
       {companies.length > 0 && (
-        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ mt: 1, display: "block" }}
+        >
           Found {companies.length} of {totalCount} companies
         </Typography>
       )}

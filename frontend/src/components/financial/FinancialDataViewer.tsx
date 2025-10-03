@@ -1,6 +1,6 @@
 /**
  * Financial Data Viewer Component
- * 
+ *
  * Features:
  * - Display financial statements from SEC EDGAR filings
  * - Interactive charts and visualizations
@@ -73,7 +73,7 @@ function TabPanel(props: TabPanelProps) {
 
   return (
     <div
-      role="tabpanel"
+      role='tabpanel'
       hidden={value !== index}
       id={`financial-tabpanel-${index}`}
       aria-labelledby={`financial-tab-${index}`}
@@ -93,14 +93,8 @@ export const FinancialDataViewer: React.FC<FinancialDataViewerProps> = ({
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
 
-  const {
-    company,
-    financialStatements,
-    loading,
-    error,
-    loadCompany,
-    loadFinancialStatements,
-  } = useFinancialData();
+  const { company, financialStatements, loading, error, loadCompany, loadFinancialStatements } =
+    useFinancialData();
 
   // Load data on mount
   React.useEffect(() => {
@@ -117,10 +111,8 @@ export const FinancialDataViewer: React.FC<FinancialDataViewerProps> = ({
 
   // Handle statement selection
   const handleStatementSelect = useCallback((statementId: string) => {
-    setSelectedStatements(prev => 
-      prev.includes(statementId)
-        ? prev.filter(id => id !== statementId)
-        : [...prev, statementId]
+    setSelectedStatements(prev =>
+      prev.includes(statementId) ? prev.filter(id => id !== statementId) : [...prev, statementId]
     );
   }, []);
 
@@ -189,7 +181,7 @@ export const FinancialDataViewer: React.FC<FinancialDataViewerProps> = ({
 
   if (error) {
     return (
-      <Alert severity="error" sx={{ m: 2 }}>
+      <Alert severity='error' sx={{ m: 2 }}>
         Error loading financial data: {error.message}
       </Alert>
     );
@@ -202,54 +194,39 @@ export const FinancialDataViewer: React.FC<FinancialDataViewerProps> = ({
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-              <Business color="primary" fontSize="large" />
+              <Business color='primary' fontSize='large' />
               <Box>
-                <Typography variant="h4">
-                  {company.name}
-                </Typography>
+                <Typography variant='h4'>{company.name}</Typography>
                 {company.ticker && (
-                  <Chip
-                    label={company.ticker}
-                    color="primary"
-                    variant="outlined"
-                    sx={{ mt: 1 }}
-                  />
+                  <Chip label={company.ticker} color='primary' variant='outlined' sx={{ mt: 1 }} />
                 )}
               </Box>
             </Box>
-            
+
             <Grid container spacing={2}>
               <Grid item xs={12} sm={6} md={3}>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant='body2' color='text.secondary'>
                   CIK
                 </Typography>
-                <Typography variant="body1">
-                  {company.cik}
-                </Typography>
+                <Typography variant='body1'>{company.cik}</Typography>
               </Grid>
               <Grid item xs={12} sm={6} md={3}>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant='body2' color='text.secondary'>
                   Industry
                 </Typography>
-                <Typography variant="body1">
-                  {company.industry || 'N/A'}
-                </Typography>
+                <Typography variant='body1'>{company.industry || 'N/A'}</Typography>
               </Grid>
               <Grid item xs={12} sm={6} md={3}>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant='body2' color='text.secondary'>
                   Sector
                 </Typography>
-                <Typography variant="body1">
-                  {company.sector || 'N/A'}
-                </Typography>
+                <Typography variant='body1'>{company.sector || 'N/A'}</Typography>
               </Grid>
               <Grid item xs={12} sm={6} md={3}>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant='body2' color='text.secondary'>
                   Fiscal Year End
                 </Typography>
-                <Typography variant="body1">
-                  {company.fiscal_year_end || 'N/A'}
-                </Typography>
+                <Typography variant='body1'>{company.fiscal_year_end || 'N/A'}</Typography>
               </Grid>
             </Grid>
           </CardContent>
@@ -262,16 +239,16 @@ export const FinancialDataViewer: React.FC<FinancialDataViewerProps> = ({
           <Tabs
             value={activeTab}
             onChange={handleTabChange}
-            aria-label="financial data tabs"
-            variant="scrollable"
-            scrollButtons="auto"
+            aria-label='financial data tabs'
+            variant='scrollable'
+            scrollButtons='auto'
           >
             {tabs.map((tab, index) => (
               <Tab
                 key={tab.label}
                 label={tab.label}
                 icon={tab.icon}
-                iconPosition="start"
+                iconPosition='start'
                 id={`financial-tab-${index}`}
                 aria-controls={`financial-tabpanel-${index}`}
               />
@@ -283,7 +260,7 @@ export const FinancialDataViewer: React.FC<FinancialDataViewerProps> = ({
         <TabPanel value={activeTab} index={0}>
           <Grid container spacing={3}>
             <Grid item xs={12} md={8}>
-              <Typography variant="h6" gutterBottom>
+              <Typography variant='h6' gutterBottom>
                 Recent Filings
               </Typography>
               <TableContainer component={Paper}>
@@ -298,21 +275,17 @@ export const FinancialDataViewer: React.FC<FinancialDataViewerProps> = ({
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {financialStatements.slice(0, 10).map((statement) => (
+                    {financialStatements.slice(0, 10).map(statement => (
                       <TableRow key={statement.id}>
                         <TableCell>
                           <Chip
                             label={statement.filing_type}
                             color={getFilingTypeColor(statement.filing_type)}
-                            size="small"
+                            size='small'
                           />
                         </TableCell>
-                        <TableCell>
-                          {formatDate(statement.filing_date)}
-                        </TableCell>
-                        <TableCell>
-                          {formatDate(statement.period_end_date)}
-                        </TableCell>
+                        <TableCell>{formatDate(statement.filing_date)}</TableCell>
+                        <TableCell>{formatDate(statement.period_end_date)}</TableCell>
                         <TableCell>
                           <Chip
                             label={statement.xbrl_processing_status}
@@ -320,15 +293,15 @@ export const FinancialDataViewer: React.FC<FinancialDataViewerProps> = ({
                               statement.xbrl_processing_status === 'completed'
                                 ? 'success'
                                 : statement.xbrl_processing_status === 'failed'
-                                ? 'error'
-                                : 'warning'
+                                  ? 'error'
+                                  : 'warning'
                             }
-                            size="small"
+                            size='small'
                           />
                         </TableCell>
                         <TableCell>
-                          <Tooltip title="View Details">
-                            <IconButton size="small">
+                          <Tooltip title='View Details'>
+                            <IconButton size='small'>
                               <Description />
                             </IconButton>
                           </Tooltip>
@@ -341,28 +314,25 @@ export const FinancialDataViewer: React.FC<FinancialDataViewerProps> = ({
             </Grid>
 
             <Grid item xs={12} md={4}>
-              <Typography variant="h6" gutterBottom>
+              <Typography variant='h6' gutterBottom>
                 Quick Actions
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <Button
-                  variant="outlined"
+                  variant='outlined'
                   startIcon={<Compare />}
                   onClick={() => setCompareDialogOpen(true)}
                 >
                   Compare Companies
                 </Button>
                 <Button
-                  variant="outlined"
+                  variant='outlined'
                   startIcon={<Download />}
                   onClick={() => setExportDialogOpen(true)}
                 >
                   Export Data
                 </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<Share />}
-                >
+                <Button variant='outlined' startIcon={<Share />}>
                   Share Report
                 </Button>
               </Box>
@@ -372,40 +342,40 @@ export const FinancialDataViewer: React.FC<FinancialDataViewerProps> = ({
 
         {/* Income Statement Tab */}
         <TabPanel value={activeTab} index={1}>
-          <Typography variant="h6" gutterBottom>
+          <Typography variant='h6' gutterBottom>
             Income Statement Analysis
           </Typography>
-          <Alert severity="info" sx={{ mb: 2 }}>
+          <Alert severity='info' sx={{ mb: 2 }}>
             Income statement data will be displayed here once XBRL processing is complete.
           </Alert>
         </TabPanel>
 
         {/* Balance Sheet Tab */}
         <TabPanel value={activeTab} index={2}>
-          <Typography variant="h6" gutterBottom>
+          <Typography variant='h6' gutterBottom>
             Balance Sheet Analysis
           </Typography>
-          <Alert severity="info" sx={{ mb: 2 }}>
+          <Alert severity='info' sx={{ mb: 2 }}>
             Balance sheet data will be displayed here once XBRL processing is complete.
           </Alert>
         </TabPanel>
 
         {/* Cash Flow Tab */}
         <TabPanel value={activeTab} index={3}>
-          <Typography variant="h6" gutterBottom>
+          <Typography variant='h6' gutterBottom>
             Cash Flow Analysis
           </Typography>
-          <Alert severity="info" sx={{ mb: 2 }}>
+          <Alert severity='info' sx={{ mb: 2 }}>
             Cash flow data will be displayed here once XBRL processing is complete.
           </Alert>
         </TabPanel>
 
         {/* Ratios Tab */}
         <TabPanel value={activeTab} index={4}>
-          <Typography variant="h6" gutterBottom>
+          <Typography variant='h6' gutterBottom>
             Financial Ratios
           </Typography>
-          <Alert severity="info" sx={{ mb: 2 }}>
+          <Alert severity='info' sx={{ mb: 2 }}>
             Financial ratios will be calculated and displayed here once XBRL processing is complete.
           </Alert>
         </TabPanel>
@@ -415,28 +385,24 @@ export const FinancialDataViewer: React.FC<FinancialDataViewerProps> = ({
       <Dialog
         open={compareDialogOpen}
         onClose={() => setCompareDialogOpen(false)}
-        maxWidth="md"
+        maxWidth='md'
         fullWidth
       >
         <DialogTitle>Compare Companies</DialogTitle>
         <DialogContent>
-          <Typography variant="body1" gutterBottom>
+          <Typography variant='body1' gutterBottom>
             Select companies to compare financial data.
           </Typography>
           <TextField
             fullWidth
-            label="Search Companies"
-            placeholder="Enter company name, ticker, or CIK"
+            label='Search Companies'
+            placeholder='Enter company name, ticker, or CIK'
             sx={{ mt: 2 }}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCompareDialogOpen(false)}>
-            Cancel
-          </Button>
-          <Button variant="contained">
-            Compare
-          </Button>
+          <Button onClick={() => setCompareDialogOpen(false)}>Cancel</Button>
+          <Button variant='contained'>Compare</Button>
         </DialogActions>
       </Dialog>
 
@@ -444,35 +410,31 @@ export const FinancialDataViewer: React.FC<FinancialDataViewerProps> = ({
       <Dialog
         open={exportDialogOpen}
         onClose={() => setExportDialogOpen(false)}
-        maxWidth="sm"
+        maxWidth='sm'
         fullWidth
       >
         <DialogTitle>Export Financial Data</DialogTitle>
         <DialogContent>
           <FormControl fullWidth sx={{ mb: 2 }}>
             <InputLabel>Export Format</InputLabel>
-            <Select value="csv" label="Export Format">
-              <MenuItem value="csv">CSV</MenuItem>
-              <MenuItem value="excel">Excel</MenuItem>
-              <MenuItem value="pdf">PDF Report</MenuItem>
+            <Select value='csv' label='Export Format'>
+              <MenuItem value='csv'>CSV</MenuItem>
+              <MenuItem value='excel'>Excel</MenuItem>
+              <MenuItem value='pdf'>PDF Report</MenuItem>
             </Select>
           </FormControl>
           <FormControl fullWidth>
             <InputLabel>Date Range</InputLabel>
-            <Select value="all" label="Date Range">
-              <MenuItem value="all">All Data</MenuItem>
-              <MenuItem value="year">Last Year</MenuItem>
-              <MenuItem value="quarter">Last Quarter</MenuItem>
+            <Select value='all' label='Date Range'>
+              <MenuItem value='all'>All Data</MenuItem>
+              <MenuItem value='year'>Last Year</MenuItem>
+              <MenuItem value='quarter'>Last Quarter</MenuItem>
             </Select>
           </FormControl>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setExportDialogOpen(false)}>
-            Cancel
-          </Button>
-          <Button variant="contained">
-            Export
-          </Button>
+          <Button onClick={() => setExportDialogOpen(false)}>Cancel</Button>
+          <Button variant='contained'>Export</Button>
         </DialogActions>
       </Dialog>
     </Box>
