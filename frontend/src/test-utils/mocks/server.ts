@@ -280,13 +280,14 @@ function createHandlers() {
       const operationMatch = query.match(/(?:query|mutation|subscription)\s+(\w+)/);
       const extractedOperationName = operationMatch ? operationMatch[1] : operationName;
 
-      if (process.env.MSW_DEBUG) {
-        console.log('🔧 MSW GraphQL Request:', {
-          query: query.substring(0, 100) + '...',
-          variables,
-          operationName: extractedOperationName,
-        });
-      }
+      // Debug logging disabled for browser compatibility
+      // if (MSW_DEBUG) {
+      //   console.log('🔧 MSW GraphQL Request:', {
+      //     query: query.substring(0, 100) + '...',
+      //     variables,
+      //     operationName: extractedOperationName,
+      //   });
+      // }
 
       // Route to appropriate handler based on operation name
       if (extractedOperationName === 'GetFinancialStatement') {
@@ -301,23 +302,26 @@ function createHandlers() {
             scenario = 'error';
           }
 
-          if (process.env.MSW_DEBUG) {
-            console.log('🔧 Loading GraphQL response for get_financial_statement:', scenario);
-          }
+          // Debug logging disabled for browser compatibility
+          // if (MSW_DEBUG) {
+          //   console.log('🔧 Loading GraphQL response for get_financial_statement:', scenario);
+          // }
 
           const response = loadGraphQLResponse('get_financial_statement', scenario);
 
-          if (process.env.MSW_DEBUG) {
-            console.log('🔧 GraphQL response loaded:', response);
-          }
+          // Debug logging disabled for browser compatibility
+          // if (MSW_DEBUG) {
+          //   console.log('🔧 GraphQL response loaded:', response);
+          // }
 
           return HttpResponse.json(response, {
             status: response.errors ? 400 : 200,
           });
         } catch (error) {
-          if (process.env.MSW_DEBUG) {
-            console.error('🔧 Error in GetFinancialStatement handler:', error);
-          }
+          // Debug logging disabled for browser compatibility
+          // if (MSW_DEBUG) {
+          //   console.error('🔧 Error in GetFinancialStatement handler:', error);
+          // }
           return HttpResponse.json(
             {
               data: null,

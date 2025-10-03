@@ -5,52 +5,91 @@
         "id": "0000789019",
         "name": "Microsoft Corporation",
         "ticker": "MSFT",
+        "marketCap": 3000000000000,
+        "sector": "Technology",
         "industry": "Software",
-        "marketCap": 2800000000000,
-        "ratios": {
-          "currentRatio": 2.5,
-          "debtToEquity": 0.3,
-          "returnOnEquity": 0.25
-        },
         "percentile": {
-          "currentRatio": 75,
-          "debtToEquity": 60,
-          "returnOnEquity": 80
-        }
+          "returnOnEquity": 80,
+          "netProfitMargin": 85,
+          "currentRatio": 75
+        },
+        "ratios": [
+          {
+            "ratioName": "returnOnEquity",
+            "value": 0.142,
+            "category": "profitability"
+          },
+          {
+            "ratioName": "netProfitMargin",
+            "value": 0.245,
+            "category": "profitability"
+          },
+          {
+            "ratioName": "currentRatio",
+            "value": 1.8,
+            "category": "liquidity"
+          }
+        ]
       },
       {
         "id": "0001018724",
         "name": "Amazon.com Inc.",
         "ticker": "AMZN",
-        "industry": "E-commerce",
         "marketCap": 1500000000000,
-        "ratios": {
-          "currentRatio": 1.2,
-          "debtToEquity": 0.8,
-          "returnOnEquity": 0.15
-        },
+        "sector": "Consumer Discretionary",
+        "industry": "Internet Retail",
         "percentile": {
-          "currentRatio": 45,
-          "debtToEquity": 70,
-          "returnOnEquity": 55
-        }
+          "returnOnEquity": 45,
+          "netProfitMargin": 30,
+          "currentRatio": 60
+        },
+        "ratios": [
+          {
+            "ratioName": "returnOnEquity",
+            "value": 0.085,
+            "category": "profitability"
+          },
+          {
+            "ratioName": "netProfitMargin",
+            "value": 0.032,
+            "category": "profitability"
+          },
+          {
+            "ratioName": "currentRatio",
+            "value": 1.2,
+            "category": "liquidity"
+          }
+        ]
       },
       {
         "id": "0001652044",
         "name": "Alphabet Inc.",
         "ticker": "GOOGL",
-        "industry": "Internet Services",
         "marketCap": 1800000000000,
-        "ratios": {
-          "currentRatio": 3.1,
-          "debtToEquity": 0.1,
-          "returnOnEquity": 0.18
-        },
+        "sector": "Technology",
+        "industry": "Internet Content & Information",
         "percentile": {
-          "currentRatio": 85,
-          "debtToEquity": 25,
-          "returnOnEquity": 65
-        }
+          "returnOnEquity": 85,
+          "netProfitMargin": 80,
+          "currentRatio": 90
+        },
+        "ratios": [
+          {
+            "ratioName": "returnOnEquity",
+            "value": 0.156,
+            "category": "profitability"
+          },
+          {
+            "ratioName": "netProfitMargin",
+            "value": 0.198,
+            "category": "profitability"
+          },
+          {
+            "ratioName": "currentRatio",
+            "value": 2.1,
+            "category": "liquidity"
+          }
+        ]
       }
     ]
   }
