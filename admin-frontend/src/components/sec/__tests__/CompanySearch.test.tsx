@@ -15,6 +15,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import { vi } from "vitest";
+import type { MockedFunction } from "vitest";
 import { CompanySearch } from "../CompanySearch";
 import { useCompanySearch } from "../../../hooks/useCompanySearch";
 import { Company } from "../../../types";
@@ -22,7 +23,7 @@ import { Company } from "../../../types";
 // Mock the useCompanySearch hook
 vi.mock("../../../hooks/useCompanySearch");
 
-const mockUseCompanySearch = useCompanySearch as vi.MockedFunction<
+const mockUseCompanySearch = useCompanySearch as MockedFunction<
   typeof useCompanySearch
 >;
 

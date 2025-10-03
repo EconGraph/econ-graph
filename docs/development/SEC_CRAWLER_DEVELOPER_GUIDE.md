@@ -626,6 +626,22 @@ export class ErrorBoundary extends React.Component<
 
 ## Testing Strategy
 
+### Testing Framework
+
+This project uses **Vitest** for frontend testing, not Jest. Vitest provides:
+
+- Fast test execution with Vite's build system
+- Jest-compatible API for easy migration
+- Built-in TypeScript support
+- Excellent performance and developer experience
+
+#### Key Differences from Jest
+
+- Use `vi` instead of `jest` for mocking
+- Import from `vitest` instead of `@jest/globals`
+- Use `vi.fn()` instead of `jest.fn()`
+- Use `vi.mock()` instead of `jest.mock()`
+
 ### Backend Testing
 
 #### Unit Tests
@@ -711,18 +727,19 @@ mod integration_tests {
 
 ```typescript
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { vi } from 'vitest';
 import { CompanySearch } from '../CompanySearch';
 
 describe('CompanySearch', () => {
   it('renders search input', () => {
-    render(<CompanySearch onCompanySelect={jest.fn()} />);
+    render(<CompanySearch onCompanySelect={vi.fn()} />);
     
     const searchInput = screen.getByPlaceholderText('Search companies...');
     expect(searchInput).toBeInTheDocument();
   });
   
   it('handles search input', async () => {
-    const onCompanySelect = jest.fn();
+    const onCompanySelect = vi.fn();
     render(<CompanySearch onCompanySelect={onCompanySelect} />);
     
     const searchInput = screen.getByPlaceholderText('Search companies...');
@@ -738,7 +755,8 @@ describe('CompanySearch', () => {
 #### Hook Tests
 
 ```typescript
-import { renderHook, act } from '@testing-library/react-hooks';
+import { renderHook, act } from '@testing-library/react';
+import { vi } from 'vitest';
 import { useCompanySearch } from '../useCompanySearch';
 
 describe('useCompanySearch', () => {

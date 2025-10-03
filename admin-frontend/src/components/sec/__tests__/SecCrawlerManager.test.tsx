@@ -15,6 +15,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import { vi } from "vitest";
+import type { MockedFunction } from "vitest";
 import { SecCrawlerManager } from "../SecCrawlerManager";
 import { useSecCrawler } from "../../../hooks/useSecCrawler";
 import { Company, SecCrawlResult } from "../../../types";
@@ -22,7 +23,7 @@ import { Company, SecCrawlResult } from "../../../types";
 // Mock the useSecCrawler hook
 vi.mock("../../../hooks/useSecCrawler");
 
-const mockUseSecCrawler = useSecCrawler as vi.MockedFunction<
+const mockUseSecCrawler = useSecCrawler as MockedFunction<
   typeof useSecCrawler
 >;
 

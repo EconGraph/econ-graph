@@ -124,6 +124,39 @@ tests/
 
 ## Test Configuration
 
+### Testing Framework
+
+This project uses **Vitest** as the primary testing framework for frontend tests, not Jest. Vitest provides:
+
+- Fast test execution with Vite's build system
+- Jest-compatible API for easy migration
+- Built-in TypeScript support
+- Excellent performance and developer experience
+
+#### Frontend Test Setup
+
+```typescript
+// vitest.config.ts
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./tests/setup.ts'],
+    globals: true,
+  },
+});
+```
+
+#### Key Differences from Jest
+
+- Use `vi` instead of `jest` for mocking
+- Import from `vitest` instead of `@jest/globals`
+- Use `vi.fn()` instead of `jest.fn()`
+- Use `vi.mock()` instead of `jest.mock()`
+
 ### Backend Tests
 
 #### Rust Tests
@@ -252,28 +285,28 @@ export const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children 
 
 ```typescript
 // tests/mocks.ts
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 
 // Mock GraphQL client
 export const mockGraphQLClient = {
-  request: jest.fn(),
-  setHeader: jest.fn(),
-  setHeaders: jest.fn(),
+  request: vi.fn(),
+  setHeader: vi.fn(),
+  setHeaders: vi.fn(),
 };
 
 // Mock hooks
 export const mockUseCompanySearch = {
   query: '',
-  setQuery: jest.fn(),
+  setQuery: vi.fn(),
   results: [],
   loading: false,
   error: null,
-  searchCompanies: jest.fn(),
+  searchCompanies: vi.fn(),
 };
 
 export const mockUseSecCrawler = {
-  crawlCompany: jest.fn(),
-  importRssFeed: jest.fn(),
+  crawlCompany: vi.fn(),
+  importRssFeed: vi.fn(),
   isCrawling: false,
   progress: 0,
   status: 'idle',
@@ -284,7 +317,7 @@ export const mockUseFinancialData = {
   data: [],
   loading: false,
   error: null,
-  refetch: jest.fn(),
+  refetch: vi.fn(),
 };
 ```
 
@@ -398,7 +431,7 @@ cargo test --coverage
 #### Frontend Tests
 
 ```bash
-# Run all frontend tests
+# Run all frontend tests (using Vitest)
 npm test
 
 # Run specific test files
@@ -407,6 +440,12 @@ npm test -- SecCrawlerManager.test.tsx
 
 # Run tests with coverage
 npm test -- --coverage
+
+# Run tests in watch mode
+npm test -- --watch
+
+# Run tests with UI
+npm test -- --ui
 ```
 
 #### End-to-End Tests

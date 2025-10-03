@@ -6,7 +6,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { useQuery, useLazyQuery } from '@apollo/client';
+import { useQuery, useLazyQuery } from '@apollo/client/react';
 import { gql } from '@apollo/client';
 
 // GraphQL query for getting a company
@@ -151,38 +151,24 @@ export const useFinancialData = (): UseFinancialDataReturn => {
   // Lazy query for getting a company
   const [getCompanyQuery, { loading: companyLoading, error: companyError }] = useLazyQuery<{
     company: Company | null;
-  }>(GET_COMPANY, {
-    onCompleted: data => {
-      setCompany(data.company);
-    },
-    onError: error => {
-      console.error('Error loading company:', error);
-    },
-  });
+  }>(GET_COMPANY);
 
   // Lazy query for getting financial statements
   const [getFinancialStatementsQuery, { loading: statementsLoading, error: statementsError }] =
     useLazyQuery<{
       companyFinancialStatements: FinancialStatementConnection;
-    }>(GET_COMPANY_FINANCIAL_STATEMENTS, {
-      onCompleted: data => {
-        if (data.companyFinancialStatements) {
-          setFinancialStatements(data.companyFinancialStatements.nodes);
-        }
-      },
-      onError: error => {
-        console.error('Error loading financial statements:', error);
-      },
-    });
+    }>(GET_COMPANY_FINANCIAL_STATEMENTS);
 
   // Load company
   const loadCompany = useCallback(
     async (id: string): Promise<void> => {
       try {
-        await getCompanyQuery({
+        const result = await getCompanyQuery({
           variables: { id },
-          fetchPolicy: 'cache-first',
         });
+        if (result.data?.company) {
+          setCompany(result.data.company);
+        }
       } catch (error) {
         console.error('Error loading company:', error);
         throw error;
@@ -195,13 +181,15 @@ export const useFinancialData = (): UseFinancialDataReturn => {
   const loadFinancialStatements = useCallback(
     async (companyId: string, pagination?: PaginationInput): Promise<void> => {
       try {
-        await getFinancialStatementsQuery({
+        const result = await getFinancialStatementsQuery({
           variables: {
             companyId,
             pagination: pagination || { first: 50 },
           },
-          fetchPolicy: 'cache-first',
         });
+        if (result.data?.companyFinancialStatements) {
+          setFinancialStatements(result.data.companyFinancialStatements.nodes);
+        }
       } catch (error) {
         console.error('Error loading financial statements:', error);
         throw error;
