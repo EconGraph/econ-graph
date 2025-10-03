@@ -1,0 +1,36 @@
+{
+  "data": {
+    "searchSeries": [
+      {
+        "id": "GDP",
+        "title": "Gross Domestic Product",
+        "description": "The total value of goods and services produced within a country's borders",
+        "externalId": "GDP",
+        "sourceId": "fred",
+        "frequency": "Quarterly",
+        "units": "Billions of Dollars",
+        "lastUpdated": "2024-01-15T10:00:00Z",
+        "startDate": "1947-01-01",
+        "endDate": "2024-01-01",
+        "isActive": true,
+        "rank": 1,
+        "similarityScore": 0.95
+      },
+      {
+        "id": "UNRATE",
+        "title": "Unemployment Rate",
+        "description": "The percentage of the labor force that is unemployed",
+        "externalId": "UNRATE",
+        "sourceId": "fred",
+        "frequency": "Monthly",
+        "units": "Percent",
+        "lastUpdated": "2024-01-15T10:00:00Z",
+        "startDate": "1948-01-01",
+        "endDate": "2024-01-01",
+        "isActive": true,
+        "rank": 2,
+        "similarityScore": 0.88
+      }
+    ]
+  }
+}
