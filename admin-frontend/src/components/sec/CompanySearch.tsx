@@ -151,6 +151,7 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
       {/* Search Input */}
       <TextField
         fullWidth
+        label="Search companies"
         placeholder={placeholder}
         value={searchQuery}
         onChange={handleSearchChange}
@@ -161,11 +162,28 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
           ),
         }}
         sx={{ mb: 2 }}
+        aria-describedby="search-help"
       />
+      
+      {/* Help text */}
+      <Typography 
+        id="search-help" 
+        variant="caption" 
+        color="text.secondary" 
+        sx={{ display: "block", mb: 1 }}
+      >
+        Type at least 2 characters to search for companies
+      </Typography>
 
       {/* Search Results */}
       {searchQuery.length >= 2 && (
-        <Paper elevation={2} sx={{ maxHeight: 400, overflow: "auto" }}>
+        <Paper 
+          elevation={2} 
+          sx={{ maxHeight: 400, overflow: "auto" }}
+          role="region"
+          aria-label="Search results"
+          aria-live="polite"
+        >
           {loading || isSearching ? (
             <Box sx={{ p: 2, textAlign: "center" }}>
               <CircularProgress size={24} />
@@ -195,6 +213,9 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
                         backgroundColor: "action.hover",
                       },
                     }}
+                    aria-label={`Select ${company.name}`}
+                    role="button"
+                    tabIndex={0}
                   >
                     <ListItemText
                       primary={
@@ -253,6 +274,7 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
                           <IconButton
                             size="small"
                             onClick={() => handleCompanySelect(company)}
+                            aria-label={`View details for ${company.name}`}
                           >
                             <Info fontSize="small" />
                           </IconButton>
@@ -263,6 +285,7 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
                               size="small"
                               onClick={() => handleCrawlCompany(company)}
                               color="primary"
+                              aria-label={`Crawl filings for ${company.name}`}
                             >
                               <PlayArrow fontSize="small" />
                             </IconButton>
@@ -281,7 +304,7 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
 
       {/* Selected Company */}
       {selectedCompany && (
-        <Card sx={{ mt: 2 }}>
+        <Card sx={{ mt: 2 }} role="region" aria-label="Selected company">
           <CardContent>
             <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
               <Business color="primary" />
@@ -325,6 +348,7 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
                 startIcon={<PlayArrow />}
                 onClick={() => handleCrawlCompany(selectedCompany)}
                 fullWidth
+                aria-label={`Crawl filings for ${selectedCompany.name}`}
               >
                 Crawl Company Filings
               </Button>
