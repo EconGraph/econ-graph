@@ -6,29 +6,29 @@
  */
 
 import React from 'react';
-import { Box, Paper, Typography, LinearProgress, Tooltip, Chip, Divider } from '@mui/material';
+import { Box, Paper, Typography, Tooltip, Chip, Divider } from '@mui/material';
 import { Info } from '@mui/icons-material';
 import { ARIA_LABELS, getColorLegendDescription } from './accessibility-utils';
 
 interface ColorLegendProps {
-  /** Currently selected indicator */
+  /** Currently selected indicator. */
   indicator: string;
-  /** Minimum value in the data range */
+  /** Minimum value in the data range. */
   minValue: number;
-  /** Maximum value in the data range */
+  /** Maximum value in the data range. */
   maxValue: number;
-  /** Color scheme being used */
+  /** Color scheme being used. */
   colorScheme: string;
-  /** Unit of measurement */
+  /** Unit of measurement. */
   unit: string;
-  /** Number of countries with data */
+  /** Number of countries with data. */
   countriesWithData: number;
-  /** Number of countries without data */
+  /** Number of countries without data. */
   countriesWithoutData: number;
-  /** Whether legend is visible */
+  /** Whether legend is visible. */
   visible?: boolean;
-  /** Callback for color scheme change */
-  onColorSchemeChange?: (scheme: string) => void;
+  /** Callback for color scheme change. */
+  _onColorSchemeChange?: (scheme: string) => void;
 }
 
 const ColorLegend: React.FC<ColorLegendProps> = ({
@@ -40,7 +40,7 @@ const ColorLegend: React.FC<ColorLegendProps> = ({
   countriesWithData,
   countriesWithoutData,
   visible = true,
-  onColorSchemeChange,
+  _onColorSchemeChange,
 }) => {
   if (!visible) return null;
 

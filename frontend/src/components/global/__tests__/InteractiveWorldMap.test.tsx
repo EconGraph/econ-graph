@@ -6,8 +6,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider, createTheme, StyledEngineProvider } from '@mui/material/styles';
 import { CssBaseline } from '@mui/material';
@@ -150,10 +149,11 @@ describe('InteractiveWorldMap', () => {
       );
 
       await waitFor(() => {
-        const svg = screen.getByRole('img', { hidden: true });
-        expect(svg).toHaveAttribute('width', '900');
-        expect(svg).toHaveAttribute('height', '500');
+        expect(screen.getByRole('img', { hidden: true })).toBeInTheDocument();
       });
+      const svg = screen.getByRole('img', { hidden: true });
+      expect(svg).toHaveAttribute('width', '900');
+      expect(svg).toHaveAttribute('height', '500');
     });
 
     it('should render with custom projection', async () => {
@@ -393,12 +393,12 @@ describe('InteractiveWorldMap', () => {
       );
 
       await waitFor(() => {
-        const svg = screen.getByRole('img', { hidden: true });
-        expect(svg).toBeInTheDocument();
-        // SVG should be accessible
-        expect(svg).toHaveAttribute('width');
-        expect(svg).toHaveAttribute('height');
+        expect(screen.getByRole('img', { hidden: true })).toBeInTheDocument();
       });
+      const svg = screen.getByRole('img', { hidden: true });
+      // SVG should be accessible
+      expect(svg).toHaveAttribute('width');
+      expect(svg).toHaveAttribute('height');
     });
 
     it('should be keyboard navigable', async () => {
@@ -410,11 +410,11 @@ describe('InteractiveWorldMap', () => {
       );
 
       await waitFor(() => {
-        const svg = screen.getByRole('img', { hidden: true });
-        expect(svg).toBeInTheDocument();
-        // SVG should be focusable for keyboard navigation
-        expect(svg).toHaveAttribute('tabindex', '0');
+        expect(screen.getByRole('img', { hidden: true })).toBeInTheDocument();
       });
+      const svg = screen.getByRole('img', { hidden: true });
+      // SVG should be focusable for keyboard navigation
+      expect(svg).toHaveAttribute('tabindex', '0');
     });
   });
 
@@ -488,10 +488,11 @@ describe('InteractiveWorldMap', () => {
       );
 
       await waitFor(() => {
-        const svg = screen.getByRole('img', { hidden: true });
-        expect(svg).toHaveAttribute('width', '400');
-        expect(svg).toHaveAttribute('height', '300');
+        expect(screen.getByRole('img', { hidden: true })).toBeInTheDocument();
       });
+      const svg = screen.getByRole('img', { hidden: true });
+      expect(svg).toHaveAttribute('width', '400');
+      expect(svg).toHaveAttribute('height', '300');
     });
 
     it('should maintain aspect ratio', async () => {

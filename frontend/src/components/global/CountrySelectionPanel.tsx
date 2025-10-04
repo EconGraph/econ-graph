@@ -18,7 +18,6 @@ import {
   Chip,
   Button,
   Divider,
-  Tooltip,
   Avatar,
   Badge,
   Menu,
@@ -31,37 +30,37 @@ import { Close, Clear, Compare, Download, FilterList, Sort, MoreVert } from '@mu
 import { CountryData } from '../../types/globalAnalysis';
 
 interface CountrySelectionPanelProps {
-  /** Array of selected countries */
+  /** Array of selected countries. */
   selectedCountries: CountryData[];
-  /** Currently selected indicator */
+  /** Currently selected indicator. */
   selectedIndicator: string;
-  /** Available indicators */
-  availableIndicators: string[];
-  /** Callback when a country is removed from selection */
+  /** Available indicators. */
+  _availableIndicators: string[];
+  /** Callback when a country is removed from selection. */
   onRemoveCountry: (countryId: string) => void;
-  /** Callback when all countries are cleared */
+  /** Callback when all countries are cleared. */
   onClearSelection: () => void;
-  /** Callback when countries are compared */
+  /** Callback when countries are compared. */
   onCompareCountries: () => void;
-  /** Callback when data is exported */
+  /** Callback when data is exported. */
   onExportData: () => void;
-  /** Callback when indicator changes */
-  onIndicatorChange: (indicator: string) => void;
-  /** Whether panel is visible */
+  /** Callback when indicator changes. */
+  _onIndicatorChange: (indicator: string) => void;
+  /** Whether panel is visible. */
   visible?: boolean;
-  /** Maximum number of countries that can be selected */
+  /** Maximum number of countries that can be selected. */
   maxSelection?: number;
 }
 
 const CountrySelectionPanel: React.FC<CountrySelectionPanelProps> = ({
   selectedCountries,
   selectedIndicator,
-  availableIndicators,
+  _availableIndicators,
   onRemoveCountry,
   onClearSelection,
   onCompareCountries,
   onExportData,
-  onIndicatorChange,
+  _onIndicatorChange,
   visible = true,
   maxSelection = 10,
 }) => {

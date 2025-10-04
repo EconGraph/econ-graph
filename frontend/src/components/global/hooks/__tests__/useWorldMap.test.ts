@@ -6,7 +6,6 @@
  */
 
 import { renderHook, act } from '@testing-library/react';
-import { useRef } from 'react';
 import { useWorldMap } from '../useWorldMap';
 import { setupD3Mocks } from '../../../../test-utils/d3-testing-utils';
 
@@ -55,7 +54,6 @@ describe('useWorldMap', () => {
         { initialProps: { projectionType: 'naturalEarth' } }
       );
 
-      const initialProjection = result.current.projection;
 
       rerender({ projectionType: 'mercator' });
 

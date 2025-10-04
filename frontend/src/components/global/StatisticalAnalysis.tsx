@@ -175,7 +175,7 @@ const StatisticalAnalysis: React.FC<StatisticalAnalysisProps> = ({
 
   const statistics = calculateStatistics();
   const topCountries = getTopCountries();
-  const bottomCountries = getBottomCountries();
+  const _bottomCountries = getBottomCountries();
   const regionDistribution = getRegionDistribution();
   const unit = selectedCountries[0] ? getCountryUnit(selectedCountries[0]) : '';
 

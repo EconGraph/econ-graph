@@ -10,7 +10,10 @@ import { CountryData } from '../../types/globalAnalysis';
 import * as d3 from 'd3';
 
 /**
- * Debounce utility for performance optimization
+ * Debounce utility for performance optimization.
+ * @param func - The function to debounce.
+ * @param wait - The number of milliseconds to delay.
+ * @returns The debounced function.
  */
 export const debounce = <T extends (...args: any[]) => any>(
   func: T,
@@ -24,7 +27,10 @@ export const debounce = <T extends (...args: any[]) => any>(
 };
 
 /**
- * Throttle utility for performance optimization
+ * Throttle utility for performance optimization.
+ * @param func - The function to throttle.
+ * @param limit - The number of milliseconds to throttle.
+ * @returns The throttled function.
  */
 export const throttle = <T extends (...args: any[]) => any>(
   func: T,
@@ -257,7 +263,8 @@ export const usePerformanceMonitor = (componentName: string) => {
     const renderTime = Date.now() - startTime.current;
 
     if (process.env.NODE_ENV === 'development') {
-      console.log(`${componentName} rendered ${renderCount.current} times in ${renderTime}ms`);
+      // Performance monitoring in development mode
+      // console.log(`${componentName} rendered ${renderCount.current} times in ${renderTime}ms`);
     }
 
     startTime.current = Date.now();

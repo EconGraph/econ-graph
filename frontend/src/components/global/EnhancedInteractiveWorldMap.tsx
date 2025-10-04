@@ -8,11 +8,11 @@
 import React, { useRef, useEffect, Suspense, useState, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
 import * as topojson from 'topojson-client';
-import { Box, CircularProgress, Grid, Paper, Typography, Alert, Snackbar } from '@mui/material';
+import { Box, Grid } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
 import { CountryData, MapViewState } from '../../types/globalAnalysis';
 import { useWorldMap } from './hooks/useWorldMap';
-import { useCountryData } from './hooks/useCountryData';
+// import { useCountryData } from './hooks/useCountryData';
 import MapControls from './MapControls';
 import ColorLegend from './ColorLegend';
 import CountrySelectionPanel from './CountrySelectionPanel';
@@ -31,7 +31,7 @@ import {
   ErrorBoundary,
   ErrorDisplay,
   LoadingState,
-  EmptyState,
+  // EmptyState,
   ErrorSnackbar,
   ErrorDialog,
   useErrorHandler,
@@ -122,15 +122,15 @@ const EnhancedWorldMapContent: React.FC<EnhancedInteractiveWorldMapProps> = ({
   const svgRef = useRef<SVGSVGElement>(null);
   const [selectedCountries, setSelectedCountries] = useState<CountryData[]>([]);
   const [currentZoom, setCurrentZoom] = useState(1);
-  const [error, setError] = useState<string | null>(null);
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [_error, _setError] = useState<string | null>(null);
+  const [_snackbarOpen, _setSnackbarOpen] = useState(false);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
 
   // Error handling
   const { currentError, handleError, clearErrors } = useErrorHandler();
 
   // Performance monitoring
-  const { renderCount, resetTimer } = usePerformanceMonitor('EnhancedWorldMapContent');
+  const { renderCount: _renderCount, resetTimer: _resetTimer } = usePerformanceMonitor('EnhancedWorldMapContent');
 
   // Load world atlas data with Suspense
   const { data: worldData } = useWorldAtlasData();
@@ -155,7 +155,7 @@ const EnhancedWorldMapContent: React.FC<EnhancedInteractiveWorldMapProps> = ({
   const colorScale = useMemoizedColorScale(dataRange, colorScheme);
 
   // Memoized statistics for performance
-  const statistics = useMemoizedStatistics(selectedCountries, selectedIndicator);
+  const _statistics = useMemoizedStatistics(selectedCountries, selectedIndicator);
 
   // Available indicators (memoized)
   const availableIndicators = useMemo(() => {
@@ -204,18 +204,18 @@ const EnhancedWorldMapContent: React.FC<EnhancedInteractiveWorldMapProps> = ({
   );
 
   // Debounced zoom handlers for performance
-  const debouncedZoomIn = useCallback(
+  const _debouncedZoomIn = useCallback(
     debounce(() => {
-      console.log('Zooming in');
+      // console.log('Zooming in');
     }, 100),
-    []
+    [debounce]
   );
 
-  const debouncedZoomOut = useCallback(
+  const _debouncedZoomOut = useCallback(
     debounce(() => {
-      console.log('Zooming out');
+      // console.log('Zooming out');
     }, 100),
-    []
+    [debounce]
   );
 
   // Throttled zoom level updates for performance
@@ -240,31 +240,31 @@ const EnhancedWorldMapContent: React.FC<EnhancedInteractiveWorldMapProps> = ({
   const handleCompareCountries = useCallback(() => {
     if (selectedCountries.length >= 2) {
       // TODO: Implement country comparison modal
-      console.log('Comparing countries:', selectedCountries);
+      // console.log('Comparing countries:', selectedCountries);
     }
   }, [selectedCountries]);
 
   // Handle data export
   const handleExportData = useCallback(() => {
     // TODO: Implement data export
-    console.log('Exporting data for countries:', selectedCountries);
+    // console.log('Exporting data for countries:', selectedCountries);
   }, [selectedCountries]);
 
   // Handle indicator change
   const handleIndicatorChange = useCallback((indicator: string) => {
     // TODO: Implement indicator change
-    console.log('Changing indicator to:', indicator);
+    // console.log('Changing indicator to:', indicator);
   }, []);
 
   // Handle zoom controls
   const handleZoomIn = useCallback(() => {
     // TODO: Implement zoom in
-    console.log('Zooming in');
+    // console.log('Zooming in');
   }, []);
 
   const handleZoomOut = useCallback(() => {
     // TODO: Implement zoom out
-    console.log('Zooming out');
+    // console.log('Zooming out');
   }, []);
 
   const handleResetZoom = useCallback(() => {
@@ -274,19 +274,19 @@ const EnhancedWorldMapContent: React.FC<EnhancedInteractiveWorldMapProps> = ({
   // Handle projection change
   const handleProjectionChange = useCallback((newProjection: string) => {
     // TODO: Implement projection change
-    console.log('Changing projection to:', newProjection);
+    // console.log('Changing projection to:', newProjection);
   }, []);
 
   // Handle border toggle
   const handleBordersToggle = useCallback((show: boolean) => {
     // TODO: Implement border toggle
-    console.log('Toggling borders:', show);
+    // console.log('Toggling borders:', show);
   }, []);
 
   // Handle labels toggle
   const handleLabelsToggle = useCallback((show: boolean) => {
     // TODO: Implement labels toggle
-    console.log('Toggling labels:', show);
+    // console.log('Toggling labels:', show);
   }, []);
 
   // Initialize D3 map with performance optimizations and error handling
@@ -549,16 +549,16 @@ const EnhancedWorldMapContent: React.FC<EnhancedInteractiveWorldMapProps> = ({
         <Grid item xs={12} md={3}>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, height: '100%' }}>
             {showSelectionPanel && (
-              <CountrySelectionPanel
-                selectedCountries={selectedCountries}
-                selectedIndicator={selectedIndicator}
-                availableIndicators={availableIndicators}
-                onRemoveCountry={handleRemoveCountry}
-                onClearSelection={handleClearSelection}
-                onCompareCountries={handleCompareCountries}
-                onExportData={handleExportData}
-                onIndicatorChange={handleIndicatorChange}
-              />
+        <CountrySelectionPanel
+          selectedCountries={selectedCountries}
+          selectedIndicator={selectedIndicator}
+          _availableIndicators={availableIndicators}
+          onRemoveCountry={handleRemoveCountry}
+          onClearSelection={handleClearSelection}
+          onCompareCountries={handleCompareCountries}
+          onExportData={handleExportData}
+          _onIndicatorChange={handleIndicatorChange}
+        />
             )}
 
             {showStatisticalAnalysis && (

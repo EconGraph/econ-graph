@@ -235,12 +235,12 @@ export const CustomLayoutExample: React.FC = () => {
               <CountrySelectionPanel
                 selectedCountries={selectedCountries}
                 selectedIndicator={selectedIndicator}
-                availableIndicators={['GDP', 'Inflation', 'Unemployment']}
+                _availableIndicators={['GDP', 'Inflation', 'Unemployment']}
                 onRemoveCountry={handleRemoveCountry}
                 onClearSelection={handleClearSelection}
                 onCompareCountries={handleCompareCountries}
                 onExportData={handleExportData}
-                onIndicatorChange={handleIndicatorChange}
+                _onIndicatorChange={handleIndicatorChange}
               />
             </Paper>
 

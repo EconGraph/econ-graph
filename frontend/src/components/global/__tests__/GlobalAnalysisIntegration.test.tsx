@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider, createTheme, StyledEngineProvider } from '@mui/material/styles';
@@ -465,11 +465,11 @@ describe('Global Analysis Integration', () => {
       );
 
       await waitFor(() => {
-        const svg = screen.getByRole('img', { hidden: true });
-        expect(svg).toBeInTheDocument();
-        expect(svg).toHaveAttribute('width');
-        expect(svg).toHaveAttribute('height');
+        expect(screen.getByRole('img', { hidden: true })).toBeInTheDocument();
       });
+      const svg = screen.getByRole('img', { hidden: true });
+      expect(svg).toHaveAttribute('width');
+      expect(svg).toHaveAttribute('height');
     });
 
     it('should be keyboard navigable', async () => {
@@ -491,10 +491,10 @@ describe('Global Analysis Integration', () => {
       );
 
       await waitFor(() => {
-        const svg = screen.getByRole('img', { hidden: true });
-        expect(svg).toBeInTheDocument();
-        expect(svg).toHaveAttribute('tabindex', '0');
+        expect(screen.getByRole('img', { hidden: true })).toBeInTheDocument();
       });
+      const svg = screen.getByRole('img', { hidden: true });
+      expect(svg).toHaveAttribute('tabindex', '0');
     });
   });
 

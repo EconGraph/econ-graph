@@ -31,7 +31,7 @@ import {
   Visibility,
   VisibilityOff,
 } from '@mui/icons-material';
-import { ARIA_LABELS, KEYBOARD_KEYS, keyboardHandlers } from './accessibility-utils';
+import { ARIA_LABELS, keyboardHandlers } from './accessibility-utils';
 
 interface MapControlsProps {
   /** Current zoom level */
