@@ -1,0 +1,246 @@
+{
+  "data": {
+    "countriesWithEconomicData": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440001",
+        "isoCode": "USA",
+        "isoCode2": "US",
+        "name": "United States",
+        "region": "North America",
+        "subRegion": "Northern America",
+        "incomeGroup": "High income",
+        "population": 331002651,
+        "gdpUsd": "25462700000000",
+        "gdpPerCapitaUsd": "76900",
+        "latitude": "39.8283",
+        "longitude": "-98.5795",
+        "currencyCode": "USD",
+        "isActive": true,
+        "economicIndicators": [
+          {
+            "name": "GDP",
+            "value": "25462700000000",
+            "unit": "USD",
+            "year": 2023,
+            "source": "World Bank",
+            "description": "Gross Domestic Product",
+            "category": "GDP",
+            "frequency": "Annual"
+          },
+          {
+            "name": "Inflation",
+            "value": "3.2",
+            "unit": "%",
+            "year": 2023,
+            "source": "Bureau of Labor Statistics",
+            "description": "Consumer Price Index",
+            "category": "Inflation",
+            "frequency": "Monthly"
+          },
+          {
+            "name": "Unemployment",
+            "value": "3.7",
+            "unit": "%",
+            "year": 2023,
+            "source": "Bureau of Labor Statistics",
+            "description": "Unemployment Rate",
+            "category": "Employment",
+            "frequency": "Monthly"
+          }
+        ]
+      },
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440002",
+        "isoCode": "CHN",
+        "isoCode2": "CN",
+        "name": "China",
+        "region": "Asia",
+        "subRegion": "Eastern Asia",
+        "incomeGroup": "Upper middle income",
+        "population": 1439323776,
+        "gdpUsd": "17963171000000",
+        "gdpPerCapitaUsd": "12480",
+        "latitude": "35.8617",
+        "longitude": "104.1954",
+        "currencyCode": "CNY",
+        "isActive": true,
+        "economicIndicators": [
+          {
+            "name": "GDP",
+            "value": "17963171000000",
+            "unit": "USD",
+            "year": 2023,
+            "source": "World Bank",
+            "description": "Gross Domestic Product",
+            "category": "GDP",
+            "frequency": "Annual"
+          },
+          {
+            "name": "Inflation",
+            "value": "2.1",
+            "unit": "%",
+            "year": 2023,
+            "source": "National Bureau of Statistics",
+            "description": "Consumer Price Index",
+            "category": "Inflation",
+            "frequency": "Monthly"
+          },
+          {
+            "name": "Unemployment",
+            "value": "5.2",
+            "unit": "%",
+            "year": 2023,
+            "source": "National Bureau of Statistics",
+            "description": "Unemployment Rate",
+            "category": "Employment",
+            "frequency": "Monthly"
+          }
+        ]
+      },
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440003",
+        "isoCode": "JPN",
+        "isoCode2": "JP",
+        "name": "Japan",
+        "region": "Asia",
+        "subRegion": "Eastern Asia",
+        "incomeGroup": "High income",
+        "population": 125836021,
+        "gdpUsd": "4231141000000",
+        "gdpPerCapitaUsd": "33600",
+        "latitude": "36.2048",
+        "longitude": "138.2529",
+        "currencyCode": "JPY",
+        "isActive": true,
+        "economicIndicators": [
+          {
+            "name": "GDP",
+            "value": "4231141000000",
+            "unit": "USD",
+            "year": 2023,
+            "source": "World Bank",
+            "description": "Gross Domestic Product",
+            "category": "GDP",
+            "frequency": "Annual"
+          },
+          {
+            "name": "Inflation",
+            "value": "2.8",
+            "unit": "%",
+            "year": 2023,
+            "source": "Statistics Bureau of Japan",
+            "description": "Consumer Price Index",
+            "category": "Inflation",
+            "frequency": "Monthly"
+          },
+          {
+            "name": "Unemployment",
+            "value": "2.6",
+            "unit": "%",
+            "year": 2023,
+            "source": "Statistics Bureau of Japan",
+            "description": "Unemployment Rate",
+            "category": "Employment",
+            "frequency": "Monthly"
+          }
+        ]
+      },
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440004",
+        "isoCode": "DEU",
+        "isoCode2": "DE",
+        "name": "Germany",
+        "region": "Europe",
+        "subRegion": "Western Europe",
+        "incomeGroup": "High income",
+        "population": 83783942,
+        "gdpUsd": "4082467000000",
+        "gdpPerCapitaUsd": "48700",
+        "latitude": "51.1657",
+        "longitude": "10.4515",
+        "currencyCode": "EUR",
+        "isActive": true,
+        "economicIndicators": [
+          {
+            "name": "GDP",
+            "value": "4082467000000",
+            "unit": "USD",
+            "year": 2023,
+            "source": "World Bank",
+            "description": "Gross Domestic Product",
+            "category": "GDP",
+            "frequency": "Annual"
+          },
+          {
+            "name": "Inflation",
+            "value": "3.7",
+            "unit": "%",
+            "year": 2023,
+            "source": "Federal Statistical Office",
+            "description": "Consumer Price Index",
+            "category": "Inflation",
+            "frequency": "Monthly"
+          },
+          {
+            "name": "Unemployment",
+            "value": "3.0",
+            "unit": "%",
+            "year": 2023,
+            "source": "Federal Statistical Office",
+            "description": "Unemployment Rate",
+            "category": "Employment",
+            "frequency": "Monthly"
+          }
+        ]
+      },
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440005",
+        "isoCode": "IND",
+        "isoCode2": "IN",
+        "name": "India",
+        "region": "Asia",
+        "subRegion": "Southern Asia",
+        "incomeGroup": "Lower middle income",
+        "population": 1380004385,
+        "gdpUsd": "3381730000000",
+        "gdpPerCapitaUsd": "2450",
+        "latitude": "20.5937",
+        "longitude": "78.9629",
+        "currencyCode": "INR",
+        "isActive": true,
+        "economicIndicators": [
+          {
+            "name": "GDP",
+            "value": "3381730000000",
+            "unit": "USD",
+            "year": 2023,
+            "source": "World Bank",
+            "description": "Gross Domestic Product",
+            "category": "GDP",
+            "frequency": "Annual"
+          },
+          {
+            "name": "Inflation",
+            "value": "5.4",
+            "unit": "%",
+            "year": 2023,
+            "source": "Ministry of Statistics",
+            "description": "Consumer Price Index",
+            "category": "Inflation",
+            "frequency": "Monthly"
+          },
+          {
+            "name": "Unemployment",
+            "value": "7.8",
+            "unit": "%",
+            "year": 2023,
+            "source": "Ministry of Statistics",
+            "description": "Unemployment Rate",
+            "category": "Employment",
+            "frequency": "Monthly"
+          }
+        ]
+      }
+    ]
+  }
+}

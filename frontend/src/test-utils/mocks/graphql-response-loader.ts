@@ -16,6 +16,13 @@ import getFinancialAlertsSuccess from './graphql-responses/get_financial_alerts/
 import getPeerCompaniesSuccess from './graphql-responses/get_peer_companies/success.json';
 import getRatioBenchmarksSuccess from './graphql-responses/get_ratio_benchmarks/success.json';
 import getRatioBenchmarksNotFound from './graphql-responses/get_ratio_benchmarks/not_found.json';
+import getCountriesWithEconomicDataSuccess from './graphql-responses/get_countries_with_economic_data/success.json';
+import getCountriesWithEconomicDataError from './graphql-responses/get_countries_with_economic_data/error.json';
+import getCountriesWithEconomicDataLoading from './graphql-responses/get_countries_with_economic_data/loading.json';
+import getCorrelationNetworkSuccess from './graphql-responses/get_correlation_network/success.json';
+import getCorrelationNetworkError from './graphql-responses/get_correlation_network/error.json';
+import getGlobalEventsWithImpactsSuccess from './graphql-responses/get_global_events_with_impacts/success.json';
+import getGlobalEventsWithImpactsError from './graphql-responses/get_global_events_with_impacts/error.json';
 
 // Response mapping for browser compatibility
 const RESPONSE_MAP: Record<string, Record<string, any>> = {
@@ -44,6 +51,19 @@ const RESPONSE_MAP: Record<string, Record<string, any>> = {
   get_ratio_benchmarks: {
     success: getRatioBenchmarksSuccess,
     not_found: getRatioBenchmarksNotFound,
+  },
+  get_countries_with_economic_data: {
+    success: getCountriesWithEconomicDataSuccess,
+    error: getCountriesWithEconomicDataError,
+    loading: getCountriesWithEconomicDataLoading,
+  },
+  get_correlation_network: {
+    success: getCorrelationNetworkSuccess,
+    error: getCorrelationNetworkError,
+  },
+  get_global_events_with_impacts: {
+    success: getGlobalEventsWithImpactsSuccess,
+    error: getGlobalEventsWithImpactsError,
   },
 };
 
