@@ -1,0 +1,141 @@
+{
+  "data": {
+    "correlationNetwork": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440001",
+        "countryId": "550e8400-e29b-41d4-a716-446655440001",
+        "countryName": "United States",
+        "isoCode": "USA",
+        "isoCode2": "US",
+        "region": "North America",
+        "subRegion": "Northern America",
+        "economicStrength": 0.95,
+        "centrality": 0.89,
+        "connections": [
+          {
+            "targetCountryId": "550e8400-e29b-41d4-a716-446655440002",
+            "targetCountryName": "China",
+            "correlation": 0.75,
+            "connectionType": "Trade",
+            "strength": 0.82
+          },
+          {
+            "targetCountryId": "550e8400-e29b-41d4-a716-446655440004",
+            "targetCountryName": "Germany",
+            "correlation": 0.68,
+            "connectionType": "Financial",
+            "strength": 0.71
+          },
+          {
+            "targetCountryId": "550e8400-e29b-41d4-a716-446655440003",
+            "targetCountryName": "Japan",
+            "correlation": 0.72,
+            "connectionType": "Investment",
+            "strength": 0.78
+          }
+        ]
+      },
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440002",
+        "countryId": "550e8400-e29b-41d4-a716-446655440002",
+        "countryName": "China",
+        "isoCode": "CHN",
+        "isoCode2": "CN",
+        "region": "Asia",
+        "subRegion": "Eastern Asia",
+        "economicStrength": 0.88,
+        "centrality": 0.85,
+        "connections": [
+          {
+            "targetCountryId": "550e8400-e29b-41d4-a716-446655440001",
+            "targetCountryName": "United States",
+            "correlation": 0.75,
+            "connectionType": "Trade",
+            "strength": 0.82
+          },
+          {
+            "targetCountryId": "550e8400-e29b-41d4-a716-446655440005",
+            "targetCountryName": "India",
+            "correlation": 0.65,
+            "connectionType": "Trade",
+            "strength": 0.69
+          }
+        ]
+      },
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440003",
+        "countryId": "550e8400-e29b-41d4-a716-446655440003",
+        "countryName": "Japan",
+        "isoCode": "JPN",
+        "isoCode2": "JP",
+        "region": "Asia",
+        "subRegion": "Eastern Asia",
+        "economicStrength": 0.76,
+        "centrality": 0.72,
+        "connections": [
+          {
+            "targetCountryId": "550e8400-e29b-41d4-a716-446655440001",
+            "targetCountryName": "United States",
+            "correlation": 0.72,
+            "connectionType": "Investment",
+            "strength": 0.78
+          },
+          {
+            "targetCountryId": "550e8400-e29b-41d4-a716-446655440004",
+            "targetCountryName": "Germany",
+            "correlation": 0.58,
+            "connectionType": "Trade",
+            "strength": 0.62
+          }
+        ]
+      },
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440004",
+        "countryId": "550e8400-e29b-41d4-a716-446655440004",
+        "countryName": "Germany",
+        "isoCode": "DEU",
+        "isoCode2": "DE",
+        "region": "Europe",
+        "subRegion": "Western Europe",
+        "economicStrength": 0.82,
+        "centrality": 0.78,
+        "connections": [
+          {
+            "targetCountryId": "550e8400-e29b-41d4-a716-446655440001",
+            "targetCountryName": "United States",
+            "correlation": 0.68,
+            "connectionType": "Financial",
+            "strength": 0.71
+          },
+          {
+            "targetCountryId": "550e8400-e29b-41d4-a716-446655440003",
+            "targetCountryName": "Japan",
+            "correlation": 0.58,
+            "connectionType": "Trade",
+            "strength": 0.62
+          }
+        ]
+      },
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440005",
+        "countryId": "550e8400-e29b-41d4-a716-446655440005",
+        "countryName": "India",
+        "isoCode": "IND",
+        "isoCode2": "IN",
+        "region": "Asia",
+        "subRegion": "Southern Asia",
+        "economicStrength": 0.65,
+        "centrality": 0.58,
+        "connections": [
+          {
+            "targetCountryId": "550e8400-e29b-41d4-a716-446655440002",
+            "targetCountryName": "China",
+            "correlation": 0.65,
+            "connectionType": "Trade",
+            "strength": 0.69
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Failed to get countries: Database connection error",
+      "extensions": {
+        "code": "DATABASE_ERROR",
+        "details": "Unable to connect to the database"
+      }
+    }
+  ]
+}

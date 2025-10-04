@@ -1,0 +1,12 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Failed to get correlation network: Invalid indicator category",
+      "extensions": {
+        "code": "INVALID_INPUT",
+        "details": "Indicator category must be one of: GDP, INFLATION, UNEMPLOYMENT, TRADE"
+      }
+    }
+  ]
+}

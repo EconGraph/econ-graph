@@ -17,7 +17,7 @@ export interface MapProjection {
   defaultCenter: [number, number];
 }
 
-const PROJECTIONS: Record<string, MapProjection> = {
+const getProjections = (): Record<string, MapProjection> => ({
   naturalEarth: {
     name: 'Natural Earth',
     projection: geoNaturalEarth1(),
@@ -36,14 +36,15 @@ const PROJECTIONS: Record<string, MapProjection> = {
     defaultScale: 200,
     defaultCenter: [0, 0],
   },
-};
+});
 
 export const useWorldMap = (
   svgRef: React.RefObject<SVGSVGElement>,
   projectionType = 'naturalEarth'
 ) => {
   const [projection, setProjection] = useState(() => {
-    const proj = PROJECTIONS[projectionType] || PROJECTIONS.naturalEarth;
+    const projections = getProjections();
+    const proj = projections[projectionType] || projections.naturalEarth;
     return proj.projection.scale(proj.defaultScale).center(proj.defaultCenter);
   });
 
@@ -53,7 +54,8 @@ export const useWorldMap = (
 
   // Update projection when type changes
   useEffect(() => {
-    const proj = PROJECTIONS[projectionType] || PROJECTIONS.naturalEarth;
+    const projections = getProjections();
+    const proj = projections[projectionType] || projections.naturalEarth;
     const newProjection = proj.projection.scale(proj.defaultScale).center(proj.defaultCenter);
 
     setProjection(newProjection);
@@ -87,7 +89,8 @@ export const useWorldMap = (
         const { width, height } = container.getBoundingClientRect();
 
         // Update projection to fit container
-        const proj = PROJECTIONS[projectionType] || PROJECTIONS.naturalEarth;
+        const projections = getProjections();
+        const proj = projections[projectionType] || projections.naturalEarth;
         const newProjection = proj.projection.scale(Math.min(width, height) / 2).center([0, 0]);
 
         setProjection(newProjection);
@@ -194,6 +197,6 @@ export const useWorldMap = (
     resetZoom,
     getZoomLevel,
     getCenter,
-    projections: Object.keys(PROJECTIONS),
+    projections: Object.keys(getProjections()),
   };
 };

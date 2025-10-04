@@ -58,7 +58,7 @@ export interface MapViewState {
   /** Scale factor for zoom. */
   scale: number;
   /** Translation offset [x, y]. */
-  translation: [number, number];
+  translation: number[];
   /** Rotation for orthographic projection [x, y, z]. */
   rotation?: [number, number, number];
 }

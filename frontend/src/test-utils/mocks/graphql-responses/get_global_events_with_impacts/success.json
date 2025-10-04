@@ -1,0 +1,115 @@
+{
+  "data": {
+    "globalEventsWithImpacts": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440010",
+        "title": "COVID-19 Pandemic Economic Impact",
+        "description": "Global economic disruption caused by the COVID-19 pandemic",
+        "eventDate": "2020-03-15",
+        "eventType": "PANDEMIC",
+        "severity": 5,
+        "source": "World Health Organization",
+        "url": "https://www.who.int/emergencies/diseases/novel-coronavirus-2019",
+        "tags": ["pandemic", "health", "economic", "global"],
+        "countryImpacts": [
+          {
+            "countryId": "550e8400-e29b-41d4-a716-446655440001",
+            "countryName": "United States",
+            "isoCode": "USA",
+            "isoCode2": "US",
+            "impactSeverity": 4,
+            "economicImpact": "GDP contraction of 3.4% in 2020",
+            "recoveryTimeMonths": 18,
+            "confidence": 0.95
+          },
+          {
+            "countryId": "550e8400-e29b-41d4-a716-446655440002",
+            "countryName": "China",
+            "isoCode": "CHN",
+            "isoCode2": "CN",
+            "impactSeverity": 3,
+            "economicImpact": "GDP growth slowed to 2.3% in 2020",
+            "recoveryTimeMonths": 12,
+            "confidence": 0.88
+          },
+          {
+            "countryId": "550e8400-e29b-41d4-a716-446655440003",
+            "countryName": "Japan",
+            "isoCode": "JPN",
+            "isoCode2": "JP",
+            "impactSeverity": 4,
+            "economicImpact": "GDP contraction of 4.8% in 2020",
+            "recoveryTimeMonths": 24,
+            "confidence": 0.92
+          }
+        ]
+      },
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440011",
+        "title": "Russia-Ukraine Conflict Economic Impact",
+        "description": "Global economic disruption caused by the Russia-Ukraine conflict",
+        "eventDate": "2022-02-24",
+        "eventType": "CONFLICT",
+        "severity": 4,
+        "source": "United Nations",
+        "url": "https://www.un.org/en/conflict-ukraine",
+        "tags": ["conflict", "energy", "food", "inflation"],
+        "countryImpacts": [
+          {
+            "countryId": "550e8400-e29b-41d4-a716-446655440004",
+            "countryName": "Germany",
+            "isoCode": "DEU",
+            "isoCode2": "DE",
+            "impactSeverity": 4,
+            "economicImpact": "Energy crisis and inflation spike",
+            "recoveryTimeMonths": 36,
+            "confidence": 0.85
+          },
+          {
+            "countryId": "550e8400-e29b-41d4-a716-446655440005",
+            "countryName": "India",
+            "isoCode": "IND",
+            "isoCode2": "IN",
+            "impactSeverity": 3,
+            "economicImpact": "Food price inflation and supply chain disruptions",
+            "recoveryTimeMonths": 18,
+            "confidence": 0.78
+          }
+        ]
+      },
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440012",
+        "title": "Federal Reserve Interest Rate Hikes",
+        "description": "Aggressive monetary tightening by the Federal Reserve",
+        "eventDate": "2022-03-16",
+        "eventType": "MONETARY_POLICY",
+        "severity": 3,
+        "source": "Federal Reserve",
+        "url": "https://www.federalreserve.gov/monetarypolicy.htm",
+        "tags": ["monetary", "interest", "inflation", "global"],
+        "countryImpacts": [
+          {
+            "countryId": "550e8400-e29b-41d4-a716-446655440001",
+            "countryName": "United States",
+            "isoCode": "USA",
+            "isoCode2": "US",
+            "impactSeverity": 3,
+            "economicImpact": "Interest rate increases to combat inflation",
+            "recoveryTimeMonths": 12,
+            "confidence": 0.90
+          },
+          {
+            "countryId": "550e8400-e29b-41d4-a716-446655440002",
+            "countryName": "China",
+            "isoCode": "CHN",
+            "isoCode2": "CN",
+            "impactSeverity": 2,
+            "economicImpact": "Capital outflows and currency pressure",
+            "recoveryTimeMonths": 6,
+            "confidence": 0.75
+          }
+        ]
+      }
+    ]
+  }
+}

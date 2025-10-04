@@ -1,0 +1,12 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Failed to get global events: Database query timeout",
+      "extensions": {
+        "code": "DATABASE_TIMEOUT",
+        "details": "Query exceeded maximum execution time"
+      }
+    }
+  ]
+}

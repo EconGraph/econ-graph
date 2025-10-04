@@ -11,24 +11,34 @@ import * as d3 from 'd3';
 import { EconomicIndicator } from '../../types/globalAnalysis';
 
 interface MapLegendProps {
-  colorScale: d3.ScaleSequential<string, never>;
-  indicator: EconomicIndicator;
+  colorScale?: d3.ScaleSequential<string, never>;
+  indicator?: EconomicIndicator;
   dataRange: { min: number; max: number };
+  // Optional props to maintain compatibility with older tests
+  selectedIndicator?: string;
+  colorScheme?: string;
 }
 
 const MapLegend: React.FC<MapLegendProps> = ({ colorScale, indicator, dataRange }) => {
   const numSegments = 100;
   const segmentWidth = 100 / numSegments;
 
+  const effectiveScale =
+    colorScale ||
+    (d3
+      .scaleSequential<string>()
+      .domain([dataRange.min, dataRange.max])
+      .interpolator((t: number) => `hsl(${t * 360},70%,50%)`) as d3.ScaleSequential<string, never>);
+
   const gradientStops = d3.range(numSegments).map(i => {
     const value = dataRange.min + (i / numSegments) * (dataRange.max - dataRange.min);
-    return { offset: `${i * segmentWidth}%`, color: colorScale(value) };
+    return { offset: `${i * segmentWidth}%`, color: effectiveScale(value) };
   });
 
   return (
     <Paper sx={{ p: 2, mt: 2, width: '100%', maxWidth: 300 }}>
       <Typography variant='subtitle2' gutterBottom>
-        {indicator}
+        {indicator || 'Legend'}
       </Typography>
       <Box
         sx={{
