@@ -14,8 +14,14 @@
 //! the `CRAWLER_*` variable shown in `--help`.
 //!
 //! The worker does not run database migrations; the backend applies them at startup.
+//!
+//! Metrics: unless `--metrics-addr` / `CRAWLER_METRICS_ADDR` is empty or `off`, an HTTP server on
+//! that address (default `0.0.0.0:9102`) serves `GET /metrics` (Prometheus text format) and
+//! `GET /healthz` (200 while the worker loop runs), and a background task refreshes the
+//! `crawler_queue_*` gauges from `crawl_queue` every `--queue-metrics-interval-secs`.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,6 +32,8 @@ use econ_graph_crawler::{
     ApiKeys, CrawlCtx, HttpConfig, HttpFetcher, SourceId, SourcePolicy, Worker, WorkerConfig,
 };
 use econ_graph_sec_crawler::SecFilingHandler;
+
+mod metrics;
 
 #[derive(Debug, Parser)]
 #[command(name = "crawler-worker", version, about = "Processes crawl_queue jobs")]
@@ -61,6 +69,18 @@ struct Args {
     /// Per-request HTTP timeout in seconds.
     #[arg(long, env = "CRAWLER_HTTP_TIMEOUT_SECS", default_value_t = 30)]
     http_timeout_secs: u64,
+
+    /// Address for the /metrics and /healthz HTTP server; empty or "off" disables it.
+    #[arg(long, env = "CRAWLER_METRICS_ADDR", default_value = metrics::DEFAULT_METRICS_ADDR)]
+    metrics_addr: String,
+
+    /// Seconds between crawl_queue polls for the queue gauges (only with the metrics server).
+    #[arg(
+        long,
+        env = "CRAWLER_QUEUE_METRICS_INTERVAL_SECS",
+        default_value_t = 30
+    )]
+    queue_metrics_interval_secs: u64,
 }
 
 #[tokio::main]
@@ -74,6 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let args = Args::parse();
+    let metrics_addr = metrics::parse_metrics_addr(&args.metrics_addr)?;
     let database_url = std::env::var("DATABASE_URL").map_err(|_| "DATABASE_URL is not set")?;
     let pool = econ_graph_core::create_pool(&database_url).await?;
 
@@ -116,14 +137,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("no source adapters registered; only SEC fetch_filing jobs can succeed");
     }
 
-    Worker::new(ctx, registry, config)
-        .with_handler(
-            SourceId::Sec,
-            JobKind::FetchFiling,
-            Arc::new(SecFilingHandler::new()),
-        )
-        .run(shutdown_signal())
-        .await;
+    // Metrics server + queue gauges. `stop` ends both after the worker has drained.
+    let alive = Arc::new(AtomicBool::new(false));
+    let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+    let mut background = Vec::new();
+    if let Some(addr) = metrics_addr {
+        metrics::init_metrics();
+        let mut server_stop = stop_rx.clone();
+        let (bound, server) = metrics::bind(addr, alive.clone(), async move {
+            let _ = server_stop.wait_for(|stop| *stop).await;
+        })?;
+        tracing::info!(addr = %bound, "metrics server listening (/metrics, /healthz)");
+        background.push(tokio::spawn(server));
+        background.push(tokio::spawn(metrics::queue_gauge_loop(
+            ctx.pool.clone(),
+            Duration::from_secs(args.queue_metrics_interval_secs.max(1)),
+            stop_rx,
+        )));
+    } else {
+        tracing::info!("metrics server disabled");
+    }
+
+    let worker = Worker::new(ctx, registry, config).with_handler(
+        SourceId::Sec,
+        JobKind::FetchFiling,
+        Arc::new(SecFilingHandler::new()),
+    );
+    alive.store(true, Ordering::SeqCst);
+    worker.run(shutdown_signal()).await;
+    alive.store(false, Ordering::SeqCst);
+
+    let _ = stop_tx.send(true);
+    for task in background {
+        let _ = task.await;
+    }
     Ok(())
 }
 

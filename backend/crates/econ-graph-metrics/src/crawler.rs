@@ -30,7 +30,7 @@
 use crate::DEFAULT_REGISTRY;
 use once_cell::sync::Lazy;
 use prometheus::{
-    Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, Opts, Registry,
+    GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts, Registry,
 };
 
 /// Comprehensive metrics collection for web crawlers
@@ -302,3 +302,110 @@ impl CrawlerMetrics {
 pub static CRAWLER_METRICS: Lazy<CrawlerMetrics> = Lazy::new(|| {
     CrawlerMetrics::new(&DEFAULT_REGISTRY).expect("Failed to initialize crawler metrics")
 });
+
+/// Queue-level metrics for the `crawl_queue` worker (`crawler-worker`).
+///
+/// - `crawler_jobs_total{source,kind,outcome}`: jobs finished by this worker process;
+///   `outcome` is `completed`, `retrying` or `failed`.
+/// - `crawler_queue_items{source,status}`: `crawl_queue` rows per source in `pending`,
+///   `processing` or `retrying` (polled from the database).
+/// - `crawler_queue_failed_24h{source}`: rows that became `failed` in the last 24 hours.
+/// - `crawler_last_success_timestamp_seconds{source}`: Unix time of the latest `completed` row.
+pub struct CrawlerQueueMetrics {
+    /// Jobs finished by the worker, by source, job kind and outcome.
+    pub jobs_total: IntCounterVec,
+    /// `crawl_queue` rows by source and active status.
+    pub queue_items: IntGaugeVec,
+    /// Rows that failed in the last 24 hours, by source.
+    pub queue_failed_24h: IntGaugeVec,
+    /// Unix timestamp of the latest completed row, by source.
+    pub last_success_timestamp_seconds: GaugeVec,
+}
+
+impl CrawlerQueueMetrics {
+    /// Creates the queue metrics and registers them with `registry`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any metric fails to register with the provided registry
+    pub fn new(registry: &Registry) -> anyhow::Result<Self> {
+        let jobs_total = IntCounterVec::new(
+            Opts::new(
+                "crawler_jobs_total",
+                "crawl_queue jobs finished by the worker, by outcome (completed, retrying, failed)",
+            ),
+            &["source", "kind", "outcome"],
+        )?;
+        registry.register(Box::new(jobs_total.clone()))?;
+
+        let queue_items = IntGaugeVec::new(
+            Opts::new(
+                "crawler_queue_items",
+                "crawl_queue rows by source and status (pending, processing, retrying)",
+            ),
+            &["source", "status"],
+        )?;
+        registry.register(Box::new(queue_items.clone()))?;
+
+        let queue_failed_24h = IntGaugeVec::new(
+            Opts::new(
+                "crawler_queue_failed_24h",
+                "crawl_queue rows that became failed in the last 24 hours, by source",
+            ),
+            &["source"],
+        )?;
+        registry.register(Box::new(queue_failed_24h.clone()))?;
+
+        let last_success_timestamp_seconds = GaugeVec::new(
+            Opts::new(
+                "crawler_last_success_timestamp_seconds",
+                "Unix time of the latest completed crawl_queue row, by source",
+            ),
+            &["source"],
+        )?;
+        registry.register(Box::new(last_success_timestamp_seconds.clone()))?;
+
+        Ok(Self {
+            jobs_total,
+            queue_items,
+            queue_failed_24h,
+            last_success_timestamp_seconds,
+        })
+    }
+
+    /// Counts one finished job (`outcome`: `completed`, `retrying` or `failed`).
+    pub fn record_job(&self, source: &str, kind: &str, outcome: &str) {
+        self.jobs_total
+            .with_label_values(&[source, kind, outcome])
+            .inc();
+    }
+}
+
+/// Global queue metrics, registered with [`DEFAULT_REGISTRY`] (the registry `CRAWLER_METRICS` uses).
+///
+/// # Panics
+///
+/// Panics if the metrics fail to initialize during lazy initialization
+pub static CRAWLER_QUEUE_METRICS: Lazy<CrawlerQueueMetrics> = Lazy::new(|| {
+    CrawlerQueueMetrics::new(&DEFAULT_REGISTRY).expect("Failed to initialize crawler queue metrics")
+});
+
+#[cfg(test)]
+mod queue_metrics_tests {
+    use super::*;
+
+    #[test]
+    fn queue_metrics_register_and_record() {
+        let registry = Registry::new();
+        let m = CrawlerQueueMetrics::new(&registry).unwrap();
+        m.record_job("FRED", "fetch_series", "completed");
+        m.queue_items.with_label_values(&["FRED", "pending"]).set(3);
+        let names: Vec<String> = registry
+            .gather()
+            .iter()
+            .map(|f| f.name().to_string())
+            .collect();
+        assert!(names.contains(&"crawler_jobs_total".to_string()));
+        assert!(names.contains(&"crawler_queue_items".to_string()));
+    }
+}

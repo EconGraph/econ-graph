@@ -12,15 +12,18 @@
 # ...), source = upstream host ("api.stlouisfed.org"). Per-source alerts therefore group
 # by crawler_type.
 #
+# Queue metrics, also served by crawler-worker (econ-graph-metrics CrawlerQueueMetrics):
+#   crawler_jobs_total{source,kind,outcome}          counter; outcome = completed|retrying|failed
+#   crawler_queue_items{source,status}               gauge; status = pending|processing|retrying
+#   crawler_queue_failed_24h{source}                 gauge; rows that became failed in the last 24h
+#   crawler_last_success_timestamp_seconds{source}   gauge; latest completed row (Unix seconds)
+# The gauges are polled from crawl_queue every 30s; source = stored string ("FRED", "BLS", ...).
+#
+# Scraping: crawler-worker serves GET /metrics on :9102 (CRAWLER_METRICS_ADDR), and its pod
+# template carries prometheus.io/scrape|port|path annotations, so the annotation-based
+# 'kubernetes-pods' job in prometheus-config.yaml scrapes it.
+#
 # KNOWN GAPS (not fixed here):
-# - The econgraph_crawler_* metrics live in econ-graph-metrics' DEFAULT_REGISTRY, which
-#   no process currently serves over HTTP: crawler-worker has no /metrics endpoint and the
-#   backend's /metrics uses its own registry. Until the worker exposes DEFAULT_REGISTRY
-#   (and gets a scrape target), the econgraph_crawler_* rules below cannot fire. The
-#   crawler.absent rules make that visible instead of failing silently.
-# - There is no queue-depth / job-completion metric (nothing exports crawl_queue counts),
-#   so "queue growing / no completions in 1h" cannot be alerted on yet. It needs e.g. a
-#   gauge of crawl_queue rows by status and a counter of completed jobs from the worker.
 # - The in-repo Prometheus (prometheus-config.yaml) is not operator-managed and its
 #   rule_files are commented out, so this PrometheusRule is only picked up on clusters
 #   running the Prometheus Operator (the CRD must exist for `kubectl apply` to succeed).
@@ -55,14 +58,17 @@ spec:
 
   - name: crawler.absent
     rules:
+    # crawler_queue_items is refreshed every 30s regardless of traffic (econgraph_crawler_*
+    # counters only appear after the first upstream request), so its absence means the
+    # worker's /metrics is not being scraped.
     - alert: CrawlerMetricsMissing
-      expr: absent(econgraph_crawler_requests_total) and on() (kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"} >= 1)
+      expr: absent(crawler_queue_items) and on() (kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"} >= 1)
       for: 1h
       labels:
         severity: info
       annotations:
-        summary: No crawler request metrics are being scraped
-        description: crawler-worker is running but econgraph_crawler_requests_total is absent; the worker's metrics are not exported/scraped, so the other crawler alerts cannot fire.
+        summary: crawler-worker metrics are not being scraped
+        description: crawler-worker is running but crawler_queue_items is absent; its /metrics endpoint (port 9102) is not scraped or the queue poller is failing, so the other crawler alerts cannot fire.
 
   - name: crawler.rules
     interval: 30s
@@ -153,3 +159,38 @@ spec:
       annotations:
         summary: No crawler traffic detected
         description: The crawler has made no upstream requests for over an hour (queue empty, all sources paused, or worker stuck).
+
+  - name: crawler.queue
+    rules:
+    - alert: CrawlerQueueBacklog
+      expr: sum(crawler_queue_items{status=~"pending|retrying"}) > 1000
+      for: 1h
+      labels:
+        severity: warning
+      annotations:
+        summary: crawl_queue backlog above 1000 items
+        description: '{{ $value | humanize }} crawl_queue items have been pending/retrying for over an hour; the worker is not keeping up (sources paused, rate limits, or too little CRAWLER_CONCURRENCY).'
+
+    # Non-empty = something is pending, processing or retrying. The `or on() vector(0)` makes
+    # the alert fire even when crawler_jobs_total has no completed series yet (fresh worker).
+    # Due-in-the-future retries also count as non-empty, hence the 1h window plus `for`.
+    - alert: CrawlerNoCompletions
+      expr: |
+        (sum(crawler_queue_items) > 0)
+        and on()
+        ((sum(increase(crawler_jobs_total{outcome="completed"}[1h])) or on() vector(0)) == 0)
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: crawl_queue has work but no job completed in the last hour
+        description: crawl_queue holds {{ $value | humanize }} active items but crawler-worker completed no job in the last hour (all jobs failing/retrying, sources paused, or the worker is stuck).
+
+    - alert: CrawlerSourceFailing
+      expr: max by (source) (crawler_queue_failed_24h) > 50
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: Source {{ $labels.source }} has {{ $value | humanize }} failed jobs in 24h
+        description: More than 50 crawl_queue items for {{ $labels.source }} became failed in the last 24 hours; check crawl_queue.error_message for that source (bad ids, auth, or upstream format change).
