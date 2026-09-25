@@ -61,6 +61,7 @@ pub mod http;
 pub mod policy;
 pub mod rate_limit;
 pub mod source;
+pub mod sources;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
 

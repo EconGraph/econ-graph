@@ -142,7 +142,6 @@ mod contract {
     ]}"#;
 
     crate::adapter_contract_tests! {
-        #[ignore = "enable after A3 merges"]
         adapter: |base_url: String| EchoAdapter::new(base_url),
         external_id: "GDP",
         route: Route::get("/series/GDP"),
@@ -165,7 +164,6 @@ mod contract_with_options {
     use crate::testkit::{Reply, Route};
 
     crate::adapter_contract_tests! {
-        #[ignore = "enable after A3 merges"]
         adapter: EchoAdapter::new,
         external_id: "X",
         route: Route::get("/series/X"),
