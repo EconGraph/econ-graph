@@ -392,16 +392,23 @@ fn decode<T: DeserializeOwned>(target: &Target, text: &str) -> Result<T, CrawlEr
     })
 }
 
-/// First [`SNIPPET_CHARS`] characters of `text` with any `secrets` scrubbed.
+/// `text` with any `secrets` scrubbed, then cut to its first [`SNIPPET_CHARS`] characters.
+///
+/// Scrubbing happens on the whole text *before* truncating: truncating first would leave the
+/// prefix of a secret that straddles the cut unmatched (and so leaked).
 fn snippet(text: &str, secrets: &[String]) -> String {
-    let mut s: String = text.chars().take(SNIPPET_CHARS).collect();
-    if text.chars().nth(SNIPPET_CHARS).is_some() {
-        s.push('…');
+    let mut scrubbed = text.to_owned();
+    for secret in secrets.iter().filter(|s| !s.is_empty()) {
+        scrubbed = scrubbed.replace(secret.as_str(), REDACTED);
     }
-    for secret in secrets {
-        s = s.replace(secret.as_str(), REDACTED);
+    match scrubbed.char_indices().nth(SNIPPET_CHARS) {
+        Some((cut, _)) => {
+            scrubbed.truncate(cut);
+            scrubbed.push('…');
+            scrubbed
+        }
+        None => scrubbed,
     }
-    s
 }
 
 /// `e` and its source chain, joined by `": "`.
@@ -601,6 +608,27 @@ mod tests {
             snippet("key is abc123", &["abc123".into()]),
             "key is REDACTED"
         );
+        // Empty secrets are ignored rather than matching everywhere.
+        assert_eq!(snippet("abc", &[String::new()]), "abc");
+    }
+
+    #[test]
+    fn snippet_scrubs_secret_straddling_the_cut() {
+        let secret = "SuperSecretKey1234567890";
+        // The secret starts 10 chars before the cut, so truncating first would leak
+        // "SuperSecre" into the snippet.
+        for (pad, ch) in [(SNIPPET_CHARS - 10, 'x'), (SNIPPET_CHARS - 1, 'é')] {
+            let text = format!("{}{secret}{}", ch.to_string().repeat(pad), "y".repeat(50));
+            let s = snippet(&text, &[secret.to_owned()]);
+            assert!(!s.contains("SuperS"), "secret prefix leaked: {s}");
+            assert!(!s.contains('S'), "any part of the secret leaked: {s}");
+            assert_eq!(s.chars().count(), SNIPPET_CHARS + 1, "{s}");
+            assert!(s.ends_with('…'));
+            assert!(
+                s.contains('R'),
+                "redaction marker starts before the cut: {s}"
+            );
+        }
     }
 
     fn fetcher_with(timeout: Duration, concurrency: usize) -> HttpFetcher {

@@ -467,12 +467,16 @@ jobs:
         cargo clippy -p econ-graph-crawler -p econ-graph-crawler-worker --all-targets --all-features --no-deps -- -D warnings
       working-directory: backend
 
-    # Required: the crawler crate and the crawl_queue model / queue service tests.
-    # These must pass for the job (and the PR) to go green.
+    # Required: the crawler crate, crawler worker, SEC handler and the crawl_queue
+    # model / queue service tests. These must pass for the job (and the PR) to go green.
+    # The long soak test (tests/soak.rs) is #[ignore]d and runs manually only; its fast
+    # limiter-conformance tests run here.
     - name: Run crawler and queue tests (required)
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         cargo test -p econ-graph-crawler --all-features -- --test-threads=1
+        cargo test -p econ-graph-crawler-worker -- --test-threads=1
+        cargo test -p econ-graph-sec-crawler --lib handler -- --test-threads=1
         cargo test -p econ-graph-core crawl_queue -- --test-threads=1
         cargo test -p econ-graph-services queue_service -- --test-threads=1
       working-directory: backend

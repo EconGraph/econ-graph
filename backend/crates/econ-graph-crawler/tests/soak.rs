@@ -16,9 +16,13 @@
 //! (real: 25/min) with its real burst 1 / concurrency 1 and the same short backoff. The circuit
 //! breaker pause is 10s instead of 5 min.
 //!
-//! Needs `DATABASE_URL`; ignored by default (long running). Run with:
-//! `cargo test -p econ-graph-crawler --test soak -- --ignored --nocapture`
+//! The soak test needs `DATABASE_URL` and takes ~2-4 minutes, so it is `#[ignore]`d and kept out
+//! of CI. Run it manually with:
+//! `DATABASE_URL=postgres://... cargo test -p econ-graph-crawler --all-features --test soak -- --ignored --nocapture`
 //! It deletes every `crawl_queue` row, so never point it at a shared database.
+//!
+//! The two limiter tests at the bottom (`limiter_permits_conform_to_policy`,
+//! `limiter_burst_after_idle`) need no database, run on paused tokio time, and run by default.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -524,7 +528,7 @@ async fn run_phase(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "long-running soak test; needs DATABASE_URL"]
+#[ignore = "soak: run manually"]
 async fn soak_two_workers_then_rate_check_single_worker() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
         eprintln!("DATABASE_URL not set; skipping soak test");
@@ -543,26 +547,26 @@ async fn soak_two_workers_then_rate_check_single_worker() {
         two.fred_excess.0, two.bls_excess.0
     );
 
-    // Phase 2: single worker must stay within policy. Slack of 1.5 requests: governor 0.6.3
-    // grants burst + 1 back-to-back after an idle period (see `limiter_burst_after_idle`), and
-    // timestamps are taken at the mock server, so send latency adds a little jitter.
+    // Phase 2: single worker must stay within policy. The limiter is strict (at most
+    // burst + rate * window at grant time); the slack of 0.5 requests only absorbs jitter,
+    // because timestamps are taken at the mock server after send latency.
     let one = run_phase("one", &url, &admin, 40, 2, 1, 7, Duration::from_secs(240)).await;
     assert!(
-        one.fred_excess.0 < 1.5,
+        one.fred_excess.0 < 0.5,
         "single worker FRED rate exceeded policy: {:?}",
         one.fred_excess
     );
     assert!(
-        one.bls_excess.0 < 1.5,
+        one.bls_excess.0 < 0.5,
         "single worker BLS rate exceeded policy: {:?}",
         one.bls_excess
     );
 }
 
 /// Client-side check (no network): permit grant times from `SourceRateLimiter` under bursty,
-/// concurrent demand never exceed `burst + rate * window` (small epsilon for clock reads).
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "timing test (~20s)"]
+/// concurrent demand never exceed `burst + rate * window`. Runs on paused (virtual) tokio time,
+/// which the limiter uses as its clock, so it is instant and exact.
+#[tokio::test(start_paused = true)]
 async fn limiter_permits_conform_to_policy() {
     use econ_graph_crawler::SourceRateLimiter;
     for (rate, burst) in [(2.0, 4u32), (2.0, 1u32)] {
@@ -581,7 +585,10 @@ async fn limiter_permits_conform_to_policy() {
                 let mut rng = rand::rngs::StdRng::seed_from_u64(t);
                 for _ in 0..6 {
                     let permit = limiter.acquire(SourceId::Fred).await;
-                    grants.lock().unwrap().push(Instant::now());
+                    grants
+                        .lock()
+                        .unwrap()
+                        .push(tokio::time::Instant::now().into_std());
                     tokio::time::sleep(Duration::from_millis(rng.gen_range(0..300))).await;
                     drop(permit);
                     if rng.gen_bool(0.2) {
@@ -602,24 +609,22 @@ async fn limiter_permits_conform_to_policy() {
             worst.1,
             worst.2
         );
-        // Known: governor 0.6.3 allows one extra cell after idle (`limiter_burst_after_idle`),
-        // so the bound checked here is (burst + 1) + rate * window.
+        // Strict bound: at most burst + rate * window (epsilon only for f64 rounding).
         assert!(
-            worst.0 < 1.05,
-            "limiter granted more than burst + 1 + rate*dt: {worst:?}"
+            worst.0 <= 1e-6,
+            "limiter granted more than burst + rate*dt: {worst:?}"
         );
     }
 }
 
-/// After the bucket has been idle, how many permits are granted back-to-back? Should be `burst`.
+/// After the bucket has been idle, how many permits are granted back-to-back? Must be `burst`.
 ///
-/// FAILS on governor 0.6.3 (A13 finding): a fresh bucket grants `burst`, but after idling it
-/// grants `burst + 1`, because `test_and_update` computes `next = max(tat, t0) + t` while
-/// `starting_state` is `t0 + t`, so an expired TAT effectively starts one cell earlier.
-#[tokio::test]
-#[ignore = "timing test (~10s); fails: governor grants burst+1 after idle (A13 finding)"]
+/// Regression for the A13 finding against governor 0.6.3 (a fresh bucket granted `burst`, an
+/// idle one `burst + 1`). Paused tokio time: "immediate" means zero virtual time elapsed.
+#[tokio::test(start_paused = true)]
 async fn limiter_burst_after_idle() {
     use econ_graph_crawler::SourceRateLimiter;
+    use tokio::time::Instant;
     let mut results = Vec::new();
     for burst in [1u32, 4] {
         let policy = SourcePolicy {
@@ -630,7 +635,7 @@ async fn limiter_burst_after_idle() {
         };
         let limiter = SourceRateLimiter::new(&HashMap::from([(SourceId::Fred, policy)])).unwrap();
         let immediate = |n: &mut usize, t: Instant| {
-            if t.elapsed() < Duration::from_millis(50) {
+            if t.elapsed() == Duration::ZERO {
                 *n += 1;
             }
         };
