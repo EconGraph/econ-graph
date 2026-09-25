@@ -91,6 +91,7 @@ dataloader = { version = "0.18", default-features = false, features = ["runtime-
 # Testing
 tokio-test = "0.4"
 mockito = "1.2"
+wiremock = "0.6"
 tempfile = "3.8"
 testcontainers = { version = "0.25", features = ["blocking"] }
 testcontainers-modules = { version = "0.13", features = ["postgres"] }

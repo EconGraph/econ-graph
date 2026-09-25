@@ -56,3 +56,16 @@ bigdecimal.workspace = true
 
 # Per-source rate limiting
 governor = "0.6"
+
+# Adapter contract test kit (feature `testkit`)
+wiremock = { workspace = true, optional = true }
+diesel-async = { workspace = true, optional = true }
+
+[features]
+# Adapter contract test kit: mock upstream server, test CrawlCtx, contract assertions.
+# In-crate tests get it automatically via cfg(test); other crates enable it as a dev-dependency feature.
+testkit = ["dep:wiremock", "dep:diesel-async"]
+
+[dev-dependencies]
+wiremock.workspace = true
+diesel-async.workspace = true

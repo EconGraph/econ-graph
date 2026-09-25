@@ -32,6 +32,7 @@
 //! - [`http`]: [`HttpFetcher`], the one shared, rate-limited, retrying HTTP client
 //! - [`rate_limit`]: [`SourceRateLimiter`], per-source token bucket + concurrency limit
 //! - [`adapter`]: the [`SourceAdapter`] trait and [`AdapterRegistry`]
+//! - `testkit` (feature `testkit`, always on in this crate's tests): mock upstream + adapter contract tests
 //!
 //! ## Usage
 //!
@@ -60,6 +61,8 @@ pub mod http;
 pub mod policy;
 pub mod rate_limit;
 pub mod source;
+#[cfg(any(test, feature = "testkit"))]
+pub mod testkit;
 
 pub use adapter::{
     AdapterRegistry, ApiKeys, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
