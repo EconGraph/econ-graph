@@ -1,0 +1,15 @@
+{
+  "status": "REQUEST_SUCCEEDED",
+  "responseTime": 95,
+  "message": [
+    "Series does not exist for Series NOPE0000000"
+  ],
+  "Results": {
+    "series": [
+      {
+        "seriesID": "NOPE0000000",
+        "data": []
+      }
+    ]
+  }
+}
