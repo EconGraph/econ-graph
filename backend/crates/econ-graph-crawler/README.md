@@ -8,6 +8,17 @@ Data collection for EconGraph. All crawling goes through the Postgres `crawl_que
    claims jobs, runs the source adapter (`src/sources/*`) through the shared rate-limited `HttpFetcher`,
    persists the result and retries or fails the job by error kind.
 
+3. **Refresh scheduler** (`src/scheduler.rs`, runs inside `crawler-worker`; disable with
+   `--scheduler false` / `CRAWLER_SCHEDULER=false`, tick every `--scheduler-interval-secs` /
+   `CRAWLER_SCHEDULER_INTERVAL_SECS`, default 300) only enqueues: each tick it adds `fetch_series` jobs
+   (priority 5, at most 500, oldest first) for active series that are due, and a `discover_catalog` job for
+   each registered source whose last discovery finished more than 7 days ago. A series is due if it was
+   never crawled or `last_crawled_at` is older than its frequency's interval: daily 1 day, weekly and
+   monthly 7 days, quarterly 14 days, annual/semiannual 30 days, anything else 7 days. Series with
+   `crawl_status = 'failed'` wait twice as long (from their last attempt). Skipped: static catalogs,
+   sources whose `fetch_series` isn't implemented (WORLD_BANK, IMF, BEA), SEC, and disabled `data_sources`.
+   Duplicates of active jobs are rejected by the queue's unique index, so no leader election is needed.
+
 Job kinds: `fetch_series` (download one series), `discover_catalog` (write a source's series metadata),
 `fetch_filing` (SEC, handled by `econ-graph-sec-crawler`).
 

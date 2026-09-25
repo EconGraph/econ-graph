@@ -19,6 +19,12 @@
 //! that address (default `0.0.0.0:9102`) serves `GET /metrics` (Prometheus text format) and
 //! `GET /healthz` (200 while the worker loop runs), and a background task refreshes the
 //! `crawler_queue_*` gauges from `crawl_queue` every `--queue-metrics-interval-secs`.
+//!
+//! Scheduler: unless `--scheduler false` / `CRAWLER_SCHEDULER=false`, a background
+//! `econ_graph_crawler::scheduler::RefreshScheduler` enqueues `fetch_series` jobs for due series
+//! and a weekly `discover_catalog` per source every `--scheduler-interval-secs` (default 300). It
+//! only enqueues. Deployment runs one replica; duplicate active jobs are rejected by the queue's
+//! unique index, so there is no leader election.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -86,6 +92,20 @@ struct Args {
         default_value_t = 30
     )]
     queue_metrics_interval_secs: u64,
+
+    /// Run the refresh scheduler (enqueues due series refreshes and weekly catalog discovery).
+    #[arg(
+        long,
+        env = "CRAWLER_SCHEDULER",
+        default_value_t = true,
+        action = clap::ArgAction::Set,
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    scheduler: bool,
+
+    /// Seconds between refresh scheduler ticks.
+    #[arg(long, env = "CRAWLER_SCHEDULER_INTERVAL_SECS", default_value_t = 300)]
+    scheduler_interval_secs: u64,
 }
 
 #[tokio::main]
@@ -148,6 +168,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let alive = Arc::new(AtomicBool::new(false));
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     let mut background = Vec::new();
+    if args.scheduler {
+        // Refresh scheduler: only enqueues; restricted to the sources this worker processes.
+        let sources: Vec<SourceId> = registry
+            .ids()
+            .into_iter()
+            .filter(|id| config.source_filter.as_ref().is_none_or(|f| f.contains(id)))
+            .collect();
+        let scheduler = econ_graph_crawler::RefreshScheduler::new(
+            ctx.pool.clone(),
+            sources,
+            econ_graph_crawler::SchedulerConfig {
+                interval: Duration::from_secs(args.scheduler_interval_secs.max(1)),
+                ..Default::default()
+            },
+        );
+        let mut scheduler_stop = stop_rx.clone();
+        background.push(tokio::spawn(async move {
+            scheduler
+                .run(async move {
+                    let _ = scheduler_stop.wait_for(|stop| *stop).await;
+                })
+                .await;
+        }));
+    } else {
+        tracing::info!("refresh scheduler disabled");
+    }
     if let Some(addr) = metrics_addr {
         metrics::init_metrics();
         let mut server_stop = stop_rx.clone();
