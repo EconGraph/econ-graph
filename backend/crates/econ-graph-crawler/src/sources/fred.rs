@@ -39,9 +39,6 @@ const FRED_WEB_SERIES_URL: &str = "https://fred.stlouisfed.org/series";
 /// FRED's marker for a missing observation.
 const MISSING_VALUE: &str = ".";
 
-/// An observation first published within this many days after its date counts as the original
-/// release (the rule the old `simple_crawler_service` used).
-const ORIGINAL_RELEASE_WINDOW_DAYS: i64 = 7;
 
 /// Search terms walked by [`FredAdapter::discover`] (same list as the old series_discovery/fred.rs).
 const SEARCH_TERMS: &[&str] = &[
@@ -353,12 +350,14 @@ fn parse_observation(
             ))
         })?),
     };
-    let revision_date = match o.realtime_start.as_deref() {
-        Some(s) => parse_date(series_id, "realtime_start", s)?,
-        None => today,
-    };
-    let is_original_release =
-        revision_date <= date + chrono::Duration::days(ORIGINAL_RELEASE_WINDOW_DAYS);
+    // We request current values only (no realtime_start/realtime_end vintage window), so FRED
+    // stamps every observation with today's realtime_start. Using that as the revision date would
+    // store a fresh copy of the whole series on every crawl. Instead key each point by its own
+    // date as the original release, so re-crawls update values in place (same as BLS).
+    // Vintage history would need realtime_start=1776-07-04 and a separate revision model.
+    let _ = (&o.realtime_start, today);
+    let revision_date = date;
+    let is_original_release = true;
     Ok(FetchedPoint {
         date,
         value,
@@ -494,15 +493,15 @@ mod tests {
         let p0 = &s.points[0];
         assert_eq!(p0.date, d("2025-04-01"));
         assert_eq!(p0.value, Some(BigDecimal::from_str("30485.729").unwrap()));
-        assert_eq!(p0.revision_date, d("2026-09-25"));
-        assert!(!p0.is_original_release, "published >7 days after the date");
+        // Current-values mode: each point is its own original release (idempotent re-crawls).
+        assert_eq!(p0.revision_date, p0.date);
+        assert!(p0.is_original_release);
 
         // "." is a missing observation: kept, with no value.
         assert_eq!(s.points[2].date, d("2025-10-01"));
         assert_eq!(s.points[2].value, None);
 
-        // Each observation's own realtime_start is its revision_date.
-        assert_eq!(s.points[4].revision_date, d("2026-04-30"));
+        assert!(s.points.iter().all(|p| p.revision_date == p.date && p.is_original_release));
 
         // Two requests, both with the key and file_type=json.
         let reqs = mock.received_requests().await;
@@ -523,16 +522,13 @@ mod tests {
             value: value.into(),
             realtime_start: rt.map(Into::into),
         };
-        // Original release: first published within 7 days of the date.
-        let p =
-            parse_observation("X", obs("2024-01-01", "1.5", Some("2024-01-08")), today).unwrap();
-        assert!(p.is_original_release);
+        // realtime_start is ignored in current-values mode: revision date = observation date.
         let p =
             parse_observation("X", obs("2024-01-01", "1.5", Some("2024-01-09")), today).unwrap();
-        assert!(!p.is_original_release);
-        // No realtime_start: revision date is today.
+        assert!(p.is_original_release);
+        assert_eq!(p.revision_date, d("2024-01-01"));
         let p = parse_observation("X", obs("2026-09-24", "-0.25", None), today).unwrap();
-        assert_eq!(p.revision_date, today);
+        assert_eq!(p.revision_date, d("2026-09-24"));
         assert!(p.is_original_release);
         assert_eq!(p.value, Some(BigDecimal::from_str("-0.25").unwrap()));
         // Missing marker.
@@ -546,7 +542,6 @@ mod tests {
         for bad in [
             obs("2024-01-01", "n/a", None),
             obs("01/01/2024", "1", None),
-            obs("2024-01-01", "1", Some("yesterday")),
         ] {
             let e = parse_observation("X", bad, today).unwrap_err();
             assert_eq!(e.kind(), "parse", "{e}");
@@ -643,7 +638,6 @@ mod tests {
     /// other 400 and comes back `Permanent`. `classify_fred_error` is ready for it (see
     /// `classify_recognises_series_does_not_exist`).
     #[tokio::test]
-    #[ignore = "needs HttpFetcher to include the response body in HTTP status errors"]
     async fn unknown_series_400_is_not_found() {
         let mock = MockSource::start().await;
         mock.mount_expect(

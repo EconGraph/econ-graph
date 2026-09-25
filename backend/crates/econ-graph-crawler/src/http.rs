@@ -309,7 +309,15 @@ impl HttpFetcher {
         let status = response.status();
         if !status.is_success() {
             let retry_after = parse_retry_after(response.headers());
-            let err = CrawlError::from_status(status, retry_after, target.context());
+            // Include a scrubbed snippet of the body: many APIs (FRED, BLS) explain the
+            // failure there, and adapters classify on it (e.g. "series does not exist").
+            let body = response.text().await.unwrap_or_default();
+            let context = if body.trim().is_empty() {
+                target.context()
+            } else {
+                format!("{}: {}", target.context(), snippet(&body, &target.secrets))
+            };
+            let err = CrawlError::from_status(status, retry_after, context);
             self.record_request(target, status.as_str(), start);
             if status == StatusCode::TOO_MANY_REQUESTS
                 || matches!(err, CrawlError::RateLimited { .. })
