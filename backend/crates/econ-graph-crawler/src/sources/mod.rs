@@ -17,6 +17,7 @@ pub mod imf;
 pub mod census;
 pub mod bea;
 pub mod fhfa;
+pub mod static_catalogs;
 
 /// Registry with every production adapter, pointed at the real upstream APIs.
 pub fn default_registry() -> AdapterRegistry {
@@ -30,5 +31,9 @@ pub fn default_registry() -> AdapterRegistry {
     registry.register(std::sync::Arc::new(census::CensusAdapter::default()));
     registry.register(std::sync::Arc::new(bea::BeaAdapter::default()));
     registry.register(std::sync::Arc::new(fhfa::FhfaAdapter::default()));
+    // Static catalogs (no live integration): BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO.
+    for adapter in static_catalogs::StaticCatalogAdapter::all() {
+        registry.register(std::sync::Arc::new(adapter));
+    }
     registry
 }
