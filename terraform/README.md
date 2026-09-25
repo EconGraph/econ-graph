@@ -126,11 +126,9 @@ The Terraform configuration deploys a complete production-ready environment incl
 - Service mesh integration ready
 - Metrics endpoint for Prometheus
 
-### Crawler Module (`modules/crawler/`)
-- Background service for data collection
-- CronJobs for scheduled crawling
-- Queue processing with SKIP LOCKED
-- Rate limiting and error handling
+### Crawler
+Not managed here. The crawl-queue worker is deployed from `k8s/manifests/crawler-worker.yaml`
+by `scripts/deploy/deploy.sh` (see `docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md`).
 
 ### Frontend Module (`modules/frontend/`)
 - Nginx-based static file serving
@@ -280,7 +278,6 @@ kubectl get all -n econgraph
 
 # View logs
 kubectl logs -n econgraph -l app=econgraph-backend -f
-kubectl logs -n econgraph -l app=econgraph-crawler -f
 
 # Port forwarding for local access
 kubectl port-forward -n econgraph svc/econgraph-backend 8080:80
@@ -373,7 +370,6 @@ environment = "dev"
 replicas = {
   backend  = 1
   frontend = 1
-  crawler  = 1
 }
 enable_cert_manager = false
 ```
@@ -385,7 +381,6 @@ environment = "prod"
 replicas = {
   backend  = 3
   frontend = 3
-  crawler  = 2
 }
 enable_cert_manager = true
 enable_monitoring = true

@@ -186,18 +186,6 @@ module "backend" {
   depends_on = [module.postgresql]
 }
 
-# EconGraph Crawler Deployment
-module "crawler" {
-  source = "./modules/crawler"
-
-  namespace     = kubernetes_namespace.econgraph.metadata[0].name
-  environment   = var.environment
-  config_map    = kubernetes_config_map.econgraph_config.metadata[0].name
-  secret        = kubernetes_secret.econgraph_secrets.metadata[0].name
-
-  depends_on = [module.postgresql]
-}
-
 # Frontend Deployment
 module "frontend" {
   source = "./modules/frontend"
@@ -325,7 +313,6 @@ output "kubectl_commands" {
     get_pods     = "kubectl get pods -n ${var.namespace}"
     get_services = "kubectl get services -n ${var.namespace}"
     logs_backend = "kubectl logs -n ${var.namespace} -l app=econgraph-backend -f"
-    logs_crawler = "kubectl logs -n ${var.namespace} -l app=econgraph-crawler -f"
     admin_pods   = "kubectl get pods -n econ-graph-admin"
     admin_logs   = "kubectl logs -n econ-graph-admin -l app=admin-frontend -f"
   }

@@ -26,7 +26,6 @@ bls_api_key = "your-bls-api-key-here"
 # Resource scaling (uncomment to customize)
 # backend_replicas  = 3
 # frontend_replicas = 3
-# crawler_replicas  = 2
 
 # Database configuration (uncomment to customize)
 # database_storage_size = "50Gi"
@@ -48,8 +47,6 @@ bls_api_key = "your-bls-api-key-here"
 # backend_image_tag = "v1.0.0"
 # frontend_image_repository = "your-registry/econgraph-frontend"
 # frontend_image_tag = "v1.0.0"
-# crawler_image_repository = "your-registry/econgraph-crawler"
-# crawler_image_tag = "v1.0.0"
 
 # ADMIN INTERFACE CONFIGURATION
 # =============================
