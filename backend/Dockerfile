@@ -78,8 +78,10 @@ COPY --from=builder --chown=econuser:econuser /out/crawler-worker /app/crawler-w
 
 USER econuser
 
-# No ports and no HTTP endpoint: the worker only talks to Postgres and upstream APIs.
+# Serves Prometheus /metrics and /healthz on 9102 (CRAWLER_METRICS_ADDR, default
+# 0.0.0.0:9102); otherwise it only talks to Postgres and upstream APIs.
 # It does not run migrations (the backend applies them at startup).
+EXPOSE 9102
 # SIGTERM: stops claiming new jobs and finishes in-flight ones.
 STOPSIGNAL SIGTERM
 ENV RUST_LOG=info
