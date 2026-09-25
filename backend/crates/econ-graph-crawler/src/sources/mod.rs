@@ -12,6 +12,11 @@ use crate::adapter::AdapterRegistry;
 // Adapter modules (one per source) are declared here.
 pub mod fred;
 pub mod bls;
+pub mod world_bank;
+pub mod imf;
+pub mod census;
+pub mod bea;
+pub mod fhfa;
 
 /// Registry with every production adapter, pointed at the real upstream APIs.
 pub fn default_registry() -> AdapterRegistry {
@@ -20,5 +25,10 @@ pub fn default_registry() -> AdapterRegistry {
     // registry.register(std::sync::Arc::new(<name>::XAdapter::default()));
     registry.register(std::sync::Arc::new(fred::FredAdapter::default()));
     registry.register(std::sync::Arc::new(bls::BlsAdapter::default()));
+    registry.register(std::sync::Arc::new(world_bank::WorldBankAdapter::default()));
+    registry.register(std::sync::Arc::new(imf::ImfAdapter::default()));
+    registry.register(std::sync::Arc::new(census::CensusAdapter::default()));
+    registry.register(std::sync::Arc::new(bea::BeaAdapter::default()));
+    registry.register(std::sync::Arc::new(fhfa::FhfaAdapter::default()));
     registry
 }

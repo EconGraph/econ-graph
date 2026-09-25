@@ -1,0 +1,20 @@
+[
+  {
+    "page": 1,
+    "pages": 1,
+    "per_page": "50",
+    "total": 1,
+    "sourceid": null
+  },
+  [
+    {
+      "id": "FR.INR.RINR",
+      "name": "Real interest rate (%)",
+      "unit": "",
+      "source": { "id": "2", "value": "World Development Indicators" },
+      "sourceNote": "Real interest rate is the lending interest rate adjusted for inflation as measured by the GDP deflator.",
+      "sourceOrganization": "International Monetary Fund, International Financial Statistics and data files using World Bank data on the GDP deflator.",
+      "topics": [ { "id": "3", "value": "Economy & Growth " } ]
+    }
+  ]
+]

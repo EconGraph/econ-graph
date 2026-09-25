@@ -1,0 +1,8 @@
+{
+  "data": [
+    { "year": 2024, "quarter": 4, "state": null, "metro_area": null, "hpi_value": 688.27, "yoy_change": 4.5, "qoq_change": 0.8 },
+    { "year": 2025, "quarter": 1, "state": null, "metro_area": null, "hpi_value": 695.10, "yoy_change": 4.0, "qoq_change": 1.0 },
+    { "year": 2025, "quarter": 2, "state": null, "metro_area": null, "hpi_value": 701.33, "yoy_change": 3.1, "qoq_change": 0.9 }
+  ],
+  "meta": { "total_count": 3, "page": 1, "per_page": 100 }
+}
