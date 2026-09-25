@@ -1,0 +1,29 @@
+{
+  "realtime_start": "2026-09-25",
+  "realtime_end": "2026-09-25",
+  "order_by": "search_rank",
+  "sort_order": "desc",
+  "count": 3,
+  "offset": 2,
+  "limit": 1000,
+  "seriess": [
+    {
+      "id": "A191RL1Q225SBEA",
+      "realtime_start": "2026-09-25",
+      "realtime_end": "2026-09-25",
+      "title": "Real Gross Domestic Product",
+      "observation_start": "1947-04-01",
+      "observation_end": "2026-04-01",
+      "frequency": "Quarterly",
+      "frequency_short": "Q",
+      "units": "Percent Change from Preceding Period",
+      "units_short": "% Chg. from Preceding Period",
+      "seasonal_adjustment": "Seasonally Adjusted Annual Rate",
+      "seasonal_adjustment_short": "SAAR",
+      "last_updated": "2026-08-28 07:54:03-05",
+      "popularity": 82,
+      "group_popularity": 91,
+      "notes": ""
+    }
+  ]
+}
