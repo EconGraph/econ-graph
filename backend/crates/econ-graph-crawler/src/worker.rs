@@ -351,7 +351,15 @@ impl Worker {
                 return None;
             }
         };
-        Some(self.process(item).await)
+        let (source, kind) = (item.source.clone(), item.kind.clone());
+        let outcome = self.process(item).await;
+        let label = match &outcome {
+            JobOutcome::Completed(_) => "completed",
+            JobOutcome::Retrying { .. } => "retrying",
+            JobOutcome::Failed { .. } => "failed",
+        };
+        econ_graph_metrics::crawler::CRAWLER_QUEUE_METRICS.record_job(&source, &kind, label);
+        Some(outcome)
     }
 
     async fn process(&self, item: CrawlQueueItem) -> JobOutcome {

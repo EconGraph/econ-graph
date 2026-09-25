@@ -44,6 +44,13 @@ spec:
       labels:
         app: crawler-worker
         component: crawler
+      # Picked up by the 'kubernetes-pods' job in k8s/monitoring/prometheus-config.yaml
+      # (and by any annotation-based Prometheus). Serves econgraph_crawler_* (HTTP-level)
+      # and crawler_jobs_total / crawler_queue_* / crawler_last_success_timestamp_seconds.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9102"
+        prometheus.io/path: "/metrics"
     spec:
       # On SIGTERM the worker stops claiming and finishes in-flight jobs; give slow
       # upstream requests (timeout 30s, plus retries/backoff) time to complete.
@@ -84,7 +91,12 @@ spec:
       - name: crawler-worker
         image: econ-graph-crawler-worker:v3.7.4
         imagePullPolicy: Never  # Use local image (imported by build-images.sh)
-        # No ports / no Service: the worker exposes no HTTP endpoint.
+        # /metrics and /healthz (CRAWLER_METRICS_ADDR, default 0.0.0.0:9102). No Service:
+        # Prometheus scrapes the pod directly.
+        ports:
+        - containerPort: 9102
+          name: metrics
+          protocol: TCP
         env:
         # Same source as the backend (ConfigMap econ-graph-config).
         - name: DATABASE_URL
@@ -106,6 +118,8 @@ spec:
         # this well below 20.
         - name: CRAWLER_CONCURRENCY
           value: "4"
+        - name: CRAWLER_METRICS_ADDR
+          value: "0.0.0.0:9102"
         - name: FRED_API_KEY
           valueFrom:
             secretKeyRef:
@@ -137,9 +151,26 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "500m"
-        # No liveness/readiness probes: the binary exposes no health endpoint, and an
-        # exec probe could only check that PID 1 is alive, which Kubernetes already
-        # knows (the pod restarts when the worker exits).
+        # /healthz returns 200 while the worker loop runs (including while it drains
+        # in-flight jobs after SIGTERM) and 503 before it starts / after it has stopped.
+        # It does not check the database, so a Postgres outage
+        # does not restart the pod (the worker just logs claim failures and retries).
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: metrics
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: metrics
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
         securityContext:
           runAsNonRoot: true
           runAsUser: 1000
