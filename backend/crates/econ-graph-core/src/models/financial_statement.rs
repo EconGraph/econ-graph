@@ -551,3 +551,6 @@ impl std::str::FromStr for XBRLProcessingStatus {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
