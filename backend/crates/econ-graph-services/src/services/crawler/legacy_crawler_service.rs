@@ -7,8 +7,8 @@ use uuid::Uuid;
 use econ_graph_core::database::DatabasePool;
 use econ_graph_core::error::{AppError, AppResult};
 use econ_graph_core::models::{
-    CrawlQueueItem, DataPoint, DataSource, EconomicSeries, NewCrawlQueueItem, NewDataPoint,
-    NewEconomicSeries, QueuePriority,
+    CrawlQueueItem, DataPoint, DataSource, EconomicSeries, JobKind, NewCrawlQueueItem,
+    NewDataPoint, NewEconomicSeries, QueuePriority,
 };
 
 /// FRED API response for series metadata
@@ -508,6 +508,7 @@ impl CrawlerService {
             priority: priority.into(),
             max_retries: 3,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         CrawlQueueItem::create(pool, &queue_item).await?;
@@ -528,6 +529,7 @@ impl CrawlerService {
             priority: priority.into(),
             max_retries: 3,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         CrawlQueueItem::create(pool, &queue_item).await?;
@@ -560,9 +562,15 @@ impl CrawlerService {
                         println!("Successfully completed queue item: {}", item.id);
                     }
                     Err(e) => {
+                        // Retry with backoff (2^attempt minutes, max 60) until max_retries,
+                        // instead of failing permanently on the first error.
                         let error_msg = format!("Crawl failed: {}", e);
-                        CrawlQueueItem::mark_failed(pool, item.id, error_msg).await?;
-                        println!("Failed queue item {}: {}", item.id, e);
+                        let attempt = (item.retry_count + 1).clamp(0, 6) as u32;
+                        let delay = std::time::Duration::from_secs(60 * 2_u64.pow(attempt).min(60));
+                        let transition =
+                            CrawlQueueItem::retry_later(pool, item.id, &error_msg, delay, true)
+                                .await?;
+                        println!("Queue item {} failed ({}): {:?}", item.id, e, transition);
                     }
                 }
             } else {
