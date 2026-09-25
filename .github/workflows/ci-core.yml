@@ -126,11 +126,11 @@ jobs:
 
         # Install cargo-audit
         echo "Installing cargo-audit..."
-        cargo install cargo-audit --verbose --force
+        cargo install cargo-audit --locked --verbose --force
 
         # Install cargo-deny
         echo "Installing cargo-deny..."
-        cargo install cargo-deny --verbose --force
+        cargo install cargo-deny --locked --verbose --force
 
         # Verify installations
         echo "Verifying installations..."
@@ -1284,7 +1284,7 @@ jobs:
     - name: Install cargo-audit
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install cargo-audit --force
+        cargo install cargo-audit --locked --force
 
     - name: Run Rust security audit
       run: |
@@ -1351,7 +1351,7 @@ jobs:
     - name: Install cargo-deny
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install cargo-deny --force
+        cargo install cargo-deny --locked --force
 
     - name: Install license-checker
       run: npm install -g license-checker

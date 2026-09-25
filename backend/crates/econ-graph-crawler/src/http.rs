@@ -801,8 +801,9 @@ mod tests {
             .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "120"))
             .mount(&server)
             .await;
+        let fetcher = fetcher();
         let start = Instant::now();
-        let err = fetcher()
+        let err = fetcher
             .get_json::<Obs>(SourceId::Fred, &format!("{}/throttled", server.uri()), &[])
             .await
             .unwrap_err();

@@ -28,7 +28,7 @@ jobs:
         key: ${{ runner.os }}-cargo-audit-${{ hashFiles('backend/Cargo.lock') }}
 
     - name: Install cargo-audit
-      run: cargo install cargo-audit
+      run: cargo install cargo-audit --locked
 
     - name: Run Rust security audit
       run: cargo audit --json > rust-audit.json

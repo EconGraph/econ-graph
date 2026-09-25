@@ -110,7 +110,7 @@ pub fn apply_snapshot(
         .collect();
     for gone in known.difference(&current) {
         for status in ["pending", "processing", "retrying"] {
-            let _ = m.queue_items.remove_label_values(&[gone, status]);
+            let _ = m.queue_items.remove_label_values(&[gone.as_str(), status]);
         }
         let _ = m.queue_failed_24h.remove_label_values(&[gone]);
         let _ = m

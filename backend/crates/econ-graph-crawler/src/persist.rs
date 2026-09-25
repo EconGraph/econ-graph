@@ -244,7 +244,7 @@ pub async fn persist_series(
     }
     let latest_date = unique.keys().map(|k| k.0).max();
 
-    conn.transaction::<SeriesWrite, AppError, _>(|conn| {
+    conn.transaction::<SeriesWrite, AppError, _>(move |conn| {
         async move {
             let row: UpsertedSeries = diesel::sql_query(
                 "INSERT INTO economic_series (source_id, external_id, title, description, units, \
