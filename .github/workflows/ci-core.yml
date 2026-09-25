@@ -459,16 +459,12 @@ jobs:
 
     # No lint exemptions for the new crawler crate (the workspace-wide clippy in
     # backend-smoke-tests still carries ~23 -A exemptions for legacy code).
-    # --no-deps keeps -D warnings scoped to econ-graph-crawler; without it the
+    # --no-deps keeps -D warnings scoped to the crawler crates; without it the
     # flag also applies to the other workspace crates it depends on.
-    # TODO(A12): remove continue-on-error once agent A12 deletes the legacy
-    # code in econ-graph-crawler/src/bin/catalog_crawler.rs, which fails this today
-    # (unused_variables x2, clippy::too_many_arguments).
     - name: Clippy (econ-graph-crawler, no exemptions)
-      continue-on-error: true
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo clippy -p econ-graph-crawler --all-targets --no-deps -- -D warnings
+        cargo clippy -p econ-graph-crawler -p econ-graph-crawler-worker --all-targets --all-features --no-deps -- -D warnings
       working-directory: backend
 
     # Required: the crawler crate and the crawl_queue model / queue service tests.
@@ -502,8 +498,8 @@ jobs:
         cargo test --workspace --no-fail-fast --doc
       working-directory: backend
 
-  # NOTE: The hand-picked backend-*-tests jobs below (models, crawler, queue,
-  # global-analysis, series-discovery, auth, collaboration, remaining-service)
+  # NOTE: The hand-picked backend-*-tests jobs below (models, queue,
+  # global-analysis, auth, collaboration, remaining-service)
   # run fixed lists of test names, so new tests never run in them. They are
   # superseded by backend-workspace-tests above and can be removed once that
   # job is green.
@@ -650,138 +646,6 @@ jobs:
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5433/econ_graph_test
-
-  backend-crawler-unit-tests:
-    name: Backend Crawler Unit Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    needs: [backend-build-cache]
-
-    services:
-      postgres:
-        image: postgres:17.6
-        env:
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: econ_graph_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5434:5432
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.branch || github.ref }}
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.89.0
-      with:
-        components: rustfmt, clippy
-
-    - name: Cache cargo registry
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          ~/.cargo/bin
-          backend/target
-        key: ${{ runner.os }}-shared-cargo-v2
-        restore-keys: |
-          ${{ runner.os }}-shared-cargo-
-
-    - name: Install diesel CLI
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
-      working-directory: backend
-
-    - name: Setup database
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        diesel setup
-        diesel migration run
-      working-directory: backend
-      env:
-        DATABASE_URL: postgresql://postgres:password@localhost:5434/econ_graph_test
-
-    - name: Run backend crawler unit tests
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --lib -- --test-threads=2 --nocapture services::crawler::tests::test_catalog_downloader_creation services::crawler::tests::test_series_downloader_creation services::crawler::simple_crawler_service::tests services::crawler::enhanced_crawler_scheduler::tests
-      working-directory: backend
-      env:
-        DATABASE_URL: postgresql://postgres:password@localhost:5434/econ_graph_test
-
-  backend-crawler-integration-tests:
-    name: Backend Crawler Integration Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    needs: [backend-build-cache]
-
-    services:
-      postgres:
-        image: postgres:17.6
-        env:
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: econ_graph_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5435:5432
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.branch || github.ref }}
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.89.0
-      with:
-        components: rustfmt, clippy
-
-    - name: Cache cargo registry
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          ~/.cargo/bin
-          backend/target
-        key: ${{ runner.os }}-shared-cargo-v2
-        restore-keys: |
-          ${{ runner.os }}-shared-cargo-
-
-    - name: Install diesel CLI
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
-      working-directory: backend
-
-    - name: Setup database
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        diesel setup
-        diesel migration run
-      working-directory: backend
-      env:
-        DATABASE_URL: postgresql://postgres:password@localhost:5435/econ_graph_test
-
-    - name: Run backend crawler integration tests
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --lib -- --test-threads=2 --nocapture services::crawler::tests::test_crawler_with_database services::crawler::tests::test_file_crawling_with_series_downloader services::crawler::tests::test_file_url_crawling services::crawler::tests::test_file_url_error_handling services::crawler::tests::test_file_url_with_special_characters services::crawler::tests::test_multiple_file_urls
-      working-directory: backend
-      env:
-        DATABASE_URL: postgresql://postgres:password@localhost:5435/econ_graph_test
 
   backend-queue-basic-tests:
     name: Backend Queue Basic Tests
@@ -1047,138 +911,6 @@ jobs:
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5439/econ_graph_test
 
-  backend-series-discovery-basic-tests:
-    name: Backend Series Discovery Basic Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    needs: [backend-build-cache]
-
-    services:
-      postgres:
-        image: postgres:17.6
-        env:
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: econ_graph_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5440:5432
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.branch || github.ref }}
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.89.0
-      with:
-        components: rustfmt, clippy
-
-    - name: Cache cargo registry
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          ~/.cargo/bin
-          backend/target
-        key: ${{ runner.os }}-shared-cargo-v2
-        restore-keys: |
-          ${{ runner.os }}-shared-cargo-
-
-    - name: Install diesel CLI
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
-      working-directory: backend
-
-    - name: Setup database
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        diesel setup
-        diesel migration run
-      working-directory: backend
-      env:
-        DATABASE_URL: postgresql://postgres:password@localhost:5440/econ_graph_test
-
-    - name: Run backend series discovery basic tests
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --lib -- --test-threads=2 --nocapture services::series_discovery::boc::tests::test_boc_data_source_creation services::series_discovery::boe::tests::test_boe_data_source_creation services::series_discovery::boj::tests::test_boj_data_source_creation services::series_discovery::ecb::tests::test_ecb_data_source_creation services::series_discovery::fhfa::tests::test_fhfa_data_source_creation services::series_discovery::ilo::tests::test_ilo_data_source_creation services::series_discovery::oecd::tests::test_oecd_data_source_creation services::series_discovery::rba::tests::test_rba_data_source_creation services::series_discovery::snb::tests::test_snb_data_source_creation services::series_discovery::unstats::tests::test_unstats_data_source_creation services::series_discovery::wto::tests::test_wto_data_source_creation
-      working-directory: backend
-      env:
-        DATABASE_URL: postgresql://postgres:password@localhost:5440/econ_graph_test
-
-  backend-series-discovery-integration-tests:
-    name: Backend Series Discovery Integration Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    needs: [backend-build-cache]
-
-    services:
-      postgres:
-        image: postgres:17.6
-        env:
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: econ_graph_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5441:5432
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.branch || github.ref }}
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.89.0
-      with:
-        components: rustfmt, clippy
-
-    - name: Cache cargo registry
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          ~/.cargo/bin
-          backend/target
-        key: ${{ runner.os }}-shared-cargo-v2
-        restore-keys: |
-          ${{ runner.os }}-shared-cargo-
-
-    - name: Install diesel CLI
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
-      working-directory: backend
-
-    - name: Setup database
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        diesel setup
-        diesel migration run
-      working-directory: backend
-      env:
-        DATABASE_URL: postgresql://postgres:password@localhost:5441/econ_graph_test
-
-    - name: Run backend series discovery integration tests
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --lib -- --test-threads=2 --nocapture services::series_discovery::boc::tests::test_discover_series services::series_discovery::boe::tests::test_discover_series services::series_discovery::boj::tests::test_discover_series services::series_discovery::ecb::tests::test_discover_series services::series_discovery::fhfa::tests::test_discover_series services::series_discovery::ilo::tests::test_discover_series services::series_discovery::oecd::tests::test_discover_series services::series_discovery::rba::tests::test_discover_series services::series_discovery::snb::tests::test_discover_series services::series_discovery::unstats::tests::test_discover_series services::series_discovery::wto::tests::test_discover_series
-      working-directory: backend
-      env:
-        DATABASE_URL: postgresql://postgres:password@localhost:5441/econ_graph_test
-
   backend-auth-integration-tests:
     name: Backend Auth Integration Tests
     runs-on: ubuntu-latest
@@ -1372,7 +1104,7 @@ jobs:
     - name: Run backend remaining service tests
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --lib -- --test-threads=2 --nocapture services::search_service services::series_service services::comprehensive_series_catalog::tests services::series_discovery::boc::tests::test_discover_boc_series_integration services::series_discovery::boe::tests::test_discover_boe_series_integration services::series_discovery::boe::tests::test_fetch_boe_data services::series_discovery::boj::tests::test_discover_boj_series_integration services::series_discovery::boj::tests::test_fetch_boj_data services::series_discovery::ecb::tests::test_discover_ecb_series_integration services::series_discovery::ecb::tests::test_fetch_ecb_data services::series_discovery::fhfa::tests::test_fhfa_hpi_data_structure services::series_discovery::ilo::tests::test_discover_ilo_series_integration services::series_discovery::oecd::tests::test_discover_oecd_series_integration services::series_discovery::oecd::tests::test_fetch_oecd_data services::series_discovery::rba::tests::test_discover_rba_series_integration services::series_discovery::rba::tests::test_fetch_rba_data services::series_discovery::snb::tests::test_discover_snb_series_integration services::series_discovery::snb::tests::test_fetch_snb_data services::series_discovery::unstats::tests::test_discover_unstats_series_integration services::series_discovery::unstats::tests::test_fetch_unstats_data services::series_discovery::wto::tests::test_discover_wto_series_integration services::series_discovery::wto::tests::test_fetch_wto_data
+        cargo test --lib -- --test-threads=2 --nocapture services::search_service services::series_service
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5444/econ_graph_test
