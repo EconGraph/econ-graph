@@ -47,6 +47,7 @@ once_cell.workspace = true
 
 # Test dependencies
 [dev-dependencies]
+econ-graph-crawler = { path = "../econ-graph-crawler" }
 serial_test.workspace = true
 tokio-test.workspace = true
 testcontainers.workspace = true

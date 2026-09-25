@@ -9,6 +9,8 @@ license.workspace = true
 econ-graph-core = { path = "../econ-graph-core" }
 econ-graph-services = { path = "../econ-graph-services" }
 econ-graph-auth = { path = "../econ-graph-auth" }
+# Crawl queue status + job helpers (triggerCrawl only enqueues; workers do the crawling)
+econ-graph-crawler = { path = "../econ-graph-crawler" }
 
 # GraphQL
 async-graphql.workspace = true

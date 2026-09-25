@@ -34,6 +34,8 @@
 //! - [`adapter`]: the [`SourceAdapter`] trait and [`AdapterRegistry`]
 //! - [`persist`]: shared database writes (series, data points, catalog metadata, crawl attempts)
 //! - [`worker`]: the [`Worker`] that drains `crawl_queue`, and the [`JobHandler`] extension point
+//! - [`status`]: crawler status derived from `crawl_queue` ([`status::crawler_status`])
+//! - [`cli`]: the `crawler` operator CLI (enqueue, discover, status, sources, fetch)
 //! - `testkit` (feature `testkit`, always on in this crate's tests): mock upstream + adapter contract tests
 //!
 //! ## Usage
@@ -58,6 +60,7 @@
 //! ```
 
 pub mod adapter;
+pub mod cli;
 pub mod error;
 pub mod http;
 pub mod persist;
@@ -65,6 +68,7 @@ pub mod policy;
 pub mod rate_limit;
 pub mod source;
 pub mod sources;
+pub mod status;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
 pub mod worker;

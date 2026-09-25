@@ -224,14 +224,13 @@ mod tests {
         container.clean_database().await.unwrap();
         let pool = container.pool();
 
-        // Test crawler status
-        let status =
-            econ_graph_services::services::crawler::simple_crawler_service::get_crawler_status()
-                .await
-                .expect("Should get crawler status");
-
-        // Status should reflect environment configuration
-        assert!(status.active_workers >= 0);
+        // Crawler status is derived from the (freshly cleaned, so empty) crawl queue
+        let status = econ_graph_crawler::status::crawler_status(pool)
+            .await
+            .expect("Should get crawler status");
+        assert_eq!(status.active_workers, 0);
+        assert!(!status.is_running);
+        assert!(status.per_source.is_empty());
 
         // Test that data sources can be created (needed for crawler)
         let fred_source = DataSource::get_or_create(&pool, DataSource::fred())

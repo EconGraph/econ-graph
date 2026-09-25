@@ -25,36 +25,42 @@ pub struct Mutation;
 
 #[Object]
 impl Mutation {
-    /// Trigger a manual crawl for specific sources or series
+    /// Enqueue crawl jobs (admin only). Nothing is crawled in the request: the jobs go to
+    /// `crawl_queue` and the crawler workers process them.
+    ///
+    /// `series_ids` become `fetch_series` jobs for `source` (or for the single entry of
+    /// `sources`); every listed source without series gets a `discover_catalog` job. Returns the
+    /// current crawler status with `enqueuedCount` = jobs actually inserted (a job with an active
+    /// duplicate in the queue is skipped and not counted).
     async fn trigger_crawl(
         &self,
         ctx: &Context<'_>,
         input: TriggerCrawlInput,
     ) -> Result<CrawlerStatusType> {
+        let admin = require_admin(ctx)?;
         let pool = ctx.data::<DatabasePool>()?;
 
-        let mut _queued_items = Vec::new();
+        let jobs = plan_trigger_crawl(&input).map_err(GraphQLError::new)?;
+        let mut enqueued = 0i32;
+        for job in &jobs {
+            if core_models::CrawlQueueItem::enqueue(pool, job)
+                .await?
+                .is_some()
+            {
+                enqueued += 1;
+            }
+        }
+        tracing::info!(
+            user_id = %admin.id,
+            requested = jobs.len(),
+            enqueued,
+            "triggerCrawl enqueued jobs"
+        );
 
-        // Handle multiple sources and series
-        let sources = input.sources.unwrap_or_else(|| vec!["FRED".to_string()]);
-        let series_ids = input.series_ids.unwrap_or_else(|| vec!["GDP".to_string()]);
-
-        let items = simple_crawler_service::trigger_manual_crawl(
-            &pool,
-            Some(sources),
-            Some(series_ids),
-            1, // priority
-        )
-        .await?;
-        _queued_items.push(items);
-
-        // Return updated crawler status
-        Ok(CrawlerStatusType {
-            is_running: true,
-            active_workers: 5,
-            last_crawl: Some(chrono::Utc::now()),
-            next_scheduled_crawl: Some(chrono::Utc::now() + chrono::Duration::hours(4)),
-        })
+        let snapshot = econ_graph_crawler::status::crawler_status(pool).await?;
+        let mut status = CrawlerStatusType::from_snapshot(snapshot);
+        status.enqueued_count = Some(enqueued);
+        Ok(status)
     }
 
     /// Create a new chart annotation
@@ -461,6 +467,88 @@ impl Mutation {
     }
 }
 
+/// Turns a `triggerCrawl` input into queue rows, or a validation message.
+///
+/// Series are never guessed onto a source: they need `source`, or exactly one entry in `sources`.
+fn plan_trigger_crawl(
+    input: &TriggerCrawlInput,
+) -> std::result::Result<Vec<core_models::NewCrawlQueueItem>, String> {
+    use core_models::JobKind;
+    use econ_graph_crawler::cli::{new_job, CATALOG_SERIES_ID, DEFAULT_PRIORITY};
+    use econ_graph_crawler::SourceId;
+
+    let priority = input.priority.unwrap_or(DEFAULT_PRIORITY);
+    if !(1..=10).contains(&priority) {
+        return Err(format!(
+            "priority must be between 1 and 10 (got {priority})"
+        ));
+    }
+    let parse = |s: &str| {
+        s.trim()
+            .parse::<SourceId>()
+            .map_err(|_| format!("unknown source {:?}", s.trim()))
+    };
+    let mut sources: Vec<SourceId> = Vec::new();
+    for s in input
+        .sources
+        .iter()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+    {
+        let id = parse(s)?;
+        if !sources.contains(&id) {
+            sources.push(id);
+        }
+    }
+    let explicit = match input.source.as_deref().map(str::trim) {
+        Some(s) if !s.is_empty() => Some(parse(s)?),
+        _ => None,
+    };
+    let mut series: Vec<&str> = Vec::new();
+    for s in input.series_ids.iter().flatten().map(|s| s.trim()) {
+        if !s.is_empty() && !series.contains(&s) {
+            series.push(s);
+        }
+    }
+
+    let mut jobs = Vec::new();
+    let series_source = if series.is_empty() {
+        if let Some(id) = explicit {
+            if !sources.contains(&id) {
+                sources.push(id);
+            }
+        }
+        None
+    } else {
+        let id = match (explicit, sources.as_slice()) {
+            (Some(id), _) => id,
+            (None, [only]) => *only,
+            (None, []) => {
+                return Err("seriesIds need a source: set `source` (or list exactly one entry in `sources`)".into())
+            }
+            (None, _) => {
+                return Err("seriesIds are ambiguous with several `sources`: set `source` to the source they belong to".into())
+            }
+        };
+        for s in &series {
+            jobs.push(new_job(id, s, JobKind::FetchSeries, priority));
+        }
+        Some(id)
+    };
+    for id in sources.into_iter().filter(|id| Some(*id) != series_source) {
+        jobs.push(new_job(
+            id,
+            CATALOG_SERIES_ID,
+            JobKind::DiscoverCatalog,
+            priority,
+        ));
+    }
+    if jobs.is_empty() {
+        return Err("nothing to crawl: give `sources` and/or `seriesIds`".into());
+    }
+    Ok(jobs)
+}
+
 impl Default for Mutation {
     fn default() -> Self {
         Self
@@ -478,9 +566,268 @@ mod tests {
             sources: Some(vec!["FRED".to_string()]),
             series_ids: Some(vec!["GDP".to_string()]),
             priority: Some(8),
+            source: None,
         };
 
         assert_eq!(input.sources, Some(vec!["FRED".to_string()]));
         assert_eq!(input.priority, Some(8));
+    }
+
+    fn input(
+        sources: &[&str],
+        series: &[&str],
+        source: Option<&str>,
+        priority: Option<i32>,
+    ) -> TriggerCrawlInput {
+        let v = |xs: &[&str]| (!xs.is_empty()).then(|| xs.iter().map(|s| s.to_string()).collect());
+        TriggerCrawlInput {
+            sources: v(sources),
+            series_ids: v(series),
+            priority,
+            source: source.map(str::to_string),
+        }
+    }
+
+    fn summary(jobs: &[core_models::NewCrawlQueueItem]) -> Vec<(String, String, String, i32)> {
+        jobs.iter()
+            .map(|j| {
+                (
+                    j.source.clone(),
+                    j.series_id.clone(),
+                    j.kind.clone(),
+                    j.priority,
+                )
+            })
+            .collect()
+    }
+
+    fn row(source: &str, series: &str, kind: &str, priority: i32) -> (String, String, String, i32) {
+        (source.into(), series.into(), kind.into(), priority)
+    }
+
+    #[test]
+    fn test_trigger_crawl_plan() {
+        // Single listed source pairs unambiguously with the series.
+        let jobs =
+            plan_trigger_crawl(&input(&["fred"], &["GDP", " UNRATE ", "GDP"], None, None)).unwrap();
+        assert_eq!(
+            summary(&jobs),
+            vec![
+                row("FRED", "GDP", "fetch_series", 5),
+                row("FRED", "UNRATE", "fetch_series", 5)
+            ]
+        );
+        // Explicit source for the series; other listed sources get discovery.
+        let jobs =
+            plan_trigger_crawl(&input(&["FRED", "BLS"], &["GDP"], Some("FRED"), Some(9))).unwrap();
+        assert_eq!(
+            summary(&jobs),
+            vec![
+                row("FRED", "GDP", "fetch_series", 9),
+                row("BLS", "catalog", "discover_catalog", 9)
+            ]
+        );
+        // Sources alone: discovery for each.
+        let jobs = plan_trigger_crawl(&input(&["WORLD_BANK"], &[], None, None)).unwrap();
+        assert_eq!(
+            summary(&jobs),
+            vec![row("WORLD_BANK", "catalog", "discover_catalog", 5)]
+        );
+        // `source` without series is a discovery request too.
+        let jobs = plan_trigger_crawl(&input(&[], &[], Some("BLS"), None)).unwrap();
+        assert_eq!(
+            summary(&jobs),
+            vec![row("BLS", "catalog", "discover_catalog", 5)]
+        );
+    }
+
+    #[test]
+    fn test_trigger_crawl_plan_rejects_invalid_input() {
+        let err = |i| plan_trigger_crawl(&i).unwrap_err();
+        assert!(err(input(&[], &["GDP"], None, None)).contains("need a source"));
+        assert!(err(input(&["FRED", "BLS"], &["GDP"], None, None)).contains("ambiguous"));
+        assert!(err(input(&["NOPE"], &[], None, None)).contains("unknown source"));
+        assert!(err(input(&[], &["GDP"], Some("NOPE"), None)).contains("unknown source"));
+        assert!(err(input(&["FRED"], &[], None, Some(0))).contains("priority"));
+        assert!(err(input(&["FRED"], &[], None, Some(11))).contains("priority"));
+        assert!(err(input(&[], &[], None, None)).contains("nothing to crawl"));
+    }
+
+    // ---------------------------------------------------------------------
+    // DB-backed: need DATABASE_URL (skipped otherwise); they empty crawl_queue.
+    // ---------------------------------------------------------------------
+
+    static DB_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    async fn db() -> Option<(DatabasePool, tokio::sync::MutexGuard<'static, ()>)> {
+        use diesel_async::RunQueryDsl;
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            eprintln!("DATABASE_URL not set; skipping DB-backed triggerCrawl test");
+            return None;
+        };
+        let guard = DB_LOCK.lock().await;
+        econ_graph_core::database::run_migrations(&url)
+            .await
+            .expect("migrations");
+        let pool = econ_graph_core::database::create_pool(&url)
+            .await
+            .expect("pool");
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query("DELETE FROM crawl_queue")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        drop(conn);
+        Some((pool, guard))
+    }
+
+    fn user(role: &str) -> User {
+        let now = chrono::Utc::now();
+        User {
+            id: Uuid::new_v4(),
+            email: format!("{role}@example.test"),
+            name: role.into(),
+            avatar_url: None,
+            provider: "email".into(),
+            provider_id: None,
+            password_hash: None,
+            role: role.into(),
+            organization: None,
+            theme: "light".into(),
+            default_chart_type: "line".into(),
+            notifications_enabled: false,
+            collaboration_enabled: false,
+            is_active: true,
+            email_verified: true,
+            created_at: now,
+            updated_at: now,
+            last_login_at: None,
+        }
+    }
+
+    async fn run_as(
+        pool: &DatabasePool,
+        user: Option<User>,
+        query: &str,
+    ) -> async_graphql::Response {
+        let schema = crate::graphql::schema::create_schema_with_data(
+            pool.clone(),
+            Arc::new(crate::graphql::context::GraphQLContext::new(user)),
+        );
+        schema.execute(query).await
+    }
+
+    async fn queue_rows(pool: &DatabasePool) -> Vec<(String, String, String)> {
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+        use econ_graph_core::schema::crawl_queue::dsl as q;
+        let mut conn = pool.get().await.unwrap();
+        q::crawl_queue
+            .order((q::source.asc(), q::series_id.asc()))
+            .select((q::source, q::series_id, q::kind))
+            .load(&mut conn)
+            .await
+            .unwrap()
+    }
+
+    const TRIGGER: &str = r#"mutation { triggerCrawl(input: { source: "FRED", seriesIds: ["GDP", "UNRATE"], sources: ["BLS"], priority: 7 }) { isRunning activeWorkers enqueuedCount sources { source pending } } }"#;
+
+    #[tokio::test]
+    async fn test_trigger_crawl_rejects_non_admin() {
+        let Some((pool, _guard)) = db().await else {
+            return;
+        };
+        for u in [None, Some(user("viewer")), Some(user("analyst"))] {
+            let resp = run_as(&pool, u, TRIGGER).await;
+            assert_eq!(resp.errors.len(), 1, "{resp:?}");
+            let msg = &resp.errors[0].message;
+            assert!(
+                msg.contains("Authentication required") || msg.contains("Insufficient permissions"),
+                "{msg}"
+            );
+        }
+        assert!(
+            queue_rows(&pool).await.is_empty(),
+            "nothing may be enqueued"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_trigger_crawl_enqueues_for_admin_without_double_counting() {
+        let Some((pool, _guard)) = db().await else {
+            return;
+        };
+        let resp = run_as(&pool, Some(user("admin")), TRIGGER).await;
+        assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+        let data = resp.data.into_json().unwrap();
+        let status = &data["triggerCrawl"];
+        assert_eq!(status["enqueuedCount"], 3);
+        assert_eq!(status["activeWorkers"], 0);
+        assert_eq!(status["isRunning"], false);
+        assert_eq!(
+            status["sources"],
+            serde_json::json!([{"source": "BLS", "pending": 1}, {"source": "FRED", "pending": 2}])
+        );
+        assert_eq!(
+            queue_rows(&pool).await,
+            vec![
+                ("BLS".into(), "catalog".into(), "discover_catalog".into()),
+                ("FRED".into(), "GDP".into(), "fetch_series".into()),
+                ("FRED".into(), "UNRATE".into(), "fetch_series".into()),
+            ]
+        );
+
+        // Same request again: every job already active -> nothing new, nothing counted.
+        let resp = run_as(&pool, Some(user("admin")), TRIGGER).await;
+        assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+        assert_eq!(
+            resp.data.into_json().unwrap()["triggerCrawl"]["enqueuedCount"],
+            0
+        );
+
+        // Partial overlap counts only the new job.
+        let resp = run_as(
+            &pool,
+            Some(user("super_admin")),
+            r#"mutation { triggerCrawl(input: { sources: ["FRED"], seriesIds: ["GDP", "PAYEMS"] }) { enqueuedCount } }"#,
+        )
+        .await;
+        assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+        assert_eq!(
+            resp.data.into_json().unwrap()["triggerCrawl"]["enqueuedCount"],
+            1
+        );
+        assert_eq!(queue_rows(&pool).await.len(), 4);
+
+        // The crawlerStatus query reads the same queue.
+        let resp = run_as(&pool, None, "{ crawlerStatus { isRunning activeWorkers lastCrawl nextScheduledCrawl enqueuedCount sources { source pending failedLastDay } } }").await;
+        assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+        let data = resp.data.into_json().unwrap();
+        assert_eq!(
+            data["crawlerStatus"]["enqueuedCount"],
+            serde_json::Value::Null
+        );
+        assert_eq!(data["crawlerStatus"]["sources"][1]["pending"], 3);
+        assert!(data["crawlerStatus"]["nextScheduledCrawl"].is_string());
+    }
+
+    #[tokio::test]
+    async fn test_trigger_crawl_validation_error_for_unpaired_series() {
+        let Some((pool, _guard)) = db().await else {
+            return;
+        };
+        let resp = run_as(
+            &pool,
+            Some(user("admin")),
+            r#"mutation { triggerCrawl(input: { seriesIds: ["GDP"] }) { enqueuedCount } }"#,
+        )
+        .await;
+        assert_eq!(resp.errors.len(), 1);
+        assert!(
+            resp.errors[0].message.contains("need a source"),
+            "{:?}",
+            resp.errors
+        );
+        assert!(queue_rows(&pool).await.is_empty());
     }
 }
