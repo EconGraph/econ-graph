@@ -18,6 +18,13 @@
 //!   (partial unique index `uq_crawl_queue_active_item`); finished rows don't block re-enqueueing.
 //! - Claiming is a single `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1)` statement,
 //!   so two workers can never claim the same row.
+//! - A claim is a lease. Worker transitions out of `processing` (`complete`, `fail`,
+//!   `retry_later`) take the worker id and only apply while the row is still `processing` and
+//!   `locked_by` that worker; otherwise they change nothing and report `LostLease` (the lease
+//!   expired, `release_stuck` re-queued the item, and another worker may own it now).
+//!   `force_*` variants skip that check and are for admin tooling only.
+//! - `release_stuck` counts as an attempt, so an item that keeps outliving its lease ends up
+//!   `failed` after `max_retries` releases.
 
 use std::fmt;
 use std::str::FromStr;
@@ -25,7 +32,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
-use diesel::sql_types::{Array, Bool, Double, Nullable, Text, Uuid as SqlUuid};
+use diesel::sql_types::{Array, BigInt, Bool, Double, Nullable, Text, Uuid as SqlUuid};
 use diesel_async::RunQueryDsl;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -78,14 +85,33 @@ impl FromStr for JobKind {
     }
 }
 
-/// Outcome of [`CrawlQueueItem::retry_later`].
+/// Outcome of [`CrawlQueueItem::retry_later`] / [`CrawlQueueItem::force_retry_later`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueTransition {
     /// The item is `retrying` and becomes claimable again at `at`.
     Rescheduled { at: DateTime<Utc> },
     /// The attempt budget is exhausted; the item is now `failed`.
     Failed,
+    /// The caller no longer holds the item's lease (released by `release_stuck` and possibly
+    /// claimed by another worker, or already finished). Nothing was changed.
+    LostLease,
 }
+
+/// Outcome of a lease-guarded terminal transition ([`CrawlQueueItem::complete`] /
+/// [`CrawlQueueItem::fail`]).
+#[must_use]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeaseOutcome {
+    /// The transition was applied.
+    Applied,
+    /// The caller no longer holds the item's lease (the item is not `processing` with
+    /// `locked_by = worker_id`, or doesn't exist). Nothing was changed; the caller should log
+    /// and move on rather than attempt another transition.
+    LostLease,
+}
+
+/// Maximum rows [`CrawlQueueItem::purge_finished`] deletes per statement.
+pub const PURGE_BATCH_SIZE: i64 = 1000;
 
 /// Crawl queue item for managing data collection jobs
 #[derive(Debug, Clone, Queryable, QueryableByName, Selectable, Serialize, Deserialize)]
@@ -379,74 +405,116 @@ impl CrawlQueueItem {
         Ok(item)
     }
 
-    /// Mark completed and clear the lock.
-    pub async fn complete(pool: &DatabasePool, id: Uuid) -> AppResult<()> {
-        Self::finish(pool, id, QueueStatus::Completed, None).await?;
-        Ok(())
+    // --- Lease-guarded transitions (for the worker that claimed the item) ---
+    //
+    // A worker's claim is a lease: `release_stuck` may take it away (and another worker may claim
+    // the item) if the job outlives `stuck_after`. These transitions only apply while the item is
+    // still `processing` AND `locked_by = worker_id`; otherwise nothing changes and they report
+    // `LostLease` (the item now belongs to someone else, or was already finished / released).
+
+    /// Mark completed and clear the lock, if `worker_id` still holds the lease.
+    pub async fn complete(
+        pool: &DatabasePool,
+        id: Uuid,
+        worker_id: &str,
+    ) -> AppResult<LeaseOutcome> {
+        Ok(
+            Self::finish(pool, id, QueueStatus::Completed, None, Some(worker_id))
+                .await?
+                .map_or(LeaseOutcome::LostLease, |_| LeaseOutcome::Applied),
+        )
+    }
+
+    /// Permanent failure (status `failed`, error recorded, lock cleared), if `worker_id` still
+    /// holds the lease.
+    pub async fn fail(
+        pool: &DatabasePool,
+        id: Uuid,
+        worker_id: &str,
+        error: &str,
+    ) -> AppResult<LeaseOutcome> {
+        Ok(
+            Self::finish(pool, id, QueueStatus::Failed, Some(error), Some(worker_id))
+                .await?
+                .map_or(LeaseOutcome::LostLease, |_| LeaseOutcome::Applied),
+        )
     }
 
     /// Reschedule: status `retrying`, lock cleared, `scheduled_for = now + delay`.
     /// If `count_attempt`, `retry_count += 1`, and if that reaches `max_retries` the item becomes
     /// `failed` instead. Rate limiting should pass `count_attempt = false`.
-    /// Only applies to active items; errors with `NotFound` otherwise.
+    /// Returns [`QueueTransition::LostLease`] (and changes nothing) unless the item is
+    /// `processing` and locked by `worker_id`.
     pub async fn retry_later(
+        pool: &DatabasePool,
+        id: Uuid,
+        worker_id: &str,
+        error: &str,
+        delay: Duration,
+        count_attempt: bool,
+    ) -> AppResult<QueueTransition> {
+        Ok(
+            Self::reschedule(pool, id, Some(worker_id), error, delay, count_attempt)
+                .await?
+                .unwrap_or(QueueTransition::LostLease),
+        )
+    }
+
+    // --- Unguarded (admin / legacy) transitions: ignore who holds the lock ---
+
+    /// Admin override: mark completed and clear any lock regardless of status or owner.
+    /// Workers must use [`CrawlQueueItem::complete`]. Errors with `NotFound` for a missing id.
+    pub async fn force_complete(pool: &DatabasePool, id: Uuid) -> AppResult<Self> {
+        Self::finish(pool, id, QueueStatus::Completed, None, None)
+            .await?
+            .ok_or_else(|| not_found(id))
+    }
+
+    /// Admin override: mark failed and clear any lock regardless of status or owner.
+    /// Workers must use [`CrawlQueueItem::fail`]. Errors with `NotFound` for a missing id.
+    pub async fn force_fail(pool: &DatabasePool, id: Uuid, error: &str) -> AppResult<Self> {
+        Self::finish(pool, id, QueueStatus::Failed, Some(error), None)
+            .await?
+            .ok_or_else(|| not_found(id))
+    }
+
+    /// Admin override of [`CrawlQueueItem::retry_later`]: applies to any active
+    /// (pending|processing|retrying) item regardless of lock owner; errors with `NotFound`
+    /// otherwise. Never returns `LostLease`.
+    pub async fn force_retry_later(
         pool: &DatabasePool,
         id: Uuid,
         error: &str,
         delay: Duration,
         count_attempt: bool,
     ) -> AppResult<QueueTransition> {
-        let mut conn = get_conn(pool).await?;
-        // All SET expressions see the pre-update row, so the decision is made atomically.
-        let item = diesel::sql_query(
-            "UPDATE crawl_queue SET \
-                 retry_count = retry_count + CASE WHEN $2 THEN 1 ELSE 0 END, \
-                 status = CASE WHEN $2 AND retry_count + 1 >= max_retries \
-                               THEN 'failed' ELSE 'retrying' END, \
-                 scheduled_for = CASE WHEN $2 AND retry_count + 1 >= max_retries \
-                                      THEN scheduled_for \
-                                      ELSE NOW() + make_interval(secs => $3) END, \
-                 error_message = $4, \
-                 locked_by = NULL, \
-                 locked_at = NULL, \
-                 finished_at = CASE WHEN $2 AND retry_count + 1 >= max_retries \
-                                    THEN NOW() ELSE NULL END, \
-                 updated_at = NOW() \
-             WHERE id = $1 AND status IN ('pending', 'processing', 'retrying') \
-             RETURNING *",
-        )
-        .bind::<SqlUuid, _>(id)
-        .bind::<Bool, _>(count_attempt)
-        .bind::<Double, _>(delay.as_secs_f64())
-        .bind::<Text, _>(error)
-        .get_result::<Self>(&mut conn)
-        .await
-        .optional()?
-        .ok_or_else(|| not_found(id))?;
-
-        if item.status == "failed" {
-            Ok(QueueTransition::Failed)
-        } else {
-            let at = item.scheduled_for.ok_or_else(|| {
-                AppError::InternalError("retry_later produced no scheduled_for".to_string())
-            })?;
-            Ok(QueueTransition::Rescheduled { at })
-        }
+        Self::reschedule(pool, id, None, error, delay, count_attempt)
+            .await?
+            .ok_or_else(|| not_found(id))
     }
 
-    /// Permanent failure: status `failed`, error recorded, lock cleared.
-    pub async fn fail(pool: &DatabasePool, id: Uuid, error: &str) -> AppResult<()> {
-        Self::finish(pool, id, QueueStatus::Failed, Some(error.to_string())).await?;
-        Ok(())
-    }
-
-    /// Return items stuck in `processing` (locked longer than `older_than`, e.g. crashed workers)
-    /// to `pending` with the lock cleared. Returns the number of items released.
+    /// Return items stuck in `processing` (locked longer than `older_than`: crashed workers, or
+    /// jobs that outlived their lease) to `pending` with the lock cleared.
+    ///
+    /// Each release counts as an attempt (`retry_count += 1`); once that reaches `max_retries`
+    /// the item becomes `failed` instead, so a job that keeps crashing workers cannot loop
+    /// forever. `error_message` records the expired lease. Returns the number of items released
+    /// (re-queued or failed).
     pub async fn release_stuck(pool: &DatabasePool, older_than: Duration) -> AppResult<i64> {
         let mut conn = get_conn(pool).await?;
+        // All SET expressions see the pre-update row.
         let n = diesel::sql_query(
-            "UPDATE crawl_queue \
-             SET status = 'pending', locked_by = NULL, locked_at = NULL, updated_at = NOW() \
+            "UPDATE crawl_queue SET \
+                 retry_count = retry_count + 1, \
+                 status = CASE WHEN retry_count + 1 >= max_retries \
+                               THEN 'failed' ELSE 'pending' END, \
+                 finished_at = CASE WHEN retry_count + 1 >= max_retries \
+                                    THEN NOW() ELSE NULL END, \
+                 error_message = format('lease expired: worker %s held the item since %s', \
+                                        locked_by, locked_at), \
+                 locked_by = NULL, \
+                 locked_at = NULL, \
+                 updated_at = NOW() \
              WHERE status = 'processing' \
                AND locked_at < NOW() - make_interval(secs => $1)",
         )
@@ -456,8 +524,8 @@ impl CrawlQueueItem {
         Ok(n as i64)
     }
 
-    /// Put an active item back to `pending` and clear its lock. Returns false if the item
-    /// doesn't exist or is already finished.
+    /// Admin: put an active item back to `pending` and clear its lock, regardless of owner
+    /// (does not count an attempt). Returns false if the item doesn't exist or is finished.
     pub async fn release(pool: &DatabasePool, id: Uuid) -> AppResult<bool> {
         use crate::schema::crawl_queue::dsl;
         let mut conn = get_conn(pool).await?;
@@ -477,24 +545,118 @@ impl CrawlQueueItem {
         Ok(n > 0)
     }
 
+    /// Delete `completed` / `failed` rows that finished at least `older_than` ago (rows without
+    /// `finished_at` fall back to `updated_at`). Deletes in batches of [`PURGE_BATCH_SIZE`] rows
+    /// so it never holds locks on a large part of the table; rows locked by another transaction
+    /// are skipped. Returns the number of rows deleted.
+    pub async fn purge_finished(pool: &DatabasePool, older_than: Duration) -> AppResult<i64> {
+        let mut conn = get_conn(pool).await?;
+        let mut total = 0_i64;
+        loop {
+            let n = diesel::sql_query(
+                "DELETE FROM crawl_queue WHERE id IN ( \
+                     SELECT id FROM crawl_queue \
+                     WHERE status IN ('completed', 'failed') \
+                       AND COALESCE(finished_at, updated_at) \
+                           <= NOW() - make_interval(secs => $1) \
+                     LIMIT $2 \
+                     FOR UPDATE SKIP LOCKED \
+                 )",
+            )
+            .bind::<Double, _>(older_than.as_secs_f64())
+            .bind::<BigInt, _>(PURGE_BATCH_SIZE)
+            .execute(&mut conn)
+            .await? as i64;
+            total += n;
+            if n < PURGE_BATCH_SIZE {
+                return Ok(total);
+            }
+            tokio::task::yield_now().await;
+        }
+    }
+
+    /// Shared body of `retry_later` / `force_retry_later`. `worker_id = Some(w)` requires the
+    /// item to be `processing` and locked by `w`; `None` accepts any active item.
+    /// `Ok(None)` when no row matched.
+    async fn reschedule(
+        pool: &DatabasePool,
+        id: Uuid,
+        worker_id: Option<&str>,
+        error: &str,
+        delay: Duration,
+        count_attempt: bool,
+    ) -> AppResult<Option<QueueTransition>> {
+        let mut conn = get_conn(pool).await?;
+        // All SET expressions see the pre-update row, so the decision is made atomically.
+        let item = diesel::sql_query(
+            "UPDATE crawl_queue SET \
+                 retry_count = retry_count + CASE WHEN $2 THEN 1 ELSE 0 END, \
+                 status = CASE WHEN $2 AND retry_count + 1 >= max_retries \
+                               THEN 'failed' ELSE 'retrying' END, \
+                 scheduled_for = CASE WHEN $2 AND retry_count + 1 >= max_retries \
+                                      THEN scheduled_for \
+                                      ELSE NOW() + make_interval(secs => $3) END, \
+                 error_message = $4, \
+                 locked_by = NULL, \
+                 locked_at = NULL, \
+                 finished_at = CASE WHEN $2 AND retry_count + 1 >= max_retries \
+                                    THEN NOW() ELSE NULL END, \
+                 updated_at = NOW() \
+             WHERE id = $1 AND status IN ('pending', 'processing', 'retrying') \
+               AND ($5::text IS NULL OR (status = 'processing' AND locked_by = $5)) \
+             RETURNING *",
+        )
+        .bind::<SqlUuid, _>(id)
+        .bind::<Bool, _>(count_attempt)
+        .bind::<Double, _>(delay.as_secs_f64())
+        .bind::<Text, _>(error)
+        .bind::<Nullable<Text>, _>(worker_id)
+        .get_result::<Self>(&mut conn)
+        .await
+        .optional()?;
+
+        let Some(item) = item else { return Ok(None) };
+        if item.status == "failed" {
+            Ok(Some(QueueTransition::Failed))
+        } else {
+            let at = item.scheduled_for.ok_or_else(|| {
+                AppError::InternalError("retry_later produced no scheduled_for".to_string())
+            })?;
+            Ok(Some(QueueTransition::Rescheduled { at }))
+        }
+    }
+
     /// Move to a terminal status, clearing the lock. `error` (if any) replaces `error_message`.
+    /// `worker_id = Some(w)` requires the item to be `processing` and locked by `w`; `None`
+    /// applies to the row whatever its state. `Ok(None)` when no row matched.
     async fn finish(
         pool: &DatabasePool,
         id: Uuid,
         status: QueueStatus,
-        error: Option<String>,
-    ) -> AppResult<Self> {
-        let update = UpdateCrawlQueueItem {
-            status: Some(status.to_string()),
-            error_message: error.map(Some),
-            finished_at: Some(Some(Utc::now())),
-            ..Default::default()
-        }
-        .clearing_lock();
-        Self::update(pool, id, &update).await.map_err(|e| match e {
-            AppError::Database(diesel::result::Error::NotFound) => not_found(id),
-            other => other,
-        })
+        error: Option<&str>,
+        worker_id: Option<&str>,
+    ) -> AppResult<Option<Self>> {
+        let mut conn = get_conn(pool).await?;
+        let item = diesel::sql_query(
+            "UPDATE crawl_queue SET \
+                 status = $2, \
+                 error_message = COALESCE($3, error_message), \
+                 locked_by = NULL, \
+                 locked_at = NULL, \
+                 finished_at = NOW(), \
+                 updated_at = NOW() \
+             WHERE id = $1 \
+               AND ($4::text IS NULL OR (status = 'processing' AND locked_by = $4)) \
+             RETURNING *",
+        )
+        .bind::<SqlUuid, _>(id)
+        .bind::<Text, _>(status.to_string())
+        .bind::<Nullable<Text>, _>(error)
+        .bind::<Nullable<Text>, _>(worker_id)
+        .get_result::<Self>(&mut conn)
+        .await
+        .optional()?;
+        Ok(item)
     }
 
     // ------------------------------------------------------------------
@@ -519,7 +681,7 @@ impl CrawlQueueItem {
         Self::claim_next(pool, worker_id, None).await
     }
 
-    /// Update crawl queue item
+    /// Unguarded update by id (admin / legacy): does not check status or lock owner.
     pub async fn update(
         pool: &DatabasePool,
         id: Uuid,
@@ -532,20 +694,6 @@ impl CrawlQueueItem {
             .get_result::<Self>(&mut conn)
             .await?;
         Ok(item)
-    }
-
-    /// Mark item as completed (see [`CrawlQueueItem::complete`])
-    pub async fn mark_completed(pool: &DatabasePool, id: Uuid) -> AppResult<Self> {
-        Self::finish(pool, id, QueueStatus::Completed, None).await
-    }
-
-    /// Mark item as failed (see [`CrawlQueueItem::fail`])
-    pub async fn mark_failed(
-        pool: &DatabasePool,
-        id: Uuid,
-        error_message: String,
-    ) -> AppResult<Self> {
-        Self::finish(pool, id, QueueStatus::Failed, Some(error_message)).await
     }
 }
 

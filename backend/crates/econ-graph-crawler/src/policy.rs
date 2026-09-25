@@ -25,7 +25,13 @@ pub struct SourcePolicy {
     pub max_backoff: Duration,
     /// Whether the source refuses requests without an API key.
     pub needs_api_key: bool,
+    /// How far before the latest stored observation an incremental fetch starts, so recent
+    /// revisions are re-fetched (`since = latest - revision_lookback`). Zero re-fetches only
+    /// from the latest stored date.
+    pub revision_lookback: Duration,
 }
+
+const DAY: Duration = Duration::from_secs(24 * 60 * 60);
 
 impl SourcePolicy {
     /// The built-in policy for `source`.
@@ -33,6 +39,8 @@ impl SourcePolicy {
     /// Rates for FRED (120/min), BLS (25/min), BEA (30/min) and Census (40/min) come from the
     /// legacy `enhanced_crawler_scheduler`; SEC uses 8/s (under SEC's 10/s fair-access limit,
     /// matching the SEC crawler default); every other source gets 1 req/s with concurrency 2.
+    /// Revision lookback: FRED 730 days, BLS 5 years (BLS revises seasonal factors for five
+    /// years), everything else 365 days.
     pub fn default_for(source: SourceId) -> Self {
         let base = SourcePolicy {
             requests_per_second: 1.0,
@@ -42,6 +50,7 @@ impl SourcePolicy {
             base_backoff: Duration::from_secs(30),
             max_backoff: Duration::from_secs(30 * 60),
             needs_api_key: false,
+            revision_lookback: DAY * 365,
         };
         match source {
             SourceId::Fred => SourcePolicy {
@@ -49,11 +58,13 @@ impl SourcePolicy {
                 burst: 4,
                 max_concurrency: 4,
                 needs_api_key: true,
+                revision_lookback: DAY * 730,
                 ..base
             },
             SourceId::Bls => SourcePolicy {
                 requests_per_second: 25.0 / 60.0,
                 max_concurrency: 1,
+                revision_lookback: DAY * 5 * 365,
                 ..base
             },
             SourceId::Bea => SourcePolicy {
@@ -138,6 +149,21 @@ mod tests {
             assert!(p.burst >= 1, "{id}");
             assert!(p.max_concurrency >= 1, "{id}");
             assert!(p.base_backoff <= p.max_backoff, "{id}");
+        }
+    }
+
+    #[test]
+    fn revision_lookbacks() {
+        let days = |id| SourcePolicy::default_for(id).revision_lookback.as_secs() / 86_400;
+        assert_eq!(days(SourceId::Fred), 730);
+        assert_eq!(days(SourceId::Bls), 5 * 365);
+        for id in [
+            SourceId::Bea,
+            SourceId::Census,
+            SourceId::WorldBank,
+            SourceId::Sec,
+        ] {
+            assert_eq!(days(id), 365, "{id}");
         }
     }
 

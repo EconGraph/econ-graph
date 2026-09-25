@@ -10,7 +10,8 @@
 use crate::database::DatabasePool;
 use crate::models::{
     crawl_queue::{
-        CrawlQueueItem, JobKind, NewCrawlQueueItem, QueuePriority, QueueStatus, QueueTransition,
+        CrawlQueueItem, JobKind, LeaseOutcome, NewCrawlQueueItem, QueuePriority, QueueStatus,
+        QueueTransition,
     },
     data_source::{DataSource, NewDataSource},
 };
@@ -246,10 +247,16 @@ async fn test_full_lifecycle_retry_complete_reenqueue() {
     assert_eq!(claimed.id, item.id);
 
     let before = Utc::now();
-    let transition =
-        CrawlQueueItem::retry_later(&pool, item.id, "timeout", Duration::from_secs(3600), true)
-            .await
-            .unwrap();
+    let transition = CrawlQueueItem::retry_later(
+        &pool,
+        item.id,
+        "w1",
+        "timeout",
+        Duration::from_secs(3600),
+        true,
+    )
+    .await
+    .unwrap();
     let QueueTransition::Rescheduled { at } = transition else {
         panic!("expected Rescheduled, got {transition:?}");
     };
@@ -285,7 +292,12 @@ async fn test_full_lifecycle_retry_complete_reenqueue() {
     assert_eq!(reclaimed.locked_by.as_deref(), Some("w2"));
     assert_eq!(reclaimed.retry_count, 1);
 
-    CrawlQueueItem::complete(&pool, item.id).await.unwrap();
+    assert_eq!(
+        CrawlQueueItem::complete(&pool, item.id, "w2")
+            .await
+            .unwrap(),
+        LeaseOutcome::Applied
+    );
     let row = reload(&pool, item.id).await;
     assert_eq!(row.status, "completed");
     assert!(row.locked_by.is_none() && row.locked_at.is_none());
@@ -328,9 +340,10 @@ async fn test_enqueue_duplicate_while_active_returns_none() {
         .is_none());
 
     // retrying duplicate
-    CrawlQueueItem::retry_later(&pool, first.id, "x", Duration::from_secs(60), true)
+    let t = CrawlQueueItem::retry_later(&pool, first.id, "w", "x", Duration::from_secs(60), true)
         .await
         .unwrap();
+    assert!(matches!(t, QueueTransition::Rescheduled { .. }));
     assert!(CrawlQueueItem::enqueue(&pool, &new_item(&source, "CPI"))
         .await
         .unwrap()
@@ -347,8 +360,17 @@ async fn test_enqueue_duplicate_while_active_returns_none() {
         .expect("different kind must enqueue");
     assert_eq!(other.job_kind(), JobKind::DiscoverCatalog);
 
-    // After a permanent failure the series can be enqueued again.
-    CrawlQueueItem::fail(&pool, first.id, "gone").await.unwrap();
+    // After a permanent failure the series can be enqueued again. (The item is `retrying`, so
+    // no worker holds a lease on it: only the admin override can fail it.)
+    assert_eq!(
+        CrawlQueueItem::fail(&pool, first.id, "w", "gone")
+            .await
+            .unwrap(),
+        LeaseOutcome::LostLease
+    );
+    CrawlQueueItem::force_fail(&pool, first.id, "gone")
+        .await
+        .unwrap();
     assert!(CrawlQueueItem::enqueue(&pool, &new_item(&source, "CPI"))
         .await
         .unwrap()
@@ -372,36 +394,46 @@ async fn test_retry_later_attempt_counting_and_failure() {
     .await
     .unwrap()
     .unwrap();
-    CrawlQueueItem::claim_next(&pool, "w", Some(&sources))
-        .await
-        .unwrap()
-        .unwrap();
+    let (pool_ref, sources_ref) = (&pool, &sources);
+    let claim = move || async move {
+        CrawlQueueItem::claim_next(pool_ref, "w", Some(sources_ref))
+            .await
+            .unwrap()
+            .expect("zero-delay retry is immediately claimable")
+    };
+    assert_eq!(claim().await.id, item.id);
 
     // Rate limiting doesn't consume the attempt budget.
     for _ in 0..3 {
-        let t = CrawlQueueItem::retry_later(&pool, item.id, "429", Duration::ZERO, false)
+        let t = CrawlQueueItem::retry_later(&pool, item.id, "w", "429", Duration::ZERO, false)
             .await
             .unwrap();
         assert!(matches!(t, QueueTransition::Rescheduled { .. }));
+        let row = reload(&pool, item.id).await;
+        assert_eq!(row.status, "retrying");
+        // No longer processing -> a second transition from the same worker is a lost lease.
+        assert_eq!(
+            CrawlQueueItem::retry_later(&pool, item.id, "w", "dup", Duration::ZERO, false)
+                .await
+                .unwrap(),
+            QueueTransition::LostLease
+        );
+        assert_eq!(claim().await.id, item.id);
     }
     let row = reload(&pool, item.id).await;
     assert_eq!(row.retry_count, 0);
-    assert_eq!(row.status, "retrying");
+    assert_eq!(row.error_message.as_deref(), Some("429"));
 
     // First counted attempt: 1 < 2 -> rescheduled.
-    let t = CrawlQueueItem::retry_later(&pool, item.id, "503", Duration::ZERO, true)
+    let t = CrawlQueueItem::retry_later(&pool, item.id, "w", "503", Duration::ZERO, true)
         .await
         .unwrap();
     assert!(matches!(t, QueueTransition::Rescheduled { .. }));
     assert_eq!(reload(&pool, item.id).await.retry_count, 1);
 
     // Claim again (zero delay -> due now), then the second counted attempt reaches max_retries.
-    let again = CrawlQueueItem::claim_next(&pool, "w", Some(&sources))
-        .await
-        .unwrap()
-        .expect("zero-delay retry is immediately claimable");
-    assert_eq!(again.id, item.id);
-    let t = CrawlQueueItem::retry_later(&pool, item.id, "503 again", Duration::ZERO, true)
+    assert_eq!(claim().await.id, item.id);
+    let t = CrawlQueueItem::retry_later(&pool, item.id, "w", "503 again", Duration::ZERO, true)
         .await
         .unwrap();
     assert_eq!(t, QueueTransition::Failed);
@@ -417,11 +449,35 @@ async fn test_retry_later_attempt_counting_and_failure() {
         .await
         .unwrap()
         .is_none());
+    assert_eq!(
+        CrawlQueueItem::retry_later(&pool, item.id, "w", "x", Duration::ZERO, true)
+            .await
+            .unwrap(),
+        QueueTransition::LostLease
+    );
     assert!(
-        CrawlQueueItem::retry_later(&pool, item.id, "x", Duration::ZERO, true)
+        CrawlQueueItem::force_retry_later(&pool, item.id, "x", Duration::ZERO, true)
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+#[serial]
+async fn test_force_retry_later_ignores_lease_owner() {
+    let pool = test_pool().await;
+    let source = unique_source("FORCE");
+    let item = CrawlQueueItem::enqueue(&pool, &new_item(&source, "A"))
+        .await
+        .unwrap()
+        .unwrap();
+    // Pending (unclaimed) items can be rescheduled by the admin path.
+    let t = CrawlQueueItem::force_retry_later(&pool, item.id, "admin", Duration::ZERO, true)
+        .await
+        .unwrap();
+    assert!(matches!(t, QueueTransition::Rescheduled { .. }));
+    let row = reload(&pool, item.id).await;
+    assert_eq!((row.status.as_str(), row.retry_count), ("retrying", 1));
 }
 
 #[tokio::test]
@@ -456,6 +512,13 @@ async fn test_release_stuck_clears_locks() {
     assert_eq!(row.status, "pending");
     assert!(row.locked_by.is_none());
     assert!(row.locked_at.is_none());
+    assert_eq!(row.retry_count, 1, "a release counts as an attempt");
+    assert!(row.finished_at.is_none());
+    let msg = row.error_message.unwrap_or_default();
+    assert!(
+        msg.contains("lease expired") && msg.contains("crashed-worker"),
+        "{msg}"
+    );
 
     let reclaimed = CrawlQueueItem::claim_next(&pool, "healthy-worker", Some(&sources))
         .await
@@ -556,15 +619,268 @@ async fn test_release_and_changeset_clear_lock() {
     assert!(row.locked_by.is_none() && row.locked_at.is_none());
 
     // Finished items are not resurrected.
-    CrawlQueueItem::complete(&pool, item.id).await.unwrap();
+    CrawlQueueItem::force_complete(&pool, item.id)
+        .await
+        .unwrap();
     assert!(!CrawlQueueItem::release(&pool, item.id).await.unwrap());
     assert_eq!(reload(&pool, item.id).await.status, "completed");
 
-    // Missing ids error rather than silently succeeding.
-    assert!(CrawlQueueItem::complete(&pool, Uuid::new_v4())
+    // Missing ids: the admin overrides error rather than silently succeeding; the guarded
+    // worker transitions report that no lease is held.
+    assert!(CrawlQueueItem::force_complete(&pool, Uuid::new_v4())
         .await
         .is_err());
-    assert!(CrawlQueueItem::fail(&pool, Uuid::new_v4(), "x")
+    assert!(CrawlQueueItem::force_fail(&pool, Uuid::new_v4(), "x")
         .await
         .is_err());
+    assert_eq!(
+        CrawlQueueItem::complete(&pool, Uuid::new_v4(), "w")
+            .await
+            .unwrap(),
+        LeaseOutcome::LostLease
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn test_lost_lease_after_release_stuck() {
+    // REQUIREMENT: a job that outlives its lease must not finish an item another worker has
+    // since claimed (the first worker's `complete` used to mark it done while B still ran it).
+    let pool = test_pool().await;
+    let source = unique_source("LEASE");
+    let sources = vec![source.clone()];
+    let item = CrawlQueueItem::enqueue(&pool, &new_item(&source, "GDP"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    let a = CrawlQueueItem::claim_next(&pool, "worker-a", Some(&sources))
+        .await
+        .unwrap()
+        .expect("A claims");
+    assert_eq!(a.id, item.id);
+
+    // A's job outlives stuck_after (0 here): the lease is taken away and B claims the item.
+    assert!(
+        CrawlQueueItem::release_stuck(&pool, Duration::ZERO)
+            .await
+            .unwrap()
+            >= 1
+    );
+    let b = CrawlQueueItem::claim_next(&pool, "worker-b", Some(&sources))
+        .await
+        .unwrap()
+        .expect("B claims the released item");
+    assert_eq!(b.id, item.id);
+
+    // Every transition A attempts is refused and leaves B's claim untouched.
+    assert_eq!(
+        CrawlQueueItem::complete(&pool, item.id, "worker-a")
+            .await
+            .unwrap(),
+        LeaseOutcome::LostLease
+    );
+    assert_eq!(
+        CrawlQueueItem::fail(&pool, item.id, "worker-a", "boom")
+            .await
+            .unwrap(),
+        LeaseOutcome::LostLease
+    );
+    assert_eq!(
+        CrawlQueueItem::retry_later(&pool, item.id, "worker-a", "503", Duration::ZERO, true)
+            .await
+            .unwrap(),
+        QueueTransition::LostLease
+    );
+    let row = reload(&pool, item.id).await;
+    assert_eq!(row.status, "processing");
+    assert_eq!(row.locked_by.as_deref(), Some("worker-b"));
+    assert!(row.finished_at.is_none());
+    assert_eq!(row.retry_count, 1, "only the release counted as an attempt");
+
+    // B still owns the lease and finishes normally.
+    assert_eq!(
+        CrawlQueueItem::complete(&pool, item.id, "worker-b")
+            .await
+            .unwrap(),
+        LeaseOutcome::Applied
+    );
+    let row = reload(&pool, item.id).await;
+    assert_eq!(row.status, "completed");
+    assert!(row.locked_by.is_none() && row.locked_at.is_none());
+    assert!(row.finished_at.is_some());
+
+    // ...and a late duplicate from B is a lost lease too, not a second transition.
+    assert_eq!(
+        CrawlQueueItem::complete(&pool, item.id, "worker-b")
+            .await
+            .unwrap(),
+        LeaseOutcome::LostLease
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn test_release_stuck_fails_item_at_max_retries() {
+    // REQUIREMENT: a job that keeps crashing workers (never finishes) must not loop forever.
+    let pool = test_pool().await;
+    let source = unique_source("CRASHY");
+    let sources = vec![source.clone()];
+    let item = CrawlQueueItem::enqueue(
+        &pool,
+        &NewCrawlQueueItem {
+            max_retries: 2,
+            ..new_item(&source, "BOOM")
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    for (round, expected_status) in [(1, "pending"), (2, "failed")] {
+        CrawlQueueItem::claim_next(&pool, &format!("crasher-{round}"), Some(&sources))
+            .await
+            .unwrap()
+            .expect("claimable");
+        CrawlQueueItem::release_stuck(&pool, Duration::ZERO)
+            .await
+            .unwrap();
+        let row = reload(&pool, item.id).await;
+        assert_eq!(row.retry_count, round);
+        assert_eq!(row.status, expected_status, "after release {round}");
+        assert!(row.locked_by.is_none() && row.locked_at.is_none());
+    }
+    let row = reload(&pool, item.id).await;
+    assert!(row.finished_at.is_some());
+    assert!(row
+        .error_message
+        .as_deref()
+        .is_some_and(|m| m.contains("lease expired") && m.contains("crasher-2")));
+    assert!(CrawlQueueItem::claim_next(&pool, "w", Some(&sources))
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+#[serial]
+async fn test_purge_finished_deletes_only_old_finished_rows() {
+    let pool = test_pool().await;
+    let source = unique_source("PURGE");
+    let sources = vec![source.clone()];
+    let mk = |series: &'static str| {
+        let pool = pool.clone();
+        let source = source.clone();
+        async move {
+            CrawlQueueItem::enqueue(&pool, &new_item(&source, series))
+                .await
+                .unwrap()
+                .unwrap()
+                .id
+        }
+    };
+    let old_done = mk("OLD_DONE").await;
+    let old_failed = mk("OLD_FAILED").await;
+    let recent_done = mk("RECENT_DONE").await;
+    let old_pending = mk("OLD_PENDING").await;
+    let old_processing = mk("OLD_PROCESSING").await;
+
+    for id in [old_done, recent_done] {
+        CrawlQueueItem::force_complete(&pool, id).await.unwrap();
+    }
+    CrawlQueueItem::force_fail(&pool, old_failed, "x")
+        .await
+        .unwrap();
+    CrawlQueueItem::claim_by_id(&pool, old_processing, "w")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Age everything except `recent_done` by 10 days (a trigger bumps `updated_at` on every
+    // UPDATE, so ages are set through created_at / finished_at).
+    let legacy_done: Uuid = {
+        let mut conn = pool.get().await.unwrap();
+        let ten_days_ago = Utc::now() - chrono::Duration::days(10);
+        diesel::update(
+            crawl_queue::table
+                .filter(crawl_queue::source.eq(&source))
+                .filter(crawl_queue::id.ne(recent_done)),
+        )
+        .set(crawl_queue::created_at.eq(ten_days_ago))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        diesel::update(crawl_queue::table.filter(crawl_queue::id.eq_any([old_done, old_failed])))
+            .set(crawl_queue::finished_at.eq(Some(ten_days_ago)))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        // A row finished before `finished_at` existed: only `updated_at` tells its age.
+        diesel::insert_into(crawl_queue::table)
+            .values((
+                crawl_queue::source.eq(&source),
+                crawl_queue::series_id.eq("LEGACY_DONE"),
+                crawl_queue::status.eq("completed"),
+                crawl_queue::created_at.eq(ten_days_ago),
+                crawl_queue::updated_at.eq(ten_days_ago),
+            ))
+            .returning(crawl_queue::id)
+            .get_result(&mut conn)
+            .await
+            .unwrap()
+    };
+    assert!(reload(&pool, legacy_done).await.finished_at.is_none());
+
+    let deleted = CrawlQueueItem::purge_finished(&pool, Duration::from_secs(5 * 86_400))
+        .await
+        .unwrap();
+    assert!(deleted >= 3, "deleted {deleted}");
+
+    let mut conn = pool.get().await.unwrap();
+    let left: HashSet<Uuid> = crawl_queue::table
+        .filter(crawl_queue::source.eq_any(&sources))
+        .select(crawl_queue::id)
+        .load::<Uuid>(&mut conn)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+    assert_eq!(
+        left,
+        HashSet::from([recent_done, old_pending, old_processing]),
+        "only old completed/failed rows are purged"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn test_purge_finished_works_in_batches() {
+    let pool = test_pool().await;
+    let source = unique_source("PURGEB");
+    let n = super::PURGE_BATCH_SIZE + 5;
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query(
+        "INSERT INTO crawl_queue (source, series_id, priority, max_retries, status, kind, \
+                                  finished_at, updated_at) \
+         SELECT $1, 'S' || g, 5, 3, 'completed', 'fetch_series', \
+                NOW() - INTERVAL '30 days', NOW() - INTERVAL '30 days' \
+         FROM generate_series(1, $2) AS g",
+    )
+    .bind::<diesel::sql_types::Text, _>(&source)
+    .bind::<diesel::sql_types::BigInt, _>(n)
+    .execute(&mut conn)
+    .await
+    .unwrap();
+
+    let deleted = CrawlQueueItem::purge_finished(&pool, Duration::from_secs(86_400))
+        .await
+        .unwrap();
+    assert!(deleted >= n, "deleted {deleted}, expected at least {n}");
+    let left: i64 = crawl_queue::table
+        .filter(crawl_queue::source.eq(&source))
+        .count()
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
 }

@@ -16,9 +16,17 @@
 //! | `NotFound` / `Auth` / `Parse` / `Permanent` | `fail`                                                          |
 //! | unknown `source` / `kind`, no adapter or handler | `fail`                                                 |
 //!
+//! A claim is a lease. `complete` / `retry_later` / `fail` are passed the worker id and only apply
+//! while the item is still `processing` and locked by this worker. If the job outlived
+//! `stuck_after`, the maintenance loop (of any worker) has released the item and another worker
+//! may be running it; the transition then reports a lost lease, the worker logs a warning and
+//! returns [`JobOutcome::LeaseLost`] without touching the item again.
+//!
 //! Dispatch by `kind`: a [`JobHandler`] registered for `(source, kind)` wins; otherwise
 //! `fetch_series` calls [`SourceAdapter::fetch_series`](crate::SourceAdapter::fetch_series) with
-//! `since` = the latest stored observation date and `discover_catalog` calls
+//! `since` = the latest stored observation date minus the source's
+//! [`revision_lookback`](crate::SourcePolicy::revision_lookback) (so recent revisions are
+//! re-fetched; `None` for a series with no stored points) and `discover_catalog` calls
 //! [`SourceAdapter::discover`](crate::SourceAdapter::discover). Adapter and handler calls run in
 //! their own task, so a panic becomes a `Transient` error instead of killing the worker.
 //!
@@ -29,7 +37,9 @@
 //! until the pause ends.
 //!
 //! A maintenance loop calls [`CrawlQueueItem::release_stuck`] every `stuck_after / 2`
-//! (clamped to 1 s ..= 5 min) so items held by crashed workers become claimable again.
+//! (clamped to 1 s ..= 5 min) so items held by crashed workers become claimable again (each
+//! release counts as an attempt). The same loop purges `completed` / `failed` rows older than
+//! `queue_retention` with [`CrawlQueueItem::purge_finished`], at start-up and then hourly.
 //!
 //! [`Worker::run`] stops claiming when its `shutdown` future resolves and returns once in-flight
 //! jobs have finished.
@@ -42,7 +52,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
-use econ_graph_core::models::{CrawlQueueItem, JobKind, QueueTransition};
+use econ_graph_core::models::{CrawlQueueItem, JobKind, LeaseOutcome, QueueTransition};
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -68,7 +78,16 @@ pub struct WorkerConfig {
     pub pause_after_consecutive: u32,
     /// How long a tripped source stays paused.
     pub pause_for: Duration,
+    /// `completed` / `failed` rows older than this (by `finished_at`) are deleted by the
+    /// maintenance loop. `None` disables purging.
+    pub queue_retention: Option<Duration>,
 }
+
+/// Default for [`WorkerConfig::queue_retention`]: 14 days.
+pub const DEFAULT_QUEUE_RETENTION: Duration = Duration::from_secs(14 * 24 * 60 * 60);
+
+/// How often the maintenance loop purges finished queue rows.
+const PURGE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 impl Default for WorkerConfig {
     fn default() -> Self {
@@ -80,6 +99,7 @@ impl Default for WorkerConfig {
             source_filter: None,
             pause_after_consecutive: 5,
             pause_for: Duration::from_secs(5 * 60),
+            queue_retention: Some(DEFAULT_QUEUE_RETENTION),
         }
     }
 }
@@ -126,6 +146,12 @@ pub enum JobOutcome {
     Failed {
         /// The error recorded on the item.
         error: String,
+    },
+    /// The worker's lease expired before it finished (`release_stuck` re-queued the item, and
+    /// another worker may be processing it). The result was discarded and the item left alone.
+    LeaseLost {
+        /// Result of the discarded attempt: `None` on success, else the error.
+        error: Option<String>,
     },
 }
 
@@ -293,6 +319,7 @@ impl Worker {
     async fn maintenance_loop(&self, mut stop: watch::Receiver<bool>) {
         let period = (self.config.stuck_after / 2)
             .clamp(Duration::from_secs(1), Duration::from_secs(5 * 60));
+        let mut last_purge: Option<Instant> = None;
         loop {
             if *stop.borrow() {
                 return;
@@ -301,6 +328,20 @@ impl Worker {
                 Ok(0) => {}
                 Ok(n) => tracing::warn!(released = n, "released stuck crawl_queue items"),
                 Err(e) => tracing::warn!(error = %e, "release_stuck failed"),
+            }
+            if let Some(retention) = self.config.queue_retention {
+                if last_purge.is_none_or(|t| t.elapsed() >= PURGE_INTERVAL) {
+                    last_purge = Some(Instant::now());
+                    match CrawlQueueItem::purge_finished(&self.ctx.pool, retention).await {
+                        Ok(0) => {}
+                        Ok(n) => tracing::info!(
+                            deleted = n,
+                            retention_days = retention.as_secs() / 86_400,
+                            "purged finished crawl_queue items"
+                        ),
+                        Err(e) => tracing::warn!(error = %e, "purging crawl_queue failed"),
+                    }
+                }
             }
             tokio::select! {
                 _ = tokio::time::sleep(period) => {}
@@ -357,6 +398,7 @@ impl Worker {
             JobOutcome::Completed(_) => "completed",
             JobOutcome::Retrying { .. } => "retrying",
             JobOutcome::Failed { .. } => "failed",
+            JobOutcome::LeaseLost { .. } => "lease_lost",
         };
         econ_graph_metrics::crawler::CRAWLER_QUEUE_METRICS.record_job(&source, &kind, label);
         Some(outcome)
@@ -416,6 +458,9 @@ impl Worker {
                 JobOutcome::Completed(stats) => Ok(stats),
                 JobOutcome::Retrying { error, .. } => Err(error),
                 JobOutcome::Failed { error } => Err(CrawlError::Permanent(error)),
+                JobOutcome::LeaseLost { .. } => Err(CrawlError::Transient(
+                    "handler returned LeaseLost (only the worker reports lost leases)".into(),
+                )),
             };
         }
         match kind {
@@ -432,9 +477,10 @@ impl Worker {
             .registry
             .get(source)
             .ok_or_else(|| CrawlError::Permanent(format!("no adapter registered for {source}")))?;
-        let since = persist::latest_point_date(&self.ctx.pool, source, external_id)
+        let latest = persist::latest_point_date(&self.ctx.pool, source, external_id)
             .await
             .map_err(db_error)?;
+        let since = latest.and_then(|d| incremental_since(d, self.ctx.http.policy(source)));
         let ctx = self.ctx.clone();
         let id = external_id.to_string();
         let fetched = guarded(async move { adapter.fetch_series(&ctx, &id, since).await }).await?;
@@ -517,10 +563,18 @@ impl Worker {
         elapsed: Duration,
     ) -> JobOutcome {
         let pool = &self.ctx.pool;
+        let worker_id = self.config.worker_id.as_str();
         let error = match result {
             Ok(stats) => {
-                if let Err(e) = CrawlQueueItem::complete(pool, item.id).await {
-                    tracing::error!(id = %item.id, error = %e, "marking item completed failed");
+                match CrawlQueueItem::complete(pool, item.id, worker_id).await {
+                    Ok(LeaseOutcome::Applied) => {}
+                    Ok(LeaseOutcome::LostLease) => {
+                        self.warn_lost_lease(item, "complete", elapsed);
+                        return JobOutcome::LeaseLost { error: None };
+                    }
+                    Err(e) => {
+                        tracing::error!(id = %item.id, error = %e, "marking item completed failed");
+                    }
                 }
                 tracing::info!(
                     id = %item.id,
@@ -557,7 +611,9 @@ impl Worker {
             tracing::warn!(id = %item.id, %source, series_id = %item.series_id, kind = error.kind(), error = %message, "job failed permanently");
             return self.fail(item, message).await;
         };
-        match CrawlQueueItem::retry_later(pool, item.id, &message, delay, count_attempt).await {
+        match CrawlQueueItem::retry_later(pool, item.id, worker_id, &message, delay, count_attempt)
+            .await
+        {
             Ok(QueueTransition::Rescheduled { at }) => {
                 tracing::warn!(
                     id = %item.id,
@@ -575,6 +631,12 @@ impl Worker {
                 tracing::warn!(id = %item.id, %source, series_id = %item.series_id, error = %message, "retry budget exhausted; job failed");
                 JobOutcome::Failed { error: message }
             }
+            Ok(QueueTransition::LostLease) => {
+                self.warn_lost_lease(item, "retry_later", elapsed);
+                JobOutcome::LeaseLost {
+                    error: Some(message),
+                }
+            }
             Err(e) => {
                 tracing::error!(id = %item.id, error = %e, "rescheduling item failed");
                 JobOutcome::Failed {
@@ -585,11 +647,42 @@ impl Worker {
     }
 
     async fn fail(&self, item: &CrawlQueueItem, error: String) -> JobOutcome {
-        if let Err(e) = CrawlQueueItem::fail(&self.ctx.pool, item.id, &error).await {
-            tracing::error!(id = %item.id, error = %e, "marking item failed failed");
+        match CrawlQueueItem::fail(&self.ctx.pool, item.id, &self.config.worker_id, &error).await {
+            Ok(LeaseOutcome::Applied) => {}
+            Ok(LeaseOutcome::LostLease) => {
+                let held_for = item
+                    .locked_at
+                    .and_then(|t| (Utc::now() - t).to_std().ok())
+                    .unwrap_or_default();
+                self.warn_lost_lease(item, "fail", held_for);
+                return JobOutcome::LeaseLost { error: Some(error) };
+            }
+            Err(e) => tracing::error!(id = %item.id, error = %e, "marking item failed failed"),
         }
         JobOutcome::Failed { error }
     }
+
+    /// A transition found the item no longer `processing` under this worker's lock.
+    fn warn_lost_lease(&self, item: &CrawlQueueItem, transition: &str, elapsed: Duration) {
+        tracing::warn!(
+            id = %item.id,
+            source = %item.source,
+            kind = %item.kind,
+            series_id = %item.series_id,
+            worker_id = %self.config.worker_id,
+            transition,
+            elapsed_secs = elapsed.as_secs(),
+            stuck_after_secs = self.config.stuck_after.as_secs(),
+            "lost lease on crawl_queue item (job outlived stuck_after and was released); result discarded"
+        );
+    }
+}
+
+/// `latest - policy.revision_lookback` (whole days), or `None` (full fetch) if that would
+/// underflow the calendar.
+fn incremental_since(latest: NaiveDate, policy: crate::policy::SourcePolicy) -> Option<NaiveDate> {
+    let lookback = chrono::Duration::from_std(policy.revision_lookback).ok()?;
+    latest.checked_sub_signed(lookback)
 }
 
 /// Database failures while reading/persisting are infrastructure problems: retry later.
@@ -622,6 +715,21 @@ where
 #[cfg(test)]
 mod breaker_tests {
     use super::*;
+
+    #[test]
+    fn incremental_since_subtracts_lookback() {
+        let latest = NaiveDate::from_ymd_opt(2024, 3, 1).unwrap();
+        let mut p = crate::policy::SourcePolicy::default_for(SourceId::Fred);
+        p.revision_lookback = Duration::ZERO;
+        assert_eq!(incremental_since(latest, p), Some(latest));
+        p.revision_lookback = Duration::from_secs(30 * 86_400);
+        assert_eq!(
+            incremental_since(latest, p),
+            NaiveDate::from_ymd_opt(2024, 1, 31)
+        );
+        p.revision_lookback = Duration::from_secs(u64::MAX / 2);
+        assert_eq!(incremental_since(latest, p), None);
+    }
 
     #[test]
     fn trips_after_k_consecutive_and_resets_on_other_results() {

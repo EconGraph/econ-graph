@@ -58,6 +58,11 @@ struct Args {
     #[arg(long, env = "CRAWLER_STUCK_AFTER_SECS", default_value_t = 30 * 60)]
     stuck_after_secs: u64,
 
+    /// Delete completed/failed crawl_queue rows that finished more than this many days ago
+    /// (checked hourly). 0 disables purging.
+    #[arg(long, env = "CRAWLER_QUEUE_RETENTION_DAYS", default_value_t = 14)]
+    queue_retention_days: u64,
+
     /// Pause a source after this many consecutive rate-limit/auth errors (0 = never).
     #[arg(long, env = "CRAWLER_PAUSE_AFTER", default_value_t = 5)]
     pause_after: u32,
@@ -132,6 +137,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         source_filter: args.sources,
         pause_after_consecutive: args.pause_after,
         pause_for: Duration::from_secs(args.pause_secs),
+        queue_retention: (args.queue_retention_days > 0)
+            .then(|| Duration::from_secs(args.queue_retention_days.saturating_mul(24 * 60 * 60))),
     };
     if registry.ids().is_empty() {
         tracing::warn!("no source adapters registered; only SEC fetch_filing jobs can succeed");

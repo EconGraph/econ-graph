@@ -1,8 +1,11 @@
 //! Queue service: legacy convenience wrappers over the crawl queue model.
 //!
 //! Every state transition here delegates to the queue API on
-//! [`CrawlQueueItem`] (`enqueue`, `claim_next`, `complete`, `retry_later`, `fail`,
-//! `release_stuck`), so there is one code path for queue semantics.
+//! [`CrawlQueueItem`], so there is one code path for queue semantics. These are admin /
+//! convenience entry points without a worker identity, so the terminal transitions use the
+//! *unguarded* `force_*` variants (they ignore which worker holds the lock). Queue workers must
+//! use the lease-guarded `CrawlQueueItem::{complete, fail, retry_later}` with their worker id
+//! instead (see `econ_graph_crawler::worker`).
 
 use chrono::{DateTime, Duration, Utc};
 use diesel::prelude::*;
@@ -51,9 +54,13 @@ pub async fn lock_queue_item(pool: &DatabasePool, item_id: Uuid, worker_id: &str
     }
 }
 
-/// Update queue item status with optional error message.
+/// Update queue item status with optional error message (admin override: ignores which worker
+/// holds the lock). Every accepted status releases the worker lock.
 ///
-/// Every status except `Processing` releases the worker lock.
+/// `Processing` is rejected with `Validation`: a `processing` row must be owned by a worker that
+/// will finish it (the DB requires `locked_by`/`locked_at` together, and a lock nobody holds
+/// would just sit there until `release_stuck` burns one of the item's attempts). Use
+/// [`lock_queue_item`] (or `CrawlQueueItem::claim_by_id`) to take ownership instead.
 pub async fn update_queue_item_status(
     pool: &DatabasePool,
     item_id: Uuid,
@@ -61,19 +68,19 @@ pub async fn update_queue_item_status(
     error_message: Option<String>,
 ) -> AppResult<()> {
     match status {
-        QueueStatus::Completed => CrawlQueueItem::complete(pool, item_id).await,
-        QueueStatus::Failed => {
-            CrawlQueueItem::fail(pool, item_id, error_message.as_deref().unwrap_or("failed")).await
-        }
-        QueueStatus::Processing => {
-            let update = UpdateCrawlQueueItem {
-                status: Some(status.to_string()),
-                error_message: error_message.map(Some),
-                ..Default::default()
-            };
-            CrawlQueueItem::update(pool, item_id, &update).await?;
+        QueueStatus::Completed => {
+            CrawlQueueItem::force_complete(pool, item_id).await?;
             Ok(())
         }
+        QueueStatus::Failed => {
+            CrawlQueueItem::force_fail(pool, item_id, error_message.as_deref().unwrap_or("failed"))
+                .await?;
+            Ok(())
+        }
+        QueueStatus::Processing => Err(AppError::Validation(format!(
+            "cannot set crawl_queue item {item_id} to processing without a worker lock; \
+             use lock_queue_item"
+        ))),
         QueueStatus::Pending | QueueStatus::Retrying | QueueStatus::Cancelled => {
             let update = UpdateCrawlQueueItem {
                 status: Some(status.to_string()),
@@ -95,6 +102,8 @@ pub fn retry_backoff(attempt: i32) -> std::time::Duration {
 
 /// Record a failed attempt and reschedule with exponential backoff (2^n minutes, max 60),
 /// or mark the item failed once `max_retries` is reached. Releases the lock.
+/// Admin override: applies to any active item regardless of lock owner
+/// (see `CrawlQueueItem::force_retry_later`).
 pub async fn update_queue_item_for_retry(
     pool: &DatabasePool,
     item_id: Uuid,
@@ -113,7 +122,7 @@ pub async fn update_queue_item_for_retry(
             .await?
     };
 
-    CrawlQueueItem::retry_later(
+    CrawlQueueItem::force_retry_later(
         pool,
         item_id,
         error_message.as_deref().unwrap_or("retry"),
@@ -226,37 +235,22 @@ async fn get_average_processing_time(conn: &mut AsyncPgConnection) -> AppResult<
     Ok(row.avg_seconds)
 }
 
-/// Clean up old completed and failed queue items
-/// Removes items older than the specified number of days
+/// Clean up completed and failed queue items that finished more than 30 days ago.
+/// (The crawler worker purges on its own schedule; see `WorkerConfig::queue_retention`.)
 pub async fn cleanup_old_queue_items(pool: &DatabasePool) -> AppResult<i64> {
     cleanup_old_queue_items_with_retention(pool, 30).await // Default 30 days retention
 }
 
-/// Clean up old queue items with custom retention period
+/// Clean up completed and failed queue items that finished more than `retention_days` ago
+/// (negative values are treated as 0). Batched; see `CrawlQueueItem::purge_finished`.
 pub async fn cleanup_old_queue_items_with_retention(
     pool: &DatabasePool,
     retention_days: i64,
 ) -> AppResult<i64> {
-    use crawl_queue::dsl;
-
-    let mut conn = pool.get().await.map_err(|e| {
-        econ_graph_core::error::AppError::DatabaseError(format!(
-            "Failed to get database connection: {}",
-            e
-        ))
-    })?;
-
-    let cutoff_date = Utc::now() - Duration::days(retention_days);
-
-    let deleted_count = diesel::delete(
-        dsl::crawl_queue
-            .filter(dsl::status.eq_any(vec!["completed", "failed"]))
-            .filter(dsl::updated_at.lt(cutoff_date)),
-    )
-    .execute(&mut conn)
-    .await?;
-
-    Ok(deleted_count as i64)
+    let secs = u64::try_from(retention_days.max(0))
+        .unwrap_or(0)
+        .saturating_mul(86_400);
+    CrawlQueueItem::purge_finished(pool, std::time::Duration::from_secs(secs)).await
 }
 
 /// Claim the next due item for a worker (see [`CrawlQueueItem::claim_next`]).
@@ -267,18 +261,22 @@ pub async fn get_and_lock_next_item(
     CrawlQueueItem::claim_next(pool, worker_id, None).await
 }
 
-/// Mark item as completed (see [`CrawlQueueItem::complete`])
+/// Mark item as completed regardless of which worker holds it (admin override; see
+/// [`CrawlQueueItem::force_complete`]). Errors with `NotFound` for a missing id.
 pub async fn mark_item_completed(pool: &DatabasePool, item_id: Uuid) -> AppResult<()> {
-    CrawlQueueItem::complete(pool, item_id).await
+    CrawlQueueItem::force_complete(pool, item_id).await?;
+    Ok(())
 }
 
-/// Mark item as permanently failed (see [`CrawlQueueItem::fail`])
+/// Mark item as permanently failed regardless of which worker holds it (admin override; see
+/// [`CrawlQueueItem::force_fail`]). Errors with `NotFound` for a missing id.
 pub async fn mark_item_failed(
     pool: &DatabasePool,
     item_id: Uuid,
     error_message: String,
 ) -> AppResult<()> {
-    CrawlQueueItem::fail(pool, item_id, &error_message).await
+    CrawlQueueItem::force_fail(pool, item_id, &error_message).await?;
+    Ok(())
 }
 
 /// Get items that have been locked for too long (stuck items)
@@ -308,7 +306,8 @@ pub async fn get_stuck_items(
 }
 
 /// Unlock stuck items (recover from crashed workers): processing items locked for longer than
-/// `timeout_minutes` go back to `pending` with the lock cleared (see [`CrawlQueueItem::release_stuck`]).
+/// `timeout_minutes` go back to `pending` with the lock cleared, counting one attempt (items
+/// that reach `max_retries` become `failed`); see [`CrawlQueueItem::release_stuck`].
 pub async fn unlock_stuck_items(pool: &DatabasePool, timeout_minutes: i64) -> AppResult<i64> {
     let older_than = std::time::Duration::from_secs(timeout_minutes.max(0) as u64 * 60);
     CrawlQueueItem::release_stuck(pool, older_than).await
@@ -593,6 +592,15 @@ mod tests {
         let stats = get_queue_statistics(&pool).await.unwrap();
         assert_eq!(stats.failed_items, 1);
         assert_eq!(stats.completed_items, 0);
+
+        // `processing` without a worker lock is rejected and changes nothing.
+        let err = update_queue_item_status(&pool, created_item.id, QueueStatus::Processing, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)), "{err:?}");
+        let row = load_item(&pool, created_item.id).await;
+        assert_eq!(row.status, "failed");
+        assert!(row.locked_by.is_none() && row.locked_at.is_none());
     }
 
     #[tokio::test]

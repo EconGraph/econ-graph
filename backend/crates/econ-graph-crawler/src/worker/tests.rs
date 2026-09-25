@@ -194,6 +194,7 @@ fn config(worker_id: &str) -> WorkerConfig {
         source_filter: None,
         pause_after_consecutive: 0,
         pause_for: Duration::from_secs(60),
+        queue_retention: None,
     }
 }
 
@@ -366,7 +367,7 @@ async fn success_persists_series_points_attempt_and_completes() {
 }
 
 #[tokio::test]
-async fn second_fetch_passes_since_latest_stored_date() {
+async fn second_fetch_passes_since_latest_stored_date_minus_lookback() {
     let Some(db) = db().await else { return };
     let mock = MockSource::start().await;
     mock.mount(
@@ -384,10 +385,17 @@ async fn second_fetch_passes_since_latest_stored_date() {
     assert_eq!(first.len(), 1);
     assert!(first[0].url.query_pairs().all(|(k, _)| k != "since"));
 
-    // Finished rows don't block re-enqueueing. The source revises Feb and adds Mar.
+    // Finished rows don't block re-enqueueing. The source revises Feb and adds Mar. The worker
+    // asks for everything since latest stored date (Feb) minus the source's revision lookback.
+    let lookback = w.ctx.http.policy(SRC).revision_lookback;
+    assert_eq!(lookback, SourcePolicy::default_for(SRC).revision_lookback);
+    assert!(lookback > Duration::ZERO);
+    let expected_since =
+        (d("2024-02-01") - chrono::Duration::from_std(lookback).unwrap()).to_string();
+    assert_eq!(expected_since, "2023-02-01", "365-day default lookback");
     mock.reset().await;
     mock.mount(
-        &Route::get("/series/t5_cpi").query("since", "2024-02-01"),
+        &Route::get("/series/t5_cpi").query("since", &expected_since),
         series_json(
             "CPI",
             &[("2024-02-01", Some("2.5")), ("2024-03-01", Some("3"))],
@@ -406,7 +414,7 @@ async fn second_fetch_passes_since_latest_stored_date() {
         .filter(|(k, _)| k == "since")
         .map(|(_, v)| v.into_owned())
         .collect();
-    assert_eq!(since, vec!["2024-02-01".to_string()]);
+    assert_eq!(since, vec![expected_since]);
     assert_eq!(stats.points_written, 2);
     assert_eq!(stats.new_points, 1);
     assert_eq!(item(&db.pool, id).await.status, "completed");
@@ -879,6 +887,167 @@ async fn extension_handlers_dispatch_by_source_and_kind() {
     let it = item(&db.pool, unhandled).await;
     assert_eq!(it.status, "failed");
     assert!(it.error_message.unwrap().contains("no handler"));
+}
+
+#[tokio::test]
+async fn zero_revision_lookback_fetches_since_latest_date() {
+    let Some(db) = db().await else { return };
+    let mock = MockSource::start().await;
+    mock.mount(
+        &Route::get("/series/t5_zero"),
+        series_json("Z", &[("2024-05-01", Some("1"))]),
+    )
+    .await;
+    let mut ctx = test_ctx_with(HashMap::from([(
+        SRC,
+        SourcePolicy {
+            revision_lookback: Duration::ZERO,
+            ..slow_backoff(SRC)
+        },
+    )]));
+    ctx.pool = db.pool.clone();
+    let w = Worker::new(ctx, registry(&mock), config("t5-zero"));
+    enqueue(&db.pool, SRC.as_str(), "t5_zero", JobKind::FetchSeries, 5).await;
+    assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
+    mock.reset().await;
+    mock.mount(
+        &Route::get("/series/t5_zero").query("since", "2024-05-01"),
+        series_json("Z", &[("2024-05-01", Some("1"))]),
+    )
+    .await;
+    enqueue(&db.pool, SRC.as_str(), "t5_zero", JobKind::FetchSeries, 5).await;
+    assert!(
+        matches!(w.run_once().await, Some(JobOutcome::Completed(_))),
+        "zero lookback should send since = latest stored date"
+    );
+}
+
+/// Simulates a job that outlives its lease: while it "runs", `release_stuck` takes the item
+/// away and another worker claims it.
+struct SlowHandler {
+    fail: bool,
+}
+
+#[async_trait]
+impl JobHandler for SlowHandler {
+    async fn handle(
+        &self,
+        ctx: &CrawlCtx,
+        item: &CrawlQueueItem,
+    ) -> Result<JobOutcome, CrawlError> {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        CrawlQueueItem::release_stuck(&ctx.pool, Duration::ZERO)
+            .await
+            .unwrap();
+        CrawlQueueItem::claim_by_id(&ctx.pool, item.id, "t5-other-worker")
+            .await
+            .unwrap()
+            .expect("the released item is claimable by another worker");
+        if self.fail {
+            Err(CrawlError::Transient("slow and failed".into()))
+        } else {
+            Ok(JobOutcome::Completed(JobStats::default()))
+        }
+    }
+}
+
+#[tokio::test]
+async fn lost_lease_is_reported_and_leaves_new_owner_alone() {
+    let Some(db) = db().await else { return };
+    let mock = MockSource::start().await;
+    for fail in [false, true] {
+        let w = worker(&db.pool, &mock).with_handler(
+            SourceId::Sec,
+            JobKind::FetchFiling,
+            Arc::new(SlowHandler { fail }),
+        );
+        let id = enqueue(&db.pool, "SEC", "t5_slow", JobKind::FetchFiling, 5).await;
+        let outcome = w.run_once().await.expect("claimed");
+        match (&outcome, fail) {
+            (JobOutcome::LeaseLost { error: None }, false) => {}
+            (JobOutcome::LeaseLost { error: Some(e) }, true) => assert!(e.contains("slow")),
+            _ => panic!("expected LeaseLost, got {outcome:?}"),
+        }
+        let it = item(&db.pool, id).await;
+        assert_eq!(it.status, "processing", "the new owner's claim stands");
+        assert_eq!(it.locked_by.as_deref(), Some("t5-other-worker"));
+        assert_eq!(it.retry_count, 1, "only the release counted");
+        assert!(it.finished_at.is_none());
+
+        // The new owner finishes normally.
+        assert_eq!(
+            CrawlQueueItem::complete(&db.pool, id, "t5-other-worker")
+                .await
+                .unwrap(),
+            econ_graph_core::models::LeaseOutcome::Applied
+        );
+        assert_eq!(item(&db.pool, id).await.status, "completed");
+    }
+}
+
+#[tokio::test]
+async fn maintenance_loop_purges_old_finished_items() {
+    let Some(db) = db().await else { return };
+    let mock = MockSource::start().await;
+    let old = enqueue(&db.pool, SRC.as_str(), "t5_old", JobKind::FetchSeries, 5).await;
+    let recent = enqueue(&db.pool, SRC.as_str(), "t5_recent", JobKind::FetchSeries, 5).await;
+    let pending = enqueue(
+        &db.pool,
+        OTHER.as_str(),
+        "t5_pending",
+        JobKind::FetchSeries,
+        5,
+    )
+    .await;
+    CrawlQueueItem::force_complete(&db.pool, old).await.unwrap();
+    CrawlQueueItem::force_fail(&db.pool, recent, "x")
+        .await
+        .unwrap();
+    {
+        let mut conn = db.pool.get().await.unwrap();
+        diesel::sql_query(
+            "UPDATE crawl_queue SET finished_at = NOW() - INTERVAL '20 days', \
+                                    created_at = NOW() - INTERVAL '20 days' \
+             WHERE id = $1",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(old)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        // Keep the pending item from being claimed: schedule it in the future.
+        diesel::update(crawl_queue::table.find(pending))
+            .set(crawl_queue::scheduled_for.eq(Some(Utc::now() + chrono::Duration::hours(1))))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+    let w = Worker::new(
+        ctx(&db.pool),
+        registry(&mock),
+        WorkerConfig {
+            queue_retention: Some(Duration::from_secs(14 * 86_400)),
+            ..config("t5-purger")
+        },
+    );
+    w.run(tokio::time::sleep(Duration::from_millis(300))).await;
+
+    let mut conn = db.pool.get().await.unwrap();
+    let left: HashSet<Uuid> = crawl_queue::table
+        .select(crawl_queue::id)
+        .load::<Uuid>(&mut conn)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+    assert_eq!(left, HashSet::from([recent, pending]));
+}
+
+#[test]
+fn default_queue_retention_is_14_days() {
+    assert_eq!(
+        WorkerConfig::default().queue_retention,
+        Some(Duration::from_secs(14 * 24 * 3600))
+    );
 }
 
 #[tokio::test]
