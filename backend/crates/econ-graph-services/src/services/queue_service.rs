@@ -202,37 +202,28 @@ pub async fn get_queue_statistics(pool: &DatabasePool) -> AppResult<QueueStatist
     })
 }
 
-/// Calculate average processing time for completed items
+/// Calculate average processing time (seconds) for completed items:
+/// `avg(finished_at - started_at)` over completed rows that have both timestamps.
 async fn get_average_processing_time(conn: &mut AsyncPgConnection) -> AppResult<Option<f64>> {
-    use crawl_queue::dsl;
+    use diesel::sql_types::{Double, Nullable};
 
-    // Get completed items with lock times to calculate processing duration
-    let completed_items: Vec<(Option<DateTime<Utc>>, DateTime<Utc>)> = dsl::crawl_queue
-        .filter(dsl::status.eq("completed"))
-        .filter(dsl::locked_at.is_not_null())
-        .select((dsl::locked_at, dsl::updated_at))
-        .load(conn)
-        .await?;
-
-    if completed_items.is_empty() {
-        return Ok(None);
+    #[derive(QueryableByName)]
+    struct Avg {
+        #[diesel(sql_type = Nullable<Double>)]
+        avg_seconds: Option<f64>,
     }
 
-    let total_seconds: i64 = completed_items
-        .iter()
-        .filter_map(|(locked_at, updated_at)| {
-            locked_at.map(|locked| (*updated_at - locked).num_seconds())
-        })
-        .sum();
+    let row = diesel::sql_query(
+        "SELECT (AVG(EXTRACT(EPOCH FROM (finished_at - started_at))))::float8 AS avg_seconds \
+         FROM crawl_queue \
+         WHERE status = 'completed' \
+           AND started_at IS NOT NULL \
+           AND finished_at IS NOT NULL",
+    )
+    .get_result::<Avg>(conn)
+    .await?;
 
-    let count = completed_items.len() as f64;
-    let average = if count > 0.0 {
-        Some(total_seconds as f64 / count)
-    } else {
-        None
-    };
-
-    Ok(average)
+    Ok(row.avg_seconds)
 }
 
 /// Clean up old completed and failed queue items
@@ -928,12 +919,17 @@ mod tests {
         assert_eq!(stats.total_items, 1);
         assert_eq!(stats.completed_items, 1);
 
-        // Completing now really clears locked_at (the lock-consistency check requires locked_by and
-        // locked_at to be cleared together), so the locked_at-based average has no completed rows
-        // to measure. It previously returned Some only because the lock was never cleared (bug 2).
+        // Completing clears the lock but records started_at / finished_at, which the average uses.
         let row = load_item(&pool, created_item.id).await;
         assert!(row.locked_at.is_none());
-        assert!(stats.average_processing_time.is_none());
+        let started = row.started_at.expect("claim sets started_at");
+        let finished = row.finished_at.expect("complete sets finished_at");
+        assert!(finished >= started);
+        let avg = stats
+            .average_processing_time
+            .expect("average processing time should be computed for completed items");
+        assert!(avg >= 0.01, "expected at least the 10ms sleep, got {avg}");
+        assert!(avg < 60.0, "unexpectedly long processing time: {avg}");
         println!(
             "Average processing time: {:?}",
             stats.average_processing_time
