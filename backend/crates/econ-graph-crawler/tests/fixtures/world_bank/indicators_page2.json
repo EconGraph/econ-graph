@@ -1,0 +1,20 @@
+[
+  {
+    "page": 2,
+    "pages": 2,
+    "per_page": "100",
+    "total": 3,
+    "sourceid": null
+  },
+  [
+    {
+      "id": "DT.DOD.DECT.CD",
+      "name": "External debt stocks, total (DOD, current US$)",
+      "unit": "",
+      "source": { "id": "2", "value": "World Development Indicators" },
+      "sourceNote": "",
+      "sourceOrganization": "World Bank, International Debt Statistics.",
+      "topics": [ { "id": "20", "value": "External Debt " } ]
+    }
+  ]
+]

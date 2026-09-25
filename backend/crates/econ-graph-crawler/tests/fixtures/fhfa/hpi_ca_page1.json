@@ -1,0 +1,7 @@
+{
+  "data": [
+    { "year": 2024, "quarter": 1, "state": "CA", "metro_area": null, "hpi_value": 1012.4, "yoy_change": 5.2, "qoq_change": 1.1 },
+    { "year": 2024, "quarter": 2, "state": "CA", "metro_area": null, "hpi_value": 1030.9, "yoy_change": 5.0, "qoq_change": 1.8 }
+  ],
+  "meta": { "total_count": 3, "page": 1, "per_page": 2 }
+}

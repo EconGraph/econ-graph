@@ -1,0 +1,55 @@
+{
+  "variables": {
+    "for": {
+      "label": "Census API FIPS 'for' clause",
+      "concept": "Census API Geography Specification",
+      "predicateType": "fips-for",
+      "group": "N/A",
+      "limit": 0,
+      "predicateOnly": true
+    },
+    "in": {
+      "label": "Census API FIPS 'in' clause",
+      "concept": "Census API Geography Specification",
+      "predicateType": "fips-in",
+      "group": "N/A",
+      "limit": 0,
+      "predicateOnly": true
+    },
+    "ESTAB": {
+      "label": "Number of establishments",
+      "concept": "Business Dynamics Statistics",
+      "predicateType": "int",
+      "group": "N/A",
+      "limit": 0
+    },
+    "FIRM": {
+      "label": "Number of firms",
+      "concept": "Business Dynamics Statistics",
+      "predicateType": "int",
+      "group": "N/A",
+      "limit": 0
+    },
+    "JOB_CREATION": {
+      "label": "Number of jobs created from expanding and opening establishments during the last 12 months",
+      "concept": "Business Dynamics Statistics",
+      "predicateType": "int",
+      "group": "N/A",
+      "limit": 0
+    },
+    "NAICS": {
+      "label": "2017 NAICS code",
+      "concept": "Business Dynamics Statistics",
+      "predicateType": "string",
+      "group": "N/A",
+      "limit": 0
+    },
+    "YEAR": {
+      "label": "Year",
+      "concept": "Business Dynamics Statistics",
+      "predicateType": "int",
+      "group": "N/A",
+      "limit": 0
+    }
+  }
+}
