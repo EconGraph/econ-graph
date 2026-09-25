@@ -20,6 +20,12 @@ cd backend
 docker build -t econ-graph-backend:${VERSION} -t econ-graph-backend:latest .
 echo "Backend image built successfully"
 
+# Build crawler-worker image (same Dockerfile, separate stage; reuses the builder stage)
+echo "Building crawler-worker image..."
+docker build --target crawler-worker \
+  -t econ-graph-crawler-worker:${VERSION} -t econ-graph-crawler-worker:latest .
+echo "Crawler-worker image built successfully"
+
 # Build frontend image
 echo "Building frontend image..."
 cd ../frontend
@@ -57,6 +63,7 @@ echo "Admin frontend image built successfully"
 echo "Loading images into MicroK8s..."
 # Save images to temporary files and import
 docker save econ-graph-backend:${VERSION} | microk8s ctr images import - || true
+docker save econ-graph-crawler-worker:${VERSION} | microk8s ctr images import - || true
 docker save econ-graph-frontend:${VERSION} | microk8s ctr images import - || true
 docker save econ-graph-chart-api:v1.0.0 | microk8s ctr images import - || true
 docker save econ-graph-admin-frontend:v1.0.0 | microk8s ctr images import - || true
@@ -65,6 +72,7 @@ echo "All images built and loaded successfully!"
 echo ""
 echo "Images available in MicroK8s:"
 echo "  - econ-graph-backend:${VERSION}"
+echo "  - econ-graph-crawler-worker:${VERSION}"
 echo "  - econ-graph-frontend:${VERSION}"
 echo "  - econ-graph-chart-api:v1.0.0"
 echo "  - econ-graph-admin-frontend:v1.0.0"

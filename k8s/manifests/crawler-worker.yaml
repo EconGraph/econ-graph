@@ -1,0 +1,157 @@
+# crawler-worker: drains the Postgres crawl_queue (FRED, BLS, ... adapters).
+#
+# Image: built from backend/Dockerfile with `--target crawler-worker`
+#   (scripts/deploy/build-images.sh builds and imports econ-graph-crawler-worker:<VERSION>).
+#
+# The worker does NOT run migrations -- the backend applies them at startup, so
+# deploy the backend first (scripts/deploy/deploy.sh does).
+#
+# API keys come from the optional Secret `crawler-api-keys`. Every key is optional:
+# the worker starts without them, and jobs for a source that requires a missing key
+# fail with an auth error (the source is then paused, see CRAWLER_PAUSE_AFTER). Never commit real values; create the Secret out of band, e.g.:
+#
+#   kubectl -n econ-graph create secret generic crawler-api-keys \
+#     --from-literal=fred-api-key="$FRED_API_KEY" \
+#     --from-literal=bls-api-key="$BLS_API_KEY" \
+#     --from-literal=bea-api-key="$BEA_API_KEY" \
+#     --from-literal=census-api-key="$CENSUS_API_KEY"
+#
+# Afterwards: kubectl -n econ-graph rollout restart deployment/crawler-worker
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crawler-worker
+  namespace: econ-graph
+  labels:
+    app: crawler-worker
+    component: crawler
+spec:
+  # Keep this at 1. Per-source rate limits (governor) are enforced PER PROCESS, so N
+  # replicas send N x the allowed request rate to FRED/BLS/SEC/... and get us throttled
+  # or banned. Scale throughput with CRAWLER_CONCURRENCY instead; if you ever scale out,
+  # first divide the per-source rates by the replica count (or split sources between
+  # replicas with CRAWLER_SOURCES).
+  replicas: 1
+  # Recreate, not RollingUpdate: a rolling update briefly runs old + new pods together,
+  # doubling the upstream request rate. The old pod drains in-flight jobs on SIGTERM.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: crawler-worker
+  template:
+    metadata:
+      labels:
+        app: crawler-worker
+        component: crawler
+    spec:
+      # On SIGTERM the worker stops claiming and finishes in-flight jobs; give slow
+      # upstream requests (timeout 30s, plus retries/backoff) time to complete.
+      # Anything still running after this is returned to `pending` by the stuck-job
+      # reaper (CRAWLER_STUCK_AFTER_SECS) of the next worker.
+      terminationGracePeriodSeconds: 120
+      automountServiceAccountToken: false
+      initContainers:
+      - name: wait-for-postgres
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Waiting for PostgreSQL to be ready..."
+          until nc -z postgres-service.econ-graph.svc.cluster.local 5432; do
+            echo "PostgreSQL is unavailable - sleeping"
+            sleep 2
+          done
+          echo "PostgreSQL is ready!"
+        resources:
+          requests:
+            memory: "16Mi"
+            cpu: "10m"
+          limits:
+            memory: "32Mi"
+            cpu: "50m"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      containers:
+      - name: crawler-worker
+        image: econ-graph-crawler-worker:v3.7.4
+        imagePullPolicy: Never  # Use local image (imported by build-images.sh)
+        # No ports / no Service: the worker exposes no HTTP endpoint.
+        env:
+        # Same source as the backend (ConfigMap econ-graph-config).
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: DATABASE_URL
+        - name: RUST_LOG
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: RUST_LOG
+        # Stable, readable locked_by value in crawl_queue.
+        - name: CRAWLER_WORKER_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        # Concurrent jobs. The DB pool is capped at 20 connections per process, so keep
+        # this well below 20.
+        - name: CRAWLER_CONCURRENCY
+          value: "4"
+        - name: FRED_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: crawler-api-keys
+              key: fred-api-key
+              optional: true
+        - name: BLS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: crawler-api-keys
+              key: bls-api-key
+              optional: true
+        - name: BEA_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: crawler-api-keys
+              key: bea-api-key
+              optional: true
+        - name: CENSUS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: crawler-api-keys
+              key: census-api-key
+              optional: true
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        # No liveness/readiness probes: the binary exposes no health endpoint, and an
+        # exec probe could only check that PID 1 is alive, which Kubernetes already
+        # knows (the pod restarts when the worker exits).
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      restartPolicy: Always
