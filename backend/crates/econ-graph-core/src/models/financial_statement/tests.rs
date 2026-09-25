@@ -99,7 +99,10 @@ async fn financial_statement_enum_columns_round_trip() {
         .await
         .expect("insert with enum-typed columns must succeed");
     assert_eq!(inserted.xbrl_file_compression_type, CompressionType::Lz4);
-    assert_eq!(inserted.xbrl_processing_status, ProcessingStatus::Downloaded);
+    assert_eq!(
+        inserted.xbrl_processing_status,
+        ProcessingStatus::Downloaded
+    );
 
     // Update and filter on the columns through the typed values too.
     diesel::update(financial_statements::table.find(inserted.id))
@@ -162,7 +165,8 @@ async fn financial_statement_columns_keep_defaults_and_checks() {
     .await
     .expect_err("unknown compression type must be rejected");
     assert!(
-        err.to_string().contains("chk_financial_statements_xbrl_file_compression_type"),
+        err.to_string()
+            .contains("chk_financial_statements_xbrl_file_compression_type"),
         "unexpected error: {err}"
     );
 }
