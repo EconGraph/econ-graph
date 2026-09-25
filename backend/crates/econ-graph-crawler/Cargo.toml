@@ -56,3 +56,11 @@ bigdecimal.workspace = true
 
 # Per-source rate limiting
 governor = "0.6"
+
+# Shared HTTP layer: metrics, Retry-After HTTP-date parsing, backoff jitter
+econ-graph-metrics = { path = "../econ-graph-metrics" }
+httpdate = "1"
+rand.workspace = true
+
+[dev-dependencies]
+wiremock.workspace = true
