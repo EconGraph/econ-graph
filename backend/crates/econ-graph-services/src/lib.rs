@@ -8,38 +8,21 @@
 //! This crate contains all the core business logic, external API integrations, and data
 //! processing services that power the economic data platform.
 //!
-//! ## Features
+//! ## Services
 //!
-//! - **Data Discovery**: Comprehensive series discovery across multiple economic data sources
-//! - **Crawler Services**: Advanced web crawling and data collection capabilities
-//! - **Search & Analysis**: Global economic analysis and search functionality
-//! - **API Integration**: Integration with major economic data providers (FRED, BLS, Census, etc.)
-//! - **Queue Management**: Asynchronous task processing and job scheduling
-//! - **Collaboration**: User collaboration and data sharing features
+//! - **Search**: full-text series search (`search_service`)
+//! - **Series**: series queries (`series_service`)
+//! - **Global analysis**: cross-country analysis (`global_analysis_service`)
+//! - **Queue**: `crawl_queue` statistics and admin helpers (`queue_service`)
+//! - **Collaboration**: chart annotations and sharing (`collaboration_service`)
 //!
-//! ## Architecture
-//!
-//! This crate follows a service-oriented architecture:
-//! - **Services**: Core business logic and external integrations
-//! - **Crawlers**: Data collection and web scraping capabilities
-//! - **Series Discovery**: Economic data source integration and discovery
-//! - **Queue System**: Asynchronous processing and job management
+//! Data collection (source adapters, the queue worker, the `crawler` CLI) lives in the
+//! `econ-graph-crawler` crate, not here.
 //!
 //! ## Usage
 //!
 //! ```rust,no_run
-//! use econ_graph_services::services::{SearchService, CrawlerService};
-//! use econ_graph_services::services::queue_service::QueueService;
-//!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Initialize services
-//!     let search_service = SearchService::new();
-//!     let crawler_service = CrawlerService::new();
-//!
-//!     // Use services for data processing
-//!     Ok(())
-//! }
+//! use econ_graph_services::services::search_service::SearchService;
 //! ```
 
 pub mod services;
