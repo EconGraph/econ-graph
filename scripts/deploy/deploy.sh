@@ -88,6 +88,9 @@ kubectl wait --for=condition=ready pod -l app=postgresql -n econ-graph --timeout
 # Deploy application
 kubectl apply -f k8s/manifests/backend-deployment.yaml
 kubectl apply -f k8s/manifests/backend-service.yaml
+# Queue worker (no Service). API keys come from the optional Secret crawler-api-keys;
+# see the header of k8s/manifests/crawler-worker.yaml for how to create it.
+kubectl apply -f k8s/manifests/crawler-worker.yaml
 kubectl apply -f k8s/manifests/frontend-deployment.yaml
 kubectl apply -f k8s/manifests/frontend-service.yaml
 kubectl apply -f k8s/manifests/admin-frontend-deployment.yaml
@@ -119,6 +122,10 @@ MONITOR_PID=$!
 # Wait for backend deployment
 echo "Waiting for backend deployment..."
 kubectl wait --for=condition=available --timeout=300s deployment/econ-graph-backend -n econ-graph
+
+# Wait for crawler worker (it relies on the backend having applied migrations)
+echo "Waiting for crawler-worker deployment..."
+kubectl wait --for=condition=available --timeout=300s deployment/crawler-worker -n econ-graph
 
 # Wait for frontend deployment
 echo "Waiting for frontend deployment..."
@@ -211,6 +218,7 @@ echo "📊 Useful commands:"
 echo "  kubectl get pods -n econ-graph"
 echo "  kubectl get services -n econ-graph"
 echo "  kubectl logs -f deployment/econ-graph-backend -n econ-graph"
+echo "  kubectl logs -f deployment/crawler-worker -n econ-graph"
 echo "  kubectl logs -f deployment/econ-graph-frontend -n econ-graph"
 echo "  kubectl logs -f deployment/econ-graph-admin-frontend -n econ-graph"
 echo "  kubectl logs -f deployment/chart-api-service -n econ-graph"

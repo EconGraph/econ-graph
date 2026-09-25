@@ -1,6 +1,20 @@
+# Build context for backend/Dockerfile. Only Cargo.toml, Cargo.lock (if present),
+# crates/ and migrations/ are used.
+
 # Rust build artifacts
 target/
-Cargo.lock
+**/target/
+
+# Stale, uncompiled copy of the crates -- never built into images
+src/
+backend/
+migrations_backup/
+scripts/
+*.sql
+test_census_api.rs
+
+# NOTE: Cargo.lock is deliberately NOT ignored: it is gitignored, but when a local
+# lockfile exists the image build should honour it.
 
 # IDE files
 .vscode/
@@ -20,10 +34,6 @@ Thumbs.db
 README.md
 *.md
 
-# Test files
-tests/
-**/*.rs.bk
-
 # Logs
 *.log
 
@@ -35,3 +45,4 @@ tests/
 # Temporary files
 tmp/
 temp/
+**/*.rs.bk
