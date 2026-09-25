@@ -181,6 +181,7 @@ mod tests {
             priority: 5,
             max_retries: 3,
             scheduled_for: None,
+            kind: econ_graph_core::models::JobKind::FetchSeries.to_string(),
         };
 
         let created_item = CrawlQueueItem::create(&pool, &new_item)

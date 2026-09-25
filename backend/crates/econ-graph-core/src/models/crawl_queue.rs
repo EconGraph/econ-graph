@@ -1,14 +1,94 @@
+//! Postgres-backed crawl job queue.
+//!
+//! State machine (column `status`):
+//!
+//! ```text
+//!   enqueue ──► pending ──claim_next──► processing ──complete──► completed
+//!                  ▲                        │  │
+//!                  │ release_stuck          │  └──fail──► failed
+//!                  └────────────────────────┤
+//!                                           └──retry_later──► retrying ──claim_next──► processing
+//!                                                 (or failed once retry_count reaches max_retries)
+//! ```
+//!
+//! Invariants:
+//! - `pending` / `retrying` rows never carry a lock; every transition out of `processing` clears
+//!   `locked_by` / `locked_at` (the DB check constraint requires both or neither).
+//! - At most one *active* (pending | processing | retrying) row exists per `(source, series_id, kind)`
+//!   (partial unique index `uq_crawl_queue_active_item`); finished rows don't block re-enqueueing.
+//! - Claiming is a single `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1)` statement,
+//!   so two workers can never claim the same row.
+
+use std::fmt;
+use std::str::FromStr;
+use std::time::Duration;
+
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
+use diesel::sql_types::{Array, Bool, Double, Nullable, Text, Uuid as SqlUuid};
 use diesel_async::RunQueryDsl;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
+use crate::database::DatabasePool;
+use crate::error::{AppError, AppResult};
 use crate::schema::crawl_queue;
 
+/// Kind of work a queue item represents (column `crawl_queue.kind`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobKind {
+    /// Fetch observations (and metadata) for one series.
+    #[default]
+    FetchSeries,
+    /// Discover the catalog of series a source offers.
+    DiscoverCatalog,
+    /// Fetch one filing (SEC).
+    FetchFiling,
+}
+
+impl JobKind {
+    /// The exact string stored in `crawl_queue.kind`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            JobKind::FetchSeries => "fetch_series",
+            JobKind::DiscoverCatalog => "discover_catalog",
+            JobKind::FetchFiling => "fetch_filing",
+        }
+    }
+}
+
+impl fmt::Display for JobKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for JobKind {
+    type Err = AppError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "fetch_series" => Ok(JobKind::FetchSeries),
+            "discover_catalog" => Ok(JobKind::DiscoverCatalog),
+            "fetch_filing" => Ok(JobKind::FetchFiling),
+            other => Err(AppError::Validation(format!("unknown job kind: {other}"))),
+        }
+    }
+}
+
+/// Outcome of [`CrawlQueueItem::retry_later`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueTransition {
+    /// The item is `retrying` and becomes claimable again at `at`.
+    Rescheduled { at: DateTime<Utc> },
+    /// The attempt budget is exhausted; the item is now `failed`.
+    Failed,
+}
+
 /// Crawl queue item for managing data collection jobs
-#[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
+#[derive(Debug, Clone, Queryable, QueryableByName, Selectable, Serialize, Deserialize)]
 #[diesel(table_name = crawl_queue)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct CrawlQueueItem {
@@ -25,6 +105,8 @@ pub struct CrawlQueueItem {
     pub scheduled_for: Option<DateTime<Utc>>,
     pub locked_by: Option<String>,
     pub locked_at: Option<DateTime<Utc>>,
+    /// One of `fetch_series` | `discover_catalog` | `fetch_filing`; see [`JobKind`].
+    pub kind: String,
 }
 
 /// New crawl queue item for insertion
@@ -40,20 +122,38 @@ pub struct NewCrawlQueueItem {
     #[validate(range(min = 0, max = 10))]
     pub max_retries: i32,
     pub scheduled_for: Option<DateTime<Utc>>,
+    /// Job kind string (default `"fetch_series"`); see [`JobKind::as_str`].
+    #[serde(default = "default_kind")]
+    pub kind: String,
 }
 
-/// Crawl queue item update model
-#[derive(Debug, Clone, AsChangeset, Validate, Deserialize)]
+fn default_kind() -> String {
+    JobKind::FetchSeries.as_str().to_string()
+}
+
+/// Crawl queue item update model.
+///
+/// Nullable columns use `Option<Option<T>>`: `None` leaves the column unchanged,
+/// `Some(None)` sets it to NULL (e.g. to clear a lock), `Some(Some(v))` sets it to `v`.
+#[derive(Debug, Clone, AsChangeset, Deserialize)]
 #[diesel(table_name = crawl_queue)]
 pub struct UpdateCrawlQueueItem {
     pub status: Option<String>,
     pub retry_count: Option<i32>,
-    #[validate(length(max = 2000))]
-    pub error_message: Option<String>,
+    pub error_message: Option<Option<String>>,
     pub updated_at: DateTime<Utc>,
-    pub scheduled_for: Option<DateTime<Utc>>,
-    pub locked_by: Option<String>,
-    pub locked_at: Option<DateTime<Utc>>,
+    pub scheduled_for: Option<Option<DateTime<Utc>>>,
+    pub locked_by: Option<Option<String>>,
+    pub locked_at: Option<Option<DateTime<Utc>>>,
+}
+
+impl UpdateCrawlQueueItem {
+    /// Changeset fields that clear the worker lock.
+    pub fn clearing_lock(mut self) -> Self {
+        self.locked_by = Some(None);
+        self.locked_at = Some(None);
+        self
+    }
 }
 
 /// Queue item status enumeration
@@ -153,7 +253,25 @@ pub struct QueueItemWithProcessingInfo {
     pub time_since_created: i64,          // in seconds
 }
 
+/// Statuses that count as "active" for the uniqueness rule.
+const ACTIVE_STATUSES: [&str; 3] = ["pending", "processing", "retrying"];
+
+async fn get_conn(pool: &DatabasePool) -> AppResult<crate::database::PooledConn<'_>> {
+    pool.get()
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("Failed to get database connection: {}", e)))
+}
+
+fn not_found(id: Uuid) -> AppError {
+    AppError::NotFound(format!("crawl_queue item {id}"))
+}
+
 impl CrawlQueueItem {
+    /// Parsed job kind (unknown strings fall back to `FetchSeries`; the DB check constraint prevents them).
+    pub fn job_kind(&self) -> JobKind {
+        self.kind.parse().unwrap_or_default()
+    }
+
     /// Check if the item can be retried
     pub fn can_retry(&self) -> bool {
         self.retry_count < self.max_retries
@@ -168,10 +286,12 @@ impl CrawlQueueItem {
         self.locked_by.is_some() && self.locked_at.is_some()
     }
 
-    /// Check if the item is ready for processing
+    /// Check if the item is ready for processing (mirrors the `claim_next` filter)
     pub fn is_ready_for_processing(&self) -> bool {
-        matches!(QueueStatus::from(self.status.clone()), QueueStatus::Pending)
-            && !self.is_locked()
+        matches!(
+            QueueStatus::from(self.status.clone()),
+            QueueStatus::Pending | QueueStatus::Retrying
+        ) && !self.is_locked()
             && self
                 .scheduled_for
                 .is_none_or(|scheduled| scheduled <= Utc::now())
@@ -183,136 +303,239 @@ impl CrawlQueueItem {
             .map(|locked_at| (Utc::now() - locked_at).num_seconds())
     }
 
-    /// Create a new crawl queue item
-    pub async fn create(
-        pool: &crate::database::DatabasePool,
-        new_item: &NewCrawlQueueItem,
-    ) -> crate::error::AppResult<Self> {
-        use crate::schema::crawl_queue::dsl;
+    // ------------------------------------------------------------------
+    // Queue API
+    // ------------------------------------------------------------------
 
-        let mut conn = pool.get().await.map_err(|e| {
-            crate::error::AppError::DatabaseError(format!(
-                "Failed to get database connection: {}",
-                e
-            ))
-        })?;
-
-        let item = diesel::insert_into(dsl::crawl_queue)
-            .values(new_item)
+    /// Insert unless an active (pending|processing|retrying) row exists for
+    /// `(source, series_id, kind)`. Returns `None` on conflict.
+    pub async fn enqueue(pool: &DatabasePool, item: &NewCrawlQueueItem) -> AppResult<Option<Self>> {
+        let mut conn = get_conn(pool).await?;
+        let inserted = diesel::insert_into(crawl_queue::table)
+            .values(item)
+            .on_conflict_do_nothing()
             .get_result::<Self>(&mut conn)
-            .await?;
+            .await
+            .optional()?;
+        Ok(inserted)
+    }
 
+    /// Atomically claim the highest-priority due item (status pending|retrying, `scheduled_for`
+    /// null or <= now) in a single statement. `sources` optionally restricts `crawl_queue.source`.
+    pub async fn claim_next(
+        pool: &DatabasePool,
+        worker_id: &str,
+        sources: Option<&[String]>,
+    ) -> AppResult<Option<Self>> {
+        let mut conn = get_conn(pool).await?;
+        let item = diesel::sql_query(
+            "UPDATE crawl_queue \
+             SET status = 'processing', locked_by = $1, locked_at = NOW(), updated_at = NOW() \
+             WHERE id = ( \
+                 SELECT id FROM crawl_queue \
+                 WHERE status IN ('pending', 'retrying') \
+                   AND (scheduled_for IS NULL OR scheduled_for <= NOW()) \
+                   AND ($2::text[] IS NULL OR source = ANY($2::text[])) \
+                 ORDER BY priority DESC, created_at ASC \
+                 FOR UPDATE SKIP LOCKED \
+                 LIMIT 1 \
+             ) \
+             RETURNING *",
+        )
+        .bind::<Text, _>(worker_id)
+        .bind::<Nullable<Array<Text>>, _>(sources)
+        .get_result::<Self>(&mut conn)
+        .await
+        .optional()?;
         Ok(item)
     }
 
-    /// Get next available item for processing using SKIP LOCKED
-    pub async fn get_next_for_processing(
-        pool: &crate::database::DatabasePool,
+    /// Claim one specific item if it is claimable (pending|retrying). Returns `None` otherwise.
+    /// Does not check `scheduled_for` (explicit claims override the schedule).
+    pub async fn claim_by_id(
+        pool: &DatabasePool,
+        id: Uuid,
         worker_id: &str,
-    ) -> crate::error::AppResult<Option<Self>> {
-        use crate::schema::crawl_queue::dsl;
+    ) -> AppResult<Option<Self>> {
+        let mut conn = get_conn(pool).await?;
+        let item = diesel::sql_query(
+            "UPDATE crawl_queue \
+             SET status = 'processing', locked_by = $2, locked_at = NOW(), updated_at = NOW() \
+             WHERE id = $1 AND status IN ('pending', 'retrying') \
+             RETURNING *",
+        )
+        .bind::<SqlUuid, _>(id)
+        .bind::<Text, _>(worker_id)
+        .get_result::<Self>(&mut conn)
+        .await
+        .optional()?;
+        Ok(item)
+    }
 
-        let mut conn = pool.get().await.map_err(|e| {
-            crate::error::AppError::DatabaseError(format!(
-                "Failed to get database connection: {}",
-                e
-            ))
-        })?;
+    /// Mark completed and clear the lock.
+    pub async fn complete(pool: &DatabasePool, id: Uuid) -> AppResult<()> {
+        Self::finish(pool, id, QueueStatus::Completed, None).await?;
+        Ok(())
+    }
 
-        // Use SKIP LOCKED to get the next available item for processing
-        let item = dsl::crawl_queue
-            .filter(dsl::status.eq("pending"))
-            .filter(dsl::locked_by.is_null())
-            .filter(
-                dsl::scheduled_for
-                    .is_null()
-                    .or(dsl::scheduled_for.le(Utc::now())),
-            )
-            .order(dsl::priority.desc())
-            .order(dsl::created_at.asc())
-            .for_update()
-            .skip_locked()
-            .first::<Self>(&mut conn)
-            .await
-            .optional()?;
+    /// Reschedule: status `retrying`, lock cleared, `scheduled_for = now + delay`.
+    /// If `count_attempt`, `retry_count += 1`, and if that reaches `max_retries` the item becomes
+    /// `failed` instead. Rate limiting should pass `count_attempt = false`.
+    /// Only applies to active items; errors with `NotFound` otherwise.
+    pub async fn retry_later(
+        pool: &DatabasePool,
+        id: Uuid,
+        error: &str,
+        delay: Duration,
+        count_attempt: bool,
+    ) -> AppResult<QueueTransition> {
+        let mut conn = get_conn(pool).await?;
+        // All SET expressions see the pre-update row, so the decision is made atomically.
+        let item = diesel::sql_query(
+            "UPDATE crawl_queue SET \
+                 retry_count = retry_count + CASE WHEN $2 THEN 1 ELSE 0 END, \
+                 status = CASE WHEN $2 AND retry_count + 1 >= max_retries \
+                               THEN 'failed' ELSE 'retrying' END, \
+                 scheduled_for = CASE WHEN $2 AND retry_count + 1 >= max_retries \
+                                      THEN scheduled_for \
+                                      ELSE NOW() + make_interval(secs => $3) END, \
+                 error_message = $4, \
+                 locked_by = NULL, \
+                 locked_at = NULL, \
+                 updated_at = NOW() \
+             WHERE id = $1 AND status IN ('pending', 'processing', 'retrying') \
+             RETURNING *",
+        )
+        .bind::<SqlUuid, _>(id)
+        .bind::<Bool, _>(count_attempt)
+        .bind::<Double, _>(delay.as_secs_f64())
+        .bind::<Text, _>(error)
+        .get_result::<Self>(&mut conn)
+        .await
+        .optional()?
+        .ok_or_else(|| not_found(id))?;
 
-        if let Some(item) = item {
-            // Lock the item for this worker
-            let item_id = item.id;
-            let update = UpdateCrawlQueueItem {
-                status: Some("processing".to_string()),
-                locked_by: Some(worker_id.to_string()),
-                locked_at: Some(Utc::now()),
-                updated_at: Utc::now(),
-                ..Default::default()
-            };
-
-            let item = diesel::update(dsl::crawl_queue.filter(dsl::id.eq(item_id)))
-                .set(&update)
-                .get_result::<Self>(&mut conn)
-                .await?;
-
-            return Ok(Some(item));
+        if item.status == "failed" {
+            Ok(QueueTransition::Failed)
+        } else {
+            let at = item.scheduled_for.ok_or_else(|| {
+                AppError::InternalError("retry_later produced no scheduled_for".to_string())
+            })?;
+            Ok(QueueTransition::Rescheduled { at })
         }
+    }
 
-        Ok(None)
+    /// Permanent failure: status `failed`, error recorded, lock cleared.
+    pub async fn fail(pool: &DatabasePool, id: Uuid, error: &str) -> AppResult<()> {
+        Self::finish(pool, id, QueueStatus::Failed, Some(error.to_string())).await?;
+        Ok(())
+    }
+
+    /// Return items stuck in `processing` (locked longer than `older_than`, e.g. crashed workers)
+    /// to `pending` with the lock cleared. Returns the number of items released.
+    pub async fn release_stuck(pool: &DatabasePool, older_than: Duration) -> AppResult<i64> {
+        let mut conn = get_conn(pool).await?;
+        let n = diesel::sql_query(
+            "UPDATE crawl_queue \
+             SET status = 'pending', locked_by = NULL, locked_at = NULL, updated_at = NOW() \
+             WHERE status = 'processing' \
+               AND locked_at < NOW() - make_interval(secs => $1)",
+        )
+        .bind::<Double, _>(older_than.as_secs_f64())
+        .execute(&mut conn)
+        .await?;
+        Ok(n as i64)
+    }
+
+    /// Put an active item back to `pending` and clear its lock. Returns false if the item
+    /// doesn't exist or is already finished.
+    pub async fn release(pool: &DatabasePool, id: Uuid) -> AppResult<bool> {
+        use crate::schema::crawl_queue::dsl;
+        let mut conn = get_conn(pool).await?;
+        let update = UpdateCrawlQueueItem {
+            status: Some(QueueStatus::Pending.to_string()),
+            ..Default::default()
+        }
+        .clearing_lock();
+        let n = diesel::update(
+            dsl::crawl_queue
+                .filter(dsl::id.eq(id))
+                .filter(dsl::status.eq_any(ACTIVE_STATUSES)),
+        )
+        .set(&update)
+        .execute(&mut conn)
+        .await?;
+        Ok(n > 0)
+    }
+
+    /// Move to a terminal status, clearing the lock. `error` (if any) replaces `error_message`.
+    async fn finish(
+        pool: &DatabasePool,
+        id: Uuid,
+        status: QueueStatus,
+        error: Option<String>,
+    ) -> AppResult<Self> {
+        let update = UpdateCrawlQueueItem {
+            status: Some(status.to_string()),
+            error_message: error.map(Some),
+            ..Default::default()
+        }
+        .clearing_lock();
+        Self::update(pool, id, &update).await.map_err(|e| match e {
+            AppError::Database(diesel::result::Error::NotFound) => not_found(id),
+            other => other,
+        })
+    }
+
+    // ------------------------------------------------------------------
+    // Legacy helpers (kept for existing callers; implemented on the API above)
+    // ------------------------------------------------------------------
+
+    /// Plain insert (errors on an active duplicate). Prefer [`CrawlQueueItem::enqueue`].
+    pub async fn create(pool: &DatabasePool, new_item: &NewCrawlQueueItem) -> AppResult<Self> {
+        let mut conn = get_conn(pool).await?;
+        let item = diesel::insert_into(crawl_queue::table)
+            .values(new_item)
+            .get_result::<Self>(&mut conn)
+            .await?;
+        Ok(item)
+    }
+
+    /// Alias for [`CrawlQueueItem::claim_next`] with no source filter.
+    pub async fn get_next_for_processing(
+        pool: &DatabasePool,
+        worker_id: &str,
+    ) -> AppResult<Option<Self>> {
+        Self::claim_next(pool, worker_id, None).await
     }
 
     /// Update crawl queue item
     pub async fn update(
-        pool: &crate::database::DatabasePool,
-        id: uuid::Uuid,
+        pool: &DatabasePool,
+        id: Uuid,
         update_data: &UpdateCrawlQueueItem,
-    ) -> crate::error::AppResult<Self> {
+    ) -> AppResult<Self> {
         use crate::schema::crawl_queue::dsl;
-
-        let mut conn = pool.get().await.map_err(|e| {
-            crate::error::AppError::DatabaseError(format!(
-                "Failed to get database connection: {}",
-                e
-            ))
-        })?;
-
+        let mut conn = get_conn(pool).await?;
         let item = diesel::update(dsl::crawl_queue.filter(dsl::id.eq(id)))
             .set(update_data)
             .get_result::<Self>(&mut conn)
             .await?;
-
         Ok(item)
     }
 
-    /// Mark item as completed
-    pub async fn mark_completed(
-        pool: &crate::database::DatabasePool,
-        id: uuid::Uuid,
-    ) -> crate::error::AppResult<Self> {
-        let update = UpdateCrawlQueueItem {
-            status: Some("completed".to_string()),
-            locked_by: None,
-            locked_at: None,
-            updated_at: Utc::now(),
-            ..Default::default()
-        };
-
-        Self::update(pool, id, &update).await
+    /// Mark item as completed (see [`CrawlQueueItem::complete`])
+    pub async fn mark_completed(pool: &DatabasePool, id: Uuid) -> AppResult<Self> {
+        Self::finish(pool, id, QueueStatus::Completed, None).await
     }
 
-    /// Mark item as failed
+    /// Mark item as failed (see [`CrawlQueueItem::fail`])
     pub async fn mark_failed(
-        pool: &crate::database::DatabasePool,
-        id: uuid::Uuid,
+        pool: &DatabasePool,
+        id: Uuid,
         error_message: String,
-    ) -> crate::error::AppResult<Self> {
-        let update = UpdateCrawlQueueItem {
-            status: Some("failed".to_string()),
-            error_message: Some(error_message),
-            locked_by: None,
-            locked_at: None,
-            updated_at: Utc::now(),
-            ..Default::default()
-        };
-
-        Self::update(pool, id, &update).await
+    ) -> AppResult<Self> {
+        Self::finish(pool, id, QueueStatus::Failed, Some(error_message)).await
     }
 }
 
@@ -324,6 +547,7 @@ impl Default for NewCrawlQueueItem {
             priority: QueuePriority::Normal.into(),
             max_retries: 3,
             scheduled_for: None,
+            kind: default_kind(),
         }
     }
 }
@@ -376,6 +600,28 @@ mod _inline_tests {
     }
 
     #[test]
+    fn test_job_kind_round_trip() {
+        for kind in [
+            JobKind::FetchSeries,
+            JobKind::DiscoverCatalog,
+            JobKind::FetchFiling,
+        ] {
+            assert_eq!(kind.as_str().parse::<JobKind>().unwrap(), kind);
+            assert_eq!(kind.to_string(), kind.as_str());
+            assert_eq!(
+                serde_json::to_string(&kind).unwrap(),
+                format!("\"{}\"", kind.as_str())
+            );
+        }
+        assert_eq!(
+            "FETCH_SERIES".parse::<JobKind>().unwrap(),
+            JobKind::FetchSeries
+        );
+        assert!("bogus".parse::<JobKind>().is_err());
+        assert_eq!(NewCrawlQueueItem::default().kind, "fetch_series");
+    }
+
+    #[test]
     fn test_queue_priority_conversion() {
         // REQUIREMENT: The crawler should process high-priority items first
         // PURPOSE: Verify that priority values are correctly mapped to priority levels
@@ -412,6 +658,7 @@ mod _inline_tests {
             scheduled_for: None,
             locked_by: None,
             locked_at: None,
+            kind: "fetch_series".to_string(),
         };
 
         // Test retry logic - required for handling transient failures
@@ -435,6 +682,11 @@ mod _inline_tests {
             "Pending item should be ready for processing"
         );
 
+        // Retrying items are claimable too
+        item.status = "retrying".to_string();
+        assert!(item.is_ready_for_processing());
+        item.status = "pending".to_string();
+
         // Test locking mechanism - prevents concurrent processing of same item
         item.locked_by = Some("worker-1".to_string());
         item.locked_at = Some(Utc::now());
@@ -443,6 +695,7 @@ mod _inline_tests {
             !item.is_ready_for_processing(),
             "Locked item should not be ready for processing"
         );
+        assert_eq!(item.job_kind(), JobKind::FetchSeries);
     }
 
     #[test]
@@ -457,6 +710,7 @@ mod _inline_tests {
             priority: 5,
             max_retries: 3,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         // Verify valid queue items pass validation
@@ -469,9 +723,7 @@ mod _inline_tests {
         let invalid_item = NewCrawlQueueItem {
             source: "".to_string(), // Empty source name
             series_id: "GDP".to_string(),
-            priority: 5,
-            max_retries: 3,
-            scheduled_for: None,
+            ..valid_item.clone()
         };
 
         assert!(
@@ -481,11 +733,8 @@ mod _inline_tests {
 
         // Test priority validation - ensures priority values are within valid range
         let invalid_priority = NewCrawlQueueItem {
-            source: "FRED".to_string(),
-            series_id: "GDP".to_string(),
             priority: 0, // Below minimum priority
-            max_retries: 3,
-            scheduled_for: None,
+            ..valid_item.clone()
         };
 
         assert!(

@@ -161,6 +161,7 @@ impl ComprehensiveCrawler {
                 priority: QueuePriority::Normal.into(),
                 scheduled_for: Some(chrono::Utc::now()),
                 max_retries: 3,
+                kind: econ_graph_core::models::JobKind::FetchSeries.to_string(),
             };
 
             CrawlQueueItem::create(pool, &queue_item).await?;
