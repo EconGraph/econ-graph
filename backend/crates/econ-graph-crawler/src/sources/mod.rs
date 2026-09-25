@@ -10,14 +10,14 @@
 use crate::adapter::AdapterRegistry;
 
 // Adapter modules (one per source) are declared here.
-pub mod fred;
-pub mod bls;
-pub mod world_bank;
-pub mod imf;
-pub mod census;
 pub mod bea;
+pub mod bls;
+pub mod census;
 pub mod fhfa;
+pub mod fred;
+pub mod imf;
 pub mod static_catalogs;
+pub mod world_bank;
 
 /// Registry with every production adapter, pointed at the real upstream APIs.
 pub fn default_registry() -> AdapterRegistry {

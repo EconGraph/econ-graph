@@ -264,6 +264,7 @@ async fn make_worker(
             source_filter: None,
             pause_after_consecutive: 5,
             pause_for: Duration::from_secs(10),
+            queue_retention: None,
         },
     )
 }

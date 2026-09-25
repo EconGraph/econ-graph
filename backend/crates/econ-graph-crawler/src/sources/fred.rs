@@ -39,7 +39,6 @@ const FRED_WEB_SERIES_URL: &str = "https://fred.stlouisfed.org/series";
 /// FRED's marker for a missing observation.
 const MISSING_VALUE: &str = ".";
 
-
 /// Search terms walked by [`FredAdapter::discover`] (same list as the old series_discovery/fred.rs).
 const SEARCH_TERMS: &[&str] = &[
     "GDP",
@@ -501,7 +500,10 @@ mod tests {
         assert_eq!(s.points[2].date, d("2025-10-01"));
         assert_eq!(s.points[2].value, None);
 
-        assert!(s.points.iter().all(|p| p.revision_date == p.date && p.is_original_release));
+        assert!(s
+            .points
+            .iter()
+            .all(|p| p.revision_date == p.date && p.is_original_release));
 
         // Two requests, both with the key and file_type=json.
         let reqs = mock.received_requests().await;
@@ -539,10 +541,7 @@ mod tests {
             None
         );
         // Garbage is a parse error, not silently dropped.
-        for bad in [
-            obs("2024-01-01", "n/a", None),
-            obs("01/01/2024", "1", None),
-        ] {
+        for bad in [obs("2024-01-01", "n/a", None), obs("01/01/2024", "1", None)] {
             let e = parse_observation("X", bad, today).unwrap_err();
             assert_eq!(e.kind(), "parse", "{e}");
         }
