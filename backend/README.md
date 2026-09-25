@@ -11,9 +11,10 @@ econ-graph-backend/
 ├── econ-graph-core/          # Core data models and database schema
 ├── econ-graph-auth/          # Authentication and authorization
 ├── econ-graph-metrics/       # Metrics collection and monitoring
-├── econ-graph-services/      # Business logic and data processing
+├── econ-graph-services/      # Business logic (search, series, analysis, queue stats)
 ├── econ-graph-graphql/       # GraphQL API with security features
-├── econ-graph-crawler/       # General data acquisition and crawling
+├── econ-graph-crawler/       # Source adapters, crawl_queue worker, `crawler` CLI
+├── econ-graph-crawler-worker/ # Deployed `crawler-worker` binary (worker + SEC handler)
 ├── econ-graph-sec-crawler/   # SEC EDGAR XBRL financial data crawling
 ├── econ-graph-mcp/           # Model Context Protocol for AI integration
 └── econ-graph-backend/       # Main application server and orchestration
@@ -52,13 +53,12 @@ Comprehensive metrics collection and monitoring capabilities using Prometheus, p
 - Centralized metrics registry
 
 ### **econ-graph-services**
-Business logic and service layer providing data processing, external API integrations, and economic data discovery capabilities.
+Business logic and service layer used by the GraphQL and MCP APIs.
 
 **Key Features:**
-- Multi-source data discovery (FRED, BLS, Census, World Bank, etc.)
-- Advanced web crawling with politeness and rate limiting
 - Global economic analysis and intelligent search
-- Asynchronous task processing and job scheduling
+- Series queries
+- `crawl_queue` statistics
 - User collaboration and data sharing features
 
 ### **econ-graph-graphql**
@@ -72,14 +72,16 @@ GraphQL API layer with enterprise-grade security features, performance optimizat
 - Comprehensive metrics and monitoring
 
 ### **econ-graph-crawler**
-General data acquisition and crawling functionality with advanced features for systematic data collection from various sources.
+All data collection goes through the Postgres `crawl_queue`: jobs are enqueued (GraphQL
+`triggerCrawl`, or `crawler enqueue|discover`), and `crawler-worker` drains the queue.
 
 **Key Features:**
-- Multi-source crawling with intelligent rate limiting
-- Robust retry mechanisms with exponential backoff
-- Comprehensive data validation and quality checks
-- Real-time progress monitoring and status reporting
-- Error handling and recovery mechanisms
+- One source adapter per provider (FRED, BLS, BEA, Census, World Bank, IMF, FHFA, central banks, ...)
+- Shared `HttpFetcher`: per-source rate limits and concurrency, timeouts, retries honouring `Retry-After`
+- Queue worker with retry/fail by error kind and per-source pause
+- `crawler discover|enqueue|status|sources|fetch` operator CLI
+
+See `crates/econ-graph-crawler/README.md` and `docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md`.
 
 ### **econ-graph-sec-crawler**
 Specialized SEC EDGAR XBRL crawler for financial data acquisition with advanced parsing and analysis capabilities.

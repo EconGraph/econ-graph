@@ -1,5 +1,8 @@
 # BLS API Experimental Findings - September 13, 2025
 
+> **Status (2026):** the BLS code referenced below (`series_discovery/bls.rs`) was ported to
+> `backend/crates/econ-graph-crawler/src/sources/bls.rs` and the old module removed; line references are historical.
+
 ## Executive Summary
 
 During the implementation of dynamic series discovery for the Bureau of Labor Statistics (BLS) API, I discovered significant discrepancies between the official documentation and actual API behavior. This document provides a detailed account of experimental findings, working endpoints, non-functional endpoints, and the workarounds implemented.

@@ -1,5 +1,11 @@
 # Census Bureau BDS Integration Documentation
 
+> **Status (2026):** the code described here was ported to the Census adapter in
+> `backend/crates/econ-graph-crawler/src/sources/census.rs`; the old `series_discovery` module and
+> `catalog_crawler` binary were removed. Run it via the crawl queue:
+> `crawler discover --source CENSUS` / `crawler enqueue --source CENSUS --series <id>`, drained by `crawler-worker`
+> (see [CRAWLER_DEPLOYMENT_GUIDE.md](./CRAWLER_DEPLOYMENT_GUIDE.md)). Paths below are historical.
+
 ## Overview
 
 This document describes the integration with the U.S. Census Bureau's Business Dynamics Statistics (BDS) dataset through their Data API. The BDS provides comprehensive statistics on business establishments, firms, and job creation/destruction patterns.
@@ -133,17 +139,19 @@ let data = execute_structured(&client, &query).await?;
 
 ### Command Line Usage
 ```bash
-# Crawl all data sources (includes Census)
-./catalog_crawler crawl-all --database-url postgresql://... --series-count 10
+# Enqueue Census catalog discovery; crawler-worker drains the queue
+crawler discover --source CENSUS
 
-# Crawl only Census Bureau
-./catalog_crawler crawl-source "U.S. Census Bureau" --database-url postgresql://... --series-count 5
+# Enqueue data fetches for specific series
+crawler enqueue --source CENSUS --series <series-id>
 ```
 
 ### Programmatic Usage
 ```rust
-let discovery_service = SeriesDiscoveryService::new(None, None, None, None);
-let census_series = discovery_service.discover_census_series(&pool).await?;
+// econ_graph_crawler::sources::census (SourceAdapter): discover() / fetch_series()
+let registry = econ_graph_crawler::sources::default_registry();
+let census = registry.get(SourceId::Census).expect("census adapter");
+let discovered = census.discover(&ctx).await?;
 ```
 
 ## Known Limitations

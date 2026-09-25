@@ -1,5 +1,11 @@
 # Census Bureau Integration - Developer Summary
 
+> **Status (2026):** the code described here was ported to the Census adapter in
+> `backend/crates/econ-graph-crawler/src/sources/census.rs`; the old `series_discovery` module and
+> `catalog_crawler` binary were removed. Run it via the crawl queue:
+> `crawler discover --source CENSUS` / `crawler enqueue --source CENSUS --series <id>`, drained by `crawler-worker`
+> (see [CRAWLER_DEPLOYMENT_GUIDE.md](./CRAWLER_DEPLOYMENT_GUIDE.md)). Paths below are historical.
+
 ## Overview
 
 This document provides a comprehensive summary of the Census Bureau Business Dynamics Statistics (BDS) integration work completed for future developers who will maintain, extend, or debug this integration.
@@ -177,11 +183,10 @@ let data = execute_structured(&client, &query).await?;
 
 ### Crawler Usage
 ```bash
-# Test Census Bureau integration
-./target/release/catalog_crawler crawl-source "U.S. Census Bureau" \
-  --database-url "postgresql://user:pass@localhost/db" \
-  --series-count 5 \
-  --dry-run
+# Discover Census series (writes series metadata when crawler-worker runs the job)
+crawler discover --source CENSUS
+# Or fetch one series now, bypassing the queue
+crawler fetch --source CENSUS --series <series-id>
 ```
 
 ## Known Limitations and Considerations
