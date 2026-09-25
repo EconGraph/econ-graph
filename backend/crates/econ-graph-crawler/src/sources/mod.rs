@@ -11,6 +11,7 @@ use crate::adapter::AdapterRegistry;
 
 // Adapter modules (one per source) are declared here.
 pub mod fred;
+pub mod bls;
 
 /// Registry with every production adapter, pointed at the real upstream APIs.
 pub fn default_registry() -> AdapterRegistry {
@@ -18,5 +19,6 @@ pub fn default_registry() -> AdapterRegistry {
     let mut registry = AdapterRegistry::new();
     // registry.register(std::sync::Arc::new(<name>::XAdapter::default()));
     registry.register(std::sync::Arc::new(fred::FredAdapter::default()));
+    registry.register(std::sync::Arc::new(bls::BlsAdapter::default()));
     registry
 }

@@ -1,0 +1,8 @@
+{
+  "status": "REQUEST_NOT_PROCESSED",
+  "responseTime": 21,
+  "message": [
+    "Request could not be serviced, as the daily threshold for total number of requests allocated to the user has been reached."
+  ],
+  "Results": {}
+}
