@@ -12,6 +12,7 @@ use crate::adapter::AdapterRegistry;
 // Adapter modules (one per source) are declared here.
 pub mod fred;
 pub mod bls;
+pub mod static_catalogs;
 
 /// Registry with every production adapter, pointed at the real upstream APIs.
 pub fn default_registry() -> AdapterRegistry {
@@ -20,5 +21,9 @@ pub fn default_registry() -> AdapterRegistry {
     // registry.register(std::sync::Arc::new(<name>::XAdapter::default()));
     registry.register(std::sync::Arc::new(fred::FredAdapter::default()));
     registry.register(std::sync::Arc::new(bls::BlsAdapter::default()));
+    // Static catalogs (no live integration): BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO.
+    for adapter in static_catalogs::StaticCatalogAdapter::all() {
+        registry.register(std::sync::Arc::new(adapter));
+    }
     registry
 }
