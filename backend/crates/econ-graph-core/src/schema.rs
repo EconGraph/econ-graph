@@ -268,6 +268,8 @@ diesel::table! {
         locked_at -> Nullable<Timestamptz>,
         #[max_length = 30]
         kind -> Varchar,
+        started_at -> Nullable<Timestamptz>,
+        finished_at -> Nullable<Timestamptz>,
     }
 }
 

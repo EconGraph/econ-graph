@@ -107,6 +107,10 @@ pub struct CrawlQueueItem {
     pub locked_at: Option<DateTime<Utc>>,
     /// One of `fetch_series` | `discover_catalog` | `fetch_filing`; see [`JobKind`].
     pub kind: String,
+    /// When the current/last attempt was claimed (reset on every claim).
+    pub started_at: Option<DateTime<Utc>>,
+    /// When the item reached `completed` / `failed`; NULL while active.
+    pub finished_at: Option<DateTime<Utc>>,
 }
 
 /// New crawl queue item for insertion
@@ -145,6 +149,7 @@ pub struct UpdateCrawlQueueItem {
     pub scheduled_for: Option<Option<DateTime<Utc>>>,
     pub locked_by: Option<Option<String>>,
     pub locked_at: Option<Option<DateTime<Utc>>>,
+    pub finished_at: Option<Option<DateTime<Utc>>>,
 }
 
 impl UpdateCrawlQueueItem {
@@ -330,7 +335,8 @@ impl CrawlQueueItem {
         let mut conn = get_conn(pool).await?;
         let item = diesel::sql_query(
             "UPDATE crawl_queue \
-             SET status = 'processing', locked_by = $1, locked_at = NOW(), updated_at = NOW() \
+             SET status = 'processing', locked_by = $1, locked_at = NOW(), updated_at = NOW(), \
+                 started_at = NOW(), finished_at = NULL \
              WHERE id = ( \
                  SELECT id FROM crawl_queue \
                  WHERE status IN ('pending', 'retrying') \
@@ -360,7 +366,8 @@ impl CrawlQueueItem {
         let mut conn = get_conn(pool).await?;
         let item = diesel::sql_query(
             "UPDATE crawl_queue \
-             SET status = 'processing', locked_by = $2, locked_at = NOW(), updated_at = NOW() \
+             SET status = 'processing', locked_by = $2, locked_at = NOW(), updated_at = NOW(), \
+                 started_at = NOW(), finished_at = NULL \
              WHERE id = $1 AND status IN ('pending', 'retrying') \
              RETURNING *",
         )
@@ -402,6 +409,8 @@ impl CrawlQueueItem {
                  error_message = $4, \
                  locked_by = NULL, \
                  locked_at = NULL, \
+                 finished_at = CASE WHEN $2 AND retry_count + 1 >= max_retries \
+                                    THEN NOW() ELSE NULL END, \
                  updated_at = NOW() \
              WHERE id = $1 AND status IN ('pending', 'processing', 'retrying') \
              RETURNING *",
@@ -478,6 +487,7 @@ impl CrawlQueueItem {
         let update = UpdateCrawlQueueItem {
             status: Some(status.to_string()),
             error_message: error.map(Some),
+            finished_at: Some(Some(Utc::now())),
             ..Default::default()
         }
         .clearing_lock();
@@ -562,6 +572,7 @@ impl Default for UpdateCrawlQueueItem {
             scheduled_for: None,
             locked_by: None,
             locked_at: None,
+            finished_at: None,
         }
     }
 }
@@ -659,6 +670,8 @@ mod _inline_tests {
             locked_by: None,
             locked_at: None,
             kind: "fetch_series".to_string(),
+            started_at: None,
+            finished_at: None,
         };
 
         // Test retry logic - required for handling transient failures

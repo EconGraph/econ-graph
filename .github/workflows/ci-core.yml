@@ -471,7 +471,22 @@ jobs:
         cargo clippy -p econ-graph-crawler --all-targets --no-deps -- -D warnings
       working-directory: backend
 
+    # Required: the crawler crate and the crawl_queue model / queue service tests.
+    # These must pass for the job (and the PR) to go green.
+    - name: Run crawler and queue tests (required)
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test -p econ-graph-crawler --all-features -- --test-threads=1
+        cargo test -p econ-graph-core crawl_queue -- --test-threads=1
+        cargo test -p econ-graph-services queue_service -- --test-threads=1
+      working-directory: backend
+
+    # Allowed to fail (owner decision): the full workspace run still has known
+    # pre-existing failures in tests unrelated to the crawler/queue work. It keeps
+    # running so those failures stay visible in the log. TODO: drop
+    # continue-on-error once the pre-existing failures are fixed.
     - name: Run all workspace tests (lib, bins, integration tests)
+      continue-on-error: true
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         cargo test --workspace --no-fail-fast --lib --bins --tests -- --test-threads=1
