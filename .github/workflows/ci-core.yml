@@ -388,6 +388,110 @@ jobs:
         DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
         CHART_API_SERVICE_URL: http://localhost:3001/api/chart
 
+  # Runs EVERY test in the Rust workspace (all crates, unit + integration + doc tests)
+  # against a Postgres service container. Unlike the hand-picked jobs below, new tests
+  # are picked up automatically. Tests read DATABASE_URL (see
+  # econ-graph-core/src/test_utils.rs); when it is unset they fall back to
+  # testcontainers, which also works here because ubuntu-latest has Docker.
+  # --test-threads=1: many DB tests drop/recreate the public schema of the shared
+  # database, so running them concurrently within one test binary is flaky.
+  backend-workspace-tests:
+    name: Backend Workspace Tests (all tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    needs: [backend-build-cache]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5446:5432
+
+    env:
+      DATABASE_URL: postgresql://postgres:password@localhost:5446/econ_graph_test
+      RUST_LOG: warn
+      RUST_BACKTRACE: 1
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+          backend/target
+        key: ${{ runner.os }}-shared-cargo-v2
+        restore-keys: |
+          ${{ runner.os }}-shared-cargo-
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+
+    # No lint exemptions for the new crawler crate (the workspace-wide clippy in
+    # backend-smoke-tests still carries ~23 -A exemptions for legacy code).
+    # --no-deps keeps -D warnings scoped to econ-graph-crawler; without it the
+    # flag also applies to the other workspace crates it depends on.
+    # TODO(A12): remove continue-on-error once agent A12 deletes the legacy
+    # code in econ-graph-crawler/src/bin/catalog_crawler.rs, which fails this today
+    # (unused_variables x2, clippy::too_many_arguments).
+    - name: Clippy (econ-graph-crawler, no exemptions)
+      continue-on-error: true
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo clippy -p econ-graph-crawler --all-targets --no-deps -- -D warnings
+      working-directory: backend
+
+    - name: Run all workspace tests (lib, bins, integration tests)
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --workspace --no-fail-fast --lib --bins --tests -- --test-threads=1
+      working-directory: backend
+
+    # TODO: ~45 doctests across the workspace do not compile (stale examples).
+    # Fix them, then drop continue-on-error (or fold into the step above by
+    # removing --lib --bins --tests).
+    - name: Run workspace doctests
+      continue-on-error: true
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --workspace --no-fail-fast --doc
+      working-directory: backend
+
+  # NOTE: The hand-picked backend-*-tests jobs below (models, crawler, queue,
+  # global-analysis, series-discovery, auth, collaboration, remaining-service)
+  # run fixed lists of test names, so new tests never run in them. They are
+  # superseded by backend-workspace-tests above and can be removed once that
+  # job is green.
   backend-models-basic-tests:
     name: Backend Models Basic Tests
     runs-on: ubuntu-latest

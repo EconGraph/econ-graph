@@ -11,6 +11,7 @@ use tokio::time::timeout;
 
 #[tokio::test]
 #[serial]
+#[ignore = "requires live network access to api.census.gov"]
 async fn test_census_bds_integration_happy_path() -> AppResult<()> {
     let container = TestContainer::new().await;
     let pool = container.pool();
@@ -79,6 +80,7 @@ async fn test_census_bds_integration_happy_path() -> AppResult<()> {
 
 #[tokio::test]
 #[serial]
+#[ignore = "requires live network access to api.census.gov"]
 async fn test_census_bds_query_builder_integration() -> AppResult<()> {
     let client = Client::new();
 
@@ -129,6 +131,7 @@ async fn test_census_bds_query_builder_integration() -> AppResult<()> {
 
 #[tokio::test]
 #[serial]
+#[ignore = "requires live network access to api.census.gov"]
 async fn test_census_bds_sample_data_integration() -> AppResult<()> {
     let client = Client::new();
 
@@ -186,6 +189,7 @@ async fn test_census_bds_sample_data_integration() -> AppResult<()> {
 
 #[tokio::test]
 #[serial]
+#[ignore = "requires live network access to api.census.gov"]
 async fn test_census_discovery_integration() -> AppResult<()> {
     let container = TestContainer::new().await;
     let pool = container.pool();
