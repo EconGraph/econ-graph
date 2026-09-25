@@ -259,7 +259,7 @@ async fn exec(pool: &DatabasePool, sql: &str) {
 }
 
 /// Inserts the company under a stale name plus `financial_statements` rows for `accessions`
-/// directly in SQL (`XbrlStorage` inserts currently fail; see the ignored test below).
+/// directly in SQL.
 async fn prestore(pool: &DatabasePool, accessions: &[&str]) {
     exec(
         pool,
@@ -453,14 +453,8 @@ async fn worker_retries_rate_limited_fetch_filing_job() {
     );
 }
 
-/// The full download-and-store path. Ignored because `XbrlStorage::store_xbrl_file` cannot
-/// insert today: econ-graph-core's `schema.rs` declares
-/// `financial_statements.xbrl_file_compression_type` / `xbrl_processing_status` as `Text`, but
-/// the migration creates them as Postgres enums (`compression_type`, `processing_status`), so
-/// the insert fails with "column ... is of type compression_type but expression is of type
-/// text". Un-ignore once the core schema/enum mapping is fixed.
+/// The full download-and-store path through `XbrlStorage::store_xbrl_file`.
 #[tokio::test]
-#[ignore = "blocked by econ-graph-core financial_statements enum column mapping (Text vs PG enum)"]
 async fn crawls_company_and_stores_filings() {
     let Some(db) = db().await else { return };
     let mock = MockSource::start().await;
