@@ -1,0 +1,32 @@
+{
+  "cik": "9999901",
+  "entityType": "operating",
+  "sic": "3571",
+  "sicDescription": "Electronic Computers",
+  "insiderTransactionForOwnerExists": 0,
+  "insiderTransactionForIssuerExists": 1,
+  "name": "Testco Holdings Inc.",
+  "tickers": ["TSTC"],
+  "exchanges": ["Nasdaq"],
+  "fiscalYearEnd": "1231",
+  "stateOfIncorporation": "DE",
+  "filings": {
+    "recent": {
+      "accessionNumber": ["0000950170-24-000001", "0009999901-24-000002", "0009999901-24-000003"],
+      "filingDate": ["2024-02-15", "2024-05-02", "2024-05-10"],
+      "reportDate": ["2023-12-31", "2024-03-31", "2024-05-09"],
+      "acceptanceDateTime": ["2024-02-15T16:30:00.000Z", "2024-05-02T16:30:00.000Z", "2024-05-10T08:00:00.000Z"],
+      "act": ["34", "34", "34"],
+      "form": ["10-K", "10-Q", "8-K"],
+      "fileNumber": ["001-99999", "001-99999", "001-99999"],
+      "filmNumber": ["24000001", "24000002", "24000003"],
+      "items": ["", "", "2.02"],
+      "size": [1200000, 800000, 50000],
+      "isXBRL": [1, 1, 0],
+      "isInlineXBRL": [1, 1, 0],
+      "primaryDocument": ["tstc-20231231.htm", "tstc-20240331.htm", "ex99.htm"],
+      "primaryDocDescription": ["10-K", "10-Q", "8-K"]
+    },
+    "files": []
+  }
+}

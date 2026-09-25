@@ -56,6 +56,17 @@ enum Commands {
         exclude_restated: bool,
     },
 
+    /// Enqueue SEC `fetch_filing` jobs on crawl_queue for the crawler-worker to process
+    Enqueue {
+        /// Company CIKs, zero-padded or not (comma-separated or repeated)
+        #[arg(short, long, value_delimiter = ',', required = true)]
+        cik: Vec<String>,
+
+        /// Queue priority (1-10, higher runs first)
+        #[arg(short, long, default_value = "5")]
+        priority: i32,
+    },
+
     /// Get storage statistics
     Stats,
 
@@ -96,9 +107,22 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|_| "postgres://postgres:password@localhost/econ_graph".to_string());
 
     let pool = econ_graph_core::database::create_pool(&database_url).await?;
+
+    if let Commands::Enqueue { cik, priority } = &cli.command {
+        let (enqueued, active) =
+            econ_graph_sec_crawler::enqueue_filings(&pool, cik, *priority).await?;
+        println!(
+            "Enqueued {} SEC fetch_filing job(s); {} already queued",
+            enqueued, active
+        );
+        return Ok(());
+    }
+
     let crawler = SecEdgarCrawler::new(pool).await?;
 
     match cli.command {
+        Commands::Enqueue { .. } => unreachable!("handled above"),
+
         Commands::CrawlCompany {
             cik,
             rate_limit,

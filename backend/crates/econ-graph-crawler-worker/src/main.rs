@@ -4,6 +4,11 @@
 
 //! `crawler-worker`: drains `crawl_queue` until SIGINT/SIGTERM.
 //!
+//! Handles `fetch_series` / `discover_catalog` jobs for every adapter in
+//! `econ_graph_crawler::sources::default_registry()`, plus SEC `fetch_filing` jobs (series_id =
+//! company CIK) through `econ_graph_sec_crawler::SecFilingHandler`. It lives in its own crate
+//! because `econ-graph-crawler` must not depend on the SEC crate.
+//!
 //! Environment: `DATABASE_URL` (required), `FRED_API_KEY` / `BLS_API_KEY` / `BEA_API_KEY` /
 //! `CENSUS_API_KEY` (optional), `RUST_LOG` (default `info`). Every flag can also be set through
 //! the `CRAWLER_*` variable shown in `--help`.
@@ -11,13 +16,16 @@
 //! The worker does not run database migrations; the backend applies them at startup.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
+use econ_graph_core::models::JobKind;
 use econ_graph_crawler::sources::default_registry;
 use econ_graph_crawler::{
     ApiKeys, CrawlCtx, HttpConfig, HttpFetcher, SourceId, SourcePolicy, Worker, WorkerConfig,
 };
+use econ_graph_sec_crawler::SecFilingHandler;
 
 #[derive(Debug, Parser)]
 #[command(name = "crawler-worker", version, about = "Processes crawl_queue jobs")]
@@ -105,10 +113,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         pause_for: Duration::from_secs(args.pause_secs),
     };
     if registry.ids().is_empty() {
-        tracing::warn!("no source adapters registered; every job will fail");
+        tracing::warn!("no source adapters registered; only SEC fetch_filing jobs can succeed");
     }
 
     Worker::new(ctx, registry, config)
+        .with_handler(
+            SourceId::Sec,
+            JobKind::FetchFiling,
+            Arc::new(SecFilingHandler::new()),
+        )
         .run(shutdown_signal())
         .await;
     Ok(())

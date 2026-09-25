@@ -12,11 +12,6 @@ path = "src/bin/crawler.rs"
 name = "catalog_crawler"
 path = "src/bin/catalog_crawler.rs"
 
-# The crawl_queue worker (see src/worker.rs).
-[[bin]]
-name = "crawler-worker"
-path = "src/bin/crawler_worker.rs"
-
 [dependencies]
 # Core dependencies
 econ-graph-core = { path = "../econ-graph-core" }

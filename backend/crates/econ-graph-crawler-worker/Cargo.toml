@@ -1,0 +1,22 @@
+[package]
+name = "econ-graph-crawler-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The crawl_queue worker binary: econ-graph-crawler's Worker plus handlers from crates it can't depend on (SEC)."
+
+# Built by deployment as `cargo build --bin crawler-worker`; keep the name.
+[[bin]]
+name = "crawler-worker"
+path = "src/main.rs"
+
+[dependencies]
+econ-graph-core = { path = "../econ-graph-core" }
+econ-graph-crawler = { path = "../econ-graph-crawler" }
+econ-graph-sec-crawler = { path = "../econ-graph-sec-crawler" }
+
+tokio.workspace = true
+# `env` lets the binary read CRAWLER_* variables
+clap = { workspace = true, features = ["env"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
