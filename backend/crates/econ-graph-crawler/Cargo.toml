@@ -49,3 +49,10 @@ chrono.workspace = true
 
 # UUID
 uuid.workspace = true
+
+# Adapter trait and data types
+async-trait.workspace = true
+bigdecimal.workspace = true
+
+# Per-source rate limiting
+governor = "0.6"
