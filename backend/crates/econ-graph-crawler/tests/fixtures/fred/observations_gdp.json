@@ -1,0 +1,21 @@
+{
+  "realtime_start": "2026-09-25",
+  "realtime_end": "2026-09-25",
+  "observation_start": "1600-01-01",
+  "observation_end": "9999-12-31",
+  "units": "lin",
+  "output_type": 1,
+  "file_type": "json",
+  "order_by": "observation_date",
+  "sort_order": "asc",
+  "count": 5,
+  "offset": 0,
+  "limit": 100000,
+  "observations": [
+    {"realtime_start": "2026-09-25", "realtime_end": "2026-09-25", "date": "2025-04-01", "value": "30485.729"},
+    {"realtime_start": "2026-09-25", "realtime_end": "2026-09-25", "date": "2025-07-01", "value": "31095.089"},
+    {"realtime_start": "2026-09-25", "realtime_end": "2026-09-25", "date": "2025-10-01", "value": "."},
+    {"realtime_start": "2026-09-25", "realtime_end": "2026-09-25", "date": "2026-01-01", "value": "31722.514"},
+    {"realtime_start": "2026-04-30", "realtime_end": "2026-05-28", "date": "2026-04-01", "value": "32101.6"}
+  ]
+}
