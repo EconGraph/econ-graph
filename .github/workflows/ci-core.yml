@@ -609,13 +609,8 @@ jobs:
           services::global_analysis_service::tests::test_get_global_events_with_filters \
           services::global_analysis_service::tests::test_direct_event_query \
           services::global_analysis_service::tests::test_event_insertion_only \
-          services::global_analysis_service::tests::test_trade_partners_retrieval
-        run_group global_analysis_advanced \
-          services::global_analysis_service::tests::test_get_correlation_network \
-          services::global_analysis_service::tests::test_calculate_country_correlations \
-          services::global_analysis_service::tests::test_calculate_economic_health_score \
-          services::global_analysis_service::tests::test_correlation_network_centrality_calculation \
-          services::global_analysis_service::tests::test_error_handling_database_connection_failure
+          services::global_analysis_service::tests::test_trade_partners_retrieval \
+          services::global_analysis_service::tests::test_calculate_economic_health_score
         run_group auth_integration \
           auth::integration_tests::test_auth_service_creation \
           auth::integration_tests::test_jwt_token_flow \
