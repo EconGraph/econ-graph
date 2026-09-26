@@ -503,6 +503,9 @@ impl CrawlerService {
         priority: QueuePriority,
     ) -> AppResult<()> {
         let queue_item = NewCrawlQueueItem {
+            kind: econ_graph_core::models::crawl_queue::JobKind::FetchSeries
+                .as_str()
+                .to_string(),
             source: "FRED".to_string(),
             series_id: series_id.to_string(),
             priority: priority.into(),
@@ -523,6 +526,9 @@ impl CrawlerService {
         priority: QueuePriority,
     ) -> AppResult<()> {
         let queue_item = NewCrawlQueueItem {
+            kind: econ_graph_core::models::crawl_queue::JobKind::FetchSeries
+                .as_str()
+                .to_string(),
             source: "BLS".to_string(),
             series_id: series_id.to_string(),
             priority: priority.into(),
@@ -556,12 +562,12 @@ impl CrawlerService {
 
                 match result {
                     Ok(_) => {
-                        CrawlQueueItem::mark_completed(pool, item.id).await?;
+                        CrawlQueueItem::force_complete(pool, item.id).await?;
                         println!("Successfully completed queue item: {}", item.id);
                     }
                     Err(e) => {
                         let error_msg = format!("Crawl failed: {}", e);
-                        CrawlQueueItem::mark_failed(pool, item.id, error_msg).await?;
+                        CrawlQueueItem::force_fail(pool, item.id, &error_msg).await?;
                         println!("Failed queue item {}: {}", item.id, e);
                     }
                 }

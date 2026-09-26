@@ -156,6 +156,9 @@ impl ComprehensiveCrawler {
 
             // Add to crawl queue
             let queue_item = NewCrawlQueueItem {
+                kind: econ_graph_core::models::crawl_queue::JobKind::FetchSeries
+                    .as_str()
+                    .to_string(),
                 series_id: series.external_id,
                 source,
                 priority: QueuePriority::Normal.into(),

@@ -176,6 +176,9 @@ mod tests {
         use econ_graph_core::models::{CrawlQueueItem, NewCrawlQueueItem};
 
         let new_item = NewCrawlQueueItem {
+            kind: econ_graph_core::models::crawl_queue::JobKind::FetchSeries
+                .as_str()
+                .to_string(),
             source: "FRED".to_string(),
             series_id: "GDP_TEST".to_string(),
             priority: 5,
