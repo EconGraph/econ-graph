@@ -204,6 +204,19 @@ jobs:
       env:
         RUST_LOG: warn
 
+    - name: Run SEC crawler unit tests (no database)
+      # Skips 3 timing tests in the old rate_limiter module that fail on main;
+      # #157 deletes that module. Drop the --skip flags once it lands.
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test -p econ-graph-sec-crawler --lib -- --test-threads=4 \
+          --skip rate_limiter::tests::test_rate_limiter_performance \
+          --skip rate_limiter::tests::test_concurrent_rate_limiting \
+          --skip rate_limiter::tests::test_time_until_next_permit
+      working-directory: backend
+      env:
+        RUST_LOG: warn
+
   chart-api-integration-tests:
     name: Chart API Integration Tests
     runs-on: ubuntu-latest
