@@ -1191,6 +1191,20 @@ impl XbrlXmlParser {
         }
     }
 
+    /// The local name of `element` if it is in the XBRL instance namespace (or has no namespace
+    /// binding), for the children of a context, entity, period or unit. Unlike
+    /// [`Self::structural_name`], linkbase and dimension elements don't qualify: a stray
+    /// `link:period` must not replace a context's period.
+    fn instance_name<'e>(
+        reader: &NsReader<&[u8]>,
+        element: &'e quick_xml::events::BytesStart,
+    ) -> Option<&'e str> {
+        match reader.resolver().resolve_element(element.name()).0 {
+            ResolveResult::Bound(ns) if ns.as_ref() != XBRLI_NS => None,
+            _ => Some(element.local_name().into_inner()),
+        }
+    }
+
     /// Check if element is a standard XBRL element, by its local name
     /// (so `xbrli:context` and `context` both match).
     fn is_standard_xbrl_element(local_name: &str) -> bool {
@@ -1326,7 +1340,7 @@ impl XbrlXmlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    match Self::structural_name(reader, e) {
+                    match Self::instance_name(reader, e) {
                         Some("entity") => {
                             if let Some(entity) = self.parse_entity_element(e, reader)? {
                                 context.entity = entity;
@@ -1390,7 +1404,7 @@ impl XbrlXmlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if Self::structural_name(reader, e) == Some("identifier") {
+                    if Self::instance_name(reader, e) == Some("identifier") {
                         in_identifier = true;
                         for attr in e.attributes() {
                             let attr = attr?;
@@ -1440,7 +1454,7 @@ impl XbrlXmlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    match Self::structural_name(reader, e) {
+                    match Self::instance_name(reader, e) {
                         Some("startDate") => {
                             let mut buf2 = Vec::new();
                             if let Ok(quick_xml::events::Event::Text(e)) =
@@ -1474,7 +1488,7 @@ impl XbrlXmlParser {
                     }
                 }
                 Ok(quick_xml::events::Event::Empty(ref e)) => {
-                    if Self::structural_name(reader, e) == Some("forever") {
+                    if Self::instance_name(reader, e) == Some("forever") {
                         period.period_type = Some("forever".to_string());
                     }
                 }
@@ -1529,7 +1543,7 @@ impl XbrlXmlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    match Self::structural_name(reader, e) {
+                    match Self::instance_name(reader, e) {
                         Some("measure") => {
                             let mut buf2 = Vec::new();
                             if let Ok(quick_xml::events::Event::Text(e)) =
