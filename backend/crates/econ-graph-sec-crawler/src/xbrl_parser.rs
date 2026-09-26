@@ -220,15 +220,20 @@ impl XbrlParser {
         let document_type = self.detect_document_type(xbrl_file).await?;
         info!("Detected document type: {:?}", document_type);
 
-        let parse_result = match document_type {
+        let (parse_result, cacheable) = match document_type {
             DocumentType::Xbrl => self.parse_xbrl_document_internal(xbrl_file).await?,
-            DocumentType::Ixbrl => self.parse_ixbrl_document(xbrl_file).await?,
-            DocumentType::HtmlEmbedded => self.parse_html_embedded_xbrl(xbrl_file).await?,
+            DocumentType::Ixbrl => (self.parse_ixbrl_document(xbrl_file).await?, true),
+            DocumentType::HtmlEmbedded => (self.parse_html_embedded_xbrl(xbrl_file).await?, true),
         };
 
         // Cache the result, unless the file changed while it was being parsed (the result might
         // then come from either version, so it belongs under neither key).
-        if self.cache.get_cache_file_path(xbrl_file).await? == cache_file {
+        if !cacheable {
+            warn!(
+                "{:?} fell back to the native parser; not caching the result",
+                xbrl_file
+            );
+        } else if self.cache.get_cache_file_path(xbrl_file).await? == cache_file {
             self.cache.write_entry(&cache_file, &parse_result).await?;
         } else {
             warn!(
@@ -256,13 +261,18 @@ impl XbrlParser {
         }
     }
 
-    /// Parse standard XBRL document
-    async fn parse_xbrl_document_internal(&self, xbrl_file: &Path) -> Result<XbrlParseResult> {
+    /// Parse standard XBRL document. Also returns whether the result may be cached: a native
+    /// fallback after Arelle failed may not, since it would sit under the Arelle cache key and
+    /// stop Arelle from being retried.
+    async fn parse_xbrl_document_internal(
+        &self,
+        xbrl_file: &Path,
+    ) -> Result<(XbrlParseResult, bool)> {
         // First, try Arelle for comprehensive parsing
         if self.config.use_arelle {
             match self.parse_with_arelle(xbrl_file).await {
                 Ok(statements) => {
-                    return Ok(XbrlParseResult {
+                    let result = XbrlParseResult {
                         statements,
                         line_items: Vec::new(),
                         taxonomy_concepts: Vec::new(),
@@ -281,19 +291,20 @@ impl XbrlParser {
                             errors: Vec::new(),
                             warnings: Vec::new(),
                         },
-                    })
+                    };
+                    return Ok((result, true));
                 }
                 Err(e) => {
                     warn!(
                         "Arelle parsing failed, falling back to native parser: {}",
                         e
                     );
+                    return Ok((self.parse_xbrl_native(xbrl_file).await?, false));
                 }
             }
         }
 
-        // Fallback to native XML parsing
-        self.parse_xbrl_native(xbrl_file).await
+        Ok((self.parse_xbrl_native(xbrl_file).await?, true))
     }
 
     /// Parse iXBRL (inline XBRL) document
@@ -702,10 +713,16 @@ impl XbrlCache {
         }
     }
 
-    /// Write a cache entry.
+    /// Write a cache entry. It is written to a temporary file and renamed into place, so readers
+    /// never see a partly written entry.
     pub async fn write_entry(&self, cache_file: &Path, result: &XbrlParseResult) -> Result<()> {
         let content = serde_json::to_string_pretty(result)?;
-        fs::write(cache_file, content).await?;
+        let tmp_file = cache_file.with_extension(format!("{}.tmp", Uuid::new_v4()));
+        fs::write(&tmp_file, content).await?;
+        if let Err(e) = fs::rename(&tmp_file, cache_file).await {
+            let _ = fs::remove_file(&tmp_file).await;
+            return Err(e.into());
+        }
         Ok(())
     }
 

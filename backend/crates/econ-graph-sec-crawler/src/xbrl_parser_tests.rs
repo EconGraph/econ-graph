@@ -654,6 +654,64 @@ async fn test_changed_document_misses_cache() {
 }
 
 #[tokio::test]
+async fn test_arelle_fallback_is_not_cached() {
+    // Arelle "installed" (the version check passes) but failing on the document: the native
+    // fallback result must not be stored under the Arelle key, or Arelle would never be retried.
+    let cache_dir = TempDir::new().unwrap();
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        use_arelle: true,
+        arelle_path: PathBuf::from("/bin/echo"),
+        cache_dir: cache_dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let file_path = get_test_data_path("sample_10k.xml");
+
+    let result = parser.parse_xbrl_document(&file_path).await.unwrap();
+    assert!(
+        !result.facts.is_empty(),
+        "native fallback should have parsed"
+    );
+    let key = XbrlCache::new(cache_dir.path().to_path_buf())
+        .for_parser_mode(true, false)
+        .get_cache_file_path(&file_path)
+        .await
+        .unwrap();
+    assert!(
+        !key.exists(),
+        "fallback result was cached under the Arelle key"
+    );
+}
+
+#[tokio::test]
+async fn test_cache_write_leaves_only_the_entry() {
+    let cache_dir = TempDir::new().unwrap();
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        use_arelle: false,
+        cache_dir: cache_dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let file_path = get_test_data_path("sample_10k.xml");
+    parser.parse_xbrl_document(&file_path).await.unwrap();
+
+    // Entries are written to a temporary file and renamed into place; no temporary is left.
+    let key = XbrlCache::new(cache_dir.path().to_path_buf())
+        .for_parser_mode(false, false)
+        .get_cache_file_path(&file_path)
+        .await
+        .unwrap();
+    let mut names = Vec::new();
+    let mut dir = fs::read_dir(cache_dir.path()).await.unwrap();
+    while let Some(entry) = dir.next_entry().await.unwrap() {
+        names.push(entry.file_name());
+    }
+    assert_eq!(names, vec![key.file_name().unwrap().to_os_string()]);
+}
+
+#[tokio::test]
 async fn test_same_bytes_at_another_path_miss_cache() {
     // Parsed statements carry generated ids, so a copy of a document gets its own entry.
     let cache_dir = TempDir::new().unwrap();
