@@ -7,7 +7,7 @@ name: Feature Flags
 on:
   push:
     branches: [ main, develop ]
-    tags: [ 'v*' ]
+    tags: [ 'train-*' ]
   pull_request:
     branches: [ main, develop ]
   schedule:

@@ -49,7 +49,7 @@ the frontend and `cfg(flag_world_map)` in the backend.
    | `kind` | every flag | `build` (unfinished code compiled out of release builds), `preview` (works end to end, shown to some people first), `ops` (kill switch), or `experiment` |
    | `owner` | every flag | The roadmap doc that owns it, such as `docs/roadmap/feature-flags.md` |
    | `stage` | `preview` only | `alpha` or `beta` |
-   | `remove_by` | `build` and `preview` | `"train N"` or `"unscheduled"`. CI fails once train N's tag, `v0.(N+1).0`, or any later release tag exists and the flag is still here |
+   | `remove_by` | `build` and `preview` | `"train N"` or `"unscheduled"`. CI fails once tag `train-N` (or a later train's) exists and the flag is still here |
 
    No other metadata keys are allowed, so a typo fails the check. `ops` flags
    are long-lived and take no `remove_by`; an `experiment` flag may carry one.

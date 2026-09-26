@@ -3,7 +3,7 @@ import { readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { checkFlags, trainTag } from '../check.js';
+import { checkFlags } from '../check.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = join(here, 'fixtures');
@@ -79,31 +79,23 @@ for (const [fixture, expected] of Object.entries(failures)) {
   });
 }
 
-test('train N ships as v0.(N+1).0', () => {
-  assert.equal(trainTag(1), 'v0.2.0');
-  assert.equal(trainTag(3), 'v0.4.0');
-});
-
 test('a flag whose remove_by train has shipped fails', () => {
   // valid has build_canary remove_by "train 1" and world_map "train 3"
-  assert.deepEqual(run('valid', ['v0.1.0', 'v0.2.0-rc.1']), []);
-  const errors = run('valid', ['v0.1.0', 'v0.2.0']);
-  assert.deepEqual(errors, [
-    'release: flag "build_canary": remove_by is train 1, and v0.2.0 has shipped; delete the flag',
-  ]);
-});
-
-test('a 1.0 or later release counts as past every train', () => {
-  assert.deepEqual(run('valid', ['v1.0.0']), [
-    'release: flag "build_canary": remove_by is train 1, and v1.0.0 has shipped; delete the flag',
-    'release: flag "world_map": remove_by is train 3, and v1.0.0 has shipped; delete the flag',
+  assert.deepEqual(run('valid', ['train-0', 'train-1-rc', 'train-10x']), []);
+  assert.deepEqual(run('valid', ['train-1']), [
+    'release: flag "build_canary": remove_by is train 1, and train-1 has shipped; delete the flag',
   ]);
 });
 
 test('a later train shipping counts when train N was never tagged', () => {
-  assert.deepEqual(run('valid', ['v0.1.0', 'v0.3.1', 'v0.3.0']), [
-    'release: flag "build_canary": remove_by is train 1, and v0.3.0 has shipped; delete the flag',
+  assert.deepEqual(run('valid', ['train-4', 'train-2']), [
+    'release: flag "build_canary": remove_by is train 1, and train-2 has shipped; delete the flag',
+    'release: flag "world_map": remove_by is train 3, and train-4 has shipped; delete the flag',
   ]);
+});
+
+test('version tags from before release trains are ignored', () => {
+  assert.deepEqual(run('valid', ['v0.2', 'v0.4.0', 'v1.0.0', 'v3.7.3', 'v2.6.0-professional-demo']), []);
 });
 
 test('the repository flag files pass', () => {

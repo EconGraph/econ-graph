@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Checks config/flags: flagd schema (vendored, no network), flag metadata,
 // dev overrides, and flags whose remove_by train has shipped.
-// Usage: node scripts/check-flags [--tags v0.2.0,v0.3.0]
+// Usage: node scripts/check-flags [--tags train-1,train-2]
 // Without --tags it reads the repository's tags from git, so CI needs them
 // fetched (actions/checkout with fetch-depth: 0).
 
@@ -28,17 +28,17 @@ function git(...args) {
 }
 
 function gitTags() {
-  const tags = git('tag', '--list', 'v*').split('\n').filter(Boolean);
-  // Without tags the remove_by check can't fire, so a pass would mean little
-  if (git('rev-parse', '--is-shallow-repository') === 'true' || tags.length === 0) {
-    console.warn('check-flags: warning: no v* tags, or a shallow clone; the remove_by check may miss a shipped train');
+  const tags = git('tag', '--list', 'train-*').split('\n').filter(Boolean);
+  // In a shallow clone the tags may be missing, so the remove_by check can't fire
+  if (git('rev-parse', '--is-shallow-repository') === 'true') {
+    console.warn('check-flags: warning: shallow clone; the remove_by check may miss a shipped train');
   }
   return tags;
 }
 
 const args = process.argv.slice(2);
 if (!(args.length === 0 || (args.length === 2 && args[0] === '--tags' && !args[1].startsWith('--')))) {
-  fail('usage: node scripts/check-flags [--tags v0.2.0,v0.3.0]');
+  fail('usage: node scripts/check-flags [--tags train-1,train-2]');
 }
 const tags = args.length ? args[1].split(',').filter(Boolean) : gitTags();
 

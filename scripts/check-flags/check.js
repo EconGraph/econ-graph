@@ -13,22 +13,18 @@ const REMOVE_BY = /^(train ([1-9][0-9]*)|unscheduled)$/;
 const METADATA_KEYS = ['kind', 'owner', 'stage', 'remove_by'];
 // A dev override only changes which variant is served
 const OVERRIDE_KEYS = ['state', 'variants', 'defaultVariant'];
-const RELEASE_TAG = /^v([0-9]+)\.([0-9]+)\.([0-9]+)$/;
+// A train is marked shipped by a `train-N` tag, pushed with its release. Not
+// the version tag: the repo already has v0.4.0 to v3.7.3 from before trains.
+const TRAIN_TAG = /^train-([1-9][0-9]*)$/;
 
-// Train N ships as v0.(N+1).0: train 1 is v0.2.0.
-export function trainTag(train) {
-  return `v0.${train + 1}.0`;
-}
-
-// The first stable release tag at or past train N's, so a train whose own tag
-// was skipped still counts as shipped once a later train is tagged. Every
-// v1.0.0 and later tag comes after every train.
+// The first train tag at or past train N's, so a train whose own tag was
+// skipped still counts as shipped once a later train is tagged
 function shippedTag(train, tags) {
   return tags
-    .map((t) => [t, RELEASE_TAG.exec(t)])
-    .filter(([, m]) => m && (Number(m[1]) > 0 || Number(m[2]) >= train + 1))
-    .map(([t]) => t)
-    .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))[0];
+    .map((t) => [t, TRAIN_TAG.exec(t)])
+    .filter(([, m]) => m && Number(m[1]) >= train)
+    .sort(([, a], [, b]) => Number(a[1]) - Number(b[1]))
+    .map(([t]) => t)[0];
 }
 
 function readJson(path, label, errors) {
