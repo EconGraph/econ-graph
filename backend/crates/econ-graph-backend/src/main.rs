@@ -304,14 +304,19 @@ async fn main() -> AppResult<()> {
                                     econ_graph_auth::auth::services::AuthService::new(
                                         pool_for_graphql.clone(),
                                     );
-                                match auth_service.verify_token(token) {
-                                    Ok(claims) => econ_graph_core::models::User::get_by_id(
+                                // verify_token rejects a subject that is not a UUID
+                                match auth_service
+                                    .verify_token(token)
+                                    .ok()
+                                    .and_then(|claims| claims.sub.parse().ok())
+                                {
+                                    Some(user_id) => econ_graph_core::models::User::get_by_id(
                                         &pool_for_graphql,
-                                        claims.sub.parse().unwrap_or_default(),
+                                        user_id,
                                     )
                                     .await
                                     .ok(),
-                                    Err(_) => None, // Invalid token, continue without user
+                                    None => None, // Invalid token, continue without user
                                 }
                             } else {
                                 None
