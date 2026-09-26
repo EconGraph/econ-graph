@@ -4,6 +4,21 @@
 -- Observations stay in data_points. In train 1 every dataset is stored long: each measure is
 -- its own series, so default_measure is 'value' until wide datasets arrive with Iceberg.
 
+-- Whether a components list is an array of {name, label, type, ...} objects that the Rust
+-- model (econ_graph_core::models::dataset::DatasetComponent) can read.
+CREATE FUNCTION dataset_components_valid(components JSONB) RETURNS BOOLEAN
+LANGUAGE sql IMMUTABLE AS $$
+    SELECT CASE WHEN jsonb_typeof(components) = 'array' THEN NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(components) AS c
+        WHERE jsonb_typeof(c) <> 'object'
+            OR jsonb_typeof(c -> 'name') IS DISTINCT FROM 'string'
+            OR jsonb_typeof(c -> 'label') IS DISTINCT FROM 'string'
+            OR jsonb_typeof(c -> 'type') IS DISTINCT FROM 'string'
+            OR c ->> 'type' NOT IN ('string', 'integer', 'decimal', 'date', 'boolean')
+    ) ELSE FALSE END
+$$;
+
 CREATE TABLE datasets (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     source_id UUID NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
@@ -28,11 +43,11 @@ CREATE TABLE datasets (
     -- Target of the composite foreign keys below, so a series and its dataset share a source.
     CONSTRAINT datasets_id_source_key UNIQUE (id, source_id),
     CONSTRAINT datasets_code_not_blank CHECK (btrim(code) <> ''),
-    CONSTRAINT datasets_dimensions_is_array CHECK (jsonb_typeof(dimensions) = 'array'),
-    CONSTRAINT datasets_measures_is_array CHECK (
-        jsonb_typeof(measures) = 'array' AND jsonb_array_length(measures) > 0
+    CONSTRAINT datasets_dimensions_valid CHECK (dataset_components_valid(dimensions)),
+    CONSTRAINT datasets_measures_valid CHECK (
+        dataset_components_valid(measures) AND jsonb_array_length(measures) > 0
     ),
-    CONSTRAINT datasets_attributes_is_array CHECK (jsonb_typeof(attributes) = 'array'),
+    CONSTRAINT datasets_attributes_valid CHECK (dataset_components_valid(attributes)),
     CONSTRAINT datasets_default_measure_declared CHECK (
         measures @> jsonb_build_array(jsonb_build_object('name', default_measure))
     )
@@ -47,7 +62,7 @@ CREATE TRIGGER update_datasets_updated_at
 -- dimensions holds the series' dimension values as a flat object of strings,
 -- e.g. {"geo_level": "state", "state": "06", "variable": "ESTAB"}; '{}' when it has none.
 -- Values must be strings (strict mode stops the path from unwrapping arrays such as
--- {"state": ["06"]}), and only a series with a dataset may have any.
+-- {"state": ["06"]}), and only a series with a dataset may have any, or a default_measure.
 -- default_measure overrides the dataset's; NULL means use the dataset's.
 --
 -- The composite foreign key also makes a series' dataset belong to the series' own source
@@ -62,10 +77,13 @@ ALTER TABLE economic_series
         FOREIGN KEY (dataset_id, source_id) REFERENCES datasets(id, source_id),
     ADD CONSTRAINT economic_series_dimensions_is_string_object CHECK (
         jsonb_typeof(dimensions) = 'object'
-        AND NOT jsonb_path_exists(dimensions, 'strict $.* ? (@.type() != "string")')
+        AND NOT jsonb_path_exists(dimensions, 'strict $.* ? (@.type() != "string")', '{}', true)
     ),
     ADD CONSTRAINT economic_series_dimensions_need_dataset CHECK (
         dataset_id IS NOT NULL OR dimensions = '{}'::jsonb
+    ),
+    ADD CONSTRAINT economic_series_default_measure_needs_dataset CHECK (
+        dataset_id IS NOT NULL OR default_measure IS NULL
     );
 
 ALTER TABLE series_metadata
@@ -76,10 +94,13 @@ ALTER TABLE series_metadata
         FOREIGN KEY (dataset_id, source_id) REFERENCES datasets(id, source_id),
     ADD CONSTRAINT series_metadata_dimensions_is_string_object CHECK (
         jsonb_typeof(dimensions) = 'object'
-        AND NOT jsonb_path_exists(dimensions, 'strict $.* ? (@.type() != "string")')
+        AND NOT jsonb_path_exists(dimensions, 'strict $.* ? (@.type() != "string")', '{}', true)
     ),
     ADD CONSTRAINT series_metadata_dimensions_need_dataset CHECK (
         dataset_id IS NOT NULL OR dimensions = '{}'::jsonb
+    ),
+    ADD CONSTRAINT series_metadata_default_measure_needs_dataset CHECK (
+        dataset_id IS NOT NULL OR default_measure IS NULL
     );
 
 -- Cross-section filters such as dimensions @> '{"indicator": "NY.GDP.PCAP.CD"}'.

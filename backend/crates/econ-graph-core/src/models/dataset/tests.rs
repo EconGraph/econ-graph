@@ -252,6 +252,25 @@ async fn dimensioned_series_round_trips_and_filters() {
         .expect("create metadata");
     assert_eq!(meta.dataset_id, Some(dataset.id));
     assert_eq!(meta.dimensions, state_dims("06"));
+
+    // get_or_create on an existing row updates the dataset columns too.
+    let mut rediscovered = new_metadata(source.id, "BDS/state.06.ESTAB");
+    rediscovered.dataset_id = Some(dataset.id);
+    rediscovered.dimensions = [
+        ("geo_level", "state"),
+        ("state", "06"),
+        ("variable", "FIRM"),
+    ]
+    .into_iter()
+    .collect();
+    rediscovered.default_measure = Some(VALUE_MEASURE.to_string());
+    let updated =
+        SeriesMetadata::get_or_create(&pool, source.id, "BDS/state.06.ESTAB", &rediscovered)
+            .await
+            .expect("update metadata");
+    assert_eq!(updated.id, meta.id);
+    assert_eq!(updated.dimensions, rediscovered.dimensions);
+    assert_eq!(updated.default_measure.as_deref(), Some(VALUE_MEASURE));
 }
 
 #[tokio::test]
@@ -395,6 +414,103 @@ async fn database_rejects_malformed_dimensions() {
                 "{table} {dimensions}"
             );
         }
+
+        let result = diesel::sql_query(format!(
+            "INSERT INTO {table} (source_id, external_id, title, frequency, default_measure) \
+             VALUES ($1, $2, 'Bad', 'Annual', 'value')"
+        ))
+        .bind::<diesel::sql_types::Uuid, _>(source.id)
+        .bind::<diesel::sql_types::Text, _>(format!("BAD_{}", Uuid::new_v4()))
+        .execute(&mut conn)
+        .await;
+        assert_eq!(
+            violated(result),
+            format!("{table}_default_measure_needs_dataset")
+        );
+    }
+}
+
+#[tokio::test]
+async fn database_rejects_components_rust_cannot_read() {
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let mut conn = pool.get().await.unwrap();
+
+    let cases = [
+        ("dimensions", r#"{}"#),
+        ("dimensions", r#"[5]"#),
+        ("dimensions", r#"[{"name": "state", "type": "string"}]"#),
+        (
+            "attributes",
+            r#"[{"name": "f", "label": "F", "type": "time"}]"#,
+        ),
+        (
+            "attributes",
+            r#"[{"name": 1, "label": "F", "type": "string"}]"#,
+        ),
+        (
+            "measures",
+            r#"[{"name": "value", "label": "Value", "type": "decimal"}, 5]"#,
+        ),
+    ];
+    for (column, components) in cases {
+        let result = diesel::sql_query(format!(
+            "INSERT INTO datasets (source_id, code, name, {column}) VALUES ($1, $2, 'Bad', $3::jsonb)"
+        ))
+        .bind::<diesel::sql_types::Uuid, _>(source.id)
+        .bind::<diesel::sql_types::Text, _>(format!("BAD_{}", Uuid::new_v4()))
+        .bind::<diesel::sql_types::Text, _>(components)
+        .execute(&mut conn)
+        .await;
+        assert_eq!(
+            violated(result),
+            format!("datasets_{column}_valid"),
+            "{components}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn used_dataset_cannot_be_deleted_but_its_source_can() {
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let dataset = Dataset::create(&pool, &bds_dataset(source.id))
+        .await
+        .unwrap();
+    let mut series = new_series(source.id, "BDS/state.06.ESTAB");
+    series.dataset_id = Some(dataset.id);
+    series.dimensions = state_dims("06");
+    let series = EconomicSeries::create(&pool, &series).await.unwrap();
+
+    let mut conn = pool.get().await.unwrap();
+    let result = diesel::delete(datasets::table.find(dataset.id))
+        .execute(&mut conn)
+        .await;
+    assert_eq!(violated(result), "economic_series_dataset_source_fkey");
+
+    diesel::delete(crate::schema::data_sources::table.find(source.id))
+        .execute(&mut conn)
+        .await
+        .expect("deleting the source cascades");
+    assert_eq!(Dataset::find_by_id(&pool, dataset.id).await.unwrap(), None);
+    let left: i64 = economic_series::table
+        .find(series.id)
+        .count()
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}
+
+fn assert_invalid(dataset: &NewDataset, expected: &str) {
+    match dataset.validate_components() {
+        Err(AppError::ValidationError(msg)) => {
+            assert!(
+                msg.contains(expected),
+                "{msg:?} does not mention {expected:?}"
+            )
+        }
+        other => panic!("expected a validation error mentioning {expected:?}, got {other:?}"),
     }
 }
 
@@ -409,19 +525,19 @@ fn validate_components_catches_what_the_database_cannot() {
         "State again",
         ComponentType::String,
     ));
-    assert!(duplicate.validate_components().is_err());
+    assert_invalid(&duplicate, "more than once");
 
     let mut undeclared = bds_dataset(source_id);
     undeclared.default_measure = "firms".to_string();
-    assert!(undeclared.validate_components().is_err());
+    assert_invalid(&undeclared, "is not one of its measures");
 
     let mut no_measures = bds_dataset(source_id);
     no_measures.measures.0.clear();
-    assert!(no_measures.validate_components().is_err());
+    assert_invalid(&no_measures, "declares no measures");
 
     let mut both = wdi_dataset(source_id);
     both.dimensions.0[1].codes = Some(vec![Code::new("USA", "United States")]);
-    assert!(both.validate_components().is_err());
+    assert_invalid(&both, "both codes and codelist");
 
     let mut repeated_code = bds_dataset(source_id);
     repeated_code.dimensions.0[1]
@@ -429,13 +545,13 @@ fn validate_components_catches_what_the_database_cannot() {
         .as_mut()
         .unwrap()
         .push(Code::new("06", "California again"));
-    assert!(repeated_code.validate_components().is_err());
+    assert_invalid(&repeated_code, "lists code \"06\" more than once");
 
     assert!(wdi_dataset(source_id).validate_components().is_ok());
 
     let mut blank = bds_dataset(source_id);
     blank.dimensions.0[0].name = " ".to_string();
-    assert!(blank.validate_components().is_err());
+    assert_invalid(&blank, "no name");
 }
 
 /// The WDI shape: `indicator` has an inline code list with a unit per code, `area` names the
