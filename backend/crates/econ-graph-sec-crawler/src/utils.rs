@@ -143,12 +143,12 @@ pub fn parse_file_size(size_str: &str) -> Result<u64> {
     let size_str = size_str.trim().to_uppercase();
 
     // Longest suffix first so "1KB" isn't read as "1K" bytes. No unit means bytes.
-    const UNITS: [(&str, f64); 5] = [
-        ("TB", 1024.0 * 1024.0 * 1024.0 * 1024.0),
-        ("GB", 1024.0 * 1024.0 * 1024.0),
-        ("MB", 1024.0 * 1024.0),
-        ("KB", 1024.0),
-        ("B", 1.0),
+    const UNITS: [(&str, u64); 5] = [
+        ("TB", 1 << 40),
+        ("GB", 1 << 30),
+        ("MB", 1 << 20),
+        ("KB", 1 << 10),
+        ("B", 1),
     ];
     let (number_part, multiplier) = UNITS
         .iter()
@@ -157,15 +157,18 @@ pub fn parse_file_size(size_str: &str) -> Result<u64> {
                 .strip_suffix(unit)
                 .map(|number| (number.trim(), *multiplier))
         })
-        .unwrap_or((size_str.as_str(), 1.0));
+        .unwrap_or((size_str.as_str(), 1));
+    let invalid = || anyhow::anyhow!("Invalid file size format: {}", size_str);
 
-    let number: f64 = number_part
-        .parse()
-        .map_err(|_| anyhow::anyhow!("Invalid file size format: {}", size_str))?;
-    let bytes = number * multiplier;
+    // Whole numbers stay exact (so u64::MAX bytes is accepted); fractions go through f64.
+    if let Ok(whole) = number_part.parse::<u64>() {
+        return whole.checked_mul(multiplier).ok_or_else(invalid);
+    }
+    let number: f64 = number_part.parse().map_err(|_| invalid())?;
+    let bytes = number * multiplier as f64;
     // 2^64: the first value that doesn't fit in a u64 (an `as` cast would saturate to u64::MAX).
     if !bytes.is_finite() || bytes < 0.0 || bytes >= 18_446_744_073_709_551_616.0 {
-        return Err(anyhow::anyhow!("Invalid file size format: {}", size_str));
+        return Err(invalid());
     }
     Ok(bytes as u64)
 }
@@ -336,6 +339,9 @@ mod tests {
         assert!(parse_file_size("1e308TB").is_err());
         assert!(parse_file_size("16777216TB").is_err()); // 2^64 bytes
         assert!(parse_file_size("NaNKB").is_err());
+        assert_eq!(parse_file_size("18446744073709551615").unwrap(), u64::MAX);
+        assert!(parse_file_size("18446744073709551616").is_err());
+        assert!(parse_file_size("18446744073709551615KB").is_err());
     }
 
     #[test]

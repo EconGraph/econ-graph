@@ -586,7 +586,7 @@ async fn test_cached_parse_keeps_facts_and_line_items() {
 
     // Mark the cache entry so the second result can only have come from the cache.
     let cache_file = XbrlCache::new(cache_dir.path().to_path_buf())
-        .for_parser_mode(false)
+        .for_parser_mode(false, false)
         .get_cache_file_path(&file_path)
         .await
         .unwrap();
@@ -624,24 +624,64 @@ async fn test_changed_document_misses_cache() {
         .await
         .unwrap();
     fs::write(&file_path, &original).await.unwrap();
-    let first_key = XbrlCache::new(cache_dir.path().to_path_buf())
-        .for_parser_mode(false)
-        .get_cache_file_path(&file_path)
-        .await
-        .unwrap();
+    let cache = XbrlCache::new(cache_dir.path().to_path_buf()).for_parser_mode(false, false);
+    let first_key = cache.get_cache_file_path(&file_path).await.unwrap();
     parser.parse_xbrl_document(&file_path).await.unwrap();
 
-    // Same path, different content: a different cache entry.
+    // Mark the first document's entry so a stale hit would be visible.
+    let mut entry: serde_json::Value =
+        serde_json::from_slice(&fs::read(&first_key).await.unwrap()).unwrap();
+    entry["processing_metadata"]["file_size"] = serde_json::json!(424242);
+    fs::write(&first_key, entry.to_string()).await.unwrap();
+
+    // Same path, different content: a different cache entry, parsed afresh.
     let mut changed = original.clone();
     changed.extend_from_slice(b"\n<!-- amended -->\n");
     fs::write(&file_path, &changed).await.unwrap();
-    let second_key = XbrlCache::new(cache_dir.path().to_path_buf())
-        .for_parser_mode(false)
-        .get_cache_file_path(&file_path)
-        .await
-        .unwrap();
+    let second_key = cache.get_cache_file_path(&file_path).await.unwrap();
     assert_ne!(first_key, second_key);
     assert!(!second_key.exists());
+
+    let second = parser.parse_xbrl_document(&file_path).await.unwrap();
+    assert_ne!(
+        second.processing_metadata.file_size, 424242,
+        "stale cache hit"
+    );
+    let stored: XbrlParseResult =
+        serde_json::from_slice(&fs::read(&second_key).await.unwrap()).unwrap();
+    assert_eq!(stored.facts.len(), second.facts.len());
+    assert!(!stored.facts.is_empty());
+}
+
+#[tokio::test]
+async fn test_same_bytes_at_another_path_miss_cache() {
+    // Parsed statements carry generated ids, so a copy of a document gets its own entry.
+    let cache_dir = TempDir::new().unwrap();
+    let work_dir = TempDir::new().unwrap();
+    let cache = XbrlCache::new(cache_dir.path().to_path_buf()).for_parser_mode(false, false);
+    let content = fs::read(get_test_data_path("sample_10k.xml"))
+        .await
+        .unwrap();
+    let a = work_dir.path().join("a.xml");
+    let b = work_dir.path().join("b.xml");
+    fs::write(&a, &content).await.unwrap();
+    fs::write(&b, &content).await.unwrap();
+    assert_ne!(
+        cache.get_cache_file_path(&a).await.unwrap(),
+        cache.get_cache_file_path(&b).await.unwrap()
+    );
+
+    // Each parser mode keys separately too.
+    let arelle = XbrlCache::new(cache_dir.path().to_path_buf()).for_parser_mode(true, false);
+    let arelle_dts = XbrlCache::new(cache_dir.path().to_path_buf()).for_parser_mode(true, true);
+    let keys = [
+        cache.get_cache_file_path(&a).await.unwrap(),
+        arelle.get_cache_file_path(&a).await.unwrap(),
+        arelle_dts.get_cache_file_path(&a).await.unwrap(),
+    ];
+    assert_ne!(keys[0], keys[1]);
+    assert_ne!(keys[1], keys[2]);
+    assert_ne!(keys[0], keys[2]);
 }
 
 #[tokio::test]
@@ -659,7 +699,7 @@ async fn test_unreadable_cache_entry_is_a_miss() {
     let file_path = get_test_data_path("sample_10k.xml");
     parser.parse_xbrl_document(&file_path).await.unwrap();
     let cache_file = XbrlCache::new(cache_dir.path().to_path_buf())
-        .for_parser_mode(false)
+        .for_parser_mode(false, false)
         .get_cache_file_path(&file_path)
         .await
         .unwrap();
