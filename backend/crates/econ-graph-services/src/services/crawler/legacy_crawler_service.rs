@@ -7,8 +7,8 @@ use uuid::Uuid;
 use econ_graph_core::database::DatabasePool;
 use econ_graph_core::error::{AppError, AppResult};
 use econ_graph_core::models::{
-    CrawlQueueItem, DataPoint, DataSource, EconomicSeries, NewCrawlQueueItem, NewDataPoint,
-    NewEconomicSeries, QueuePriority,
+    CrawlQueueItem, DataPoint, DataSource, EconomicSeries, LeaseOutcome, NewCrawlQueueItem,
+    NewDataPoint, NewEconomicSeries, QueuePriority,
 };
 
 /// FRED API response for series metadata
@@ -503,6 +503,9 @@ impl CrawlerService {
         priority: QueuePriority,
     ) -> AppResult<()> {
         let queue_item = NewCrawlQueueItem {
+            kind: econ_graph_core::models::crawl_queue::JobKind::FetchSeries
+                .as_str()
+                .to_string(),
             source: "FRED".to_string(),
             series_id: series_id.to_string(),
             priority: priority.into(),
@@ -510,8 +513,11 @@ impl CrawlerService {
             scheduled_for: None,
         };
 
-        CrawlQueueItem::create(pool, &queue_item).await?;
-        println!("Scheduled FRED crawl for series: {}", series_id);
+        if CrawlQueueItem::enqueue(pool, &queue_item).await?.is_some() {
+            println!("Scheduled FRED crawl for series: {}", series_id);
+        } else {
+            println!("FRED series {} is already queued", series_id);
+        }
         Ok(())
     }
 
@@ -523,6 +529,9 @@ impl CrawlerService {
         priority: QueuePriority,
     ) -> AppResult<()> {
         let queue_item = NewCrawlQueueItem {
+            kind: econ_graph_core::models::crawl_queue::JobKind::FetchSeries
+                .as_str()
+                .to_string(),
             source: "BLS".to_string(),
             series_id: series_id.to_string(),
             priority: priority.into(),
@@ -530,8 +539,11 @@ impl CrawlerService {
             scheduled_for: None,
         };
 
-        CrawlQueueItem::create(pool, &queue_item).await?;
-        println!("Scheduled BLS crawl for series: {}", series_id);
+        if CrawlQueueItem::enqueue(pool, &queue_item).await?.is_some() {
+            println!("Scheduled BLS crawl for series: {}", series_id);
+        } else {
+            println!("BLS series {} is already queued", series_id);
+        }
         Ok(())
     }
 
@@ -555,14 +567,24 @@ impl CrawlerService {
                 };
 
                 match result {
-                    Ok(_) => {
-                        CrawlQueueItem::mark_completed(pool, item.id).await?;
-                        println!("Successfully completed queue item: {}", item.id);
-                    }
+                    Ok(_) => match CrawlQueueItem::complete(pool, &item).await? {
+                        LeaseOutcome::Applied => {
+                            println!("Successfully completed queue item: {}", item.id)
+                        }
+                        LeaseOutcome::LostLease => {
+                            println!("Lost lease on queue item {}; not completing", item.id)
+                        }
+                    },
                     Err(e) => {
                         let error_msg = format!("Crawl failed: {}", e);
-                        CrawlQueueItem::mark_failed(pool, item.id, error_msg).await?;
-                        println!("Failed queue item {}: {}", item.id, e);
+                        match CrawlQueueItem::fail(pool, &item, &error_msg).await? {
+                            LeaseOutcome::Applied => {
+                                println!("Failed queue item {}: {}", item.id, e)
+                            }
+                            LeaseOutcome::LostLease => {
+                                println!("Lost lease on queue item {}; not failing it", item.id)
+                            }
+                        }
                     }
                 }
             } else {

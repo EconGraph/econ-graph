@@ -1,3 +1,16 @@
+//! Queue service: legacy convenience wrappers over the crawl queue model.
+//!
+//! Every state transition here delegates to the queue API on
+//! [`CrawlQueueItem`], so there is one code path for queue semantics.
+//!
+//! - Worker paths finish the item they claimed: [`complete_claimed_item`],
+//!   [`fail_claimed_item`] and [`retry_claimed_item_later`] take the claimed row and are
+//!   lease-guarded (see `CrawlQueueItem::{complete, fail, retry_later}`), so a worker whose lease
+//!   expired cannot overwrite a newer claim of the same item.
+//! - The id-based transitions (`mark_item_completed`, `mark_item_failed`,
+//!   `update_queue_item_status`, `update_queue_item_for_retry`) are admin overrides with no worker
+//!   identity: they use the *unguarded* `force_*` variants and ignore which claim holds the item.
+
 use chrono::{DateTime, Duration, Utc};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -5,115 +18,109 @@ use uuid::Uuid;
 
 use econ_graph_core::{
     database::DatabasePool,
-    error::AppResult,
-    models::{CrawlQueueItem, QueueStatistics, QueueStatus, UpdateCrawlQueueItem},
+    error::{AppError, AppResult},
+    models::{
+        CrawlQueueItem, LeaseOutcome, QueueStatistics, QueueStatus, QueueTransition,
+        UpdateCrawlQueueItem,
+    },
     schema::crawl_queue,
 };
 
-/// Get next queue items for processing using SKIP LOCKED
-/// This implements PostgreSQL's SKIP LOCKED feature for concurrent queue processing
+/// Worker id used when items are claimed through [`get_next_queue_items`].
+pub const QUEUE_SERVICE_WORKER_ID: &str = "queue-service";
+
+/// Claim up to `limit` due items (highest priority first) for processing.
+///
+/// Each returned item has been atomically moved to `processing` and locked by
+/// [`QUEUE_SERVICE_WORKER_ID`] (see [`CrawlQueueItem::claim_next`]); the caller owns it and must
+/// finish it by passing the returned item to [`complete_claimed_item`], [`fail_claimed_item`] or
+/// [`retry_claimed_item_later`].
 pub async fn get_next_queue_items(
     pool: &DatabasePool,
     limit: i64,
 ) -> AppResult<Vec<CrawlQueueItem>> {
-    use crawl_queue::dsl;
-
-    let mut conn = pool.get().await.map_err(|e| {
-        econ_graph_core::error::AppError::DatabaseError(format!(
-            "Failed to get database connection: {}",
-            e
-        ))
-    })?;
-
-    // Use SKIP LOCKED to get available items without blocking
-    let items = dsl::crawl_queue
-        .filter(dsl::status.eq("pending"))
-        .filter(dsl::locked_by.is_null())
-        .filter(
-            dsl::scheduled_for
-                .is_null()
-                .or(dsl::scheduled_for.le(Utc::now())),
-        )
-        .order(dsl::priority.desc()) // Higher priority first
-        .order(dsl::created_at.asc()) // FIFO for same priority
-        .limit(limit)
-        .for_update()
-        .skip_locked()
-        .load::<CrawlQueueItem>(&mut conn)
-        .await?;
-
+    let mut items = Vec::new();
+    while (items.len() as i64) < limit {
+        match CrawlQueueItem::claim_next(pool, QUEUE_SERVICE_WORKER_ID, None).await? {
+            Some(item) => items.push(item),
+            None => break,
+        }
+    }
     Ok(items)
 }
 
-/// Lock a queue item for processing by a specific worker
-pub async fn lock_queue_item(pool: &DatabasePool, item_id: Uuid, worker_id: &str) -> AppResult<()> {
-    use crawl_queue::dsl;
-
-    let mut conn = pool.get().await.map_err(|e| {
-        econ_graph_core::error::AppError::DatabaseError(format!(
-            "Failed to get database connection: {}",
-            e
-        ))
-    })?;
-
-    let update = UpdateCrawlQueueItem {
-        status: Some("processing".to_string()),
-        locked_by: Some(worker_id.to_string()),
-        locked_at: Some(Utc::now()),
-        updated_at: Utc::now(),
-        ..Default::default()
-    };
-
-    diesel::update(dsl::crawl_queue.filter(dsl::id.eq(item_id)))
-        .set(&update)
-        .execute(&mut conn)
-        .await?;
-
-    Ok(())
+/// Lock a specific queue item for processing by a worker and return the claim, which the worker
+/// finishes with [`complete_claimed_item`], [`fail_claimed_item`] or [`retry_claimed_item_later`].
+///
+/// Fails with `Conflict` if the item doesn't exist or isn't claimable (pending/retrying).
+pub async fn lock_queue_item(
+    pool: &DatabasePool,
+    item_id: Uuid,
+    worker_id: &str,
+) -> AppResult<CrawlQueueItem> {
+    match CrawlQueueItem::claim_by_id(pool, item_id, worker_id).await? {
+        Some(claim) => Ok(claim),
+        None => Err(AppError::Conflict(format!(
+            "crawl_queue item {item_id} is not claimable"
+        ))),
+    }
 }
 
-/// Update queue item status with optional error message
+/// Update queue item status with optional error message (admin override: ignores which worker
+/// holds the lock). Every accepted status releases the worker lock.
+///
+/// `Processing` is rejected with `Validation`: a `processing` row must be owned by a worker that
+/// will finish it (the DB requires `locked_by`/`locked_at` together, and a lock nobody holds
+/// would just sit there until `release_stuck` burns one of the item's attempts). Use
+/// [`lock_queue_item`] (or `CrawlQueueItem::claim_by_id`) to take ownership instead.
 pub async fn update_queue_item_status(
     pool: &DatabasePool,
     item_id: Uuid,
     status: QueueStatus,
     error_message: Option<String>,
 ) -> AppResult<()> {
-    use crawl_queue::dsl;
-
-    let mut conn = pool.get().await.map_err(|e| {
-        econ_graph_core::error::AppError::DatabaseError(format!(
-            "Failed to get database connection: {}",
-            e
-        ))
-    })?;
-
-    let update = UpdateCrawlQueueItem {
-        status: Some(status.to_string()),
-        error_message,
-        locked_by: if matches!(status, QueueStatus::Completed | QueueStatus::Failed) {
-            None // Release lock when done
-        } else {
-            None // Keep existing value
-        },
-        locked_at: if matches!(status, QueueStatus::Completed | QueueStatus::Failed) {
-            None // Release lock when done
-        } else {
-            None // Keep existing value
-        },
-        updated_at: Utc::now(),
-        ..Default::default()
-    };
-
-    diesel::update(dsl::crawl_queue.filter(dsl::id.eq(item_id)))
-        .set(&update)
-        .execute(&mut conn)
-        .await?;
-
-    Ok(())
+    match status {
+        QueueStatus::Completed => {
+            CrawlQueueItem::force_complete(pool, item_id).await?;
+            Ok(())
+        }
+        QueueStatus::Failed => {
+            CrawlQueueItem::force_fail(pool, item_id, error_message.as_deref().unwrap_or("failed"))
+                .await?;
+            Ok(())
+        }
+        QueueStatus::Processing => Err(AppError::Validation(format!(
+            "cannot set crawl_queue item {item_id} to processing without a worker lock; \
+             use lock_queue_item"
+        ))),
+        QueueStatus::Pending | QueueStatus::Retrying | QueueStatus::Cancelled => {
+            let update = UpdateCrawlQueueItem {
+                status: Some(status.to_string()),
+                error_message: error_message.map(Some),
+                // finished_at is NULL while an item is active; cancelled is terminal.
+                finished_at: Some(match status {
+                    QueueStatus::Cancelled => Some(Utc::now()),
+                    _ => None,
+                }),
+                ..Default::default()
+            }
+            .clearing_lock();
+            CrawlQueueItem::update(pool, item_id, &update).await?;
+            Ok(())
+        }
+    }
 }
 
-/// Update queue item for retry (increments retry count and reschedules)
+/// Backoff used by [`update_queue_item_for_retry`]: 2^attempt minutes, capped at 60.
+pub fn retry_backoff(attempt: i32) -> std::time::Duration {
+    let minutes = 2_u64.saturating_pow(attempt.max(0) as u32).min(60);
+    std::time::Duration::from_secs(minutes * 60)
+}
+
+/// Record a failed attempt and reschedule with exponential backoff (2^n minutes, max 60),
+/// or mark the item failed once `max_retries` is reached. Releases the lock.
+/// Admin override: applies to any active item regardless of lock owner
+/// (see `CrawlQueueItem::force_retry_later`).
 pub async fn update_queue_item_for_retry(
     pool: &DatabasePool,
     item_id: Uuid,
@@ -121,76 +128,68 @@ pub async fn update_queue_item_for_retry(
 ) -> AppResult<()> {
     use crawl_queue::dsl;
 
-    let mut conn = pool.get().await.map_err(|e| {
-        econ_graph_core::error::AppError::DatabaseError(format!(
-            "Failed to get database connection: {}",
-            e
-        ))
-    })?;
-
-    // Get current item to check retry count
-    let current_item = dsl::crawl_queue
-        .filter(dsl::id.eq(item_id))
-        .first::<CrawlQueueItem>(&mut conn)
-        .await?;
-
-    let new_retry_count = current_item.retry_count + 1;
-    let new_status = if new_retry_count >= current_item.max_retries {
-        "failed".to_string() // Max retries exceeded
-    } else {
-        "retrying".to_string()
+    let current_retry_count: i32 = {
+        let mut conn = pool.get().await.map_err(|e| {
+            AppError::DatabaseError(format!("Failed to get database connection: {}", e))
+        })?;
+        dsl::crawl_queue
+            .filter(dsl::id.eq(item_id))
+            .select(dsl::retry_count)
+            .first(&mut conn)
+            .await?
     };
 
-    // Schedule retry with exponential backoff (2^retry_count minutes)
-    let backoff_minutes = 2_i64.pow(new_retry_count as u32).min(60); // Max 60 minutes
-    let scheduled_for = if new_status == "retrying" {
-        Some(Utc::now() + Duration::minutes(backoff_minutes))
-    } else {
-        None
-    };
-
-    let update = UpdateCrawlQueueItem {
-        status: Some(new_status),
-        retry_count: Some(new_retry_count),
-        error_message,
-        scheduled_for,
-        locked_by: None, // Release lock
-        locked_at: None, // Release lock
-        updated_at: Utc::now(),
-    };
-
-    diesel::update(dsl::crawl_queue.filter(dsl::id.eq(item_id)))
-        .set(&update)
-        .execute(&mut conn)
-        .await?;
-
+    CrawlQueueItem::force_retry_later(
+        pool,
+        item_id,
+        error_message.as_deref().unwrap_or("retry"),
+        retry_backoff(current_retry_count + 1),
+        true,
+    )
+    .await?;
     Ok(())
 }
 
-/// Unlock a queue item (release worker lock)
+/// Mark a claimed item completed, if `claim` (from [`get_next_queue_items`],
+/// [`get_and_lock_next_item`] or [`lock_queue_item`]) is still the item's current claim.
+pub async fn complete_claimed_item(
+    pool: &DatabasePool,
+    claim: &CrawlQueueItem,
+) -> AppResult<LeaseOutcome> {
+    CrawlQueueItem::complete(pool, claim).await
+}
+
+/// Mark a claimed item permanently failed, if `claim` is still the item's current claim.
+pub async fn fail_claimed_item(
+    pool: &DatabasePool,
+    claim: &CrawlQueueItem,
+    error_message: &str,
+) -> AppResult<LeaseOutcome> {
+    CrawlQueueItem::fail(pool, claim, error_message).await
+}
+
+/// Record a failed attempt on a claimed item and reschedule it with the same exponential backoff
+/// as [`update_queue_item_for_retry`], or fail it once `max_retries` is reached. Returns
+/// [`QueueTransition::LostLease`] (changing nothing) if `claim` is no longer the current claim.
+pub async fn retry_claimed_item_later(
+    pool: &DatabasePool,
+    claim: &CrawlQueueItem,
+    error_message: &str,
+) -> AppResult<QueueTransition> {
+    CrawlQueueItem::retry_later(
+        pool,
+        claim,
+        error_message,
+        retry_backoff(claim.retry_count + 1),
+        true,
+    )
+    .await
+}
+
+/// Unlock a queue item (release worker lock) and put it back to `pending`.
+/// Finished (completed/failed/cancelled) or missing items are left untouched.
 pub async fn unlock_queue_item(pool: &DatabasePool, item_id: Uuid) -> AppResult<()> {
-    use crawl_queue::dsl;
-
-    let mut conn = pool.get().await.map_err(|e| {
-        econ_graph_core::error::AppError::DatabaseError(format!(
-            "Failed to get database connection: {}",
-            e
-        ))
-    })?;
-
-    let update = UpdateCrawlQueueItem {
-        status: Some("pending".to_string()), // Reset to pending
-        locked_by: None,
-        locked_at: None,
-        updated_at: Utc::now(),
-        ..Default::default()
-    };
-
-    diesel::update(dsl::crawl_queue.filter(dsl::id.eq(item_id)))
-        .set(&update)
-        .execute(&mut conn)
-        .await?;
-
+    CrawlQueueItem::release(pool, item_id).await?;
     Ok(())
 }
 
@@ -265,95 +264,71 @@ pub async fn get_queue_statistics(pool: &DatabasePool) -> AppResult<QueueStatist
     })
 }
 
-/// Calculate average processing time for completed items
+/// Calculate average processing time (seconds) for completed items:
+/// `avg(finished_at - started_at)` over completed rows that have both timestamps.
 async fn get_average_processing_time(conn: &mut AsyncPgConnection) -> AppResult<Option<f64>> {
-    use crawl_queue::dsl;
+    use diesel::sql_types::{Double, Nullable};
 
-    // Get completed items with lock times to calculate processing duration
-    let completed_items: Vec<(Option<DateTime<Utc>>, DateTime<Utc>)> = dsl::crawl_queue
-        .filter(dsl::status.eq("completed"))
-        .filter(dsl::locked_at.is_not_null())
-        .select((dsl::locked_at, dsl::updated_at))
-        .load(conn)
-        .await?;
-
-    if completed_items.is_empty() {
-        return Ok(None);
+    #[derive(QueryableByName)]
+    struct Avg {
+        #[diesel(sql_type = Nullable<Double>)]
+        avg_seconds: Option<f64>,
     }
 
-    let total_seconds: i64 = completed_items
-        .iter()
-        .filter_map(|(locked_at, updated_at)| {
-            locked_at.map(|locked| (*updated_at - locked).num_seconds())
-        })
-        .sum();
+    let row = diesel::sql_query(
+        "SELECT (AVG(EXTRACT(EPOCH FROM (finished_at - started_at))))::float8 AS avg_seconds \
+         FROM crawl_queue \
+         WHERE status = 'completed' \
+           AND started_at IS NOT NULL \
+           AND finished_at IS NOT NULL",
+    )
+    .get_result::<Avg>(conn)
+    .await?;
 
-    let count = completed_items.len() as f64;
-    let average = if count > 0.0 {
-        Some(total_seconds as f64 / count)
-    } else {
-        None
-    };
-
-    Ok(average)
+    Ok(row.avg_seconds)
 }
 
-/// Clean up old completed and failed queue items
-/// Removes items older than the specified number of days
+/// Clean up completed and failed queue items that finished more than 30 days ago.
+/// (The crawler worker purges on its own schedule; see `WorkerConfig::queue_retention`.)
 pub async fn cleanup_old_queue_items(pool: &DatabasePool) -> AppResult<i64> {
     cleanup_old_queue_items_with_retention(pool, 30).await // Default 30 days retention
 }
 
-/// Clean up old queue items with custom retention period
+/// Clean up completed and failed queue items that finished more than `retention_days` ago
+/// (negative values are treated as 0). Batched; see `CrawlQueueItem::purge_finished`.
 pub async fn cleanup_old_queue_items_with_retention(
     pool: &DatabasePool,
     retention_days: i64,
 ) -> AppResult<i64> {
-    use crawl_queue::dsl;
-
-    let mut conn = pool.get().await.map_err(|e| {
-        econ_graph_core::error::AppError::DatabaseError(format!(
-            "Failed to get database connection: {}",
-            e
-        ))
-    })?;
-
-    let cutoff_date = Utc::now() - Duration::days(retention_days);
-
-    let deleted_count = diesel::delete(
-        dsl::crawl_queue
-            .filter(dsl::status.eq_any(vec!["completed", "failed"]))
-            .filter(dsl::updated_at.lt(cutoff_date)),
-    )
-    .execute(&mut conn)
-    .await?;
-
-    Ok(deleted_count as i64)
+    let secs = u64::try_from(retention_days.max(0))
+        .unwrap_or(0)
+        .saturating_mul(86_400);
+    CrawlQueueItem::purge_finished(pool, std::time::Duration::from_secs(secs)).await
 }
 
-/// Get next item for processing by a specific worker (convenience method)
-/// This combines getting and locking an item in one operation
+/// Claim the next due item for a worker (see [`CrawlQueueItem::claim_next`]).
 pub async fn get_and_lock_next_item(
     pool: &DatabasePool,
     worker_id: &str,
 ) -> AppResult<Option<CrawlQueueItem>> {
-    // Use the model's built-in method which implements SKIP LOCKED
-    CrawlQueueItem::get_next_for_processing(pool, worker_id).await
+    CrawlQueueItem::claim_next(pool, worker_id, None).await
 }
 
-/// Mark item as completed (convenience method)
+/// Mark item as completed regardless of which worker holds it (admin override; see
+/// [`CrawlQueueItem::force_complete`]). Errors with `NotFound` for a missing id.
 pub async fn mark_item_completed(pool: &DatabasePool, item_id: Uuid) -> AppResult<()> {
-    CrawlQueueItem::mark_completed(pool, item_id).await?;
+    CrawlQueueItem::force_complete(pool, item_id).await?;
     Ok(())
 }
 
-/// Mark item as failed (convenience method)
+/// Mark item as permanently failed regardless of which worker holds it (admin override; see
+/// [`CrawlQueueItem::force_fail`]). Errors with `NotFound` for a missing id.
 pub async fn mark_item_failed(
     pool: &DatabasePool,
     item_id: Uuid,
     error_message: String,
 ) -> AppResult<()> {
-    CrawlQueueItem::mark_failed(pool, item_id, error_message).await?;
+    CrawlQueueItem::force_fail(pool, item_id, &error_message).await?;
     Ok(())
 }
 
@@ -383,25 +358,99 @@ pub async fn get_stuck_items(
     Ok(stuck_items)
 }
 
-/// Unlock stuck items (recover from crashed workers)
+/// Unlock stuck items (recover from crashed workers): processing items locked for longer than
+/// `timeout_minutes` go back to `pending` with the lock cleared, counting one attempt (items
+/// that reach `max_retries` become `failed`); see [`CrawlQueueItem::release_stuck`].
 pub async fn unlock_stuck_items(pool: &DatabasePool, timeout_minutes: i64) -> AppResult<i64> {
-    let stuck_items = get_stuck_items(pool, timeout_minutes).await?;
-    let mut unlocked_count = 0;
-
-    for item in stuck_items {
-        unlock_queue_item(pool, item.id).await?;
-        unlocked_count += 1;
-    }
-
-    Ok(unlocked_count)
+    let older_than = std::time::Duration::from_secs(timeout_minutes.max(0) as u64 * 60);
+    CrawlQueueItem::release_stuck(pool, older_than).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use econ_graph_core::models::NewCrawlQueueItem;
+    use econ_graph_core::models::{JobKind, NewCrawlQueueItem};
     use econ_graph_core::test_utils::TestContainer;
     use serial_test::serial;
+
+    async fn load_item(pool: &DatabasePool, id: Uuid) -> CrawlQueueItem {
+        let mut conn = pool.get().await.unwrap();
+        crawl_queue::table
+            .find(id)
+            .first::<CrawlQueueItem>(&mut conn)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_claimed_item_transitions_are_lease_guarded() {
+        // REQUIREMENT: a worker finishing the item it claimed must not overwrite a newer claim
+        // after its lease expired and the item was claimed again (even under the same worker id).
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        container.clean_database().await.unwrap();
+
+        let created = CrawlQueueItem::create(
+            &pool,
+            &NewCrawlQueueItem {
+                source: "FRED".to_string(),
+                series_id: "TEST_CLAIMED".to_string(),
+                priority: 5,
+                max_retries: 3,
+                scheduled_for: None,
+                kind: JobKind::FetchSeries.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let stale = get_next_queue_items(&pool, 1).await.unwrap().remove(0);
+        assert_eq!(stale.id, created.id);
+        assert_eq!(unlock_stuck_items(&pool, 0).await.unwrap(), 1);
+        let fresh = lock_queue_item(&pool, created.id, QUEUE_SERVICE_WORKER_ID)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            complete_claimed_item(&pool, &stale).await.unwrap(),
+            LeaseOutcome::LostLease
+        );
+        assert_eq!(
+            fail_claimed_item(&pool, &stale, "boom").await.unwrap(),
+            LeaseOutcome::LostLease
+        );
+        assert_eq!(
+            retry_claimed_item_later(&pool, &stale, "503")
+                .await
+                .unwrap(),
+            QueueTransition::LostLease
+        );
+        assert_eq!(load_item(&pool, created.id).await.status, "processing");
+
+        // The current claim reschedules with backoff, then (reclaimed) completes.
+        let t = retry_claimed_item_later(&pool, &fresh, "503")
+            .await
+            .unwrap();
+        assert!(matches!(t, QueueTransition::Rescheduled { .. }));
+        let row = load_item(&pool, created.id).await;
+        assert_eq!(row.status, "retrying");
+        assert!(row.scheduled_for.unwrap() > Utc::now());
+        diesel::update(crawl_queue::table.find(created.id))
+            .set(crawl_queue::scheduled_for.eq(Some(Utc::now() - Duration::seconds(1))))
+            .execute(&mut pool.get().await.unwrap())
+            .await
+            .unwrap();
+        let again = get_and_lock_next_item(&pool, "worker-2")
+            .await
+            .unwrap()
+            .expect("due retry is claimable");
+        assert_eq!(
+            complete_claimed_item(&pool, &again).await.unwrap(),
+            LeaseOutcome::Applied
+        );
+        assert_eq!(load_item(&pool, created.id).await.status, "completed");
+    }
 
     #[tokio::test]
     #[serial]
@@ -450,6 +499,7 @@ mod tests {
             priority: 5,
             max_retries: 3,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         let created_item = CrawlQueueItem::create(&pool, &new_item).await.unwrap();
@@ -482,6 +532,7 @@ mod tests {
             priority: 8,
             max_retries: 3,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         let created_item = CrawlQueueItem::create(&pool, &new_item).await.unwrap();
@@ -503,10 +554,115 @@ mod tests {
         // Unlock the item
         unlock_queue_item(&pool, created_item.id).await.unwrap();
 
-        // The test passes if unlock_queue_item doesn't error
-        // In a real system, the item would be available for the next worker
-        // For the test, we just verify the unlock operation succeeded
-        println!("Queue item unlock test completed successfully");
+        // The lock must really be cleared (previously `locked_by: None` was skipped by the
+        // changeset, so the lock stayed and the item was never re-picked).
+        let row = load_item(&pool, created_item.id).await;
+        assert_eq!(row.status, "pending");
+        assert!(
+            row.locked_by.is_none(),
+            "locked_by must be NULL after unlock"
+        );
+        assert!(
+            row.locked_at.is_none(),
+            "locked_at must be NULL after unlock"
+        );
+
+        // ... and the item is available to the next worker.
+        let next = get_and_lock_next_item(&pool, "test-worker-2")
+            .await
+            .unwrap();
+        assert_eq!(next.map(|i| i.id), Some(created_item.id));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_unlock_queue_item_nulls_lock_columns() {
+        // REQUIREMENT: unlock_queue_item must null locked_by/locked_at in the database
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        container.clean_database().await.unwrap();
+
+        let created = CrawlQueueItem::create(
+            &pool,
+            &NewCrawlQueueItem {
+                source: "FRED".to_string(),
+                series_id: "UNLOCK_ME".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let claimed = get_and_lock_next_item(&pool, "w-unlock")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(claimed.id, created.id);
+        assert!(claimed.locked_by.is_some() && claimed.locked_at.is_some());
+
+        unlock_queue_item(&pool, created.id).await.unwrap();
+
+        let row = load_item(&pool, created.id).await;
+        assert_eq!(row.locked_by, None);
+        assert_eq!(row.locked_at, None);
+        assert_eq!(row.status, "pending");
+
+        // Unlocking a finished item must not resurrect it.
+        mark_item_completed(&pool, created.id).await.unwrap();
+        unlock_queue_item(&pool, created.id).await.unwrap();
+        assert_eq!(load_item(&pool, created.id).await.status, "completed");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_retry_backoff_and_retrying_items_are_reclaimed() {
+        // update_queue_item_for_retry -> retry_later with 2^n minute backoff capped at 60,
+        // and a due 'retrying' item is picked up again (bug 3).
+        assert_eq!(retry_backoff(1).as_secs(), 2 * 60);
+        assert_eq!(retry_backoff(3).as_secs(), 8 * 60);
+        assert_eq!(retry_backoff(6).as_secs(), 60 * 60);
+        assert_eq!(retry_backoff(30).as_secs(), 60 * 60);
+
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        container.clean_database().await.unwrap();
+
+        let created = CrawlQueueItem::create(
+            &pool,
+            &NewCrawlQueueItem {
+                source: "FRED".to_string(),
+                series_id: "BACKOFF".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        get_and_lock_next_item(&pool, "w").await.unwrap().unwrap();
+
+        let before = Utc::now();
+        update_queue_item_for_retry(&pool, created.id, Some("boom".to_string()))
+            .await
+            .unwrap();
+        let row = load_item(&pool, created.id).await;
+        assert_eq!(row.status, "retrying");
+        assert_eq!(row.retry_count, 1);
+        assert!(row.locked_by.is_none() && row.locked_at.is_none());
+        let scheduled = row.scheduled_for.unwrap();
+        assert!(scheduled >= before + Duration::seconds(119));
+        assert!(scheduled <= Utc::now() + Duration::seconds(121));
+
+        // Not due yet.
+        assert!(get_and_lock_next_item(&pool, "w").await.unwrap().is_none());
+
+        // Make it due: it must be claimable again.
+        let mut conn = pool.get().await.unwrap();
+        diesel::update(crawl_queue::table.find(created.id))
+            .set(crawl_queue::scheduled_for.eq(Some(Utc::now() - Duration::seconds(1))))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        drop(conn);
+        let again = get_and_lock_next_item(&pool, "w2").await.unwrap();
+        assert_eq!(again.map(|i| i.id), Some(created.id));
     }
 
     #[tokio::test]
@@ -529,6 +685,7 @@ mod tests {
             priority: 3,
             max_retries: 2,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         let created_item = CrawlQueueItem::create(&pool, &new_item).await.unwrap();
@@ -558,6 +715,15 @@ mod tests {
         let stats = get_queue_statistics(&pool).await.unwrap();
         assert_eq!(stats.failed_items, 1);
         assert_eq!(stats.completed_items, 0);
+
+        // `processing` without a worker lock is rejected and changes nothing.
+        let err = update_queue_item_status(&pool, created_item.id, QueueStatus::Processing, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)), "{err:?}");
+        let row = load_item(&pool, created_item.id).await;
+        assert_eq!(row.status, "failed");
+        assert!(row.locked_by.is_none() && row.locked_at.is_none());
     }
 
     #[tokio::test]
@@ -580,6 +746,7 @@ mod tests {
             priority: 5,
             max_retries: 2,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         let created_item = CrawlQueueItem::create(&pool, &new_item).await.unwrap();
@@ -620,6 +787,7 @@ mod tests {
             priority: 9, // High priority
             max_retries: 3,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         let low_priority = NewCrawlQueueItem {
@@ -628,6 +796,7 @@ mod tests {
             priority: 2, // Low priority
             max_retries: 3,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         CrawlQueueItem::create(&pool, &low_priority).await.unwrap();
@@ -675,6 +844,7 @@ mod tests {
             priority: 5,
             max_retries: 3,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         let created_item = CrawlQueueItem::create(&pool, &new_item).await.unwrap();
@@ -719,6 +889,7 @@ mod tests {
             priority: 5,
             max_retries: 3,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         let created_item = CrawlQueueItem::create(&pool, &new_item).await.unwrap();
@@ -749,6 +920,9 @@ mod tests {
         let container = TestContainer::new().await;
         let pool = container.pool();
 
+        // Clean database to ensure test isolation
+        container.clean_database().await.unwrap();
+
         // Create a test queue item
         let new_item = NewCrawlQueueItem {
             source: "FRED".to_string(),
@@ -756,6 +930,7 @@ mod tests {
             priority: 5,
             max_retries: 3,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         let created_item = CrawlQueueItem::create(&pool, &new_item).await.unwrap();
@@ -797,6 +972,7 @@ mod tests {
             priority: 5,
             max_retries: 3,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         let new_item2 = NewCrawlQueueItem {
@@ -805,6 +981,7 @@ mod tests {
             priority: 3,
             max_retries: 3,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         let created_item1 = CrawlQueueItem::create(&pool, &new_item1).await.unwrap();
@@ -852,6 +1029,7 @@ mod tests {
             priority: 5,
             max_retries: 3,
             scheduled_for: None,
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         let created_item = CrawlQueueItem::create(&pool, &new_item).await.unwrap();
@@ -872,8 +1050,17 @@ mod tests {
         assert_eq!(stats.total_items, 1);
         assert_eq!(stats.completed_items, 1);
 
-        // Processing time should be calculated (may be 0 due to timing, but should be Some)
-        assert!(stats.average_processing_time.is_some());
+        // Completing clears the lock but records started_at / finished_at, which the average uses.
+        let row = load_item(&pool, created_item.id).await;
+        assert!(row.locked_at.is_none());
+        let started = row.started_at.expect("claim sets started_at");
+        let finished = row.finished_at.expect("complete sets finished_at");
+        assert!(finished >= started);
+        let avg = stats
+            .average_processing_time
+            .expect("average processing time should be computed for completed items");
+        assert!(avg >= 0.01, "expected at least the 10ms sleep, got {avg}");
+        assert!(avg < 60.0, "unexpectedly long processing time: {avg}");
         println!(
             "Average processing time: {:?}",
             stats.average_processing_time
@@ -901,6 +1088,7 @@ mod tests {
             priority: 5,
             max_retries: 3,
             scheduled_for: Some(future_time),
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         let created_item = CrawlQueueItem::create(&pool, &scheduled_item)
@@ -919,6 +1107,7 @@ mod tests {
             priority: 5,
             max_retries: 3,
             scheduled_for: Some(past_time),
+            kind: JobKind::FetchSeries.to_string(),
         };
 
         let created_past_item = CrawlQueueItem::create(&pool, &past_item).await.unwrap();
@@ -979,6 +1168,9 @@ mod tests {
         let container = TestContainer::new().await;
         let pool = container.pool();
 
+        // Clean database to ensure test isolation
+        container.clean_database().await.unwrap();
+
         // Create multiple items
         let items = vec![
             NewCrawlQueueItem {
@@ -987,6 +1179,7 @@ mod tests {
                 priority: 5,
                 max_retries: 3,
                 scheduled_for: None,
+                kind: JobKind::FetchSeries.to_string(),
             },
             NewCrawlQueueItem {
                 source: "BLS".to_string(),
@@ -994,6 +1187,7 @@ mod tests {
                 priority: 5,
                 max_retries: 3,
                 scheduled_for: None,
+                kind: JobKind::FetchSeries.to_string(),
             },
             NewCrawlQueueItem {
                 source: "CENSUS".to_string(),
@@ -1001,6 +1195,7 @@ mod tests {
                 priority: 5,
                 max_retries: 3,
                 scheduled_for: None,
+                kind: JobKind::FetchSeries.to_string(),
             },
         ];
 
@@ -1013,13 +1208,12 @@ mod tests {
         for i in 0..3 {
             let pool_clone = pool.clone();
             let handle = tokio::spawn(async move {
-                let items = get_next_queue_items(&pool_clone, 1).await.unwrap();
-                if !items.is_empty() {
-                    lock_queue_item(&pool_clone, items[0].id, &format!("worker-{}", i))
-                        .await
-                        .unwrap();
-                }
-                items
+                // get_and_lock_next_item claims atomically; a separate get + lock would race.
+                get_and_lock_next_item(&pool_clone, &format!("worker-{}", i))
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .collect::<Vec<_>>()
             });
             handles.push(handle);
         }
@@ -1038,7 +1232,9 @@ mod tests {
             .filter_map(|r| r.get(0).map(|item| item.id))
             .collect();
 
-        // Should have at least one item locked (depending on timing)
+        // Each of the 3 workers claimed a different one of the 3 items.
+        assert_eq!(results.iter().map(|r| r.len()).sum::<usize>(), 3);
+        assert_eq!(locked_items.len(), 3);
         println!(
             "Concurrent access test completed. Locked items: {}",
             locked_items.len()

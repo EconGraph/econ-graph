@@ -266,6 +266,11 @@ diesel::table! {
         #[max_length = 100]
         locked_by -> Nullable<Varchar>,
         locked_at -> Nullable<Timestamptz>,
+        #[max_length = 30]
+        kind -> Varchar,
+        started_at -> Nullable<Timestamptz>,
+        finished_at -> Nullable<Timestamptz>,
+        claim_token -> Nullable<Uuid>,
     }
 }
 
