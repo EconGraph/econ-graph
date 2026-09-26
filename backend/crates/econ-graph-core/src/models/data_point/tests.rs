@@ -37,6 +37,7 @@ mod simple_tests {
             is_original_release: true,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            superseded_on: None,
         };
 
         let yoy_change = data_point.calculate_yoy_change(previous_value);
@@ -65,6 +66,7 @@ mod simple_tests {
             is_original_release: true,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            superseded_on: None,
         };
 
         let qoq_change = data_point.calculate_qoq_change(previous_value.as_ref());
@@ -93,6 +95,7 @@ mod simple_tests {
             is_original_release: true,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            superseded_on: None,
         };
 
         let mom_change = data_point.calculate_mom_change(previous_value.as_ref());
@@ -121,6 +124,7 @@ mod simple_tests {
             is_original_release: true,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            superseded_on: None,
         };
 
         // All calculations should return None when previous value is zero

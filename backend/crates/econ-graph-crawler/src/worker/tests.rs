@@ -472,6 +472,122 @@ async fn refetching_unchanged_points_writes_nothing() {
     assert_eq!(point_count(&db.pool, series_id).await, 2);
 }
 
+fn vintage(value: &str, revision: &str) -> FetchedPoint {
+    FetchedPoint {
+        date: d("2024-01-01"),
+        value: Some(BigDecimal::from_str(value).unwrap()),
+        revision_date: d(revision),
+        is_original_release: false,
+    }
+}
+
+/// `(revision_date, superseded_on, value)` for every stored vintage of 2024-01-01.
+async fn vintages(
+    pool: &DatabasePool,
+    series_id: Uuid,
+) -> Vec<(NaiveDate, Option<NaiveDate>, String)> {
+    let mut conn = pool.get().await.unwrap();
+    data_points::table
+        .filter(data_points::series_id.eq(series_id))
+        .filter(data_points::date.eq(d("2024-01-01")))
+        .order(data_points::revision_date)
+        .select((
+            data_points::revision_date,
+            data_points::superseded_on,
+            data_points::value,
+        ))
+        .load::<(NaiveDate, Option<NaiveDate>, Option<BigDecimal>)>(&mut conn)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(r, s, v)| (r, s, v.unwrap().normalized().to_string()))
+        .collect()
+}
+
+#[tokio::test]
+async fn revisions_are_linked_into_vintages_in_any_order() {
+    let Some(db) = db().await else { return };
+    let fetched = |points| FetchedSeries {
+        metadata: None,
+        points,
+    };
+    let write = persist::persist_series(
+        &db.pool,
+        SRC,
+        "t5_vintage",
+        &fetched(vec![vintage("1", "2024-02-01"), vintage("3", "2024-04-01")]),
+    )
+    .await
+    .unwrap();
+    let series_id = write.series_id;
+
+    // A revision between two stored ones arrives later: the database splits the gap.
+    persist::persist_series(
+        &db.pool,
+        SRC,
+        "t5_vintage",
+        &fetched(vec![vintage("2", "2024-03-01")]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        vintages(&db.pool, series_id).await,
+        vec![
+            (d("2024-02-01"), Some(d("2024-03-01")), "1".to_string()),
+            (d("2024-03-01"), Some(d("2024-04-01")), "2".to_string()),
+            (d("2024-04-01"), None, "3".to_string()),
+        ]
+    );
+
+    // "As known on 2024-03-15" picks exactly the vintage in effect that day.
+    let mut conn = db.pool.get().await.unwrap();
+    let as_of = d("2024-03-15");
+    let known: Vec<Option<BigDecimal>> = data_points::table
+        .filter(data_points::series_id.eq(series_id))
+        .filter(data_points::revision_date.le(as_of))
+        .filter(
+            data_points::superseded_on
+                .is_null()
+                .or(data_points::superseded_on.gt(as_of)),
+        )
+        .select(data_points::value)
+        .load(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(known, vec![Some(BigDecimal::from(2))]);
+
+    // Deleting a vintage extends the previous one over the gap.
+    diesel::delete(
+        data_points::table
+            .filter(data_points::series_id.eq(series_id))
+            .filter(data_points::revision_date.eq(d("2024-03-01"))),
+    )
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    assert_eq!(
+        vintages(&db.pool, series_id).await,
+        vec![
+            (d("2024-02-01"), Some(d("2024-04-01")), "1".to_string()),
+            (d("2024-04-01"), None, "3".to_string()),
+        ]
+    );
+
+    // Overlapping vintages are impossible even for writes that bypass the trigger's linking.
+    let overlap = diesel::update(
+        data_points::table
+            .filter(data_points::series_id.eq(series_id))
+            .filter(data_points::revision_date.eq(d("2024-02-01"))),
+    )
+    .set(data_points::superseded_on.eq(None::<NaiveDate>))
+    .execute(&mut conn)
+    .await;
+    assert!(
+        overlap.is_err(),
+        "open-ended old vintage must overlap the current one"
+    );
+}
+
 #[tokio::test]
 async fn server_error_retries_with_counted_attempt_and_backoff() {
     let Some(db) = db().await else { return };

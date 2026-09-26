@@ -45,6 +45,7 @@ use crate::schema::data_points;
 ///     is_original_release: true,
 ///     created_at: Utc::now(),
 ///     updated_at: Utc::now(),
+///     superseded_on: None,
 /// };
 /// ```
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Deserialize)]
@@ -87,6 +88,11 @@ pub struct DataPoint {
     /// Timestamp when this record was last modified
     /// Updated automatically on any field changes for change tracking
     pub updated_at: DateTime<Utc>,
+
+    /// First day this vintage no longer applies: the `revision_date` of the next revision.
+    /// `None` means this is the current value. Maintained by the database; never written by
+    /// the application. The vintage covers `[revision_date, superseded_on)`.
+    pub superseded_on: Option<NaiveDate>,
 }
 
 /// **NewDataPoint Model**
@@ -284,6 +290,7 @@ pub struct DataPointWithSeries {
 ///     end_date: Some(NaiveDate::from_ymd_opt(2024, 11, 30).unwrap()),
 ///     original_only: Some(true),
 ///     latest_revision_only: Some(false),
+///     as_of: None,
 ///     limit: Some(12),
 ///     offset: Some(0),
 /// };
@@ -311,6 +318,10 @@ pub struct DataQueryParams {
     /// true: Show most recent estimates (final data)
     /// false/None: Include all revisions for complete revision history
     pub latest_revision_only: Option<bool>,
+
+    /// Return each observation as it was known on this day (the vintage in effect then).
+    /// Observations first published after this day are omitted.
+    pub as_of: Option<NaiveDate>,
 
     /// Maximum number of data points to return
     /// Capped at 10,000 to prevent memory exhaustion and ensure reasonable response times
@@ -517,6 +528,7 @@ impl DataPoint {
     ///     is_original_release: true,
     ///     created_at: Utc::now(),
     ///     updated_at: Utc::now(),
+    ///     superseded_on: None,
     /// };
     /// let previous_year_gdp = Some(BigDecimal::from(26744));
     /// let yoy_growth = current_gdp.calculate_yoy_change(previous_year_gdp);
@@ -572,6 +584,7 @@ impl DataPoint {
     ///     is_original_release: true,
     ///     created_at: Utc::now(),
     ///     updated_at: Utc::now(),
+    ///     superseded_on: None,
     /// };
     /// let q1_gdp = BigDecimal::from(27100);
     /// let qoq_growth = q2_gdp.calculate_qoq_change(Some(&q1_gdp));
@@ -632,6 +645,7 @@ impl DataPoint {
     ///     is_original_release: true,
     ///     created_at: Utc::now(),
     ///     updated_at: Utc::now(),
+    ///     superseded_on: None,
     /// };
     /// let oct_employment = BigDecimal::from(157300);
     /// let mom_change = nov_employment.calculate_mom_change(Some(&oct_employment));
@@ -845,6 +859,7 @@ mod inline_tests {
             is_original_release: true,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            superseded_on: None,
         };
 
         // Test normal YoY calculation: (110-100)/100 * 100 = 10%
@@ -882,6 +897,7 @@ mod inline_tests {
             end_date: None,
             original_only: None,
             latest_revision_only: None,
+            as_of: None,
             limit: Some(100),
             offset: Some(0),
         };
@@ -899,6 +915,7 @@ mod inline_tests {
             end_date: None,
             original_only: None,
             latest_revision_only: None,
+            as_of: None,
             limit: Some(20000), // Exceeds maximum allowed limit
             offset: Some(0),
         };

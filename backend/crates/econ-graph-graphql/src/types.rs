@@ -176,7 +176,7 @@ impl EconomicSeriesType {
         let filter = filter.unwrap_or_default();
 
         // Query data points directly from database
-        use diesel::{ExpressionMethods, QueryDsl};
+        use diesel::{BoolExpressionMethods, ExpressionMethods, QueryDsl};
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::data_points::dsl;
 
@@ -195,6 +195,16 @@ impl EconomicSeriesType {
 
         if filter.original_only.unwrap_or(false) {
             query = query.filter(dsl::is_original_release.eq(true));
+        }
+
+        if let Some(as_of) = filter.as_of {
+            query = query.filter(dsl::revision_date.le(as_of)).filter(
+                dsl::superseded_on
+                    .is_null()
+                    .or(dsl::superseded_on.gt(as_of)),
+            );
+        } else if filter.latest_revision_only.unwrap_or(false) {
+            query = query.filter(dsl::superseded_on.is_null());
         }
 
         let data_points = query
@@ -271,6 +281,8 @@ pub struct DataPointType {
     pub is_original_release: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// First day this vintage no longer applied (the next revision's date); null if current.
+    pub superseded_on: Option<NaiveDate>,
 }
 
 impl From<DataPoint> for DataPointType {
@@ -284,6 +296,7 @@ impl From<DataPoint> for DataPointType {
             is_original_release: data_point.is_original_release,
             created_at: data_point.created_at,
             updated_at: data_point.updated_at,
+            superseded_on: data_point.superseded_on,
         }
     }
 }
@@ -622,6 +635,8 @@ pub struct DataFilterInput {
     pub end_date: Option<NaiveDate>,
     pub original_only: Option<bool>,
     pub latest_revision_only: Option<bool>,
+    /// Return each observation as it was known on this day (its vintage in effect then).
+    pub as_of: Option<NaiveDate>,
 }
 
 impl Default for DataFilterInput {
@@ -631,6 +646,7 @@ impl Default for DataFilterInput {
             end_date: None,
             original_only: Some(false),
             latest_revision_only: Some(false),
+            as_of: None,
         }
     }
 }
