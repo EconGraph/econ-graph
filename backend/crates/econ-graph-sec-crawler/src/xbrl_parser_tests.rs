@@ -712,6 +712,143 @@ async fn test_cache_write_leaves_only_the_entry() {
 }
 
 #[tokio::test]
+async fn test_native_parse_compound_units_forever_periods_and_custom_names() {
+    // Default-namespace (unprefixed) contexts, a paired <forever></forever>, a per-share unit,
+    // custom-taxonomy facts that happen to be named `unit` and `context`, and a footnote whose
+    // XHTML content must not be read as facts.
+    let doc = r#"<?xml version="1.0" encoding="UTF-8"?>
+<xbrl xmlns="http://www.xbrl.org/2003/instance"
+      xmlns:us-gaap="http://fasb.org/us-gaap/2024"
+      xmlns:custom="http://example.com/custom">
+  <context id="c1">
+    <entity>
+      <identifier scheme="http://www.sec.gov/CIK">0000320193</identifier>
+      <link:identifier xmlns:link="http://www.xbrl.org/2003/linkbase">not-the-cik</link:identifier>
+      <segment><custom:identifier>not-the-cik</custom:identifier></segment>
+    </entity>
+    <period><forever></forever></period>
+    <custom:period><instant>2099-01-01</instant></custom:period>
+    <link:period xmlns:link="http://www.xbrl.org/2003/linkbase"><instant>2098-01-01</instant></link:period>
+  </context>
+  <unit id="usdPerShare">
+    <divide>
+      <unitNumerator><measure>iso4217:USD</measure></unitNumerator>
+      <unitDenominator><measure>shares</measure></unitDenominator>
+    </divide>
+  </unit>
+  <unit id="usd"><measure>iso4217:USD</measure></unit>
+  <us-gaap:EarningsPerShareBasic contextRef="c1" unitRef="usdPerShare" decimals="2">6.13</us-gaap:EarningsPerShareBasic>
+  <custom:unit contextRef="c1">Retail</custom:unit>
+  <custom:context contextRef="c1">Annual</custom:context>
+  <link:footnoteLink xmlns:link="http://www.xbrl.org/2003/linkbase"
+                     xmlns:xhtml="http://www.w3.org/1999/xhtml">
+    <link:footnote><xhtml:p>Restated.</xhtml:p></link:footnote>
+  </link:footnoteLink>
+</xbrl>"#;
+    let work_dir = TempDir::new().unwrap();
+    let file_path = work_dir.path().join("compound.xml");
+    fs::write(&file_path, doc).await.unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        use_arelle: false,
+        cache_dir: cache_dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let result = parser.parse_xbrl_document(&file_path).await.unwrap();
+
+    assert_eq!(result.contexts.len(), 1);
+    let context = &result.contexts[0];
+    assert_eq!(context.entity_identifier.as_deref(), Some("0000320193"));
+    assert_eq!(context.period.period_type.as_deref(), Some("forever"));
+    // custom:period and link:period are not the XBRL period and must not replace it.
+    assert_eq!(context.period.instant, None);
+
+    let units: Vec<(&str, Option<&str>, Option<&str>)> = result
+        .units
+        .iter()
+        .map(|u| (u.id.as_str(), u.measure.as_deref(), u.unit_type.as_deref()))
+        .collect();
+    assert_eq!(
+        units,
+        [
+            ("usdPerShare", Some("iso4217:USD/shares"), Some("divide")),
+            ("usd", Some("iso4217:USD"), Some("simple")),
+        ]
+    );
+
+    let facts: Vec<(&str, Option<&str>)> = result
+        .facts
+        .iter()
+        .map(|f| (f.concept.as_str(), f.value.as_deref()))
+        .collect();
+    assert_eq!(
+        facts,
+        [
+            ("us-gaap:EarningsPerShareBasic", Some("6.13")),
+            ("custom:unit", Some("Retail")),
+            ("custom:context", Some("Annual")),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_native_parse_reads_prefixed_contexts_and_units() {
+    // sample_10k.xml writes contexts and units as `xbrli:context` / `xbrli:unit`, with a segment
+    // member inside each entity. Those used to be skipped, and read as facts instead.
+    let cache_dir = TempDir::new().unwrap();
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        use_arelle: false,
+        cache_dir: cache_dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let result = parser
+        .parse_xbrl_document(&get_test_data_path("sample_10k.xml"))
+        .await
+        .unwrap();
+
+    let ids: Vec<&str> = result.contexts.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, ["c1", "c2", "c3"]);
+    for context in &result.contexts {
+        // The segment's explicitMember text must not overwrite the identifier.
+        assert_eq!(context.entity.identifier, "0000320193");
+        assert_eq!(context.entity.scheme, "http://www.sec.gov/CIK");
+        assert_eq!(context.entity_identifier.as_deref(), Some("0000320193"));
+    }
+    let c1 = &result.contexts[0].period;
+    assert_eq!(c1.instant.as_deref(), Some("2023-12-31"));
+    assert_eq!(c1.period_type.as_deref(), Some("instant"));
+    let c3 = &result.contexts[2].period;
+    assert_eq!(c3.start_date.as_deref(), Some("2023-10-01"));
+    assert_eq!(c3.end_date.as_deref(), Some("2023-12-31"));
+    assert_eq!(c3.period_type.as_deref(), Some("duration"));
+
+    let units: Vec<(&str, Option<&str>)> = result
+        .units
+        .iter()
+        .map(|u| (u.id.as_str(), u.measure.as_deref()))
+        .collect();
+    assert_eq!(
+        units,
+        [("u1", Some("xbrli:USD")), ("u2", Some("xbrli:shares"))]
+    );
+
+    // Every fact refers to one of the contexts; no context, entity or unit element is a fact.
+    assert_eq!(result.facts.len(), 34);
+    for fact in &result.facts {
+        assert!(
+            ids.contains(&fact.context_ref.as_str()),
+            "{} has contextRef {:?}",
+            fact.concept,
+            fact.context_ref
+        );
+    }
+}
+
+#[tokio::test]
 async fn test_same_bytes_at_another_path_miss_cache() {
     // Parsed statements carry generated ids, so a copy of a document gets its own entry.
     let cache_dir = TempDir::new().unwrap();
@@ -776,8 +913,11 @@ async fn test_unreadable_cache_entry_is_a_miss() {
 
 #[tokio::test]
 async fn test_parse_real_apple_xbrl_file() {
+    // A fresh cache, so an entry left by an older parser can't stand in for this one's output.
+    let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
         use_arelle: false, // Use native parsing for testing
+        cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
     .await
@@ -834,8 +974,11 @@ async fn test_parse_real_apple_xbrl_file() {
 
 #[tokio::test]
 async fn test_parse_sample_xbrl_file() {
+    // A fresh cache, so an entry left by an older parser can't stand in for this one's output.
+    let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
         use_arelle: false, // Use native parsing for testing
+        cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
     .await
@@ -892,8 +1035,11 @@ async fn test_parse_sample_xbrl_file() {
 
 #[tokio::test]
 async fn test_parse_real_jpmorgan_bank_xbrl_file() {
+    // A fresh cache, so an entry left by an older parser can't stand in for this one's output.
+    let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
         use_arelle: false, // Use native parsing for testing
+        cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
     .await
@@ -964,8 +1110,11 @@ async fn test_parse_real_jpmorgan_bank_xbrl_file() {
 
 #[tokio::test]
 async fn test_parse_real_chevron_oil_company_xbrl_file() {
+    // A fresh cache, so an entry left by an older parser can't stand in for this one's output.
+    let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
         use_arelle: false, // Use native parsing for testing
+        cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
     .await
