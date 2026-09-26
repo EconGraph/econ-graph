@@ -1,7 +1,7 @@
 // Vitest setup file for MSW integration
 // This file sets up the test environment for Vitest with MSW support
 
-import '@testing-library/jest-dom';
+import '@testing-library/jest-dom/vitest';
 import { beforeAll, afterEach, afterAll, vi } from 'vitest';
 import { setupSimpleMSW, cleanupSimpleMSW } from './test-utils/mocks/simpleServer';
 import { cleanup } from '@testing-library/react';

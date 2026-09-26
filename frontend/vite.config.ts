@@ -41,17 +41,24 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
-    // Optimize chunks for better caching
-    rollupOptions: {
+    // Separate vendor chunks for better caching (Vite 8 bundles with Rolldown).
+    rolldownOptions: {
       output: {
-        manualChunks: {
-          // Separate vendor chunks for better caching
-          vendor: ['react', 'react-dom'],
-          mui: ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],
-          d3: ['d3', 'd3-geo', 'd3-zoom', 'd3-scale', 'd3-selection'],
-          charts: ['chart.js', 'react-chartjs-2'],
-          router: ['react-router-dom'],
-          query: ['@tanstack/react-query'],
+        codeSplitting: {
+          groups: [
+            { name: 'vendor', test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+            {
+              name: 'mui',
+              test: /[\\/]node_modules[\\/](@mui[\\/](material|icons-material)|@emotion[\\/](react|styled))[\\/]/,
+            },
+            {
+              name: 'd3',
+              test: /[\\/]node_modules[\\/](d3|d3-geo|d3-zoom|d3-scale|d3-selection)[\\/]/,
+            },
+            { name: 'charts', test: /[\\/]node_modules[\\/](chart\.js|react-chartjs-2)[\\/]/ },
+            { name: 'router', test: /[\\/]node_modules[\\/](react-router|react-router-dom)[\\/]/ },
+            { name: 'query', test: /[\\/]node_modules[\\/]@tanstack[\\/]react-query[\\/]/ },
+          ],
         },
       },
     },
@@ -62,7 +69,7 @@ export default defineConfig({
   // Path resolution
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src'),
+      '@': resolve(import.meta.dirname, 'src'),
     },
   },
 
@@ -123,7 +130,7 @@ export default defineConfig({
     ],
     // Module name mapping
     alias: {
-      '@': resolve(__dirname, 'src'),
+      '@': resolve(import.meta.dirname, 'src'),
     },
     // Increase timeout for slow tests
     testTimeout: 30000,

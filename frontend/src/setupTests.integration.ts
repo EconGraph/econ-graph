@@ -1,5 +1,5 @@
 // Integration test setup - minimal mocking for real component testing
-import '@testing-library/jest-dom';
+import '@testing-library/jest-dom/vitest';
 import React from 'react';
 
 // Only mock the essential modules that are needed for integration tests

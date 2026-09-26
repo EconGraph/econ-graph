@@ -23,7 +23,7 @@ on:
     - cron: '0 9 * * 1'
 
 env:
-  NODE_VERSION: '20'
+  NODE_VERSION: '24'
 
 jobs:
   accessibility-static-analysis:
