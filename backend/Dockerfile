@@ -9,8 +9,7 @@
 # Both images come from ONE cargo invocation in the `builder` stage, so building both
 # targets compiles the workspace once.
 #
-# Only the workspace crates (crates/*) and migrations/ are copied in. backend/src/ is a
-# stale, uncompiled copy of the crates and is intentionally NOT used.
+# Only the workspace crates (crates/*) and migrations/ are copied in.
 #
 # Dependency caching uses BuildKit cache mounts (cargo registry, git checkouts and the
 # target dir) instead of a dummy-main.rs skeleton, which never worked for this workspace

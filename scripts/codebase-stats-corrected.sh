@@ -21,8 +21,8 @@ echo -e "${YELLOW}Methodology: Only counting manually written code (excludes aut
 echo ""
 
 # Count lines by category using git ls-files to respect .gitignore
-BACKEND_PROD=$(git ls-files 'backend/src/*.rs' | grep -v test | grep -v _test.rs | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
-BACKEND_TESTS=$(git ls-files 'backend/src/*.rs' | grep -E "(test|_test\.rs)" | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
+BACKEND_PROD=$(git ls-files 'backend/crates/*.rs' | grep -v test | grep -v _test.rs | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
+BACKEND_TESTS=$(git ls-files 'backend/crates/*.rs' | grep -E "(test|_test\.rs)" | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
 FRONTEND_PROD=$(git ls-files 'frontend/src/*.ts' 'frontend/src/*.tsx' 'frontend/src/*.js' 'frontend/src/*.jsx' | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
 FRONTEND_TESTS=$(git ls-files 'frontend/tests/*.ts' 'frontend/tests/*.tsx' 'frontend/tests/*.js' 'frontend/tests/*.jsx' | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
 CONFIG=$(git ls-files '*.yaml' '*.yml' '*.json' '*.toml' 'Dockerfile*' '*.tf' | grep -v package-lock.json | grep -v Cargo.lock | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
@@ -50,8 +50,8 @@ echo -e "  Infrastructure:     $(printf "%'d" $((CONFIG + DOCS + SCRIPTS))) ($(e
 # Show what files are being counted
 echo ""
 echo -e "${YELLOW}File Counts:${NC}"
-echo -e "  Backend Production Files: $(git ls-files 'backend/src/*.rs' | grep -v test | grep -v _test.rs | wc -l)"
-echo -e "  Backend Test Files:       $(git ls-files 'backend/src/*.rs' | grep -E "(test|_test\.rs)" | wc -l)"
+echo -e "  Backend Production Files: $(git ls-files 'backend/crates/*.rs' | grep -v test | grep -v _test.rs | wc -l)"
+echo -e "  Backend Test Files:       $(git ls-files 'backend/crates/*.rs' | grep -E "(test|_test\.rs)" | wc -l)"
 echo -e "  Frontend Production Files: $(git ls-files 'frontend/src/*.ts' 'frontend/src/*.tsx' 'frontend/src/*.js' 'frontend/src/*.jsx' | wc -l)"
 echo -e "  Frontend Test Files:      $(git ls-files 'frontend/tests/*.ts' 'frontend/tests/*.tsx' 'frontend/tests/*.js' 'frontend/tests/*.jsx' | wc -l)"
 
