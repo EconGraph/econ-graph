@@ -17,9 +17,12 @@
 //! - Batch operations must be atomic and consistent
 //! - All DataLoaders must have comprehensive documentation
 
+use crate::graphql::datasets::{DatasetBatcher, SeriesDatasetFields, SeriesDatasetFieldsBatcher};
 use crate::imports::*;
 use dataloader::cached::Loader;
+use dataloader::non_cached::Loader as NonCachedLoader;
 use dataloader::BatchFn;
+use econ_graph_core::models::Dataset;
 use std::collections::HashMap;
 
 /// DataLoader batcher for efficiently loading data sources by ID
@@ -356,6 +359,11 @@ pub struct DataLoaders {
     pub series_by_source_loader: Loader<Uuid, Vec<EconomicSeries>, SeriesBySourceBatcher>,
     pub series_count_loader: Loader<Uuid, i32, SeriesCountBatcher>,
     pub user_loader: Loader<Uuid, Option<User>, UserBatcher>,
+    /// Non-caching, so dataset edits show on the next request.
+    pub dataset_loader: NonCachedLoader<Uuid, Option<Dataset>, DatasetBatcher>,
+    /// Non-caching, so series moving between datasets show on the next request.
+    pub series_dataset_fields_loader:
+        NonCachedLoader<Uuid, Option<SeriesDatasetFields>, SeriesDatasetFieldsBatcher>,
 }
 
 impl DataLoaders {
@@ -368,6 +376,9 @@ impl DataLoaders {
         let series_by_source_loader = Loader::new(SeriesBySourceBatcher { pool: pool.clone() });
         let series_count_loader = Loader::new(SeriesCountBatcher { pool: pool.clone() });
         let user_loader = Loader::new(UserBatcher { pool: pool.clone() });
+        let dataset_loader = NonCachedLoader::new(DatasetBatcher { pool: pool.clone() });
+        let series_dataset_fields_loader =
+            NonCachedLoader::new(SeriesDatasetFieldsBatcher { pool: pool.clone() });
 
         Self {
             data_source_loader,
@@ -376,6 +387,8 @@ impl DataLoaders {
             series_by_source_loader,
             series_count_loader,
             user_loader,
+            dataset_loader,
+            series_dataset_fields_loader,
         }
     }
 }

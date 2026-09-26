@@ -6,6 +6,7 @@
 
 pub mod context;
 pub mod dataloaders;
+pub mod datasets;
 pub mod global_analysis;
 pub mod mutation;
 pub mod query;
@@ -13,6 +14,9 @@ pub mod schema;
 
 #[cfg(test)]
 pub mod n_plus_one_tests;
+
+#[cfg(test)]
+mod datasets_db_tests;
 
 // Re-export commonly used types
 pub use mutation::Mutation;
