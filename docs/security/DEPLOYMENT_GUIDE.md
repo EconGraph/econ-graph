@@ -339,13 +339,13 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:13
+    image: postgres:18
     environment:
       POSTGRES_DB: econ_graph
       POSTGRES_USER: econ_graph
       POSTGRES_PASSWORD: secure_password
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     ports:
       - "5432:5432"
     healthcheck:
