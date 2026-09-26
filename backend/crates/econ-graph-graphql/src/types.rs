@@ -197,6 +197,13 @@ impl EconomicSeriesType {
             query = query.filter(dsl::is_original_release.eq(true));
         }
 
+        if filter.as_of.is_some() || filter.latest_revision_only.unwrap_or(false) {
+            query = query.filter(models::revision_filter(
+                filter.as_of,
+                filter.original_only.unwrap_or(false),
+            ));
+        }
+
         let data_points = query
             .order(dsl::date.asc())
             .load::<models::DataPoint>(&mut conn)
@@ -622,6 +629,9 @@ pub struct DataFilterInput {
     pub end_date: Option<NaiveDate>,
     pub original_only: Option<bool>,
     pub latest_revision_only: Option<bool>,
+    /// Return each observation as it was known on this day (its newest revision published on or
+    /// before it). Takes precedence over `latestRevisionOnly`.
+    pub as_of: Option<NaiveDate>,
 }
 
 impl Default for DataFilterInput {
@@ -631,6 +641,7 @@ impl Default for DataFilterInput {
             end_date: None,
             original_only: Some(false),
             latest_revision_only: Some(false),
+            as_of: None,
         }
     }
 }
