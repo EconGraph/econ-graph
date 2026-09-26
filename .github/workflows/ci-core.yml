@@ -722,9 +722,9 @@ jobs:
         save-if: ${{ github.job == 'backend-build-cache' }}
 
     - name: Install cargo-audit
-      uses: taiki-e/install-action@v2
+      uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
       with:
-        tool: cargo-audit
+        tool: cargo-audit@0.22.2
 
     - name: Run Rust security audit
       run: |
@@ -785,9 +785,9 @@ jobs:
         cache-dependency-path: frontend/package-lock.json
 
     - name: Install cargo-deny
-      uses: taiki-e/install-action@v2
+      uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
       with:
-        tool: cargo-deny
+        tool: cargo-deny@0.20.2
 
     - name: Install license-checker
       run: npm install -g license-checker
