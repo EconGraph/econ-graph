@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for EconGraph Backend
-FROM rust:1.98.1-slim AS builder
+FROM rust:1.98.1-slim-bookworm AS builder
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
