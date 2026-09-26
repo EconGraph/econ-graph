@@ -257,24 +257,15 @@ export const QUERIES = {
   `,
 
   // Collaboration queries
+  // Anonymous request, so the backend returns public annotations only.
   GET_ANNOTATIONS_FOR_SERIES: `
-    query GetAnnotationsForSeries($seriesId: String!, $userId: ID) {
-      annotationsForSeries(seriesId: $seriesId, userId: $userId) {
+    query GetAnnotationsForSeries($seriesId: String!) {
+      annotationsForSeries(seriesId: $seriesId) {
         id
-        user_id
-        series_id
-        chart_id
-        annotation_date
-        annotation_value
+        annotationDate
         title
         description
         color
-        annotation_type
-        is_visible
-        is_pinned
-        tags
-        created_at
-        updated_at
       }
     }
   `,
@@ -545,22 +536,15 @@ export interface SearchSeriesResponse {
 }
 
 // Collaboration types
+/** An annotation as `GetAnnotationsForSeries` selects it. */
 export interface ChartAnnotationType {
   id: string;
-  user_id: string;
-  series_id?: string;
-  chart_id?: string;
-  annotation_date: string;
-  annotation_value?: number;
+  /** Observation date the note is about, `YYYY-MM-DD`. */
+  annotationDate: string;
   title: string;
-  description?: string;
-  color?: string;
-  annotation_type?: string;
-  is_visible?: boolean;
-  is_pinned?: boolean;
-  tags?: string[];
-  created_at?: string;
-  updated_at?: string;
+  description: string | null;
+  /** Free text, up to 7 characters (default `#2196f3`); `useSeriesAnnotations` checks it. */
+  color: string | null;
 }
 
 export interface AnnotationCommentType {

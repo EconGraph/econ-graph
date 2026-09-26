@@ -48,12 +48,10 @@ export const GRAPHQL_OPERATION_SKIP_LIST: Readonly<Record<string, string>> = {
   'utils/graphql.ts#GetCorrelationNetwork': 'world-map: replaced by crossSection',
   'utils/graphql.ts#GetGlobalEventsWithImpacts': 'world-map: replaced by crossSection',
 
-  // Unused: nothing in src/ sends these. useCollaboration.ts, the only caller
-  // of GetAnnotationsForSeries, GetChartCollaborators and GetCommentsForAnnotation,
-  // is imported by nothing (UI-5 deleted its other caller, ChartCollaborationConnectedQuery,
-  // and the now-uncalled GetAnnotations with it). Fix or delete them (series-ui UI-8
-  // rewrites the annotation query; series search is #165).
-  'utils/graphql.ts#GetAnnotationsForSeries': 'series-ui: unused, UI-8 rewrites it',
+  // Unused: nothing in src/ sends these. Their only caller, useCollaboration.ts,
+  // was deleted by UI-8 (UI-5 deleted the other one, ChartCollaborationConnectedQuery,
+  // and the now-uncalled GetAnnotations with it). Fix or delete them (series search
+  // is #165).
   'utils/graphql.ts#GetChartCollaborators': 'series-ui: unused, UI-5 removed its other caller',
   'utils/graphql.ts#GetCommentsForAnnotation': 'series-ui: unused, UI-5 removed its other caller',
   'utils/graphql.ts#SearchSeriesFulltext': 'series-ui: unused, fix or delete with series search',

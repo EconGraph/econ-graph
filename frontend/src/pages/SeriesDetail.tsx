@@ -27,8 +27,10 @@ import {
   TrendingUp as TrendingUpIcon,
 } from '@mui/icons-material';
 
-import SeriesChart from '../components/charts/SeriesChart';
+import SeriesChart, { SeriesChartAnnotation } from '../components/charts/SeriesChart';
+import SeriesAnnotationsPanel from '../components/charts/SeriesAnnotationsPanel';
 import { useSeriesData, useSeriesDetail, SeriesDataPoint } from '../hooks/useSeriesData';
+import { useSeriesAnnotations } from '../hooks/useSeriesAnnotations';
 import { DataTransformation, describeTransformation } from '../utils/transformations';
 import { formatIsoDate } from '../utils/dates';
 
@@ -76,6 +78,20 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
   const detail = useSeriesDetail(seriesId);
   const series = detail.data;
   const data = useSeriesData(seriesId, { transformation, enabled: !!series });
+  const annotations = useSeriesAnnotations(seriesId, { enabled: !!series });
+  const [selectedAnnotationId, setSelectedAnnotationId] = React.useState<string | null>(null);
+
+  const chartAnnotations = React.useMemo<SeriesChartAnnotation[]>(
+    () =>
+      (annotations.data ?? []).map(a => ({
+        kind: 'point',
+        id: a.id,
+        label: a.title,
+        date: a.date,
+        color: a.color,
+      })),
+    [annotations.data]
+  );
 
   if (detail.isLoading) {
     return <PageSkeleton />;
@@ -158,6 +174,8 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
           transformation={shownTransformation}
           selectedTransformation={transformation}
           onTransformationChange={setTransformation}
+          annotations={chartAnnotations}
+          onAnnotationClick={setSelectedAnnotationId}
         />
       </Box>
     );
@@ -227,6 +245,17 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
         </Grid>
 
         <Grid item xs={12} lg={4}>
+          <Box sx={{ mb: 3 }}>
+            <SeriesAnnotationsPanel
+              annotations={annotations.data ?? []}
+              isLoading={annotations.isLoading}
+              error={annotations.isError ? (annotations.error as Error | null) : null}
+              onRetry={() => annotations.refetch()}
+              selectedId={selectedAnnotationId}
+              onSelect={setSelectedAnnotationId}
+            />
+          </Box>
+
           <Card sx={{ mb: 3 }}>
             <CardContent>
               <Typography variant='h6' gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
