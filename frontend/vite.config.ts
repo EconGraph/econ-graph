@@ -6,6 +6,10 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 
+// Where the dev server and `vite preview` proxy /api and /graphql. The release e2e stack
+// (playwright.release.config.ts) points it at its own backend.
+const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:8080';
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
@@ -24,13 +28,13 @@ export default defineConfig({
     proxy: {
       // Proxy API requests to backend
       '/api': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
         secure: false,
       },
       // Proxy GraphQL requests
       '/graphql': {
-        target: 'http://localhost:8080',
+        target: backendUrl,
         changeOrigin: true,
         secure: false,
       },

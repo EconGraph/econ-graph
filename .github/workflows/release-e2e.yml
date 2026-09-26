@@ -1,0 +1,98 @@
+name: Release E2E
+
+# The release end-to-end suite (frontend/playwright.release.config.ts): the frontend release
+# build against the backend on Postgres 18, seeded from recorded fixtures. No network access to
+# any data source and no API keys. See frontend/tests/e2e/release/README.md.
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - 'scripts/release-e2e.sh'
+      - '.github/workflows/release-e2e.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: release-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Same profile settings as ci-core.yml, so the shared Rust cache matches
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  release-e2e:
+    name: Release E2E (Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: econ_graph_e2e
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5439:5432
+
+    env:
+      # scripts/release-e2e.sh uses this instead of starting its own Postgres
+      RELEASE_E2E_DATABASE_URL: postgres://postgres:password@localhost:5439/econ_graph_e2e
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.98.1
+
+    - name: Cache cargo registry
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: backend
+        # Restore the cache ci-core.yml's build job saves; never save a second copy from here
+        shared-key: backend
+        save-if: false
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install frontend dependencies
+      working-directory: frontend
+      run: npm ci
+
+    - name: Install Chromium
+      working-directory: frontend
+      run: npx playwright install --with-deps chromium
+
+    - name: Build, seed and run the release suite
+      run: scripts/release-e2e.sh
+
+    - name: Upload Playwright report
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: release-e2e-report
+        path: |
+          frontend/playwright-report-release/
+          frontend/test-results-release/
+        retention-days: 14
