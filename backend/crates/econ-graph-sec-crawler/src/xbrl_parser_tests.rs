@@ -313,9 +313,29 @@ async fn test_xbrl_cache_operations() {
         .await
         .expect("Failed to write test file");
 
-    // Test storing and retrieving
+    // Test storing and retrieving a full parse result
+    let test_result = XbrlParseResult {
+        statements: test_statements,
+        line_items: Vec::new(),
+        taxonomy_concepts: Vec::new(),
+        contexts: Vec::new(),
+        units: Vec::new(),
+        facts: Vec::new(),
+        validation_report: ValidationReport {
+            is_valid: true,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        },
+        processing_metadata: ProcessingMetadata {
+            document_type: DocumentType::Xbrl,
+            file_size: 12,
+            processing_time: std::time::Duration::from_millis(5),
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        },
+    };
     cache
-        .store_parsed_result(&test_file, &test_statements)
+        .store_parsed_result(&test_file, &test_result)
         .await
         .expect("Failed to store result");
     let retrieved = cache
@@ -324,9 +344,10 @@ async fn test_xbrl_cache_operations() {
         .expect("Failed to retrieve result");
 
     assert!(retrieved.is_some());
-    let retrieved_statements = retrieved.unwrap();
-    assert_eq!(retrieved_statements.len(), 1);
-    assert_eq!(retrieved_statements[0].form_type, "10-K");
+    let retrieved = retrieved.unwrap();
+    assert_eq!(retrieved.statements.len(), 1);
+    assert_eq!(retrieved.statements[0].form_type, "10-K");
+    assert_eq!(retrieved.processing_metadata.file_size, 12);
 }
 
 #[tokio::test]
@@ -544,6 +565,213 @@ fn get_test_data_path(file_name: &str) -> PathBuf {
     path.push("test_data");
     path.push(file_name);
     path
+}
+
+#[tokio::test]
+async fn test_cached_parse_keeps_facts_and_line_items() {
+    // A second parse of the same file is served from the cache and must return the same data,
+    // not just the statements.
+    let cache_dir = TempDir::new().unwrap();
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        use_arelle: false,
+        cache_dir: cache_dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let file_path = get_test_data_path("sample_10k.xml");
+
+    let first = parser.parse_xbrl_document(&file_path).await.unwrap();
+    assert!(!first.facts.is_empty(), "sample should have facts");
+
+    // Mark the cache entry so the second result can only have come from the cache.
+    let cache_file = XbrlCache::new(cache_dir.path().to_path_buf())
+        .for_parser_mode(false, false)
+        .get_cache_file_path(&file_path)
+        .await
+        .unwrap();
+    let mut entry: serde_json::Value =
+        serde_json::from_slice(&fs::read(&cache_file).await.unwrap()).unwrap();
+    entry["processing_metadata"]["file_size"] = serde_json::json!(424242);
+    fs::write(&cache_file, entry.to_string()).await.unwrap();
+
+    let second = parser.parse_xbrl_document(&file_path).await.unwrap();
+
+    assert_eq!(
+        second.processing_metadata.file_size, 424242,
+        "not a cache hit"
+    );
+    assert_eq!(second.facts.len(), first.facts.len());
+    assert_eq!(second.line_items.len(), first.line_items.len());
+    assert_eq!(second.statements.len(), first.statements.len());
+    assert_eq!(second.contexts.len(), first.contexts.len());
+    assert_eq!(second.units.len(), first.units.len());
+}
+
+#[tokio::test]
+async fn test_changed_document_misses_cache() {
+    let cache_dir = TempDir::new().unwrap();
+    let work_dir = TempDir::new().unwrap();
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        use_arelle: false,
+        cache_dir: cache_dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let file_path = work_dir.path().join("filing.xml");
+    let original = fs::read(get_test_data_path("sample_10k.xml"))
+        .await
+        .unwrap();
+    fs::write(&file_path, &original).await.unwrap();
+    let cache = XbrlCache::new(cache_dir.path().to_path_buf()).for_parser_mode(false, false);
+    let first_key = cache.get_cache_file_path(&file_path).await.unwrap();
+    parser.parse_xbrl_document(&file_path).await.unwrap();
+
+    // Mark the first document's entry so a stale hit would be visible.
+    let mut entry: serde_json::Value =
+        serde_json::from_slice(&fs::read(&first_key).await.unwrap()).unwrap();
+    entry["processing_metadata"]["file_size"] = serde_json::json!(424242);
+    fs::write(&first_key, entry.to_string()).await.unwrap();
+
+    // Same path, different content: a different cache entry, parsed afresh.
+    let mut changed = original.clone();
+    changed.extend_from_slice(b"\n<!-- amended -->\n");
+    fs::write(&file_path, &changed).await.unwrap();
+    let second_key = cache.get_cache_file_path(&file_path).await.unwrap();
+    assert_ne!(first_key, second_key);
+    assert!(!second_key.exists());
+
+    let second = parser.parse_xbrl_document(&file_path).await.unwrap();
+    assert_ne!(
+        second.processing_metadata.file_size, 424242,
+        "stale cache hit"
+    );
+    let stored: XbrlParseResult =
+        serde_json::from_slice(&fs::read(&second_key).await.unwrap()).unwrap();
+    assert_eq!(stored.facts.len(), second.facts.len());
+    assert!(!stored.facts.is_empty());
+}
+
+#[tokio::test]
+async fn test_arelle_fallback_is_not_cached() {
+    // Arelle "installed" (the version check passes) but failing on the document: the native
+    // fallback result must not be stored under the Arelle key, or Arelle would never be retried.
+    let cache_dir = TempDir::new().unwrap();
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        use_arelle: true,
+        arelle_path: PathBuf::from("/bin/echo"),
+        cache_dir: cache_dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let file_path = get_test_data_path("sample_10k.xml");
+
+    let result = parser.parse_xbrl_document(&file_path).await.unwrap();
+    assert!(
+        !result.facts.is_empty(),
+        "native fallback should have parsed"
+    );
+    let key = XbrlCache::new(cache_dir.path().to_path_buf())
+        .for_parser_mode(true, false)
+        .get_cache_file_path(&file_path)
+        .await
+        .unwrap();
+    assert!(
+        !key.exists(),
+        "fallback result was cached under the Arelle key"
+    );
+}
+
+#[tokio::test]
+async fn test_cache_write_leaves_only_the_entry() {
+    let cache_dir = TempDir::new().unwrap();
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        use_arelle: false,
+        cache_dir: cache_dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let file_path = get_test_data_path("sample_10k.xml");
+    parser.parse_xbrl_document(&file_path).await.unwrap();
+
+    // Entries are written to a temporary file and renamed into place; no temporary is left.
+    let key = XbrlCache::new(cache_dir.path().to_path_buf())
+        .for_parser_mode(false, false)
+        .get_cache_file_path(&file_path)
+        .await
+        .unwrap();
+    let mut names = Vec::new();
+    let mut dir = fs::read_dir(cache_dir.path()).await.unwrap();
+    while let Some(entry) = dir.next_entry().await.unwrap() {
+        names.push(entry.file_name());
+    }
+    assert_eq!(names, vec![key.file_name().unwrap().to_os_string()]);
+}
+
+#[tokio::test]
+async fn test_same_bytes_at_another_path_miss_cache() {
+    // Parsed statements carry generated ids, so a copy of a document gets its own entry.
+    let cache_dir = TempDir::new().unwrap();
+    let work_dir = TempDir::new().unwrap();
+    let cache = XbrlCache::new(cache_dir.path().to_path_buf()).for_parser_mode(false, false);
+    let content = fs::read(get_test_data_path("sample_10k.xml"))
+        .await
+        .unwrap();
+    let a = work_dir.path().join("a.xml");
+    let b = work_dir.path().join("b.xml");
+    fs::write(&a, &content).await.unwrap();
+    fs::write(&b, &content).await.unwrap();
+    assert_ne!(
+        cache.get_cache_file_path(&a).await.unwrap(),
+        cache.get_cache_file_path(&b).await.unwrap()
+    );
+
+    // Each parser mode keys separately too.
+    let arelle = XbrlCache::new(cache_dir.path().to_path_buf()).for_parser_mode(true, false);
+    let arelle_dts = XbrlCache::new(cache_dir.path().to_path_buf()).for_parser_mode(true, true);
+    let keys = [
+        cache.get_cache_file_path(&a).await.unwrap(),
+        arelle.get_cache_file_path(&a).await.unwrap(),
+        arelle_dts.get_cache_file_path(&a).await.unwrap(),
+    ];
+    assert_ne!(keys[0], keys[1]);
+    assert_ne!(keys[1], keys[2]);
+    assert_ne!(keys[0], keys[2]);
+}
+
+#[tokio::test]
+async fn test_unreadable_cache_entry_is_a_miss() {
+    // Entries written before the cache stored full results (a bare statements array), or cut
+    // off mid-write (invalid UTF-8), must not break parsing; they're re-parsed and replaced.
+    let cache_dir = TempDir::new().unwrap();
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        use_arelle: false,
+        cache_dir: cache_dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let file_path = get_test_data_path("sample_10k.xml");
+    parser.parse_xbrl_document(&file_path).await.unwrap();
+    let cache_file = XbrlCache::new(cache_dir.path().to_path_buf())
+        .for_parser_mode(false, false)
+        .get_cache_file_path(&file_path)
+        .await
+        .unwrap();
+
+    for bad_entry in [&b"[]"[..], &b"[{\"form_type\": \"10-\xe2\x82"[..]] {
+        fs::write(&cache_file, bad_entry).await.unwrap();
+
+        let result = parser.parse_xbrl_document(&file_path).await.unwrap();
+        assert!(!result.facts.is_empty(), "bad entry should be re-parsed");
+
+        let rewritten: XbrlParseResult =
+            serde_json::from_slice(&fs::read(&cache_file).await.unwrap()).unwrap();
+        assert_eq!(rewritten.facts.len(), result.facts.len());
+    }
 }
 
 #[tokio::test]
