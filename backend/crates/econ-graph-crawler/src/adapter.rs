@@ -184,9 +184,11 @@ pub trait SourceAdapter: Send + Sync {
     /// permanently. `Ok` carries one result per requested id; an id missing from the map fails
     /// as [`CrawlError::NotFound`] and ids that weren't requested are ignored.
     ///
-    /// The default calls [`fetch_series`](Self::fetch_series) once per id, in order. After the
-    /// first `RateLimited` or `Auth` it stops calling upstream and gives the remaining ids that
-    /// error, keeping the results already fetched.
+    /// The default calls [`fetch_series`](Self::fetch_series) once per id, in order, each with the
+    /// batch's `since` (so a more recent series may re-fetch some history). After the first
+    /// `RateLimited` it stops calling upstream and gives the remaining ids that (retryable)
+    /// error, keeping the results already fetched. Other errors, `Auth` included, stay with
+    /// their own series.
     async fn fetch_batch(
         &self,
         ctx: &CrawlCtx,
@@ -200,7 +202,7 @@ pub trait SourceAdapter: Send + Sync {
                 Some(e) => Err(e.clone()),
                 None => self.fetch_series(ctx, id, since).await,
             };
-            if let Err(e @ (CrawlError::RateLimited { .. } | CrawlError::Auth(_))) = &fetched {
+            if let Err(e @ CrawlError::RateLimited { .. }) = &fetched {
                 refused.get_or_insert_with(|| e.clone());
             }
             out.insert(id.clone(), fetched);
@@ -308,7 +310,7 @@ mod tests {
         assert_eq!(out["B"], Ok(FetchedSeries::default()));
     }
 
-    /// Rate limited on ids starting with `"limited"`.
+    /// Rate limited on ids starting with `"limited"`, unauthorised on `"denied"`, else not found.
     struct Limited;
 
     #[async_trait]
@@ -327,6 +329,8 @@ mod tests {
         ) -> Result<FetchedSeries, CrawlError> {
             if id.starts_with("limited") {
                 Err(CrawlError::RateLimited { retry_after: None })
+            } else if id.starts_with("denied") {
+                Err(CrawlError::Auth(id.into()))
             } else {
                 Err(CrawlError::NotFound(id.into()))
             }
@@ -347,6 +351,12 @@ mod tests {
         assert_eq!(out["missing"], Err(CrawlError::NotFound("missing".into())));
         assert_eq!(out["limited"], limited);
         assert_eq!(out["after"], limited);
+
+        // An auth failure stays with its own series; later ids are still fetched.
+        let ids = vec!["denied".to_string(), "after".to_string()];
+        let out = Limited.fetch_batch(&ctx, &ids, None).await.unwrap();
+        assert_eq!(out["denied"], Err(CrawlError::Auth("denied".into())));
+        assert_eq!(out["after"], Err(CrawlError::NotFound("after".into())));
     }
 
     #[test]
