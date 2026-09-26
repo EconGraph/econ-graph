@@ -6,7 +6,7 @@ import { SchemaValidator, deepEqual } from './schema.js';
 
 const KINDS = ['build', 'preview', 'ops', 'experiment'];
 const STAGES = ['alpha', 'beta'];
-// Flag keys become __FLAG_WORLD_MAP__ in the frontend and cfg(flag_world_map) in the backend
+// Flag keys become __FLAGS__.world_map in the frontend and cfg(flag_world_map) in the backend
 const KEY = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
 const OWNER = /^docs\/roadmap\/[a-z0-9-]+\.md$/;
 const REMOVE_BY = /^(train ([1-9][0-9]*)|unscheduled)$/;

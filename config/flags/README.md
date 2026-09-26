@@ -34,7 +34,7 @@ they are stale. Their shape:
 
 A flag with `"state": "DISABLED"` is left out, which flagd treats as absent.
 
-Each key will map to a name in code: `world_map` becomes `__FLAG_WORLD_MAP__` in
+Each key will map to a name in code: `world_map` becomes `__FLAGS__.world_map` in
 the frontend and `cfg(flag_world_map)` in the backend.
 
 ## Adding a flag
