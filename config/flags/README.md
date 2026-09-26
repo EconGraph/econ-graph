@@ -81,6 +81,10 @@ Example:
 }
 ```
 
+When train N ships, its release pushes the marker tag with the version tag:
+`git tag train-N <release commit> && git push origin train-N`. From then on the
+check fails for every flag still marked `remove_by: "train N"` or earlier.
+
 ## Removing a flag
 
 Delete it from both files in the PR that finishes or replaces the feature,
