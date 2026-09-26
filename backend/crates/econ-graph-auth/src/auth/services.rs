@@ -12,9 +12,25 @@ use reqwest::Client;
 use std::env;
 use uuid::Uuid;
 
-/// JWT secret key from environment
-fn get_jwt_secret() -> String {
-    env::var("JWT_SECRET").unwrap_or_else(|_| "your-secret-key-change-in-production".to_string())
+/// JWT signing secret from the `JWT_SECRET` environment variable.
+///
+/// Fails when the variable is unset or empty, so the server never signs or accepts tokens
+/// with a guessable key. The backend calls this at startup to refuse to start without one.
+pub fn jwt_secret() -> AppResult<String> {
+    let secret = env::var("JWT_SECRET").ok();
+    // This crate's own unit tests sign tokens without configuring a secret.
+    #[cfg(test)]
+    let secret = secret.or_else(|| Some("unit-test-jwt-secret".to_string()));
+    validate_jwt_secret(secret)
+}
+
+fn validate_jwt_secret(secret: Option<String>) -> AppResult<String> {
+    match secret {
+        Some(secret) if !secret.trim().is_empty() => Ok(secret),
+        _ => Err(AppError::ConfigError(
+            "JWT_SECRET must be set to a non-empty value".to_string(),
+        )),
+    }
 }
 
 /// JWT issuer
@@ -66,7 +82,7 @@ impl AuthService {
         let token = encode(
             &Header::default(),
             &claims,
-            &EncodingKey::from_secret(get_jwt_secret().as_ref()),
+            &EncodingKey::from_secret(jwt_secret()?.as_ref()),
         )
         .map_err(|e| AppError::AuthenticationError(format!("Failed to generate token: {}", e)))?;
 
@@ -80,7 +96,7 @@ impl AuthService {
 
         let token_data = decode::<Claims>(
             token,
-            &DecodingKey::from_secret(get_jwt_secret().as_ref()),
+            &DecodingKey::from_secret(jwt_secret()?.as_ref()),
             &validation,
         )
         .map_err(|e| AppError::AuthenticationError(format!("Invalid token: {}", e)))?;
@@ -335,5 +351,25 @@ impl AuthService {
         self.get_user_by_id(user_id)
             .await?
             .ok_or_else(|| AppError::AuthenticationError("User not found".to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_jwt_secret;
+
+    #[test]
+    fn jwt_secret_rejects_missing_or_empty_values() {
+        assert!(validate_jwt_secret(None).is_err());
+        assert!(validate_jwt_secret(Some(String::new())).is_err());
+        assert!(validate_jwt_secret(Some("   ".to_string())).is_err());
+    }
+
+    #[test]
+    fn jwt_secret_accepts_a_configured_value() {
+        assert_eq!(
+            validate_jwt_secret(Some("s3cret".to_string())).unwrap(),
+            "s3cret"
+        );
     }
 }

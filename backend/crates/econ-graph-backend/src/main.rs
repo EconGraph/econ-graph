@@ -207,6 +207,13 @@ async fn main() -> AppResult<()> {
         error
     })?;
 
+    // Refuse to start without a JWT signing secret rather than sign tokens with a known key.
+    econ_graph_auth::auth::services::jwt_secret().map_err(|e| {
+        e.log_with_context("Application startup JWT secret check");
+        eprintln!("❌ {}", e);
+        e
+    })?;
+
     info!("📊 Configuration loaded successfully:");
     info!("  - Server host: {}", config.server.host);
     info!("  - Server port: {}", config.server.port);

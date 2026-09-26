@@ -61,6 +61,9 @@ else
   CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-"http://localhost:3000"}
 fi
 
+# The backend refuses to start without a JWT secret; generate a throwaway one if none is set
+JWT_SECRET=${JWT_SECRET:-$(openssl rand -hex 32)}
+
 # Environment variables debugging
 echo "📋 Environment variables being passed to container:"
 echo "  - DATABASE_URL: $DATABASE_URL"
@@ -81,6 +84,7 @@ docker run --rm -d --name backend-server \
   -e BACKEND_PORT="$BACKEND_PORT" \
   -e FRONTEND_PORT="$FRONTEND_PORT" \
   -e CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS" \
+  -e JWT_SECRET="$JWT_SECRET" \
   -e USER=postgres \
   --network host \
   econ-graph-e2e-optimized:latest \
