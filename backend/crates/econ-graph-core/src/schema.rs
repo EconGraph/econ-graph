@@ -9,9 +9,11 @@ diesel::table! {
         line_item_id -> Nullable<Uuid>,
         assignee_id -> Uuid,
         assigner_id -> Uuid,
-        assignment_type -> Text,
+        #[max_length = 20]
+        assignment_type -> Varchar,
         due_date -> Nullable<Timestamptz>,
-        status -> Text,
+        #[max_length = 20]
+        status -> Varchar,
         notes -> Nullable<Text>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
@@ -49,7 +51,8 @@ diesel::table! {
         name -> Varchar,
         description -> Nullable<Text>,
         template_content -> Text,
-        annotation_type -> Text,
+        #[max_length = 30]
+        annotation_type -> Varchar,
         tags -> Nullable<Array<Nullable<Text>>>,
         is_public -> Nullable<Bool>,
         created_by -> Uuid,
@@ -361,12 +364,14 @@ diesel::table! {
         line_item_id -> Nullable<Uuid>,
         author_id -> Uuid,
         content -> Text,
-        annotation_type -> Text,
+        #[max_length = 30]
+        annotation_type -> Varchar,
         tags -> Nullable<Array<Nullable<Text>>>,
         highlights -> Nullable<Jsonb>,
         mentions -> Nullable<Array<Nullable<Uuid>>>,
         parent_annotation_id -> Nullable<Uuid>,
-        status -> Text,
+        #[max_length = 20]
+        status -> Varchar,
         is_private -> Nullable<Bool>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
@@ -396,8 +401,10 @@ diesel::table! {
         decimals -> Nullable<Int4>,
         is_credit -> Nullable<Bool>,
         is_debit -> Nullable<Bool>,
-        statement_type -> Text,
-        statement_section -> Text,
+        #[max_length = 30]
+        statement_type -> Varchar,
+        #[max_length = 30]
+        statement_section -> Varchar,
         #[max_length = 255]
         parent_concept -> Nullable<Varchar>,
         level -> Int4,
@@ -413,7 +420,8 @@ diesel::table! {
     financial_ratios (id) {
         id -> Uuid,
         statement_id -> Uuid,
-        ratio_category -> Text,
+        #[max_length = 30]
+        ratio_category -> Varchar,
         #[max_length = 100]
         ratio_name -> Varchar,
         ratio_value -> Nullable<Numeric>,
@@ -424,7 +432,8 @@ diesel::table! {
         numerator_concept -> Nullable<Varchar>,
         #[max_length = 255]
         denominator_concept -> Nullable<Varchar>,
-        calculation_method -> Nullable<Text>,
+        #[max_length = 30]
+        calculation_method -> Nullable<Varchar>,
         is_industry_standard -> Nullable<Bool>,
         benchmark_value -> Nullable<Numeric>,
         benchmark_percentile -> Nullable<Int4>,
@@ -454,10 +463,12 @@ diesel::table! {
         xbrl_file_content -> Nullable<Bytea>,
         xbrl_file_size_bytes -> Nullable<Int8>,
         xbrl_file_compressed -> Bool,
-        xbrl_file_compression_type -> Text,
+        #[max_length = 20]
+        xbrl_file_compression_type -> Varchar,
         #[max_length = 64]
         xbrl_file_hash -> Nullable<Varchar>,
-        xbrl_processing_status -> Text,
+        #[max_length = 20]
+        xbrl_processing_status -> Varchar,
         xbrl_processing_error -> Nullable<Text>,
         xbrl_processing_started_at -> Nullable<Timestamptz>,
         xbrl_processing_completed_at -> Nullable<Timestamptz>,
@@ -709,18 +720,22 @@ diesel::table! {
         schema_filename -> Varchar,
         schema_version -> Nullable<Varchar>,
         schema_date -> Nullable<Date>,
-        file_type -> Text,
-        source_type -> Text,
+        #[max_length = 30]
+        file_type -> Varchar,
+        #[max_length = 30]
+        source_type -> Varchar,
         file_content -> Nullable<Bytea>,
         file_oid -> Nullable<Integer>,
         file_size_bytes -> Bigint,
         file_hash -> Varchar,
         is_compressed -> Bool,
+        #[max_length = 20]
         compression_type -> Varchar,
         source_url -> Nullable<Text>,
         download_url -> Nullable<Text>,
         original_filename -> Nullable<Varchar>,
-        processing_status -> Text,
+        #[max_length = 20]
+        processing_status -> Varchar,
         processing_error -> Nullable<Text>,
         processing_started_at -> Nullable<Timestamptz>,
         processing_completed_at -> Nullable<Timestamptz>,
@@ -735,7 +750,8 @@ diesel::table! {
     xbrl_taxonomy_linkbases (id) {
         id -> Uuid,
         linkbase_filename -> Varchar,
-        linkbase_type -> Text,
+        #[max_length = 30]
+        linkbase_type -> Varchar,
         target_namespace -> Nullable<Varchar>,
         schema_id -> Nullable<Uuid>,
         file_content -> Nullable<Bytea>,
@@ -743,11 +759,13 @@ diesel::table! {
         file_size_bytes -> Bigint,
         file_hash -> Varchar,
         is_compressed -> Bool,
+        #[max_length = 20]
         compression_type -> Varchar,
         source_url -> Nullable<Text>,
         download_url -> Nullable<Text>,
         original_filename -> Nullable<Varchar>,
-        processing_status -> Text,
+        #[max_length = 20]
+        processing_status -> Varchar,
         processing_error -> Nullable<Text>,
         processing_started_at -> Nullable<Timestamptz>,
         processing_completed_at -> Nullable<Timestamptz>,
