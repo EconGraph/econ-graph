@@ -242,6 +242,7 @@ pub async fn get_series_by_id(
 ///     end_date: Some(NaiveDate::from_ymd_opt(2024, 11, 30).unwrap()),
 ///     original_only: Some(true),
 ///     latest_revision_only: Some(false),
+///     as_of: None,
 ///     limit: Some(12),
 ///     offset: Some(0),
 /// };
@@ -286,11 +287,8 @@ pub async fn get_series_data(
         }
     }
 
-    if let Some(latest_revision_only) = params.latest_revision_only {
-        if latest_revision_only {
-            // This is a complex query - for now, we'll handle it in the application layer
-            // In production, this should be optimized with a proper SQL query
-        }
+    if params.as_of.is_some() || params.latest_revision_only.unwrap_or(false) {
+        query = query.filter(econ_graph_core::models::revision_filter(params.as_of));
     }
 
     // Apply pagination
@@ -302,12 +300,7 @@ pub async fn get_series_data(
     // Order by date
     query = query.order_by(data_points::date.asc());
 
-    let mut data_points = query.load::<DataPoint>(&mut *conn).await?;
-
-    // Post-process for latest revision only if requested
-    if params.latest_revision_only.unwrap_or(false) {
-        data_points = filter_latest_revisions(data_points);
-    }
+    let data_points = query.load::<DataPoint>(&mut *conn).await?;
 
     Ok(data_points)
 }
@@ -372,33 +365,6 @@ pub async fn transform_data_points(
             "Unsupported transformation".to_string(),
         )),
     }
-}
-
-/// Filter data points to keep only the latest revision for each date
-fn filter_latest_revisions(data_points: Vec<DataPoint>) -> Vec<DataPoint> {
-    use std::collections::HashMap;
-
-    let mut latest_revisions: HashMap<chrono::NaiveDate, DataPoint> = HashMap::new();
-
-    for data_point in data_points {
-        let date = data_point.date;
-
-        match latest_revisions.get(&date) {
-            Some(existing) => {
-                if data_point.revision_date > existing.revision_date {
-                    latest_revisions.insert(date, data_point);
-                }
-            }
-            None => {
-                latest_revisions.insert(date, data_point);
-            }
-        }
-    }
-
-    let mut result: Vec<DataPoint> = latest_revisions.into_values().collect();
-    result.sort_by_key(|a| a.date);
-
-    result
 }
 
 /// Calculate year-over-year changes
@@ -502,56 +468,6 @@ mod tests {
     use chrono::NaiveDate;
     use rust_decimal_macros::dec;
     use uuid::Uuid;
-
-    #[test]
-    fn test_filter_latest_revisions() {
-        // REQUIREMENT: Support plotting both original releases and later corrections
-        // PURPOSE: Verify that latest revision filtering works correctly for data analysis
-        // This ensures users can choose between original and revised data for analysis
-
-        let data_points = vec![
-            DataPoint {
-                id: Uuid::new_v4(),
-                series_id: Uuid::new_v4(),
-                date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
-                value: Some(BigDecimal::from(100)),
-                revision_date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
-                is_original_release: true,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-            },
-            DataPoint {
-                id: Uuid::new_v4(),
-                series_id: Uuid::new_v4(),
-                date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
-                value: Some(BigDecimal::from(101)),
-                revision_date: NaiveDate::from_ymd_opt(2024, 2, 1).unwrap(), // Later revision
-                is_original_release: false,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-            },
-        ];
-
-        let filtered = filter_latest_revisions(data_points);
-
-        // Verify only latest revision is kept - important for accurate current analysis
-        assert_eq!(
-            filtered.len(),
-            1,
-            "Should filter to only latest revision per date"
-        );
-        // Verify correct revision value is preserved - ensures data accuracy
-        assert_eq!(
-            filtered[0].value,
-            Some(BigDecimal::from(101)),
-            "Should keep the later revision value"
-        );
-        // Verify revision metadata is maintained - important for data provenance
-        assert!(
-            !filtered[0].is_original_release,
-            "Should preserve revision metadata"
-        );
-    }
 
     #[test]
     fn test_calculate_yoy_changes() {

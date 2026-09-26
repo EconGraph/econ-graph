@@ -458,6 +458,73 @@ async fn refetching_unchanged_points_writes_nothing() {
     assert_eq!(point_count(&db.pool, series_id).await, 2);
 }
 
+fn revision(date: &str, value: &str, revision: &str) -> FetchedPoint {
+    FetchedPoint {
+        date: d(date),
+        value: Some(BigDecimal::from_str(value).unwrap()),
+        revision_date: d(revision),
+        is_original_release: false,
+    }
+}
+
+#[tokio::test]
+async fn revision_filter_picks_latest_and_as_of_revisions() {
+    let Some(db) = db().await else { return };
+    // January has three revisions, stored out of order; February is first published in May.
+    let write = persist::persist_series(
+        &db.pool,
+        SRC,
+        "t5_revisions",
+        &FetchedSeries {
+            metadata: None,
+            points: vec![
+                revision("2024-01-01", "3", "2024-04-01"),
+                revision("2024-01-01", "1", "2024-02-01"),
+                revision("2024-02-01", "5", "2024-05-01"),
+                revision("2024-01-01", "2", "2024-03-01"),
+            ],
+        },
+    )
+    .await
+    .unwrap();
+    let series_id = write.series_id;
+
+    let known = |as_of: Option<NaiveDate>| {
+        let pool = db.pool.clone();
+        async move {
+            let mut conn = pool.get().await.unwrap();
+            data_points::table
+                .filter(data_points::series_id.eq(series_id))
+                .filter(econ_graph_core::models::revision_filter(as_of))
+                .order(data_points::date)
+                .select((data_points::date, data_points::value))
+                .load::<(NaiveDate, Option<BigDecimal>)>(&mut conn)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|(date, v)| (date, v.unwrap().normalized().to_string()))
+                .collect::<Vec<_>>()
+        }
+    };
+    let row = |date: &str, value: &str| (d(date), value.to_string());
+
+    assert_eq!(
+        known(None).await,
+        vec![row("2024-01-01", "3"), row("2024-02-01", "5")]
+    );
+    // Mid-March: January's March revision is in effect and February isn't published yet.
+    assert_eq!(
+        known(Some(d("2024-03-15"))).await,
+        vec![row("2024-01-01", "2")]
+    );
+    // A revision takes effect on its own revision_date.
+    assert_eq!(
+        known(Some(d("2024-02-01"))).await,
+        vec![row("2024-01-01", "1")]
+    );
+    assert_eq!(known(Some(d("2024-01-31"))).await, vec![]);
+}
+
 #[tokio::test]
 async fn server_error_retries_with_counted_attempt_and_backoff() {
     let Some(db) = db().await else { return };
