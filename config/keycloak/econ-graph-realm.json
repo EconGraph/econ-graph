@@ -12,6 +12,137 @@
   "accessTokenLifespan": 300,
   "ssoSessionIdleTimeout": 1800,
   "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      {
+        "name": "default-roles-econ-graph",
+        "description": "Granted to every account: the user composite plus Keycloak's defaults",
+        "composite": true,
+        "composites": {
+          "realm": ["offline_access", "uma_authorization", "user"],
+          "client": {
+            "account": ["view-profile", "manage-account"]
+          }
+        }
+      },
+      {
+        "name": "offline_access",
+        "description": "Keycloak default: offline access"
+      },
+      {
+        "name": "uma_authorization",
+        "description": "Keycloak default: UMA authorization"
+      },
+      {
+        "name": "user",
+        "description": "Signed-in user: the fine-grained roles every account holds",
+        "composite": true,
+        "composites": {
+          "client": {
+            "econ-graph-api": ["annotation:create", "annotation:comment", "chart:share", "api:mcp"]
+          }
+        }
+      },
+      {
+        "name": "support",
+        "description": "Support staff: user plus read-only user, session and system views",
+        "composite": true,
+        "composites": {
+          "realm": ["user"],
+          "client": {
+            "econ-graph-api": ["admin.users:read", "admin.sessions:read", "admin.system:read"]
+          }
+        }
+      },
+      {
+        "name": "admin",
+        "description": "Senior staff: support plus every other staff role",
+        "composite": true,
+        "composites": {
+          "realm": ["support"],
+          "client": {
+            "econ-graph-api": [
+              "admin.users:create", "admin.users:update", "admin.users:delete", "admin.users:suspend",
+              "admin.sessions:revoke", "admin.crawlers:manage", "admin.security:read", "admin.audit:read"
+            ]
+          }
+        }
+      },
+      {
+        "name": "super_admin",
+        "description": "Top staff level: everything in admin, nothing extra yet",
+        "composite": true,
+        "composites": {
+          "realm": ["admin"]
+        }
+      }
+    ],
+    "client": {
+      "econ-graph-api": [
+        {
+          "name": "annotation:create",
+          "description": "Create an annotation on a series"
+        },
+        {
+          "name": "annotation:comment",
+          "description": "Comment on an annotation the caller can see"
+        },
+        {
+          "name": "chart:share",
+          "description": "Share a chart the caller owns with another user"
+        },
+        {
+          "name": "api:mcp",
+          "description": "Call the MCP endpoint (/mcp)"
+        },
+        {
+          "name": "admin.users:read",
+          "description": "List and read any user's account"
+        },
+        {
+          "name": "admin.users:create",
+          "description": "Create user accounts"
+        },
+        {
+          "name": "admin.users:update",
+          "description": "Update any user's account"
+        },
+        {
+          "name": "admin.users:delete",
+          "description": "Delete user accounts"
+        },
+        {
+          "name": "admin.users:suspend",
+          "description": "Suspend and reactivate user accounts"
+        },
+        {
+          "name": "admin.sessions:read",
+          "description": "List user sessions"
+        },
+        {
+          "name": "admin.sessions:revoke",
+          "description": "End a user's sessions (force logout)"
+        },
+        {
+          "name": "admin.crawlers:manage",
+          "description": "Trigger and manage crawls"
+        },
+        {
+          "name": "admin.system:read",
+          "description": "Read system health"
+        },
+        {
+          "name": "admin.security:read",
+          "description": "Read security events"
+        },
+        {
+          "name": "admin.audit:read",
+          "description": "Read the audit log"
+        }
+      ]
+    }
+  },
+  "defaultRole": {"name": "default-roles-econ-graph", "composite": true, "clientRole": false},
   "clients": [
     {
       "clientId": "econ-graph-web",
@@ -49,6 +180,22 @@
             "included.client.audience": "econ-graph-api",
             "access.token.claim": "true",
             "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "econ-graph-api roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "econ-graph-api",
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false",
             "introspection.token.claim": "true"
           }
         }

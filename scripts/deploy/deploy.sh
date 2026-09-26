@@ -93,12 +93,17 @@ if kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
   echo "🔐 Deploying Keycloak..."
   kubectl -n econ-graph create configmap keycloak-realm \
     --from-file=econ-graph-realm.json=config/keycloak/econ-graph-realm.json \
+    --from-file=render-realm.sh=scripts/keycloak/render-realm.sh \
     --dry-run=client -o yaml | kubectl apply -f -
   kubectl apply -f k8s/manifests/keycloak/postgres.yaml
   echo "⏳ Waiting for Keycloak's PostgreSQL to be ready..."
   kubectl -n econ-graph rollout status statefulset/keycloak-postgres --timeout=300s
   kubectl apply -f k8s/manifests/keycloak/deployment.yaml
   kubectl apply -f k8s/manifests/keycloak/ingress.yaml
+  # The realm-import Job applies the realm file on every deploy; a Job cannot be
+  # re-run in place, so the previous one goes first.
+  kubectl -n econ-graph delete job keycloak-realm-import --ignore-not-found
+  kubectl apply -f k8s/manifests/keycloak/realm-import-job.yaml
   KEYCLOAK_DEPLOYED=true
 else
   echo "⚠️  Secret econ-graph-keycloak not found, skipping Keycloak."
@@ -162,6 +167,27 @@ kubectl wait --for=condition=available --timeout=300s deployment/chart-api-servi
 if [ "$KEYCLOAK_DEPLOYED" = true ]; then
   echo "Waiting for Keycloak deployment..."
   kubectl wait --for=condition=available --timeout=600s deployment/keycloak -n econ-graph
+  echo "Waiting for the Keycloak realm import..."
+  # `kubectl wait --for=condition=complete` alone would sit out its whole timeout on
+  # a failed Job, so poll for either terminal condition.
+  realm_import_status=""
+  for _ in $(seq 1 120); do
+    realm_import_status="$(kubectl -n econ-graph get job keycloak-realm-import \
+      -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)"
+    case "$realm_import_status" in
+      *Complete*|*Failed*) break ;;
+    esac
+    sleep 5
+  done
+  case "$realm_import_status" in
+    *Complete*) echo "✅ Keycloak realm applied" ;;
+    *)
+      echo "❌ Keycloak realm import did not complete (status: ${realm_import_status:-none}):"
+      kubectl -n econ-graph logs job/keycloak-realm-import --all-containers || true
+      kill $MONITOR_PID 2>/dev/null || true
+      exit 1
+      ;;
+  esac
 fi
 
 # Stop monitoring

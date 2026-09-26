@@ -15,9 +15,9 @@
 # config/keycloak/econ-graph-realm.json. The seeded dev and QA test users are for the
 # local compose stack only and never deployed (CI enforces this).
 #
-# Keycloak imports the realm only when it does not exist yet. Settings resolved from
-# the environment at that point (web URL, Google client) are then stored in
-# Keycloak's database: change them later in the admin console, not by redeploying.
+# --import-realm creates the realm on the first start only. The Job in
+# realm-import-job.yaml then applies the realm file on every deploy, so later changes
+# to it (roles, clients, the Google client) reach the cluster without touching users.
 #
 # The admin console is not exposed on the ingress. Reach it with
 #   kubectl -n econ-graph port-forward svc/keycloak-service 18080:8080
@@ -172,6 +172,11 @@ spec:
       - name: realm
         configMap:
           name: keycloak-realm
+          # The ConfigMap also carries render-realm.sh for the realm-import Job;
+          # only the realm belongs in Keycloak's import directory.
+          items:
+          - key: econ-graph-realm.json
+            path: econ-graph-realm.json
       securityContext:
         seccompProfile:
           type: RuntimeDefault

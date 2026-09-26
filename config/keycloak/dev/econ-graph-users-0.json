@@ -9,6 +9,7 @@
       "lastName": "Tester",
       "enabled": true,
       "emailVerified": true,
+      "realmRoles": ["default-roles-econ-graph"],
       "credentials": [
         {
           "type": "password",
@@ -28,6 +29,7 @@
       "lastName": "Tester",
       "enabled": true,
       "emailVerified": true,
+      "realmRoles": ["default-roles-econ-graph"],
       "credentials": [
         {
           "type": "password",
@@ -47,6 +49,7 @@
       "lastName": "Admin",
       "enabled": true,
       "emailVerified": true,
+      "realmRoles": ["default-roles-econ-graph", "admin"],
       "credentials": [
         {
           "type": "password",

@@ -57,6 +57,8 @@ services:
 
   # Keycloak (OIDC identity provider) with the dev realm `econ-graph`.
   # Realm and seeded test users live in config/keycloak/; see its README.
+  # --import-realm skips a realm that already exists, so after the realm file
+  # changes, stop keycloak and keycloak-db and remove the keycloak_db_data volume.
   keycloak-db:
     image: postgres:18
     environment:
