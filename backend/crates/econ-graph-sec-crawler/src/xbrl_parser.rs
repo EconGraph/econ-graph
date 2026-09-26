@@ -718,8 +718,11 @@ impl XbrlCache {
     pub async fn write_entry(&self, cache_file: &Path, result: &XbrlParseResult) -> Result<()> {
         let content = serde_json::to_string_pretty(result)?;
         let tmp_file = cache_file.with_extension(format!("{}.tmp", Uuid::new_v4()));
-        fs::write(&tmp_file, content).await?;
-        if let Err(e) = fs::rename(&tmp_file, cache_file).await {
+        let written = match fs::write(&tmp_file, content).await {
+            Ok(()) => fs::rename(&tmp_file, cache_file).await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = written {
             let _ = fs::remove_file(&tmp_file).await;
             return Err(e.into());
         }
