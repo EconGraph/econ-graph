@@ -1,5 +1,6 @@
 -- Restore the Postgres ENUM types and column types.
--- Fails if an annotation_type column holds one of the values only the VARCHAR CHECK allowed.
+-- annotation_type keeps the extra values the VARCHAR CHECK admitted, so rows using them survive
+-- the rollback.
 
 CREATE TYPE compression_type AS ENUM ('zstd', 'lz4', 'gzip', 'none');
 CREATE TYPE processing_status AS ENUM ('pending', 'downloaded', 'processing', 'completed', 'failed');
@@ -15,7 +16,7 @@ CREATE TYPE substitution_group AS ENUM ('item', 'tuple');
 CREATE TYPE processing_step AS ENUM ('download', 'parse', 'validate', 'store', 'extract', 'calculate');
 CREATE TYPE taxonomy_file_type AS ENUM ('schema', 'label_linkbase', 'presentation_linkbase', 'calculation_linkbase', 'definition_linkbase', 'reference_linkbase', 'formula_linkbase');
 CREATE TYPE taxonomy_source_type AS ENUM ('company_specific', 'us_gaap', 'sec_dei', 'fasb_srt', 'ifrs', 'other_standard', 'custom');
-CREATE TYPE annotation_type AS ENUM ('comment', 'question', 'concern', 'insight', 'risk', 'opportunity', 'highlight');
+CREATE TYPE annotation_type AS ENUM ('comment', 'question', 'concern', 'insight', 'risk', 'opportunity', 'highlight', 'revenue_growth', 'cost_concern', 'cash_flow', 'balance_sheet', 'one_time_item', 'industry_context');
 CREATE TYPE annotation_status AS ENUM ('active', 'resolved', 'archived');
 CREATE TYPE assignment_type AS ENUM ('review', 'analyze', 'verify', 'approve', 'investigate');
 CREATE TYPE assignment_status AS ENUM ('pending', 'in_progress', 'completed', 'overdue', 'cancelled');
