@@ -248,8 +248,8 @@ mod tests {
         assert!(e.contains("expected 51 rows") && e.contains("got 1"), "{e}");
     }
 
-    /// Every shipped dataset file parses and validates. Passes vacuously today: no adapter
-    /// declares a dataset yet (DS-4, DS-5 add the first files), so the directory holds none.
+    /// Every shipped dataset file parses and validates: today `fred.toml` and `bls.toml`
+    /// (DS-4); Census BDS (DS-5) adds more.
     #[test]
     fn shipped_dataset_files_are_valid() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
