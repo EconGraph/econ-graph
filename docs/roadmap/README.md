@@ -212,26 +212,27 @@ Each topic roadmap reviews the open 2025 PRs in its area and says what to keep:
 
 ## Doc inventory
 
-The verdict column says what should happen to each older doc. **Archive** means move
-it to `docs/archive/` with a note that it is historical. **Delete** means it is empty
-or duplicates another doc. **Update** means the doc is still useful but out of date.
-The moves and deletions are a separate follow-up change, so the links above keep
-working until then.
+The verdict column says what happened, or should happen, to each older doc.
+**Archived** docs were moved to [`docs/archive/`](../archive/README.md) and are kept
+for history only. **Deleted** docs were empty or duplicated another doc; git history
+still has them. **Archive** and **Delete** mark docs that wait on a topic roadmap
+merging or on content being folded elsewhere first. **Update** means the doc is still
+useful but out of date.
 
 ### Roadmaps and plans
 
 | Doc | Verdict | Why |
 |---|---|---|
 | `docs/business/ROADMAP.md` | Update | The product roadmap. Its 2025 dates have passed, and its statuses are superseded by this index |
-| `docs/development/NEAR_TERM_FEATURES.md` | Archive | Duplicates ROADMAP phases 1 to 3. The file paths it proposes don't exist |
+| [`docs/development/NEAR_TERM_FEATURES.md`](../archive/development/NEAR_TERM_FEATURES.md) | Archived | Duplicates ROADMAP phases 1 to 3. The file paths it proposes don't exist |
 | `docs/development/GLOBAL_ANALYSIS_ROADMAP.md` | Update | Keep as the one global-analysis roadmap and add the wiring steps above |
-| `docs/development/GLOBAL_ANALYSIS_UI_ROADMAP.md` | Delete | Duplicates phases 2 to 5 of the doc above |
-| `docs/projects/frontend-developer-global-analysis-plan.md` | Archive | Week 1 is done. Its test-suite claim is false |
-| `docs/projects/global-analysis-ui-phase1.md` | Delete | The same plan as the doc above with every box unchecked |
+| `docs/development/GLOBAL_ANALYSIS_UI_ROADMAP.md` | Deleted | Duplicates phases 2 to 5 of the doc above |
+| [`docs/projects/frontend-developer-global-analysis-plan.md`](../archive/projects/frontend-developer-global-analysis-plan.md) | Archived | Week 1 is done. Its test-suite claim is false |
+| `docs/projects/global-analysis-ui-phase1.md` | Deleted | The same plan as the doc above with every box unchecked |
 | `docs/development/SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md` | Update | 2,835 lines with false completion claims. Rewrite it as a short SEC roadmap |
-| `docs/development/vitest-migration-plan.md` | Archive | The migration is complete |
-| `docs/technical/CRATE_SPLIT_PLAN.md` | Archive | The split is complete |
-| `docs/technical/CRAWLER_MONITORING_IMPLEMENTATION_PLAN.md` | Archive | Mostly done. Its paths are stale |
+| [`docs/development/vitest-migration-plan.md`](../archive/development/vitest-migration-plan.md) | Archived | The migration is complete |
+| [`docs/technical/CRATE_SPLIT_PLAN.md`](../archive/technical/CRATE_SPLIT_PLAN.md) | Archived | The split is complete |
+| [`docs/technical/CRAWLER_MONITORING_IMPLEMENTATION_PLAN.md`](../archive/technical/CRAWLER_MONITORING_IMPLEMENTATION_PLAN.md) | Archived | Mostly done. Its paths are stale |
 | `admin-frontend/docs/features/CRAWLER_ADMIN_PLAN.md` | Archive | Superseded by [admin-ui.md](./admin-ui.md) |
 | `docs/projects/SECURITY_IMPLEMENTATION_PLAN.md` | Update | Phase 1 is still open. Repoint its paths at `backend/crates` |
 | `docs/business/FINANCIAL_DATA_USER_RESEARCH_PLAN.md` | Keep | An unstarted research plan. Its pricing questions feed plan design |
@@ -247,32 +248,32 @@ working until then.
 |---|---|---|
 | `docs/business/PRODUCT_SUMMARY_2025.md` | Update | Claims OECD data and real-time features that don't exist. Its bad metrics ("0 lines", "99.9%") are rewritten daily by `scripts/update-cost-analysis.sh`, so fix or drop that script step before archiving it |
 | `docs/business/INVESTOR_PITCH.md` | Update | Its roadmap and pricing belong in ROADMAP and the plans doc. Its customer quotes have no source and should be removed before it is shared |
-| `docs/technical/GLOBAL_ANALYSIS_SUMMARY.md` | Archive | A third copy of the global roadmap. Its Jest references are stale |
+| [`docs/technical/GLOBAL_ANALYSIS_SUMMARY.md`](../archive/technical/GLOBAL_ANALYSIS_SUMMARY.md) | Archived | A third copy of the global roadmap. Its Jest references are stale |
 | `docs/technical/GLOBAL_ANALYSIS_FEATURES.md` | Update | Cut it down to what is actually built |
 | `docs/technical/FRONTEND_SUMMARY.md` | Update | Its stack section still lists Jest, Cypress and React Router 6 |
 | `docs/technical/FULLTEXT_SEARCH.md` | Update | Describes search that was never built. Revisit after #165 |
-| `docs/technical/MCP_SERVER_ANALYSIS.md` | Archive | The bug it describes is fixed |
-| `docs/technical/WORLD_BANK_INTEGRATION_POST_MORTEM.md` | Archive | Its open follow-ups are listed under Data sources above |
+| [`docs/technical/MCP_SERVER_ANALYSIS.md`](../archive/technical/MCP_SERVER_ANALYSIS.md) | Archived | The bug it describes is fixed |
+| [`docs/technical/WORLD_BANK_INTEGRATION_POST_MORTEM.md`](../archive/technical/WORLD_BANK_INTEGRATION_POST_MORTEM.md) | Archived | Its open follow-ups are listed under Data sources above |
 | `docs/technical/RATE_LIMIT_SOURCES.md` | Update | Repoint it at `econ-graph-crawler/src/policy.rs` |
 | `docs/technical/SECRETS_MANAGEMENT.md` | Update | Label it as a plan. None of it exists yet |
 | `docs/technical/ADMIN_SECURITY.md` | Archive | Superseded by [admin-ui.md](./admin-ui.md) and [auth-plans-permissions.md](./auth-plans-permissions.md). MFA and 30-minute sessions are still open |
-| `docs/projects/SECURITY_FINDINGS_REPORT.md` | Archive | Superseded by the FINAL report |
+| [`docs/projects/SECURITY_FINDINGS_REPORT.md`](../archive/projects/SECURITY_FINDINGS_REPORT.md) | Archived | Superseded by the FINAL report |
 | `docs/security/FINAL_COMPREHENSIVE_SECURITY_ASSESSMENT_REPORT.md` | Update | The canonical findings list. Add a status column |
-| `docs/security/SECURITY_ASSESSMENT_REPORT.md` | Delete | An earlier draft of the FINAL report |
-| `docs/security/COMPREHENSIVE_SECURITY_ASSESSMENT_REPORT.md` | Delete | Identical to the FINAL report, minus its frontend findings |
-| `docs/security/SECURITY_FIXES_SUMMARY.md` | Archive | Its JWT and CORS "fixed" claims no longer hold |
+| `docs/security/SECURITY_ASSESSMENT_REPORT.md` | Deleted | An earlier draft of the FINAL report |
+| `docs/security/COMPREHENSIVE_SECURITY_ASSESSMENT_REPORT.md` | Deleted | Identical to the FINAL report, minus its frontend findings |
+| [`docs/security/SECURITY_FIXES_SUMMARY.md`](../archive/security/SECURITY_FIXES_SUMMARY.md) | Archived | Its JWT and CORS "fixed" claims no longer hold |
 | `docs/security/SECURITY_IMPLEMENTATION_SUMMARY.md` | Update | Describes GraphQL security as live, but it isn't wired in |
 | `docs/security/ARCHITECTURE_DESIGN.md`, `IMPLEMENTATION_DETAILS.md`, `API_REFERENCE.md`, `DEPLOYMENT_GUIDE.md` | Archive | Four overlapping docs for one module. Fold what is useful into `GRAPHQL_SECURITY_GUIDE.md` |
 | `docs/security/GRAPHQL_SECURITY_GUIDE.md` | Update | Keep as the one GraphQL-security doc. Add a note that it is not enforced yet |
-| `CLOUDFLARE_INTEGRATION_STATUS.md` (root) | Archive | Its open items are listed under CI above |
-| `LETSENCRYPT_CLOUDFLARE_INTEGRATION_SUMMARY.md` (root) | Delete | Duplicates `docs/deployment/LETSENCRYPT_CLOUDFLARE_DNS01_INTEGRATION.md` |
-| `docs/deployment/PRIVATE_CHART_API.md` | Delete | Superseded by `CHART_API_SERVICE.md` |
+| [`CLOUDFLARE_INTEGRATION_STATUS.md`](../archive/CLOUDFLARE_INTEGRATION_STATUS.md) (root) | Archived | Its open items are listed under CI above |
+| `LETSENCRYPT_CLOUDFLARE_INTEGRATION_SUMMARY.md` (root) | Deleted | Duplicates `docs/deployment/LETSENCRYPT_CLOUDFLARE_DNS01_INTEGRATION.md` |
+| `docs/deployment/PRIVATE_CHART_API.md` | Deleted | Superseded by `CHART_API_SERVICE.md` |
 | `docs/monitoring/README.md` | Update | Its metric names don't match the code |
 | `frontend/docs/storybook-testing.md` | Update | Claims Storybook tests run in CI. Its related-doc links are broken |
-| `ci/docs/CI_FAILURE_ANALYSIS_AND_FIXES.md`, `E2E_TEST_FAILURE_ANALYSIS.md` | Archive | Point-in-time incident notes from September 2025 |
+| [`ci/docs/CI_FAILURE_ANALYSIS_AND_FIXES.md`](../archive/ci/docs/CI_FAILURE_ANALYSIS_AND_FIXES.md), [`E2E_TEST_FAILURE_ANALYSIS.md`](../archive/ci/docs/E2E_TEST_FAILURE_ANALYSIS.md) | Archived | Point-in-time incident notes from September 2025 |
 | `ci/docs/workflow-status-report.md` | Keep | Generated by `scripts/fix-github-workflow-cache.sh` |
-| `progress-reports/2025-09-13/*` | Archive | Retrospectives. The crawler work they describe was superseded by #157 |
-| `super-secret-projects/EDGAR_INGESTION.md` | Delete | Empty |
+| [`progress-reports/2025-09-13/*`](../archive/progress-reports/2025-09-13/) | Archived | Retrospectives. The crawler work they describe was superseded by #157 |
+| `super-secret-projects/EDGAR_INGESTION.md` | Deleted | Empty |
 | `super-secret-projects/EDGAR_INTEGRATION_ANALYSIS.md`, `EDGAR_XBRL_RESEARCH_FINDINGS.md`, `STEALTH_CRAWLING_VS_POLITE_CRAWLING.md` | Archive | Research superseded by `econ-graph-sec-crawler` |
 
 ### Other docs with stale roadmap sections

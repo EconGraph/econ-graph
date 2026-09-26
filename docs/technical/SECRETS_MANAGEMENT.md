@@ -299,7 +299,7 @@ env:
 ## Related Documentation
 
 - [Security Implementation Plan](../projects/SECURITY_IMPLEMENTATION_PLAN.md)
-- [Security Findings Report](../projects/SECURITY_FINDINGS_REPORT.md)
+- [Security Assessment Report](../security/FINAL_COMPREHENSIVE_SECURITY_ASSESSMENT_REPORT.md)
 - [Admin Security](ADMIN_SECURITY.md)
 - [Deployment Guide](../deployment/)
 

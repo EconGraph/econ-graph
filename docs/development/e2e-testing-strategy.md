@@ -194,7 +194,7 @@ test('grafana dashboard with mock', async () => {
 
 ## Related Documentation
 
-- [CI/CD Documentation](../ci/docs/README.md) - Comprehensive CI/CD documentation
-- [E2E Test Failure Analysis](../ci/docs/E2E_TEST_FAILURE_ANALYSIS.md) - E2E test troubleshooting
+- [CI/CD Documentation](../../ci/docs/README.md) - Comprehensive CI/CD documentation
+- [E2E Test Failure Analysis](../archive/ci/docs/E2E_TEST_FAILURE_ANALYSIS.md) - E2E test troubleshooting
 - [RelEng Persona](../../personas/releng-engineer.md) - Release engineering practices
 - [AI Developer Standards](../../personas/ai-developer-standards.md) - Development guidelines

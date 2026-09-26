@@ -156,12 +156,12 @@ User Interaction → Context Update → Component Re-render → D3 Update
 ## Documentation
 
 ### Technical Documentation
-- **[Global Analysis Architecture](./GLOBAL_ANALYSIS_ARCHITECTURE.md)**: Detailed technical architecture
-- **[Global Analysis Features](./GLOBAL_ANALYSIS_FEATURES.md)**: Comprehensive feature documentation
-- **[Global Analysis API](./GLOBAL_ANALYSIS_API.md)**: API endpoints and data models
+- **[Global Analysis Architecture](../../technical/GLOBAL_ANALYSIS_ARCHITECTURE.md)**: Detailed technical architecture
+- **[Global Analysis Features](../../technical/GLOBAL_ANALYSIS_FEATURES.md)**: Comprehensive feature documentation
+- **[Global Analysis API](../../technical/GLOBAL_ANALYSIS_API.md)**: API endpoints and data models
 
 ### User Documentation
-- **[Global Analysis User Guide](../user-guides/GLOBAL_ANALYSIS_USER_GUIDE.md)**: Step-by-step user instructions
+- **[Global Analysis User Guide](../../user-guides/GLOBAL_ANALYSIS_USER_GUIDE.md)**: Step-by-step user instructions
 - **Video Tutorials**: Interactive walkthroughs (planned)
 - **FAQ**: Frequently asked questions
 
