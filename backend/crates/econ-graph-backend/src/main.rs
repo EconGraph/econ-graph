@@ -10,7 +10,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::signal;
 use tracing::{info, Instrument};
-use warp::Filter;
+use warp::{Filter, Reply as _};
 
 // Import from our new crates
 use econ_graph_auth::auth::{routes::auth_routes, services::AuthService};
@@ -150,6 +150,31 @@ async fn root_handler() -> Result<impl warp::Reply, Infallible> {
     Ok(warp::reply::html(
         html.replace("{}", env!("CARGO_PKG_VERSION")),
     ))
+}
+
+/// The active user named by a valid `Authorization: Bearer <jwt>` header, if any.
+async fn bearer_user(
+    pool: &DatabasePool,
+    authorization: Option<&str>,
+) -> Option<econ_graph_core::models::User> {
+    let token = authorization?.strip_prefix("Bearer ")?;
+    let claims = AuthService::new(pool.clone()).verify_token(token).ok()?;
+    let user_id = claims.sub.parse().ok()?;
+    econ_graph_core::models::User::get_by_id(pool, user_id)
+        .await
+        .ok()
+        .filter(|user| user.is_active)
+}
+
+/// JSON-RPC error for an MCP request without a valid bearer token.
+fn mcp_unauthorized() -> warp::reply::Response {
+    let body = warp::reply::json(&json!({
+        "jsonrpc": "2.0",
+        "id": null,
+        "error": { "code": -32001, "message": "Authentication required" }
+    }));
+    let reply = warp::reply::with_status(body, warp::http::StatusCode::UNAUTHORIZED);
+    warp::reply::with_header(reply, "WWW-Authenticate", "Bearer").into_response()
 }
 
 #[tokio::main]
@@ -352,17 +377,28 @@ async fn main() -> AppResult<()> {
     // MCP Server routes
     let mcp_server = Arc::new(EconGraphMcpServer::new(Arc::new(pool.clone())));
 
-    // Create a simple MCP handler that doesn't rely on complex filter chaining
+    // MCP requires a signed-in user's bearer token, like the rest of the API.
+    // MCP OAuth (auth roadmap phase 6) will replace this.
     let mcp_handler = {
         let server = mcp_server.clone();
-        move |body: warp::hyper::body::Bytes| {
+        let pool = pool.clone();
+        move |authorization: Option<String>, body: warp::hyper::body::Bytes| {
             let server = server.clone();
-            async move { mcp_handler(body, server).await }
+            let pool = pool.clone();
+            async move {
+                if bearer_user(&pool, authorization.as_deref()).await.is_none() {
+                    return Ok::<_, warp::Rejection>(mcp_unauthorized());
+                }
+                mcp_handler(body, server)
+                    .await
+                    .map(warp::Reply::into_response)
+            }
         }
     };
 
     let mcp_filter = warp::path("mcp")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::bytes())
         .and_then(mcp_handler);
 
@@ -440,4 +476,44 @@ async fn main() -> AppResult<()> {
 
     info!("✅ Server shutdown complete");
     Ok(())
+}
+
+#[cfg(test)]
+mod mcp_auth_tests {
+    use super::{bearer_user, mcp_unauthorized};
+    use econ_graph_core::DatabasePool;
+
+    /// A pool that never connects: every case here is rejected before any database access.
+    fn unreachable_pool() -> DatabasePool {
+        let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
+            diesel_async::AsyncPgConnection,
+        >::new("postgres://nobody@127.0.0.1:1/none");
+        DatabasePool::builder()
+            .connection_timeout(std::time::Duration::from_secs(1))
+            .build_unchecked(manager)
+    }
+
+    #[tokio::test]
+    async fn bearer_user_rejects_missing_malformed_and_invalid_tokens() {
+        let pool = unreachable_pool();
+        for header in [
+            None,
+            Some(""),
+            Some("Basic dXNlcjpwYXNz"),
+            Some("Bearer "),
+            Some("Bearer not.a.jwt"),
+        ] {
+            assert!(
+                bearer_user(&pool, header).await.is_none(),
+                "{header:?} should not authenticate"
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_unauthorized_is_a_401_with_a_bearer_challenge() {
+        let response = mcp_unauthorized();
+        assert_eq!(response.status(), warp::http::StatusCode::UNAUTHORIZED);
+        assert_eq!(response.headers()["WWW-Authenticate"], "Bearer");
+    }
 }
