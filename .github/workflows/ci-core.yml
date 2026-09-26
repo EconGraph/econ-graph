@@ -49,6 +49,12 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Line numbers in backtraces without full debuginfo: faster compiles and
+  # links, and about half the target dir the Rust cache saves and restores
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  # CI builds from scratch or a restored cache, so incremental state is only
+  # extra work and extra cache size
+  CARGO_INCREMENTAL: '0'
   # Prebuilt diesel CLI from GitHub releases instead of `cargo install` in every job
   DIESEL_VERSION: 2.3.13
   # From the release's diesel_cli-x86_64-unknown-linux-gnu.tar.xz.sha256
@@ -338,11 +344,17 @@ jobs:
       env:
         PORT: 3001
 
+    - name: Build backend and MCP integration tests
+      working-directory: backend
+      # A debug build in one invocation: the server only has to boot for the
+      # health check, and building the test with it keeps one feature set, so
+      # dependencies compile once and the test step below reuses them.
+      run: cargo build --bin econ-graph-backend --test mcp_server_integration_tests
+
     - name: Start backend service
       working-directory: backend
       run: |
-        cargo build --release
-        ./target/release/econ-graph-backend &
+        ./target/debug/econ-graph-backend &
         sleep 15
         curl -f http://localhost:9877/health || exit 1
       env:

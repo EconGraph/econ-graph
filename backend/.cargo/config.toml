@@ -1,8 +1,4 @@
 # Cargo configuration for optimized test execution
-[build]
-# Use all available CPU cores for compilation
-jobs = 12
-
 [test]
 # Optimize test execution
 # Tests already run in parallel by default, but we can optimize further
