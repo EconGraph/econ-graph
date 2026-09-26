@@ -17,9 +17,9 @@ flagd's own rule for several sources.
 
 `node scripts/flags-merge` applies that rule once and writes the resolved values
 to `frontend/flags/<profile>.json` and `backend/flags/<profile>.json`, because
-the frontend and backend Docker builds can't see `config/flags`. Vite and the
-backend build read only the generated file for their profile, and neither
-re-implements the merge. The generated files are committed, and CI fails when
+the frontend and backend Docker builds can't see `config/flags`. The Vite build
+and the backend build (wired in follow-up PRs) read only the generated file for
+their profile, so neither re-implements the merge. The generated files are committed, and CI fails when
 they are stale. Their shape:
 
 ```json
@@ -34,8 +34,8 @@ they are stale. Their shape:
 
 A flag with `"state": "DISABLED"` is left out, which flagd treats as absent.
 
-Each key maps to a name in code: `world_map` becomes `__FLAG_WORLD_MAP__` in the
-frontend and `cfg(flag_world_map)` in the backend.
+Each key will map to a name in code: `world_map` becomes `__FLAG_WORLD_MAP__` in
+the frontend and `cfg(flag_world_map)` in the backend.
 
 ## Adding a flag
 

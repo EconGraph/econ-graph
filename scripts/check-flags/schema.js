@@ -6,7 +6,18 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-const ANNOTATIONS = new Set(['$schema', '$id', '$comment', 'title', 'description', 'definitions']);
+const ANNOTATIONS = new Set([
+  '$schema',
+  '$id',
+  '$comment',
+  'title',
+  'description',
+  'definitions',
+  'default',
+  'examples',
+  'readOnly',
+  'writeOnly',
+]);
 
 function typeOf(value) {
   if (value === null) return 'null';

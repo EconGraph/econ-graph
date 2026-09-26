@@ -40,7 +40,7 @@ const failures = {
   'preview-missing-remove-by': 'flag "world_map": preview flags need metadata.remove_by',
   'malformed-remove-by': 'flag "build_canary": build flags need metadata.remove_by',
   'remove-by-on-ops-flag': 'flag "mcp": ops flags are long-lived',
-  'build-non-boolean': 'flag "build_canary": build flags must have boolean variants',
+  'build-non-boolean': 'flag "build_canary": build flags must have exactly the variants',
   'build-with-targeting': 'flag "build_canary": build flags are resolved at build time',
   'build-disabled': 'flag "build_canary": build flags must be ENABLED',
   'dev-unknown-flag': 'dev: flag "no_such_flag": overrides a flag that flags.flagd.json does not define',
@@ -90,6 +90,13 @@ test('a flag whose remove_by train has shipped fails', () => {
   const errors = run('valid', ['v0.1.0', 'v0.2.0']);
   assert.deepEqual(errors, [
     'release: flag "build_canary": remove_by is train 1, and v0.2.0 has shipped; delete the flag',
+  ]);
+});
+
+test('a 1.0 or later release counts as past every train', () => {
+  assert.deepEqual(run('valid', ['v1.0.0']), [
+    'release: flag "build_canary": remove_by is train 1, and v1.0.0 has shipped; delete the flag',
+    'release: flag "world_map": remove_by is train 3, and v1.0.0 has shipped; delete the flag',
   ]);
 });
 

@@ -1,0 +1,50 @@
+name: Feature Flags
+
+# Its own workflow, without ci-core's paths-ignore, because the check depends
+# on things outside config/flags: roadmap docs (a flag's owner) and release
+# tags (a flag whose remove_by train has shipped). So it also runs when a tag
+# is pushed and weekly, rather than failing the next unrelated PR.
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flags-check:
+    name: Feature Flags Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        # Tags, so the check can fail on a flag whose remove_by train shipped
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+
+    - name: Test the flag check against its fixtures
+      working-directory: scripts/check-flags
+      run: npm test
+
+    - name: Test the flag merge
+      working-directory: scripts/flags-merge
+      run: npm test
+
+    - name: Check config/flags
+      run: node scripts/check-flags
+
+    - name: Check the generated per-profile flag files are current
+      run: node scripts/flags-merge --check

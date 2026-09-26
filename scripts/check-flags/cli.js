@@ -14,18 +14,33 @@ import { checkFlags } from './check.js';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const flagsDir = join(root, 'config', 'flags');
 
+function fail(message) {
+  console.error(`check-flags: ${message}`);
+  process.exit(2);
+}
+
+function git(...args) {
+  try {
+    return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  } catch (e) {
+    fail(`git ${args.join(' ')} failed; pass --tags explicitly outside a git checkout (${e.message.split('\n')[0]})`);
+  }
+}
+
 function gitTags() {
-  const out = execFileSync('git', ['tag', '--list', 'v*'], { cwd: root, encoding: 'utf8' });
-  return out.split('\n').filter(Boolean);
+  const tags = git('tag', '--list', 'v*').split('\n').filter(Boolean);
+  // Without tags the remove_by check can't fire, so a pass would mean little
+  if (git('rev-parse', '--is-shallow-repository') === 'true' || tags.length === 0) {
+    console.warn('check-flags: warning: no v* tags, or a shallow clone; the remove_by check may miss a shipped train');
+  }
+  return tags;
 }
 
 const args = process.argv.slice(2);
-const tagsAt = args.indexOf('--tags');
-if (tagsAt >= 0 && (args[tagsAt + 1] === undefined || args[tagsAt + 1].startsWith('--'))) {
-  console.error('check-flags: --tags needs a comma-separated list, such as --tags v0.2.0,v0.3.0');
-  process.exit(2);
+if (!(args.length === 0 || (args.length === 2 && args[0] === '--tags' && !args[1].startsWith('--')))) {
+  fail('usage: node scripts/check-flags [--tags v0.2.0,v0.3.0]');
 }
-const tags = tagsAt >= 0 ? args[tagsAt + 1].split(',').filter(Boolean) : gitTags();
+const tags = args.length ? args[1].split(',').filter(Boolean) : gitTags();
 
 const errors = checkFlags({
   releasePath: join(flagsDir, 'flags.flagd.json'),

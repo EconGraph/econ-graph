@@ -13,7 +13,7 @@ const REMOVE_BY = /^(train ([1-9][0-9]*)|unscheduled)$/;
 const METADATA_KEYS = ['kind', 'owner', 'stage', 'remove_by'];
 // A dev override only changes which variant is served
 const OVERRIDE_KEYS = ['state', 'variants', 'defaultVariant'];
-const RELEASE_TAG = /^v0\.([0-9]+)\.([0-9]+)$/;
+const RELEASE_TAG = /^v([0-9]+)\.([0-9]+)\.([0-9]+)$/;
 
 // Train N ships as v0.(N+1).0: train 1 is v0.2.0.
 export function trainTag(train) {
@@ -21,11 +21,12 @@ export function trainTag(train) {
 }
 
 // The first stable release tag at or past train N's, so a train whose own tag
-// was skipped still counts as shipped once a later train is tagged
+// was skipped still counts as shipped once a later train is tagged. Every
+// v1.0.0 and later tag comes after every train.
 function shippedTag(train, tags) {
   return tags
     .map((t) => [t, RELEASE_TAG.exec(t)])
-    .filter(([, m]) => m && Number(m[1]) >= train + 1)
+    .filter(([, m]) => m && (Number(m[1]) > 0 || Number(m[2]) >= train + 1))
     .map(([t]) => t)
     .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))[0];
 }
@@ -92,8 +93,8 @@ function checkReleaseFlag(name, flag, { docExists, tags }, errors) {
 
   if (kind === 'build') {
     // Folded into the bundle as a constant, so there is nothing to target
-    if (!Object.values(flag.variants).every((v) => typeof v === 'boolean')) {
-      errors.push(`${at}: build flags must have boolean variants`);
+    if (!deepEqual(flag.variants, { on: true, off: false })) {
+      errors.push(`${at}: build flags must have exactly the variants { "on": true, "off": false }`);
     }
     if (flag.targeting !== undefined)
       errors.push(`${at}: build flags are resolved at build time and take no targeting`);
