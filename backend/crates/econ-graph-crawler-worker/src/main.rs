@@ -10,8 +10,10 @@
 //! because `econ-graph-crawler` must not depend on the SEC crate.
 //!
 //! Environment: `DATABASE_URL` (required), `FRED_API_KEY` / `BLS_API_KEY` / `BEA_API_KEY` /
-//! `CENSUS_API_KEY` (optional), `RUST_LOG` (default `info`). Every flag can also be set through
-//! the `CRAWLER_*` variable shown in `--help`.
+//! `CENSUS_API_KEY` (optional), `RUST_LOG` (default `info`), `CRAWLER_DATA_DIR` (reference data
+//! files such as `us_states.csv`; defaults to the crawler crate's `data/` directory in the source
+//! tree, and the image sets `/app/data`). Every flag can also be set through the `CRAWLER_*`
+//! variable shown in `--help`.
 //!
 //! The worker does not run database migrations; the backend applies them at startup.
 //!
@@ -124,6 +126,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = econ_graph_core::create_pool(&database_url).await?;
 
     let registry = default_registry();
+    // Reference data the FHFA and Census adapters read at runtime ($CRAWLER_DATA_DIR): fail at
+    // startup rather than on their first job.
+    let states = econ_graph_crawler::reference::us_states()?;
+    tracing::info!(
+        data_dir = %econ_graph_crawler::reference::data_dir().display(),
+        states = states.len(),
+        "reference data loaded"
+    );
     // Built-in policies, overridden by whatever each registered adapter declares.
     let policies: HashMap<SourceId, SourcePolicy> = SourceId::ALL
         .into_iter()

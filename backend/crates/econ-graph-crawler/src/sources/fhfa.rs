@@ -9,7 +9,8 @@
 //! # Discovery
 //!
 //! Makes no request, exactly like the old code: the catalog is the old static list — the
-//! national index `USHPI`, one `{STATE}HPI` per state + DC, and one `{METRO}HPI` per listed
+//! national index `USHPI`, one `{STATE}HPI` per state + DC (from the shared states file,
+//! [`crate::reference::us_states`], read at runtime), and one `{METRO}HPI` per listed
 //! metro area, all quarterly, units "Index (1991Q1 = 100)". Ids are de-duplicated first-seen, so
 //! where a metro code collides with a state code (`LAHPI` = Louisiana, not Los Angeles; `SDHPI` =
 //! South Dakota, not San Diego) the state wins, as the old `get_or_create` loop did.
@@ -47,6 +48,7 @@ use crate::adapter::{
     CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, NewSeriesMetadataLite, SourceAdapter,
 };
 use crate::error::CrawlError;
+use crate::reference::us_states;
 use crate::source::SourceId;
 
 /// The API root the old code used.
@@ -57,60 +59,6 @@ const MAX_PAGES: u32 = 20;
 
 const FREQUENCY: &str = "Quarterly";
 const UNITS: &str = "Index (1991Q1 = 100)";
-
-const STATES: &[(&str, &str)] = &[
-    ("AL", "Alabama"),
-    ("AK", "Alaska"),
-    ("AZ", "Arizona"),
-    ("AR", "Arkansas"),
-    ("CA", "California"),
-    ("CO", "Colorado"),
-    ("CT", "Connecticut"),
-    ("DE", "Delaware"),
-    ("FL", "Florida"),
-    ("GA", "Georgia"),
-    ("HI", "Hawaii"),
-    ("ID", "Idaho"),
-    ("IL", "Illinois"),
-    ("IN", "Indiana"),
-    ("IA", "Iowa"),
-    ("KS", "Kansas"),
-    ("KY", "Kentucky"),
-    ("LA", "Louisiana"),
-    ("ME", "Maine"),
-    ("MD", "Maryland"),
-    ("MA", "Massachusetts"),
-    ("MI", "Michigan"),
-    ("MN", "Minnesota"),
-    ("MS", "Mississippi"),
-    ("MO", "Missouri"),
-    ("MT", "Montana"),
-    ("NE", "Nebraska"),
-    ("NV", "Nevada"),
-    ("NH", "New Hampshire"),
-    ("NJ", "New Jersey"),
-    ("NM", "New Mexico"),
-    ("NY", "New York"),
-    ("NC", "North Carolina"),
-    ("ND", "North Dakota"),
-    ("OH", "Ohio"),
-    ("OK", "Oklahoma"),
-    ("OR", "Oregon"),
-    ("PA", "Pennsylvania"),
-    ("RI", "Rhode Island"),
-    ("SC", "South Carolina"),
-    ("SD", "South Dakota"),
-    ("TN", "Tennessee"),
-    ("TX", "Texas"),
-    ("UT", "Utah"),
-    ("VT", "Vermont"),
-    ("VA", "Virginia"),
-    ("WA", "Washington"),
-    ("WV", "West Virginia"),
-    ("WI", "Wisconsin"),
-    ("WY", "Wyoming"),
-    ("DC", "District of Columbia"),
-];
 
 const METROS: &[(&str, &str)] = &[
     ("NYC", "New York-Newark-Jersey City, NY-NJ-PA"),
@@ -143,17 +91,18 @@ struct CatalogEntry {
     path: String,
 }
 
-/// The static catalog, de-duplicated first-seen (national, states, metros).
-fn catalog() -> Vec<CatalogEntry> {
+/// The catalog, de-duplicated first-seen (national, states, metros). The states come from the
+/// shared states file ([`us_states`], read at runtime).
+fn catalog() -> Result<Vec<CatalogEntry>, CrawlError> {
     let national = std::iter::once(CatalogEntry {
         external_id: "USHPI".into(),
         name: "U.S.".into(),
         path: "national".into(),
     });
-    let states = STATES.iter().map(|(code, name)| CatalogEntry {
-        external_id: format!("{code}HPI"),
-        name: (*name).into(),
-        path: format!("state/{code}"),
+    let states = us_states()?.iter().map(|s| CatalogEntry {
+        external_id: format!("{}HPI", s.postal),
+        name: s.name.clone(),
+        path: format!("state/{}", s.postal),
     });
     let metros = METROS.iter().map(|(code, name)| CatalogEntry {
         external_id: format!("{code}HPI"),
@@ -161,11 +110,11 @@ fn catalog() -> Vec<CatalogEntry> {
         path: format!("metro/{code}"),
     });
     let mut seen = HashSet::new();
-    national
+    Ok(national
         .chain(states)
         .chain(metros)
         .filter(|e| seen.insert(e.external_id.clone()))
-        .collect()
+        .collect())
 }
 
 /// FHFA adapter. See the module docs.
@@ -201,7 +150,7 @@ impl SourceAdapter for FhfaAdapter {
 
     /// The static catalog; no request (see the module docs).
     async fn discover(&self, _ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
-        Ok(catalog()
+        Ok(catalog()?
             .into_iter()
             .map(|e| DiscoveredSeries {
                 data_url: Some(self.data_url(&e)),
@@ -220,7 +169,7 @@ impl SourceAdapter for FhfaAdapter {
         external_id: &str,
         since: Option<NaiveDate>,
     ) -> Result<FetchedSeries, CrawlError> {
-        let entry = catalog()
+        let entry = catalog()?
             .into_iter()
             .find(|e| e.external_id == external_id)
             .ok_or_else(|| CrawlError::NotFound(format!("FHFA: unknown series {external_id:?}")))?;

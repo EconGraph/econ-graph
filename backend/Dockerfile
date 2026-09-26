@@ -75,6 +75,9 @@ WORKDIR /app
 FROM runtime-base AS crawler-worker
 
 COPY --from=builder --chown=econuser:econuser /out/crawler-worker /app/crawler-worker
+# Reference data read at runtime (not compiled in), e.g. the U.S. states table.
+COPY --chown=econuser:econuser crates/econ-graph-crawler/data /app/data
+ENV CRAWLER_DATA_DIR=/app/data
 
 USER econuser
 

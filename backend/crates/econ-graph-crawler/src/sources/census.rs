@@ -13,16 +13,24 @@
 //! - `GET {base}/timeseries/bds/geography.json` -> `{"fips": [{"name": .., "geoLevelDisplay": ..}, ..]}`
 //!
 //! Variables are filtered with the old keyword rules ([`is_economic_variable`]) and crossed with
-//! every geography level, giving `CENSUS_BDS_{VARIABLE}_{geography name}` (annual, units "Count").
-//! No pagination, so no page cap.
+//! the geography levels that give single series (annual, units "Count"):
+//! - `us`: one national series, `CENSUS_BDS_{VARIABLE}_us`;
+//! - `state`: one series per state and DC, `CENSUS_BDS_{VARIABLE}_state_{FIPS}` (two-digit state
+//!   FIPS code, e.g. `_state_06` for California), from the shared states file
+//!   ([`crate::reference::us_states`], read at runtime).
+//!
+//! Only levels that `geography.json` lists are used. Finer levels (county, metro area) have
+//! thousands of areas and are skipped. No pagination, so no page cap.
 //!
 //! # Fetching
 //!
 //! The old code parsed BDS data responses (a JSON array of string rows, header row first), so
-//! fetching is implemented, for national series only (`CENSUS_BDS_{VARIABLE}_us`): other
-//! geography levels have one value per area and year, which is not a single series, so they are
-//! `Permanent`. The request is
-//! `GET {base}/timeseries/bds?get={VARIABLE},YEAR&for=us:*[&key=KEY]`, i.e. all years (the old
+//! fetching is implemented for the ids discovery produces: national (`CENSUS_BDS_{VARIABLE}_us`)
+//! and per-state (`CENSUS_BDS_{VARIABLE}_state_{FIPS}`). Any other id, including the bare
+//! `_state` ids older discovery runs persisted (one value per state and year, not a single
+//! series), is `Permanent`. The request is
+//! `GET {base}/timeseries/bds?get={VARIABLE},YEAR&for={us:*|state:FIPS}[&key=KEY]`, i.e. all
+//! years (the old
 //! comma-separated `YEAR=` list hit the API's "204 No Content" limitation for multi-year
 //! queries); `since` is applied client-side by year. Each row becomes a point dated January 1 of
 //! its `YEAR`, `revision_date = date`, `is_original_release = true`. As in the old parser, rows
@@ -51,6 +59,7 @@ use serde_json::Value;
 
 use crate::adapter::{CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, SourceAdapter};
 use crate::error::CrawlError;
+use crate::reference::us_states;
 use crate::source::SourceId;
 
 /// The real Census Data API root.
@@ -62,13 +71,23 @@ const BDS_PATH: &str = "/timeseries/bds";
 /// Prefix of every Census external id this adapter produces.
 const ID_PREFIX: &str = "CENSUS_BDS_";
 
-/// The only geography level [`CensusAdapter::fetch_series`] supports.
+/// National geography level.
 const NATIONAL_GEO: &str = "us";
 
-/// SQL `LIKE` pattern matching the ids [`CensusAdapter::fetch_series`] accepts:
-/// `CENSUS_BDS_{VARIABLE}_us`. Discovery also persists other geography levels, which the refresh
-/// scheduler must not enqueue.
-pub const FETCHABLE_ID_LIKE: &str = "CENSUS\\_BDS\\_%\\_us";
+/// State geography level. Its series ids end in `_state_{FIPS}`.
+const STATE_GEO: &str = "state";
+
+/// PostgreSQL regular expression matching exactly the ids [`CensusAdapter::fetch_series`] accepts:
+/// `CENSUS_BDS_{VARIABLE}_us` and `CENSUS_BDS_{VARIABLE}_state_{FIPS}` for the FIPS codes in
+/// [`us_states`]. Older discovery runs also persisted other geography levels (e.g. bare `_state`),
+/// which the refresh scheduler must not enqueue.
+pub fn fetchable_id_regex() -> Result<String, CrawlError> {
+    let fips: Vec<&str> = us_states()?.iter().map(|s| s.fips.as_str()).collect();
+    Ok(format!(
+        "^CENSUS_BDS_[A-Za-z0-9_]+_({NATIONAL_GEO}|{STATE_GEO}_({}))$",
+        fips.join("|")
+    ))
+}
 
 /// Census adapter. See the module docs.
 #[derive(Debug, Clone)]
@@ -84,10 +103,12 @@ impl CensusAdapter {
         }
     }
 
+    /// `path` (starting with `/`) under the API root.
     fn url(&self, path: &str) -> String {
         format!("{}{path}", self.base_url)
     }
 
+    /// A BDS metadata file (`variables.json`, `geography.json`), requested without the API key.
     async fn metadata_json(&self, ctx: &CrawlCtx, file: &str) -> Result<Value, CrawlError> {
         ctx.http
             .get_json(
@@ -112,24 +133,46 @@ impl SourceAdapter for CensusAdapter {
         SourceId::Census
     }
 
+    /// One series per economic variable for the nation and for each state and DC, limited to the
+    /// levels `geography.json` lists. See the module docs.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         let variables = parse_variables(&self.metadata_json(ctx, "variables.json").await?)?;
         let geographies = parse_geographies(&self.metadata_json(ctx, "geography.json").await?)?;
 
+        // (id suffix, area name) for every single series the listed geography levels give.
+        let mut areas: Vec<(String, String)> = Vec::new();
+        let mut skipped = Vec::new();
+        for geo in &geographies {
+            match geo.name.as_str() {
+                NATIONAL_GEO => areas.push((NATIONAL_GEO.into(), "United States".into())),
+                STATE_GEO => areas.extend(
+                    us_states()?
+                        .iter()
+                        .map(|s| (format!("{STATE_GEO}_{}", s.fips), s.name.clone())),
+                ),
+                other => skipped.push(other.to_string()),
+            }
+        }
+        if !skipped.is_empty() {
+            tracing::debug!(
+                ?skipped,
+                "Census BDS: skipping geography levels without single series"
+            );
+        }
+
         let mut seen = HashSet::new();
         let mut found = Vec::new();
         for var in variables.iter().filter(|v| is_economic_variable(v)) {
-            for geo in &geographies {
-                let external_id = format!("{ID_PREFIX}{}_{}", var.name, geo.name);
+            for (suffix, area) in &areas {
+                let external_id = format!("{ID_PREFIX}{}_{suffix}", var.name);
                 if !seen.insert(external_id.clone()) {
                     continue;
                 }
-                let geo_label = geo.level_display.as_deref().unwrap_or(&geo.name);
                 found.push(DiscoveredSeries {
                     external_id,
-                    title: format!("{} - {geo_label}", var.label),
+                    title: format!("{} - {area}", var.label),
                     description: Some(format!(
-                        "Business Dynamics Statistics: {} for {geo_label}",
+                        "Business Dynamics Statistics: {} for {area}",
                         var.label
                     )),
                     units: Some("Count".into()),
@@ -142,15 +185,20 @@ impl SourceAdapter for CensusAdapter {
         Ok(found)
     }
 
+    /// All years of a national or per-state series, filtered to `since`'s year and later.
+    /// Unsupported ids fail as `Permanent` without a request.
     async fn fetch_series(
         &self,
         ctx: &CrawlCtx,
         external_id: &str,
         since: Option<NaiveDate>,
     ) -> Result<FetchedSeries, CrawlError> {
-        let variable = national_variable(external_id)?;
+        let (variable, area) = parse_series_id(external_id)?;
         let get = format!("{variable},YEAR");
-        let for_geo = format!("{NATIONAL_GEO}:*");
+        let for_geo = match area {
+            Area::National => format!("{NATIONAL_GEO}:*"),
+            Area::State(fips) => format!("{STATE_GEO}:{fips}"),
+        };
         let mut query = vec![("get", get.as_str()), ("for", for_geo.as_str())];
         if let Some(key) = ctx.keys.census.as_deref() {
             query.push(("key", key));
@@ -184,21 +232,43 @@ pub fn classify_census_error(err: CrawlError) -> CrawlError {
     }
 }
 
-/// `CENSUS_BDS_{VARIABLE}_us` -> `VARIABLE`.
-fn national_variable(external_id: &str) -> Result<&str, CrawlError> {
+/// The area a fetchable series covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Area<'a> {
+    National,
+    /// Two-digit state FIPS code, one of [`us_states`].
+    State(&'a str),
+}
+
+/// `CENSUS_BDS_{VARIABLE}_us` -> (`VARIABLE`, national);
+/// `CENSUS_BDS_{VARIABLE}_state_{FIPS}` -> (`VARIABLE`, that state).
+fn parse_series_id(external_id: &str) -> Result<(&str, Area<'_>), CrawlError> {
     let rest = external_id.strip_prefix(ID_PREFIX).ok_or_else(|| {
         CrawlError::Permanent(format!(
             "Census: {external_id:?} is not a {ID_PREFIX}* series id"
         ))
     })?;
-    let variable = rest
-        .strip_suffix(NATIONAL_GEO)
-        .and_then(|v| v.strip_suffix('_'))
-        .ok_or_else(|| {
-            CrawlError::Permanent(format!(
-                "Census {external_id}: only national ({NATIONAL_GEO}) BDS series can be fetched"
-            ))
-        })?;
+    let unsupported = || {
+        CrawlError::Permanent(format!(
+            "Census {external_id}: only national (_{NATIONAL_GEO}) and per-state \
+             (_{STATE_GEO}_{{FIPS}}) BDS series can be fetched"
+        ))
+    };
+    let (variable, area) = if let Some(v) = rest.strip_suffix(NATIONAL_GEO) {
+        (v.strip_suffix('_').ok_or_else(unsupported)?, Area::National)
+    } else {
+        let (v, fips) = rest.rsplit_once('_').ok_or_else(unsupported)?;
+        let v = v
+            .strip_suffix(STATE_GEO)
+            .and_then(|v| v.strip_suffix('_'))
+            .ok_or_else(unsupported)?;
+        if !us_states()?.iter().any(|s| s.fips == fips) {
+            return Err(CrawlError::Permanent(format!(
+                "Census {external_id}: {fips:?} is not a BDS state FIPS code"
+            )));
+        }
+        (v, Area::State(fips))
+    };
     if variable.is_empty()
         || !variable
             .chars()
@@ -208,9 +278,10 @@ fn national_variable(external_id: &str) -> Result<&str, CrawlError> {
             "Census {external_id}: invalid variable name {variable:?}"
         )));
     }
-    Ok(variable)
+    Ok((variable, area))
 }
 
+/// A response cell as text; `null` is empty.
 fn cell(v: &Value) -> String {
     match v {
         Value::Null => String::new(),
@@ -300,9 +371,9 @@ struct BdsVariable {
 #[derive(Debug, Clone, PartialEq)]
 struct BdsGeography {
     name: String,
-    level_display: Option<String>,
 }
 
+/// The variables in `variables.json`.
 fn parse_variables(body: &Value) -> Result<Vec<BdsVariable>, CrawlError> {
     let vars = body
         .get("variables")
@@ -324,6 +395,7 @@ fn parse_variables(body: &Value) -> Result<Vec<BdsVariable>, CrawlError> {
         .collect())
 }
 
+/// The geography levels in `geography.json`, skipping entries without a name.
 fn parse_geographies(body: &Value) -> Result<Vec<BdsGeography>, CrawlError> {
     let fips = body
         .get("fips")
@@ -334,13 +406,7 @@ fn parse_geographies(body: &Value) -> Result<Vec<BdsGeography>, CrawlError> {
         .filter_map(|g| {
             let obj = g.as_object()?;
             let name = obj.get("name").and_then(Value::as_str)?.trim().to_string();
-            (!name.is_empty()).then(|| BdsGeography {
-                name,
-                level_display: obj
-                    .get("geoLevelDisplay")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
-            })
+            (!name.is_empty()).then_some(BdsGeography { name })
         })
         .collect())
 }
@@ -385,6 +451,8 @@ mod tests {
     const VARIABLES: &str = include_str!("../../tests/fixtures/census/variables.json");
     const GEOGRAPHY: &str = include_str!("../../tests/fixtures/census/geography.json");
     const ESTAB_US: &str = include_str!("../../tests/fixtures/census/bds_estab_us.json");
+    const ESTAB_STATE_06: &str =
+        include_str!("../../tests/fixtures/census/bds_estab_state_06.json");
 
     fn d(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
@@ -397,6 +465,7 @@ mod tests {
         assert_eq!(CensusAdapter::default().id(), SourceId::Census);
     }
 
+    /// Every economic variable gets a national series and one per state and DC.
     #[tokio::test]
     async fn discover_crosses_economic_variables_with_geographies() {
         let mock = MockSource::start().await;
@@ -416,26 +485,34 @@ mod tests {
             .discover(&test_ctx())
             .await
             .unwrap();
-        let mut ids: Vec<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
-        ids.sort_unstable();
-        assert_eq!(
-            ids,
-            [
-                "CENSUS_BDS_ESTAB_state",
-                "CENSUS_BDS_ESTAB_us",
-                "CENSUS_BDS_FIRM_state",
-                "CENSUS_BDS_FIRM_us",
-                "CENSUS_BDS_JOB_CREATION_state",
-                "CENSUS_BDS_JOB_CREATION_us",
-            ]
-        );
-        let estab_us = found
-            .iter()
-            .find(|s| s.external_id == "CENSUS_BDS_ESTAB_us")
-            .unwrap();
-        assert_eq!(estab_us.title, "Number of establishments - 010");
+        // 3 economic variables x (national + 50 states + DC).
+        let states = us_states().unwrap();
+        assert_eq!(states.len(), 51);
+        assert_eq!(found.len(), 3 * (1 + states.len()));
+        let ids: HashSet<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
+        for var in ["ESTAB", "FIRM", "JOB_CREATION"] {
+            assert!(
+                ids.contains(format!("CENSUS_BDS_{var}_us").as_str()),
+                "{var}"
+            );
+            for s in states {
+                let id = format!("CENSUS_BDS_{var}_state_{}", s.fips);
+                assert!(ids.contains(id.as_str()), "{id}");
+            }
+        }
+        // No bare per-level ids: those are not single series.
+        assert!(!ids.contains("CENSUS_BDS_ESTAB_state"));
+        let by_id = |id: &str| found.iter().find(|s| s.external_id == id).unwrap();
+        let estab_us = by_id("CENSUS_BDS_ESTAB_us");
+        assert_eq!(estab_us.title, "Number of establishments - United States");
         assert_eq!(estab_us.units.as_deref(), Some("Count"));
         assert_eq!(estab_us.frequency.as_deref(), Some("Annual"));
+        let estab_ca = by_id("CENSUS_BDS_ESTAB_state_06");
+        assert_eq!(estab_ca.title, "Number of establishments - California");
+        assert_eq!(
+            estab_ca.description.as_deref(),
+            Some("Business Dynamics Statistics: Number of establishments for California")
+        );
         // Metadata endpoints never carry the key.
         for r in mock.received_requests().await {
             assert!(r.url.query().is_none(), "{}", r.url);
@@ -526,15 +603,111 @@ mod tests {
         assert!(!reqs[0].url.query_pairs().any(|(k, _)| k == "key"));
     }
 
+    /// County and metro-area levels are skipped; only the listed levels produce series.
     #[tokio::test]
-    async fn fetch_rejects_non_national_and_foreign_ids_without_requests() {
+    async fn discover_skips_levels_without_single_series() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/timeseries/bds/variables.json"),
+            Reply::json_str(VARIABLES),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/timeseries/bds/geography.json"),
+            Reply::json(serde_json::json!({"fips": [
+                {"name": "us", "geoLevelDisplay": "010"},
+                {"name": "county", "geoLevelDisplay": "050"},
+                {"name": "metropolitan statistical area/micropolitan statistical area"},
+            ]})),
+        )
+        .await;
+        let found = CensusAdapter::new(mock.base_url())
+            .discover(&test_ctx())
+            .await
+            .unwrap();
+        let mut ids: Vec<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(
+            ids,
+            [
+                "CENSUS_BDS_ESTAB_us",
+                "CENSUS_BDS_FIRM_us",
+                "CENSUS_BDS_JOB_CREATION_us",
+            ]
+        );
+    }
+
+    /// A per-state id requests `for=state:{FIPS}` and parses its rows.
+    #[tokio::test]
+    async fn fetch_state_series_queries_that_state() {
+        let mock = MockSource::start().await;
+        mock.mount_expect(
+            &Route::get("/timeseries/bds")
+                .query("get", "ESTAB,YEAR")
+                .query("for", "state:06")
+                .query("key", TEST_API_KEY),
+            Reply::json_str(ESTAB_STATE_06),
+            1,
+        )
+        .await;
+        let s = CensusAdapter::new(mock.base_url())
+            .fetch_series(&test_ctx(), "CENSUS_BDS_ESTAB_state_06", None)
+            .await
+            .unwrap();
+        let got: Vec<(NaiveDate, Option<String>)> = s
+            .points
+            .iter()
+            .map(|p| (p.date, p.value.as_ref().map(ToString::to_string)))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (d("2021-01-01"), Some("823456".into())),
+                (d("2022-01-01"), Some("841234".into())),
+            ]
+        );
+        mock.server().verify().await;
+    }
+
+    /// Ids split into variable and area, including variables whose name ends in `_state`.
+    #[test]
+    fn series_id_parsing() {
+        assert_eq!(
+            parse_series_id("CENSUS_BDS_ESTAB_us").unwrap(),
+            ("ESTAB", Area::National)
+        );
+        assert_eq!(
+            parse_series_id("CENSUS_BDS_JOB_CREATION_state_56").unwrap(),
+            ("JOB_CREATION", Area::State("56"))
+        );
+        // A variable whose own name ends in "_state" still needs a FIPS suffix.
+        assert_eq!(
+            parse_series_id("CENSUS_BDS_X_state_state_01").unwrap(),
+            ("X_state", Area::State("01"))
+        );
+        // fetchable_id_regex is checked against Postgres in the scheduler's DB tests.
+        for s in us_states().unwrap() {
+            let id = format!("CENSUS_BDS_ESTAB_state_{}", s.fips);
+            assert!(parse_series_id(&id).is_ok(), "{id}");
+        }
+    }
+
+    /// Bare levels, unknown FIPS codes, malformed and foreign ids fail before any request.
+    #[tokio::test]
+    async fn fetch_rejects_unsupported_and_foreign_ids_without_requests() {
         let mock = MockSource::start().await;
         let adapter = CensusAdapter::new(mock.base_url());
         for id in [
             "CENSUS_BDS_ESTAB_state",
+            "CENSUS_BDS_ESTAB_county",
+            "CENSUS_BDS_ESTAB_state_03",
+            "CENSUS_BDS_ESTAB_state_6",
+            "CENSUS_BDS_ESTAB_state_06x",
+            "CENSUS_BDS__state_06",
             "GDP",
             "CENSUS_BDS__us",
             "CENSUS_BDS_ESTAB&x=1_us",
+            "CENSUS_BDS_ESTAB&x=1_state_06",
         ] {
             let e = adapter
                 .fetch_series(&test_ctx(), id, None)
