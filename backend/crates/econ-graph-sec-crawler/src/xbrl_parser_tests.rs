@@ -712,6 +712,61 @@ async fn test_cache_write_leaves_only_the_entry() {
 }
 
 #[tokio::test]
+async fn test_native_parse_reads_prefixed_contexts_and_units() {
+    // sample_10k.xml writes contexts and units as `xbrli:context` / `xbrli:unit`, with a segment
+    // member inside each entity. Those used to be skipped, and read as facts instead.
+    let cache_dir = TempDir::new().unwrap();
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        use_arelle: false,
+        cache_dir: cache_dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let result = parser
+        .parse_xbrl_document(&get_test_data_path("sample_10k.xml"))
+        .await
+        .unwrap();
+
+    let ids: Vec<&str> = result.contexts.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, ["c1", "c2", "c3"]);
+    for context in &result.contexts {
+        // The segment's explicitMember text must not overwrite the identifier.
+        assert_eq!(context.entity.identifier, "0000320193");
+        assert_eq!(context.entity.scheme, "http://www.sec.gov/CIK");
+        assert_eq!(context.entity_identifier.as_deref(), Some("0000320193"));
+    }
+    let c1 = &result.contexts[0].period;
+    assert_eq!(c1.instant.as_deref(), Some("2023-12-31"));
+    assert_eq!(c1.period_type.as_deref(), Some("instant"));
+    let c3 = &result.contexts[2].period;
+    assert_eq!(c3.start_date.as_deref(), Some("2023-10-01"));
+    assert_eq!(c3.end_date.as_deref(), Some("2023-12-31"));
+    assert_eq!(c3.period_type.as_deref(), Some("duration"));
+
+    let units: Vec<(&str, Option<&str>)> = result
+        .units
+        .iter()
+        .map(|u| (u.id.as_str(), u.measure.as_deref()))
+        .collect();
+    assert_eq!(
+        units,
+        [("u1", Some("xbrli:USD")), ("u2", Some("xbrli:shares"))]
+    );
+
+    // Every fact refers to one of the contexts; no context, entity or unit element is a fact.
+    assert_eq!(result.facts.len(), 34);
+    for fact in &result.facts {
+        assert!(
+            ids.contains(&fact.context_ref.as_str()),
+            "{} has contextRef {:?}",
+            fact.concept,
+            fact.context_ref
+        );
+    }
+}
+
+#[tokio::test]
 async fn test_same_bytes_at_another_path_miss_cache() {
     // Parsed statements carry generated ids, so a copy of a document gets its own entry.
     let cache_dir = TempDir::new().unwrap();
@@ -776,8 +831,11 @@ async fn test_unreadable_cache_entry_is_a_miss() {
 
 #[tokio::test]
 async fn test_parse_real_apple_xbrl_file() {
+    // A fresh cache, so an entry left by an older parser can't stand in for this one's output.
+    let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
         use_arelle: false, // Use native parsing for testing
+        cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
     .await
@@ -834,8 +892,11 @@ async fn test_parse_real_apple_xbrl_file() {
 
 #[tokio::test]
 async fn test_parse_sample_xbrl_file() {
+    // A fresh cache, so an entry left by an older parser can't stand in for this one's output.
+    let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
         use_arelle: false, // Use native parsing for testing
+        cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
     .await
@@ -892,8 +953,11 @@ async fn test_parse_sample_xbrl_file() {
 
 #[tokio::test]
 async fn test_parse_real_jpmorgan_bank_xbrl_file() {
+    // A fresh cache, so an entry left by an older parser can't stand in for this one's output.
+    let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
         use_arelle: false, // Use native parsing for testing
+        cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
     .await
@@ -964,8 +1028,11 @@ async fn test_parse_real_jpmorgan_bank_xbrl_file() {
 
 #[tokio::test]
 async fn test_parse_real_chevron_oil_company_xbrl_file() {
+    // A fresh cache, so an entry left by an older parser can't stand in for this one's output.
+    let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
         use_arelle: false, // Use native parsing for testing
+        cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
     .await

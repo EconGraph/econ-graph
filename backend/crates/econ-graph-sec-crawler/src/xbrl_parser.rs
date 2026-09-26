@@ -657,6 +657,10 @@ pub struct XbrlCache {
     mode: &'static str,
 }
 
+/// Version of the parse output stored in [`XbrlCache`] entries. Bump it whenever a parser change
+/// alters what a parse of the same document returns, so entries written by the old parser miss.
+const XBRL_CACHE_VERSION: u32 = 2;
+
 impl XbrlCache {
     pub fn new(cache_dir: PathBuf) -> Self {
         Self {
@@ -729,8 +733,8 @@ impl XbrlCache {
         Ok(())
     }
 
-    /// Cache file for `xbrl_file`: named by the parser mode and a hash of the document's path and
-    /// content. The path is part of the key because parsed statements carry generated ids, so two
+    /// Cache file for `xbrl_file`: named by the parser mode, [`XBRL_CACHE_VERSION`] and a hash of
+    /// the document's path and content. The path is part of the key because parsed statements carry generated ids, so two
     /// documents with the same bytes must not share a result; the content is part of it so a
     /// replaced document misses.
     pub async fn get_cache_file_path(&self, xbrl_file: &Path) -> Result<PathBuf> {
@@ -739,9 +743,12 @@ impl XbrlCache {
         hasher.consume(xbrl_file.to_string_lossy().as_bytes());
         hasher.consume([0u8]);
         hasher.consume(&content);
-        Ok(self
-            .cache_dir
-            .join(format!("{}-{:x}.json", self.mode, hasher.finalize())))
+        Ok(self.cache_dir.join(format!(
+            "{}-v{}-{:x}.json",
+            self.mode,
+            XBRL_CACHE_VERSION,
+            hasher.finalize()
+        )))
     }
 }
 
@@ -1106,7 +1113,7 @@ impl XbrlXmlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    match e.name().as_ref() {
+                    match e.local_name().as_ref() {
                         "context" => {
                             if let Some(context) = self.parse_context_element(e, &mut reader)? {
                                 contexts.push(context);
@@ -1124,7 +1131,7 @@ impl XbrlXmlParser {
                         }
                         _ => {
                             // Check if this is a fact element (not a standard XBRL element)
-                            if !self.is_standard_xbrl_element(e.name().as_ref()) {
+                            if !self.is_standard_xbrl_element(e.local_name().as_ref()) {
                                 if let Some(fact) = self.parse_fact_element(e, &mut reader)? {
                                     facts.push(fact);
                                 }
@@ -1147,24 +1154,37 @@ impl XbrlXmlParser {
         })
     }
 
-    /// Check if element is a standard XBRL element
-    fn is_standard_xbrl_element(&self, name: &str) -> bool {
+    /// Check if element is a standard XBRL element, by its local name
+    /// (so `xbrli:context` and `context` both match).
+    fn is_standard_xbrl_element(&self, local_name: &str) -> bool {
         matches!(
-            name,
+            local_name,
             "xbrl"
                 | "context"
                 | "entity"
                 | "identifier"
+                | "segment"
+                | "scenario"
+                | "explicitMember"
+                | "typedMember"
                 | "period"
                 | "startDate"
                 | "endDate"
                 | "instant"
+                | "forever"
                 | "unit"
                 | "measure"
+                | "divide"
+                | "unitNumerator"
+                | "unitDenominator"
                 | "linkbaseRef"
                 | "schemaRef"
                 | "roleRef"
                 | "arcroleRef"
+                | "footnoteLink"
+                | "footnote"
+                | "footnoteArc"
+                | "loc"
         )
     }
 
@@ -1268,7 +1288,7 @@ impl XbrlXmlParser {
         let mut buf = Vec::new();
         loop {
             match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(ref e)) => match e.name().as_ref() {
+                Ok(quick_xml::events::Event::Start(ref e)) => match e.local_name().as_ref() {
                     "entity" => {
                         if let Some(entity) = self.parse_entity_element(e, reader)? {
                             context.entity = entity;
@@ -1282,7 +1302,7 @@ impl XbrlXmlParser {
                     _ => {}
                 },
                 Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == "context" {
+                    if e.local_name().as_ref() == "context" {
                         break;
                     }
                 }
@@ -1291,6 +1311,19 @@ impl XbrlXmlParser {
                 _ => {}
             }
             buf.clear();
+        }
+
+        if !context.entity.identifier.is_empty() {
+            context.entity_identifier = Some(context.entity.identifier.clone());
+        }
+        if context.period.period_type.is_none() {
+            context.period.period_type = if context.period.instant.is_some() {
+                Some("instant".to_string())
+            } else if context.period.start_date.is_some() || context.period.end_date.is_some() {
+                Some("duration".to_string())
+            } else {
+                None
+            };
         }
 
         Ok(Some(context))
@@ -1307,11 +1340,15 @@ impl XbrlXmlParser {
             scheme: String::new(),
         };
 
+        // Only text directly inside <identifier> is the identifier; the
+        // entity's <segment> members carry text too.
+        let mut in_identifier = false;
         let mut buf = Vec::new();
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == "identifier" {
+                    if e.local_name().as_ref() == "identifier" {
+                        in_identifier = true;
                         for attr in e.attributes() {
                             let attr = attr?;
                             if attr.key.as_ref() == "scheme" {
@@ -1321,13 +1358,15 @@ impl XbrlXmlParser {
                     }
                 }
                 Ok(quick_xml::events::Event::Text(e)) => {
-                    entity.identifier = e.to_string();
-                }
-                Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == "entity" {
-                        break;
+                    if in_identifier {
+                        entity.identifier = e.to_string();
                     }
                 }
+                Ok(quick_xml::events::Event::End(ref e)) => match e.local_name().as_ref() {
+                    "identifier" => in_identifier = false,
+                    "entity" => break,
+                    _ => {}
+                },
                 Ok(quick_xml::events::Event::Eof) => break,
                 Err(e) => return Err(anyhow::anyhow!("Error parsing entity: {}", e)),
                 _ => {}
@@ -1354,7 +1393,7 @@ impl XbrlXmlParser {
         let mut buf = Vec::new();
         loop {
             match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(ref e)) => match e.name().as_ref() {
+                Ok(quick_xml::events::Event::Start(ref e)) => match e.local_name().as_ref() {
                     "startDate" => {
                         let mut buf2 = Vec::new();
                         if let Ok(quick_xml::events::Event::Text(e)) =
@@ -1381,8 +1420,13 @@ impl XbrlXmlParser {
                     }
                     _ => {}
                 },
+                Ok(quick_xml::events::Event::Empty(ref e)) => {
+                    if e.local_name().as_ref() == "forever" {
+                        period.period_type = Some("forever".to_string());
+                    }
+                }
                 Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == "period" {
+                    if e.local_name().as_ref() == "period" {
                         break;
                     }
                 }
@@ -1428,7 +1472,7 @@ impl XbrlXmlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == "measure" {
+                    if e.local_name().as_ref() == "measure" {
                         let mut buf2 = Vec::new();
                         if let Ok(quick_xml::events::Event::Text(e)) =
                             reader.read_event_into(&mut buf2)
@@ -1438,7 +1482,7 @@ impl XbrlXmlParser {
                     }
                 }
                 Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == "unit" {
+                    if e.local_name().as_ref() == "unit" {
                         break;
                     }
                 }
@@ -1613,8 +1657,9 @@ impl XbrlParser {
         Ok(Some(fact))
     }
 
-    /// Extract contexts from content
+    /// Extract contexts (`context` or prefixed `xbrli:context`) from content
     fn extract_contexts(&self, content: &str) -> Result<Vec<XbrlContext>> {
+        let xml_parser = XbrlXmlParser::new();
         let mut contexts = Vec::new();
         let mut reader = Reader::from_str(content);
         reader.config_mut().trim_text(true);
@@ -1623,8 +1668,8 @@ impl XbrlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == "context" {
-                        if let Some(context) = self.parse_context_element(e, &mut reader)? {
+                    if e.local_name().as_ref() == "context" {
+                        if let Some(context) = xml_parser.parse_context_element(e, &mut reader)? {
                             contexts.push(context);
                         }
                     }
@@ -1639,187 +1684,19 @@ impl XbrlParser {
         Ok(contexts)
     }
 
-    /// Parse a context element
-    fn parse_context_element(
-        &self,
-        element: &quick_xml::events::BytesStart,
-        reader: &mut Reader<&[u8]>,
-    ) -> Result<Option<XbrlContext>> {
-        let mut context = XbrlContext {
-            id: String::new(),
-            entity: XbrlEntity {
-                identifier: String::new(),
-                scheme: String::new(),
-            },
-            period: XbrlPeriod {
-                start_date: None,
-                end_date: None,
-                instant: None,
-                period_type: None,
-            },
-            scenario: None,
-            entity_identifier: None,
-            segment: None,
-        };
-
-        // Get context ID
-        for attr in element.attributes() {
-            let attr = attr?;
-            if attr.key.as_ref() == "id" {
-                context.id = attr.value.to_string();
-                break;
-            }
-        }
-
-        if context.id.is_empty() {
-            return Ok(None);
-        }
-
-        // Parse nested elements
-        let mut buf = Vec::new();
-        loop {
-            match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(ref e)) => match e.name().as_ref() {
-                    "entity" => {
-                        if let Some(entity) = self.parse_entity_element(e, reader)? {
-                            context.entity = entity;
-                        }
-                    }
-                    "period" => {
-                        if let Some(period) = self.parse_period_element(e, reader)? {
-                            context.period = period;
-                        }
-                    }
-                    _ => {}
-                },
-                Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == "context" {
-                        break;
-                    }
-                }
-                Ok(quick_xml::events::Event::Eof) => break,
-                Err(e) => return Err(anyhow::anyhow!("Error parsing context: {}", e)),
-                _ => {}
-            }
-            buf.clear();
-        }
-
-        Ok(Some(context))
-    }
-
-    /// Parse an entity element
-    fn parse_entity_element(
-        &self,
-        _element: &quick_xml::events::BytesStart,
-        reader: &mut Reader<&[u8]>,
-    ) -> Result<Option<XbrlEntity>> {
-        let mut entity = XbrlEntity {
-            identifier: String::new(),
-            scheme: String::new(),
-        };
-
-        let mut buf = Vec::new();
-        loop {
-            match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == "identifier" {
-                        for attr in e.attributes() {
-                            let attr = attr?;
-                            if attr.key.as_ref() == "scheme" {
-                                entity.scheme = attr.value.to_string();
-                            }
-                        }
-                    }
-                }
-                Ok(quick_xml::events::Event::Text(e)) => {
-                    entity.identifier = e.to_string();
-                }
-                Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == "entity" {
-                        break;
-                    }
-                }
-                Ok(quick_xml::events::Event::Eof) => break,
-                Err(e) => return Err(anyhow::anyhow!("Error parsing entity: {}", e)),
-                _ => {}
-            }
-            buf.clear();
-        }
-
-        Ok(Some(entity))
-    }
-
-    /// Parse a period element
-    fn parse_period_element(
-        &self,
-        _element: &quick_xml::events::BytesStart,
-        reader: &mut Reader<&[u8]>,
-    ) -> Result<Option<XbrlPeriod>> {
-        let mut period = XbrlPeriod {
-            start_date: None,
-            end_date: None,
-            instant: None,
-            period_type: None,
-        };
-
-        let mut buf = Vec::new();
-        loop {
-            match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(ref e)) => match e.name().as_ref() {
-                    "startDate" => {
-                        let mut buf2 = Vec::new();
-                        if let Ok(quick_xml::events::Event::Text(e)) =
-                            reader.read_event_into(&mut buf2)
-                        {
-                            period.start_date = Some(e.to_string());
-                        }
-                    }
-                    "endDate" => {
-                        let mut buf2 = Vec::new();
-                        if let Ok(quick_xml::events::Event::Text(e)) =
-                            reader.read_event_into(&mut buf2)
-                        {
-                            period.end_date = Some(e.to_string());
-                        }
-                    }
-                    "instant" => {
-                        let mut buf2 = Vec::new();
-                        if let Ok(quick_xml::events::Event::Text(e)) =
-                            reader.read_event_into(&mut buf2)
-                        {
-                            period.instant = Some(e.to_string());
-                        }
-                    }
-                    _ => {}
-                },
-                Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == "period" {
-                        break;
-                    }
-                }
-                Ok(quick_xml::events::Event::Eof) => break,
-                Err(e) => return Err(anyhow::anyhow!("Error parsing period: {}", e)),
-                _ => {}
-            }
-            buf.clear();
-        }
-
-        Ok(Some(period))
-    }
-
-    /// Extract units from content
+    /// Extract units (`unit` or prefixed `xbrli:unit`) from content
     fn extract_units(&self, content: &str) -> Result<Vec<XbrlUnit>> {
+        let xml_parser = XbrlXmlParser::new();
         let mut units = Vec::new();
-        let content_bytes = content.as_bytes();
-        let mut reader = Reader::from_reader(content_bytes);
+        let mut reader = Reader::from_str(content);
         reader.config_mut().trim_text(true);
 
         let mut buf = Vec::new();
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == "unit" {
-                        if let Some(unit) = self.parse_unit_element(e, &mut reader)? {
+                    if e.local_name().as_ref() == "unit" {
+                        if let Some(unit) = xml_parser.parse_unit_element(e, &mut reader)? {
                             units.push(unit);
                         }
                     }
@@ -1832,62 +1709,6 @@ impl XbrlParser {
         }
 
         Ok(units)
-    }
-
-    /// Parse a unit element
-    fn parse_unit_element(
-        &self,
-        element: &quick_xml::events::BytesStart,
-        reader: &mut Reader<&[u8]>,
-    ) -> Result<Option<XbrlUnit>> {
-        let mut unit = XbrlUnit {
-            id: String::new(),
-            measure: Some(String::new()),
-            measure_namespace: None,
-            measure_local_name: None,
-            unit_type: None,
-        };
-
-        // Get unit ID
-        for attr in element.attributes() {
-            let attr = attr?;
-            if attr.key.as_ref() == "id" {
-                unit.id = attr.value.to_string();
-                break;
-            }
-        }
-
-        if unit.id.is_empty() {
-            return Ok(None);
-        }
-
-        // Parse measure
-        let mut buf = Vec::new();
-        loop {
-            match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == "measure" {
-                        let mut buf2 = Vec::new();
-                        if let Ok(quick_xml::events::Event::Text(e)) =
-                            reader.read_event_into(&mut buf2)
-                        {
-                            unit.measure = Some(e.to_string());
-                        }
-                    }
-                }
-                Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == "unit" {
-                        break;
-                    }
-                }
-                Ok(quick_xml::events::Event::Eof) => break,
-                Err(e) => return Err(anyhow::anyhow!("Error parsing unit: {}", e)),
-                _ => {}
-            }
-            buf.clear();
-        }
-
-        Ok(Some(unit))
     }
 
     /// Extract XBRL content from HTML
