@@ -55,6 +55,56 @@ services:
       timeout: 10s
       retries: 3
 
+  # Keycloak (OIDC identity provider) with the dev realm `econ-graph`.
+  # Realm and seeded test users live in config/keycloak/; see its README.
+  keycloak-db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak}
+      POSTGRES_DB: keycloak
+    volumes:
+      - keycloak_db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.4
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak}
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8081}
+      KC_HEALTH_ENABLED: "true"
+      # Placeholders in config/keycloak/econ-graph-realm.json
+      KC_REALM_SSL_REQUIRED: none
+      KC_WEB_BASE_URL: http://localhost:3000
+      KC_WEB_DIRECT_GRANTS: "true"
+      KC_GOOGLE_ENABLED: ${KC_GOOGLE_ENABLED:-false}
+      KC_GOOGLE_CLIENT_ID: ${KC_GOOGLE_CLIENT_ID:-unset}
+      KC_GOOGLE_CLIENT_SECRET: ${KC_GOOGLE_CLIENT_SECRET:-unset}
+    ports:
+      - "${KEYCLOAK_PORT:-8081}:8080"
+    volumes:
+      - ./config/keycloak/econ-graph-realm.json:/opt/keycloak/data/import/econ-graph-realm.json:ro
+      - ./config/keycloak/dev/econ-graph-users-0.json:/opt/keycloak/data/import/econ-graph-users-0.json:ro
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
   # Development services
   backend-dev:
     profiles: ["dev"]
@@ -137,6 +187,7 @@ services:
 
 volumes:
   postgres_data:
+  keycloak_db_data:
   cargo_cache:
   target_cache:
   node_modules_cache:
