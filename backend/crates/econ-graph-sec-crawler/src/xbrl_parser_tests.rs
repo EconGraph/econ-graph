@@ -714,7 +714,8 @@ async fn test_cache_write_leaves_only_the_entry() {
 #[tokio::test]
 async fn test_native_parse_compound_units_forever_periods_and_custom_names() {
     // Default-namespace (unprefixed) contexts, a paired <forever></forever>, a per-share unit,
-    // and custom-taxonomy facts that happen to be named `unit` and `context`.
+    // custom-taxonomy facts that happen to be named `unit` and `context`, and a footnote whose
+    // XHTML content must not be read as facts.
     let doc = r#"<?xml version="1.0" encoding="UTF-8"?>
 <xbrl xmlns="http://www.xbrl.org/2003/instance"
       xmlns:us-gaap="http://fasb.org/us-gaap/2024"
@@ -733,6 +734,10 @@ async fn test_native_parse_compound_units_forever_periods_and_custom_names() {
   <us-gaap:EarningsPerShareBasic contextRef="c1" unitRef="usdPerShare" decimals="2">6.13</us-gaap:EarningsPerShareBasic>
   <custom:unit contextRef="c1">Retail</custom:unit>
   <custom:context contextRef="c1">Annual</custom:context>
+  <link:footnoteLink xmlns:link="http://www.xbrl.org/2003/linkbase"
+                     xmlns:xhtml="http://www.w3.org/1999/xhtml">
+    <link:footnote><xhtml:p>Restated.</xhtml:p></link:footnote>
+  </link:footnoteLink>
 </xbrl>"#;
     let work_dir = TempDir::new().unwrap();
     let file_path = work_dir.path().join("compound.xml");

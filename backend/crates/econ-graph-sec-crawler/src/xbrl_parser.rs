@@ -1137,7 +1137,14 @@ impl XbrlXmlParser {
                                 linkbases.push(linkbase);
                             }
                         }
-                        Some(_) => {}
+                        // The root: its children are the contexts, units and facts.
+                        Some("xbrl") => {}
+                        // Any other structural container (footnoteLink, schemaRef, ...): skip
+                        // the whole subtree, so e.g. a footnote's XHTML isn't read as facts.
+                        Some(_) => {
+                            let mut skip_buf = Vec::new();
+                            reader.read_to_end_into(e.name(), &mut skip_buf)?;
+                        }
                         None => {
                             if let Some(fact) = self.parse_fact_element(e, &mut reader)? {
                                 facts.push(fact);
