@@ -56,32 +56,5 @@ COMMENT ON COLUMN annotation_templates.id IS NULL;
 -- 3. REVERT DEFAULT VALUES (OPTIONAL)
 -- ============================================================================
 
--- Note: In PostgreSQL 18, gen_random_uuid() generates UUIDv7 by default
--- Reverting to a different function would require creating a custom function
--- For now, we'll leave the defaults as they are since UUIDv7 is generally preferred
--- If you need to revert to UUIDv4, you would need to create a custom function:
-
--- Example of how to create a UUIDv4 function (commented out):
--- CREATE OR REPLACE FUNCTION gen_uuid_v4() RETURNS UUID AS $$
--- BEGIN
---     RETURN gen_random_uuid();
--- END;
--- $$ LANGUAGE plpgsql;
-
--- Then update all the defaults to use gen_uuid_v4() instead of gen_random_uuid()
-
--- ============================================================================
--- 4. ROLLBACK COMPLETION LOG
--- ============================================================================
-
--- Log the rollback of the PostgreSQL 18 and UUIDv7 upgrade
-INSERT INTO audit_logs (user_id, user_name, action, resource_type, resource_id, details, created_at)
-VALUES (
-    '00000000-0000-0000-0000-000000000000',
-    'System Migration',
-    'database_rollback',
-    'schema',
-    'postgres_18_uuidv7_upgrade',
-    '{"rollback_type": "postgres_18_uuidv7", "version": "18", "uuid_format": "v7", "tables_affected": 35}',
-    NOW()
-) ON CONFLICT DO NOTHING;
+-- Defaults stay on uuidv7(). gen_random_uuid() still generates UUIDv4 in PostgreSQL 18; the
+-- built-in uuidv7() is what generates UUIDv7.
