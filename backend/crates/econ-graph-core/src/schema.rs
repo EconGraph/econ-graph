@@ -1,17 +1,69 @@
 // @generated automatically by Diesel CLI.
 
-use diesel::sql_types::*;
+pub mod sql_types {
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "annotation_status"))]
+    pub struct AnnotationStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "annotation_type"))]
+    pub struct AnnotationType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "assignment_status"))]
+    pub struct AssignmentStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "assignment_type"))]
+    pub struct AssignmentType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "calculation_method"))]
+    pub struct CalculationMethod;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "compression_type"))]
+    pub struct CompressionType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "processing_status"))]
+    pub struct ProcessingStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "ratio_category"))]
+    pub struct RatioCategory;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "statement_section"))]
+    pub struct StatementSection;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "statement_type"))]
+    pub struct StatementType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "taxonomy_file_type"))]
+    pub struct TaxonomyFileType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "taxonomy_source_type"))]
+    pub struct TaxonomySourceType;
+}
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::AssignmentType;
+    use super::sql_types::AssignmentStatus;
+
     annotation_assignments (id) {
         id -> Uuid,
         statement_id -> Uuid,
         line_item_id -> Nullable<Uuid>,
         assignee_id -> Uuid,
         assigner_id -> Uuid,
-        assignment_type -> Text,
+        assignment_type -> AssignmentType,
         due_date -> Nullable<Timestamptz>,
-        status -> Text,
+        status -> AssignmentStatus,
         notes -> Nullable<Text>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
@@ -31,6 +83,8 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+
     annotation_replies (id) {
         id -> Uuid,
         annotation_id -> Uuid,
@@ -43,13 +97,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::AnnotationType;
+
     annotation_templates (id) {
         id -> Uuid,
         #[max_length = 255]
         name -> Varchar,
         description -> Nullable<Text>,
         template_content -> Text,
-        annotation_type -> Text,
+        annotation_type -> AnnotationType,
         tags -> Nullable<Array<Nullable<Text>>>,
         is_public -> Nullable<Bool>,
         created_by -> Uuid,
@@ -360,18 +417,22 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::AnnotationType;
+    use super::sql_types::AnnotationStatus;
+
     financial_annotations (id) {
         id -> Uuid,
         statement_id -> Uuid,
         line_item_id -> Nullable<Uuid>,
         author_id -> Uuid,
         content -> Text,
-        annotation_type -> Text,
+        annotation_type -> AnnotationType,
         tags -> Nullable<Array<Nullable<Text>>>,
         highlights -> Nullable<Jsonb>,
         mentions -> Nullable<Array<Nullable<Uuid>>>,
         parent_annotation_id -> Nullable<Uuid>,
-        status -> Text,
+        status -> AnnotationStatus,
         is_private -> Nullable<Bool>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
@@ -379,6 +440,10 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::StatementType;
+    use super::sql_types::StatementSection;
+
     financial_line_items (id) {
         id -> Uuid,
         statement_id -> Uuid,
@@ -401,8 +466,8 @@ diesel::table! {
         decimals -> Nullable<Int4>,
         is_credit -> Nullable<Bool>,
         is_debit -> Nullable<Bool>,
-        statement_type -> Text,
-        statement_section -> Text,
+        statement_type -> StatementType,
+        statement_section -> StatementSection,
         #[max_length = 255]
         parent_concept -> Nullable<Varchar>,
         level -> Int4,
@@ -415,10 +480,14 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::RatioCategory;
+    use super::sql_types::CalculationMethod;
+
     financial_ratios (id) {
         id -> Uuid,
         statement_id -> Uuid,
-        ratio_category -> Text,
+        ratio_category -> RatioCategory,
         #[max_length = 100]
         ratio_name -> Varchar,
         ratio_value -> Nullable<Numeric>,
@@ -429,7 +498,7 @@ diesel::table! {
         numerator_concept -> Nullable<Varchar>,
         #[max_length = 255]
         denominator_concept -> Nullable<Varchar>,
-        calculation_method -> Nullable<Text>,
+        calculation_method -> Nullable<CalculationMethod>,
         is_industry_standard -> Nullable<Bool>,
         benchmark_value -> Nullable<Numeric>,
         benchmark_percentile -> Nullable<Int4>,
@@ -439,6 +508,10 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::CompressionType;
+    use super::sql_types::ProcessingStatus;
+
     financial_statements (id) {
         id -> Uuid,
         company_id -> Uuid,
@@ -459,10 +532,10 @@ diesel::table! {
         xbrl_file_content -> Nullable<Bytea>,
         xbrl_file_size_bytes -> Nullable<Int8>,
         xbrl_file_compressed -> Bool,
-        xbrl_file_compression_type -> Text,
+        xbrl_file_compression_type -> CompressionType,
         #[max_length = 64]
         xbrl_file_hash -> Nullable<Varchar>,
-        xbrl_processing_status -> Text,
+        xbrl_processing_status -> ProcessingStatus,
         xbrl_processing_error -> Nullable<Text>,
         xbrl_processing_started_at -> Nullable<Timestamptz>,
         xbrl_processing_completed_at -> Nullable<Timestamptz>,
@@ -708,24 +781,30 @@ diesel::table! {
 
 diesel::joinable!(annotation_assignments -> financial_line_items (line_item_id));
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::TaxonomyFileType;
+    use super::sql_types::TaxonomySourceType;
+    use super::sql_types::CompressionType;
+    use super::sql_types::ProcessingStatus;
+
     xbrl_taxonomy_schemas (id) {
         id -> Uuid,
         schema_namespace -> Varchar,
         schema_filename -> Varchar,
         schema_version -> Nullable<Varchar>,
         schema_date -> Nullable<Date>,
-        file_type -> Text,
-        source_type -> Text,
+        file_type -> TaxonomyFileType,
+        source_type -> TaxonomySourceType,
         file_content -> Nullable<Bytea>,
         file_oid -> Nullable<Integer>,
         file_size_bytes -> Bigint,
         file_hash -> Varchar,
         is_compressed -> Bool,
-        compression_type -> Varchar,
+        compression_type -> CompressionType,
         source_url -> Nullable<Text>,
         download_url -> Nullable<Text>,
         original_filename -> Nullable<Varchar>,
-        processing_status -> Text,
+        processing_status -> ProcessingStatus,
         processing_error -> Nullable<Text>,
         processing_started_at -> Nullable<Timestamptz>,
         processing_completed_at -> Nullable<Timestamptz>,
@@ -737,10 +816,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::TaxonomyFileType;
+    use super::sql_types::CompressionType;
+    use super::sql_types::ProcessingStatus;
+
     xbrl_taxonomy_linkbases (id) {
         id -> Uuid,
         linkbase_filename -> Varchar,
-        linkbase_type -> Text,
+        linkbase_type -> TaxonomyFileType,
         target_namespace -> Nullable<Varchar>,
         schema_id -> Nullable<Uuid>,
         file_content -> Nullable<Bytea>,
@@ -748,11 +832,11 @@ diesel::table! {
         file_size_bytes -> Bigint,
         file_hash -> Varchar,
         is_compressed -> Bool,
-        compression_type -> Varchar,
+        compression_type -> CompressionType,
         source_url -> Nullable<Text>,
         download_url -> Nullable<Text>,
         original_filename -> Nullable<Varchar>,
-        processing_status -> Text,
+        processing_status -> ProcessingStatus,
         processing_error -> Nullable<Text>,
         processing_started_at -> Nullable<Timestamptz>,
         processing_completed_at -> Nullable<Timestamptz>,

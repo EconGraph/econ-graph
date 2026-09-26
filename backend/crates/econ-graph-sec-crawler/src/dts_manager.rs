@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use econ_graph_core::database::DatabasePool;
-use econ_graph_core::enums::{TaxonomyFileType, TaxonomySourceType};
+use econ_graph_core::enums::{ProcessingStatus, TaxonomyFileType, TaxonomySourceType};
 use econ_graph_core::models::XbrlTaxonomySchema;
 use econ_graph_core::schema::{xbrl_taxonomy_linkbases, xbrl_taxonomy_schemas};
 use sha2::{Digest, Sha256};
@@ -372,7 +372,7 @@ impl DtsManager {
         // Get all taxonomy schemas for this statement
         let schemas = diesel_async::RunQueryDsl::load(
             xbrl_taxonomy_schemas::table
-                .filter(xbrl_taxonomy_schemas::processing_status.eq("downloaded")),
+                .filter(xbrl_taxonomy_schemas::processing_status.eq(ProcessingStatus::Downloaded)),
             &mut conn,
         )
         .await?;

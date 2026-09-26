@@ -527,7 +527,7 @@ jobs:
     - name: Run backend models advanced tests
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --lib -- --test-threads=2 --nocapture models::data_source::tests models::economic_series::tests models::data_point::tests models::crawl_queue::tests models::search::tests models::series_metadata::tests
+        cargo test --lib -- --test-threads=2 --nocapture models::data_source::tests models::economic_series::tests models::data_point::tests models::crawl_queue::tests models::search::tests models::series_metadata::tests models::financial_statement::tests
       working-directory: backend
       env:
         DATABASE_URL: postgresql://postgres:password@localhost:5433/econ_graph_test
