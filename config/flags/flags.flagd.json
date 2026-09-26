@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema/flags.json",
+  "flags": {
+    "buildCanary": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "build",
+        "owner": "docs/roadmap/feature-flags.md",
+        "remove_by": "unscheduled"
+      }
+    },
+    "mcp": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "ops",
+        "owner": "docs/roadmap/feature-flags.md"
+      }
+    }
+  }
+}

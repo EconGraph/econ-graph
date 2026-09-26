@@ -79,6 +79,7 @@ jobs:
           frontend:
             - 'frontend/**'
             - 'admin-frontend/**'
+            - 'config/flags/**'
           backend:
             - 'backend/**'
             - 'chart-api-service/**'
@@ -89,6 +90,7 @@ jobs:
             - 'scripts/**'
             - 'docker-compose.yml'
             - 'package.json'
+            - 'config/flags/**'
   backend-build-cache:
     name: Backend Build Cache
     runs-on: ubuntu-latest
@@ -723,6 +725,31 @@ jobs:
         CI: true
         NODE_OPTIONS: --max-old-space-size=4096
 
+
+  flags-check:
+    name: Feature Flags Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+        # Tags, so the check can fail on a flag whose remove_by train shipped
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+
+    - name: Test the flag check against its fixtures
+      working-directory: scripts/check-flags
+      run: npm test
+
+    - name: Check config/flags
+      run: node scripts/check-flags
 
   quality-checks:
     name: Quality Checks

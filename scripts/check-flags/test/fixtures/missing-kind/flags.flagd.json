@@ -1,0 +1,56 @@
+{
+  "flags": {
+    "buildCanary": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "build",
+        "owner": "docs/roadmap/feature-flags.md",
+        "remove_by": "train 1"
+      }
+    },
+    "mcp": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off",
+      "metadata": {
+        "owner": "docs/roadmap/feature-flags.md"
+      }
+    },
+    "worldMap": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off",
+      "targeting": {
+        "if": [
+          {
+            "in": [
+              "preview:access",
+              {
+                "var": "roles"
+              }
+            ]
+          },
+          "on",
+          "off"
+        ]
+      },
+      "metadata": {
+        "kind": "preview",
+        "owner": "docs/roadmap/feature-flags.md",
+        "stage": "beta",
+        "remove_by": "train 3"
+      }
+    }
+  }
+}
