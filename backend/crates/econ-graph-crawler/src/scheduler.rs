@@ -7,7 +7,8 @@
 //! Each [`RefreshScheduler::tick`]:
 //!
 //! 1. **Series refresh** — enqueues a `fetch_series` job (priority [`DEFAULT_PRIORITY`]) for every
-//!    active `economic_series` row that is *due*, oldest first, at most
+//!    active `economic_series` row that is *due*, and for every active `series_metadata` row
+//!    (written by catalog discovery) that has no `economic_series` row yet, oldest first, at most
 //!    [`SchedulerConfig::batch_limit`] per tick. Only series of sources that are in the registry,
 //!    can actually fetch series (not static catalogs, not [`FETCH_UNIMPLEMENTED`], not SEC) and
 //!    whose `data_sources` row is enabled (`is_enabled`) are considered.
@@ -26,7 +27,16 @@
 //!
 //!    Series whose `crawl_status` is `failed` back off: they are due only once
 //!    `max(last_crawled_at, last crawl_attempts.attempted_at)` is older than **twice** the interval
-//!    (a never-successful series therefore isn't retried every tick).
+//!    (a never-successful series therefore isn't retried every tick). A discovered series without
+//!    an `economic_series` row has no `crawl_attempts`, so its last failed `fetch_series` queue
+//!    row stands in. Finished queue rows are purged after the worker's queue retention (14 days
+//!    by default), so for these series the backoff is at most that retention: a failed quarterly
+//!    or annual discovered series is retried after 14 days, not twice its interval. With purging
+//!    disabled the backoff is the full twice-the-interval.
+//!
+//!    Discovered series and refreshes of existing series take turns in the batch, each kind
+//!    oldest first (never-crawled series first; discovered series never tried before ones whose
+//!    last fetch failed), so neither starves the other.
 //!    Series that already have an active (pending | processing | retrying) job are not candidates;
 //!    a concurrent duplicate rejected by the queue's partial unique index counts as skipped.
 //!
@@ -150,6 +160,14 @@ fn frequency_days_sql(f: &str) -> String {
 
 /// Due-series query. `$1` data_sources names, `$2` matching source codes, `$3` limit, `$4` the
 /// regex of fetchable Census ids.
+///
+/// Candidates are active `economic_series` rows plus active `series_metadata` rows (from catalog
+/// discovery) that have no `economic_series` row yet. A metadata-only candidate has never been
+/// crawled; if its last `fetch_series` job failed (`crawl_attempts` needs a series row, so the
+/// finished queue row is the only record), it backs off like a failed series.
+///
+/// Discovered series and refreshes of existing series alternate in the batch (each kind ordered
+/// oldest first), so a large first discovery can't hold back refreshes for days.
 static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "WITH src AS ( \
@@ -157,15 +175,40 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
              FROM unnest($1::text[], $2::text[]) AS m(ds_name, code) \
              JOIN data_sources ds ON ds.name = m.ds_name \
              WHERE ds.is_enabled \
+         ), failed_jobs AS ( \
+             SELECT q.source, q.series_id, \
+                    max(COALESCE(q.finished_at, q.updated_at)) AS failed_at \
+             FROM crawl_queue q \
+             WHERE q.kind = 'fetch_series' AND q.status = 'failed' \
+               AND q.source IN (SELECT code FROM src) \
+             GROUP BY q.source, q.series_id \
          ), cand AS ( \
              SELECT src.code, es.id, es.external_id, es.last_crawled_at, es.crawl_status, \
-                    make_interval(days => ({days})) AS refresh \
+                    NULL::timestamptz AS failed_at, FALSE AS discovered, \
+                    make_interval(days => ({es_days})) AS refresh \
              FROM economic_series es \
              JOIN src ON es.source_id = src.ds_id \
              WHERE es.is_active \
                AND (src.code <> '{census}' OR es.external_id ~ $4) \
-         ) \
-         SELECT c.code AS source, c.external_id::text AS external_id \
+             UNION ALL \
+             SELECT src.code, NULL::uuid, sm.external_id, NULL::timestamptz, \
+                    CASE WHEN f.failed_at IS NOT NULL THEN 'failed' END, f.failed_at, TRUE, \
+                    make_interval(days => ({sm_days})) \
+             FROM series_metadata sm \
+             JOIN src ON sm.source_id = src.ds_id \
+             LEFT JOIN failed_jobs f \
+                    ON f.source = src.code AND f.series_id = sm.external_id \
+             WHERE sm.is_active \
+               AND (src.code <> '{census}' OR sm.external_id ~ $4) \
+               AND NOT EXISTS ( \
+                     SELECT 1 FROM economic_series es \
+                     WHERE es.source_id = sm.source_id AND es.external_id = sm.external_id) \
+         ), due AS ( \
+         SELECT c.code, c.external_id, c.discovered, \
+                row_number() OVER (PARTITION BY c.discovered \
+                                   ORDER BY c.last_crawled_at ASC NULLS FIRST, \
+                                            c.failed_at ASC NULLS FIRST, \
+                                            c.code, c.external_id) AS rn \
          FROM cand c \
          WHERE NOT EXISTS ( \
                  SELECT 1 FROM crawl_queue q \
@@ -173,15 +216,19 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
                    AND q.kind = 'fetch_series' \
                    AND q.status IN ('pending', 'processing', 'retrying')) \
            AND CASE WHEN c.crawl_status = 'failed' THEN \
-                   COALESCE(GREATEST(c.last_crawled_at, \
+                   COALESCE(GREATEST(c.last_crawled_at, c.failed_at, \
                                      (SELECT max(ca.attempted_at) FROM crawl_attempts ca \
                                       WHERE ca.series_id = c.id)), \
                             '-infinity'::timestamptz) <= NOW() - 2 * c.refresh \
                ELSE c.last_crawled_at IS NULL OR c.last_crawled_at <= NOW() - c.refresh \
                END \
-         ORDER BY c.last_crawled_at ASC NULLS FIRST, c.code, c.external_id \
+         ) \
+         SELECT d.code AS source, d.external_id::text AS external_id \
+         FROM due d \
+         ORDER BY d.rn, d.discovered \
          LIMIT $3",
-        days = frequency_days_sql("lower(btrim(es.frequency))"),
+        es_days = frequency_days_sql("lower(btrim(es.frequency))"),
+        sm_days = frequency_days_sql("lower(btrim(sm.frequency))"),
         census = SourceId::Census.as_str(),
     )
 });
@@ -448,9 +495,10 @@ fn conn_err(e: impl std::fmt::Display) -> AppError {
 #[cfg(test)]
 mod tests {
     //! DB-backed tests need `DATABASE_URL` and are skipped when it is unset. Rows they create use
-    //! external ids prefixed `t15c_`; `crawl_queue` is emptied before each test. Other tests may
-    //! leave series in the database, so assertions only look at `t15c_` rows (or at sources no
-    //! other test seeds).
+    //! external ids prefixed `t15c_`; `crawl_queue` is emptied and FHFA (which some tests disable)
+    //! re-enabled before each test. Other tests may leave series (and the migrations seed
+    //! `series_metadata`) in the database, so assertions only look at `t15c_` rows (or at
+    //! sources no other test seeds).
 
     use std::collections::BTreeSet;
 
@@ -472,11 +520,13 @@ mod tests {
         let (url, guard) = crate::testkit::lock_test_db("scheduler").await?;
         let pool = econ_graph_core::create_pool(&url).await.expect("pool");
         exec(&pool, "DELETE FROM crawl_queue").await;
-        exec(
-            &pool,
+        for sql in [
             "DELETE FROM economic_series WHERE external_id LIKE 't15c\\_%'",
-        )
-        .await;
+            "DELETE FROM series_metadata WHERE external_id LIKE 't15c\\_%'",
+        ] {
+            exec(&pool, sql).await;
+        }
+        set_enabled(&pool, SourceId::Fhfa, true).await;
         Some(Db {
             pool,
             _guard: guard,
@@ -549,6 +599,63 @@ mod tests {
              VALUES ($1, NOW() - make_interval(secs => $2), 'api', false)",
         )
         .bind::<diesel::sql_types::Uuid, _>(series_id)
+        .bind::<Double, _>(days_ago * DAY)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    }
+
+    /// Writes active `series_metadata` rows as catalog discovery does, with no `economic_series`
+    /// row. (The worker test `discovered_series_are_fetched_after_a_scheduler_tick` runs real
+    /// discovery.)
+    async fn discover(pool: &DatabasePool, source: SourceId, ids: &[(&str, &str)]) {
+        let source_id = persist::data_source_id(pool, source).await.unwrap();
+        let mut conn = pool.get().await.unwrap();
+        for (id, frequency) in ids {
+            diesel::sql_query(
+                "INSERT INTO series_metadata (source_id, external_id, title, frequency, is_active) \
+                 VALUES ($1, $2, $2, $3, TRUE) \
+                 ON CONFLICT (source_id, external_id) DO UPDATE SET is_active = TRUE",
+            )
+            .bind::<diesel::sql_types::Uuid, _>(source_id)
+            .bind::<Text, _>(*id)
+            .bind::<Text, _>(*frequency)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        }
+    }
+
+    async fn set_enabled(pool: &DatabasePool, source: SourceId, enabled: bool) {
+        persist::data_source_id(pool, source).await.unwrap();
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query("UPDATE data_sources SET is_enabled = $2 WHERE name = $1")
+            .bind::<Text, _>(data_source_template(source).name)
+            .bind::<Bool, _>(enabled)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+
+    /// A `fetch_series` job for `external_id` that failed `days_ago`.
+    async fn seed_failed_job(
+        pool: &DatabasePool,
+        source: SourceId,
+        external_id: &str,
+        days_ago: f64,
+    ) {
+        let job = new_job(source, external_id, JobKind::FetchSeries, DEFAULT_PRIORITY);
+        let id = CrawlQueueItem::enqueue(pool, &job)
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query(
+            "UPDATE crawl_queue SET status = 'failed', \
+             finished_at = NOW() - make_interval(secs => $2) WHERE id = $1",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(id)
         .bind::<Double, _>(days_ago * DAY)
         .execute(&mut conn)
         .await
@@ -727,12 +834,28 @@ mod tests {
             "CENSUS_BDS_T15CX_county",
             "CENSUS_BDS_T15CX_Alabama",
         ];
-        let cleanup =
-            "DELETE FROM economic_series WHERE external_id LIKE 'CENSUS\\_BDS\\_T15CX\\_%'";
-        exec(p, cleanup).await;
+        let cleanup = [
+            "DELETE FROM economic_series WHERE external_id LIKE 'CENSUS\\_BDS\\_T15CX\\_%'",
+            "DELETE FROM series_metadata WHERE external_id LIKE 'CENSUS\\_BDS\\_T15CY\\_%'",
+        ];
+        for sql in cleanup {
+            exec(p, sql).await;
+        }
         for id in ids {
             seed(p, SourceId::Census, id, "Annual", None, None).await;
         }
+        // The same filter applies to discovered series with no economic_series row yet.
+        discover(
+            p,
+            SourceId::Census,
+            &[
+                ("CENSUS_BDS_T15CY_us", "Annual"),
+                ("CENSUS_BDS_T15CY_state_06", "Annual"),
+                ("CENSUS_BDS_T15CY_state", "Annual"),
+                ("CENSUS_BDS_T15CY_Alabama", "Annual"),
+            ],
+        )
+        .await;
 
         scheduler(p, &[SourceId::Census], DEFAULT_BATCH_LIMIT)
             .tick()
@@ -741,16 +864,23 @@ mod tests {
         let queued: Vec<String> = queue_rows(p, JobKind::FetchSeries)
             .await
             .into_iter()
-            .filter(|r| r.series_id.contains("T15CX"))
+            .filter(|r| r.series_id.contains("T15CX") || r.series_id.contains("T15CY"))
             .map(|r| r.series_id)
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
         assert_eq!(
             queued,
-            vec!["CENSUS_BDS_T15CX_state_06", "CENSUS_BDS_T15CX_us"]
+            vec![
+                "CENSUS_BDS_T15CX_state_06",
+                "CENSUS_BDS_T15CX_us",
+                "CENSUS_BDS_T15CY_state_06",
+                "CENSUS_BDS_T15CY_us",
+            ]
         );
-        exec(p, cleanup).await;
+        for sql in cleanup {
+            exec(p, sql).await;
+        }
     }
 
     #[tokio::test]
@@ -868,14 +998,16 @@ mod tests {
         let Some(db) = db().await else { return };
         let p = &db.pool;
         let fhfa = persist::data_source_id(p, SourceId::Fhfa).await.unwrap();
-        exec(
-            p,
-            &format!(
-                "UPDATE economic_series SET is_active = false \
-                 WHERE source_id = '{fhfa}' AND external_id NOT LIKE 't15c\\_%'"
-            ),
-        )
-        .await;
+        for table in ["economic_series", "series_metadata"] {
+            exec(
+                p,
+                &format!(
+                    "UPDATE {table} SET is_active = false \
+                     WHERE source_id = '{fhfa}' AND external_id NOT LIKE 't15c\\_%'"
+                ),
+            )
+            .await;
+        }
         for (id, ago) in [
             ("t15c_6", Some(6.0)),
             ("t15c_10", Some(10.0)),
@@ -953,6 +1085,148 @@ mod tests {
                 "FRED/t15c_ok10",
             ])
         );
+    }
+
+    /// After discovery alone (only `series_metadata`), one tick enqueues every discovered series
+    /// of an enabled source once, and a second tick adds nothing.
+    #[tokio::test]
+    async fn enqueues_discovered_series_once() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        use SourceId::{Bls, Fhfa, Fred};
+        discover(
+            p,
+            Fred,
+            &[
+                ("t15c_d_monthly", "Monthly"),
+                ("t15c_d_annual", "Annual"),
+                ("t15c_d_queued", "Monthly"),
+                ("t15c_d_inactive", "Monthly"),
+                ("t15c_d_fetched", "Monthly"),
+            ],
+        )
+        .await;
+        discover(p, Bls, &[("t15c_d_bls", "Quarterly")]).await;
+        discover(p, Fhfa, &[("t15c_d_disabled", "Monthly")]).await;
+        exec(
+            p,
+            "UPDATE series_metadata SET is_active = false WHERE external_id = 't15c_d_inactive'",
+        )
+        .await;
+        // Already fetched a day ago: the economic_series row decides, and it isn't due.
+        seed(
+            p,
+            Fred,
+            "t15c_d_fetched",
+            "Monthly",
+            Some(1.0),
+            Some("success"),
+        )
+        .await;
+        set_enabled(p, Fred, true).await;
+        set_enabled(p, Bls, true).await;
+        set_enabled(p, Fhfa, false).await;
+        let queued = new_job(
+            Fred,
+            "t15c_d_queued",
+            JobKind::FetchSeries,
+            DEFAULT_PRIORITY,
+        );
+        CrawlQueueItem::enqueue(p, &queued).await.unwrap().unwrap();
+
+        // Large enough for every due series other tests or the seeds leave behind.
+        let s = scheduler(p, &[Fred, Bls, Fhfa], 100_000);
+        let first = s.tick().await.unwrap();
+        assert_eq!(first.series_skipped, 0, "{first:?}");
+        let expected = set(&[
+            "BLS/t15c_d_bls",
+            "FRED/t15c_d_annual",
+            "FRED/t15c_d_monthly",
+            "FRED/t15c_d_queued",
+        ]);
+        assert_eq!(queued_series(p).await, expected);
+        let rows = queue_rows(p, JobKind::FetchSeries).await;
+        let t15c: Vec<&QueueRow> = rows
+            .iter()
+            .filter(|r| r.series_id.starts_with("t15c_"))
+            .collect();
+        assert_eq!(t15c.len(), expected.len(), "one job per series");
+
+        let second = s.tick().await.unwrap();
+        assert_eq!(second.series_enqueued, 0, "{second:?}");
+        assert_eq!(queued_series(p).await, expected);
+        set_enabled(p, Fhfa, true).await;
+    }
+
+    /// Discovered series and due refreshes alternate, so a big discovery can't starve refreshes.
+    #[tokio::test]
+    async fn discovered_series_and_refreshes_share_the_batch() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        let fhfa = persist::data_source_id(p, SourceId::Fhfa).await.unwrap();
+        for table in ["economic_series", "series_metadata"] {
+            exec(
+                p,
+                &format!(
+                    "UPDATE {table} SET is_active = false \
+                     WHERE source_id = '{fhfa}' AND external_id NOT LIKE 't15c\\_%'"
+                ),
+            )
+            .await;
+        }
+        set_enabled(p, SourceId::Fhfa, true).await;
+        discover(
+            p,
+            SourceId::Fhfa,
+            &[
+                ("t15c_new_1", "Daily"),
+                ("t15c_new_2", "Daily"),
+                ("t15c_new_3", "Daily"),
+            ],
+        )
+        .await;
+        seed(p, SourceId::Fhfa, "t15c_old_9", "Daily", Some(9.0), None).await;
+        seed(p, SourceId::Fhfa, "t15c_old_5", "Daily", Some(5.0), None).await;
+        seed(p, SourceId::Fhfa, "t15c_fresh", "Daily", Some(0.1), None).await;
+
+        let s = scheduler(p, &[SourceId::Fhfa], 3);
+        s.tick().await.unwrap();
+        // Oldest refresh, first discovered, next oldest refresh.
+        assert_eq!(
+            queued_series(p).await,
+            set(&["FHFA/t15c_new_1", "FHFA/t15c_old_5", "FHFA/t15c_old_9"])
+        );
+        s.tick().await.unwrap();
+        assert_eq!(queued_series(p).await.len(), 5);
+    }
+
+    /// A discovered series has no `crawl_attempts` until it has a series row, so its failed
+    /// `fetch_series` jobs drive the backoff (twice the interval, 14 days for monthly).
+    #[tokio::test]
+    async fn failed_discovered_series_back_off_twice_the_interval() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        let fred = SourceId::Fred;
+        discover(
+            p,
+            fred,
+            &[
+                ("t15c_df_recent", "Monthly"),
+                ("t15c_df_old", "Monthly"),
+                ("t15c_df_old_then_recent", "Monthly"),
+            ],
+        )
+        .await;
+        seed_failed_job(p, fred, "t15c_df_recent", 3.0).await;
+        seed_failed_job(p, fred, "t15c_df_old", 20.0).await;
+        seed_failed_job(p, fred, "t15c_df_old_then_recent", 30.0).await;
+        seed_failed_job(p, fred, "t15c_df_old_then_recent", 2.0).await;
+
+        scheduler(p, &[fred], DEFAULT_BATCH_LIMIT)
+            .tick()
+            .await
+            .unwrap();
+        assert_eq!(queued_series(p).await, set(&["FRED/t15c_df_old"]));
     }
 
     #[tokio::test]
