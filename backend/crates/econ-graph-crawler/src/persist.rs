@@ -225,9 +225,11 @@ async fn upsert_points(
          SELECT $1, t.date, t.value, t.revision_date, t.is_original_release \
          FROM UNNEST($2::date[], $3::numeric[], $4::date[], $5::bool[]) \
              AS t(date, value, revision_date, is_original_release) \
-         ON CONFLICT (series_id, date, revision_date, is_original_release) DO UPDATE \
-             SET value = EXCLUDED.value, updated_at = NOW() \
-             WHERE data_points.value IS DISTINCT FROM EXCLUDED.value \
+         ON CONFLICT (series_id, date, revision_date) DO UPDATE \
+             SET value = EXCLUDED.value, is_original_release = EXCLUDED.is_original_release, \
+                 updated_at = NOW() \
+             WHERE (data_points.value, data_points.is_original_release) \
+                 IS DISTINCT FROM (EXCLUDED.value, EXCLUDED.is_original_release) \
          RETURNING (old.id IS NULL) AS inserted",
     )
     .bind::<SqlUuid, _>(series_id)
@@ -251,9 +253,10 @@ async fn upsert_points(
 ///   [`UNKNOWN_FREQUENCY`]). When `fetched.metadata` is present, its non-empty fields replace the
 ///   stored ones; absent fields keep their stored values. Always sets `last_crawled_at`,
 ///   `last_updated`, `crawl_status = 'success'` and clears `crawl_error_message`.
-/// - Points: upserted on the `data_points` unique key `(series_id, date, revision_date,
-///   is_original_release)` in chunks of [`INSERT_CHUNK`]; a conflicting row gets the new value
-///   only if it differs.
+/// - Points: upserted on the `data_points` unique key `(series_id, date, revision_date)` in
+///   chunks of [`INSERT_CHUNK`]; a conflicting row gets the new value only if it differs. Each
+///   distinct `revision_date` is a vintage: the database links it to its neighbours
+///   (`superseded_on`), so revisions may arrive in any order.
 ///   Duplicate keys in the input keep the last occurrence.
 /// - `start_date` / `end_date` are recomputed from the stored points.
 pub async fn persist_series(
@@ -275,7 +278,7 @@ pub async fn persist_series(
     // Last occurrence wins for duplicate keys (one INSERT can't touch a row twice).
     let mut unique = BTreeMap::new();
     for p in &fetched.points {
-        unique.insert((p.date, p.revision_date, p.is_original_release), p);
+        unique.insert((p.date, p.revision_date), p);
     }
     let latest_date = unique.keys().map(|k| k.0).max();
 

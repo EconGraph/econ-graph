@@ -75,7 +75,8 @@ impl BatchFn<Uuid, Option<DataSource>> for DataSourceBatcher {
     }
 }
 
-/// DataLoader batcher for efficiently loading data points by series ID
+/// DataLoader batcher for efficiently loading data points by series ID.
+/// Returns current values only (one per observation date), not superseded revisions.
 pub struct DataPointsBySeriesBatcher {
     pub pool: DatabasePool,
 }
@@ -102,6 +103,7 @@ impl BatchFn<Uuid, Vec<DataPoint>> for DataPointsBySeriesBatcher {
 
             let data_points = match dsl::data_points
                 .filter(dsl::series_id.eq_any(&keys))
+                .filter(dsl::superseded_on.is_null())
                 .order(dsl::date.desc())
                 .load::<DataPoint>(&mut conn)
                 .await
