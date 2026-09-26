@@ -1,0 +1,12 @@
+# Topic roadmaps the roadmap index already links to but whose own PRs are
+# still open. Delete a line in the PR that adds that file. Anchored on the
+# checkout directory (econ-graph in CI) so a mistyped path to the same file
+# name elsewhere is still reported.
+/econ-graph/docs/roadmap/admin-ui\.md$
+/econ-graph/docs/roadmap/auth-plans-permissions\.md$
+/econ-graph/docs/roadmap/data-sources\.md$
+/econ-graph/docs/roadmap/feature-flags\.md$
+/econ-graph/docs/roadmap/federation\.md$
+/econ-graph/docs/roadmap/global-analysis\.md$
+/econ-graph/docs/roadmap/releases\.md$
+/econ-graph/docs/roadmap/sec-financial-data\.md$
