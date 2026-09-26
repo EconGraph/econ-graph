@@ -158,6 +158,7 @@ jobs:
           -e BACKEND_PORT=$BACKEND_PORT \
           -e FRONTEND_PORT=$FRONTEND_PORT \
           -e CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS" \
+          -e JWT_SECRET="$(openssl rand -hex 32)" \
           econ-graph-e2e-optimized:latest \
           npm run start:backend
 
@@ -304,6 +305,7 @@ jobs:
           -e BACKEND_PORT=$BACKEND_PORT \
           -e FRONTEND_PORT=$FRONTEND_PORT \
           -e CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS" \
+          -e JWT_SECRET="$(openssl rand -hex 32)" \
           econ-graph-e2e-optimized:latest \
           npm run start:backend
 
@@ -451,6 +453,7 @@ jobs:
           -e BACKEND_PORT=$BACKEND_PORT \
           -e FRONTEND_PORT=$FRONTEND_PORT \
           -e CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS" \
+          -e JWT_SECRET="$(openssl rand -hex 32)" \
           econ-graph-e2e-optimized:latest \
           npm run start:backend
 
@@ -597,6 +600,7 @@ jobs:
           -e BACKEND_PORT=$BACKEND_PORT \
           -e FRONTEND_PORT=$FRONTEND_PORT \
           -e CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS" \
+          -e JWT_SECRET="$(openssl rand -hex 32)" \
           econ-graph-e2e-optimized:latest \
           npm run start:backend
 
@@ -743,6 +747,7 @@ jobs:
           -e BACKEND_PORT=$BACKEND_PORT \
           -e FRONTEND_PORT=$FRONTEND_PORT \
           -e CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS" \
+          -e JWT_SECRET="$(openssl rand -hex 32)" \
           econ-graph-e2e-optimized:latest \
           npm run start:backend
 

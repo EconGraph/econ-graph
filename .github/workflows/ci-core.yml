@@ -361,6 +361,8 @@ jobs:
         DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
         BACKEND_PORT: 9877
         CHART_API_SERVICE_URL: http://localhost:3001/api/chart
+        # The backend refuses to start without one; this job never issues real tokens
+        JWT_SECRET: ci-only-jwt-secret
 
     - name: Run MCP server integration tests
       working-directory: backend
