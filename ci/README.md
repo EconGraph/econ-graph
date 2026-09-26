@@ -10,9 +10,7 @@ ci/
 ├── docker/                     # Docker configurations for CI
 ├── docs/                       # CI/CD documentation
 │   ├── README.md              # CI documentation index
-│   ├── CI_FAILURE_ANALYSIS_AND_FIXES.md
 │   ├── CI_FAILURE_TROUBLESHOOTING.md
-│   ├── E2E_TEST_FAILURE_ANALYSIS.md
 │   └── workflow-status-report.md
 ├── scripts/                    # CI/CD automation scripts
 │   └── validate-ci-workflows.sh  # GitHub Actions workflow validation

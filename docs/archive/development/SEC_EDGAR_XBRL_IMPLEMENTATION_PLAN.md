@@ -1,3 +1,5 @@
+> Superseded by the SEC financial data roadmap, proposed in [#193](https://github.com/EconGraph/econ-graph/pull/193) as `docs/roadmap/sec-financial-data.md`. Kept for history only; its completion claims are not accurate.
+
 # SEC EDGAR XBRL Financial Data Implementation Plan
 
 ## Executive Summary
