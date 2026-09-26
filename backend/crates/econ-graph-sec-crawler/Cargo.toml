@@ -20,7 +20,7 @@ async-trait.workspace = true
 once_cell.workspace = true
 
 # HTTP and networking
-reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+reqwest = { version = "0.13", features = ["json", "stream", "multipart"] }
 tokio-util = { version = "0.7", features = ["io"] }
 
 # Configuration
@@ -47,34 +47,34 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 # File system operations
-walkdir = "2.4"
-tempfile = "3.8"
+walkdir = "2.5"
+tempfile = "3.27"
 
 # XML parsing for XBRL
-quick-xml = "0.36"
-roxmltree = "0.20"
-xml = "1.0"
+quick-xml = "0.42"
+roxmltree = "0.21"
+xml = "1.4"
 
 # Database
-diesel = { version = "2.2", features = ["postgres", "chrono", "uuid", "numeric"] }
-diesel-async = { version = "=0.6.1", features = ["postgres", "bb8"] }
+diesel = { version = "2.3", features = ["postgres", "chrono", "uuid", "numeric"] }
+diesel-async = { version = "=0.9.2", features = ["postgres", "bb8"] }
 
 # Regular expressions
-regex = "1.10"
+regex = "1.13"
 
 # Retry logic
 backoff = "0.4"
 
 # Progress tracking
-indicatif = "0.17"
+indicatif = "0.18"
 
 # Compression
-zstd = "0.13"
+zstd = "0.14"
 
 # Hashing for file integrity
 sha2.workspace = true
 hex = "0.4"
-md5 = "0.7"
+md5 = "0.8"
 
 # Local dependencies
 econ-graph-core = { path = "../econ-graph-core" }
@@ -93,8 +93,8 @@ serial_test.workspace = true
 
 # Test utilities
 assert_matches = "1.5"
-rstest = "0.19"
-rstest_reuse = "0.6"
+rstest = "0.27"
+rstest_reuse = "0.7"
 
 [[bin]]
 name = "sec-crawler"

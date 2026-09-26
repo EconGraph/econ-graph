@@ -21,9 +21,9 @@
 # dependencies fresh (exact `=` pins in the workspace Cargo.toml keep the risky ones
 # stable). If a local Cargo.lock exists it IS copied in and honoured.
 
-# Keep in sync with rust-toolchain.toml at the repository root (channel = "1.89.0").
+# Keep in sync with rust-toolchain.toml at the repository root (channel = "1.98.1").
 # Bookworm to match the runtime image's glibc/OpenSSL/libpq.
-ARG RUST_VERSION=1.89.0
+ARG RUST_VERSION=1.98.1
 
 ############################
 # Build stage

@@ -196,7 +196,7 @@ impl QueryFilter {
     fn check_rules(&self, query: &str) -> Result<(), String> {
         // Sort rules by priority (higher priority first)
         let mut sorted_rules = self.rules.clone();
-        sorted_rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        sorted_rules.sort_by_key(|r| std::cmp::Reverse(r.priority));
 
         for rule in sorted_rules {
             if !rule.enabled {

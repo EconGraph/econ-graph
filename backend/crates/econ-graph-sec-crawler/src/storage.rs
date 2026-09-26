@@ -458,7 +458,7 @@ impl XbrlStorage {
         // Calculate file hash
         let mut hasher = Sha256::new();
         hasher.update(content);
-        let file_hash = format!("sha256:{:x}", hasher.finalize());
+        let file_hash = format!("sha256:{}", hex::encode(hasher.finalize()));
 
         // Determine file type and source type
         let file_type = if reference.reference_type == "schemaRef" {

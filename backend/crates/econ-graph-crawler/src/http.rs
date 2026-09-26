@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use econ_graph_metrics::crawler::CRAWLER_METRICS;
-use rand::Rng;
+use rand::RngExt;
 use reqwest::header::{HeaderMap, ACCEPT, CONTENT_TYPE, RETRY_AFTER};
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
@@ -488,7 +488,7 @@ fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
 /// In-process retry delay before retry `attempt + 1`: 250ms * 4^attempt, ±25% jitter.
 fn backoff_delay(attempt: u32) -> Duration {
     let base = RETRY_BASE_DELAY.saturating_mul(4u32.saturating_pow(attempt));
-    base.mul_f64(rand::thread_rng().gen_range(0.75..=1.25))
+    base.mul_f64(rand::rng().random_range(0.75..=1.25))
 }
 
 #[cfg(test)]

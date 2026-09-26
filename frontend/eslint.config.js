@@ -101,6 +101,16 @@ export default [
       ...typescript.configs.recommended.rules,
       ...react.configs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
+      // eslint-plugin-react-hooks 7 adds the React Compiler rules to `recommended` as errors.
+      // Keep the classic hook rules as errors; report the compiler rules as warnings until the
+      // flagged components are refactored.
+      ...Object.fromEntries(
+        Object.keys(reactHooks.configs.recommended.rules)
+          .filter(
+            rule => !['react-hooks/rules-of-hooks', 'react-hooks/exhaustive-deps'].includes(rule)
+          )
+          .map(rule => [rule, 'warn'])
+      ),
       ...jsxA11y.configs.recommended.rules,
       ...jsdoc.configs.recommended.rules,
 
@@ -135,7 +145,7 @@ export default [
 
       // Import rules - temporarily disable path resolution warnings
       'import/no-unresolved': 'off',
-      
+
       // JSDoc rules for documentation quality (initially lenient)
       'jsdoc/require-jsdoc': [
         'warn',

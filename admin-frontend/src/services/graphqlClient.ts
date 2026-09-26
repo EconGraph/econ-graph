@@ -18,6 +18,26 @@ import { setContext } from "@apollo/client/link/context";
 import { onError } from "@apollo/client/link/error";
 import { RetryLink } from "@apollo/client/link/retry";
 
+// Apollo Client 4.3+ requires non-default `errorPolicy` defaults to be declared for type safety.
+// Keep in sync with `defaultOptions` below.
+/* eslint-disable @typescript-eslint/no-namespace -- Apollo declares these as namespaces; augmentation must match. */
+declare module "@apollo/client" {
+  namespace ApolloClient {
+    namespace DeclareDefaultOptions {
+      interface WatchQuery {
+        errorPolicy: "all";
+      }
+      interface Query {
+        errorPolicy: "all";
+      }
+      interface Mutate {
+        errorPolicy: "all";
+      }
+    }
+  }
+}
+/* eslint-enable @typescript-eslint/no-namespace */
+
 // GraphQL endpoint configuration
 const GRAPHQL_ENDPOINT =
   process.env.REACT_APP_GRAPHQL_ENDPOINT || "http://localhost:8080/graphql";

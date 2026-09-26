@@ -44,7 +44,7 @@ mod simple_tests {
 
         let change = yoy_change.unwrap();
         // Should be 10% change
-        assert!(change > BigDecimal::from(9) && change < BigDecimal::from(11));
+        assert!(change > 9 && change < 11);
     }
 
     #[test]
@@ -72,7 +72,7 @@ mod simple_tests {
 
         let change = qoq_change.unwrap();
         // Should be 5% change
-        assert!(change > BigDecimal::from(4) && change < BigDecimal::from(6));
+        assert!(change > 4 && change < 6);
     }
 
     #[test]
@@ -100,7 +100,7 @@ mod simple_tests {
 
         let change = mom_change.unwrap();
         // Should be 2% change
-        assert!(change > BigDecimal::from(1) && change < BigDecimal::from(3));
+        assert!(change > 1 && change < 3);
     }
 
     #[test]

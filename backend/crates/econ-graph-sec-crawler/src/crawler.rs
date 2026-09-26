@@ -545,34 +545,28 @@ impl SecEdgarCrawler {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(ref e)) => {
-                    if e.name().as_ref() == b"schemaRef" || e.name().as_ref() == b"linkbaseRef" {
+                    if e.name().as_ref() == "schemaRef" || e.name().as_ref() == "linkbaseRef" {
                         let mut href = None;
                         let mut role = None;
                         let mut arcrole = None;
 
                         for attr in e.attributes().flatten() {
                             match attr.key.as_ref() {
-                                b"href" => {
-                                    if let Ok(value) = std::str::from_utf8(&attr.value) {
-                                        href = Some(value.to_string());
-                                    }
+                                "href" => {
+                                    href = Some(attr.value.to_string());
                                 }
-                                b"role" => {
-                                    if let Ok(value) = std::str::from_utf8(&attr.value) {
-                                        role = Some(value.to_string());
-                                    }
+                                "role" => {
+                                    role = Some(attr.value.to_string());
                                 }
-                                b"arcrole" => {
-                                    if let Ok(value) = std::str::from_utf8(&attr.value) {
-                                        arcrole = Some(value.to_string());
-                                    }
+                                "arcrole" => {
+                                    arcrole = Some(attr.value.to_string());
                                 }
                                 _ => {}
                             }
                         }
 
                         if let Some(href) = href {
-                            let reference_type = if e.name().as_ref() == b"schemaRef" {
+                            let reference_type = if e.name().as_ref() == "schemaRef" {
                                 "schemaRef"
                             } else {
                                 "linkbaseRef"

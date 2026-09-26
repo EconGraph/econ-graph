@@ -107,7 +107,7 @@ mod tests {
         // Verify schema is created successfully
         // Note: We can't easily test the schema structure without a real database
         // This test just ensures the schema can be created without panicking
-        assert!(std::ptr::addr_of!(schema) != std::ptr::null());
+        assert!(!std::ptr::addr_of!(schema).is_null());
     }
 
     /// Test schema creation with additional data
@@ -122,6 +122,6 @@ mod tests {
         // Verify schema is created successfully
         // Note: We can't easily test the schema structure without a real database
         // This test just ensures the schema can be created without panicking
-        assert!(std::ptr::addr_of!(schema) != std::ptr::null());
+        assert!(!std::ptr::addr_of!(schema).is_null());
     }
 }

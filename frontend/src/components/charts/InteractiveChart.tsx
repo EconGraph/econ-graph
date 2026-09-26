@@ -244,7 +244,7 @@ const InteractiveChart: React.FC<ChartProps> = ({ data, title, units, frequency 
         // REQUIREMENT: Mouse-overs to see individual values and corresponding dates in tooltips
         callbacks: {
           title: (context: TooltipItem<'line'>[]) => {
-            const date = new Date(context[0].parsed.x);
+            const date = new Date(context[0].parsed.x ?? 0);
             return date.toLocaleDateString('en-US', {
               year: 'numeric',
               month: 'long',

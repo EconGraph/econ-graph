@@ -352,7 +352,7 @@ mod tests {
     /// `burst + window / T` (checked exactly, in integer nanoseconds).
     #[tokio::test(start_paused = true)]
     async fn grants_conform_under_concurrent_demand() {
-        use rand::{Rng, SeedableRng};
+        use rand::{RngExt, SeedableRng};
         for (rps, burst) in [(2.0, 4u32), (2.0, 1), (3.0, 3), (25.0 / 60.0, 1)] {
             let l = limiter_for(SourceId::Fred, rps, burst, 8);
             let grants = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -364,11 +364,11 @@ mod tests {
                     for _ in 0..15 {
                         let permit = l.acquire(SourceId::Fred).await;
                         grants.lock().unwrap().push(Instant::now());
-                        let hold = rng.gen_range(0..300);
+                        let hold = rng.random_range(0..300);
                         tokio::time::sleep(Duration::from_millis(hold)).await;
                         drop(permit);
-                        if rng.gen_bool(0.2) {
-                            let idle = rng.gen_range(500..5000);
+                        if rng.random_bool(0.2) {
+                            let idle = rng.random_range(500..5000);
                             tokio::time::sleep(Duration::from_millis(idle)).await;
                         }
                     }

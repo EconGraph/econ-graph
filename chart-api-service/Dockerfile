@@ -1,5 +1,5 @@
 # Multi-stage build for Chart API Service
-FROM node:18-alpine AS builder
+FROM node:24-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -11,7 +11,7 @@ COPY package*.json ./
 RUN npm ci --only=production && npm cache clean --force
 
 # Production stage
-FROM node:18-alpine AS production
+FROM node:24-alpine AS production
 
 # Create app user (use existing node user if available)
 RUN addgroup -S nodejs 2>/dev/null || true && \

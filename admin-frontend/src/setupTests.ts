@@ -1,6 +1,6 @@
 // Vitest setup file for MSW integration
 import { beforeAll, afterEach, afterAll, vi } from "vitest";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/vitest";
 
 // MSW setup - based on MSW examples
 import "whatwg-fetch";

@@ -18,6 +18,8 @@ econ-graph-mcp = { path = "../econ-graph-mcp" }
 
 # Web framework
 warp.workspace = true
+# Must match the hyper major used by warp 0.3; used to serve warp routes HTTP/1.1-only.
+hyper = { version = "0.14", features = ["server", "http1", "tcp"] }
 tokio-stream.workspace = true
 
 # Async runtime

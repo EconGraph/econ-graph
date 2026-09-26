@@ -18,7 +18,6 @@ use std::time::Duration;
 use chrono::{NaiveDate, Utc};
 use diesel::prelude::*;
 use diesel::sql_types::{Bool, Date, Int8, Nullable, Text, Uuid as SqlUuid};
-use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use econ_graph_core::error::{AppError, AppResult};
 use econ_graph_core::models::{DataSource, NewCrawlAttempt, NewDataPoint, NewDataSource};
@@ -210,6 +209,15 @@ struct CountRow {
     n: i64,
 }
 
+/// Number of `data_points` rows stored for `series_id`.
+async fn count_points(conn: &mut AsyncPgConnection, series_id: Uuid) -> QueryResult<i64> {
+    diesel::sql_query("SELECT COUNT(*) AS n FROM data_points WHERE series_id = $1")
+        .bind::<SqlUuid, _>(series_id)
+        .get_result::<CountRow>(conn)
+        .await
+        .map(|row| row.n)
+}
+
 /// Upserts the `economic_series` row for `(source, external_id)` and all `fetched.points`, in one
 /// transaction.
 ///
@@ -244,8 +252,7 @@ pub async fn persist_series(
     }
     let latest_date = unique.keys().map(|k| k.0).max();
 
-    conn.transaction::<SeriesWrite, AppError, _>(move |conn| {
-        async move {
+    conn.transaction::<SeriesWrite, AppError, _>(async move |conn| {
             let row: UpsertedSeries = diesel::sql_query(
                 "INSERT INTO economic_series (source_id, external_id, title, description, units, \
                      frequency, seasonal_adjustment, is_active, first_discovered_at, last_crawled_at, \
@@ -274,12 +281,7 @@ pub async fn persist_series(
             .await?;
             let series_id = row.id;
 
-            let count_points = |conn: &mut AsyncPgConnection| {
-                diesel::sql_query("SELECT COUNT(*) AS n FROM data_points WHERE series_id = $1")
-                    .bind::<SqlUuid, _>(series_id)
-                    .get_result::<CountRow>(conn)
-            };
-            let before = count_points(conn).await?.n;
+            let before = count_points(conn, series_id).await?;
 
             let rows: Vec<NewDataPoint> = unique
                 .values()
@@ -311,7 +313,7 @@ pub async fn persist_series(
                     .await?;
             }
 
-            let after = count_points(conn).await?.n;
+            let after = count_points(conn, series_id).await?;
 
             if !rows.is_empty() {
                 diesel::sql_query(
@@ -332,8 +334,6 @@ pub async fn persist_series(
                 points_new: usize::try_from(after - before).unwrap_or(0),
                 latest_date,
             })
-        }
-        .scope_boxed()
     })
     .await
 }
@@ -376,31 +376,28 @@ pub async fn persist_discovered(
         })
         .collect();
 
-    conn.transaction::<usize, AppError, _>(|conn| {
-        async move {
-            let mut written = 0;
-            for chunk in rows.chunks(INSERT_CHUNK) {
-                let now = Utc::now();
-                written += diesel::insert_into(sm::series_metadata)
-                    .values(chunk)
-                    .on_conflict((sm::source_id, sm::external_id))
-                    .do_update()
-                    .set((
-                        sm::title.eq(excluded(sm::title)),
-                        sm::description.eq(excluded(sm::description)),
-                        sm::units.eq(excluded(sm::units)),
-                        sm::frequency.eq(excluded(sm::frequency)),
-                        sm::data_url.eq(excluded(sm::data_url)),
-                        sm::is_active.eq(true),
-                        sm::last_discovered_at.eq(now),
-                        sm::updated_at.eq(now),
-                    ))
-                    .execute(conn)
-                    .await?;
-            }
-            Ok(written)
+    conn.transaction::<usize, AppError, _>(async move |conn| {
+        let mut written = 0;
+        for chunk in rows.chunks(INSERT_CHUNK) {
+            let now = Utc::now();
+            written += diesel::insert_into(sm::series_metadata)
+                .values(chunk)
+                .on_conflict((sm::source_id, sm::external_id))
+                .do_update()
+                .set((
+                    sm::title.eq(excluded(sm::title)),
+                    sm::description.eq(excluded(sm::description)),
+                    sm::units.eq(excluded(sm::units)),
+                    sm::frequency.eq(excluded(sm::frequency)),
+                    sm::data_url.eq(excluded(sm::data_url)),
+                    sm::is_active.eq(true),
+                    sm::last_discovered_at.eq(now),
+                    sm::updated_at.eq(now),
+                ))
+                .execute(conn)
+                .await?;
         }
-        .scope_boxed()
+        Ok(written)
     })
     .await
 }

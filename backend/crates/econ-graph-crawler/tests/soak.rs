@@ -41,7 +41,7 @@ use econ_graph_crawler::{
     AdapterRegistry, ApiKeys, CrawlCtx, CrawlError, DiscoveredSeries, FetchedSeries, HttpConfig,
     HttpFetcher, SourceAdapter, SourceId, SourcePolicy, Worker, WorkerConfig,
 };
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
@@ -89,7 +89,7 @@ impl Respond for Upstream {
     fn respond(&self, req: &Request) -> ResponseTemplate {
         let now = Instant::now();
         let series = self.series_of(req);
-        let roll: f64 = self.rng.lock().unwrap().gen();
+        let roll: f64 = self.rng.lock().unwrap().random();
         let (status, resp) = if self.flaky.contains(&series) || roll < 0.05 {
             (
                 500,
@@ -387,7 +387,7 @@ async fn run_phase(
                 &NewCrawlQueueItem {
                     source: src.as_str().to_string(),
                     series_id: format!("soak_{name}_{p}_{i:03}"),
-                    priority: rng.gen_range(1..=10),
+                    priority: rng.random_range(1..=10),
                     max_retries: MAX_RETRIES,
                     ..Default::default()
                 },
@@ -590,9 +590,9 @@ async fn limiter_permits_conform_to_policy() {
                         .lock()
                         .unwrap()
                         .push(tokio::time::Instant::now().into_std());
-                    tokio::time::sleep(Duration::from_millis(rng.gen_range(0..300))).await;
+                    tokio::time::sleep(Duration::from_millis(rng.random_range(0..300))).await;
                     drop(permit);
-                    if rng.gen_bool(0.2) {
+                    if rng.random_bool(0.2) {
                         tokio::time::sleep(Duration::from_millis(1500)).await; // let tokens refill
                     }
                 }
