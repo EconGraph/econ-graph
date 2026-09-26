@@ -12,7 +12,9 @@ CREATE TABLE datasets (
     name VARCHAR(500) NOT NULL,
     description TEXT,
     -- Each of these is a JSON array of components:
-    --   {"name", "label", "type", "unit"?, "codes"?: {code: label}}
+    --   {"name", "label", "type", "unit"?, "codes"?, "codelist"?}
+    -- where "codes" is an inline list of {"code", "label", "unit"?, "description"?} and
+    -- "codelist" names a shared code list loaded at runtime (e.g. "countries").
     -- Dimensions are listed in key order; the canonical series key follows that order.
     dimensions JSONB NOT NULL DEFAULT '[]'::jsonb,
     measures JSONB NOT NULL DEFAULT '[{"name": "value", "label": "Value", "type": "decimal"}]'::jsonb,
@@ -44,27 +46,40 @@ CREATE TRIGGER update_datasets_updated_at
 -- Series columns. dataset_id stays nullable until every train 1 adapter declares its datasets.
 -- dimensions holds the series' dimension values as a flat object of strings,
 -- e.g. {"geo_level": "state", "state": "06", "variable": "ESTAB"}; '{}' when it has none.
+-- Values must be strings (strict mode stops the path from unwrapping arrays such as
+-- {"state": ["06"]}), and only a series with a dataset may have any.
 -- default_measure overrides the dataset's; NULL means use the dataset's.
+--
+-- The composite foreign key also makes a series' dataset belong to the series' own source
+-- (source_id is NOT NULL, so it is checked whenever dataset_id is set). It has no ON DELETE
+-- action: a dataset cannot be deleted while series use it, while deleting a data source
+-- cascades to both.
 ALTER TABLE economic_series
-    ADD COLUMN dataset_id UUID REFERENCES datasets(id),
+    ADD COLUMN dataset_id UUID,
     ADD COLUMN dimensions JSONB NOT NULL DEFAULT '{}'::jsonb,
     ADD COLUMN default_measure VARCHAR(100),
     ADD CONSTRAINT economic_series_dataset_source_fkey
         FOREIGN KEY (dataset_id, source_id) REFERENCES datasets(id, source_id),
     ADD CONSTRAINT economic_series_dimensions_is_string_object CHECK (
         jsonb_typeof(dimensions) = 'object'
-        AND NOT jsonb_path_exists(dimensions, '$.* ? (@.type() != "string")')
+        AND NOT jsonb_path_exists(dimensions, 'strict $.* ? (@.type() != "string")')
+    ),
+    ADD CONSTRAINT economic_series_dimensions_need_dataset CHECK (
+        dataset_id IS NOT NULL OR dimensions = '{}'::jsonb
     );
 
 ALTER TABLE series_metadata
-    ADD COLUMN dataset_id UUID REFERENCES datasets(id),
+    ADD COLUMN dataset_id UUID,
     ADD COLUMN dimensions JSONB NOT NULL DEFAULT '{}'::jsonb,
     ADD COLUMN default_measure VARCHAR(100),
     ADD CONSTRAINT series_metadata_dataset_source_fkey
         FOREIGN KEY (dataset_id, source_id) REFERENCES datasets(id, source_id),
     ADD CONSTRAINT series_metadata_dimensions_is_string_object CHECK (
         jsonb_typeof(dimensions) = 'object'
-        AND NOT jsonb_path_exists(dimensions, '$.* ? (@.type() != "string")')
+        AND NOT jsonb_path_exists(dimensions, 'strict $.* ? (@.type() != "string")')
+    ),
+    ADD CONSTRAINT series_metadata_dimensions_need_dataset CHECK (
+        dataset_id IS NOT NULL OR dimensions = '{}'::jsonb
     );
 
 -- Cross-section filters such as dimensions @> '{"indicator": "NY.GDP.PCAP.CD"}'.

@@ -6,6 +6,7 @@ DROP INDEX IF EXISTS idx_series_metadata_dimensions;
 DROP INDEX IF EXISTS idx_economic_series_dimensions;
 
 ALTER TABLE series_metadata
+    DROP CONSTRAINT IF EXISTS series_metadata_dimensions_need_dataset,
     DROP CONSTRAINT IF EXISTS series_metadata_dimensions_is_string_object,
     DROP CONSTRAINT IF EXISTS series_metadata_dataset_source_fkey,
     DROP COLUMN IF EXISTS default_measure,
@@ -13,6 +14,7 @@ ALTER TABLE series_metadata
     DROP COLUMN IF EXISTS dataset_id;
 
 ALTER TABLE economic_series
+    DROP CONSTRAINT IF EXISTS economic_series_dimensions_need_dataset,
     DROP CONSTRAINT IF EXISTS economic_series_dimensions_is_string_object,
     DROP CONSTRAINT IF EXISTS economic_series_dataset_source_fkey,
     DROP COLUMN IF EXISTS default_measure,
