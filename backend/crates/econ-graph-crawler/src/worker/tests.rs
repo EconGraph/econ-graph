@@ -29,6 +29,7 @@ use crate::adapter::{
     AdapterRegistry, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
     NewSeriesMetadataLite, SourceAdapter,
 };
+use crate::dataset::{parse_dataset_file, DatasetCatalog, SeriesDataset};
 use crate::persist;
 use crate::policy::SourcePolicy;
 use crate::testkit::{fast_policy, test_ctx_with, MockSource, Reply, Route};
@@ -51,6 +52,7 @@ async fn db() -> Option<Db> {
             "DELETE FROM crawl_queue",
             "DELETE FROM series_metadata WHERE external_id LIKE 't5\\_%'",
             "DELETE FROM economic_series WHERE external_id LIKE 't5\\_%'",
+            "DELETE FROM datasets WHERE code LIKE 't5\\_%'",
         ] {
             diesel::sql_query(sql).execute(&mut conn).await.unwrap();
         }
@@ -83,10 +85,58 @@ struct CatalogBody {
     series: Vec<(String, String)>,
 }
 
+/// Dataset the test adapter declares: dimensions `indicator` and `area`.
+const DATASET: &str = "t5_ds";
+
+const DATASET_TOML: &str = r#"
+[[dataset]]
+code = "t5_ds"
+name = "Test dataset"
+
+[[dataset.dimensions]]
+name = "indicator"
+label = "Indicator"
+
+[[dataset.dimensions]]
+name = "area"
+label = "Area"
+"#;
+
+/// The dataset the test adapter attaches to `external_id`, chosen by its prefix: `t5_ds_*` is in
+/// [`DATASET`], `t5_badkeys_*` has the wrong dimension keys, `t5_undeclared_*` names a dataset the
+/// adapter does not declare; anything else has none.
+fn test_dataset(external_id: &str) -> Option<SeriesDataset> {
+    if external_id.starts_with("t5_ds_") {
+        Some(SeriesDataset::new(
+            DATASET,
+            [("indicator", external_id), ("area", "USA")],
+        ))
+    } else if external_id.starts_with("t5_badkeys_") {
+        Some(SeriesDataset::new(DATASET, [("indicator", external_id)]))
+    } else if external_id.starts_with("t5_undeclared_") {
+        Some(SeriesDataset::new("t5_other", [("indicator", external_id)]))
+    } else {
+        None
+    }
+}
+
+fn test_catalog() -> DatasetCatalog {
+    let mut c = DatasetCatalog::empty();
+    for id in [SRC, OTHER] {
+        c.insert(id, &[DATASET], parse_dataset_file(DATASET_TOML).unwrap())
+            .unwrap();
+    }
+    c
+}
+
 #[async_trait]
 impl SourceAdapter for TestAdapter {
     fn id(&self) -> SourceId {
         self.id
+    }
+
+    fn datasets(&self) -> Vec<&str> {
+        vec![DATASET]
     }
 
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
@@ -98,6 +148,7 @@ impl SourceAdapter for TestAdapter {
             .series
             .into_iter()
             .map(|(id, title)| DiscoveredSeries {
+                dataset: test_dataset(&id),
                 data_url: Some(format!("{}/series/{id}", self.base_url)),
                 external_id: id,
                 title,
@@ -139,6 +190,7 @@ impl SourceAdapter for TestAdapter {
                 ..Default::default()
             }),
             points,
+            dataset: test_dataset(external_id),
         })
     }
 }
@@ -185,7 +237,7 @@ fn config(worker_id: &str) -> WorkerConfig {
 }
 
 fn worker(pool: &DatabasePool, mock: &MockSource) -> Worker {
-    Worker::new(ctx(pool), registry(mock), config("t5-worker"))
+    Worker::new(ctx(pool), registry(mock), config("t5-worker")).with_datasets(test_catalog())
 }
 
 async fn enqueue(
@@ -657,6 +709,224 @@ async fn discover_job_upserts_series_metadata() {
         .await
         .unwrap();
     assert_eq!(titles, vec!["Series A v2", "Series B renamed"]);
+}
+
+#[derive(QueryableByName, Debug, PartialEq)]
+struct DatasetColumnsRow {
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Uuid>)]
+    dataset_id: Option<Uuid>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Jsonb>)]
+    dimensions: Option<serde_json::Value>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+    default_measure: Option<String>,
+}
+
+/// `dataset_id`, `dimensions` and `default_measure` of `external_id` in `table`.
+async fn dataset_columns(pool: &DatabasePool, table: &str, external_id: &str) -> DatasetColumnsRow {
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query(format!(
+        "SELECT dataset_id, dimensions, default_measure FROM {table} WHERE external_id = $1"
+    ))
+    .bind::<diesel::sql_types::Text, _>(external_id)
+    .get_result(&mut conn)
+    .await
+    .unwrap()
+}
+
+#[derive(QueryableByName)]
+struct DatasetRowTest {
+    #[diesel(sql_type = diesel::sql_types::Uuid)]
+    id: Uuid,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    name: String,
+    #[diesel(sql_type = diesel::sql_types::Jsonb)]
+    dimensions: serde_json::Value,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    default_measure: String,
+}
+
+async fn dataset_row(pool: &DatabasePool, source: SourceId) -> Vec<DatasetRowTest> {
+    let source_id = persist::data_source_id(pool, source).await.unwrap();
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query(
+        "SELECT id, name, dimensions, default_measure FROM datasets \
+         WHERE source_id = $1 AND code = $2",
+    )
+    .bind::<diesel::sql_types::Uuid, _>(source_id)
+    .bind::<diesel::sql_types::Text, _>(DATASET)
+    .load(&mut conn)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn sync_datasets_upserts_rows() {
+    let Some(db) = db().await else { return };
+    let mut catalog = test_catalog();
+    assert_eq!(persist::sync_datasets(&db.pool, &catalog).await.unwrap(), 2);
+    let first = dataset_row(&db.pool, SRC).await;
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].name, "Test dataset");
+    assert_eq!(first[0].default_measure, "value");
+    assert_eq!(
+        first[0].dimensions,
+        serde_json::json!([
+            {"name": "indicator", "label": "Indicator"},
+            {"name": "area", "label": "Area"}
+        ])
+    );
+    assert_eq!(dataset_row(&db.pool, OTHER).await.len(), 1);
+
+    // A changed definition updates the row in place, keeping its id.
+    catalog
+        .insert(
+            SRC,
+            &[DATASET],
+            parse_dataset_file(&DATASET_TOML.replace("Test dataset", "Renamed")).unwrap(),
+        )
+        .unwrap();
+    persist::sync_datasets(&db.pool, &catalog).await.unwrap();
+    let second = dataset_row(&db.pool, SRC).await;
+    assert_eq!(second[0].id, first[0].id);
+    assert_eq!(second[0].name, "Renamed");
+}
+
+#[tokio::test]
+async fn dataset_series_persist_dataset_id_and_dimensions() {
+    let Some(db) = db().await else { return };
+    persist::sync_datasets(&db.pool, &test_catalog())
+        .await
+        .unwrap();
+    let dataset_id = dataset_row(&db.pool, SRC).await[0].id;
+    let mock = MockSource::start().await;
+    mock.mount(
+        &Route::get("/catalog"),
+        Reply::json(serde_json::json!({"series": [["t5_ds_a", "A"], ["t5_plain", "Plain"]]})),
+    )
+    .await;
+    mock.mount(
+        &Route::get("/series/t5_ds_a"),
+        series_json("A", &[("2024-01-01", Some("1"))]),
+    )
+    .await;
+    let w = worker(&db.pool, &mock);
+    let expected = DatasetColumnsRow {
+        dataset_id: Some(dataset_id),
+        dimensions: Some(serde_json::json!({"indicator": "t5_ds_a", "area": "USA"})),
+        default_measure: Some("value".into()),
+    };
+
+    enqueue(
+        &db.pool,
+        SRC.as_str(),
+        "catalog",
+        JobKind::DiscoverCatalog,
+        5,
+    )
+    .await;
+    assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
+    assert_eq!(
+        dataset_columns(&db.pool, "series_metadata", "t5_ds_a").await,
+        expected
+    );
+    let none = DatasetColumnsRow {
+        dataset_id: None,
+        dimensions: None,
+        default_measure: None,
+    };
+    assert_eq!(
+        dataset_columns(&db.pool, "series_metadata", "t5_plain").await,
+        none
+    );
+
+    enqueue(&db.pool, SRC.as_str(), "t5_ds_a", JobKind::FetchSeries, 5).await;
+    assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
+    assert_eq!(
+        dataset_columns(&db.pool, "economic_series", "t5_ds_a").await,
+        expected
+    );
+
+    // A fetch without a dataset keeps the stored one.
+    let fetched = FetchedSeries::default();
+    persist::persist_series(&db.pool, SRC, "t5_ds_a", &fetched)
+        .await
+        .unwrap();
+    assert_eq!(
+        dataset_columns(&db.pool, "economic_series", "t5_ds_a").await,
+        expected
+    );
+}
+
+#[tokio::test]
+async fn undeclared_dataset_or_wrong_keys_fail_before_writing() {
+    let Some(db) = db().await else { return };
+    persist::sync_datasets(&db.pool, &test_catalog())
+        .await
+        .unwrap();
+    let mock = MockSource::start().await;
+    for id in ["t5_badkeys_x", "t5_undeclared_y"] {
+        mock.mount(
+            &Route::get(format!("/series/{id}")),
+            series_json("X", &[("2024-01-01", Some("1"))]),
+        )
+        .await;
+    }
+    let w = worker(&db.pool, &mock);
+    for (id, needle) in [
+        ("t5_badkeys_x", "wrong dimension keys"),
+        ("t5_undeclared_y", "dataset t5_other is not declared"),
+    ] {
+        let job = enqueue(&db.pool, SRC.as_str(), id, JobKind::FetchSeries, 5).await;
+        assert!(matches!(
+            w.run_once().await,
+            Some(JobOutcome::Failed { .. })
+        ));
+        let it = item(&db.pool, job).await;
+        assert_eq!(it.status, "failed");
+        assert!(it.error_message.unwrap().contains(needle));
+        assert!(series_row(&db.pool, id).await.is_none());
+    }
+
+    // Discovery rejects the whole catalog, writing nothing.
+    mock.mount(
+        &Route::get("/catalog"),
+        Reply::json(serde_json::json!({"series": [["t5_ds_ok", "Ok"], ["t5_badkeys_z", "Bad"]]})),
+    )
+    .await;
+    enqueue(
+        &db.pool,
+        SRC.as_str(),
+        "catalog",
+        JobKind::DiscoverCatalog,
+        5,
+    )
+    .await;
+    assert!(matches!(
+        w.run_once().await,
+        Some(JobOutcome::Failed { .. })
+    ));
+    let mut conn = db.pool.get().await.unwrap();
+    let n: i64 = series_metadata::table
+        .filter(series_metadata::external_id.like("t5\\_%"))
+        .count()
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(n, 0);
+}
+
+#[tokio::test]
+async fn persist_rejects_a_dataset_that_was_not_synced() {
+    let Some(db) = db().await else { return };
+    let fetched = FetchedSeries {
+        dataset: test_dataset("t5_ds_unsynced"),
+        ..FetchedSeries::default()
+    };
+    let e = persist::persist_series(&db.pool, SRC, "t5_ds_unsynced", &fetched)
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("sync_datasets"), "{e}");
+    assert!(series_row(&db.pool, "t5_ds_unsynced").await.is_none());
 }
 
 async fn wait_until_completed(pool: &DatabasePool, n: i64) {

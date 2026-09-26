@@ -57,6 +57,7 @@ use tokio::sync::watch;
 use uuid::Uuid;
 
 use crate::adapter::{AdapterRegistry, CrawlCtx};
+use crate::dataset::DatasetCatalog;
 use crate::error::CrawlError;
 use crate::persist::{self, AttemptRecord};
 use crate::source::SourceId;
@@ -221,6 +222,9 @@ pub struct Worker {
     pub registry: AdapterRegistry,
     /// Settings.
     pub config: WorkerConfig,
+    /// Dataset definitions the adapters' series are checked against before they are written.
+    /// Empty unless set with [`with_datasets`](Self::with_datasets).
+    pub datasets: DatasetCatalog,
     handlers: HashMap<(SourceId, JobKind), Arc<dyn JobHandler>>,
     breaker: Mutex<Breaker>,
 }
@@ -234,6 +238,7 @@ impl Worker {
             ctx,
             registry,
             config,
+            datasets: DatasetCatalog::empty(),
             handlers: HashMap::new(),
             breaker: Mutex::new(Breaker::default()),
         }
@@ -259,6 +264,15 @@ impl Worker {
         handler: Arc<dyn JobHandler>,
     ) -> Self {
         self.register_handler(source, kind, handler);
+        self
+    }
+
+    /// Sets the dataset definitions, already synced into `datasets` with
+    /// [`persist::sync_datasets`]. A series naming a dataset that is not in `datasets` fails its
+    /// job, so a worker whose adapters declare datasets needs this.
+    #[must_use]
+    pub fn with_datasets(mut self, datasets: DatasetCatalog) -> Self {
+        self.datasets = datasets;
         self
     }
 
@@ -484,6 +498,8 @@ impl Worker {
         let ctx = self.ctx.clone();
         let id = external_id.to_string();
         let fetched = guarded(async move { adapter.fetch_series(&ctx, &id, since).await }).await?;
+        self.datasets
+            .check(source, external_id, fetched.dataset.as_ref())?;
         let write = persist::persist_series(&self.ctx.pool, source, external_id, &fetched)
             .await
             .map_err(db_error)?;
@@ -503,6 +519,12 @@ impl Worker {
             .ok_or_else(|| CrawlError::Permanent(format!("no adapter registered for {source}")))?;
         let ctx = self.ctx.clone();
         let found = guarded(async move { adapter.discover(&ctx).await }).await?;
+        self.datasets.check_all(
+            source,
+            found
+                .iter()
+                .map(|d| (d.external_id.as_str(), d.dataset.as_ref())),
+        )?;
         let written = persist::persist_discovered(&self.ctx.pool, source, &found)
             .await
             .map_err(db_error)?;

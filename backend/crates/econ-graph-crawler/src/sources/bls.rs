@@ -375,6 +375,7 @@ impl SourceAdapter for BlsAdapter {
                     units: Some(known.units.to_string()),
                     frequency: Some(known.frequency.to_string()),
                     data_url: Some(format!("{}/timeseries/data/{}", self.base_url, known.id)),
+                    dataset: None,
                 });
             }
         }
@@ -451,7 +452,11 @@ impl SourceAdapter for BlsAdapter {
             seasonal_adjustment: c.seasonality,
         });
 
-        Ok(FetchedSeries { metadata, points })
+        Ok(FetchedSeries {
+            metadata,
+            points,
+            dataset: None,
+        })
     }
 }
 

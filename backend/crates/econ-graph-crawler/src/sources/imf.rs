@@ -138,6 +138,7 @@ fn known_series(dataset_id: &str) -> Vec<DiscoveredSeries> {
             units: Some(units.to_string()),
             frequency: Some(frequency.to_string()),
             data_url: None,
+            dataset: None,
         };
     match dataset_id.to_uppercase().as_str() {
         "IFS" => vec![
