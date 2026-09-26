@@ -458,6 +458,100 @@ async fn refetching_unchanged_points_writes_nothing() {
     assert_eq!(point_count(&db.pool, series_id).await, 2);
 }
 
+/// A fetched point for `date` with `value`, published on `revision`.
+fn revision(date: &str, value: &str, revision: &str, original: bool) -> FetchedPoint {
+    FetchedPoint {
+        date: d(date),
+        value: Some(BigDecimal::from_str(value).unwrap()),
+        revision_date: d(revision),
+        is_original_release: original,
+    }
+}
+
+/// `revision_filter` keeps the newest revision, or the newest known on an `as_of` day, and with
+/// `original_only` keeps the original release even when later revisions exist.
+
+#[tokio::test]
+async fn revision_filter_picks_latest_and_as_of_revisions() {
+    let Some(db) = db().await else { return };
+    // January has three revisions, stored out of order; February is first published in May.
+    // Each month's first publication is its original release.
+    let write = persist::persist_series(
+        &db.pool,
+        SRC,
+        "t5_revisions",
+        &FetchedSeries {
+            metadata: None,
+            points: vec![
+                revision("2024-01-01", "3", "2024-04-01", false),
+                revision("2024-01-01", "1", "2024-02-01", true),
+                revision("2024-02-01", "5", "2024-05-01", true),
+                revision("2024-01-01", "2", "2024-03-01", false),
+            ],
+        },
+    )
+    .await
+    .unwrap();
+    let series_id = write.series_id;
+
+    let query = |as_of: Option<NaiveDate>, original_only: bool| {
+        let pool = db.pool.clone();
+        async move {
+            let mut conn = pool.get().await.unwrap();
+            let mut query = data_points::table
+                .filter(data_points::series_id.eq(series_id))
+                .filter(econ_graph_core::models::revision_filter(
+                    as_of,
+                    original_only,
+                ))
+                .into_boxed();
+            if original_only {
+                query = query.filter(data_points::is_original_release.eq(true));
+            }
+            query
+                .order(data_points::date)
+                .select((data_points::date, data_points::value))
+                .load::<(NaiveDate, Option<BigDecimal>)>(&mut conn)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|(date, v)| (date, v.unwrap().normalized().to_string()))
+                .collect::<Vec<_>>()
+        }
+    };
+    let known = |as_of: Option<NaiveDate>| query(as_of, false);
+    let original = |as_of: Option<NaiveDate>| query(as_of, true);
+    let row = |date: &str, value: &str| (d(date), value.to_string());
+
+    assert_eq!(
+        known(None).await,
+        vec![row("2024-01-01", "3"), row("2024-02-01", "5")]
+    );
+    // Mid-March: January's March revision is in effect and February isn't published yet.
+    assert_eq!(
+        known(Some(d("2024-03-15"))).await,
+        vec![row("2024-01-01", "2")]
+    );
+    // A revision takes effect on its own revision_date.
+    assert_eq!(
+        known(Some(d("2024-02-01"))).await,
+        vec![row("2024-01-01", "1")]
+    );
+    assert_eq!(known(Some(d("2024-01-31"))).await, vec![]);
+
+    // Later revisions don't hide original releases.
+    assert_eq!(
+        original(None).await,
+        vec![row("2024-01-01", "1"), row("2024-02-01", "5")]
+    );
+    // An original release first published after asOf is still omitted.
+    assert_eq!(
+        original(Some(d("2024-03-15"))).await,
+        vec![row("2024-01-01", "1")]
+    );
+    assert_eq!(original(Some(d("2024-01-31"))).await, vec![]);
+}
+
 #[tokio::test]
 async fn server_error_retries_with_counted_attempt_and_backoff() {
     let Some(db) = db().await else { return };

@@ -1,6 +1,8 @@
 use bigdecimal::{BigDecimal, Zero};
 use chrono::{DateTime, NaiveDate, Utc};
+use diesel::dsl::sql;
 use diesel::prelude::*;
+use diesel::sql_types::{Bool, Date};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
@@ -284,6 +286,7 @@ pub struct DataPointWithSeries {
 ///     end_date: Some(NaiveDate::from_ymd_opt(2024, 11, 30).unwrap()),
 ///     original_only: Some(true),
 ///     latest_revision_only: Some(false),
+///     as_of: None,
 ///     limit: Some(12),
 ///     offset: Some(0),
 /// };
@@ -312,6 +315,11 @@ pub struct DataQueryParams {
     /// false/None: Include all revisions for complete revision history
     pub latest_revision_only: Option<bool>,
 
+    /// Return each observation as it was known on this day: its newest revision published on or
+    /// before it. Observations first published after this day are omitted. Takes precedence over
+    /// `latest_revision_only`.
+    pub as_of: Option<NaiveDate>,
+
     /// Maximum number of data points to return
     /// Capped at 10,000 to prevent memory exhaustion and ensure reasonable response times
     #[validate(range(min = 1, max = 10000))]
@@ -321,6 +329,43 @@ pub struct DataQueryParams {
     /// Used with limit to implement cursor-based pagination for large datasets
     #[validate(range(min = 0))]
     pub offset: Option<i64>,
+}
+
+/// SQL filter keeping one revision per observation: the newest revision published on or before
+/// `as_of`, or the newest revision overall when `as_of` is `None`. Observations first published
+/// after `as_of` are dropped. Two rows with the same `revision_date` are ordered by `id`.
+///
+/// With `original_only`, only original releases compete, so a later non-original revision can't
+/// hide the original row. Callers still filter `is_original_release` themselves.
+///
+/// Running this in SQL (rather than deduplicating loaded rows) keeps `LIMIT`/`OFFSET`
+/// pagination counting the rows actually returned.
+pub fn revision_filter(
+    as_of: Option<NaiveDate>,
+    original_only: bool,
+) -> Box<dyn BoxableExpression<data_points::table, diesel::pg::Pg, SqlType = Bool>> {
+    let newer = format!(
+        "NOT EXISTS (SELECT 1 FROM data_points newer \
+         WHERE newer.series_id = data_points.series_id AND newer.date = data_points.date \
+         AND (newer.revision_date, newer.id) > (data_points.revision_date, data_points.id){}",
+        if original_only {
+            " AND newer.is_original_release"
+        } else {
+            ""
+        }
+    );
+    match as_of {
+        None => Box::new(sql::<Bool>(&newer).sql(")")),
+        Some(as_of) => Box::new(
+            sql::<Bool>("data_points.revision_date <= ")
+                .bind::<Date, _>(as_of)
+                .sql(" AND ")
+                .sql(&newer)
+                .sql(" AND newer.revision_date <= ")
+                .bind::<Date, _>(as_of)
+                .sql(")"),
+        ),
+    }
 }
 
 /// **DataTransformation Enum**
@@ -882,6 +927,7 @@ mod inline_tests {
             end_date: None,
             original_only: None,
             latest_revision_only: None,
+            as_of: None,
             limit: Some(100),
             offset: Some(0),
         };
@@ -899,6 +945,7 @@ mod inline_tests {
             end_date: None,
             original_only: None,
             latest_revision_only: None,
+            as_of: None,
             limit: Some(20000), // Exceeds maximum allowed limit
             offset: Some(0),
         };
