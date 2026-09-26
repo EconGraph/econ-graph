@@ -23,23 +23,26 @@
 //! returns [`JobOutcome::LeaseLost`] without touching the item again.
 //!
 //! Dispatch by `kind`: a [`JobHandler`] registered for `(source, kind)` wins; otherwise
-//! `fetch_series` calls [`SourceAdapter::fetch_series`](crate::SourceAdapter::fetch_series) with
+//! `fetch_series` calls [`SourceAdapter::fetch_series`] with
 //! `since` = the latest stored observation date minus the source's
 //! [`revision_lookback`](crate::SourcePolicy::revision_lookback) (so recent revisions are
 //! re-fetched; `None` for a series with no stored points) and `discover_catalog` calls
-//! [`SourceAdapter::discover`](crate::SourceAdapter::discover). Adapter and handler calls run in
+//! [`SourceAdapter::discover`]. Adapter and handler calls run in
 //! their own task, so a panic becomes a `Transient` error instead of killing the worker.
 //!
 //! Batching: when the claimed item is a `fetch_series` job with no registered handler, its
 //! source's [`max_batch`](crate::SourcePolicy::max_batch) is above 1 and the adapter gives its
 //! series a [`batch_key`](crate::SourceAdapter::batch_key), the worker also claims up to
 //! `max_batch - 1` other due `fetch_series` jobs of that source with the same key (looking at the
-//! next [`BATCH_CANDIDATE_SCAN`] due jobs of the source) and fetches them all with one
-//! [`SourceAdapter::fetch_batch`](crate::SourceAdapter::fetch_batch) call, passing the earliest
-//! `since` of the batch. Each job then keeps its own result: its own persistence, its own
+//! next `max_batch * `[`BATCH_SCAN_PER_SLOT`] due jobs of the source, at most [`BATCH_SCAN_MAX`])
+//! and fetches them all with one [`SourceAdapter::fetch_batch`]
+//! call, passing the earliest `since` of the batch. A keyed item that finds no mates is fetched
+//! alone through `fetch_series`. Each job then keeps its own result: its own persistence, its own
 //! `crawl_attempts` row and its own transition from the table above, so one bad series fails
 //! only its own job. An error for the whole call applies to every job in the batch. The breaker
-//! below counts a batch as one result.
+//! below counts each batch call as one result: the call's error, else the first per-series
+//! `RateLimited` or `Auth`, else a success. Every job's lease starts when the batch is claimed,
+//! so `stuck_after` must cover a whole batch, not one job.
 //!
 //! Per-source circuit breaker: after `pause_after_consecutive` consecutive `RateLimited` or `Auth`
 //! results for a source, the worker stops claiming that source for `pause_for` (via
@@ -97,8 +100,13 @@ pub struct WorkerConfig {
 /// Default for [`WorkerConfig::queue_retention`]: 14 days.
 pub const DEFAULT_QUEUE_RETENTION: Duration = Duration::from_secs(14 * 24 * 60 * 60);
 
-/// How many due jobs of the lead's source the worker looks through for batch mates.
-pub const BATCH_CANDIDATE_SCAN: i64 = 2000;
+/// Due jobs of the lead's source the worker looks through for batch mates, per slot in the
+/// batch (`max_batch * BATCH_SCAN_PER_SLOT`, at most [`BATCH_SCAN_MAX`]). Every claim of a
+/// batching source pays for this scan, so it stays proportional to the batch size.
+pub const BATCH_SCAN_PER_SLOT: usize = 50;
+
+/// Upper bound on the batch-mate scan, in queue rows.
+pub const BATCH_SCAN_MAX: usize = 2000;
 
 /// How often the maintenance loop purges finished queue rows.
 const PURGE_INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -467,7 +475,12 @@ impl Worker {
             &lead.source,
             &lead.kind,
             lead.id,
-            BATCH_CANDIDATE_SCAN,
+            i64::try_from(
+                max_batch
+                    .saturating_mul(BATCH_SCAN_PER_SLOT)
+                    .min(BATCH_SCAN_MAX),
+            )
+            .unwrap_or(i64::MAX),
         )
         .await
         {
@@ -573,12 +586,24 @@ impl Worker {
             let since = since.flatten();
             let fetched =
                 guarded(async move { adapter.fetch_batch(&ctx, &request, since).await }).await;
-            self.record_breaker(source, fetched.as_ref().err());
+            // One breaker result per upstream call: the call's own error, else a per-series
+            // rate limit or auth failure (which the source applies to the whole call anyway).
+            let breaker_error = match &fetched {
+                Err(e) => Some(e),
+                Ok(map) => map.values().find_map(|r| match r {
+                    Err(e @ (CrawlError::RateLimited { .. } | CrawlError::Auth(_))) => Some(e),
+                    _ => None,
+                }),
+            };
+            self.record_breaker(source, breaker_error);
             fetched
         };
+        let fetch_time = started.elapsed();
 
         let mut outcomes = Vec::with_capacity(items.len());
         for (item, result) in items.iter().zip(results) {
+            // Each job's duration is the shared fetch plus its own persistence.
+            let own_started = Instant::now();
             let result = match result {
                 Some(r) => r,
                 None => match &mut fetched {
@@ -593,12 +618,9 @@ impl Worker {
                     },
                 },
             };
-            self.record_attempt(source, item, &result, started.elapsed())
-                .await;
-            outcomes.push(
-                self.transition(source, item, result, started.elapsed())
-                    .await,
-            );
+            let duration = fetch_time + own_started.elapsed();
+            self.record_attempt(source, item, &result, duration).await;
+            outcomes.push(self.transition(source, item, result, duration).await);
         }
         outcomes
     }

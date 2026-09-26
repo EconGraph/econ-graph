@@ -32,7 +32,8 @@ pub struct SourcePolicy {
     /// Most `fetch_series` jobs the worker claims and fetches together in one
     /// [`SourceAdapter::fetch_batch`](crate::SourceAdapter::fetch_batch) call. Only applies to
     /// adapters whose [`batch_key`](crate::SourceAdapter::batch_key) groups series; 1 (the
-    /// default for every source) fetches one series per job.
+    /// default for every source) fetches one series per job. Every job's lease starts when the
+    /// batch is claimed, so the worker's `stuck_after` must cover a whole batch.
     pub max_batch: usize,
 }
 

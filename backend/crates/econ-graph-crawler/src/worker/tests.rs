@@ -1471,3 +1471,47 @@ async fn adapters_without_batching_fetch_one_series_per_job() {
     assert!(keyed.batch_calls().is_empty());
     assert_eq!(keyed.series_calls().len(), 2);
 }
+
+#[tokio::test]
+async fn per_series_rate_limit_in_a_batch_counts_for_the_breaker() {
+    let Some(db) = db().await else { return };
+    let adapter = Arc::new(BatchAdapter {
+        batching: true,
+        series_errors: HashMap::from([(
+            "t5_kh_2".to_string(),
+            CrawlError::RateLimited { retry_after: None },
+        )]),
+        ..Default::default()
+    });
+    let mut w = batch_worker(&db.pool, &adapter, 10);
+    w.config.pause_after_consecutive = 1;
+    enqueue_fetch(&db.pool, &["t5_kh_1", "t5_kh_2"]).await;
+
+    let outcomes = w.run_batch_once().await.expect("claimed");
+    assert!(matches!(outcomes[0], JobOutcome::Completed(_)));
+    assert!(
+        matches!(&outcomes[1], JobOutcome::Retrying { error, .. } if error.kind() == "rate_limited")
+    );
+    assert_eq!(w.paused_sources(), vec![SRC]);
+}
+
+#[tokio::test]
+async fn a_fetch_series_handler_turns_batching_off() {
+    let Some(db) = db().await else { return };
+    let adapter = Arc::new(BatchAdapter {
+        batching: true,
+        ..Default::default()
+    });
+    let handler = Arc::new(FilingHandler(AtomicUsize::new(0)));
+    let w = batch_worker(&db.pool, &adapter, 10).with_handler(
+        SRC,
+        JobKind::FetchSeries,
+        handler.clone(),
+    );
+    enqueue_fetch(&db.pool, &["t5_ki_1", "t5_ki_2"]).await;
+    assert_eq!(w.run_batch_once().await.expect("claimed").len(), 1);
+    assert_eq!(w.run_batch_once().await.expect("claimed").len(), 1);
+    assert_eq!(AtomicUsize::load(&handler.0, Ordering::SeqCst), 2);
+    assert!(adapter.batch_calls().is_empty());
+    assert!(adapter.series_calls().is_empty());
+}

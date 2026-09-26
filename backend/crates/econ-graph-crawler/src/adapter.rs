@@ -178,10 +178,11 @@ pub trait SourceAdapter: Send + Sync {
     /// Fetches several series that share a [`batch_key`](Self::batch_key), only observations on
     /// or after `since` when given (the earliest `since` of the batch's series).
     ///
-    /// `Err` means the whole request failed and applies to every series in the batch. `Ok`
-    /// carries one result per requested id; an id missing from the map fails as
-    /// [`CrawlError::NotFound`]. The default calls [`fetch_series`](Self::fetch_series) once per
-    /// id, in order.
+    /// `Err` means the whole request failed and applies to every series in the batch; return it
+    /// for source-wide failures such as `RateLimited` or `Auth`. `Ok` carries one result per
+    /// requested id; an id missing from the map fails as [`CrawlError::NotFound`] and ids that
+    /// weren't requested are ignored. The default calls [`fetch_series`](Self::fetch_series) once
+    /// per id, in order, and stops with that error at the first `RateLimited` or `Auth`.
     async fn fetch_batch(
         &self,
         ctx: &CrawlCtx,
@@ -191,6 +192,9 @@ pub trait SourceAdapter: Send + Sync {
         let mut out = BatchFetch::with_capacity(external_ids.len());
         for id in external_ids {
             let fetched = self.fetch_series(ctx, id, since).await;
+            if let Err(e @ (CrawlError::RateLimited { .. } | CrawlError::Auth(_))) = fetched {
+                return Err(e);
+            }
             out.insert(id.clone(), fetched);
         }
         Ok(out)
@@ -294,6 +298,48 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert_eq!(out["A"], Ok(FetchedSeries::default()));
         assert_eq!(out["B"], Ok(FetchedSeries::default()));
+    }
+
+    /// Rate limited on ids starting with `"limited"`.
+    struct Limited;
+
+    #[async_trait]
+    impl SourceAdapter for Limited {
+        fn id(&self) -> SourceId {
+            SourceId::Bea
+        }
+        async fn discover(&self, _: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
+            Ok(Vec::new())
+        }
+        async fn fetch_series(
+            &self,
+            _: &CrawlCtx,
+            id: &str,
+            _: Option<NaiveDate>,
+        ) -> Result<FetchedSeries, CrawlError> {
+            if id.starts_with("limited") {
+                Err(CrawlError::RateLimited { retry_after: None })
+            } else {
+                Err(CrawlError::NotFound(id.into()))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn default_fetch_batch_stops_at_a_rate_limit() {
+        let ctx = crate::testkit::test_ctx();
+        let ids = vec![
+            "missing".to_string(),
+            "limited".to_string(),
+            "never".to_string(),
+        ];
+        assert_eq!(
+            Limited.fetch_batch(&ctx, &ids, None).await,
+            Err(CrawlError::RateLimited { retry_after: None })
+        );
+        // Per-series errors other than rate limits and auth stay per series.
+        let out = Limited.fetch_batch(&ctx, &ids[..1], None).await.unwrap();
+        assert_eq!(out["missing"], Err(CrawlError::NotFound("missing".into())));
     }
 
     #[test]
