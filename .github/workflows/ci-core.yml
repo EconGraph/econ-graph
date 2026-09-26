@@ -52,6 +52,9 @@ env:
   # Line numbers in backtraces without full debuginfo: faster compiles and
   # links, and about half the target dir the Rust cache saves and restores
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  # CI builds from scratch or a restored cache, so incremental state is only
+  # extra work and extra cache size
+  CARGO_INCREMENTAL: '0'
   DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
 jobs:
