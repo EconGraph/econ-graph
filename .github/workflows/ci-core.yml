@@ -112,9 +112,9 @@ jobs:
     - name: Build backend
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo build --verbose
-        # Compile the lib test binaries too, so the saved cache has dev-dependencies
-        cargo test --lib --no-run
+        # One build with dev-dependency features for every target, so the test
+        # jobs reuse it instead of recompiling deps under a second feature set
+        cargo build --verbose --all-targets
       working-directory: backend
 
   backend-migration-validation-tests:
@@ -1569,12 +1569,6 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         diesel setup
         diesel migration run
-      working-directory: backend
-
-    - name: Build backend
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo build --verbose
       working-directory: backend
 
     - name: Run backend integration tests
