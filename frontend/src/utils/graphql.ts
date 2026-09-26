@@ -100,11 +100,11 @@ export const QUERIES = {
     query GetSeriesDetail($id: ID!) {
       series(id: $id) {
         id
+        externalId
         title
         description
         source {
           name
-          description
         }
         frequency
         units
@@ -113,26 +113,23 @@ export const QUERIES = {
         endDate
         lastUpdated
         isActive
-        dataPointCount
       }
     }
   `,
 
-  // Get series data with transformations
+  // Get series observations, transformed on the backend
   GET_SERIES_DATA: `
     query GetSeriesData(
       $seriesId: ID!
       $filter: DataFilter
       $transformation: DataTransformation
       $first: Int
-      $after: String
     ) {
       seriesData(
         seriesId: $seriesId
         filter: $filter
         transformation: $transformation
         first: $first
-        after: $after
       ) {
         nodes {
           date
@@ -141,12 +138,6 @@ export const QUERIES = {
           isOriginalRelease
         }
         totalCount
-        pageInfo {
-          hasNextPage
-          hasPreviousPage
-          startCursor
-          endCursor
-        }
       }
     }
   `,
