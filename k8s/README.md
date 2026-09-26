@@ -76,6 +76,24 @@ terraform apply
 ./scripts/deploy/deploy.sh
 ```
 
+## 🔐 Keycloak
+
+`scripts/deploy/deploy.sh` deploys Keycloak (its own Postgres, then Keycloak with
+the `econ-graph` realm from `config/keycloak/`) under `/idp` on the ingress host.
+Its credentials are never committed: the deploy script creates the Secret
+`keycloak-secrets` from environment variables and refuses placeholder values.
+
+```bash
+export KEYCLOAK_ADMIN_PASSWORD="$(openssl rand -base64 24)"
+export KEYCLOAK_DB_PASSWORD="$(openssl rand -base64 24)"
+# Optional, for Google sign-in (redirect URI <ingress>/idp/realms/econ-graph/broker/google/endpoint):
+export KC_GOOGLE_CLIENT_ID=... KC_GOOGLE_CLIENT_SECRET=...
+./scripts/deploy/deploy.sh
+```
+
+The issuer is `http://localhost:8080/idp/realms/econ-graph`. Seeded test users
+exist only in the local docker-compose stack, never in the cluster.
+
 ## 🌐 Accessing the Application
 
 After deployment, the application will be available at:

@@ -1,0 +1,71 @@
+# Keycloak realm `econ-graph`
+
+Keycloak is EconGraph's identity provider. The realm is configuration as code:
+
+| File | Used by | Contents |
+|---|---|---|
+| `econ-graph-realm.json` | docker-compose and k8s | Realm settings, clients, Google identity provider |
+| `dev/econ-graph-users-0.json` | docker-compose only | Seeded test users. Never deployed |
+
+Keycloak imports both files on first start (`--import-realm`). An existing realm is
+not overwritten, so after editing a file, recreate the local volume:
+`docker compose down -v keycloak keycloak-db && docker compose up -d keycloak`.
+
+## Local stack
+
+```bash
+docker compose up -d keycloak
+scripts/keycloak/dev-token.sh alice   # prints iss, aud and sub of alice's access token
+```
+
+- Issuer: `http://localhost:8081/realms/econ-graph` (host port from `KEYCLOAK_PORT`)
+- Admin console: <http://localhost:8081/admin>, user `admin`, password `admin`
+  (override with `KEYCLOAK_ADMIN_USERNAME` / `KEYCLOAK_ADMIN_PASSWORD`)
+
+### Test users
+
+The release end-to-end suite depends on these. Keep the usernames, ids and
+passwords stable: the ids are the tokens' `sub`, which becomes `users.id`.
+
+| Username | Id (`sub`) | Password |
+|---|---|---|
+| `alice` | `0199a0e0-0000-7000-8000-00000000a11c` | `alice-dev-password` |
+| `bob` | `0199a0e0-0000-7000-8000-000000000b0b` | `bob-dev-password` |
+| `staff-admin` | `0199a0e0-0000-7000-8000-0000000005af` | `staff-admin-dev-password` |
+
+Roles arrive with the role catalog (AUTH-4); until then the users differ only by name.
+
+## Clients
+
+- `econ-graph-web`: public client for the browser app. Authorization code with PKCE
+  (S256 required). Access tokens carry `aud: econ-graph-api` through an audience mapper.
+  The password grant is enabled only where `KC_WEB_DIRECT_GRANTS=true`, which only
+  docker-compose sets, so scripts and tests can get tokens without a browser.
+- `econ-graph-api`: bearer-only client representing the backend. It is the token
+  audience and will own the fine-grained client roles.
+
+## Placeholders
+
+The realm file reads these environment variables when it is imported:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `KC_WEB_BASE_URL` | none (required) | Web app origin; redirect URIs are `<origin>/*` |
+| `KC_WEB_DIRECT_GRANTS` | `false` | Password grant on `econ-graph-web` (dev only) |
+| `KC_REALM_SSL_REQUIRED` | `external` | `none` in local compose |
+| `KC_GOOGLE_ENABLED` | `false` | Turn on "Sign in with Google" |
+| `KC_GOOGLE_CLIENT_ID`, `KC_GOOGLE_CLIENT_SECRET` | `unset` | Google OAuth client |
+
+For Google sign-in locally, create an OAuth client in Google Cloud with redirect URI
+`http://localhost:8081/realms/econ-graph/broker/google/endpoint`, then:
+
+```bash
+export KC_GOOGLE_ENABLED=true KC_GOOGLE_CLIENT_ID=... KC_GOOGLE_CLIENT_SECRET=...
+docker compose up -d keycloak
+```
+
+## Kubernetes
+
+See `k8s/manifests/keycloak-deployment.yaml`. The realm file becomes the ConfigMap
+`keycloak-realm`; credentials live only in the Secret `keycloak-secrets`, which
+`scripts/deploy/create-keycloak-secret.sh` creates from environment variables.

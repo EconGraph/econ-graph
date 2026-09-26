@@ -85,6 +85,17 @@ kubectl apply -f k8s/manifests/postgres.yaml
 echo "⏳ Waiting for PostgreSQL to be ready..."
 kubectl wait --for=condition=ready pod -l app=postgresql -n econ-graph --timeout=300s
 
+# Deploy Keycloak (its own Postgres, then Keycloak with the econ-graph realm).
+# The Secret is created from environment variables; see the script's header.
+echo "🔐 Deploying Keycloak..."
+./scripts/deploy/create-keycloak-secret.sh
+kubectl -n econ-graph create configmap keycloak-realm \
+  --from-file=econ-graph-realm.json=config/keycloak/econ-graph-realm.json \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f k8s/manifests/keycloak-postgres.yaml
+kubectl apply -f k8s/manifests/keycloak-deployment.yaml
+kubectl apply -f k8s/manifests/keycloak-ingress.yaml
+
 # Deploy application
 kubectl apply -f k8s/manifests/backend-deployment.yaml
 kubectl apply -f k8s/manifests/backend-service.yaml
