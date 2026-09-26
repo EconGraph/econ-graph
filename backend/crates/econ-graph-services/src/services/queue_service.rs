@@ -1,11 +1,15 @@
 //! Queue service: legacy convenience wrappers over the crawl queue model.
 //!
 //! Every state transition here delegates to the queue API on
-//! [`CrawlQueueItem`], so there is one code path for queue semantics. These are admin /
-//! convenience entry points without a worker identity, so the terminal transitions use the
-//! *unguarded* `force_*` variants (they ignore which worker holds the lock). Queue workers must
-//! use the lease-guarded `CrawlQueueItem::{complete, fail, retry_later}` with their worker id
-//! instead (see `econ_graph_crawler::worker`).
+//! [`CrawlQueueItem`], so there is one code path for queue semantics.
+//!
+//! - Worker paths finish the item they claimed: [`complete_claimed_item`],
+//!   [`fail_claimed_item`] and [`retry_claimed_item_later`] take the claimed row and are
+//!   lease-guarded (see `CrawlQueueItem::{complete, fail, retry_later}`), so a worker whose lease
+//!   expired cannot overwrite a newer claim of the same item.
+//! - The id-based transitions (`mark_item_completed`, `mark_item_failed`,
+//!   `update_queue_item_status`, `update_queue_item_for_retry`) are admin overrides with no worker
+//!   identity: they use the *unguarded* `force_*` variants and ignore which claim holds the item.
 
 use chrono::{DateTime, Duration, Utc};
 use diesel::prelude::*;
@@ -15,7 +19,10 @@ use uuid::Uuid;
 use econ_graph_core::{
     database::DatabasePool,
     error::{AppError, AppResult},
-    models::{CrawlQueueItem, QueueStatistics, QueueStatus, UpdateCrawlQueueItem},
+    models::{
+        CrawlQueueItem, LeaseOutcome, QueueStatistics, QueueStatus, QueueTransition,
+        UpdateCrawlQueueItem,
+    },
     schema::crawl_queue,
 };
 
@@ -26,8 +33,8 @@ pub const QUEUE_SERVICE_WORKER_ID: &str = "queue-service";
 ///
 /// Each returned item has been atomically moved to `processing` and locked by
 /// [`QUEUE_SERVICE_WORKER_ID`] (see [`CrawlQueueItem::claim_next`]); the caller owns it and must
-/// finish it with `mark_item_completed`, `mark_item_failed`, `update_queue_item_for_retry` or
-/// `unlock_queue_item`.
+/// finish it by passing the returned item to [`complete_claimed_item`], [`fail_claimed_item`] or
+/// [`retry_claimed_item_later`].
 pub async fn get_next_queue_items(
     pool: &DatabasePool,
     limit: i64,
@@ -42,12 +49,17 @@ pub async fn get_next_queue_items(
     Ok(items)
 }
 
-/// Lock a specific queue item for processing by a worker.
+/// Lock a specific queue item for processing by a worker and return the claim, which the worker
+/// finishes with [`complete_claimed_item`], [`fail_claimed_item`] or [`retry_claimed_item_later`].
 ///
 /// Fails with `Conflict` if the item doesn't exist or isn't claimable (pending/retrying).
-pub async fn lock_queue_item(pool: &DatabasePool, item_id: Uuid, worker_id: &str) -> AppResult<()> {
+pub async fn lock_queue_item(
+    pool: &DatabasePool,
+    item_id: Uuid,
+    worker_id: &str,
+) -> AppResult<CrawlQueueItem> {
     match CrawlQueueItem::claim_by_id(pool, item_id, worker_id).await? {
-        Some(_) => Ok(()),
+        Some(claim) => Ok(claim),
         None => Err(AppError::Conflict(format!(
             "crawl_queue item {item_id} is not claimable"
         ))),
@@ -136,6 +148,42 @@ pub async fn update_queue_item_for_retry(
     )
     .await?;
     Ok(())
+}
+
+/// Mark a claimed item completed, if `claim` (from [`get_next_queue_items`],
+/// [`get_and_lock_next_item`] or [`lock_queue_item`]) is still the item's current claim.
+pub async fn complete_claimed_item(
+    pool: &DatabasePool,
+    claim: &CrawlQueueItem,
+) -> AppResult<LeaseOutcome> {
+    CrawlQueueItem::complete(pool, claim).await
+}
+
+/// Mark a claimed item permanently failed, if `claim` is still the item's current claim.
+pub async fn fail_claimed_item(
+    pool: &DatabasePool,
+    claim: &CrawlQueueItem,
+    error_message: &str,
+) -> AppResult<LeaseOutcome> {
+    CrawlQueueItem::fail(pool, claim, error_message).await
+}
+
+/// Record a failed attempt on a claimed item and reschedule it with the same exponential backoff
+/// as [`update_queue_item_for_retry`], or fail it once `max_retries` is reached. Returns
+/// [`QueueTransition::LostLease`] (changing nothing) if `claim` is no longer the current claim.
+pub async fn retry_claimed_item_later(
+    pool: &DatabasePool,
+    claim: &CrawlQueueItem,
+    error_message: &str,
+) -> AppResult<QueueTransition> {
+    CrawlQueueItem::retry_later(
+        pool,
+        claim,
+        error_message,
+        retry_backoff(claim.retry_count + 1),
+        true,
+    )
+    .await
 }
 
 /// Unlock a queue item (release worker lock) and put it back to `pending`.
@@ -332,6 +380,76 @@ mod tests {
             .first::<CrawlQueueItem>(&mut conn)
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_claimed_item_transitions_are_lease_guarded() {
+        // REQUIREMENT: a worker finishing the item it claimed must not overwrite a newer claim
+        // after its lease expired and the item was claimed again (even under the same worker id).
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        container.clean_database().await.unwrap();
+
+        let created = CrawlQueueItem::create(
+            &pool,
+            &NewCrawlQueueItem {
+                source: "FRED".to_string(),
+                series_id: "TEST_CLAIMED".to_string(),
+                priority: 5,
+                max_retries: 3,
+                scheduled_for: None,
+                kind: JobKind::FetchSeries.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let stale = get_next_queue_items(&pool, 1).await.unwrap().remove(0);
+        assert_eq!(stale.id, created.id);
+        assert_eq!(unlock_stuck_items(&pool, 0).await.unwrap(), 1);
+        let fresh = lock_queue_item(&pool, created.id, QUEUE_SERVICE_WORKER_ID)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            complete_claimed_item(&pool, &stale).await.unwrap(),
+            LeaseOutcome::LostLease
+        );
+        assert_eq!(
+            fail_claimed_item(&pool, &stale, "boom").await.unwrap(),
+            LeaseOutcome::LostLease
+        );
+        assert_eq!(
+            retry_claimed_item_later(&pool, &stale, "503")
+                .await
+                .unwrap(),
+            QueueTransition::LostLease
+        );
+        assert_eq!(load_item(&pool, created.id).await.status, "processing");
+
+        // The current claim reschedules with backoff, then (reclaimed) completes.
+        let t = retry_claimed_item_later(&pool, &fresh, "503")
+            .await
+            .unwrap();
+        assert!(matches!(t, QueueTransition::Rescheduled { .. }));
+        let row = load_item(&pool, created.id).await;
+        assert_eq!(row.status, "retrying");
+        assert!(row.scheduled_for.unwrap() > Utc::now());
+        diesel::update(crawl_queue::table.find(created.id))
+            .set(crawl_queue::scheduled_for.eq(Some(Utc::now() - Duration::seconds(1))))
+            .execute(&mut pool.get().await.unwrap())
+            .await
+            .unwrap();
+        let again = get_and_lock_next_item(&pool, "worker-2")
+            .await
+            .unwrap()
+            .expect("due retry is claimable");
+        assert_eq!(
+            complete_claimed_item(&pool, &again).await.unwrap(),
+            LeaseOutcome::Applied
+        );
+        assert_eq!(load_item(&pool, created.id).await.status, "completed");
     }
 
     #[tokio::test]
