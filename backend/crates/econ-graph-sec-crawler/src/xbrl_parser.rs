@@ -137,7 +137,8 @@ impl XbrlParser {
             Self::verify_arelle_installation(&config).await?;
         }
 
-        let cache = XbrlCache::new(config.cache_dir.clone());
+        let cache = XbrlCache::new(config.cache_dir.clone())
+            .for_parser_mode(config.use_arelle, pool.is_some());
         let taxonomy_cache = TaxonomyCache::new();
         let statement_mapper = StatementMapper::new();
         let fact_validator = FactValidator::new();
@@ -209,44 +210,37 @@ impl XbrlParser {
         }
 
         // Check cache first
-        if let Some(cached_statements) = self.cache.get_parsed_result(xbrl_file).await? {
+        let cache_file = self.cache.get_cache_file_path(xbrl_file).await?;
+        if let Some(cached) = self.cache.read_entry(&cache_file).await? {
             info!("Using cached parsing result for {:?}", xbrl_file);
-            return Ok(XbrlParseResult {
-                statements: cached_statements,
-                line_items: Vec::new(), // Cache doesn't store line items
-                taxonomy_concepts: Vec::new(), // Cache doesn't store taxonomy concepts
-                contexts: Vec::new(),   // Cache doesn't store contexts
-                units: Vec::new(),      // Cache doesn't store units
-                facts: Vec::new(),      // Cache doesn't store facts
-                validation_report: ValidationReport {
-                    is_valid: true,
-                    errors: Vec::new(),
-                    warnings: Vec::new(),
-                },
-                processing_metadata: ProcessingMetadata {
-                    document_type: DocumentType::Xbrl,
-                    file_size: 0,
-                    processing_time: std::time::Duration::from_millis(0),
-                    errors: Vec::new(),
-                    warnings: Vec::new(),
-                },
-            });
+            return Ok(cached);
         }
 
         // Detect document type and parse accordingly
         let document_type = self.detect_document_type(xbrl_file).await?;
         info!("Detected document type: {:?}", document_type);
 
-        let parse_result = match document_type {
+        let (parse_result, cacheable) = match document_type {
             DocumentType::Xbrl => self.parse_xbrl_document_internal(xbrl_file).await?,
-            DocumentType::Ixbrl => self.parse_ixbrl_document(xbrl_file).await?,
-            DocumentType::HtmlEmbedded => self.parse_html_embedded_xbrl(xbrl_file).await?,
+            DocumentType::Ixbrl => (self.parse_ixbrl_document(xbrl_file).await?, true),
+            DocumentType::HtmlEmbedded => (self.parse_html_embedded_xbrl(xbrl_file).await?, true),
         };
 
-        // Cache the result
-        self.cache
-            .store_parsed_result(xbrl_file, &parse_result.statements)
-            .await?;
+        // Cache the result, unless the file changed while it was being parsed (the result might
+        // then come from either version, so it belongs under neither key).
+        if !cacheable {
+            warn!(
+                "{:?} fell back to the native parser; not caching the result",
+                xbrl_file
+            );
+        } else if self.cache.get_cache_file_path(xbrl_file).await? == cache_file {
+            self.cache.write_entry(&cache_file, &parse_result).await?;
+        } else {
+            warn!(
+                "{:?} changed while it was being parsed; not caching the result",
+                xbrl_file
+            );
+        }
 
         Ok(parse_result)
     }
@@ -267,13 +261,18 @@ impl XbrlParser {
         }
     }
 
-    /// Parse standard XBRL document
-    async fn parse_xbrl_document_internal(&self, xbrl_file: &Path) -> Result<XbrlParseResult> {
+    /// Parse standard XBRL document. Also returns whether the result may be cached: a native
+    /// fallback after Arelle failed may not, since it would sit under the Arelle cache key and
+    /// stop Arelle from being retried.
+    async fn parse_xbrl_document_internal(
+        &self,
+        xbrl_file: &Path,
+    ) -> Result<(XbrlParseResult, bool)> {
         // First, try Arelle for comprehensive parsing
         if self.config.use_arelle {
             match self.parse_with_arelle(xbrl_file).await {
                 Ok(statements) => {
-                    return Ok(XbrlParseResult {
+                    let result = XbrlParseResult {
                         statements,
                         line_items: Vec::new(),
                         taxonomy_concepts: Vec::new(),
@@ -292,19 +291,20 @@ impl XbrlParser {
                             errors: Vec::new(),
                             warnings: Vec::new(),
                         },
-                    })
+                    };
+                    return Ok((result, true));
                 }
                 Err(e) => {
                     warn!(
                         "Arelle parsing failed, falling back to native parser: {}",
                         e
                     );
+                    return Ok((self.parse_xbrl_native(xbrl_file).await?, false));
                 }
             }
         }
 
-        // Fallback to native XML parsing
-        self.parse_xbrl_native(xbrl_file).await
+        Ok((self.parse_xbrl_native(xbrl_file).await?, true))
     }
 
     /// Parse iXBRL (inline XBRL) document
@@ -653,42 +653,95 @@ impl XbrlParser {
 #[derive(Debug, Clone)]
 pub struct XbrlCache {
     cache_dir: PathBuf,
+    /// Parser mode baked into cache keys, so Arelle and native results don't mix.
+    mode: &'static str,
 }
 
 impl XbrlCache {
     pub fn new(cache_dir: PathBuf) -> Self {
-        Self { cache_dir }
+        Self {
+            cache_dir,
+            mode: "native",
+        }
     }
 
-    pub async fn get_parsed_result(
+    /// Key entries by parser mode (native, Arelle, or Arelle with a DTS manager, whose scripts
+    /// differ) as well as by document.
+    pub fn for_parser_mode(mut self, use_arelle: bool, has_dts_manager: bool) -> Self {
+        self.mode = match (use_arelle, has_dts_manager) {
+            (true, true) => "arelle-dts",
+            (true, false) => "arelle",
+            (false, _) => "native",
+        };
+        self
+    }
+
+    /// The cached parse of `xbrl_file`, or `None` on a miss.
+    pub async fn get_parsed_result(&self, xbrl_file: &Path) -> Result<Option<XbrlParseResult>> {
+        let cache_file = self.get_cache_file_path(xbrl_file).await?;
+        self.read_entry(&cache_file).await
+    }
+
+    /// Cache the full parse result (statements, line items, facts, contexts, units, ...).
+    pub async fn store_parsed_result(
         &self,
         xbrl_file: &Path,
-    ) -> Result<Option<Vec<FinancialStatement>>> {
-        let cache_file = self.get_cache_file_path(xbrl_file);
+        result: &XbrlParseResult,
+    ) -> Result<()> {
+        let cache_file = self.get_cache_file_path(xbrl_file).await?;
+        self.write_entry(&cache_file, result).await
+    }
 
+    /// Read a cache entry, or `None` on a miss. A cache file that doesn't deserialize (for
+    /// example one written by an older version that only stored statements, or one cut off
+    /// mid-write) counts as a miss, so the document is parsed again and the entry overwritten.
+    pub async fn read_entry(&self, cache_file: &Path) -> Result<Option<XbrlParseResult>> {
         if !cache_file.exists() {
             return Ok(None);
         }
 
-        let content = fs::read_to_string(&cache_file).await?;
-        let result: Vec<FinancialStatement> = serde_json::from_str(&content)?;
-        Ok(Some(result))
+        let content = fs::read(cache_file).await?;
+        match serde_json::from_slice(&content) {
+            Ok(result) => Ok(Some(result)),
+            Err(e) => {
+                warn!(
+                    "Ignoring unreadable XBRL cache entry {:?}: {}",
+                    cache_file, e
+                );
+                Ok(None)
+            }
+        }
     }
 
-    pub async fn store_parsed_result(
-        &self,
-        xbrl_file: &Path,
-        result: &[FinancialStatement],
-    ) -> Result<()> {
-        let cache_file = self.get_cache_file_path(xbrl_file);
+    /// Write a cache entry. It is written to a temporary file and renamed into place, so readers
+    /// never see a partly written entry.
+    pub async fn write_entry(&self, cache_file: &Path, result: &XbrlParseResult) -> Result<()> {
         let content = serde_json::to_string_pretty(result)?;
-        fs::write(&cache_file, content).await?;
+        let tmp_file = cache_file.with_extension(format!("{}.tmp", Uuid::new_v4()));
+        let written = match fs::write(&tmp_file, content).await {
+            Ok(()) => fs::rename(&tmp_file, cache_file).await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = written {
+            let _ = fs::remove_file(&tmp_file).await;
+            return Err(e.into());
+        }
         Ok(())
     }
 
-    fn get_cache_file_path(&self, xbrl_file: &Path) -> PathBuf {
-        let file_hash = format!("{:x}", md5::compute(xbrl_file.to_string_lossy().as_bytes()));
-        self.cache_dir.join(format!("{}.json", file_hash))
+    /// Cache file for `xbrl_file`: named by the parser mode and a hash of the document's path and
+    /// content. The path is part of the key because parsed statements carry generated ids, so two
+    /// documents with the same bytes must not share a result; the content is part of it so a
+    /// replaced document misses.
+    pub async fn get_cache_file_path(&self, xbrl_file: &Path) -> Result<PathBuf> {
+        let content = fs::read(xbrl_file).await?;
+        let mut hasher = md5::Context::new();
+        hasher.consume(xbrl_file.to_string_lossy().as_bytes());
+        hasher.consume([0u8]);
+        hasher.consume(&content);
+        Ok(self
+            .cache_dir
+            .join(format!("{}-{:x}.json", self.mode, hasher.finalize())))
     }
 }
 
