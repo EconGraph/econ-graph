@@ -51,6 +51,8 @@ env:
   CARGO_TERM_COLOR: always
   # Prebuilt diesel CLI from GitHub releases instead of `cargo install` in every job
   DIESEL_VERSION: 2.3.13
+  # From the release's diesel_cli-x86_64-unknown-linux-gnu.tar.xz.sha256
+  DIESEL_SHA256: cecfdb4f840e48ad230f77719fedc9720df351ab217de32bd1dd75cfe906b957
   DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
 
 jobs:
@@ -294,7 +296,10 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        curl -sSfL "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz" | tar -xJ -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
+        archive="$RUNNER_TEMP/diesel_cli.tar.xz"
+        curl -sSfL -o "$archive" "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz"
+        echo "${DIESEL_SHA256}  ${archive}" | sha256sum -c -
+        tar -xJf "$archive" -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
         diesel --version
       working-directory: backend
 
@@ -392,7 +397,10 @@ jobs:
 
     - name: Install diesel CLI
       run: |
-        curl -sSfL "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz" | tar -xJ -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
+        archive="$RUNNER_TEMP/diesel_cli.tar.xz"
+        curl -sSfL -o "$archive" "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz"
+        echo "${DIESEL_SHA256}  ${archive}" | sha256sum -c -
+        tar -xJf "$archive" -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
         diesel --version
 
     - name: Build test binaries
@@ -881,7 +889,10 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        curl -sSfL "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz" | tar -xJ -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
+        archive="$RUNNER_TEMP/diesel_cli.tar.xz"
+        curl -sSfL -o "$archive" "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz"
+        echo "${DIESEL_SHA256}  ${archive}" | sha256sum -c -
+        tar -xJf "$archive" -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
         diesel --version
       working-directory: backend
 
@@ -1044,7 +1055,10 @@ jobs:
     - name: Install shared tools
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        curl -sSfL "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz" | tar -xJ -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
+        archive="$RUNNER_TEMP/diesel_cli.tar.xz"
+        curl -sSfL -o "$archive" "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz"
+        echo "${DIESEL_SHA256}  ${archive}" | sha256sum -c -
+        tar -xJf "$archive" -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
         diesel --version
       working-directory: backend
 
@@ -1158,7 +1172,10 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        curl -sSfL "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz" | tar -xJ -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
+        archive="$RUNNER_TEMP/diesel_cli.tar.xz"
+        curl -sSfL -o "$archive" "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz"
+        echo "${DIESEL_SHA256}  ${archive}" | sha256sum -c -
+        tar -xJf "$archive" -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
         diesel --version
       working-directory: backend
 
@@ -1379,7 +1396,10 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        curl -sSfL "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz" | tar -xJ -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
+        archive="$RUNNER_TEMP/diesel_cli.tar.xz"
+        curl -sSfL -o "$archive" "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz"
+        echo "${DIESEL_SHA256}  ${archive}" | sha256sum -c -
+        tar -xJf "$archive" -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
         diesel --version
       working-directory: backend
 
@@ -1576,7 +1596,10 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        curl -sSfL "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz" | tar -xJ -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
+        archive="$RUNNER_TEMP/diesel_cli.tar.xz"
+        curl -sSfL -o "$archive" "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz"
+        echo "${DIESEL_SHA256}  ${archive}" | sha256sum -c -
+        tar -xJf "$archive" -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
         diesel --version
       working-directory: backend
 
@@ -1777,7 +1800,10 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        curl -sSfL "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz" | tar -xJ -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
+        archive="$RUNNER_TEMP/diesel_cli.tar.xz"
+        curl -sSfL -o "$archive" "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz"
+        echo "${DIESEL_SHA256}  ${archive}" | sha256sum -c -
+        tar -xJf "$archive" -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
         diesel --version
       working-directory: backend
 
@@ -1982,7 +2008,10 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        curl -sSfL "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz" | tar -xJ -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
+        archive="$RUNNER_TEMP/diesel_cli.tar.xz"
+        curl -sSfL -o "$archive" "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz"
+        echo "${DIESEL_SHA256}  ${archive}" | sha256sum -c -
+        tar -xJf "$archive" -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
         diesel --version
       working-directory: backend
 
@@ -2187,7 +2216,10 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        curl -sSfL "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz" | tar -xJ -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
+        archive="$RUNNER_TEMP/diesel_cli.tar.xz"
+        curl -sSfL -o "$archive" "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz"
+        echo "${DIESEL_SHA256}  ${archive}" | sha256sum -c -
+        tar -xJf "$archive" -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
         diesel --version
       working-directory: backend
 
