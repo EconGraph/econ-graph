@@ -107,7 +107,7 @@ Model Context Protocol server implementation enabling AI model integration for e
 Main backend application providing server infrastructure, metrics collection, and comprehensive integration testing capabilities.
 
 **Key Features:**
-- Core HTTP server with routing and middleware
+- Core HTTP server with routing and middleware (warp routes served by hyper, HTTP/1.1 only; HTTP/2 is refused on every route, including the NodePort)
 - Application performance and health monitoring
 - Service orchestration and lifecycle management
 - Comprehensive end-to-end testing capabilities

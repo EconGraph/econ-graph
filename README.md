@@ -238,8 +238,8 @@ EconGraph maintains the highest standards of quality and reliability expected by
 ### **🛠️ For Technical Teams**
 
 #### **Prerequisites**
-- Node.js 18+ and npm
-- Rust 1.70+ and Cargo
+- Node.js 24 LTS and npm
+- Rust 1.98.1 and Cargo (pinned in `rust-toolchain.toml`; rustup installs it automatically)
 - PostgreSQL 17+ (recommended for production)
 - Docker (for containerized deployment)
 
