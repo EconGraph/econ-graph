@@ -465,7 +465,7 @@ jobs:
       working-directory: backend
 
     # Required: the crawler crate, crawler worker, all SEC crawler lib tests (no database
-    # needed) and the crawl_queue model / queue service tests. These must pass for the job
+    # needed) and the crawl_queue, dataset model and queue service tests. These must pass for the job
     # (and the PR) to go green.
     # The long soak test (tests/soak.rs) is #[ignore]d and runs manually only; its fast
     # limiter-conformance tests run here.
@@ -476,6 +476,7 @@ jobs:
         cargo test -p econ-graph-crawler-worker -- --test-threads=1
         cargo test -p econ-graph-sec-crawler --lib -- --test-threads=1
         cargo test -p econ-graph-core crawl_queue -- --test-threads=1
+        cargo test -p econ-graph-core --lib models::dataset -- --test-threads=1
         cargo test -p econ-graph-services queue_service -- --test-threads=1
       working-directory: backend
 
