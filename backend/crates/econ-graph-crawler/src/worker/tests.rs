@@ -434,6 +434,45 @@ async fn second_fetch_passes_since_latest_stored_date_minus_lookback() {
 }
 
 #[tokio::test]
+async fn refetching_unchanged_points_writes_nothing() {
+    let Some(db) = db().await else { return };
+    let mock = MockSource::start().await;
+    let points = [("2024-01-01", Some("1")), ("2024-02-01", None)];
+    mock.mount(&Route::get("/series/t5_same"), series_json("Same", &points))
+        .await;
+    let w = worker(&db.pool, &mock);
+    enqueue(&db.pool, SRC.as_str(), "t5_same", JobKind::FetchSeries, 5).await;
+    let Some(JobOutcome::Completed(first)) = w.run_once().await else {
+        panic!("first fetch should complete")
+    };
+    assert_eq!((first.points_written, first.new_points), (2, 2));
+    let series_id = first.series_id.unwrap();
+    let updated_at = |pool: DatabasePool| async move {
+        let mut conn = pool.get().await.unwrap();
+        data_points::table
+            .filter(data_points::series_id.eq(series_id))
+            .select(data_points::updated_at)
+            .order(data_points::date)
+            .load::<chrono::DateTime<Utc>>(&mut conn)
+            .await
+            .unwrap()
+    };
+    let before = updated_at(db.pool.clone()).await;
+
+    // Same values again (including the NULL): nothing is rewritten or counted.
+    mock.reset().await;
+    mock.mount(&Route::get("/series/t5_same"), series_json("Same", &points))
+        .await;
+    enqueue(&db.pool, SRC.as_str(), "t5_same", JobKind::FetchSeries, 5).await;
+    let Some(JobOutcome::Completed(second)) = w.run_once().await else {
+        panic!("second fetch should complete")
+    };
+    assert_eq!((second.points_written, second.new_points), (0, 0));
+    assert_eq!(updated_at(db.pool.clone()).await, before);
+    assert_eq!(point_count(&db.pool, series_id).await, 2);
+}
+
+#[tokio::test]
 async fn server_error_retries_with_counted_attempt_and_backoff() {
     let Some(db) = db().await else { return };
     let mock = MockSource::start().await;
