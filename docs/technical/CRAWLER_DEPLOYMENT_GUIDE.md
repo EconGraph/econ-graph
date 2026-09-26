@@ -52,6 +52,7 @@ Configuration (flags or environment):
 | `CRAWLER_PAUSE_AFTER` / `CRAWLER_PAUSE_SECS` | 5 / 300 | pause a source after N consecutive rate-limit/auth errors |
 | `CRAWLER_HTTP_TIMEOUT_SECS` | 30 | per-request timeout |
 | `CRAWLER_DATA_DIR` | `/app/data` in the image | reference data read at runtime (`us_states.csv`, used by FHFA and Census); the worker exits at startup if it is missing |
+| `REFERENCE_DATA_DIR` | `/app/reference` in the image | shared reference data (`countries.csv`, econ-graph-core's `data/`); the worker and the backend exit at startup if it is missing |
 | `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY`, `CENSUS_API_KEY` | unset | from Secret `crawler-api-keys` (all optional) |
 
 ## Retries
