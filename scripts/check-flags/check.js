@@ -2,7 +2,7 @@
 // config/flags/README.md for what each flag must carry and why.
 
 import { readFileSync } from 'node:fs';
-import { SchemaValidator } from './schema.js';
+import { SchemaValidator, deepEqual } from './schema.js';
 
 const KINDS = ['build', 'preview', 'ops', 'experiment'];
 const STAGES = ['alpha', 'beta'];
@@ -10,10 +10,24 @@ const STAGES = ['alpha', 'beta'];
 const KEY = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
 const OWNER = /^docs\/roadmap\/[a-z0-9-]+\.md$/;
 const REMOVE_BY = /^(train ([1-9][0-9]*)|unscheduled)$/;
+const METADATA_KEYS = ['kind', 'owner', 'stage', 'remove_by'];
+// A dev override only changes which variant is served
+const OVERRIDE_KEYS = ['state', 'variants', 'defaultVariant'];
+const RELEASE_TAG = /^v0\.([0-9]+)\.([0-9]+)$/;
 
 // Train N ships as v0.(N+1).0: train 1 is v0.2.0.
 export function trainTag(train) {
   return `v0.${train + 1}.0`;
+}
+
+// The first stable release tag at or past train N's, so a train whose own tag
+// was skipped still counts as shipped once a later train is tagged
+function shippedTag(train, tags) {
+  return tags
+    .map((t) => [t, RELEASE_TAG.exec(t)])
+    .filter(([, m]) => m && Number(m[1]) >= train + 1)
+    .map(([t]) => t)
+    .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))[0];
 }
 
 function readJson(path, label, errors) {
@@ -33,7 +47,7 @@ function readJson(path, label, errors) {
 }
 
 function checkDefaultVariant(label, name, flag, errors) {
-  if (typeof flag.defaultVariant !== 'string' || !(flag.defaultVariant in flag.variants)) {
+  if (typeof flag.defaultVariant !== 'string' || !Object.hasOwn(flag.variants, flag.defaultVariant)) {
     errors.push(`${label}: flag "${name}": defaultVariant must name one of its variants`);
   }
 }
@@ -45,6 +59,9 @@ function checkReleaseFlag(name, flag, { docExists, tags }, errors) {
 
   const meta = flag.metadata ?? {};
   const { kind, owner, stage, remove_by: removeBy } = meta;
+  for (const key of Object.keys(meta).filter((k) => !METADATA_KEYS.includes(k))) {
+    errors.push(`${at}: unknown metadata key "${key}" (allowed: ${METADATA_KEYS.join(', ')})`);
+  }
   if (!KINDS.includes(kind)) errors.push(`${at}: metadata.kind must be one of ${KINDS.join(', ')}`);
 
   if (typeof owner !== 'string' || !OWNER.test(owner)) {
@@ -59,16 +76,18 @@ function checkReleaseFlag(name, flag, { docExists, tags }, errors) {
     errors.push(`${at}: metadata.stage is only for preview flags`);
   }
 
-  if (kind === 'build' || kind === 'preview') {
+  const needsRemoveBy = kind === 'build' || kind === 'preview';
+  if (kind === 'ops' && removeBy !== undefined) {
+    errors.push(`${at}: ops flags are long-lived and take no metadata.remove_by`);
+  } else if (removeBy !== undefined || needsRemoveBy) {
     const m = typeof removeBy === 'string' ? REMOVE_BY.exec(removeBy) : null;
     if (!m) {
-      errors.push(`${at}: ${kind} flags need metadata.remove_by ("train N" or "unscheduled")`);
+      const who = needsRemoveBy ? `${kind} flags need` : 'bad';
+      errors.push(`${at}: ${who} metadata.remove_by ("train N" or "unscheduled")`);
     } else if (m[2]) {
-      const tag = trainTag(Number(m[2]));
-      if (tags.has(tag)) errors.push(`${at}: remove_by is ${removeBy}, which shipped as ${tag}; delete the flag`);
+      const tag = shippedTag(Number(m[2]), tags);
+      if (tag) errors.push(`${at}: remove_by is ${removeBy}, and ${tag} has shipped; delete the flag`);
     }
-  } else if (kind === 'ops' && removeBy !== undefined) {
-    errors.push(`${at}: ops flags are long-lived and take no metadata.remove_by`);
   }
 
   if (kind === 'build') {
@@ -84,14 +103,18 @@ function checkReleaseFlag(name, flag, { docExists, tags }, errors) {
 
 function checkDevFlag(name, flag, release, errors) {
   const at = `dev: flag "${name}"`;
-  const base = release[name];
+  const base = Object.hasOwn(release, name) ? release[name] : undefined;
   if (!base) {
     errors.push(`${at}: overrides a flag that flags.flagd.json does not define`);
     return;
   }
   checkDefaultVariant('dev', name, flag, errors);
   if (flag.metadata !== undefined) errors.push(`${at}: metadata belongs in flags.flagd.json only`);
-  if (JSON.stringify(flag.variants) !== JSON.stringify(base.variants)) {
+  for (const key of Object.keys(flag).filter((k) => k !== 'metadata' && !OVERRIDE_KEYS.includes(k))) {
+    errors.push(`${at}: an override takes only ${OVERRIDE_KEYS.join(', ')}, not "${key}"`);
+  }
+  if (flag.state !== base.state) errors.push(`${at}: state must match flags.flagd.json`);
+  if (!deepEqual(flag.variants, base.variants)) {
     errors.push(`${at}: variants must match flags.flagd.json; an override only changes the variant served`);
   }
 }
@@ -114,7 +137,7 @@ export function checkFlags({ releasePath, devPath, schemaPath, tags, docExists }
 
   const release = files.release.flags;
   for (const [name, flag] of Object.entries(release)) {
-    checkReleaseFlag(name, flag, { docExists, tags: new Set(tags) }, errors);
+    checkReleaseFlag(name, flag, { docExists, tags }, errors);
   }
   if (files.dev) {
     for (const [name, flag] of Object.entries(files.dev.flags)) checkDevFlag(name, flag, release, errors);

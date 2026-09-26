@@ -33,12 +33,7 @@
       },
       "defaultVariant": "off",
       "targeting": {
-        "fractional": [
-          [
-            "on",
-            -5
-          ]
-        ]
+        "fractional": [["on", -5]]
       },
       "metadata": {
         "kind": "preview",

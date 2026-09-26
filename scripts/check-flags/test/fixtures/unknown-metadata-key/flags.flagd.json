@@ -10,10 +10,8 @@
       "metadata": {
         "kind": "build",
         "owner": "docs/roadmap/feature-flags.md",
-        "remove_by": "train 1"
-      },
-      "targeting": {
-        "if": [true, "on", "off"]
+        "remove_by": "train 1",
+        "removeBy": "train 2"
       }
     },
     "mcp": {

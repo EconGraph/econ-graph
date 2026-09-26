@@ -11,9 +11,6 @@
         "kind": "build",
         "owner": "docs/roadmap/feature-flags.md",
         "remove_by": "train 1"
-      },
-      "targeting": {
-        "if": [true, "on", "off"]
       }
     },
     "mcp": {
@@ -54,6 +51,19 @@
         "owner": "docs/roadmap/feature-flags.md",
         "stage": "beta",
         "remove_by": "train 3"
+      }
+    },
+    "layout_test": {
+      "state": "ENABLED",
+      "variants": {
+        "a": "a",
+        "b": "b"
+      },
+      "defaultVariant": "a",
+      "metadata": {
+        "kind": "experiment",
+        "owner": "docs/roadmap/feature-flags.md",
+        "remove_by": "whenever"
       }
     }
   }

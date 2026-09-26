@@ -21,7 +21,11 @@ function gitTags() {
 
 const args = process.argv.slice(2);
 const tagsAt = args.indexOf('--tags');
-const tags = tagsAt >= 0 ? (args[tagsAt + 1] ?? '').split(',').filter(Boolean) : gitTags();
+if (tagsAt >= 0 && (args[tagsAt + 1] === undefined || args[tagsAt + 1].startsWith('--'))) {
+  console.error('check-flags: --tags needs a comma-separated list, such as --tags v0.2.0,v0.3.0');
+  process.exit(2);
+}
+const tags = tagsAt >= 0 ? args[tagsAt + 1].split(',').filter(Boolean) : gitTags();
 
 const errors = checkFlags({
   releasePath: join(flagsDir, 'flags.flagd.json'),

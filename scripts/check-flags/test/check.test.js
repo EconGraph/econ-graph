@@ -48,16 +48,25 @@ const failures = {
   'dev-changes-variants': 'dev: flag "build_canary": variants must match flags.flagd.json',
   'dev-unknown-default-variant': 'dev: flag "build_canary": defaultVariant must name one of its variants',
   'dev-schema-invalid': '$.flags.build_canary.state: must be one of',
+  'inherited-default-variant': 'flag "mcp": defaultVariant must name one of its variants',
+  'unknown-metadata-key': 'flag "build_canary": unknown metadata key "removeBy"',
+  'experiment-malformed-remove-by': 'flag "layout_test": bad metadata.remove_by',
+  'dev-changes-state': 'dev: flag "build_canary": state must match flags.flagd.json',
+  'dev-with-targeting':
+    'dev: flag "build_canary": an override takes only state, variants, defaultVariant, not "targeting"',
 };
+const passing = ['valid', 'valid-dev-variants-reordered'];
 
 test('every fixture directory has a test', () => {
   const dirs = readdirSync(fixtures).sort();
-  assert.deepEqual(dirs, ['valid', ...Object.keys(failures)].sort());
+  assert.deepEqual(dirs, [...passing, ...Object.keys(failures)].sort());
 });
 
-test('valid fixture passes', () => {
-  assert.deepEqual(run('valid'), []);
-});
+for (const fixture of passing) {
+  test(`${fixture} passes`, () => {
+    assert.deepEqual(run(fixture), []);
+  });
+}
 
 for (const [fixture, expected] of Object.entries(failures)) {
   test(`${fixture} fails`, () => {
@@ -80,7 +89,13 @@ test('a flag whose remove_by train has shipped fails', () => {
   assert.deepEqual(run('valid', ['v0.1.0', 'v0.2.0-rc.1']), []);
   const errors = run('valid', ['v0.1.0', 'v0.2.0']);
   assert.deepEqual(errors, [
-    'release: flag "build_canary": remove_by is train 1, which shipped as v0.2.0; delete the flag',
+    'release: flag "build_canary": remove_by is train 1, and v0.2.0 has shipped; delete the flag',
+  ]);
+});
+
+test('a later train shipping counts when train N was never tagged', () => {
+  assert.deepEqual(run('valid', ['v0.1.0', 'v0.3.1', 'v0.3.0']), [
+    'release: flag "build_canary": remove_by is train 1, and v0.3.0 has shipped; delete the flag',
   ]);
 });
 

@@ -20,15 +20,22 @@ function matchesType(value, type) {
   return actual === type || (type === 'number' && actual === 'integer');
 }
 
-function deepEqual(a, b) {
-  return JSON.stringify(a) === JSON.stringify(b);
+// JSON equality that ignores object key order
+export function deepEqual(a, b) {
+  if (typeOf(a) !== typeOf(b)) return false;
+  if (Array.isArray(a)) return a.length === b.length && a.every((v, i) => deepEqual(v, b[i]));
+  if (typeOf(a) === 'object') {
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every((k) => Object.hasOwn(b, k) && deepEqual(a[k], b[k]));
+  }
+  return a === b;
 }
 
 function pointer(root, fragment) {
   let node = root;
   for (const raw of fragment.replace(/^\//, '').split('/').filter(Boolean)) {
     const part = decodeURIComponent(raw).replace(/~1/g, '/').replace(/~0/g, '~');
-    if (node === undefined || !(part in node)) return undefined;
+    if (node === null || typeof node !== 'object' || !Object.hasOwn(node, part)) return undefined;
     node = node[part];
   }
   return node;
@@ -62,6 +69,9 @@ export class SchemaValidator {
     return this.check(value, this.load(this.entry), this.entry, '$');
   }
 
+  // Keywords beside a $ref are applied too (as in draft 2019-09 and later),
+  // not ignored as draft-07 says. flags.json puts `properties` beside a $ref
+  // for flag set metadata, and applying it is the stricter reading.
   check(value, schema, file, at) {
     if (schema === true || (typeof schema === 'object' && Object.keys(schema).length === 0)) return [];
     if (schema === false) return [`${at}: no value is allowed here`];
@@ -125,11 +135,13 @@ const KEYWORDS = {
   },
   required(value, names, _schema, _file, at) {
     if (typeOf(value) !== 'object') return [];
-    return names.filter((n) => !(n in value)).map((n) => `${at}: missing required property "${n}"`);
+    return names.filter((n) => !Object.hasOwn(value, n)).map((n) => `${at}: missing required property "${n}"`);
   },
   properties(value, props, _schema, file, at) {
     if (typeOf(value) !== 'object') return [];
-    return Object.entries(props).flatMap(([k, s]) => (k in value ? this.check(value[k], s, file, `${at}.${k}`) : []));
+    return Object.entries(props).flatMap(([k, s]) =>
+      Object.hasOwn(value, k) ? this.check(value[k], s, file, `${at}.${k}`) : [],
+    );
   },
   patternProperties(value, patterns, _schema, file, at) {
     if (typeOf(value) !== 'object') return [];
