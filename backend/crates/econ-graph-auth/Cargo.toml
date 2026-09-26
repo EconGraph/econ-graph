@@ -47,6 +47,7 @@ reqwest.workspace = true
 
 # Test dependencies
 [dev-dependencies]
+diesel-async.workspace = true
 serial_test.workspace = true
 tokio-test.workspace = true
 testcontainers.workspace = true
