@@ -211,7 +211,7 @@ echo "  Frontend: http://admin.econ-graph.local (add '127.0.0.1 admin.econ-graph
 echo "  Admin UI: http://admin.econ-graph.local/admin"
 echo "  Backend:  http://admin.econ-graph.local/api"
 echo "  GraphQL:  http://admin.econ-graph.local/graphql"
-echo "  Playground: http://admin.econ-graph.local/playground"
+echo "  Playground: off (set ENABLE_GRAPHQL_PLAYGROUND=true on the backend to serve /playground)"
 echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT} (admin/admin123)"
 echo ""
 echo "📊 Useful commands:"

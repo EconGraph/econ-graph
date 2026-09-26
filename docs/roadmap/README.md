@@ -129,8 +129,8 @@ and [#182](https://github.com/EconGraph/econ-graph/pull/182) (backend CORS).
 | Item | Evidence |
 |---|---|
 | Two ingress variants still allow any CORS origin (the backend no longer does, since #182) | `cors-allow-origin: "*"` in `k8s/manifests/ingress.yaml` and `ingress-cloudflare-dns01.yaml` |
-| `/mcp` and `/playground` are unauthenticated | `econ-graph-backend/src/main.rs` |
-| GraphQL depth, complexity and rate limits exist but are not enforced | `/graphql` calls `schema.execute` directly (`econ-graph-backend/src/main.rs`, `graphql_handler`). Nothing calls `SecureGraphQLServer::execute_secure_request` in `econ-graph-graphql/src/security/server.rs` |
+| Fixed: `/mcp` requires a signed-in user's token ([#185](https://github.com/EconGraph/econ-graph/pull/185)), and `/playground` is served only when `ENABLE_GRAPHQL_PLAYGROUND` is set, which only local development does ([#221](https://github.com/EconGraph/econ-graph/pull/221)) | `econ-graph-backend/src/main.rs` |
+| GraphQL depth (15) and complexity (1000) limits are enforced by both schema builders ([#221](https://github.com/EconGraph/econ-graph/pull/221)). Per-client rate limits still exist only in the unused `SecureGraphQLServer` | `econ-graph-graphql/src/graphql/schema.rs`; `econ-graph-graphql/src/security/server.rs` |
 | Plaintext DB and monitoring credentials in k8s manifests | `k8s/manifests/postgres-deployment.yaml`, `configmap.yaml`, `ingress-cloudflare-dns01.yaml` |
 | Sealed Secrets / secrets submodule not set up | `k8s/secrets` is uninitialized. `SECRETS_MANAGEMENT.md` describes a target state, not the current one |
 | Tokens are stored in `localStorage` | `frontend/src/contexts/AuthContext.tsx` and `admin-frontend/src/contexts/AuthContext.tsx` |
