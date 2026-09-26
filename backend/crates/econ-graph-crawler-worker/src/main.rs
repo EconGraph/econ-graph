@@ -50,7 +50,7 @@ struct Args {
     #[arg(long, env = "CRAWLER_CONCURRENCY", default_value_t = 4)]
     concurrency: usize,
 
-    /// Value stored in crawl_queue.locked_by (default: <hostname>-<pid>).
+    /// Value stored in crawl_queue.locked_by (default: `<hostname>-<pid>`).
     #[arg(long, env = "CRAWLER_WORKER_ID")]
     worker_id: Option<String>,
 
