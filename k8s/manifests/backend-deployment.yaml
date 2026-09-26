@@ -78,6 +78,9 @@ spec:
             configMapKeyRef:
               name: econ-graph-config
               key: RUST_LOG
+        # Shared reference data (countries.csv) copied into the image; matches its ENV.
+        - name: REFERENCE_DATA_DIR
+          value: /app/reference
         - name: JWT_SECRET
           valueFrom:
             secretKeyRef:
