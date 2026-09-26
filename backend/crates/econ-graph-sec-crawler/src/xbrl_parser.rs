@@ -1377,14 +1377,15 @@ impl XbrlXmlParser {
             scheme: String::new(),
         };
 
-        // Only text directly inside <identifier> is the identifier; the
-        // entity's <segment> members carry text too.
+        // Only the text of the entity's own <identifier> child is the identifier. Any other
+        // child (<segment> and its members, or an identifier in a foreign namespace) is skipped
+        // whole, so text or a custom `identifier` nested inside it can't overwrite it.
         let mut in_identifier = false;
         let mut buf = Vec::new();
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.local_name().as_ref() == "identifier" {
+                    if Self::structural_name(reader, e) == Some("identifier") {
                         in_identifier = true;
                         for attr in e.attributes() {
                             let attr = attr?;
@@ -1392,6 +1393,9 @@ impl XbrlXmlParser {
                                 entity.scheme = attr.value.to_string();
                             }
                         }
+                    } else {
+                        let mut skip_buf = Vec::new();
+                        reader.read_to_end_into(e.name(), &mut skip_buf)?;
                     }
                 }
                 Ok(quick_xml::events::Event::Text(e)) => {

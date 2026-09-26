@@ -721,7 +721,10 @@ async fn test_native_parse_compound_units_forever_periods_and_custom_names() {
       xmlns:us-gaap="http://fasb.org/us-gaap/2024"
       xmlns:custom="http://example.com/custom">
   <context id="c1">
-    <entity><identifier scheme="http://www.sec.gov/CIK">0000320193</identifier></entity>
+    <entity>
+      <identifier scheme="http://www.sec.gov/CIK">0000320193</identifier>
+      <segment><custom:identifier>not-the-cik</custom:identifier></segment>
+    </entity>
     <period><forever></forever></period>
   </context>
   <unit id="usdPerShare">
