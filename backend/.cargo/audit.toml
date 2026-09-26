@@ -11,9 +11,11 @@ ignore = [
     # release requires warp 0.3, and warp 0.4 support exists only in the
     # async-graphql 8.0 release candidates.
     #
-    # Exposure: the backend is only reached through the nginx ingress with
-    # `backend-protocol: "HTTP"`, which proxies HTTP/1.1 upstream, so the
-    # HTTP/2 code path in h2 is not reachable from clients.
+    # Exposure: the backend's HTTP server is built with hyper's `http1_only(true)`
+    # (econ-graph-backend/src/main.rs), so it refuses HTTP/2 connections on every
+    # route, including the NodePort (30080) that bypasses the ingress. The h2
+    # server code path is therefore unreachable; h2 is only linked, never served.
+    # The nginx ingress also proxies HTTP/1.1 upstream (`backend-protocol: "HTTP"`).
     #
     # Remove this once async-graphql 8.0 is released and warp is upgraded to 0.4.
     "RUSTSEC-2026-0258",

@@ -413,16 +413,27 @@ async fn main() -> AppResult<()> {
     info!("  - GET /metrics - Prometheus metrics");
     info!("  - GET / - API documentation");
 
-    // Start the server
+    // Start the server. HTTP/1.1 only: TLS terminates at the ingress, which proxies HTTP/1.1,
+    // and refusing cleartext HTTP/2 keeps h2 0.3 (RUSTSEC-2026-0258, pulled in by warp 0.3)
+    // unreachable even via the NodePort. warp::serve offers no way to disable HTTP/2.
     info!("🚀 Starting HTTP server...");
-    let (_, server) =
-        warp::serve(routes).bind_with_graceful_shutdown(([0, 0, 0, 0], port), async {
+    let make_svc = hyper::service::make_service_fn(move |_| {
+        let svc = warp::service(routes.clone());
+        async move { Ok::<_, Infallible>(svc) }
+    });
+    let server = hyper::Server::try_bind(&([0, 0, 0, 0], port).into())
+        .map_err(|e| AppError::InternalError(format!("Failed to bind port {port}: {e}")))?
+        .http1_only(true)
+        .serve(make_svc)
+        .with_graceful_shutdown(async {
             signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
             info!("🛑 Received shutdown signal, gracefully shutting down...");
         });
 
     info!("✅ Server is now running and accepting connections!");
-    server.await;
+    server
+        .await
+        .map_err(|e| AppError::InternalError(format!("HTTP server error: {e}")))?;
 
     info!("✅ Server shutdown complete");
     Ok(())
