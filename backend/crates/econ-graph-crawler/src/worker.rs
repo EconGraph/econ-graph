@@ -501,11 +501,17 @@ impl Worker {
             .registry
             .get(source)
             .ok_or_else(|| CrawlError::Permanent(format!("no adapter registered for {source}")))?;
+        let complete = adapter.discovery_is_complete();
         let ctx = self.ctx.clone();
         let found = guarded(async move { adapter.discover(&ctx).await }).await?;
         let written = persist::persist_discovered(&self.ctx.pool, source, &found)
             .await
             .map_err(db_error)?;
+        if complete {
+            persist::retire_unlisted(&self.ctx.pool, source, &found)
+                .await
+                .map_err(db_error)?;
+        }
         Ok(JobStats {
             metadata_written: written,
             ..JobStats::default()

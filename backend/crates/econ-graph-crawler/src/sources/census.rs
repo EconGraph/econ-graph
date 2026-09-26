@@ -133,6 +133,14 @@ impl SourceAdapter for CensusAdapter {
         SourceId::Census
     }
 
+    /// Discovery crosses the dataset's full variable and geography metadata, and fails rather
+    /// than returning part of it. Retirement applies to every series of the Census data source,
+    /// so rows this adapter doesn't produce (the ACS rows seeded by the initial migration) go
+    /// inactive too. Scope it to the BDS dataset once series carry a dataset (datasets DS-3).
+    fn discovery_is_complete(&self) -> bool {
+        true
+    }
+
     /// One series per economic variable for the nation and for each state and DC, limited to the
     /// levels `geography.json` lists. See the module docs.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {

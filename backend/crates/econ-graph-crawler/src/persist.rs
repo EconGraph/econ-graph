@@ -3,12 +3,14 @@
 // See LICENSE file for complete terms and conditions.
 
 //! Shared database writes for crawl results. Every source adapter's output goes through here,
-//! so upsert semantics are defined exactly once.
+//! so upsert semantics are defined exactly once. Series rows get [stable ids](crate::series_id),
+//! and series are never deleted.
 //!
 //! - [`data_source_id`]: the `data_sources` row for a [`SourceId`] (matches the seeded names, so
 //!   FRED/BLS/... map onto the existing rows; created from the core template if missing).
 //! - [`persist_series`]: upserts `economic_series` + `data_points` in one transaction.
 //! - [`persist_discovered`]: upserts `series_metadata` rows from catalog discovery.
+//! - [`retire_unlisted`]: marks series a complete catalog no longer lists inactive (never deletes).
 //! - [`record_attempt`]: one `crawl_attempts` row per processed job (when the series exists).
 //! - [`latest_point_date`]: the `since` bound for incremental fetches.
 
@@ -26,6 +28,7 @@ use econ_graph_core::DatabasePool;
 use uuid::Uuid;
 
 use crate::adapter::{DiscoveredSeries, FetchedPoint, FetchedSeries};
+use crate::series_id::stable_series_id;
 use crate::source::SourceId;
 
 /// Rows per multi-row INSERT (keeps well under Postgres' 65535 bind-parameter limit).
@@ -247,8 +250,9 @@ async fn upsert_points(
 /// Upserts the `economic_series` row for `(source, external_id)` and all `fetched.points`, in one
 /// transaction.
 ///
-/// - Series: created if missing (title falls back to `external_id`, frequency to
-///   [`UNKNOWN_FREQUENCY`]). When `fetched.metadata` is present, its non-empty fields replace the
+/// - Series: created if missing, with the [stable id](crate::series_id) of `(source, external_id)`
+///   (title falls back to `external_id`, frequency to [`UNKNOWN_FREQUENCY`]). An existing row keeps
+///   its id. When `fetched.metadata` is present, its non-empty fields replace the
 ///   stored ones; absent fields keep their stored values. Always sets `last_crawled_at`,
 ///   `last_updated`, `crawl_status = 'success'` and clears `crawl_error_message`.
 /// - Points: upserted on the `data_points` unique key `(series_id, date, revision_date,
@@ -271,6 +275,7 @@ pub async fn persist_series(
     let frequency = meta.and_then(|m| clip_opt(m.frequency.as_deref(), 50));
     let seasonal = meta.and_then(|m| clip_opt(m.seasonal_adjustment.as_deref(), 100));
     let external_id = clip(external_id, 255);
+    let id = stable_series_id(source, &external_id);
 
     // Last occurrence wins for duplicate keys (one INSERT can't touch a row twice).
     let mut unique = BTreeMap::new();
@@ -281,11 +286,11 @@ pub async fn persist_series(
 
     conn.transaction::<SeriesWrite, AppError, _>(async move |conn| {
             let row: UpsertedSeries = diesel::sql_query(
-                "INSERT INTO economic_series (source_id, external_id, title, description, units, \
+                "INSERT INTO economic_series (id, source_id, external_id, title, description, units, \
                      frequency, seasonal_adjustment, is_active, first_discovered_at, last_crawled_at, \
                      last_updated, crawl_status, crawl_error_message) \
-                 VALUES ($1, $2, COALESCE($3, $2), $4, $5, COALESCE($6, $7), $8, TRUE, NOW(), NOW(), \
-                     NOW(), 'success', NULL) \
+                 VALUES ($9, $1, $2, COALESCE($3, $2), $4, $5, COALESCE($6, $7), $8, TRUE, NOW(), \
+                     NOW(), NOW(), 'success', NULL) \
                  ON CONFLICT (source_id, external_id) DO UPDATE SET \
                      title = COALESCE($3, economic_series.title), \
                      description = COALESCE($4, economic_series.description), \
@@ -304,6 +309,7 @@ pub async fn persist_series(
             .bind::<Nullable<Text>, _>(frequency.as_deref())
             .bind::<Text, _>(UNKNOWN_FREQUENCY)
             .bind::<Nullable<Text>, _>(seasonal.as_deref())
+            .bind::<SqlUuid, _>(id)
             .get_result(conn)
             .await?;
             let series_id = row.id;
@@ -340,8 +346,9 @@ pub async fn persist_series(
 }
 
 /// Upserts one `series_metadata` row per discovered series (key `(source_id, external_id)`), in
-/// one transaction, chunked. Existing rows get the new title/description/units/frequency/data_url,
-/// `last_discovered_at = NOW()` and `is_active = TRUE`. Duplicate ids in the input keep the last.
+/// one transaction, chunked. Every row gets the [stable id](crate::series_id) of its key. Existing
+/// rows get the new title/description/units/frequency/data_url, `last_discovered_at = NOW()` and
+/// `is_active = TRUE`. Duplicate ids in the input keep the last.
 /// Returns the number of rows written.
 pub async fn persist_discovered(
     pool: &DatabasePool,
@@ -355,25 +362,33 @@ pub async fn persist_discovered(
     let mut conn = pool.get().await.map_err(conn_err)?;
     let source_id = data_source_id_conn(&mut conn, source).await?;
 
+    // Keyed by the stored (clipped) id: one INSERT can't touch a row twice.
     let mut unique = BTreeMap::new();
     for d in discovered {
         if !d.external_id.trim().is_empty() {
-            unique.insert(d.external_id.as_str(), d);
+            unique.insert(clip(&d.external_id, 255), d);
         }
     }
-    let rows: Vec<NewSeriesMetadata> = unique
-        .values()
-        .map(|d| NewSeriesMetadata {
-            source_id,
-            external_id: clip(&d.external_id, 255),
-            title: clip_opt(Some(&d.title), 500).unwrap_or_else(|| clip(&d.external_id, 500)),
-            description: clip_opt(d.description.as_deref(), usize::MAX),
-            units: clip_opt(d.units.as_deref(), 100),
-            frequency: clip_opt(d.frequency.as_deref(), 50),
-            geographic_level: None,
-            data_url: clip_opt(d.data_url.as_deref(), usize::MAX),
-            api_endpoint: None,
-            is_active: true,
+    let rows: Vec<_> = unique
+        .into_iter()
+        .map(|(external_id, d)| {
+            let id = sm::id.eq(stable_series_id(source, &external_id));
+            (
+                id,
+                NewSeriesMetadata {
+                    source_id,
+                    external_id,
+                    title: clip_opt(Some(&d.title), 500)
+                        .unwrap_or_else(|| clip(&d.external_id, 500)),
+                    description: clip_opt(d.description.as_deref(), usize::MAX),
+                    units: clip_opt(d.units.as_deref(), 100),
+                    frequency: clip_opt(d.frequency.as_deref(), 50),
+                    geographic_level: None,
+                    data_url: clip_opt(d.data_url.as_deref(), usize::MAX),
+                    api_endpoint: None,
+                    is_active: true,
+                },
+            )
         })
         .collect();
 
@@ -386,6 +401,9 @@ pub async fn persist_discovered(
                 .on_conflict((sm::source_id, sm::external_id))
                 .do_update()
                 .set((
+                    // Nothing references series_metadata.id, so a row created before stable ids
+                    // (the seeds, an older database) is moved onto its stable id here.
+                    sm::id.eq(excluded(sm::id)),
                     sm::title.eq(excluded(sm::title)),
                     sm::description.eq(excluded(sm::description)),
                     sm::units.eq(excluded(sm::units)),
@@ -401,6 +419,70 @@ pub async fn persist_discovered(
         Ok(written)
     })
     .await
+}
+
+/// Result of [`retire_unlisted`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Retirement {
+    /// `series_metadata` rows marked inactive.
+    pub metadata_retired: usize,
+    /// `economic_series` rows marked inactive.
+    pub series_retired: usize,
+    /// `economic_series` rows marked active again because the catalog lists them again.
+    pub series_reactivated: usize,
+}
+
+/// Applies a complete catalog of `source` (see [`SourceAdapter::discovery_is_complete`]): its
+/// `series_metadata` and `economic_series` rows that `listed` doesn't contain are marked
+/// inactive, and its inactive `economic_series` rows that `listed` contains are marked active
+/// again. Nothing is deleted, so a retired series keeps its id and its data points.
+///
+/// Does nothing when `listed` is empty: a source that suddenly lists nothing is far more likely
+/// broken than retired.
+///
+/// [`SourceAdapter::discovery_is_complete`]: crate::adapter::SourceAdapter::discovery_is_complete
+pub async fn retire_unlisted(
+    pool: &DatabasePool,
+    source: SourceId,
+    listed: &[DiscoveredSeries],
+) -> AppResult<Retirement> {
+    let ids: Vec<String> = listed
+        .iter()
+        .filter(|d| !d.external_id.trim().is_empty())
+        .map(|d| clip(&d.external_id, 255))
+        .collect();
+    if ids.is_empty() {
+        return Ok(Retirement::default());
+    }
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    let retirement = conn
+        .transaction::<Retirement, AppError, _>(async move |conn| {
+            let run = |sql: &'static str| {
+                diesel::sql_query(sql)
+                    .bind::<SqlUuid, _>(source_id)
+                    .bind::<Array<Text>, _>(ids.clone())
+            };
+            Ok(Retirement {
+                metadata_retired: run("UPDATE series_metadata SET is_active = FALSE \
+                     WHERE source_id = $1 AND is_active AND external_id <> ALL($2)")
+                .execute(conn)
+                .await?,
+                series_retired: run("UPDATE economic_series SET is_active = FALSE \
+                     WHERE source_id = $1 AND is_active AND external_id <> ALL($2)")
+                .execute(conn)
+                .await?,
+                series_reactivated: run("UPDATE economic_series SET is_active = TRUE \
+                     WHERE source_id = $1 AND NOT is_active AND external_id = ANY($2)")
+                .execute(conn)
+                .await?,
+            })
+        })
+        .await?;
+    if retirement != Retirement::default() {
+        tracing::info!(%source, ?retirement, "applied complete catalog");
+    }
+    Ok(retirement)
 }
 
 /// Records one `crawl_attempts` row for `series_id` (the table requires an existing series) and,
@@ -501,3 +583,6 @@ mod tests {
         assert_eq!(data_source_template(SourceId::Sec).name, "SEC EDGAR");
     }
 }
+
+#[cfg(test)]
+mod stable_id_tests;
