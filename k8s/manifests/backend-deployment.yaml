@@ -83,7 +83,7 @@ spec:
             secretKeyRef:
               name: econ-graph-secrets
               key: jwt-secret
-        - name: CORS_ORIGIN
+        - name: CORS_ALLOWED_ORIGINS
           valueFrom:
             configMapKeyRef:
               name: econ-graph-config

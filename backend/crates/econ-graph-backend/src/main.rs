@@ -152,6 +152,41 @@ async fn root_handler() -> Result<impl warp::Reply, Infallible> {
     ))
 }
 
+/// Check each configured CORS origin is a bare `http(s)://host[:port]` origin.
+///
+/// warp panics on an origin it cannot parse, and a wildcard would re-open the API to every
+/// site, so reject both at startup with a clear message instead.
+fn validate_cors_origins(origins: &[String]) -> AppResult<Vec<String>> {
+    let origins: Vec<String> = origins
+        .iter()
+        .map(|o| o.trim().trim_end_matches('/').to_string())
+        .filter(|o| !o.is_empty())
+        .collect();
+    if origins.is_empty() {
+        return Err(AppError::ConfigError(
+            "CORS_ALLOWED_ORIGINS must list at least one origin".to_string(),
+        ));
+    }
+    for origin in &origins {
+        let valid = origin
+            .parse::<warp::http::Uri>()
+            .ok()
+            .filter(|uri| {
+                matches!(uri.scheme_str(), Some("http") | Some("https"))
+                    && uri.host().is_some_and(|h| !h.is_empty() && h != "*")
+                    && uri.path_and_query().map_or(true, |pq| pq.as_str() == "/")
+            })
+            .is_some();
+        if !valid {
+            return Err(AppError::ConfigError(format!(
+                "Invalid CORS origin {:?}: expected scheme://host[:port], like https://econ-graph.com",
+                origin
+            )));
+        }
+    }
+    Ok(origins)
+}
+
 #[tokio::main]
 async fn main() -> AppResult<()> {
     // Initialize tracing with more detailed output
@@ -264,11 +299,17 @@ async fn main() -> AppResult<()> {
     // Crawling does not run in this process: the API only enqueues crawl_queue jobs, and the
     // separate `crawler-worker` binary (econ-graph-crawler) processes them.
 
-    // Create Warp filters
+    // Create Warp filters. Browsers may call the API only from the configured frontend origins
+    // (CORS_ALLOWED_ORIGINS, comma-separated; defaults to the local frontend).
+    let cors_origins = validate_cors_origins(&config.cors.allowed_origins).map_err(|e| {
+        e.log_with_context("Application startup CORS configuration");
+        eprintln!("❌ {}", e);
+        e
+    })?;
     let cors = warp::cors()
-        .allow_any_origin()
+        .allow_origins(cors_origins.iter().map(String::as_str))
         .allow_headers(vec!["content-type", "authorization"])
-        .allow_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"]);
+        .allow_methods(vec!["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
 
     // GraphQL endpoint with authentication
     let pool_for_graphql = pool.clone();
@@ -440,4 +481,47 @@ async fn main() -> AppResult<()> {
 
     info!("✅ Server shutdown complete");
     Ok(())
+}
+
+#[cfg(test)]
+mod cors_tests {
+    use super::validate_cors_origins;
+
+    fn origins(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn accepts_plain_origins_and_trims_them() {
+        let validated = validate_cors_origins(&origins(&[
+            "http://localhost:3000",
+            " https://econ-graph.com/ ",
+        ]))
+        .unwrap();
+        assert_eq!(
+            validated,
+            origins(&["http://localhost:3000", "https://econ-graph.com"])
+        );
+        // warp panics on origins it cannot parse; validated ones must not.
+        let _ = warp::cors().allow_origins(validated.iter().map(String::as_str));
+    }
+
+    #[test]
+    fn rejects_wildcards_paths_and_empty_lists() {
+        for bad in [
+            vec!["*"],
+            vec!["https://*"],
+            vec!["econ-graph.com"],
+            vec!["ftp://econ-graph.com"],
+            vec!["https://econ-graph.com/app"],
+            vec![""],
+            vec![],
+        ] {
+            assert!(
+                validate_cors_origins(&origins(&bad)).is_err(),
+                "{:?} should be rejected",
+                bad
+            );
+        }
+    }
 }
