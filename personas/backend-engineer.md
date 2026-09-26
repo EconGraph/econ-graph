@@ -43,11 +43,10 @@ backend/
 - **Testing**: Provides `TestContainer` pattern for database testing across all crates
 
 **econ-graph-services** (Business Logic)
-- **Purpose**: Data processing, crawling, and business operations
-- **Key Modules**: `crawler/`, `series_discovery/`, `search_service/`, `series_service/`
-- **Dependencies**: `econ-graph-core`, `reqwest`, `csv`, `tokio-cron-scheduler`
-- **Critical**: Implements all data acquisition and processing logic
-- **Testing**: Comprehensive integration tests with real data sources
+- **Purpose**: Business operations used by GraphQL/MCP (no crawling)
+- **Key Modules**: `search_service/`, `series_service/`, `global_analysis_service/`, `queue_service/`
+- **Dependencies**: `econ-graph-core`
+- **Testing**: Database-backed unit tests
 
 **econ-graph-auth** (Authentication)
 - **Purpose**: User authentication, OAuth, JWT, and authorization
@@ -71,10 +70,10 @@ backend/
 - **Testing**: MCP protocol compliance and AI tool integration
 
 **econ-graph-crawler** (Data Acquisition)
-- **Purpose**: Standalone data crawling binaries
-- **Key Modules**: `bin/crawler.rs`, `bin/catalog_crawler.rs`
-- **Dependencies**: `econ-graph-services`
-- **Critical**: Handles bulk data acquisition from external sources
+- **Purpose**: All data acquisition via the `crawl_queue` (adapters, worker, `crawler` CLI)
+- **Key Modules**: `sources/`, `worker.rs`, `http.rs`, `cli.rs`, `bin/crawler.rs`
+- **Dependencies**: `econ-graph-core`, `econ-graph-metrics`
+- **Critical**: Handles bulk data acquisition from external sources; deployed as `crawler-worker`
 - **Testing**: End-to-end crawling tests with real data sources
 
 ### Database Architecture

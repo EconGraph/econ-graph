@@ -26,9 +26,8 @@ Welcome to the comprehensive documentation for EconGraph - the economic data vis
 - **[Census BDS Integration](./technical/CENSUS_BDS_INTEGRATION.md)** - Census Business Dynamics Statistics integration
 - **[Census Bureau Integration Summary](./technical/CENSUS_BUREAU_INTEGRATION_SUMMARY.md)** - Census API integration overview
 - **[Crate Split Plan](./technical/CRATE_SPLIT_PLAN.md)** - Rust crate organization strategy
-- **[Crawler Deployment Guide](./technical/CRAWLER_DEPLOYMENT_GUIDE.md)** - Data crawler deployment instructions
-- **[Crawler Politeness](./technical/CRAWLER_POLITENESS.md)** - Web scraping best practices
-- **[Crawler Tuning Guide](./technical/CRAWLER_TUNING_GUIDE.md)** - Performance optimization for crawlers
+- **[Crawler Deployment Guide](./technical/CRAWLER_DEPLOYMENT_GUIDE.md)** - Crawl queue, `crawler` CLI and `crawler-worker` deployment
+- **[Crawler Politeness](./technical/CRAWLER_POLITENESS.md)** - Per-source rate limits, retries and tuning
 - **[Developer Guide Database](./technical/DEVELOPER_GUIDE_DATABASE.md)** - Database development guidelines
 - **[Rate Limit Sources](./technical/RATE_LIMIT_SOURCES.md)** - API rate limiting documentation
 - **[Testing Strategy](./technical/TESTING_STRATEGY.md)** - Comprehensive testing approach

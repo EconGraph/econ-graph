@@ -1,5 +1,11 @@
 # Census Bureau BDS Integration Documentation
 
+> **Status (2026):** the code described here was ported to the Census adapter in
+> `backend/crates/econ-graph-crawler/src/sources/census.rs`; the old `series_discovery` module and
+> `catalog_crawler` binary were removed. Run it via the crawl queue:
+> `crawler discover --source CENSUS` / `crawler enqueue --source CENSUS --series <id>`, drained by `crawler-worker`
+> (see [CRAWLER_DEPLOYMENT_GUIDE.md](./CRAWLER_DEPLOYMENT_GUIDE.md)). Paths below are historical.
+
 ## Overview
 
 This document describes the integration with the U.S. Census Bureau's Business Dynamics Statistics (BDS) dataset through their Data API. The BDS provides comprehensive statistics on business establishments, firms, and job creation/destruction patterns.
@@ -94,56 +100,47 @@ pub struct BdsDataPoint {
 Automatically discovers and catalogs BDS series:
 - Fetches available variables and geography levels
 - Filters for economic indicators
-- Creates `EconomicSeries` records in database
+- Records each series in `series_metadata` (fetching then creates the `economic_series` rows)
 - Generates external IDs: `CENSUS_BDS_{VARIABLE}_{GEOGRAPHY}`
 
 ## Usage Examples
 
-### Basic Data Fetching
-```rust
-use econ_graph_backend::services::series_discovery::census::fetch_bds_data;
+The BDS integration is the `CensusAdapter` source adapter
+(`backend/crates/econ-graph-crawler/src/sources/census.rs`). It is driven through the crawl queue
+rather than called directly:
 
-let client = Client::new();
-let variables = vec!["ESTAB".to_string(), "YEAR".to_string()];
-let data_points = fetch_bds_data(&client, &variables, "us", 2020, 2021, &None).await?;
+```bash
+# Enqueue a discovery job; crawler-worker then records BDS series
+# (economic variables x geographies) in series_metadata
+crawler discover --source CENSUS
+
+# Enqueue a series for fetching; crawler-worker drains the queue
+crawler enqueue --source CENSUS --series CENSUS_BDS_ESTAB_us
 ```
 
-### Series Discovery
-```rust
-use econ_graph_backend::services::series_discovery::census::discover_census_series;
-
-let pool = database_pool;
-let discovered_series = discover_census_series(&pool).await?;
-```
-
-### Query Builder Usage
-```rust
-use econ_graph_backend::services::series_discovery::census::CensusQueryBuilder;
-
-let query = CensusQueryBuilder::new()
-    .variables(&["ESTAB", "FIRM", "YEAR"])
-    .for_geography("state")
-    .year_range(2020, 2022);
-
-let url = query.build_url()?;
-let data = execute_structured(&client, &query).await?;
-```
+Notes:
+- Discovery produces external IDs `CENSUS_BDS_{VARIABLE}_{GEOGRAPHY}` for every economic variable
+  and geography level, but only national series (`..._us`) can be fetched; others are rejected
+  as permanent errors without making a request.
+- Set `CENSUS_API_KEY` to send an API key; requests also work without one at lower rate limits.
 
 ## Crawler Integration
 
 ### Command Line Usage
 ```bash
-# Crawl all data sources (includes Census)
-./catalog_crawler crawl-all --database-url postgresql://... --series-count 10
+# Enqueue Census catalog discovery; crawler-worker drains the queue
+crawler discover --source CENSUS
 
-# Crawl only Census Bureau
-./catalog_crawler crawl-source "U.S. Census Bureau" --database-url postgresql://... --series-count 5
+# Enqueue data fetches for specific series
+crawler enqueue --source CENSUS --series <series-id>
 ```
 
 ### Programmatic Usage
 ```rust
-let discovery_service = SeriesDiscoveryService::new(None, None, None, None);
-let census_series = discovery_service.discover_census_series(&pool).await?;
+// econ_graph_crawler::sources::census (SourceAdapter): discover() / fetch_series()
+let registry = econ_graph_crawler::sources::default_registry();
+let census = registry.get(SourceId::Census).expect("census adapter");
+let discovered = census.discover(&ctx).await?;
 ```
 
 ## Known Limitations
@@ -191,22 +188,23 @@ match fetch_bds_data(&client, &variables, geography, year_start, year_end, &None
 
 ## Testing
 
-### Integration Tests
-The integration includes comprehensive tests:
-- `test_census_bds_integration_happy_path` - Basic functionality
-- `test_census_bds_query_builder_integration` - Query builder validation
-- `test_census_bds_sample_data_integration` - Sample data fetching
-- `test_census_discovery_integration` - Series discovery
-- `test_census_api_error_conditions` - Error handling
-- `test_census_api_rate_limiting` - Rate limiting behavior
+### Adapter Tests
+`sources/census.rs` tests run against a mocked Census API, alongside the shared adapter contract
+tests:
+- `discover_crosses_economic_variables_with_geographies` - Discovery from `variables.json` and `geography.json`
+- `discover_needs_both_metadata_files` - Discovery fails cleanly if either metadata file is missing
+- `fetch_parses_rows_and_sends_key` / `fetch_works_without_a_key_and_applies_since` - Data fetching, API key, incremental `since`
+- `fetch_rejects_non_national_and_foreign_ids_without_requests` - ID validation
+- `census_specific_errors` - Census error classification
+- `row_parsing_rules` - BDS row parsing
 
 ### Running Tests
 ```bash
-# Run all Census integration tests
-cargo test --lib services::series_discovery::census::integration_tests
+# Run the Census adapter tests (mocked API, no network needed)
+cargo test -p econ-graph-crawler --all-features sources::census
 
-# Run specific test
-cargo test --lib test_census_bds_integration_happy_path
+# Run a specific test
+cargo test -p econ-graph-crawler --all-features sources::census::tests::fetch_parses_rows_and_sends_key
 ```
 
 ## Performance Considerations

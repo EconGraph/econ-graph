@@ -1,16 +1,83 @@
+# Crawler alerts.
+#
+# Metric names/labels come from econ-graph-metrics (src/crawler.rs), recorded by the
+# crawler-worker's HttpFetcher (econ-graph-crawler/src/http.rs):
+#   econgraph_crawler_requests_total{crawler_type,source,endpoint,status}
+#   econgraph_crawler_request_duration_seconds_bucket{crawler_type,source,endpoint,le}
+#   econgraph_crawler_errors_total{crawler_type,source,error_type}
+#   econgraph_crawler_rate_limit_hits_total{crawler_type,source}
+#   econgraph_crawler_retries_total{crawler_type,source,retry_reason}
+#   econgraph_crawler_timeouts_total{crawler_type,source}
+# Label meaning in the new crawler: crawler_type = source id lower-cased ("fred", "bls",
+# ...), source = upstream host ("api.stlouisfed.org"). Per-source alerts therefore group
+# by crawler_type.
+#
+# Queue metrics, also served by crawler-worker (econ-graph-metrics CrawlerQueueMetrics):
+#   crawler_jobs_total{source,kind,outcome}          counter; outcome = completed|retrying|failed
+#   crawler_queue_items{source,status}               gauge; status = pending|processing|retrying
+#   crawler_queue_failed_24h{source}                 gauge; rows that became failed in the last 24h
+#   crawler_last_success_timestamp_seconds{source}   gauge; latest completed row (Unix seconds)
+# The gauges are polled from crawl_queue every 30s; source = stored string ("FRED", "BLS", ...).
+#
+# Scraping: crawler-worker serves GET /metrics on :9102 (CRAWLER_METRICS_ADDR), and its pod
+# template carries prometheus.io/scrape|port|path annotations, so the annotation-based
+# 'kubernetes-pods' job in prometheus-config.yaml scrapes it.
+#
+# KNOWN GAPS (not fixed here):
+# - The in-repo Prometheus (prometheus-config.yaml) is not operator-managed and its
+#   rule_files are commented out, so this PrometheusRule is only picked up on clusters
+#   running the Prometheus Operator (the CRD must exist for `kubectl apply` to succeed).
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: crawler-alerts
+  namespace: econ-graph
   labels:
     role: alert-rules
 spec:
   groups:
+  - name: crawler.worker
+    rules:
+    # kube-state-metrics (deployed in k8s/monitoring) provides these.
+    - alert: CrawlerWorkerDown
+      expr: kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"} < 1
+      for: 10m
+      labels:
+        severity: critical
+      annotations:
+        summary: crawler-worker has no available pod
+        description: The crawler-worker Deployment has had no available replica for 10 minutes; crawl_queue is not being drained.
+
+    - alert: CrawlerWorkerRestarting
+      expr: increase(kube_pod_container_status_restarts_total{namespace="econ-graph", container="crawler-worker"}[1h]) > 3
+      labels:
+        severity: warning
+      annotations:
+        summary: crawler-worker is restarting repeatedly
+        description: The crawler-worker container restarted {{ $value | humanize }} times in the last hour (check DATABASE_URL / logs).
+
+  - name: crawler.absent
+    rules:
+    # crawler_queue_items is refreshed every 30s regardless of traffic (econgraph_crawler_*
+    # counters only appear after the first upstream request), so its absence means the
+    # worker's /metrics is not being scraped.
+    - alert: CrawlerMetricsMissing
+      expr: absent(crawler_queue_items) and on() (kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"} >= 1)
+      for: 1h
+      labels:
+        severity: info
+      annotations:
+        summary: crawler-worker metrics are not being scraped
+        description: crawler-worker is running but crawler_queue_items is absent; its /metrics endpoint (port 9102) is not scraped or the queue poller is failing, so the other crawler alerts cannot fire.
+
   - name: crawler.rules
     interval: 30s
     rules:
+    # Denominator filtered with `> 0` so idle periods give no result instead of dividing
+    # by zero (the previous clamp_max(..., 1) capped the denominator at 1 req/s, which
+    # inflated or hid the ratio).
     - alert: CrawlerHighErrorRate
-      expr: sum(rate(econgraph_crawler_errors_total[5m])) / clamp_max(sum(rate(econgraph_crawler_requests_total[5m])), 1) > 0.05
+      expr: sum(rate(econgraph_crawler_errors_total[5m])) / (sum(rate(econgraph_crawler_requests_total[5m])) > 0) > 0.05
       for: 10m
       labels:
         severity: warning
@@ -19,13 +86,13 @@ spec:
         description: Crawler error rate is above 5% for 10 minutes.
 
     - alert: CrawlerHighErrorRateBySource
-      expr: sum by (source) (rate(econgraph_crawler_errors_total[5m])) / clamp_max(sum by (source) (rate(econgraph_crawler_requests_total[5m])), 1) > 0.05
+      expr: sum by (crawler_type) (rate(econgraph_crawler_errors_total[5m])) / (sum by (crawler_type) (rate(econgraph_crawler_requests_total[5m])) > 0) > 0.05
       for: 10m
       labels:
         severity: warning
       annotations:
-        summary: High crawler error rate (>5%) for source {{ $labels.source }}
-        description: Error rate is above 5% for 10 minutes for source {{ $labels.source }}.
+        summary: High crawler error rate (>5%) for source {{ $labels.crawler_type }}
+        description: Error rate is above 5% for 10 minutes for source {{ $labels.crawler_type }}.
 
     - alert: CrawlerFrequentRateLimitHits
       expr: sum(rate(econgraph_crawler_rate_limit_hits_total[15m])) > 0.5
@@ -37,13 +104,13 @@ spec:
         description: Crawlers are frequently hitting upstream rate limits.
 
     - alert: CrawlerFrequentRateLimitHitsBySource
-      expr: sum by (source) (rate(econgraph_crawler_rate_limit_hits_total[15m])) > 0.1
+      expr: sum by (crawler_type) (rate(econgraph_crawler_rate_limit_hits_total[15m])) > 0.1
       for: 15m
       labels:
         severity: warning
       annotations:
-        summary: Frequent 429 rate limit hits for {{ $labels.source }}
-        description: Rate limit hits are frequent for source {{ $labels.source }}.
+        summary: Frequent 429 rate limit hits for {{ $labels.crawler_type }}
+        description: Rate limit hits are frequent for source {{ $labels.crawler_type }}; its SourcePolicy rate may be too high (or more than one worker replica is running).
 
     - alert: CrawlerHighTimeouts
       expr: sum(rate(econgraph_crawler_timeouts_total[10m])) > 0.2
@@ -55,16 +122,16 @@ spec:
         description: Timeout rate exceeds threshold.
 
     - alert: CrawlerHighTimeoutsBySource
-      expr: sum by (source) (rate(econgraph_crawler_timeouts_total[10m])) > 0.05
+      expr: sum by (crawler_type) (rate(econgraph_crawler_timeouts_total[10m])) > 0.05
       for: 10m
       labels:
         severity: warning
       annotations:
-        summary: Elevated crawler timeouts for {{ $labels.source }}
-        description: Timeout rate exceeds threshold for source {{ $labels.source }}.
+        summary: Elevated crawler timeouts for {{ $labels.crawler_type }}
+        description: Timeout rate exceeds threshold for source {{ $labels.crawler_type }}.
 
     - alert: CrawlerHighLatencyP95
-      expr: histogram_quantile(0.95, sum(rate(econgraph_crawler_request_duration_seconds_bucket[5m])) by (le)) > 5
+      expr: histogram_quantile(0.95, sum by (le) (rate(econgraph_crawler_request_duration_seconds_bucket[5m]))) > 5
       for: 10m
       labels:
         severity: warning
@@ -73,28 +140,57 @@ spec:
         description: 95th percentile of request latency is above 5 seconds.
 
     - alert: CrawlerHighLatencyP95BySource
-      expr: histogram_quantile(0.95, sum by (le, source) (rate(econgraph_crawler_request_duration_seconds_bucket[5m]))) > 5
+      expr: histogram_quantile(0.95, sum by (le, crawler_type) (rate(econgraph_crawler_request_duration_seconds_bucket[5m]))) > 5
       for: 10m
       labels:
         severity: warning
       annotations:
-        summary: High p95 latency (>5s) for {{ $labels.source }}
-        description: 95th percentile of request latency is above 5 seconds for source {{ $labels.source }}.
+        summary: High p95 latency (>5s) for {{ $labels.crawler_type }}
+        description: 95th percentile of request latency is above 5 seconds for source {{ $labels.crawler_type }}.
 
+    # The worker only makes requests when due jobs exist, so an empty queue also yields
+    # zero traffic; this is a warning, not critical. Per-source "no traffic" alerts were
+    # dropped: sources are crawled on their own schedules and an idle source is normal.
     - alert: CrawlerNoTraffic
       expr: sum(rate(econgraph_crawler_requests_total[15m])) == 0
-      for: 30m
-      labels:
-        severity: critical
-      annotations:
-        summary: No crawler traffic detected
-        description: Crawler has produced no requests for 30 minutes.
-
-    - alert: CrawlerNoTrafficBySource
-      expr: sum by (source) (rate(econgraph_crawler_requests_total[15m])) == 0
-      for: 30m
+      for: 1h
       labels:
         severity: warning
       annotations:
-        summary: No crawler traffic for {{ $labels.source }}
-        description: Source {{ $labels.source }} has produced no requests for 30 minutes.
+        summary: No crawler traffic detected
+        description: The crawler has made no upstream requests for over an hour (queue empty, all sources paused, or worker stuck).
+
+  - name: crawler.queue
+    rules:
+    - alert: CrawlerQueueBacklog
+      expr: sum(crawler_queue_items{status=~"pending|retrying"}) > 1000
+      for: 1h
+      labels:
+        severity: warning
+      annotations:
+        summary: crawl_queue backlog above 1000 items
+        description: '{{ $value | humanize }} crawl_queue items have been pending/retrying for over an hour; the worker is not keeping up (sources paused, rate limits, or too little CRAWLER_CONCURRENCY).'
+
+    # Non-empty = something is pending, processing or retrying. The `or on() vector(0)` makes
+    # the alert fire even when crawler_jobs_total has no completed series yet (fresh worker).
+    # Due-in-the-future retries also count as non-empty, hence the 1h window plus `for`.
+    - alert: CrawlerNoCompletions
+      expr: |
+        (sum(crawler_queue_items) > 0)
+        and on()
+        ((sum(increase(crawler_jobs_total{outcome="completed"}[1h])) or on() vector(0)) == 0)
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: crawl_queue has work but no job completed in the last hour
+        description: crawl_queue holds {{ $value | humanize }} active items but crawler-worker completed no job in the last hour (all jobs failing/retrying, sources paused, or the worker is stuck).
+
+    - alert: CrawlerSourceFailing
+      expr: max by (source) (crawler_queue_failed_24h) > 50
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: Source {{ $labels.source }} has {{ $value | humanize }} failed jobs in 24h
+        description: More than 50 crawl_queue items for {{ $labels.source }} became failed in the last 24 hours; check crawl_queue.error_message for that source (bad ids, auth, or upstream format change).

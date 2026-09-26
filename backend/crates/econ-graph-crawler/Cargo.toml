@@ -8,14 +8,9 @@ license.workspace = true
 name = "crawler"
 path = "src/bin/crawler.rs"
 
-[[bin]]
-name = "catalog_crawler"
-path = "src/bin/catalog_crawler.rs"
-
 [dependencies]
 # Core dependencies
 econ-graph-core = { path = "../econ-graph-core" }
-econ-graph-services = { path = "../econ-graph-services" }
 
 # HTTP client for crawling
 reqwest.workspace = true
@@ -23,11 +18,8 @@ reqwest.workspace = true
 # Async runtime
 tokio.workspace = true
 
-# CLI argument parsing
-clap.workspace = true
-
-# CSV parsing for data feeds
-csv.workspace = true
+# CLI argument parsing (`env` lets the worker binary read CRAWLER_* variables)
+clap = { workspace = true, features = ["env"] }
 
 # URL parsing
 url.workspace = true
@@ -49,3 +41,31 @@ chrono.workspace = true
 
 # UUID
 uuid.workspace = true
+
+# Adapter trait and data types
+async-trait.workspace = true
+bigdecimal.workspace = true
+
+# Shared HTTP layer: metrics, Retry-After HTTP-date parsing, backoff jitter
+econ-graph-metrics = { path = "../econ-graph-metrics" }
+httpdate = "1"
+rand.workspace = true
+
+# Persistence (src/persist.rs) and queue worker (src/worker.rs)
+diesel.workspace = true
+diesel-async.workspace = true
+futures.workspace = true
+
+# Adapter contract test kit (feature `testkit`)
+wiremock = { workspace = true, optional = true }
+
+[features]
+# Adapter contract test kit: mock upstream server, test CrawlCtx, contract assertions.
+# In-crate tests get it automatically via cfg(test); other crates enable it as a dev-dependency feature.
+testkit = ["dep:wiremock"]
+
+[dev-dependencies]
+wiremock.workspace = true
+diesel-async.workspace = true
+# Paused (virtual) time for the rate limiter tests
+tokio = { workspace = true, features = ["test-util"] }

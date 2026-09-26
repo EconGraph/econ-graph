@@ -1,0 +1,67 @@
+{
+  "status": "REQUEST_SUCCEEDED",
+  "responseTime": 187,
+  "message": [],
+  "Results": {
+    "series": [
+      {
+        "seriesID": "CUUR0000SA0",
+        "catalog": {
+          "series_title": "All items in U.S. city average, all urban consumers, not seasonally adjusted",
+          "series_id": "CUUR0000SA0",
+          "seasonality": "Not Seasonally Adjusted",
+          "survey_name": "CPI for All Urban Consumers (CPI-U)",
+          "survey_abbreviation": "CU",
+          "measure_data_type": "Index 1982-1984=100",
+          "area": "U.S. city average",
+          "item": "All items"
+        },
+        "data": [
+          {
+            "year": "2024",
+            "period": "M03",
+            "periodName": "March",
+            "latest": "true",
+            "value": "312.332",
+            "footnotes": [{}]
+          },
+          {
+            "year": "2024",
+            "period": "M02",
+            "periodName": "February",
+            "value": "310.326",
+            "footnotes": [{}]
+          },
+          {
+            "year": "2024",
+            "period": "M01",
+            "periodName": "January",
+            "value": "308.417",
+            "footnotes": [{}]
+          },
+          {
+            "year": "2023",
+            "period": "M13",
+            "periodName": "Annual",
+            "value": "304.702",
+            "footnotes": [{}]
+          },
+          {
+            "year": "2023",
+            "period": "M12",
+            "periodName": "December",
+            "value": "306.746",
+            "footnotes": [{}]
+          },
+          {
+            "year": "2023",
+            "period": "M11",
+            "periodName": "November",
+            "value": "-",
+            "footnotes": [{"code": "X", "text": "Data unavailable due to the lapse in appropriations."}]
+          }
+        ]
+      }
+    ]
+  }
+}

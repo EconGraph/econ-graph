@@ -1,0 +1,14 @@
+{
+  "fips": [
+    {
+      "name": "us",
+      "geoLevelDisplay": "010",
+      "referenceDate": "2022-01-01"
+    },
+    {
+      "name": "state",
+      "geoLevelDisplay": "040",
+      "referenceDate": "2022-01-01"
+    }
+  ]
+}

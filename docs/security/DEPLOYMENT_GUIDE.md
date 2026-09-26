@@ -281,7 +281,7 @@ Create `Dockerfile`:
 
 ```dockerfile
 # Build stage
-FROM rust:1.70 as builder
+FROM rust:1.98.1-bookworm as builder
 
 WORKDIR /app
 
@@ -299,12 +299,12 @@ COPY . .
 RUN cargo build --release --bin econ-graph-graphql
 
 # Runtime stage
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    libssl1.1 \
+    libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app user

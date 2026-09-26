@@ -103,6 +103,7 @@ echo "🏗️  Building Docker images for v3.7.4..."
 # Tag images with new version
 echo "🏷️  Tagging images with v3.7.4..."
 docker tag econ-graph-backend:latest econ-graph-backend:v3.7.4
+docker tag econ-graph-crawler-worker:latest econ-graph-crawler-worker:v3.7.4
 docker tag econ-graph-frontend:latest econ-graph-frontend:v3.7.4
 docker tag econ-graph-chart-api:latest econ-graph-chart-api:v1.0.0
 docker tag econ-graph-admin-frontend:latest econ-graph-admin-frontend:v1.0.0
@@ -110,6 +111,7 @@ docker tag econ-graph-admin-frontend:latest econ-graph-admin-frontend:v1.0.0
 # Load images into MicroK8s
 echo "📦 Loading images into MicroK8s..."
 docker save econ-graph-backend:v3.7.4 | microk8s ctr images import - || true
+docker save econ-graph-crawler-worker:v3.7.4 | microk8s ctr images import - || true
 docker save econ-graph-frontend:v3.7.4 | microk8s ctr images import - || true
 docker save econ-graph-chart-api:v1.0.0 | microk8s ctr images import - || true
 docker save econ-graph-admin-frontend:v1.0.0 | microk8s ctr images import - || true
@@ -330,6 +332,7 @@ kill $MONITOR_PID 2>/dev/null || true
 # Restart deployments to pick up new images
 echo "🔄 Restarting deployments..."
 kubectl rollout restart deployment/econ-graph-backend -n econ-graph
+kubectl rollout restart deployment/crawler-worker -n econ-graph
 kubectl rollout restart deployment/econ-graph-frontend -n econ-graph
 kubectl rollout restart deployment/econ-graph-admin-frontend -n econ-graph
 kubectl rollout restart deployment/chart-api-service -n econ-graph

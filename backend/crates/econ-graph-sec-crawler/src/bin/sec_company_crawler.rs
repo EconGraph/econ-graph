@@ -47,13 +47,22 @@ struct Cli {
     #[arg(long)]
     exclude_restated: bool,
 
-    /// Maximum number of concurrent crawls
-    #[arg(short, long, default_value = "3")]
+    /// Maximum number of concurrent crawls (no short flag: -m is --max-file-size)
+    #[arg(long, default_value = "3")]
     max_concurrent: usize,
 
     /// Output results to file
     #[arg(short, long)]
     output: Option<String>,
+
+    /// Enqueue SEC fetch_filing jobs on crawl_queue (processed by crawler-worker) instead of
+    /// crawling in this process. Only --ciks is used.
+    #[arg(long)]
+    enqueue: bool,
+
+    /// Queue priority for --enqueue (1-10, higher runs first)
+    #[arg(long, default_value = "5", value_parser = clap::value_parser!(i32).range(1..=10))]
+    priority: i32,
 }
 
 #[tokio::main]
@@ -79,6 +88,19 @@ async fn main() -> Result<()> {
 
     if ciks.is_empty() {
         return Err(anyhow::anyhow!("No CIKs provided"));
+    }
+
+    if cli.enqueue {
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://postgres:password@localhost/econ_graph".to_string());
+        let pool = econ_graph_core::database::create_pool(&database_url).await?;
+        let (enqueued, active) =
+            econ_graph_sec_crawler::enqueue_filings(&pool, &ciks, cli.priority).await?;
+        println!(
+            "Enqueued {} SEC fetch_filing job(s); {} already queued",
+            enqueued, active
+        );
+        return Ok(());
     }
 
     info!("Starting batch crawl for {} companies", ciks.len());

@@ -546,14 +546,63 @@ pub struct QueueStatisticsType {
     pub average_processing_time: Option<f64>,
 }
 
-/// Crawler status information
+/// Crawler status, derived from the crawl queue (see `econ_graph_crawler::status`).
 #[derive(SimpleObject)]
 #[graphql(name = "CrawlerStatus")]
 pub struct CrawlerStatusType {
+    /// A job is being processed, or one finished within the last 10 minutes.
     pub is_running: bool,
+    /// Distinct workers currently holding a job.
     pub active_workers: i32,
+    /// When the most recent job completed successfully.
     pub last_crawl: Option<DateTime<Utc>>,
+    /// When the next waiting job becomes due (now if one is already due); null if none is waiting.
     pub next_scheduled_crawl: Option<DateTime<Utc>>,
+    /// Jobs newly enqueued by `triggerCrawl` (active duplicates are not counted); null elsewhere.
+    pub enqueued_count: Option<i32>,
+    /// Per-source queue counts.
+    pub sources: Vec<CrawlerSourceStatusType>,
+}
+
+/// Queue counts for one crawl source.
+#[derive(SimpleObject)]
+#[graphql(name = "CrawlerSourceStatus")]
+pub struct CrawlerSourceStatusType {
+    /// Source name as stored in the queue (e.g. FRED, WORLD_BANK).
+    pub source: String,
+    pub pending: i32,
+    pub processing: i32,
+    pub retrying: i32,
+    /// Jobs that failed permanently in the last 24 hours.
+    pub failed_last_day: i32,
+    /// When a job for this source last completed successfully.
+    pub last_success: Option<DateTime<Utc>>,
+}
+
+impl CrawlerStatusType {
+    /// Converts a crawler status snapshot; `enqueued_count` is left null.
+    pub fn from_snapshot(s: econ_graph_crawler::status::CrawlerStatusSnapshot) -> Self {
+        let clamp = |n: i64| i32::try_from(n).unwrap_or(i32::MAX);
+        Self {
+            is_running: s.is_running,
+            active_workers: clamp(s.active_workers),
+            last_crawl: s.last_crawl,
+            next_scheduled_crawl: s.next_scheduled_crawl,
+            enqueued_count: None,
+            sources: s
+                .per_source
+                .into_iter()
+                .map(|p| CrawlerSourceStatusType {
+                    source: p.source,
+                    pending: clamp(p.pending),
+                    processing: clamp(p.processing),
+                    retrying: clamp(p.retrying),
+                    failed_last_day: clamp(p.failed_24h),
+                    last_success: p.last_success,
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Input types for mutations and complex queries
@@ -598,9 +647,16 @@ pub struct PaginationInput {
 #[derive(InputObject)]
 #[graphql(name = "TriggerCrawlInput")]
 pub struct TriggerCrawlInput {
+    /// Sources to crawl (e.g. FRED, BLS). A listed source with no series paired to it gets a
+    /// catalog-discovery job.
     pub sources: Option<Vec<String>>,
+    /// Series ids to fetch. They belong to `source`, or to the single entry of `sources`;
+    /// with neither (or several `sources`) the request is rejected.
     pub series_ids: Option<Vec<String>>,
+    /// Queue priority, 1 (lowest) to 10 (highest). Default 5.
     pub priority: Option<i32>,
+    /// Source that every entry of `series_ids` belongs to.
+    pub source: Option<String>,
 }
 
 /// GraphQL representation of a search result

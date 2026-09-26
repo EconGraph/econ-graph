@@ -1,0 +1,23 @@
+{
+  "realtime_start": "2026-09-25",
+  "realtime_end": "2026-09-25",
+  "seriess": [
+    {
+      "id": "GDP",
+      "realtime_start": "2026-09-25",
+      "realtime_end": "2026-09-25",
+      "title": "Gross Domestic Product",
+      "observation_start": "1947-01-01",
+      "observation_end": "2026-04-01",
+      "frequency": "Quarterly",
+      "frequency_short": "Q",
+      "units": "Billions of Dollars",
+      "units_short": "Bil. of $",
+      "seasonal_adjustment": "Seasonally Adjusted Annual Rate",
+      "seasonal_adjustment_short": "SAAR",
+      "last_updated": "2026-08-28 07:54:02-05",
+      "popularity": 93,
+      "notes": "BEA Account Code: A191RC\n\nGross domestic product (GDP), the featured measure of U.S. output, is the market value of the goods and services produced by labor and property located in the United States."
+    }
+  ]
+}

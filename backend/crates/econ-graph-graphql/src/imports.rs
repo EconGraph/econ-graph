@@ -71,7 +71,6 @@ pub use econ_graph_core::models;
 // Services crate imports
 pub use econ_graph_services::services::{
     collaboration_service::{CollaborationService, PermissionLevel},
-    crawler::{crawler_service, simple_crawler_service},
     global_analysis_service::GlobalAnalysisService,
     queue_service,
     // Core services

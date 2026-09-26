@@ -62,10 +62,6 @@ diesel-async = { version = "=0.9.2", features = ["postgres", "bb8"] }
 # Regular expressions
 regex = "1.13"
 
-# Rate limiting
-governor = "0.10"
-nonzero_ext = "0.3"
-
 # Retry logic
 backoff = "0.4"
 
@@ -82,10 +78,12 @@ md5 = "0.8"
 
 # Local dependencies
 econ-graph-core = { path = "../econ-graph-core" }
-econ-graph-services = { path = "../econ-graph-services" }
 econ-graph-metrics = { path = "../econ-graph-metrics" }
+# Shared HTTP layer (HttpFetcher, SEC policy) and crawl_queue worker integration
+econ-graph-crawler = { path = "../econ-graph-crawler" }
 
 [dev-dependencies]
+econ-graph-crawler = { path = "../econ-graph-crawler", features = ["testkit"] }
 # Testing
 tokio-test.workspace = true
 mockito.workspace = true

@@ -20,7 +20,6 @@ use econ_graph_mcp::mcp_server::{mcp_handler, EconGraphMcpServer};
 
 mod integration_tests;
 mod metrics;
-// use services::crawler::start_crawler; // TODO: Implement start_crawler function
 
 #[derive(Clone)]
 pub struct AppState {
@@ -262,18 +261,8 @@ async fn main() -> AppResult<()> {
         }
     });
 
-    // Start background crawler (if enabled in config)
-    // For now, crawler is always enabled - in production this could be configurable
-    info!("🕷️  Starting background crawler...");
-    // TODO: Implement crawler startup
-    // match start_crawler().await {
-    //     Ok(_) => info!("✅ Background crawler started successfully"),
-    //     Err(e) => {
-    //         eprintln!("⚠️  Warning: Failed to start background crawler: {}", e);
-    //         info!("⚠️  Background crawler failed to start, continuing without crawler");
-    //     }
-    // }
-    info!("⚠️  Background crawler startup temporarily disabled");
+    // Crawling does not run in this process: the API only enqueues crawl_queue jobs, and the
+    // separate `crawler-worker` binary (econ-graph-crawler) processes them.
 
     // Create Warp filters
     let cors = warp::cors()
