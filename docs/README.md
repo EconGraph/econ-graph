@@ -2,11 +2,15 @@
 
 Welcome to the comprehensive documentation for EconGraph - the economic data visualization platform.
 
+## 🗺️ Roadmap
+
+**[Roadmap index](./roadmap/README.md)** - Current topic roadmaps, what is built today, open work, and the status of every older plan doc
+
 ## 📖 Documentation Structure
 
 ### 🏢 [Business Documentation](./business/)
 - **[Investor Pitch](./business/INVESTOR_PITCH.md)** - Complete investor presentation and business case
-- **[Roadmap](./business/ROADMAP.md)** - Future features and development timeline
+- **[Product Roadmap](./business/ROADMAP.md)** - Product feature phases (see the [roadmap index](./roadmap/README.md) for current status)
 - **[Privacy Policy](./business/PRIVACY_POLICY.md)** - Data privacy and protection policies
 
 ### 🔧 [Technical Documentation](./technical/)
@@ -93,13 +97,17 @@ Welcome to the comprehensive documentation for EconGraph - the economic data vis
 
 ## 🔐 Secrets Management
 
-EconGraph uses a secure secrets management approach:
+> **Warning:** the setup below is planned, not in place. The `k8s/secrets` submodule is
+> not initialized, and the current Kubernetes manifests still contain plaintext
+> credentials. See [Security](./roadmap/README.md#security) in the roadmap index.
+
+The planned secrets management approach:
 
 - **Secrets Repository**: Private repository at `https://github.com/jmalicki/econ-graph-secrets`
 - **Encryption Method**: Bitnami Sealed Secrets for Kubernetes
 - **Access Control**: Private repository with team-based permissions
 - **Integration**: Git submodule in `k8s/secrets/` directory
-- **Deployment**: Integrated with deployment scripts in `scripts/deploy/`
+- **Deployment**: To be integrated with the deployment scripts in `scripts/deploy/`
 
 For more details, see the [Security Implementation Plan](./projects/SECURITY_IMPLEMENTATION_PLAN.md).
 
