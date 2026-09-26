@@ -24,30 +24,30 @@ function run(fixture, tags = []) {
 const failures = {
   'invalid-json': 'release: invalid JSON',
   'schema-missing-variants': '$.flags.mcp: missing required property "variants"',
-  'schema-bad-targeting': 'release: flagd schema: $.flags.worldMap',
+  'schema-bad-targeting': 'release: flagd schema: $.flags.world_map',
   'unknown-default-variant': 'flag "mcp": defaultVariant must name one of its variants',
-  'bad-key': 'flag "world-map": key must be camelCase',
+  'bad-key': 'flag "worldMap": key must be snake_case',
   'missing-metadata': 'flag "mcp": metadata.kind must be one of',
   'missing-kind': 'flag "mcp": metadata.kind must be one of',
   'unknown-kind': 'flag "mcp": metadata.kind must be one of',
   'missing-owner': 'flag "mcp": metadata.owner must be the roadmap doc',
   'owner-not-a-roadmap-doc': 'flag "mcp": metadata.owner must be the roadmap doc',
   'owner-doc-missing': 'flag "mcp": metadata.owner docs/roadmap/no-such-doc.md does not exist',
-  'preview-missing-stage': 'flag "worldMap": preview flags need metadata.stage',
-  'preview-unknown-stage': 'flag "worldMap": preview flags need metadata.stage',
-  'stage-on-build-flag': 'flag "buildCanary": metadata.stage is only for preview flags',
-  'build-missing-remove-by': 'flag "buildCanary": build flags need metadata.remove_by',
-  'preview-missing-remove-by': 'flag "worldMap": preview flags need metadata.remove_by',
-  'malformed-remove-by': 'flag "buildCanary": build flags need metadata.remove_by',
+  'preview-missing-stage': 'flag "world_map": preview flags need metadata.stage',
+  'preview-unknown-stage': 'flag "world_map": preview flags need metadata.stage',
+  'stage-on-build-flag': 'flag "build_canary": metadata.stage is only for preview flags',
+  'build-missing-remove-by': 'flag "build_canary": build flags need metadata.remove_by',
+  'preview-missing-remove-by': 'flag "world_map": preview flags need metadata.remove_by',
+  'malformed-remove-by': 'flag "build_canary": build flags need metadata.remove_by',
   'remove-by-on-ops-flag': 'flag "mcp": ops flags are long-lived',
-  'build-non-boolean': 'flag "buildCanary": build flags must have boolean variants',
-  'build-with-targeting': 'flag "buildCanary": build flags are resolved at build time',
-  'build-disabled': 'flag "buildCanary": build flags must be ENABLED',
-  'dev-unknown-flag': 'dev: flag "noSuchFlag": overrides a flag that flags.flagd.json does not define',
-  'dev-with-metadata': 'dev: flag "buildCanary": metadata belongs in flags.flagd.json only',
-  'dev-changes-variants': 'dev: flag "buildCanary": variants must match flags.flagd.json',
-  'dev-unknown-default-variant': 'dev: flag "buildCanary": defaultVariant must name one of its variants',
-  'dev-schema-invalid': '$.flags.buildCanary.state: must be one of',
+  'build-non-boolean': 'flag "build_canary": build flags must have boolean variants',
+  'build-with-targeting': 'flag "build_canary": build flags are resolved at build time',
+  'build-disabled': 'flag "build_canary": build flags must be ENABLED',
+  'dev-unknown-flag': 'dev: flag "no_such_flag": overrides a flag that flags.flagd.json does not define',
+  'dev-with-metadata': 'dev: flag "build_canary": metadata belongs in flags.flagd.json only',
+  'dev-changes-variants': 'dev: flag "build_canary": variants must match flags.flagd.json',
+  'dev-unknown-default-variant': 'dev: flag "build_canary": defaultVariant must name one of its variants',
+  'dev-schema-invalid': '$.flags.build_canary.state: must be one of',
 };
 
 test('every fixture directory has a test', () => {
@@ -76,11 +76,11 @@ test('train N ships as v0.(N+1).0', () => {
 });
 
 test('a flag whose remove_by train has shipped fails', () => {
-  // valid has buildCanary remove_by "train 1" and worldMap "train 3"
+  // valid has build_canary remove_by "train 1" and world_map "train 3"
   assert.deepEqual(run('valid', ['v0.1.0', 'v0.2.0-rc.1']), []);
   const errors = run('valid', ['v0.1.0', 'v0.2.0']);
   assert.deepEqual(errors, [
-    'release: flag "buildCanary": remove_by is train 1, which shipped as v0.2.0; delete the flag',
+    'release: flag "build_canary": remove_by is train 1, which shipped as v0.2.0; delete the flag',
   ]);
 });
 

@@ -1,6 +1,6 @@
 {
   "flags": {
-    "buildCanary": {
+    "build_canary": {
       "state": "ON",
       "variants": {
         "on": true,

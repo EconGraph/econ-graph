@@ -6,8 +6,8 @@ import { SchemaValidator } from './schema.js';
 
 const KINDS = ['build', 'preview', 'ops', 'experiment'];
 const STAGES = ['alpha', 'beta'];
-// Flag keys become frontend constants (`FLAGS.worldMap`), so they are identifiers
-const KEY = /^[a-z][a-zA-Z0-9]*$/;
+// Flag keys become __FLAG_WORLD_MAP__ in the frontend and cfg(flag_world_map) in the backend
+const KEY = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
 const OWNER = /^docs\/roadmap\/[a-z0-9-]+\.md$/;
 const REMOVE_BY = /^(train ([1-9][0-9]*)|unscheduled)$/;
 
@@ -40,7 +40,7 @@ function checkDefaultVariant(label, name, flag, errors) {
 
 function checkReleaseFlag(name, flag, { docExists, tags }, errors) {
   const at = `release: flag "${name}"`;
-  if (!KEY.test(name)) errors.push(`${at}: key must be camelCase letters and digits`);
+  if (!KEY.test(name)) errors.push(`${at}: key must be snake_case: lowercase letters, digits and single underscores`);
   checkDefaultVariant('release', name, flag, errors);
 
   const meta = flag.metadata ?? {};

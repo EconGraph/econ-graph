@@ -1,6 +1,6 @@
 {
   "flags": {
-    "buildCanary": {
+    "build_canary": {
       "state": "ENABLED",
       "variants": {
         "on": true,
@@ -15,13 +15,13 @@
     },
     "mcp": {
       "state": "ENABLED",
-      "defaultVariant": "off",
+      "defaultVariant": "on",
       "metadata": {
         "kind": "ops",
         "owner": "docs/roadmap/feature-flags.md"
       }
     },
-    "worldMap": {
+    "world_map": {
       "state": "ENABLED",
       "variants": {
         "on": true,
