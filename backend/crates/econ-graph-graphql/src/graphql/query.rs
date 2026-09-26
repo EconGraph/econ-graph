@@ -325,9 +325,11 @@ impl Query {
 
     /// Get user information by ID. Callers may read only their own record unless they are an admin.
     async fn user(&self, ctx: &Context<'_>, user_id: ID) -> Result<Option<UserType>> {
+        // Authenticate before parsing, so anonymous callers never see input validation errors.
+        let caller_id = current_user(ctx)?.id;
         let user_uuid = uuid::Uuid::parse_str(&user_id)?;
 
-        if current_user(ctx)?.id != user_uuid {
+        if caller_id != user_uuid {
             require_admin(ctx)?;
         }
 
@@ -900,6 +902,23 @@ mod tests {
                 "{role:?}: expected {expected}, got {msg}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_user_query_requires_authentication_before_parsing_the_id() {
+        let schema = crate::graphql::schema::create_schema_with_data(
+            unreachable_pool(),
+            std::sync::Arc::new(crate::graphql::context::GraphQLContext::new(None)),
+        );
+        let resp = schema
+            .execute(r#"{ user(userId: "not-a-uuid") { id } }"#)
+            .await;
+        assert_eq!(resp.errors.len(), 1, "{:?}", resp.errors);
+        assert!(
+            resp.errors[0].message.contains("Authentication required"),
+            "{}",
+            resp.errors[0].message
+        );
     }
 
     #[tokio::test]
