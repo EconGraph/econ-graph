@@ -8,13 +8,11 @@ use crate::auth::middleware::{handle_auth_rejection, with_auth};
 use crate::auth::services::AuthService;
 use warp::{filters::BoxedFilter, Filter, Reply};
 
-/// Create authentication routes
+/// Create authentication routes.
+///
+/// CORS is not applied here: the backend wraps all routes, these included, in one CORS filter
+/// built from the configured allowed origins.
 pub fn auth_routes(auth_service: AuthService) -> BoxedFilter<(impl Reply,)> {
-    let cors = warp::cors()
-        .allow_any_origin()
-        .allow_headers(vec!["content-type", "authorization"])
-        .allow_methods(vec!["GET", "POST", "PATCH", "DELETE", "OPTIONS"]);
-
     // Google OAuth route
     let google_auth = warp::path!("auth" / "google")
         .and(warp::post())
@@ -78,7 +76,6 @@ pub fn auth_routes(auth_service: AuthService) -> BoxedFilter<(impl Reply,)> {
         .or(update_profile)
         .or(logout)
         .or(facebook_data_deletion)
-        .with(cors)
         .recover(handle_auth_rejection)
         .boxed()
 }
