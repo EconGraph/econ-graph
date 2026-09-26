@@ -100,7 +100,7 @@ jobs:
         DATABASE_URL: postgres://test_user:test_password@localhost:5432/econ_graph_test
       run: |
         cd backend
-        cargo build --bin catalog_crawler --release
+        cargo build --bin catalog_crawler --release --workspace --jobs 4
 
     - name: Run crawler integration test
       env:
@@ -265,4 +265,6 @@ jobs:
         echo "  2. Test migration on development database"
         echo "  3. Integrate into main migration sequence if approved"
 
-# Workflow cache refresh: 2025-09-17 08:25:07 PDT
+
+
+# Workflow cache refresh: 2025-10-03 01:21:06 PDT

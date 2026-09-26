@@ -1,6 +1,6 @@
 # GitHub Actions Workflow Status Report
 
-Generated: 2025-09-17 08:25:07 PDT
+Generated: 2025-10-03 01:21:06 PDT
 
 ## Issue Identified
 GitHub is showing 22 workflows as "active" but only 8 actually exist in the repository. This is causing CI parsing failures.
@@ -11,8 +11,19 @@ GitHub is showing 22 workflows as "active" but only 8 actually exist in the repo
 - **Branch Cleanup**: Test branches left orphaned workflows in GitHub's cache
 
 ## Orphaned Workflows (shown as active but don't exist)
+- ❌ Accessibility (orphaned)
+- ❌ Tests (orphaned)
+- ❌ Admin (orphaned)
+- ❌ Frontend (orphaned)
+- ❌ Tests (orphaned)
+- ❌ Backend (orphaned)
+- ❌ Federation (orphaned)
+- ❌ Architecture (orphaned)
+- ❌ CI (orphaned)
 - ❌ .github/workflows/ci-build.yml (orphaned)
-- ❌ .github/workflows/ci-core.yml (orphaned)
+- ❌ Core (orphaned)
+- ❌ CI (orphaned)
+- ❌ Tests (orphaned)
 - ❌ Experimental (orphaned)
 - ❌ Features (orphaned)
 - ❌ .github/workflows/ci-integration.yml (orphaned)
@@ -22,6 +33,9 @@ GitHub is showing 22 workflows as "active" but only 8 actually exist in the repo
 - ❌ Crawler (orphaned)
 - ❌ Integration (orphaned)
 - ❌ Test (orphaned)
+- ❌ E2E (orphaned)
+- ❌ Tests (orphaned)
+- ❌ Nightly (orphaned)
 - ❌ .github/workflows/instant-path-test.yml (orphaned)
 - ❌ .github/workflows/minimal-cc-test.yml (orphaned)
 - ❌ Comprehensive (orphaned)
@@ -47,16 +61,22 @@ GitHub is showing 22 workflows as "active" but only 8 actually exist in the repo
 - ❌ .github/workflows/test-simple-expansion.yml (orphaned)
 - ❌ .github/workflows/test-simple-fix.yml (orphaned)
 - ❌ .github/workflows/test-yaml-env.yml (orphaned)
+- ❌ Update (orphaned)
+- ❌ Cost (orphaned)
+- ❌ Analysis (orphaned)
 
 ## Existing Workflows (valid)
+- ✅ accessibility-tests.yml
 - ✅ ci-core.yml
 - ✅ ci-experimental.yml
 - ✅ crawler-integration-test.yml
+- ✅ e2e-tests-nightly.yml
 - ✅ playwright-tests-comprehensive.yml
 - ✅ playwright-tests-deployed.yml
 - ✅ playwright-tests.yml
 - ✅ ramdisk-build-cache.yml
 - ✅ security.yml
+- ✅ update-cost-analysis.yml
 
 ## Solution Applied
 1. **Cache Refresh**: Added timestamps to all workflow files to force GitHub to refresh its cache

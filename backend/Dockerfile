@@ -25,14 +25,14 @@ COPY migrations ./migrations
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
 # Build dependencies (this layer will be cached)
-RUN cargo build --release --bin econ-graph-backend
+RUN cargo build --release --workspace --jobs $(nproc)
 
 # Remove dummy main.rs and copy actual source code
 RUN rm src/main.rs
 COPY src ./src
 
 # Build the actual application
-RUN cargo build --release --bin econ-graph-backend
+RUN cargo build --release --workspace --jobs $(nproc)
 
 # Runtime stage
 FROM debian:bookworm-slim
