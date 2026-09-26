@@ -567,7 +567,7 @@ impl CrawlerService {
                 };
 
                 match result {
-                    Ok(_) => match CrawlQueueItem::complete(pool, item.id, worker_id).await? {
+                    Ok(_) => match CrawlQueueItem::complete(pool, &item).await? {
                         LeaseOutcome::Applied => {
                             println!("Successfully completed queue item: {}", item.id)
                         }
@@ -577,7 +577,7 @@ impl CrawlerService {
                     },
                     Err(e) => {
                         let error_msg = format!("Crawl failed: {}", e);
-                        match CrawlQueueItem::fail(pool, item.id, worker_id, &error_msg).await? {
+                        match CrawlQueueItem::fail(pool, &item, &error_msg).await? {
                             LeaseOutcome::Applied => {
                                 println!("Failed queue item {}: {}", item.id, e)
                             }

@@ -19,9 +19,10 @@
 //! - Claiming is a single `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1)` statement,
 //!   so two workers can never claim the same row.
 //! - A claim is a lease. Worker transitions out of `processing` (`complete`, `fail`,
-//!   `retry_later`) take the worker id and only apply while the row is still `processing` and
-//!   `locked_by` that worker; otherwise they change nothing and report `LostLease` (the lease
-//!   expired, `release_stuck` re-queued the item, and another worker may own it now).
+//!   `retry_later`) take the claimed row and only apply while the item is still `processing`
+//!   under that same claim (`locked_by` and the per-claim `claim_token` both match); otherwise
+//!   they change nothing and report `LostLease` (the lease expired, `release_stuck` re-queued the
+//!   item, and another claim, possibly by the same worker id, may own it now).
 //!   `force_*` variants skip that check and are for admin tooling only.
 //! - `release_stuck` counts as an attempt, so an item that keeps outliving its lease ends up
 //!   `failed` after `max_retries` releases.
@@ -97,6 +98,13 @@ pub enum QueueTransition {
     LostLease,
 }
 
+/// The identity a lease-guarded transition must present: who claimed the item and which claim.
+#[derive(Debug, Clone, Copy)]
+struct Lease<'a> {
+    worker_id: &'a str,
+    claim_token: Uuid,
+}
+
 /// Outcome of a lease-guarded terminal transition ([`CrawlQueueItem::complete`] /
 /// [`CrawlQueueItem::fail`]).
 #[must_use]
@@ -104,8 +112,8 @@ pub enum QueueTransition {
 pub enum LeaseOutcome {
     /// The transition was applied.
     Applied,
-    /// The caller no longer holds the item's lease (the item is not `processing` with
-    /// `locked_by = worker_id`, or doesn't exist). Nothing was changed; the caller should log
+    /// The caller no longer holds the item's lease (the item is not `processing` under the
+    /// caller's claim, or doesn't exist). Nothing was changed; the caller should log
     /// and move on rather than attempt another transition.
     LostLease,
 }
@@ -137,6 +145,10 @@ pub struct CrawlQueueItem {
     pub started_at: Option<DateTime<Utc>>,
     /// When the item reached `completed` / `failed`; NULL while active.
     pub finished_at: Option<DateTime<Utc>>,
+    /// Unique token for the current claim, set by `claim_next` / `claim_by_id` and cleared when
+    /// the lease ends. Lease-guarded transitions require it, so a stale task cannot finish a newer
+    /// claim of the same item even when both used the same `worker_id`.
+    pub claim_token: Option<Uuid>,
 }
 
 /// New crawl queue item for insertion
@@ -176,6 +188,7 @@ pub struct UpdateCrawlQueueItem {
     pub locked_by: Option<Option<String>>,
     pub locked_at: Option<Option<DateTime<Utc>>>,
     pub finished_at: Option<Option<DateTime<Utc>>>,
+    pub claim_token: Option<Option<Uuid>>,
 }
 
 impl UpdateCrawlQueueItem {
@@ -183,6 +196,7 @@ impl UpdateCrawlQueueItem {
     pub fn clearing_lock(mut self) -> Self {
         self.locked_by = Some(None);
         self.locked_at = Some(None);
+        self.claim_token = Some(None);
         self
     }
 }
@@ -362,7 +376,7 @@ impl CrawlQueueItem {
         let item = diesel::sql_query(
             "UPDATE crawl_queue \
              SET status = 'processing', locked_by = $1, locked_at = NOW(), updated_at = NOW(), \
-                 started_at = NOW(), finished_at = NULL \
+                 started_at = NOW(), finished_at = NULL, claim_token = gen_random_uuid() \
              WHERE id = ( \
                  SELECT id FROM crawl_queue \
                  WHERE status IN ('pending', 'retrying') \
@@ -393,7 +407,7 @@ impl CrawlQueueItem {
         let item = diesel::sql_query(
             "UPDATE crawl_queue \
              SET status = 'processing', locked_by = $2, locked_at = NOW(), updated_at = NOW(), \
-                 started_at = NOW(), finished_at = NULL \
+                 started_at = NOW(), finished_at = NULL, claim_token = gen_random_uuid() \
              WHERE id = $1 AND status IN ('pending', 'retrying') \
              RETURNING *",
         )
@@ -409,52 +423,65 @@ impl CrawlQueueItem {
     //
     // A worker's claim is a lease: `release_stuck` may take it away (and another worker may claim
     // the item) if the job outlives `stuck_after`. These transitions only apply while the item is
-    // still `processing` AND `locked_by = worker_id`; otherwise nothing changes and they report
+    // still `processing` under the caller's claim (same `locked_by` AND `claim_token` as the row
+    // returned by `claim_next` / `claim_by_id`); otherwise nothing changes and they report
     // `LostLease` (the item now belongs to someone else, or was already finished / released).
 
-    /// Mark completed and clear the lock, if `worker_id` still holds the lease.
-    pub async fn complete(
-        pool: &DatabasePool,
-        id: Uuid,
-        worker_id: &str,
-    ) -> AppResult<LeaseOutcome> {
+    /// The lease this row represents, if it is a claim returned by `claim_next` / `claim_by_id`.
+    fn lease(&self) -> Option<Lease<'_>> {
+        Some(Lease {
+            worker_id: self.locked_by.as_deref()?,
+            claim_token: self.claim_token?,
+        })
+    }
+
+    /// Mark completed and clear the lock, if `claim` (the row returned by `claim_next` /
+    /// `claim_by_id`) is still the item's current claim.
+    pub async fn complete(pool: &DatabasePool, claim: &Self) -> AppResult<LeaseOutcome> {
+        let Some(lease) = claim.lease() else {
+            return Ok(LeaseOutcome::LostLease);
+        };
         Ok(
-            Self::finish(pool, id, QueueStatus::Completed, None, Some(worker_id))
+            Self::finish(pool, claim.id, QueueStatus::Completed, None, Some(lease))
                 .await?
                 .map_or(LeaseOutcome::LostLease, |_| LeaseOutcome::Applied),
         )
     }
 
-    /// Permanent failure (status `failed`, error recorded, lock cleared), if `worker_id` still
-    /// holds the lease.
-    pub async fn fail(
-        pool: &DatabasePool,
-        id: Uuid,
-        worker_id: &str,
-        error: &str,
-    ) -> AppResult<LeaseOutcome> {
-        Ok(
-            Self::finish(pool, id, QueueStatus::Failed, Some(error), Some(worker_id))
-                .await?
-                .map_or(LeaseOutcome::LostLease, |_| LeaseOutcome::Applied),
+    /// Permanent failure (status `failed`, error recorded, lock cleared), if `claim` is still the
+    /// item's current claim.
+    pub async fn fail(pool: &DatabasePool, claim: &Self, error: &str) -> AppResult<LeaseOutcome> {
+        let Some(lease) = claim.lease() else {
+            return Ok(LeaseOutcome::LostLease);
+        };
+        Ok(Self::finish(
+            pool,
+            claim.id,
+            QueueStatus::Failed,
+            Some(error),
+            Some(lease),
         )
+        .await?
+        .map_or(LeaseOutcome::LostLease, |_| LeaseOutcome::Applied))
     }
 
     /// Reschedule: status `retrying`, lock cleared, `scheduled_for = now + delay`.
     /// If `count_attempt`, `retry_count += 1`, and if that reaches `max_retries` the item becomes
     /// `failed` instead. Rate limiting should pass `count_attempt = false`.
-    /// Returns [`QueueTransition::LostLease`] (and changes nothing) unless the item is
-    /// `processing` and locked by `worker_id`.
+    /// Returns [`QueueTransition::LostLease`] (and changes nothing) unless `claim` is still the
+    /// item's current claim.
     pub async fn retry_later(
         pool: &DatabasePool,
-        id: Uuid,
-        worker_id: &str,
+        claim: &Self,
         error: &str,
         delay: Duration,
         count_attempt: bool,
     ) -> AppResult<QueueTransition> {
+        let Some(lease) = claim.lease() else {
+            return Ok(QueueTransition::LostLease);
+        };
         Ok(
-            Self::reschedule(pool, id, Some(worker_id), error, delay, count_attempt)
+            Self::reschedule(pool, claim.id, Some(lease), error, delay, count_attempt)
                 .await?
                 .unwrap_or(QueueTransition::LostLease),
         )
@@ -514,6 +541,7 @@ impl CrawlQueueItem {
                                         locked_by, locked_at), \
                  locked_by = NULL, \
                  locked_at = NULL, \
+                 claim_token = NULL, \
                  updated_at = NOW() \
              WHERE status = 'processing' \
                AND locked_at < NOW() - make_interval(secs => $1)",
@@ -575,13 +603,13 @@ impl CrawlQueueItem {
         }
     }
 
-    /// Shared body of `retry_later` / `force_retry_later`. `worker_id = Some(w)` requires the
-    /// item to be `processing` and locked by `w`; `None` accepts any active item.
+    /// Shared body of `retry_later` / `force_retry_later`. `lease = Some(l)` requires the
+    /// item to be `processing` under that claim; `None` accepts any active item.
     /// `Ok(None)` when no row matched.
     async fn reschedule(
         pool: &DatabasePool,
         id: Uuid,
-        worker_id: Option<&str>,
+        lease: Option<Lease<'_>>,
         error: &str,
         delay: Duration,
         count_attempt: bool,
@@ -599,18 +627,21 @@ impl CrawlQueueItem {
                  error_message = $4, \
                  locked_by = NULL, \
                  locked_at = NULL, \
+                 claim_token = NULL, \
                  finished_at = CASE WHEN $2 AND retry_count + 1 >= max_retries \
                                     THEN NOW() ELSE NULL END, \
                  updated_at = NOW() \
              WHERE id = $1 AND status IN ('pending', 'processing', 'retrying') \
-               AND ($5::text IS NULL OR (status = 'processing' AND locked_by = $5)) \
+               AND ($5::text IS NULL OR (status = 'processing' AND locked_by = $5 \
+                                         AND claim_token = $6)) \
              RETURNING *",
         )
         .bind::<SqlUuid, _>(id)
         .bind::<Bool, _>(count_attempt)
         .bind::<Double, _>(delay.as_secs_f64())
         .bind::<Text, _>(error)
-        .bind::<Nullable<Text>, _>(worker_id)
+        .bind::<Nullable<Text>, _>(lease.map(|l| l.worker_id))
+        .bind::<Nullable<SqlUuid>, _>(lease.map(|l| l.claim_token))
         .get_result::<Self>(&mut conn)
         .await
         .optional()?;
@@ -627,14 +658,14 @@ impl CrawlQueueItem {
     }
 
     /// Move to a terminal status, clearing the lock. `error` (if any) replaces `error_message`.
-    /// `worker_id = Some(w)` requires the item to be `processing` and locked by `w`; `None`
+    /// `lease = Some(l)` requires the item to be `processing` under that claim; `None`
     /// applies to the row whatever its state. `Ok(None)` when no row matched.
     async fn finish(
         pool: &DatabasePool,
         id: Uuid,
         status: QueueStatus,
         error: Option<&str>,
-        worker_id: Option<&str>,
+        lease: Option<Lease<'_>>,
     ) -> AppResult<Option<Self>> {
         let mut conn = get_conn(pool).await?;
         let item = diesel::sql_query(
@@ -643,16 +674,19 @@ impl CrawlQueueItem {
                  error_message = COALESCE($3, error_message), \
                  locked_by = NULL, \
                  locked_at = NULL, \
+                 claim_token = NULL, \
                  finished_at = NOW(), \
                  updated_at = NOW() \
              WHERE id = $1 \
-               AND ($4::text IS NULL OR (status = 'processing' AND locked_by = $4)) \
+               AND ($4::text IS NULL OR (status = 'processing' AND locked_by = $4 \
+                                         AND claim_token = $5)) \
              RETURNING *",
         )
         .bind::<SqlUuid, _>(id)
         .bind::<Text, _>(status.to_string())
         .bind::<Nullable<Text>, _>(error)
-        .bind::<Nullable<Text>, _>(worker_id)
+        .bind::<Nullable<Text>, _>(lease.map(|l| l.worker_id))
+        .bind::<Nullable<SqlUuid>, _>(lease.map(|l| l.claim_token))
         .get_result::<Self>(&mut conn)
         .await
         .optional()?;
@@ -721,6 +755,7 @@ impl Default for UpdateCrawlQueueItem {
             locked_by: None,
             locked_at: None,
             finished_at: None,
+            claim_token: None,
         }
     }
 }
@@ -820,6 +855,7 @@ mod _inline_tests {
             kind: "fetch_series".to_string(),
             started_at: None,
             finished_at: None,
+            claim_token: None,
         };
 
         // Test retry logic - required for handling transient failures

@@ -270,6 +270,7 @@ diesel::table! {
         kind -> Varchar,
         started_at -> Nullable<Timestamptz>,
         finished_at -> Nullable<Timestamptz>,
+        claim_token -> Nullable<Uuid>,
     }
 }
 
