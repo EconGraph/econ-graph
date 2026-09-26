@@ -323,11 +323,17 @@ impl Query {
             .collect())
     }
 
-    /// Get user information by ID
+    /// Get user information by ID. Callers may read only their own record unless they are an admin.
     async fn user(&self, ctx: &Context<'_>, user_id: ID) -> Result<Option<UserType>> {
-        let pool = ctx.data::<DatabasePool>()?;
-
+        // Authenticate before parsing, so anonymous callers never see input validation errors.
+        let caller_id = current_user(ctx)?.id;
         let user_uuid = uuid::Uuid::parse_str(&user_id)?;
+
+        if caller_id != user_uuid {
+            require_admin(ctx)?;
+        }
+
+        let pool = ctx.data::<DatabasePool>()?;
 
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
@@ -832,6 +838,113 @@ impl Default for Query {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_user(role: &str) -> models::User {
+        let now = chrono::Utc::now();
+        models::User {
+            id: uuid::Uuid::new_v4(),
+            email: format!("{role}@example.test"),
+            name: role.into(),
+            avatar_url: None,
+            provider: "email".into(),
+            provider_id: None,
+            password_hash: None,
+            role: role.into(),
+            organization: None,
+            theme: "light".into(),
+            default_chart_type: "line".into(),
+            notifications_enabled: false,
+            collaboration_enabled: false,
+            is_active: true,
+            email_verified: true,
+            created_at: now,
+            updated_at: now,
+            last_login_at: None,
+        }
+    }
+
+    /// A pool that never connects: the authorization check must reject the request before
+    /// any database access, so this test needs no database.
+    fn unreachable_pool() -> DatabasePool {
+        let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
+            diesel_async::AsyncPgConnection,
+        >::new("postgres://nobody@127.0.0.1:1/none");
+        DatabasePool::builder()
+            .connection_timeout(std::time::Duration::from_secs(1))
+            .build_unchecked(manager)
+    }
+
+    #[tokio::test]
+    async fn test_user_query_rejects_other_users_before_db_access() {
+        let other_user_id = uuid::Uuid::new_v4();
+        let query = format!(r#"{{ user(userId: "{other_user_id}") {{ id email }} }}"#);
+        for u in [
+            None,
+            Some(test_user("guest")),
+            Some(test_user("viewer")),
+            Some(test_user("analyst")),
+        ] {
+            let role = u.as_ref().map(|u| u.role.clone());
+            let schema = crate::graphql::schema::create_schema_with_data(
+                unreachable_pool(),
+                std::sync::Arc::new(crate::graphql::context::GraphQLContext::new(u)),
+            );
+            let resp = schema.execute(query.as_str()).await;
+            assert_eq!(resp.errors.len(), 1, "{role:?}: {:?}", resp.errors);
+            let msg = &resp.errors[0].message;
+            let expected = if role.is_some() {
+                "Insufficient permissions"
+            } else {
+                "Authentication required"
+            };
+            assert!(
+                msg.contains(expected),
+                "{role:?}: expected {expected}, got {msg}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_user_query_requires_authentication_before_parsing_the_id() {
+        let schema = crate::graphql::schema::create_schema_with_data(
+            unreachable_pool(),
+            std::sync::Arc::new(crate::graphql::context::GraphQLContext::new(None)),
+        );
+        let resp = schema
+            .execute(r#"{ user(userId: "not-a-uuid") { id } }"#)
+            .await;
+        assert_eq!(resp.errors.len(), 1, "{:?}", resp.errors);
+        assert!(
+            resp.errors[0].message.contains("Authentication required"),
+            "{}",
+            resp.errors[0].message
+        );
+    }
+
+    #[tokio::test]
+    async fn test_user_query_lets_self_and_admin_past_the_check() {
+        // Both reach the database lookup, which fails here because the pool never connects.
+        let viewer = test_user("viewer");
+        let viewer_id = viewer.id;
+        for (u, target) in [
+            (viewer, viewer_id),
+            (test_user("admin"), uuid::Uuid::new_v4()),
+        ] {
+            let role = u.role.clone();
+            let schema = crate::graphql::schema::create_schema_with_data(
+                unreachable_pool(),
+                std::sync::Arc::new(crate::graphql::context::GraphQLContext::new(Some(u))),
+            );
+            let query = format!(r#"{{ user(userId: "{target}") {{ id }} }}"#);
+            let resp = schema.execute(query.as_str()).await;
+            assert_eq!(resp.errors.len(), 1, "{role}: {:?}", resp.errors);
+            let msg = &resp.errors[0].message;
+            assert!(
+                !msg.contains("permissions") && !msg.contains("Authentication"),
+                "{role}: should pass the authorization check, got {msg}"
+            );
+        }
+    }
 
     #[test]
     fn test_convert_series_filter_to_params() {
