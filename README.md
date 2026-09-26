@@ -240,7 +240,7 @@ EconGraph maintains the highest standards of quality and reliability expected by
 #### **Prerequisites**
 - Node.js 24 LTS and npm
 - Rust 1.98.1 and Cargo (pinned in `rust-toolchain.toml`; rustup installs it automatically)
-- PostgreSQL 17+ (recommended for production)
+- PostgreSQL 18+ (recommended for production)
 - Docker (for containerized deployment)
 
 #### **🎯 Quick Start**
@@ -255,7 +255,7 @@ EconGraph maintains the highest standards of quality and reliability expected by
    ```bash
    docker run -d --name econ-postgres \
      -e POSTGRES_PASSWORD=password \
-     -p 5432:5432 postgres:17
+     -p 5432:5432 postgres:18
    ```
 
 3. **Launch the backend**
@@ -459,7 +459,7 @@ This project is licensed under the Microsoft Reference Source License (MS-RSL) -
 
 **Built as a learning project for full-stack development with Rust and React**
 
-</div># PostgreSQL 17.6 Environment
+</div># PostgreSQL 18 Environment
 # Trigger CI test
 # Package-lock.json sync fix
 # CI Trigger

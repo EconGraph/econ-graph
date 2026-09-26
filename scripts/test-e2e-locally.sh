@@ -64,7 +64,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:17.6
+    image: postgres:18
     environment:
       POSTGRES_PASSWORD: password
       POSTGRES_USER: postgres
@@ -77,7 +77,7 @@ services:
       timeout: 5s
       retries: 5
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
 
 volumes:
   postgres_data:

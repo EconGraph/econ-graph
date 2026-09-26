@@ -4,6 +4,7 @@
 
 use diesel::prelude::*;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use econ_graph_core::test_utils::POSTGRES_IMAGE_TAG;
 use imara_diff::{Algorithm, BasicLineDiffPrinter, Diff, InternedInput, UnifiedDiffConfig};
 use std::fs;
 use std::process::Command;
@@ -24,7 +25,7 @@ pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("../../migrations/"
 #[tokio::test]
 async fn test_schema_compatibility() {
     // Start PostgreSQL container
-    let postgres_image = GenericImage::new("postgres", "18")
+    let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
         .with_wait_for(WaitFor::message_on_stdout(
             "database system is ready to accept connections",
         ))
@@ -183,7 +184,7 @@ fn find_schema_differences(schema1: &str, schema2: &str) -> Vec<String> {
 #[tokio::test]
 async fn test_schema_generation_process() {
     // Start PostgreSQL container
-    let postgres_image = GenericImage::new("postgres", "18")
+    let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
         .with_wait_for(WaitFor::message_on_stdout(
             "database system is ready to accept connections",
         ))
@@ -243,7 +244,7 @@ async fn test_schema_generation_process() {
 #[tokio::test]
 async fn test_migration_application() {
     // Start PostgreSQL container
-    let postgres_image = GenericImage::new("postgres", "18")
+    let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
         .with_wait_for(WaitFor::message_on_stdout(
             "database system is ready to accept connections",
         ))
@@ -289,7 +290,7 @@ async fn test_migration_application() {
 #[tokio::test]
 async fn test_schema_compatibility_comparison() {
     // Start PostgreSQL container
-    let postgres_image = GenericImage::new("postgres", "18")
+    let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
         .with_wait_for(WaitFor::message_on_stdout(
             "database system is ready to accept connections",
         ))

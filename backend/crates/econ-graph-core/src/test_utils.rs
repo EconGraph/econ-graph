@@ -11,6 +11,10 @@ use testcontainers::runners::AsyncRunner;
 #[cfg(test)]
 use testcontainers::{Container, ContainerAsync, GenericImage, ImageExt};
 
+/// Postgres Docker image tag used by every testcontainers-based test.
+/// Keep in sync with the `postgres_image` anchors in `.github/workflows/`.
+pub const POSTGRES_IMAGE_TAG: &str = "18";
+
 /// Test container for database testing
 pub struct TestContainer {
     pool: DatabasePool,
@@ -34,7 +38,7 @@ impl TestContainer {
             // Don't run migrations automatically - let tests handle this after cleaning
 
             // Create a dummy container for the struct
-            let postgres_image = GenericImage::new("postgres", "17")
+            let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
                 .with_wait_for(WaitFor::message_on_stderr(
                     "database system is ready to accept connections",
                 ))
@@ -54,7 +58,7 @@ impl TestContainer {
         } else {
             println!("DEBUG: Using testcontainers for ephemeral database");
             // Use testcontainers for ephemeral database
-            let postgres_image = GenericImage::new("postgres", "17")
+            let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
                 .with_wait_for(WaitFor::message_on_stderr(
                     "database system is ready to accept connections",
                 ))
