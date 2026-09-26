@@ -1,0 +1,22 @@
+{
+  "BEAAPI": {
+    "Request": {
+      "RequestParam": [
+        { "ParameterName": "USERID", "ParameterValue": "REDACTED" },
+        { "ParameterName": "METHOD", "ParameterValue": "GETDATASETLIST" },
+        { "ParameterName": "RESULTFORMAT", "ParameterValue": "JSON" }
+      ]
+    },
+    "Results": {
+      "Dataset": [
+        { "DatasetName": "NIPA", "DatasetDescription": "Standard NIPA tables" },
+        { "DatasetName": "NIUnderlyingDetail", "DatasetDescription": "Standard NI underlying detail tables" },
+        { "DatasetName": "MNE", "DatasetDescription": "Multinational Enterprises" },
+        { "DatasetName": "FixedAssets", "DatasetDescription": "Standard Fixed Assets tables" },
+        { "DatasetName": "ITA", "DatasetDescription": "International Transactions Accounts" },
+        { "DatasetName": "IIP", "DatasetDescription": "International Investment Position" },
+        { "DatasetName": "Regional", "DatasetDescription": "Regional data sets" }
+      ]
+    }
+  }
+}

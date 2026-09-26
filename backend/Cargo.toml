@@ -5,6 +5,7 @@ members = [
     "crates/econ-graph-auth",
     "crates/econ-graph-graphql",
     "crates/econ-graph-crawler",
+    "crates/econ-graph-crawler-worker",
     "crates/econ-graph-sec-crawler",
     "crates/econ-graph-mcp",
     "crates/econ-graph-backend",
@@ -91,6 +92,7 @@ dataloader = { version = "0.18", default-features = false, features = ["runtime-
 # Testing
 tokio-test = "0.4"
 mockito = "1.7"
+wiremock = "0.6"
 tempfile = "3.27"
 testcontainers = { version = "0.27", features = ["blocking"] }
 testcontainers-modules = { version = "0.15", features = ["postgres"] }

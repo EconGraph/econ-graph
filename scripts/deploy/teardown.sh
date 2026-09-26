@@ -28,6 +28,7 @@ kubectl delete -f k8s/manifests/frontend-service.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/frontend-deployment.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/admin-frontend-service.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/admin-frontend-deployment.yaml --ignore-not-found=true
+kubectl delete -f k8s/manifests/crawler-worker.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/backend-service.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/backend-deployment.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/chart-api-service.yaml --ignore-not-found=true

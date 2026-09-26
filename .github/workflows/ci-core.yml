@@ -369,6 +369,124 @@ jobs:
         DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
         CHART_API_SERVICE_URL: http://localhost:3001/api/chart
 
+  # Runs EVERY test in the Rust workspace (all crates, unit + integration + doc tests)
+  # against a Postgres service container. Unlike the hand-picked jobs below, new tests
+  # are picked up automatically. Tests read DATABASE_URL (see
+  # econ-graph-core/src/test_utils.rs); when it is unset they fall back to
+  # testcontainers, which also works here because ubuntu-latest has Docker.
+  # --test-threads=1: many DB tests drop/recreate the public schema of the shared
+  # database, so running them concurrently within one test binary is flaky.
+  backend-workspace-tests:
+    name: Backend Workspace Tests (all tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    needs: [backend-build-cache]
+
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5446:5432
+
+    env:
+      DATABASE_URL: postgresql://postgres:password@localhost:5446/econ_graph_test
+      RUST_LOG: warn
+      RUST_BACKTRACE: 1
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.branch || github.ref }}
+        persist-credentials: false
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.98.1
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: backend
+        shared-key: backend
+        # Keyed on Cargo.lock and the toolchain; only the build job saves it
+        save-if: ${{ github.job == 'backend-build-cache' }}
+
+    - name: Install diesel CLI
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        archive="$RUNNER_TEMP/diesel_cli.tar.xz"
+        curl -sSfL -o "$archive" "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz"
+        echo "${DIESEL_SHA256}  ${archive}" | sha256sum -c -
+        tar -xJf "$archive" -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
+        diesel --version
+      working-directory: backend
+
+    - name: Setup database
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        diesel setup
+        diesel migration run
+      working-directory: backend
+
+    # No lint exemptions for the new crawler crate (the workspace-wide clippy in
+    # backend-smoke-tests still carries ~23 -A exemptions for legacy code).
+    # --no-deps keeps -D warnings scoped to the crawler crates; without it the
+    # flag also applies to the other workspace crates it depends on.
+    - name: Clippy (econ-graph-crawler, no exemptions)
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo clippy -p econ-graph-crawler -p econ-graph-crawler-worker --all-targets --all-features --no-deps -- -D warnings
+      working-directory: backend
+
+    # Required: the crawler crate, crawler worker, all SEC crawler lib tests (no database
+    # needed) and the crawl_queue model / queue service tests. These must pass for the job
+    # (and the PR) to go green.
+    # The long soak test (tests/soak.rs) is #[ignore]d and runs manually only; its fast
+    # limiter-conformance tests run here.
+    - name: Run crawler and queue tests (required)
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test -p econ-graph-crawler --all-features -- --test-threads=1
+        cargo test -p econ-graph-crawler-worker -- --test-threads=1
+        cargo test -p econ-graph-sec-crawler --lib -- --test-threads=1
+        cargo test -p econ-graph-core crawl_queue -- --test-threads=1
+        cargo test -p econ-graph-services queue_service -- --test-threads=1
+      working-directory: backend
+
+    # Allowed to fail (owner decision): the full workspace run still has known
+    # pre-existing failures in tests unrelated to the crawler/queue work. It keeps
+    # running so those failures stay visible in the log. TODO: drop
+    # continue-on-error once the pre-existing failures are fixed.
+    - name: Run all workspace tests (lib, bins, integration tests)
+      continue-on-error: true
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --workspace --no-fail-fast --lib --bins --tests -- --test-threads=1
+      working-directory: backend
+
+    # TODO: ~45 doctests across the workspace do not compile (stale examples).
+    # Fix them, then drop continue-on-error (or fold into the step above by
+    # removing --lib --bins --tests).
+    - name: Run workspace doctests
+      continue-on-error: true
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test --workspace --no-fail-fast --doc
+      working-directory: backend
+
   backend-db-tests:
     # One job for all database-backed lib tests. They used to be 13 jobs that
     # each compiled the same test binaries (~3 min) to run a few seconds of
@@ -456,18 +574,6 @@ jobs:
           models::search::tests \
           models::series_metadata::tests \
           models::financial_statement::tests
-        run_group crawler_unit \
-          services::crawler::tests::test_catalog_downloader_creation \
-          services::crawler::tests::test_series_downloader_creation \
-          services::crawler::simple_crawler_service::tests \
-          services::crawler::enhanced_crawler_scheduler::tests
-        run_group crawler_integration \
-          services::crawler::tests::test_crawler_with_database \
-          services::crawler::tests::test_file_crawling_with_series_downloader \
-          services::crawler::tests::test_file_url_crawling \
-          services::crawler::tests::test_file_url_error_handling \
-          services::crawler::tests::test_file_url_with_special_characters \
-          services::crawler::tests::test_multiple_file_urls
         run_group queue_basic \
           services::queue_service::tests::test_get_and_lock_next_item \
           services::queue_service::tests::test_queue_item_locking_and_unlocking \
@@ -497,30 +603,6 @@ jobs:
           services::global_analysis_service::tests::test_calculate_economic_health_score \
           services::global_analysis_service::tests::test_correlation_network_centrality_calculation \
           services::global_analysis_service::tests::test_error_handling_database_connection_failure
-        run_group series_discovery_basic \
-          services::series_discovery::boc::tests::test_boc_data_source_creation \
-          services::series_discovery::boe::tests::test_boe_data_source_creation \
-          services::series_discovery::boj::tests::test_boj_data_source_creation \
-          services::series_discovery::ecb::tests::test_ecb_data_source_creation \
-          services::series_discovery::fhfa::tests::test_fhfa_data_source_creation \
-          services::series_discovery::ilo::tests::test_ilo_data_source_creation \
-          services::series_discovery::oecd::tests::test_oecd_data_source_creation \
-          services::series_discovery::rba::tests::test_rba_data_source_creation \
-          services::series_discovery::snb::tests::test_snb_data_source_creation \
-          services::series_discovery::unstats::tests::test_unstats_data_source_creation \
-          services::series_discovery::wto::tests::test_wto_data_source_creation
-        run_group series_discovery_integration \
-          services::series_discovery::boc::tests::test_discover_series \
-          services::series_discovery::boe::tests::test_discover_series \
-          services::series_discovery::boj::tests::test_discover_series \
-          services::series_discovery::ecb::tests::test_discover_series \
-          services::series_discovery::fhfa::tests::test_discover_series \
-          services::series_discovery::ilo::tests::test_discover_series \
-          services::series_discovery::oecd::tests::test_discover_series \
-          services::series_discovery::rba::tests::test_discover_series \
-          services::series_discovery::snb::tests::test_discover_series \
-          services::series_discovery::unstats::tests::test_discover_series \
-          services::series_discovery::wto::tests::test_discover_series
         run_group auth_integration \
           auth::integration_tests::test_auth_service_creation \
           auth::integration_tests::test_jwt_token_flow \
@@ -546,27 +628,7 @@ jobs:
           services::collaboration_service::tests
         run_group remaining_service \
           services::search_service \
-          services::series_service \
-          services::comprehensive_series_catalog::tests \
-          services::series_discovery::boc::tests::test_discover_boc_series_integration \
-          services::series_discovery::boe::tests::test_discover_boe_series_integration \
-          services::series_discovery::boe::tests::test_fetch_boe_data \
-          services::series_discovery::boj::tests::test_discover_boj_series_integration \
-          services::series_discovery::boj::tests::test_fetch_boj_data \
-          services::series_discovery::ecb::tests::test_discover_ecb_series_integration \
-          services::series_discovery::ecb::tests::test_fetch_ecb_data \
-          services::series_discovery::fhfa::tests::test_fhfa_hpi_data_structure \
-          services::series_discovery::ilo::tests::test_discover_ilo_series_integration \
-          services::series_discovery::oecd::tests::test_discover_oecd_series_integration \
-          services::series_discovery::oecd::tests::test_fetch_oecd_data \
-          services::series_discovery::rba::tests::test_discover_rba_series_integration \
-          services::series_discovery::rba::tests::test_fetch_rba_data \
-          services::series_discovery::snb::tests::test_discover_snb_series_integration \
-          services::series_discovery::snb::tests::test_fetch_snb_data \
-          services::series_discovery::unstats::tests::test_discover_unstats_series_integration \
-          services::series_discovery::unstats::tests::test_fetch_unstats_data \
-          services::series_discovery::wto::tests::test_discover_wto_series_integration \
-          services::series_discovery::wto::tests::test_fetch_wto_data
+          services::series_service
 
         if [ ${#failed[@]} -gt 0 ]; then
           echo "::error::Failed test groups: ${failed[*]}"

@@ -1,0 +1,17 @@
+{
+  "BEAAPI": {
+    "Request": {
+      "RequestParam": [
+        { "ParameterName": "USERID", "ParameterValue": "REDACTED" },
+        { "ParameterName": "METHOD", "ParameterValue": "GETDATASETLIST" },
+        { "ParameterName": "RESULTFORMAT", "ParameterValue": "JSON" }
+      ]
+    },
+    "Results": {
+      "Error": {
+        "APIErrorCode": "3",
+        "APIErrorDescription": "The UserId provided in the request is not valid."
+      }
+    }
+  }
+}

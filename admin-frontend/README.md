@@ -291,7 +291,7 @@ npm start
 The admin interface is containerized and deployed alongside the main application:
 
 ```dockerfile
-FROM node:18-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production

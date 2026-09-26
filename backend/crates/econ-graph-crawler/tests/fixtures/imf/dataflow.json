@@ -1,0 +1,57 @@
+{
+  "Structure": {
+    "@xmlns": "http://www.SDMX.org/resources/SDMXML/schemas/v2_0/message",
+    "Header": {
+      "ID": "Dataflow",
+      "Test": "false",
+      "Prepared": "2026-09-01T12:00:00",
+      "Sender": { "@id": "1C0", "Name": { "@xml:lang": "en", "#text": "IMF" } }
+    },
+    "Dataflows": {
+      "Dataflow": [
+        {
+          "@id": "DS-IFS",
+          "@version": "1.0",
+          "@agencyID": "IMF",
+          "Name": [{ "@xml:lang": "en", "$": "International Financial Statistics (IFS)" }],
+          "KeyFamilyRef": { "KeyFamilyID": "IFS", "KeyFamilyAgencyID": "IMF" }
+        },
+        {
+          "@id": "DS-BOP",
+          "@version": "1.0",
+          "@agencyID": "IMF",
+          "Name": [{ "@xml:lang": "en", "$": "Balance of Payments (BOP), World and Country Tables" }],
+          "KeyFamilyRef": { "KeyFamilyID": "BOP", "KeyFamilyAgencyID": "IMF" }
+        },
+        {
+          "@id": "DS-PCPS",
+          "@version": "1.0",
+          "@agencyID": "IMF",
+          "Name": [{ "@xml:lang": "en", "$": "Primary Commodity Prices" }],
+          "KeyFamilyRef": { "KeyFamilyID": "PCPS", "KeyFamilyAgencyID": "IMF" }
+        },
+        {
+          "@id": "DS-DOT",
+          "@version": "1.0",
+          "@agencyID": "IMF",
+          "Name": [{ "@xml:lang": "en", "$": "Direction of Trade Statistics (DOTS)" }],
+          "KeyFamilyRef": { "KeyFamilyID": "DOT", "KeyFamilyAgencyID": "IMF" }
+        },
+        {
+          "@id": "DS-IFS_2",
+          "@version": "1.0",
+          "@agencyID": "IMF",
+          "Name": [{ "@xml:lang": "en", "$": "International Financial Statistics (IFS), archive" }],
+          "KeyFamilyRef": { "KeyFamilyID": "IFS", "KeyFamilyAgencyID": "IMF" }
+        },
+        {
+          "@id": "DS-WEO",
+          "@version": "1.0",
+          "@agencyID": "IMF",
+          "Name": { "@xml:lang": "en", "#text": "World Economic Outlook (WEO)" },
+          "KeyFamilyRef": { "KeyFamilyID": "WEO", "KeyFamilyAgencyID": "IMF" }
+        }
+      ]
+    }
+  }
+}

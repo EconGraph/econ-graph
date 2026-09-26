@@ -1,0 +1,13 @@
+{
+  "status": "REQUEST_SUCCEEDED",
+  "responseTime": 33,
+  "message": [],
+  "Results": {
+    "survey": [
+      {"survey_abbreviation": "AP", "survey_name": "Average Price Data"},
+      {"survey_abbreviation": "CE", "survey_name": "Employment, Hours, and Earnings from the Current Employment Statistics survey (National)"},
+      {"survey_abbreviation": "CU", "survey_name": "Consumer Price Index - All Urban Consumers"},
+      {"survey_abbreviation": "LN", "survey_name": "Labor Force Statistics from the Current Population Survey"}
+    ]
+  }
+}

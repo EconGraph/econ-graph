@@ -65,7 +65,7 @@ on:
    - Provides access to source code and data files
 
 2. **Setup Dependencies**
-   - Node.js 18 for any JavaScript dependencies
+   - Node.js 24 for any JavaScript dependencies
    - Rust toolchain for codebase analysis
    - System packages (bc for calculations)
 

@@ -1,0 +1,43 @@
+{
+  "status": "REQUEST_SUCCEEDED",
+  "responseTime": 142,
+  "message": [],
+  "Results": {
+    "series": [
+      {
+        "seriesID": "CIU1010000000000A",
+        "data": [
+          {
+            "year": "2024",
+            "period": "Q02",
+            "periodName": "2nd Quarter",
+            "latest": "true",
+            "value": "4.1",
+            "footnotes": [{"code": "P", "text": "preliminary"}]
+          },
+          {
+            "year": "2024",
+            "period": "Q01",
+            "periodName": "1st Quarter",
+            "value": "4.2",
+            "footnotes": [{}]
+          },
+          {
+            "year": "2023",
+            "period": "Q04",
+            "periodName": "4th Quarter",
+            "value": "4.2",
+            "footnotes": [{}]
+          },
+          {
+            "year": "2023",
+            "period": "Q03",
+            "periodName": "3rd Quarter",
+            "value": "4.3",
+            "footnotes": [{}]
+          }
+        ]
+      }
+    ]
+  }
+}

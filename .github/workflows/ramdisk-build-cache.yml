@@ -71,11 +71,11 @@ jobs:
 
         # Install cargo-audit
         echo "Installing cargo-audit..."
-        $HOME/.cargo/bin/cargo install cargo-audit --verbose --force
+        $HOME/.cargo/bin/cargo install cargo-audit --locked --verbose --force
 
         # Install cargo-deny
         echo "Installing cargo-deny..."
-        $HOME/.cargo/bin/cargo install cargo-deny --verbose --force
+        $HOME/.cargo/bin/cargo install cargo-deny --locked --verbose --force
 
         # Verify installations
         echo "Verifying installations..."

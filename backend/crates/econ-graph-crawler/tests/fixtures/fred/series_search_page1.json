@@ -1,0 +1,46 @@
+{
+  "realtime_start": "2026-09-25",
+  "realtime_end": "2026-09-25",
+  "order_by": "search_rank",
+  "sort_order": "desc",
+  "count": 3,
+  "offset": 0,
+  "limit": 1000,
+  "seriess": [
+    {
+      "id": "GDP",
+      "realtime_start": "2026-09-25",
+      "realtime_end": "2026-09-25",
+      "title": "Gross Domestic Product",
+      "observation_start": "1947-01-01",
+      "observation_end": "2026-04-01",
+      "frequency": "Quarterly",
+      "frequency_short": "Q",
+      "units": "Billions of Dollars",
+      "units_short": "Bil. of $",
+      "seasonal_adjustment": "Seasonally Adjusted Annual Rate",
+      "seasonal_adjustment_short": "SAAR",
+      "last_updated": "2026-08-28 07:54:02-05",
+      "popularity": 93,
+      "group_popularity": 93,
+      "notes": "BEA Account Code: A191RC"
+    },
+    {
+      "id": "GDPC1",
+      "realtime_start": "2026-09-25",
+      "realtime_end": "2026-09-25",
+      "title": "Real Gross Domestic Product",
+      "observation_start": "1947-01-01",
+      "observation_end": "2026-04-01",
+      "frequency": "Quarterly",
+      "frequency_short": "Q",
+      "units": "Billions of Chained 2017 Dollars",
+      "units_short": "Bil. of Chn. 2017 $",
+      "seasonal_adjustment": "Seasonally Adjusted Annual Rate",
+      "seasonal_adjustment_short": "SAAR",
+      "last_updated": "2026-08-28 07:54:07-05",
+      "popularity": 87,
+      "group_popularity": 91
+    }
+  ]
+}
