@@ -124,7 +124,8 @@ Notes:
 - Discovery produces a national series (`..._us`) and one series per state and DC
   (`..._state_{FIPS}`) for every economic variable. County and metro-area levels are skipped.
   Any other id is rejected as a permanent error without making a request.
-- Set `CENSUS_API_KEY` to send an API key; requests also work without one at lower rate limits.
+- `CENSUS_API_KEY` is required: the Census API rejects keyless requests, so without it the
+  adapter fails with an auth error before making any request.
 
 ## Crawler Integration
 
@@ -195,7 +196,8 @@ match fetch_bds_data(&client, &variables, geography, year_start, year_end, &None
 tests:
 - `discover_crosses_economic_variables_with_geographies` - Discovery from `variables.json` and `geography.json`
 - `discover_needs_both_metadata_files` - Discovery fails cleanly if either metadata file is missing
-- `fetch_parses_rows_and_sends_key` / `fetch_works_without_a_key_and_applies_since` - Data fetching, API key, incremental `since`
+- `fetch_parses_rows_and_sends_key` / `fetch_applies_since` - Data fetching, API key, incremental `since`
+- `missing_key_is_auth_error_without_requests` - No `CENSUS_API_KEY`: `Auth` error before any request
 - `discover_skips_levels_without_single_series` - County and metro-area levels are not discovered
 - `fetch_state_series_queries_that_state` - Per-state fetch (`for=state:{FIPS}`)
 - `series_id_parsing` / `fetch_rejects_unsupported_and_foreign_ids_without_requests` - ID validation
@@ -226,13 +228,11 @@ cargo test -p econ-graph-crawler --all-features sources::census::tests::fetch_pa
 ## Deployment Notes
 
 ### Environment Variables
-No API keys required for Census Bureau integration.
+`CENSUS_API_KEY` is required (free at <https://api.census.gov/data/key_signup.html>).
 
 ### Database Migrations
-Ensure the `api_key_name` column exists in the `data_sources` table:
-```sql
-ALTER TABLE data_sources ADD COLUMN api_key_name VARCHAR(255);
-```
+Migration `2026-09-26-000010_census_api_key_required` marks the Census data source row as
+requiring `CENSUS_API_KEY`. The backend applies it at startup.
 
 ### Monitoring
 - Monitor API response times (may be slow)

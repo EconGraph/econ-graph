@@ -11,7 +11,10 @@
 
 - **Data source**: U.S. Census Bureau Business Dynamics Statistics (BDS)
 - **API root**: `https://api.census.gov/data` (`census::DEFAULT_BASE_URL`), dataset path `/timeseries/bds`
-- **Authentication**: optional. `CENSUS_API_KEY` (`ctx.keys.census`) is sent as `key=` only when set.
+- **Authentication**: required. The Census Data API rejects requests without a key, so
+  `CENSUS_API_KEY` (`ctx.keys.census`) is sent as `key=` on every request. Without it, discovery
+  and fetching fail with `Auth` before any request. Keys are free at
+  <https://api.census.gov/data/key_signup.html>.
 - **Data type**: annual establishment, firm and job creation/destruction statistics (units "Count")
 - **Rate policy**: `SourcePolicy::default_for(SourceId::Census)` in
   `backend/crates/econ-graph-crawler/src/policy.rs` (40 requests/min); enforced by the shared
@@ -59,10 +62,10 @@ missing observations.
 
 ## Database
 
-The data source row ("U.S. Census Bureau") was made keyless, visible and enabled by migration
-`2025-09-13-185806-0000_update_census_data_source_config` (now archived under
-`backend/migrations_backup/`). Discovered series are written as `EconomicSeries` rows keyed by the
-external IDs above when `crawler-worker` runs the discovery job.
+The data source row ("U.S. Census Bureau") is visible and enabled. Migration
+`2026-09-26-000010_census_api_key_required` marks it as requiring `CENSUS_API_KEY`. Discovered
+series are written as `EconomicSeries` rows keyed by the external IDs above when `crawler-worker`
+runs the discovery job.
 
 ## Testing
 
