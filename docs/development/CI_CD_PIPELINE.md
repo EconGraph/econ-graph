@@ -202,7 +202,7 @@ runs:
       run: sudo apt-get update && sudo apt-get install -y build-essential
     
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.89.0
+      uses: dtolnay/rust-toolchain@1.98.1
       with:
         components: rustfmt, clippy
     

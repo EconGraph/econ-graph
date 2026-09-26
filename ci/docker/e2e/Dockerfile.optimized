@@ -2,7 +2,7 @@
 # This container builds both backend and frontend in parallel for faster startup times
 
 # Stage 1: Build Backend Binary
-FROM rust:1.89.0-bullseye AS backend-builder
+FROM rust:1.98.1-bullseye AS backend-builder
 
 # Install system dependencies for Rust compilation
 RUN apt-get update && apt-get install -y \

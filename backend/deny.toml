@@ -132,6 +132,9 @@ exceptions = [
     { allow = ["MS-PL"], crate = "econ-graph-metrics" },
     { allow = ["MS-PL"], crate = "econ-graph-sec-crawler" },
     { allow = ["MS-PL"], crate = "econ-graph-services" },
+    # Mozilla CA root certificate data bundled for rustls (via reqwest 0.13)
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-root-certs" },
     # Each entry is the crate and version constraint, and its specific allow
     # list
     #{ allow = ["Zlib"], crate = "adler32" },

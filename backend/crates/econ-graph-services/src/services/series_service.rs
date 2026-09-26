@@ -396,7 +396,7 @@ fn filter_latest_revisions(data_points: Vec<DataPoint>) -> Vec<DataPoint> {
     }
 
     let mut result: Vec<DataPoint> = latest_revisions.into_values().collect();
-    result.sort_by(|a, b| a.date.cmp(&b.date));
+    result.sort_by_key(|a| a.date);
 
     result
 }

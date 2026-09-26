@@ -731,7 +731,7 @@ pub async fn apply_data_transformation(
 
     // Sort data points by date to ensure correct chronological order
     let mut sorted_points = data_points;
-    sorted_points.sort_by(|a, b| a.date.cmp(&b.date));
+    sorted_points.sort_by_key(|a| a.date);
 
     let mut transformed_points = Vec::new();
 
@@ -828,7 +828,7 @@ pub async fn apply_data_transformation(
                     let prev_point = &sorted_points[i - 1];
                     match (&point.value, &prev_point.value) {
                         (Some(current), Some(previous)) => {
-                            if *current > BigDecimal::from(0) && *previous > BigDecimal::from(0) {
+                            if *current > 0 && *previous > 0 {
                                 // Approximate natural log using decimal operations
                                 // This is a simplified implementation - in production you might want a more accurate log
                                 let ratio = current / previous;
