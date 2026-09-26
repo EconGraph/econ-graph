@@ -1,10 +1,10 @@
 // Regression tests for the enum-typed columns of the SEC/XBRL tables.
 //
 // The initial schema created these columns as Postgres ENUM types while schema.rs (and the Rust
-// enums in crate::enums) bind them as Text, so every diesel insert failed with
-// "column ... is of type compression_type but expression is of type text". Migration
-// 2026-09-25-000003_enum_columns_to_varchar converts them to VARCHAR + CHECK. These tests insert
-// through the diesel models and read the rows back.
+// enums in crate::enums) bound them as Text, so every diesel insert failed with
+// "column ... is of type compression_type but expression is of type text". schema.rs now declares
+// the Postgres enum types in `schema::sql_types` and the Rust enums bind to them. These tests
+// insert through the diesel models and read the rows back.
 //
 // They need a reachable Postgres in DATABASE_URL; migrations are applied once per test binary.
 // Each test uses a unique CIK / namespace so leftover rows from earlier runs can't interfere.
@@ -125,7 +125,7 @@ async fn financial_statement_enum_columns_round_trip() {
 }
 
 #[tokio::test]
-async fn financial_statement_columns_keep_defaults_and_checks() {
+async fn financial_statement_columns_keep_defaults_and_reject_unknown_values() {
     let pool = test_pool().await;
     let company_id = insert_company(&pool).await;
     let accession = unique_accession();
@@ -156,19 +156,53 @@ async fn financial_statement_columns_keep_defaults_and_checks() {
     assert_eq!(compression, CompressionType::Zstd);
     assert_eq!(status, ProcessingStatus::Pending);
 
-    // The CHECK constraint still rejects values outside the former enum.
-    let err = diesel::update(
-        financial_statements::table.filter(financial_statements::accession_number.eq(&accession)),
+    // The enum type still rejects values outside its labels.
+    let err = diesel::sql_query(
+        "UPDATE financial_statements SET xbrl_file_compression_type = 'brotli' \
+         WHERE accession_number = $1",
     )
-    .set(financial_statements::xbrl_file_compression_type.eq("brotli"))
+    .bind::<diesel::sql_types::Text, _>(&accession)
     .execute(&mut conn)
     .await
     .expect_err("unknown compression type must be rejected");
     assert!(
         err.to_string()
-            .contains("chk_financial_statements_xbrl_file_compression_type"),
+            .contains("invalid input value for enum compression_type"),
         "unexpected error: {err}"
     );
+}
+
+#[tokio::test]
+async fn every_annotation_type_round_trips() {
+    use crate::enums::AnnotationType;
+    use crate::schema::sql_types;
+    use diesel::dsl::sql;
+
+    let pool = test_pool().await;
+    let mut conn = pool.get().await.unwrap();
+    for value in [
+        AnnotationType::Comment,
+        AnnotationType::Question,
+        AnnotationType::Concern,
+        AnnotationType::Insight,
+        AnnotationType::Risk,
+        AnnotationType::Opportunity,
+        AnnotationType::Highlight,
+        AnnotationType::RevenueGrowth,
+        AnnotationType::CostConcern,
+        AnnotationType::CashFlow,
+        AnnotationType::BalanceSheet,
+        AnnotationType::OneTimeItem,
+        AnnotationType::IndustryContext,
+    ] {
+        let back: AnnotationType = diesel::select(
+            sql::<sql_types::AnnotationType>("").bind::<sql_types::AnnotationType, _>(value),
+        )
+        .get_result(&mut conn)
+        .await
+        .unwrap_or_else(|e| panic!("{value:?} is not a valid annotation_type: {e}"));
+        assert_eq!(back, value);
+    }
 }
 
 #[tokio::test]

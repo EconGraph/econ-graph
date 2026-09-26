@@ -1,17 +1,19 @@
 //! Financial data enums for type safety and data integrity
-//! These enums correspond to the PostgreSQL enum types created in the database schema
+//! These enums correspond to the PostgreSQL enum types created in the database schema and
+//! bind to them through the SQL types in `crate::schema::sql_types`.
 
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::Text;
-use diesel::Expression;
 use serde::{Deserialize, Serialize};
+
+use crate::schema::sql_types;
 
 /// Compression types for XBRL file storage
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
-#[diesel(sql_type = Text)]
+#[diesel(sql_type = sql_types::CompressionType)]
 pub enum CompressionType {
     Zstd,
     Lz4,
@@ -19,7 +21,7 @@ pub enum CompressionType {
     None,
 }
 
-impl ToSql<Text, Pg> for CompressionType {
+impl ToSql<sql_types::CompressionType, Pg> for CompressionType {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
         let value = match self {
             CompressionType::Zstd => "zstd",
@@ -31,7 +33,7 @@ impl ToSql<Text, Pg> for CompressionType {
     }
 }
 
-impl FromSql<Text, Pg> for CompressionType {
+impl FromSql<sql_types::CompressionType, Pg> for CompressionType {
     fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
         let value = <String as FromSql<Text, Pg>>::from_sql(bytes)?;
         match value.as_str() {
@@ -45,7 +47,7 @@ impl FromSql<Text, Pg> for CompressionType {
 }
 
 // Let Diesel automatically derive Queryable for single-field types
-impl diesel::Queryable<Text, Pg> for CompressionType {
+impl diesel::Queryable<sql_types::CompressionType, Pg> for CompressionType {
     type Row = Self;
     fn build(row: Self::Row) -> deserialize::Result<Self> {
         Ok(row)
@@ -65,7 +67,7 @@ impl CompressionType {
 
 /// Processing status for XBRL files
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
-#[diesel(sql_type = Text)]
+#[diesel(sql_type = sql_types::ProcessingStatus)]
 pub enum ProcessingStatus {
     Pending,
     Downloaded,
@@ -74,7 +76,7 @@ pub enum ProcessingStatus {
     Failed,
 }
 
-impl ToSql<Text, Pg> for ProcessingStatus {
+impl ToSql<sql_types::ProcessingStatus, Pg> for ProcessingStatus {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
         let value = match self {
             ProcessingStatus::Pending => "pending",
@@ -87,7 +89,7 @@ impl ToSql<Text, Pg> for ProcessingStatus {
     }
 }
 
-impl FromSql<Text, Pg> for ProcessingStatus {
+impl FromSql<sql_types::ProcessingStatus, Pg> for ProcessingStatus {
     fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
         let value = <String as FromSql<Text, Pg>>::from_sql(bytes)?;
         match value.as_str() {
@@ -101,7 +103,7 @@ impl FromSql<Text, Pg> for ProcessingStatus {
     }
 }
 
-impl diesel::Queryable<Text, Pg> for ProcessingStatus {
+impl diesel::Queryable<sql_types::ProcessingStatus, Pg> for ProcessingStatus {
     type Row = Self;
     fn build(row: Self::Row) -> deserialize::Result<Self> {
         Ok(row)
@@ -110,7 +112,7 @@ impl diesel::Queryable<Text, Pg> for ProcessingStatus {
 
 /// Financial statement types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
-#[diesel(sql_type = Text)]
+#[diesel(sql_type = sql_types::StatementType)]
 pub enum StatementType {
     IncomeStatement,
     BalanceSheet,
@@ -118,7 +120,7 @@ pub enum StatementType {
     Equity,
 }
 
-impl ToSql<Text, Pg> for StatementType {
+impl ToSql<sql_types::StatementType, Pg> for StatementType {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
         let value = match self {
             StatementType::IncomeStatement => "income_statement",
@@ -130,7 +132,7 @@ impl ToSql<Text, Pg> for StatementType {
     }
 }
 
-impl FromSql<Text, Pg> for StatementType {
+impl FromSql<sql_types::StatementType, Pg> for StatementType {
     fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
         let value = <String as FromSql<Text, Pg>>::from_sql(bytes)?;
         match value.as_str() {
@@ -143,7 +145,7 @@ impl FromSql<Text, Pg> for StatementType {
     }
 }
 
-impl diesel::Queryable<Text, Pg> for StatementType {
+impl diesel::Queryable<sql_types::StatementType, Pg> for StatementType {
     type Row = Self;
     fn build(row: Self::Row) -> deserialize::Result<Self> {
         Ok(row)
@@ -152,7 +154,7 @@ impl diesel::Queryable<Text, Pg> for StatementType {
 
 /// Financial statement sections
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
-#[diesel(sql_type = Text)]
+#[diesel(sql_type = sql_types::StatementSection)]
 pub enum StatementSection {
     Revenue,
     Expenses,
@@ -164,7 +166,7 @@ pub enum StatementSection {
     Financing,
 }
 
-impl ToSql<Text, Pg> for StatementSection {
+impl ToSql<sql_types::StatementSection, Pg> for StatementSection {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
         let value = match self {
             StatementSection::Revenue => "revenue",
@@ -180,7 +182,7 @@ impl ToSql<Text, Pg> for StatementSection {
     }
 }
 
-impl FromSql<Text, Pg> for StatementSection {
+impl FromSql<sql_types::StatementSection, Pg> for StatementSection {
     fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
         let value = <String as FromSql<Text, Pg>>::from_sql(bytes)?;
         match value.as_str() {
@@ -197,7 +199,7 @@ impl FromSql<Text, Pg> for StatementSection {
     }
 }
 
-impl diesel::Queryable<Text, Pg> for StatementSection {
+impl diesel::Queryable<sql_types::StatementSection, Pg> for StatementSection {
     type Row = Self;
     fn build(row: Self::Row) -> deserialize::Result<Self> {
         Ok(row)
@@ -206,7 +208,7 @@ impl diesel::Queryable<Text, Pg> for StatementSection {
 
 /// Annotation types for collaborative analysis
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
-#[diesel(sql_type = Text)]
+#[diesel(sql_type = sql_types::AnnotationType)]
 pub enum AnnotationType {
     Comment,
     Question,
@@ -223,7 +225,7 @@ pub enum AnnotationType {
     IndustryContext,
 }
 
-impl ToSql<Text, Pg> for AnnotationType {
+impl ToSql<sql_types::AnnotationType, Pg> for AnnotationType {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
         let value = match self {
             AnnotationType::Comment => "comment",
@@ -244,7 +246,7 @@ impl ToSql<Text, Pg> for AnnotationType {
     }
 }
 
-impl FromSql<Text, Pg> for AnnotationType {
+impl FromSql<sql_types::AnnotationType, Pg> for AnnotationType {
     fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
         let value = <String as FromSql<Text, Pg>>::from_sql(bytes)?;
         match value.as_str() {
@@ -266,7 +268,7 @@ impl FromSql<Text, Pg> for AnnotationType {
     }
 }
 
-impl diesel::Queryable<Text, Pg> for AnnotationType {
+impl diesel::Queryable<sql_types::AnnotationType, Pg> for AnnotationType {
     type Row = Self;
     fn build(row: Self::Row) -> deserialize::Result<Self> {
         Ok(row)
@@ -275,14 +277,14 @@ impl diesel::Queryable<Text, Pg> for AnnotationType {
 
 /// Annotation status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
-#[diesel(sql_type = Text)]
+#[diesel(sql_type = sql_types::AnnotationStatus)]
 pub enum AnnotationStatus {
     Active,
     Resolved,
     Archived,
 }
 
-impl ToSql<Text, Pg> for AnnotationStatus {
+impl ToSql<sql_types::AnnotationStatus, Pg> for AnnotationStatus {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
         let value = match self {
             AnnotationStatus::Active => "active",
@@ -293,7 +295,7 @@ impl ToSql<Text, Pg> for AnnotationStatus {
     }
 }
 
-impl FromSql<Text, Pg> for AnnotationStatus {
+impl FromSql<sql_types::AnnotationStatus, Pg> for AnnotationStatus {
     fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
         let value = <String as FromSql<Text, Pg>>::from_sql(bytes)?;
         match value.as_str() {
@@ -305,7 +307,7 @@ impl FromSql<Text, Pg> for AnnotationStatus {
     }
 }
 
-impl diesel::Queryable<Text, Pg> for AnnotationStatus {
+impl diesel::Queryable<sql_types::AnnotationStatus, Pg> for AnnotationStatus {
     type Row = Self;
     fn build(row: Self::Row) -> deserialize::Result<Self> {
         Ok(row)
@@ -314,7 +316,7 @@ impl diesel::Queryable<Text, Pg> for AnnotationStatus {
 
 /// Assignment types for team workflow
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
-#[diesel(sql_type = Text)]
+#[diesel(sql_type = sql_types::AssignmentType)]
 pub enum AssignmentType {
     Review,
     Analyze,
@@ -323,7 +325,7 @@ pub enum AssignmentType {
     Investigate,
 }
 
-impl ToSql<Text, Pg> for AssignmentType {
+impl ToSql<sql_types::AssignmentType, Pg> for AssignmentType {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
         let value = match self {
             AssignmentType::Review => "review",
@@ -336,7 +338,7 @@ impl ToSql<Text, Pg> for AssignmentType {
     }
 }
 
-impl FromSql<Text, Pg> for AssignmentType {
+impl FromSql<sql_types::AssignmentType, Pg> for AssignmentType {
     fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
         let value = <String as FromSql<Text, Pg>>::from_sql(bytes)?;
         match value.as_str() {
@@ -350,7 +352,7 @@ impl FromSql<Text, Pg> for AssignmentType {
     }
 }
 
-impl diesel::Queryable<Text, Pg> for AssignmentType {
+impl diesel::Queryable<sql_types::AssignmentType, Pg> for AssignmentType {
     type Row = Self;
     fn build(row: Self::Row) -> deserialize::Result<Self> {
         Ok(row)
@@ -359,7 +361,7 @@ impl diesel::Queryable<Text, Pg> for AssignmentType {
 
 /// Assignment status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
-#[diesel(sql_type = Text)]
+#[diesel(sql_type = sql_types::AssignmentStatus)]
 pub enum AssignmentStatus {
     Pending,
     InProgress,
@@ -368,7 +370,7 @@ pub enum AssignmentStatus {
     Cancelled,
 }
 
-impl ToSql<Text, Pg> for AssignmentStatus {
+impl ToSql<sql_types::AssignmentStatus, Pg> for AssignmentStatus {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
         let value = match self {
             AssignmentStatus::Pending => "pending",
@@ -381,7 +383,7 @@ impl ToSql<Text, Pg> for AssignmentStatus {
     }
 }
 
-impl FromSql<Text, Pg> for AssignmentStatus {
+impl FromSql<sql_types::AssignmentStatus, Pg> for AssignmentStatus {
     fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
         let value = <String as FromSql<Text, Pg>>::from_sql(bytes)?;
         match value.as_str() {
@@ -395,7 +397,7 @@ impl FromSql<Text, Pg> for AssignmentStatus {
     }
 }
 
-impl diesel::Queryable<Text, Pg> for AssignmentStatus {
+impl diesel::Queryable<sql_types::AssignmentStatus, Pg> for AssignmentStatus {
     type Row = Self;
     fn build(row: Self::Row) -> deserialize::Result<Self> {
         Ok(row)
@@ -452,7 +454,7 @@ impl diesel::Queryable<Text, Pg> for ProcessingStep {
 
 /// Taxonomy file types for XBRL DTS components
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
-#[diesel(sql_type = Text)]
+#[diesel(sql_type = sql_types::TaxonomyFileType)]
 pub enum TaxonomyFileType {
     Schema,
     LabelLinkbase,
@@ -463,7 +465,7 @@ pub enum TaxonomyFileType {
     FormulaLinkbase,
 }
 
-impl ToSql<Text, Pg> for TaxonomyFileType {
+impl ToSql<sql_types::TaxonomyFileType, Pg> for TaxonomyFileType {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
         let value = match self {
             TaxonomyFileType::Schema => "schema",
@@ -478,7 +480,7 @@ impl ToSql<Text, Pg> for TaxonomyFileType {
     }
 }
 
-impl FromSql<Text, Pg> for TaxonomyFileType {
+impl FromSql<sql_types::TaxonomyFileType, Pg> for TaxonomyFileType {
     fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
         let value = <String as FromSql<Text, Pg>>::from_sql(bytes)?;
         match value.as_str() {
@@ -494,7 +496,7 @@ impl FromSql<Text, Pg> for TaxonomyFileType {
     }
 }
 
-impl diesel::Queryable<Text, Pg> for TaxonomyFileType {
+impl diesel::Queryable<sql_types::TaxonomyFileType, Pg> for TaxonomyFileType {
     type Row = Self;
     fn build(row: Self::Row) -> deserialize::Result<Self> {
         Ok(row)
@@ -503,7 +505,7 @@ impl diesel::Queryable<Text, Pg> for TaxonomyFileType {
 
 /// Taxonomy source types for XBRL taxonomy classification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
-#[diesel(sql_type = Text)]
+#[diesel(sql_type = sql_types::TaxonomySourceType)]
 pub enum TaxonomySourceType {
     CompanySpecific,
     UsGaap,
@@ -514,7 +516,7 @@ pub enum TaxonomySourceType {
     Custom,
 }
 
-impl ToSql<Text, Pg> for TaxonomySourceType {
+impl ToSql<sql_types::TaxonomySourceType, Pg> for TaxonomySourceType {
     fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
         let value = match self {
             TaxonomySourceType::CompanySpecific => "company_specific",
@@ -529,7 +531,7 @@ impl ToSql<Text, Pg> for TaxonomySourceType {
     }
 }
 
-impl FromSql<Text, Pg> for TaxonomySourceType {
+impl FromSql<sql_types::TaxonomySourceType, Pg> for TaxonomySourceType {
     fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
         let value = <String as FromSql<Text, Pg>>::from_sql(bytes)?;
         match value.as_str() {
@@ -545,7 +547,7 @@ impl FromSql<Text, Pg> for TaxonomySourceType {
     }
 }
 
-impl diesel::Queryable<Text, Pg> for TaxonomySourceType {
+impl diesel::Queryable<sql_types::TaxonomySourceType, Pg> for TaxonomySourceType {
     type Row = Self;
     fn build(row: Self::Row) -> deserialize::Result<Self> {
         Ok(row)
