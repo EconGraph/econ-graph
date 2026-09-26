@@ -10,7 +10,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::signal;
 use tracing::{info, Instrument};
-use warp::Filter;
+use warp::{Filter, Reply as _};
 
 // Import from our new crates
 use econ_graph_auth::auth::{routes::auth_routes, services::AuthService};
@@ -195,6 +195,145 @@ fn cors_filter(origins: &[String]) -> warp::cors::Builder {
         .allow_origins(origins.iter().map(String::as_str))
         .allow_headers(vec!["content-type", "authorization"])
         .allow_methods(vec!["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+}
+
+/// The active user named by a valid `Authorization: Bearer <jwt>` header, if any.
+async fn bearer_user(
+    pool: &DatabasePool,
+    authorization: Option<&str>,
+) -> Option<econ_graph_core::models::User> {
+    let token = authorization?.strip_prefix("Bearer ")?;
+    let claims = AuthService::new(pool.clone()).verify_token(token).ok()?;
+    let user_id = claims.sub.parse().ok()?;
+    econ_graph_core::models::User::get_by_id(pool, user_id)
+        .await
+        .ok()
+        .filter(|user| user.is_active)
+}
+
+/// JSON-RPC error for an MCP request without a valid bearer token.
+fn mcp_unauthorized() -> warp::reply::Response {
+    let reply = mcp_error(
+        warp::http::StatusCode::UNAUTHORIZED,
+        -32001,
+        "Authentication required",
+    );
+    warp::reply::with_header(reply, "WWW-Authenticate", "Bearer").into_response()
+}
+
+/// Why `mcp_route` refused a request; its `recover` turns each into a JSON-RPC error reply.
+#[derive(Debug)]
+enum McpRejection {
+    /// No valid bearer token: 401 with a `WWW-Authenticate: Bearer` challenge.
+    Unauthorized,
+    /// More than [`MCP_BODY_LIMIT`] bytes of body: 413.
+    BodyTooLarge,
+    /// The body could not be read: 400.
+    BodyUnreadable,
+}
+
+impl warp::reject::Reject for McpRejection {}
+
+/// Largest MCP request body accepted, in bytes. JSON-RPC requests are small.
+const MCP_BODY_LIMIT: usize = 1024 * 1024;
+
+/// Collect a request body, giving up as soon as more than `limit` bytes have arrived.
+///
+/// This counts the bytes actually received rather than trusting `Content-Length`, which a
+/// chunked request can carry alongside a much larger body.
+async fn read_body_limited<S, B>(
+    body: S,
+    limit: usize,
+) -> Result<warp::hyper::body::Bytes, warp::Rejection>
+where
+    S: tokio_stream::Stream<Item = Result<B, warp::Error>>,
+    B: warp::hyper::body::Buf,
+{
+    use tokio_stream::StreamExt as _;
+    use warp::hyper::body::Buf as _;
+
+    let mut body = std::pin::pin!(body);
+    let mut collected = Vec::new();
+    while let Some(chunk) = body.next().await {
+        let mut chunk = chunk.map_err(|_| warp::reject::custom(McpRejection::BodyUnreadable))?;
+        if collected.len() + chunk.remaining() > limit {
+            return Err(warp::reject::custom(McpRejection::BodyTooLarge));
+        }
+        while chunk.has_remaining() {
+            let bytes = chunk.chunk();
+            collected.extend_from_slice(bytes);
+            let read = bytes.len();
+            chunk.advance(read);
+        }
+    }
+    Ok(collected.into())
+}
+
+/// JSON-RPC error reply with the given HTTP status, for requests `mcp_route` refuses.
+fn mcp_error(status: warp::http::StatusCode, code: i32, message: &str) -> warp::reply::Response {
+    let body = warp::reply::json(&json!({
+        "jsonrpc": "2.0",
+        "id": null,
+        "error": { "code": code, "message": message }
+    }));
+    warp::reply::with_status(body, status).into_response()
+}
+
+/// `POST /mcp`, open only to an active user with a valid bearer token.
+///
+/// The token is checked before the body is read, so unauthenticated clients cannot make the
+/// server buffer a body, and bodies over [`MCP_BODY_LIMIT`] are refused as they stream in.
+fn mcp_route(
+    pool: DatabasePool,
+    server: Arc<EconGraphMcpServer>,
+) -> impl Filter<Extract = (warp::reply::Response,), Error = warp::Rejection> + Clone {
+    let authenticate = warp::header::headers_cloned()
+        .and_then(move |headers: warp::http::HeaderMap| {
+            let pool = pool.clone();
+            async move {
+                // A header that is not UTF-8 counts as missing, so it still gets the 401.
+                let authorization = headers
+                    .get(warp::http::header::AUTHORIZATION)
+                    .and_then(|value| std::str::from_utf8(value.as_bytes()).ok());
+                match bearer_user(&pool, authorization).await {
+                    Some(_) => Ok(()),
+                    None => Err(warp::reject::custom(McpRejection::Unauthorized)),
+                }
+            }
+        })
+        .untuple_one();
+
+    warp::path("mcp")
+        .and(warp::post())
+        .and(authenticate)
+        .and(warp::body::stream())
+        .and_then(move |body| {
+            let server = server.clone();
+            async move {
+                let body = read_body_limited(body, MCP_BODY_LIMIT).await?;
+                mcp_handler(body, server)
+                    .await
+                    .map(warp::Reply::into_response)
+            }
+        })
+        .recover(|rejection: warp::Rejection| async move {
+            use warp::http::StatusCode;
+            match rejection.find::<McpRejection>() {
+                Some(McpRejection::Unauthorized) => Ok(mcp_unauthorized()),
+                Some(McpRejection::BodyTooLarge) => Ok(mcp_error(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    -32600,
+                    "Request body too large",
+                )),
+                Some(McpRejection::BodyUnreadable) => Ok(mcp_error(
+                    StatusCode::BAD_REQUEST,
+                    -32700,
+                    "Could not read request body",
+                )),
+                None => Err(rejection),
+            }
+        })
+        .unify()
 }
 
 #[tokio::main]
@@ -409,19 +548,9 @@ async fn main() -> AppResult<()> {
     // MCP Server routes
     let mcp_server = Arc::new(EconGraphMcpServer::new(Arc::new(pool.clone())));
 
-    // Create a simple MCP handler that doesn't rely on complex filter chaining
-    let mcp_handler = {
-        let server = mcp_server.clone();
-        move |body: warp::hyper::body::Bytes| {
-            let server = server.clone();
-            async move { mcp_handler(body, server).await }
-        }
-    };
-
-    let mcp_filter = warp::path("mcp")
-        .and(warp::post())
-        .and(warp::body::bytes())
-        .and_then(mcp_handler);
+    // MCP requires a signed-in user's bearer token, like the rest of the API.
+    // MCP OAuth (auth roadmap phase 6) will replace this.
+    let mcp_filter = mcp_route(pool.clone(), mcp_server.clone());
 
     // Combine all routes
     let routes = root_filter
@@ -609,5 +738,105 @@ mod cors_tests {
         let res = preflight("https://evil.example").reply(&app()).await;
         assert_eq!(res.status(), 403);
         assert!(res.headers().get("access-control-allow-origin").is_none());
+    }
+}
+
+#[cfg(test)]
+mod mcp_auth_tests {
+    use super::{bearer_user, mcp_route, mcp_unauthorized, read_body_limited, McpRejection};
+    use econ_graph_core::DatabasePool;
+    use econ_graph_mcp::mcp_server::EconGraphMcpServer;
+    use std::sync::Arc;
+
+    /// A pool that never connects: every case here is rejected before any database access.
+    fn unreachable_pool() -> DatabasePool {
+        let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
+            diesel_async::AsyncPgConnection,
+        >::new("postgres://nobody@127.0.0.1:1/none");
+        DatabasePool::builder()
+            .connection_timeout(std::time::Duration::from_secs(1))
+            .build_unchecked(manager)
+    }
+
+    /// Missing, non-Bearer, empty and unverifiable tokens never authenticate.
+    #[tokio::test]
+    async fn bearer_user_rejects_missing_malformed_and_invalid_tokens() {
+        let pool = unreachable_pool();
+        for header in [
+            None,
+            Some(""),
+            Some("Basic dXNlcjpwYXNz"),
+            Some("Bearer "),
+            Some("Bearer not.a.jwt"),
+        ] {
+            assert!(
+                bearer_user(&pool, header).await.is_none(),
+                "{header:?} should not authenticate"
+            );
+        }
+    }
+
+    /// The rejection is an HTTP 401 carrying a `WWW-Authenticate: Bearer` challenge.
+    #[test]
+    fn mcp_unauthorized_is_a_401_with_a_bearer_challenge() {
+        let response = mcp_unauthorized();
+        assert_eq!(response.status(), warp::http::StatusCode::UNAUTHORIZED);
+        assert_eq!(response.headers()["WWW-Authenticate"], "Bearer");
+    }
+
+    /// POSTs to the mounted `/mcp` route with each `Authorization` value (none, bad token,
+    /// non-UTF-8) all get the 401 challenge, even with a body over the size limit.
+    #[tokio::test]
+    async fn mcp_route_answers_unauthenticated_requests_with_401() {
+        let pool = unreachable_pool();
+        let route = mcp_route(
+            pool.clone(),
+            Arc::new(EconGraphMcpServer::new(Arc::new(pool))),
+        );
+        let too_big = vec![b' '; super::MCP_BODY_LIMIT + 1];
+        for authorization in [
+            None,
+            Some(warp::http::HeaderValue::from_static("Bearer not.a.jwt")),
+            Some(warp::http::HeaderValue::from_bytes(b"Bearer \xff\xfe").unwrap()),
+        ] {
+            let mut request = warp::test::request()
+                .method("POST")
+                .path("/mcp")
+                .body(too_big.clone());
+            if let Some(value) = authorization.clone() {
+                request = request.header("authorization", value);
+            }
+            let response = request.reply(&route).await;
+            assert_eq!(
+                response.status(),
+                warp::http::StatusCode::UNAUTHORIZED,
+                "{authorization:?}"
+            );
+            assert_eq!(response.headers()["WWW-Authenticate"], "Bearer");
+        }
+    }
+
+    /// Chunks that together exceed the limit are refused, however they are split; this is
+    /// what caps chunked bodies whose `Content-Length` understates their size.
+    #[tokio::test]
+    async fn read_body_limited_counts_received_bytes() {
+        use warp::hyper::body::Bytes;
+        let chunks = |sizes: &[usize]| {
+            tokio_stream::iter(
+                sizes
+                    .iter()
+                    .map(|&n| Ok::<_, warp::Error>(Bytes::from(vec![b'x'; n])))
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        let body = read_body_limited(chunks(&[4, 6]), 10).await.unwrap();
+        assert_eq!(body.len(), 10);
+
+        let rejection = read_body_limited(chunks(&[4, 4, 4]), 10).await.unwrap_err();
+        assert!(matches!(
+            rejection.find::<McpRejection>(),
+            Some(McpRejection::BodyTooLarge)
+        ));
     }
 }
