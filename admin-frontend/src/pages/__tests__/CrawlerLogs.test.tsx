@@ -59,12 +59,10 @@ describe("CrawlerLogs", () => {
     testQueryClient.clear();
 
     // Setup default mocks for hooks
-    const { useCrawlerLogs, useLogSearch } = await import(
-      "../../hooks/useCrawlerLogs"
-    );
-    const getCrawlerLogsSuccess = await import(
-      "../../__mocks__/graphql/getCrawlerLogs/success.json"
-    );
+    const { useCrawlerLogs, useLogSearch } =
+      await import("../../hooks/useCrawlerLogs");
+    const getCrawlerLogsSuccess =
+      await import("../../__mocks__/graphql/getCrawlerLogs/success.json");
 
     (useCrawlerLogs as any).mockReturnValue({
       logs: getCrawlerLogsSuccess.default.data.crawlerLogs,
@@ -352,9 +350,8 @@ describe("CrawlerLogs", () => {
     it("displays error when GraphQL request fails", async () => {
       // Mock the hooks to return error data
       const { useCrawlerLogs } = await import("../../hooks/useCrawlerLogs");
-      const getCrawlerLogsError = await import(
-        "../../__mocks__/graphql/getCrawlerLogs/error.json"
-      );
+      const getCrawlerLogsError =
+        await import("../../__mocks__/graphql/getCrawlerLogs/error.json");
       (useCrawlerLogs as any).mockReturnValue({
         data: getCrawlerLogsError.default,
         isLoading: false,

@@ -1,6 +1,6 @@
 # Frontend Test Image
 # Pre-built frontend for E2E tests using actual project dependencies
-FROM node:20-alpine as builder
+FROM node:24-alpine as builder
 
 # Set working directory
 WORKDIR /app
@@ -20,7 +20,7 @@ COPY . ./
 RUN npm run build
 
 # Runtime image
-FROM node:20-alpine
+FROM node:24-alpine
 
 # Install system dependencies
 RUN apk add --no-cache curl

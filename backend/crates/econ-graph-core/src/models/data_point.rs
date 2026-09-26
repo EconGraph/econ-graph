@@ -527,7 +527,7 @@ impl DataPoint {
         previous_year_value: Option<BigDecimal>,
     ) -> Option<BigDecimal> {
         match (&self.value, &previous_year_value) {
-            (Some(current), Some(previous)) if *previous != BigDecimal::from(0) => {
+            (Some(current), Some(previous)) if !previous.is_zero() => {
                 Some(((current - previous) / previous) * BigDecimal::from(100))
             }
             _ => None,

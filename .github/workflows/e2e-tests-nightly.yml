@@ -111,7 +111,7 @@ jobs:
         echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS" >> $GITHUB_ENV
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.89.0
+      uses: dtolnay/rust-toolchain@1.98.1
 
     - name: Cache cargo registry
       uses: actions/cache@v4
@@ -257,7 +257,7 @@ jobs:
         echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS" >> $GITHUB_ENV
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.89.0
+      uses: dtolnay/rust-toolchain@1.98.1
 
     - name: Cache cargo registry
       uses: actions/cache@v4
@@ -404,7 +404,7 @@ jobs:
         echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS" >> $GITHUB_ENV
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.89.0
+      uses: dtolnay/rust-toolchain@1.98.1
 
     - name: Cache cargo registry
       uses: actions/cache@v4
@@ -550,7 +550,7 @@ jobs:
         echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS" >> $GITHUB_ENV
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.89.0
+      uses: dtolnay/rust-toolchain@1.98.1
 
     - name: Cache cargo registry
       uses: actions/cache@v4
@@ -696,7 +696,7 @@ jobs:
         echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS" >> $GITHUB_ENV
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.89.0
+      uses: dtolnay/rust-toolchain@1.98.1
 
     - name: Cache cargo registry
       uses: actions/cache@v4

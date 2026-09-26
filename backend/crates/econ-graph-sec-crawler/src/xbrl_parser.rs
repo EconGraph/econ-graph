@@ -1054,17 +1054,17 @@ impl XbrlXmlParser {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
                     match e.name().as_ref() {
-                        b"context" => {
+                        "context" => {
                             if let Some(context) = self.parse_context_element(e, &mut reader)? {
                                 contexts.push(context);
                             }
                         }
-                        b"unit" => {
+                        "unit" => {
                             if let Some(unit) = self.parse_unit_element(e, &mut reader)? {
                                 units.push(unit);
                             }
                         }
-                        b"linkbaseRef" => {
+                        "linkbaseRef" => {
                             if let Some(linkbase) = self.parse_linkbase_element(e)? {
                                 linkbases.push(linkbase);
                             }
@@ -1095,23 +1095,23 @@ impl XbrlXmlParser {
     }
 
     /// Check if element is a standard XBRL element
-    fn is_standard_xbrl_element(&self, name: &[u8]) -> bool {
+    fn is_standard_xbrl_element(&self, name: &str) -> bool {
         matches!(
             name,
-            b"xbrl"
-                | b"context"
-                | b"entity"
-                | b"identifier"
-                | b"period"
-                | b"startDate"
-                | b"endDate"
-                | b"instant"
-                | b"unit"
-                | b"measure"
-                | b"linkbaseRef"
-                | b"schemaRef"
-                | b"roleRef"
-                | b"arcroleRef"
+            "xbrl"
+                | "context"
+                | "entity"
+                | "identifier"
+                | "period"
+                | "startDate"
+                | "endDate"
+                | "instant"
+                | "unit"
+                | "measure"
+                | "linkbaseRef"
+                | "schemaRef"
+                | "roleRef"
+                | "arcroleRef"
         )
     }
 
@@ -1134,27 +1134,19 @@ impl XbrlXmlParser {
         };
 
         // Get element name as concept
-        fact.concept = String::from_utf8_lossy(element.name().as_ref()).to_string();
+        fact.concept = element.name().as_ref().to_string();
 
         // Parse attributes
         for attr in element.attributes() {
             let attr = attr?;
             match attr.key.as_ref() {
-                b"contextRef" => {
-                    fact.context_ref = String::from_utf8_lossy(&attr.value).to_string()
+                "contextRef" => fact.context_ref = attr.value.to_string(),
+                "unitRef" => fact.unit_ref = Some(attr.value.to_string()),
+                "decimals" => {
+                    fact.decimals = attr.value.parse().ok();
                 }
-                b"unitRef" => {
-                    fact.unit_ref = Some(String::from_utf8_lossy(&attr.value).to_string())
-                }
-                b"decimals" => {
-                    if let Ok(decimals_str) = String::from_utf8(attr.value.to_vec()) {
-                        fact.decimals = decimals_str.parse().ok();
-                    }
-                }
-                b"precision" => {
-                    if let Ok(precision_str) = String::from_utf8(attr.value.to_vec()) {
-                        fact.precision = precision_str.parse().ok();
-                    }
+                "precision" => {
+                    fact.precision = attr.value.parse().ok();
                 }
                 _ => {}
             }
@@ -1167,7 +1159,7 @@ impl XbrlXmlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Text(e)) => {
-                    content.push_str(&String::from_utf8_lossy(e.as_ref()));
+                    content.push_str(&e);
                 }
                 Ok(quick_xml::events::Event::End(_)) => break,
                 Err(e) => return Err(anyhow::anyhow!("Error reading fact content: {}", e)),
@@ -1209,8 +1201,8 @@ impl XbrlXmlParser {
         // Get context ID
         for attr in element.attributes() {
             let attr = attr?;
-            if attr.key.as_ref() == b"id" {
-                context.id = String::from_utf8_lossy(&attr.value).to_string();
+            if attr.key.as_ref() == "id" {
+                context.id = attr.value.to_string();
                 break;
             }
         }
@@ -1224,12 +1216,12 @@ impl XbrlXmlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => match e.name().as_ref() {
-                    b"entity" => {
+                    "entity" => {
                         if let Some(entity) = self.parse_entity_element(e, reader)? {
                             context.entity = entity;
                         }
                     }
-                    b"period" => {
+                    "period" => {
                         if let Some(period) = self.parse_period_element(e, reader)? {
                             context.period = period;
                         }
@@ -1237,7 +1229,7 @@ impl XbrlXmlParser {
                     _ => {}
                 },
                 Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == b"context" {
+                    if e.name().as_ref() == "context" {
                         break;
                     }
                 }
@@ -1266,20 +1258,20 @@ impl XbrlXmlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == b"identifier" {
+                    if e.name().as_ref() == "identifier" {
                         for attr in e.attributes() {
                             let attr = attr?;
-                            if attr.key.as_ref() == b"scheme" {
-                                entity.scheme = String::from_utf8_lossy(&attr.value).to_string();
+                            if attr.key.as_ref() == "scheme" {
+                                entity.scheme = attr.value.to_string();
                             }
                         }
                     }
                 }
                 Ok(quick_xml::events::Event::Text(e)) => {
-                    entity.identifier = String::from_utf8_lossy(e.as_ref()).to_string();
+                    entity.identifier = e.to_string();
                 }
                 Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == b"entity" {
+                    if e.name().as_ref() == "entity" {
                         break;
                     }
                 }
@@ -1310,35 +1302,34 @@ impl XbrlXmlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => match e.name().as_ref() {
-                    b"startDate" => {
+                    "startDate" => {
                         let mut buf2 = Vec::new();
                         if let Ok(quick_xml::events::Event::Text(e)) =
                             reader.read_event_into(&mut buf2)
                         {
-                            period.start_date =
-                                Some(String::from_utf8_lossy(e.as_ref()).to_string());
+                            period.start_date = Some(e.to_string());
                         }
                     }
-                    b"endDate" => {
+                    "endDate" => {
                         let mut buf2 = Vec::new();
                         if let Ok(quick_xml::events::Event::Text(e)) =
                             reader.read_event_into(&mut buf2)
                         {
-                            period.end_date = Some(String::from_utf8_lossy(e.as_ref()).to_string());
+                            period.end_date = Some(e.to_string());
                         }
                     }
-                    b"instant" => {
+                    "instant" => {
                         let mut buf2 = Vec::new();
                         if let Ok(quick_xml::events::Event::Text(e)) =
                             reader.read_event_into(&mut buf2)
                         {
-                            period.instant = Some(String::from_utf8_lossy(e.as_ref()).to_string());
+                            period.instant = Some(e.to_string());
                         }
                     }
                     _ => {}
                 },
                 Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == b"period" {
+                    if e.name().as_ref() == "period" {
                         break;
                     }
                 }
@@ -1369,8 +1360,8 @@ impl XbrlXmlParser {
         // Get unit ID
         for attr in element.attributes() {
             let attr = attr?;
-            if attr.key.as_ref() == b"id" {
-                unit.id = String::from_utf8_lossy(&attr.value).to_string();
+            if attr.key.as_ref() == "id" {
+                unit.id = attr.value.to_string();
                 break;
             }
         }
@@ -1384,17 +1375,17 @@ impl XbrlXmlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == b"measure" {
+                    if e.name().as_ref() == "measure" {
                         let mut buf2 = Vec::new();
                         if let Ok(quick_xml::events::Event::Text(e)) =
                             reader.read_event_into(&mut buf2)
                         {
-                            unit.measure = Some(String::from_utf8_lossy(e.as_ref()).to_string());
+                            unit.measure = Some(e.to_string());
                         }
                     }
                 }
                 Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == b"unit" {
+                    if e.name().as_ref() == "unit" {
                         break;
                     }
                 }
@@ -1423,11 +1414,9 @@ impl XbrlXmlParser {
         for attr in element.attributes() {
             let attr = attr?;
             match attr.key.as_ref() {
-                b"role" => linkbase.role = String::from_utf8_lossy(&attr.value).to_string(),
-                b"href" => linkbase.href = String::from_utf8_lossy(&attr.value).to_string(),
-                b"arcrole" => {
-                    linkbase.arcrole = Some(String::from_utf8_lossy(&attr.value).to_string())
-                }
+                "role" => linkbase.role = attr.value.to_string(),
+                "href" => linkbase.href = attr.value.to_string(),
+                "arcrole" => linkbase.arcrole = Some(attr.value.to_string()),
                 _ => {}
             }
         }
@@ -1496,8 +1485,7 @@ impl XbrlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == b"ix:nonNumeric"
-                        || e.name().as_ref() == b"ix:nonFraction"
+                    if e.name().as_ref() == "ix:nonNumeric" || e.name().as_ref() == "ix:nonFraction"
                     {
                         if let Some(fact) = self.parse_ixbrl_fact_element(e, &mut reader)? {
                             facts.push(fact);
@@ -1536,22 +1524,14 @@ impl XbrlParser {
         for attr in element.attributes() {
             let attr = attr?;
             match attr.key.as_ref() {
-                b"name" => fact.concept = String::from_utf8_lossy(&attr.value).to_string(),
-                b"contextRef" => {
-                    fact.context_ref = String::from_utf8_lossy(&attr.value).to_string()
+                "name" => fact.concept = attr.value.to_string(),
+                "contextRef" => fact.context_ref = attr.value.to_string(),
+                "unitRef" => fact.unit_ref = Some(attr.value.to_string()),
+                "decimals" => {
+                    fact.decimals = attr.value.parse().ok();
                 }
-                b"unitRef" => {
-                    fact.unit_ref = Some(String::from_utf8_lossy(&attr.value).to_string())
-                }
-                b"decimals" => {
-                    if let Ok(decimals_str) = String::from_utf8(attr.value.to_vec()) {
-                        fact.decimals = decimals_str.parse().ok();
-                    }
-                }
-                b"precision" => {
-                    if let Ok(precision_str) = String::from_utf8(attr.value.to_vec()) {
-                        fact.precision = precision_str.parse().ok();
-                    }
+                "precision" => {
+                    fact.precision = attr.value.parse().ok();
                 }
                 _ => {}
             }
@@ -1564,7 +1544,7 @@ impl XbrlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Text(e)) => {
-                    content.push_str(&String::from_utf8_lossy(e.as_ref()));
+                    content.push_str(&e);
                 }
                 Ok(quick_xml::events::Event::End(_)) => break,
                 Err(e) => return Err(anyhow::anyhow!("Error reading iXBRL content: {}", e)),
@@ -1590,7 +1570,7 @@ impl XbrlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == b"context" {
+                    if e.name().as_ref() == "context" {
                         if let Some(context) = self.parse_context_element(e, &mut reader)? {
                             contexts.push(context);
                         }
@@ -1632,8 +1612,8 @@ impl XbrlParser {
         // Get context ID
         for attr in element.attributes() {
             let attr = attr?;
-            if attr.key.as_ref() == b"id" {
-                context.id = String::from_utf8_lossy(&attr.value).to_string();
+            if attr.key.as_ref() == "id" {
+                context.id = attr.value.to_string();
                 break;
             }
         }
@@ -1647,12 +1627,12 @@ impl XbrlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => match e.name().as_ref() {
-                    b"entity" => {
+                    "entity" => {
                         if let Some(entity) = self.parse_entity_element(e, reader)? {
                             context.entity = entity;
                         }
                     }
-                    b"period" => {
+                    "period" => {
                         if let Some(period) = self.parse_period_element(e, reader)? {
                             context.period = period;
                         }
@@ -1660,7 +1640,7 @@ impl XbrlParser {
                     _ => {}
                 },
                 Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == b"context" {
+                    if e.name().as_ref() == "context" {
                         break;
                     }
                 }
@@ -1689,20 +1669,20 @@ impl XbrlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == b"identifier" {
+                    if e.name().as_ref() == "identifier" {
                         for attr in e.attributes() {
                             let attr = attr?;
-                            if attr.key.as_ref() == b"scheme" {
-                                entity.scheme = String::from_utf8_lossy(&attr.value).to_string();
+                            if attr.key.as_ref() == "scheme" {
+                                entity.scheme = attr.value.to_string();
                             }
                         }
                     }
                 }
                 Ok(quick_xml::events::Event::Text(e)) => {
-                    entity.identifier = String::from_utf8_lossy(e.as_ref()).to_string();
+                    entity.identifier = e.to_string();
                 }
                 Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == b"entity" {
+                    if e.name().as_ref() == "entity" {
                         break;
                     }
                 }
@@ -1733,35 +1713,34 @@ impl XbrlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => match e.name().as_ref() {
-                    b"startDate" => {
+                    "startDate" => {
                         let mut buf2 = Vec::new();
                         if let Ok(quick_xml::events::Event::Text(e)) =
                             reader.read_event_into(&mut buf2)
                         {
-                            period.start_date =
-                                Some(String::from_utf8_lossy(e.as_ref()).to_string());
+                            period.start_date = Some(e.to_string());
                         }
                     }
-                    b"endDate" => {
+                    "endDate" => {
                         let mut buf2 = Vec::new();
                         if let Ok(quick_xml::events::Event::Text(e)) =
                             reader.read_event_into(&mut buf2)
                         {
-                            period.end_date = Some(String::from_utf8_lossy(e.as_ref()).to_string());
+                            period.end_date = Some(e.to_string());
                         }
                     }
-                    b"instant" => {
+                    "instant" => {
                         let mut buf2 = Vec::new();
                         if let Ok(quick_xml::events::Event::Text(e)) =
                             reader.read_event_into(&mut buf2)
                         {
-                            period.instant = Some(String::from_utf8_lossy(e.as_ref()).to_string());
+                            period.instant = Some(e.to_string());
                         }
                     }
                     _ => {}
                 },
                 Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == b"period" {
+                    if e.name().as_ref() == "period" {
                         break;
                     }
                 }
@@ -1786,7 +1765,7 @@ impl XbrlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == b"unit" {
+                    if e.name().as_ref() == "unit" {
                         if let Some(unit) = self.parse_unit_element(e, &mut reader)? {
                             units.push(unit);
                         }
@@ -1819,8 +1798,8 @@ impl XbrlParser {
         // Get unit ID
         for attr in element.attributes() {
             let attr = attr?;
-            if attr.key.as_ref() == b"id" {
-                unit.id = String::from_utf8_lossy(&attr.value).to_string();
+            if attr.key.as_ref() == "id" {
+                unit.id = attr.value.to_string();
                 break;
             }
         }
@@ -1834,17 +1813,17 @@ impl XbrlParser {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(ref e)) => {
-                    if e.name().as_ref() == b"measure" {
+                    if e.name().as_ref() == "measure" {
                         let mut buf2 = Vec::new();
                         if let Ok(quick_xml::events::Event::Text(e)) =
                             reader.read_event_into(&mut buf2)
                         {
-                            unit.measure = Some(String::from_utf8_lossy(e.as_ref()).to_string());
+                            unit.measure = Some(e.to_string());
                         }
                     }
                 }
                 Ok(quick_xml::events::Event::End(ref e)) => {
-                    if e.name().as_ref() == b"unit" {
+                    if e.name().as_ref() == "unit" {
                         break;
                     }
                 }

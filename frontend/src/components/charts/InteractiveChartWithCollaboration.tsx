@@ -223,14 +223,7 @@ interface InteractiveChartWithCollaborationProps {
  * @property {'pct_change'} pct_change - Calculate percentage changes between periods.
  */
 type TransformationType =
-  | 'none'
-  | 'yoy'
-  | 'qoq'
-  | 'mom'
-  | 'growth_rate'
-  | 'log'
-  | 'diff'
-  | 'pct_change';
+  'none' | 'yoy' | 'qoq' | 'mom' | 'growth_rate' | 'log' | 'diff' | 'pct_change';
 
 /**
  * **InteractiveChartWithCollaboration Component Function**.
@@ -525,7 +518,7 @@ const InteractiveChartWithCollaboration: React.FC<InteractiveChartWithCollaborat
       tooltip: {
         callbacks: {
           title: (tooltipItems: TooltipItem<'line'>[]) => {
-            const date = new Date(tooltipItems[0].parsed.x);
+            const date = new Date(tooltipItems[0].parsed.x ?? 0);
             return date.toLocaleDateString('en-US', {
               year: 'numeric',
               month: 'long',

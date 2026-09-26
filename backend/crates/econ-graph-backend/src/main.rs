@@ -4,11 +4,12 @@
 
 use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 use async_graphql_warp::GraphQLResponse;
+use hyper::service::Service as _;
 use serde_json::json;
 use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::signal;
-use tracing::info;
+use tracing::{info, Instrument};
 use warp::Filter;
 
 // Import from our new crates
@@ -413,16 +414,40 @@ async fn main() -> AppResult<()> {
     info!("  - GET /metrics - Prometheus metrics");
     info!("  - GET / - API documentation");
 
-    // Start the server
+    // Start the server. HTTP/1.1 only: TLS terminates at the ingress, which proxies HTTP/1.1,
+    // and refusing cleartext HTTP/2 keeps h2 0.3 (RUSTSEC-2026-0258, pulled in by warp 0.3)
+    // unreachable even via the NodePort. warp::serve offers no way to disable HTTP/2.
     info!("🚀 Starting HTTP server...");
-    let (_, server) =
-        warp::serve(routes).bind_with_graceful_shutdown(([0, 0, 0, 0], port), async {
+    // warp::service() cannot pass the peer address to warp (warp::serve does that through a
+    // crate-private hook), so record it on a span around each request instead; the
+    // warp::trace::request() span nests inside it and its events carry remote.addr.
+    let make_svc =
+        hyper::service::make_service_fn(move |conn: &hyper::server::conn::AddrStream| {
+            let remote_addr = conn.remote_addr();
+            let svc = warp::service(routes.clone());
+            async move {
+                Ok::<_, Infallible>(hyper::service::service_fn(move |req| {
+                    let span = tracing::info_span!("connection", remote.addr = %remote_addr);
+                    // warp creates its request span inside call(), so enter ours for the call too.
+                    let mut svc = svc.clone();
+                    let response = span.in_scope(|| svc.call(req));
+                    response.instrument(span)
+                }))
+            }
+        });
+    let server = hyper::Server::try_bind(&([0, 0, 0, 0], port).into())
+        .map_err(|e| AppError::InternalError(format!("Failed to bind port {port}: {e}")))?
+        .http1_only(true)
+        .serve(make_svc)
+        .with_graceful_shutdown(async {
             signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
             info!("🛑 Received shutdown signal, gracefully shutting down...");
         });
 
     info!("✅ Server is now running and accepting connections!");
-    server.await;
+    server
+        .await
+        .map_err(|e| AppError::InternalError(format!("HTTP server error: {e}")))?;
 
     info!("✅ Server shutdown complete");
     Ok(())

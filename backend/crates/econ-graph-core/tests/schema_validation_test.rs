@@ -4,7 +4,7 @@
 
 use diesel::prelude::*;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use imara_diff::{Algorithm, UnifiedDiffBuilder};
+use imara_diff::{Algorithm, BasicLineDiffPrinter, Diff, InternedInput, UnifiedDiffConfig};
 use std::fs;
 use std::process::Command;
 use testcontainers::core::WaitFor;
@@ -353,11 +353,17 @@ async fn test_schema_compatibility_comparison() {
 /// Generate a proper unified diff between two schemas using imara-diff
 fn generate_schema_diff(generated_schema: &str, existing_schema: &str) -> String {
     // Use imara-diff to generate a proper unified diff
-    let input = imara_diff::intern::InternedInput::new(generated_schema, existing_schema);
+    let input = InternedInput::new(generated_schema, existing_schema);
 
-    let builder = UnifiedDiffBuilder::new(&input);
-
-    let result = imara_diff::diff(Algorithm::Histogram, &input, builder);
+    let mut diff = Diff::compute(Algorithm::Histogram, &input);
+    diff.postprocess_lines(&input);
+    let result = diff
+        .unified_diff(
+            &BasicLineDiffPrinter(&input.interner),
+            UnifiedDiffConfig::default(),
+            &input,
+        )
+        .to_string();
 
     // If we got diff output, use it
     if !result.is_empty() {

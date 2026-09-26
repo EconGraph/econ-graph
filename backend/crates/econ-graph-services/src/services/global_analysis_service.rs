@@ -1211,7 +1211,7 @@ mod tests {
             .expect("Should find China as trade partner");
 
         assert!(china_partner.country.name.starts_with("TEST China"));
-        assert!(china_partner.trade_value_usd > BigDecimal::from(0));
+        assert!(china_partner.trade_value_usd > 0);
         assert!(china_partner.trade_intensity > 0.0);
         assert!(!china_partner.relationship_type.is_empty());
     }

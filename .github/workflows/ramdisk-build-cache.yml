@@ -22,7 +22,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || 'main' }}
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.89.0
+      uses: dtolnay/rust-toolchain@1.98.1
       with:
         components: rustfmt, clippy
 

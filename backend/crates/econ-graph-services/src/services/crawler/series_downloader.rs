@@ -113,8 +113,8 @@ impl SeriesDownloader {
         }
 
         // Select a random series
-        use rand::seq::SliceRandom;
-        let mut rng = rand::thread_rng();
+        use rand::seq::IndexedRandom;
+        let mut rng = rand::rng();
         let random_series = all_series.choose(&mut rng).unwrap();
 
         println!("🎲 Randomly selected series: {}", random_series.title);

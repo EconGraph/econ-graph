@@ -72,6 +72,8 @@ feature-depth = 1
 ignore = [
     #"RUSTSEC-0000-0000",
     #{ id = "RUSTSEC-0000-0000", reason = "you can specify a reason the advisory is ignored" },
+    # h2 0.3 via warp 0.3 -> hyper 0.14; see backend/.cargo/audit.toml for the full rationale.
+    { id = "RUSTSEC-2026-0258", reason = "h2 0.3 only via warp 0.3; warp 0.4 blocked on async-graphql 8 (RC only); backend serves http1_only so h2 is never served" },
     #"a-crate-that-is-yanked@0.1.1", # you can also ignore yanked crate versions if you wish
     #{ crate = "a-crate-that-is-yanked@0.1.1", reason = "you can specify why you are ignoring the yanked crate" },
 ]
@@ -132,6 +134,9 @@ exceptions = [
     { allow = ["MS-PL"], crate = "econ-graph-metrics" },
     { allow = ["MS-PL"], crate = "econ-graph-sec-crawler" },
     { allow = ["MS-PL"], crate = "econ-graph-services" },
+    # Mozilla CA root certificate data bundled for rustls (via reqwest 0.13)
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-root-certs" },
     # Each entry is the crate and version constraint, and its specific allow
     # list
     #{ allow = ["Zlib"], crate = "adler32" },
