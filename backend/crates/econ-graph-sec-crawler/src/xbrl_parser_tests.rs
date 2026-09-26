@@ -712,6 +712,75 @@ async fn test_cache_write_leaves_only_the_entry() {
 }
 
 #[tokio::test]
+async fn test_native_parse_compound_units_forever_periods_and_custom_names() {
+    // Default-namespace (unprefixed) contexts, a paired <forever></forever>, a per-share unit,
+    // and custom-taxonomy facts that happen to be named `unit` and `context`.
+    let doc = r#"<?xml version="1.0" encoding="UTF-8"?>
+<xbrl xmlns="http://www.xbrl.org/2003/instance"
+      xmlns:us-gaap="http://fasb.org/us-gaap/2024"
+      xmlns:custom="http://example.com/custom">
+  <context id="c1">
+    <entity><identifier scheme="http://www.sec.gov/CIK">0000320193</identifier></entity>
+    <period><forever></forever></period>
+  </context>
+  <unit id="usdPerShare">
+    <divide>
+      <unitNumerator><measure>iso4217:USD</measure></unitNumerator>
+      <unitDenominator><measure>shares</measure></unitDenominator>
+    </divide>
+  </unit>
+  <unit id="usd"><measure>iso4217:USD</measure></unit>
+  <us-gaap:EarningsPerShareBasic contextRef="c1" unitRef="usdPerShare" decimals="2">6.13</us-gaap:EarningsPerShareBasic>
+  <custom:unit contextRef="c1">Retail</custom:unit>
+  <custom:context contextRef="c1">Annual</custom:context>
+</xbrl>"#;
+    let work_dir = TempDir::new().unwrap();
+    let file_path = work_dir.path().join("compound.xml");
+    fs::write(&file_path, doc).await.unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        use_arelle: false,
+        cache_dir: cache_dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let result = parser.parse_xbrl_document(&file_path).await.unwrap();
+
+    assert_eq!(result.contexts.len(), 1);
+    let context = &result.contexts[0];
+    assert_eq!(context.entity_identifier.as_deref(), Some("0000320193"));
+    assert_eq!(context.period.period_type.as_deref(), Some("forever"));
+
+    let units: Vec<(&str, Option<&str>, Option<&str>)> = result
+        .units
+        .iter()
+        .map(|u| (u.id.as_str(), u.measure.as_deref(), u.unit_type.as_deref()))
+        .collect();
+    assert_eq!(
+        units,
+        [
+            ("usdPerShare", Some("iso4217:USD/shares"), Some("divide")),
+            ("usd", Some("iso4217:USD"), Some("simple")),
+        ]
+    );
+
+    let facts: Vec<(&str, Option<&str>)> = result
+        .facts
+        .iter()
+        .map(|f| (f.concept.as_str(), f.value.as_deref()))
+        .collect();
+    assert_eq!(
+        facts,
+        [
+            ("us-gaap:EarningsPerShareBasic", Some("6.13")),
+            ("custom:unit", Some("Retail")),
+            ("custom:context", Some("Annual")),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn test_native_parse_reads_prefixed_contexts_and_units() {
     // sample_10k.xml writes contexts and units as `xbrli:context` / `xbrli:unit`, with a segment
     // member inside each entity. Those used to be skipped, and read as facts instead.
