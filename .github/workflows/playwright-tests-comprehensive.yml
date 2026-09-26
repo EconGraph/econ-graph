@@ -83,6 +83,8 @@ jobs:
         DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
         BACKEND_PORT: 8080
         FRONTEND_PORT: 3000
+        # The backend refuses to start without one; this job never issues real tokens
+        JWT_SECRET: ci-only-jwt-secret
 
     - name: Build frontend
       working-directory: ./frontend

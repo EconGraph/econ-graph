@@ -44,7 +44,7 @@ pub struct OAuthConfig {
     pub facebook_app_id: Option<String>,
     pub facebook_app_secret: Option<String>,
     pub facebook_access_token: Option<String>,
-    pub jwt_secret: String,
+    pub jwt_secret: Option<String>,
 }
 
 impl Config {
@@ -108,8 +108,7 @@ impl Config {
                 facebook_app_id: env::var("FACEBOOK_APP_ID").ok(),
                 facebook_app_secret: env::var("FACEBOOK_APP_SECRET").ok(),
                 facebook_access_token: env::var("FACEBOOK_ACCESS_TOKEN").ok(),
-                jwt_secret: env::var("JWT_SECRET")
-                    .unwrap_or_else(|_| "your-jwt-secret-key-change-in-production".to_string()),
+                jwt_secret: env::var("JWT_SECRET").ok(),
             },
         })
     }
@@ -148,7 +147,7 @@ impl Default for Config {
                 facebook_app_id: None,
                 facebook_app_secret: None,
                 facebook_access_token: None,
-                jwt_secret: "test-jwt-secret".to_string(),
+                jwt_secret: Some("test-jwt-secret".to_string()),
             },
         }
     }
