@@ -152,6 +152,51 @@ async fn root_handler() -> Result<impl warp::Reply, Infallible> {
     ))
 }
 
+/// Check each configured CORS origin is a bare `http(s)://host[:port]` origin.
+///
+/// warp panics on an origin it cannot parse, and a wildcard would re-open the API to every
+/// site, so reject both at startup with a clear message instead.
+fn validate_cors_origins(origins: &[String]) -> AppResult<Vec<String>> {
+    let origins: Vec<String> = origins
+        .iter()
+        .map(|o| o.trim().trim_end_matches('/').to_string())
+        .filter(|o| !o.is_empty())
+        .collect();
+    if origins.is_empty() {
+        return Err(AppError::ConfigError(
+            "CORS_ALLOWED_ORIGINS must list at least one origin".to_string(),
+        ));
+    }
+    for origin in &origins {
+        let valid = origin
+            .parse::<warp::http::Uri>()
+            .ok()
+            .filter(|uri| {
+                matches!(uri.scheme_str(), Some("http") | Some("https"))
+                    && uri.host().is_some_and(|h| !h.is_empty() && h != "*")
+                    && uri.path_and_query().map_or(true, |pq| pq.as_str() == "/")
+            })
+            .is_some();
+        if !valid {
+            return Err(AppError::ConfigError(format!(
+                "Invalid CORS origin {:?}: expected scheme://host[:port], like https://econ-graph.com",
+                origin
+            )));
+        }
+    }
+    Ok(origins)
+}
+
+/// Build the CORS filter that lets browsers call the API only from `origins`.
+///
+/// `origins` must already have passed [`validate_cors_origins`].
+fn cors_filter(origins: &[String]) -> warp::cors::Builder {
+    warp::cors()
+        .allow_origins(origins.iter().map(String::as_str))
+        .allow_headers(vec!["content-type", "authorization"])
+        .allow_methods(vec!["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+}
+
 #[tokio::main]
 async fn main() -> AppResult<()> {
     // Initialize tracing with more detailed output
@@ -214,10 +259,18 @@ async fn main() -> AppResult<()> {
         e
     })?;
 
+    // Validate CORS origins (CORS_ALLOWED_ORIGINS, comma-separated; defaults to the local
+    // frontend) before touching the database, so bad config fails fast without side effects.
+    let cors_origins = validate_cors_origins(&config.cors.allowed_origins).map_err(|e| {
+        e.log_with_context("Application startup CORS configuration");
+        eprintln!("❌ {}", e);
+        e
+    })?;
+
     info!("📊 Configuration loaded successfully:");
     info!("  - Server host: {}", config.server.host);
     info!("  - Server port: {}", config.server.port);
-    info!("  - CORS origins: {:?}", config.cors.allowed_origins);
+    info!("  - CORS origins: {:?}", cors_origins);
     info!("  - Database URL: {}", config.database_url);
 
     // Create database connection pool
@@ -271,11 +324,8 @@ async fn main() -> AppResult<()> {
     // Crawling does not run in this process: the API only enqueues crawl_queue jobs, and the
     // separate `crawler-worker` binary (econ-graph-crawler) processes them.
 
-    // Create Warp filters
-    let cors = warp::cors()
-        .allow_any_origin()
-        .allow_headers(vec!["content-type", "authorization"])
-        .allow_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"]);
+    // Create Warp filters. Browsers may call the API only from the configured frontend origins.
+    let cors = cors_filter(&cors_origins);
 
     // GraphQL endpoint with authentication
     let pool_for_graphql = pool.clone();
@@ -447,4 +497,117 @@ async fn main() -> AppResult<()> {
 
     info!("✅ Server shutdown complete");
     Ok(())
+}
+
+#[cfg(test)]
+mod cors_tests {
+    use super::{cors_filter, validate_cors_origins};
+    use warp::Filter;
+
+    /// Turn string literals into the owned list the config holds.
+    fn origins(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Valid origins pass, with whitespace and a trailing slash trimmed.
+    #[test]
+    fn accepts_plain_origins_and_trims_them() {
+        let validated = validate_cors_origins(&origins(&[
+            "http://localhost:3000",
+            " https://econ-graph.com/ ",
+        ]))
+        .unwrap();
+        assert_eq!(
+            validated,
+            origins(&["http://localhost:3000", "https://econ-graph.com"])
+        );
+        // warp panics on origins it cannot parse; validated ones must not.
+        let _ = cors_filter(&validated);
+    }
+
+    /// Wildcards, missing or non-http(s) schemes, paths and empty lists are all refused.
+    #[test]
+    fn rejects_wildcards_paths_and_empty_lists() {
+        for bad in [
+            vec!["*"],
+            vec!["https://*"],
+            vec!["econ-graph.com"],
+            vec!["ftp://econ-graph.com"],
+            vec!["https://econ-graph.com/app"],
+            vec![""],
+            vec![],
+        ] {
+            assert!(
+                validate_cors_origins(&origins(&bad)).is_err(),
+                "{:?} should be rejected",
+                bad
+            );
+        }
+    }
+
+    /// A route wrapped in the backend's CORS filter for the local frontend only.
+    fn app() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+        warp::any()
+            .map(|| "ok")
+            .with(cors_filter(&origins(&["http://localhost:3000"])))
+    }
+
+    /// A request from the configured origin succeeds and is told it may read the response.
+    #[tokio::test]
+    async fn allows_requests_from_a_configured_origin() {
+        let res = warp::test::request()
+            .method("GET")
+            .header("origin", "http://localhost:3000")
+            .reply(&app())
+            .await;
+        assert_eq!(res.status(), 200);
+        assert_eq!(
+            res.headers()["access-control-allow-origin"],
+            "http://localhost:3000"
+        );
+    }
+
+    /// A request from any other origin is refused.
+    #[tokio::test]
+    async fn refuses_requests_from_other_origins() {
+        let res = warp::test::request()
+            .method("GET")
+            .header("origin", "https://evil.example")
+            .reply(&app())
+            .await;
+        assert_eq!(res.status(), 403);
+        assert!(res.headers().get("access-control-allow-origin").is_none());
+    }
+
+    /// A preflight from the configured origin gets the allowed methods and headers,
+    /// and one from another origin is refused.
+    #[tokio::test]
+    async fn answers_preflight_only_for_configured_origins() {
+        let preflight = |origin: &'static str| {
+            warp::test::request()
+                .method("OPTIONS")
+                .header("origin", origin)
+                .header("access-control-request-method", "POST")
+                .header(
+                    "access-control-request-headers",
+                    "authorization, content-type",
+                )
+        };
+
+        let res = preflight("http://localhost:3000").reply(&app()).await;
+        assert_eq!(res.status(), 200);
+        assert_eq!(
+            res.headers()["access-control-allow-origin"],
+            "http://localhost:3000"
+        );
+        let methods = res.headers()["access-control-allow-methods"]
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(methods.contains("POST"), "{}", methods);
+
+        let res = preflight("https://evil.example").reply(&app()).await;
+        assert_eq!(res.status(), 403);
+        assert!(res.headers().get("access-control-allow-origin").is_none());
+    }
 }
