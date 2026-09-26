@@ -137,7 +137,7 @@ impl XbrlParser {
             Self::verify_arelle_installation(&config).await?;
         }
 
-        let cache = XbrlCache::new(config.cache_dir.clone());
+        let cache = XbrlCache::new(config.cache_dir.clone()).for_parser_mode(config.use_arelle);
         let taxonomy_cache = TaxonomyCache::new();
         let statement_mapper = StatementMapper::new();
         let fact_validator = FactValidator::new();
@@ -634,25 +634,37 @@ impl XbrlParser {
 #[derive(Debug, Clone)]
 pub struct XbrlCache {
     cache_dir: PathBuf,
+    /// Parser mode baked into cache keys, so Arelle and native results don't mix.
+    mode: &'static str,
 }
 
 impl XbrlCache {
     pub fn new(cache_dir: PathBuf) -> Self {
-        Self { cache_dir }
+        Self {
+            cache_dir,
+            mode: "native",
+        }
     }
 
-    /// The cached parse of `xbrl_file`, or `None` on a miss. A cache file that no longer
-    /// deserializes (for example one written by an older version that only stored statements)
+    /// Key entries by parser mode as well as document content.
+    pub fn for_parser_mode(mut self, use_arelle: bool) -> Self {
+        self.mode = if use_arelle { "arelle" } else { "native" };
+        self
+    }
+
+    /// The cached parse of `xbrl_file`, or `None` on a miss. Entries are keyed by the document's
+    /// content, so a changed file misses. A cache file that doesn't deserialize (for example
+    /// one written by an older version that only stored statements, or one cut off mid-write)
     /// counts as a miss, so the document is parsed again and the entry overwritten.
     pub async fn get_parsed_result(&self, xbrl_file: &Path) -> Result<Option<XbrlParseResult>> {
-        let cache_file = self.get_cache_file_path(xbrl_file);
+        let cache_file = self.get_cache_file_path(xbrl_file).await?;
 
         if !cache_file.exists() {
             return Ok(None);
         }
 
-        let content = fs::read_to_string(&cache_file).await?;
-        match serde_json::from_str(&content) {
+        let content = fs::read(&cache_file).await?;
+        match serde_json::from_slice(&content) {
             Ok(result) => Ok(Some(result)),
             Err(e) => {
                 warn!(
@@ -670,15 +682,17 @@ impl XbrlCache {
         xbrl_file: &Path,
         result: &XbrlParseResult,
     ) -> Result<()> {
-        let cache_file = self.get_cache_file_path(xbrl_file);
+        let cache_file = self.get_cache_file_path(xbrl_file).await?;
         let content = serde_json::to_string_pretty(result)?;
         fs::write(&cache_file, content).await?;
         Ok(())
     }
 
-    fn get_cache_file_path(&self, xbrl_file: &Path) -> PathBuf {
-        let file_hash = format!("{:x}", md5::compute(xbrl_file.to_string_lossy().as_bytes()));
-        self.cache_dir.join(format!("{}.json", file_hash))
+    /// Cache file for `xbrl_file`: named by a hash of its content and the parser mode.
+    pub async fn get_cache_file_path(&self, xbrl_file: &Path) -> Result<PathBuf> {
+        let content = fs::read(xbrl_file).await?;
+        let key = format!("{:x}", md5::compute(&content));
+        Ok(self.cache_dir.join(format!("{}-{}.json", self.mode, key)))
     }
 }
 

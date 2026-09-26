@@ -162,10 +162,12 @@ pub fn parse_file_size(size_str: &str) -> Result<u64> {
     let number: f64 = number_part
         .parse()
         .map_err(|_| anyhow::anyhow!("Invalid file size format: {}", size_str))?;
-    if !number.is_finite() || number < 0.0 {
+    let bytes = number * multiplier;
+    // 2^64: the first value that doesn't fit in a u64 (an `as` cast would saturate to u64::MAX).
+    if !bytes.is_finite() || bytes < 0.0 || bytes >= 18_446_744_073_709_551_616.0 {
         return Err(anyhow::anyhow!("Invalid file size format: {}", size_str));
     }
-    Ok((number * multiplier) as u64)
+    Ok(bytes as u64)
 }
 
 /// **Retry Utilities**
@@ -331,6 +333,9 @@ mod tests {
         assert!(parse_file_size("KB").is_err());
         assert!(parse_file_size("-1KB").is_err());
         assert!(parse_file_size("1XB").is_err());
+        assert!(parse_file_size("1e308TB").is_err());
+        assert!(parse_file_size("16777216TB").is_err()); // 2^64 bytes
+        assert!(parse_file_size("NaNKB").is_err());
     }
 
     #[test]
