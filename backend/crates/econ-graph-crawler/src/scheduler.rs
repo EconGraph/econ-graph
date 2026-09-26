@@ -148,7 +148,8 @@ fn frequency_days_sql(f: &str) -> String {
     sql
 }
 
-/// Due-series query. `$1` data_sources names, `$2` matching source codes, `$3` limit.
+/// Due-series query. `$1` data_sources names, `$2` matching source codes, `$3` limit, `$4` the
+/// regex of fetchable Census ids.
 static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "WITH src AS ( \
@@ -162,7 +163,7 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
              FROM economic_series es \
              JOIN src ON es.source_id = src.ds_id \
              WHERE es.is_active \
-               AND (src.code <> '{census}' OR es.external_id LIKE '{census_like}') \
+               AND (src.code <> '{census}' OR es.external_id ~ $4) \
          ) \
          SELECT c.code AS source, c.external_id::text AS external_id \
          FROM cand c \
@@ -182,7 +183,6 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
          LIMIT $3",
         days = frequency_days_sql("lower(btrim(es.frequency))"),
         census = SourceId::Census.as_str(),
-        census_like = crate::sources::census::FETCHABLE_ID_LIKE,
     )
 });
 
@@ -328,12 +328,19 @@ impl RefreshScheduler {
             .map(|&s| data_source_template(s).name)
             .collect();
         let codes: Vec<String> = sources.iter().map(|s| s.as_str().to_string()).collect();
+        // Only read when Census is scheduled; the pattern is unused otherwise.
+        let census_ids = if sources.contains(&SourceId::Census) {
+            crate::sources::census::fetchable_id_regex()?
+        } else {
+            String::new()
+        };
         let due: Vec<DueSeries> = {
             let mut conn = self.pool.get().await.map_err(conn_err)?;
             diesel::sql_query(DUE_SERIES_SQL.as_str())
                 .bind::<Array<Text>, _>(&names)
                 .bind::<Array<Text>, _>(&codes)
                 .bind::<BigInt, _>(self.config.batch_limit)
+                .bind::<Text, _>(&census_ids)
                 .load(&mut conn)
                 .await?
         };
@@ -707,16 +714,22 @@ mod tests {
         }
     }
 
+    /// Only national and per-state Census ids are enqueued; bare levels and old-style ids are not.
     #[tokio::test]
     async fn skips_census_series_fetch_series_cannot_handle() {
         let Some(db) = db().await else { return };
         let p = &db.pool;
-        let ids = ["CENSUS_BDS_T15CX_us", "CENSUS_BDS_T15CX_Alabama"];
-        let cleanup = format!(
-            "DELETE FROM economic_series WHERE external_id IN ('{}', '{}')",
-            ids[0], ids[1]
-        );
-        exec(p, &cleanup).await;
+        let ids = [
+            "CENSUS_BDS_T15CX_us",
+            "CENSUS_BDS_T15CX_state_06",
+            "CENSUS_BDS_T15CX_state_03",
+            "CENSUS_BDS_T15CX_state",
+            "CENSUS_BDS_T15CX_county",
+            "CENSUS_BDS_T15CX_Alabama",
+        ];
+        let cleanup =
+            "DELETE FROM economic_series WHERE external_id LIKE 'CENSUS\\_BDS\\_T15CX\\_%'";
+        exec(p, cleanup).await;
         for id in ids {
             seed(p, SourceId::Census, id, "Annual", None, None).await;
         }
@@ -730,9 +743,14 @@ mod tests {
             .into_iter()
             .filter(|r| r.series_id.contains("T15CX"))
             .map(|r| r.series_id)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
             .collect();
-        assert_eq!(queued, vec!["CENSUS_BDS_T15CX_us"]);
-        exec(p, &cleanup).await;
+        assert_eq!(
+            queued,
+            vec!["CENSUS_BDS_T15CX_state_06", "CENSUS_BDS_T15CX_us"]
+        );
+        exec(p, cleanup).await;
     }
 
     #[tokio::test]

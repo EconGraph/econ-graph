@@ -47,11 +47,11 @@ The integration focuses on key economic variables:
 - `EXIT` - Firm exit
 
 ### Geographic Levels
-- `us` - United States (national)
-- `state` - State level
-- `county` - County level
-- `metro` - Metropolitan areas
-- `cbsa` - Core Based Statistical Areas
+- `us` - United States (national); fetched as `CENSUS_BDS_{VARIABLE}_us`
+- `state` - State level; fetched per state and DC as `CENSUS_BDS_{VARIABLE}_state_{FIPS}`
+- `county` - County level (not fetched)
+- `metro` - Metropolitan areas (not fetched)
+- `cbsa` - Core Based Statistical Areas (not fetched)
 
 ### Time Coverage
 - **Start Date**: 1978
@@ -101,7 +101,8 @@ Automatically discovers and catalogs BDS series:
 - Fetches available variables and geography levels
 - Filters for economic indicators
 - Records each series in `series_metadata` (fetching then creates the `economic_series` rows)
-- Generates external IDs: `CENSUS_BDS_{VARIABLE}_{GEOGRAPHY}`
+- Generates external IDs `CENSUS_BDS_{VARIABLE}_us` (national) and
+  `CENSUS_BDS_{VARIABLE}_state_{FIPS}` (one per state and DC)
 
 ## Usage Examples
 
@@ -111,17 +112,18 @@ rather than called directly:
 
 ```bash
 # Enqueue a discovery job; crawler-worker then records BDS series
-# (economic variables x geographies) in series_metadata
+# (economic variables x national and per-state) in series_metadata
 crawler discover --source CENSUS
 
 # Enqueue a series for fetching; crawler-worker drains the queue
 crawler enqueue --source CENSUS --series CENSUS_BDS_ESTAB_us
+crawler enqueue --source CENSUS --series CENSUS_BDS_ESTAB_state_06   # California
 ```
 
 Notes:
-- Discovery produces external IDs `CENSUS_BDS_{VARIABLE}_{GEOGRAPHY}` for every economic variable
-  and geography level, but only national series (`..._us`) can be fetched; others are rejected
-  as permanent errors without making a request.
+- Discovery produces a national series (`..._us`) and one series per state and DC
+  (`..._state_{FIPS}`) for every economic variable. County and metro-area levels are skipped.
+  Any other id is rejected as a permanent error without making a request.
 - Set `CENSUS_API_KEY` to send an API key; requests also work without one at lower rate limits.
 
 ## Crawler Integration
@@ -194,7 +196,9 @@ tests:
 - `discover_crosses_economic_variables_with_geographies` - Discovery from `variables.json` and `geography.json`
 - `discover_needs_both_metadata_files` - Discovery fails cleanly if either metadata file is missing
 - `fetch_parses_rows_and_sends_key` / `fetch_works_without_a_key_and_applies_since` - Data fetching, API key, incremental `since`
-- `fetch_rejects_non_national_and_foreign_ids_without_requests` - ID validation
+- `discover_skips_levels_without_single_series` - County and metro-area levels are not discovered
+- `fetch_state_series_queries_that_state` - Per-state fetch (`for=state:{FIPS}`)
+- `series_id_parsing` / `fetch_rejects_unsupported_and_foreign_ids_without_requests` - ID validation
 - `census_specific_errors` - Census error classification
 - `row_parsing_rules` - BDS row parsing
 

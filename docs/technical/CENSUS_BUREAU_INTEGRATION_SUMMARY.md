@@ -27,12 +27,21 @@
 2. `GET {base}/timeseries/bds/geography.json` -> `{"fips": [{"name": .., "geoLevelDisplay": ..}, ..]}`
 
 Variables are filtered by the keyword rules in `is_economic_variable` (establishments, firms, jobs,
-employment, creation/destruction, ...) and crossed with every geography level, giving external IDs
-`CENSUS_BDS_{VARIABLE}_{geography}` (e.g. `CENSUS_BDS_ESTAB_us`, `CENSUS_BDS_FIRM_state`).
+employment, creation/destruction, ...) and crossed with the geography levels that give single
+series:
 
-**Fetching** (`fetch_series`) is supported for national series only (`CENSUS_BDS_{VARIABLE}_us`);
-other geography levels have one value per area and year, so they are `Permanent` errors. The
-request is `GET {base}/timeseries/bds?get={VARIABLE},YEAR&for=us:*[&key=KEY]` (all years; the
+- `us`: one national series per variable, `CENSUS_BDS_{VARIABLE}_us` (e.g. `CENSUS_BDS_ESTAB_us`);
+- `state`: one series per state and DC, `CENSUS_BDS_{VARIABLE}_state_{FIPS}` with the two-digit
+  state FIPS code (e.g. `CENSUS_BDS_ESTAB_state_06` for California), 51 per variable. The states
+  come from `backend/crates/econ-graph-crawler/data/us_states.csv`, which the crawler reads at
+  runtime from `CRAWLER_DATA_DIR` (shared with the FHFA adapter).
+
+Finer levels (county, metro area) have thousands of areas and are skipped.
+
+**Fetching** (`fetch_series`) is supported for both kinds of id. Any other id (including the bare
+`CENSUS_BDS_{VARIABLE}_state` ids older discovery runs recorded) is a `Permanent` error, and the
+refresh scheduler never enqueues it. The request is
+`GET {base}/timeseries/bds?get={VARIABLE},YEAR&for={us:*|state:FIPS}[&key=KEY]` (all years; the
 old comma-separated `YEAR=` list hit the API's "204 No Content" limitation for multi-year queries).
 `since` is applied client-side by year. Each row becomes a point dated January 1 of its `YEAR`.
 Rows of the wrong width or with an unparseable year are skipped; empty or non-numeric values are
@@ -81,7 +90,9 @@ crawler fetch --source CENSUS --series CENSUS_BDS_ESTAB_us
 
 1. **Multi-year queries**: explicit year lists may return 204 No Content; the adapter requests all
    years and filters locally.
-2. **Geography**: sub-national levels return one value per area per year and are discovery-only.
+2. **Geography**: a geography level returns one value per area per year, so the adapter makes one
+   series per area: national and each state plus DC. County and metro-area levels (thousands of
+   areas) are not discovered or fetched.
 3. **Data availability**: some variables are not available for every geography level; values
    may be suppressed (stored as missing observations).
 4. **Publication lag**: BDS data typically lags 1-2 years.
