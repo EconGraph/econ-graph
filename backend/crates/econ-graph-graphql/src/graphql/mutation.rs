@@ -25,12 +25,13 @@ pub struct Mutation;
 
 #[Object]
 impl Mutation {
-    /// Trigger a manual crawl for specific sources or series
+    /// Trigger a manual crawl for specific sources or series (admin only)
     async fn trigger_crawl(
         &self,
         ctx: &Context<'_>,
         input: TriggerCrawlInput,
     ) -> Result<CrawlerStatusType> {
+        let admin = require_admin(ctx)?;
         let pool = ctx.data::<DatabasePool>()?;
 
         let mut _queued_items = Vec::new();
@@ -38,6 +39,13 @@ impl Mutation {
         // Handle multiple sources and series
         let sources = input.sources.unwrap_or_else(|| vec!["FRED".to_string()]);
         let series_ids = input.series_ids.unwrap_or_else(|| vec!["GDP".to_string()]);
+
+        tracing::info!(
+            user_id = %admin.id,
+            ?sources,
+            ?series_ids,
+            "triggerCrawl requested"
+        );
 
         let items = simple_crawler_service::trigger_manual_crawl(
             &pool,
@@ -482,5 +490,64 @@ mod tests {
 
         assert_eq!(input.sources, Some(vec!["FRED".to_string()]));
         assert_eq!(input.priority, Some(8));
+    }
+
+    fn user_with_role(role: &str) -> User {
+        let now = chrono::Utc::now();
+        User {
+            id: Uuid::new_v4(),
+            email: format!("{role}@example.test"),
+            name: role.into(),
+            avatar_url: None,
+            provider: "email".into(),
+            provider_id: None,
+            password_hash: None,
+            role: role.into(),
+            organization: None,
+            theme: "light".into(),
+            default_chart_type: "line".into(),
+            notifications_enabled: false,
+            collaboration_enabled: false,
+            is_active: true,
+            email_verified: true,
+            created_at: now,
+            updated_at: now,
+            last_login_at: None,
+        }
+    }
+
+    /// A pool that never connects: the authorization check must reject the request before
+    /// any database access, so these tests need no database.
+    fn unreachable_pool() -> DatabasePool {
+        let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
+            diesel_async::AsyncPgConnection,
+        >::new("postgres://nobody@127.0.0.1:1/none");
+        DatabasePool::builder()
+            .connection_timeout(std::time::Duration::from_secs(1))
+            .build_unchecked(manager)
+    }
+
+    #[tokio::test]
+    async fn test_trigger_crawl_rejects_non_admin() {
+        let query = r#"mutation { triggerCrawl(input: { sources: ["FRED"], seriesIds: ["GDP"] }) { isRunning } }"#;
+        for user in [
+            None,
+            Some(user_with_role("guest")),
+            Some(user_with_role("viewer")),
+            Some(user_with_role("analyst")),
+        ] {
+            let role = user.as_ref().map(|u| u.role.clone());
+            let schema = crate::graphql::schema::create_schema_with_data(
+                unreachable_pool(),
+                Arc::new(crate::graphql::context::GraphQLContext::new(user)),
+            );
+            let resp = schema.execute(query).await;
+            assert_eq!(resp.errors.len(), 1, "{role:?}: {:?}", resp.errors);
+            let msg = &resp.errors[0].message;
+            assert!(
+                msg.contains("Authentication required") || msg.contains("Insufficient permissions"),
+                "{role:?}: {msg}"
+            );
+        }
     }
 }
