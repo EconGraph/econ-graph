@@ -101,6 +101,11 @@ impl AuthService {
         )
         .map_err(|e| AppError::AuthenticationError(format!("Invalid token: {}", e)))?;
 
+        // Reject a subject that is not a user id rather than letting callers map it to a default.
+        Uuid::parse_str(&token_data.claims.sub).map_err(|_| {
+            AppError::AuthenticationError("Invalid token: subject is not a user id".to_string())
+        })?;
+
         Ok(token_data.claims)
     }
 
@@ -356,7 +361,7 @@ impl AuthService {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_jwt_secret;
+    use super::*;
 
     #[test]
     fn jwt_secret_rejects_missing_or_empty_values() {
@@ -371,5 +376,32 @@ mod tests {
             validate_jwt_secret(Some("s3cret".to_string())).unwrap(),
             "s3cret"
         );
+    }
+
+    #[tokio::test]
+    async fn verify_token_rejects_a_subject_that_is_not_a_uuid() {
+        // A pool that never connects: verify_token does not touch the database.
+        let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
+            diesel_async::AsyncPgConnection,
+        >::new("postgres://nobody@127.0.0.1:1/none");
+        let auth_service = AuthService::new(DatabasePool::builder().build_unchecked(manager));
+        let now = Utc::now();
+        let claims = Claims {
+            sub: "not-a-uuid".to_string(),
+            email: "user@example.com".to_string(),
+            name: "User".to_string(),
+            role: UserRole::Viewer,
+            exp: (now + Duration::hours(1)).timestamp() as usize,
+            iat: now.timestamp() as usize,
+            iss: JWT_ISSUER.to_string(),
+        };
+        let token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(jwt_secret().unwrap().as_ref()),
+        )
+        .unwrap();
+
+        assert!(auth_service.verify_token(&token).is_err());
     }
 }
