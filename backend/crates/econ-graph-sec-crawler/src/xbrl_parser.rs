@@ -1325,19 +1325,24 @@ impl XbrlXmlParser {
         let mut buf = Vec::new();
         loop {
             match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(ref e)) => match e.local_name().as_ref() {
-                    "entity" => {
-                        if let Some(entity) = self.parse_entity_element(e, reader)? {
-                            context.entity = entity;
+                Ok(quick_xml::events::Event::Start(ref e)) => {
+                    match Self::structural_name(reader, e) {
+                        Some("entity") => {
+                            if let Some(entity) = self.parse_entity_element(e, reader)? {
+                                context.entity = entity;
+                            }
+                        }
+                        Some("period") => {
+                            if let Some(period) = self.parse_period_element(e, reader)? {
+                                context.period = period;
+                            }
+                        }
+                        _ => {
+                            let mut skip_buf = Vec::new();
+                            reader.read_to_end_into(e.name(), &mut skip_buf)?;
                         }
                     }
-                    "period" => {
-                        if let Some(period) = self.parse_period_element(e, reader)? {
-                            context.period = period;
-                        }
-                    }
-                    _ => {}
-                },
+                }
                 Ok(quick_xml::events::Event::End(ref e)) => {
                     if e.local_name().as_ref() == "context" {
                         break;
@@ -1434,37 +1439,42 @@ impl XbrlXmlParser {
         let mut buf = Vec::new();
         loop {
             match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(ref e)) => match e.local_name().as_ref() {
-                    "startDate" => {
-                        let mut buf2 = Vec::new();
-                        if let Ok(quick_xml::events::Event::Text(e)) =
-                            reader.read_event_into(&mut buf2)
-                        {
-                            period.start_date = Some(e.to_string());
+                Ok(quick_xml::events::Event::Start(ref e)) => {
+                    match Self::structural_name(reader, e) {
+                        Some("startDate") => {
+                            let mut buf2 = Vec::new();
+                            if let Ok(quick_xml::events::Event::Text(e)) =
+                                reader.read_event_into(&mut buf2)
+                            {
+                                period.start_date = Some(e.to_string());
+                            }
+                        }
+                        Some("endDate") => {
+                            let mut buf2 = Vec::new();
+                            if let Ok(quick_xml::events::Event::Text(e)) =
+                                reader.read_event_into(&mut buf2)
+                            {
+                                period.end_date = Some(e.to_string());
+                            }
+                        }
+                        Some("instant") => {
+                            let mut buf2 = Vec::new();
+                            if let Ok(quick_xml::events::Event::Text(e)) =
+                                reader.read_event_into(&mut buf2)
+                            {
+                                period.instant = Some(e.to_string());
+                            }
+                        }
+                        // `<forever></forever>`; the self-closing form is an Empty event below
+                        Some("forever") => period.period_type = Some("forever".to_string()),
+                        _ => {
+                            let mut skip_buf = Vec::new();
+                            reader.read_to_end_into(e.name(), &mut skip_buf)?;
                         }
                     }
-                    "endDate" => {
-                        let mut buf2 = Vec::new();
-                        if let Ok(quick_xml::events::Event::Text(e)) =
-                            reader.read_event_into(&mut buf2)
-                        {
-                            period.end_date = Some(e.to_string());
-                        }
-                    }
-                    "instant" => {
-                        let mut buf2 = Vec::new();
-                        if let Ok(quick_xml::events::Event::Text(e)) =
-                            reader.read_event_into(&mut buf2)
-                        {
-                            period.instant = Some(e.to_string());
-                        }
-                    }
-                    // `<forever></forever>`; the self-closing form is an Empty event below
-                    "forever" => period.period_type = Some("forever".to_string()),
-                    _ => {}
-                },
+                }
                 Ok(quick_xml::events::Event::Empty(ref e)) => {
-                    if e.local_name().as_ref() == "forever" {
+                    if Self::structural_name(reader, e) == Some("forever") {
                         period.period_type = Some("forever".to_string());
                     }
                 }
@@ -1518,22 +1528,29 @@ impl XbrlXmlParser {
         let mut buf = Vec::new();
         loop {
             match reader.read_event_into(&mut buf) {
-                Ok(quick_xml::events::Event::Start(ref e)) => match e.local_name().as_ref() {
-                    "measure" => {
-                        let mut buf2 = Vec::new();
-                        if let Ok(quick_xml::events::Event::Text(e)) =
-                            reader.read_event_into(&mut buf2)
-                        {
-                            if in_denominator {
-                                denominator.push(e.to_string());
-                            } else {
-                                numerator.push(e.to_string());
+                Ok(quick_xml::events::Event::Start(ref e)) => {
+                    match Self::structural_name(reader, e) {
+                        Some("measure") => {
+                            let mut buf2 = Vec::new();
+                            if let Ok(quick_xml::events::Event::Text(e)) =
+                                reader.read_event_into(&mut buf2)
+                            {
+                                if in_denominator {
+                                    denominator.push(e.to_string());
+                                } else {
+                                    numerator.push(e.to_string());
+                                }
                             }
                         }
+                        Some("unitDenominator") => in_denominator = true,
+                        // Containers whose measures are read above
+                        Some("divide") | Some("unitNumerator") => {}
+                        _ => {
+                            let mut skip_buf = Vec::new();
+                            reader.read_to_end_into(e.name(), &mut skip_buf)?;
+                        }
                     }
-                    "unitDenominator" => in_denominator = true,
-                    _ => {}
-                },
+                }
                 Ok(quick_xml::events::Event::End(ref e)) => match e.local_name().as_ref() {
                     "unitDenominator" => in_denominator = false,
                     "unit" => break,

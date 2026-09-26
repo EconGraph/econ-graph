@@ -726,6 +726,7 @@ async fn test_native_parse_compound_units_forever_periods_and_custom_names() {
       <segment><custom:identifier>not-the-cik</custom:identifier></segment>
     </entity>
     <period><forever></forever></period>
+    <custom:period><instant>2099-01-01</instant></custom:period>
   </context>
   <unit id="usdPerShare">
     <divide>
@@ -759,6 +760,8 @@ async fn test_native_parse_compound_units_forever_periods_and_custom_names() {
     let context = &result.contexts[0];
     assert_eq!(context.entity_identifier.as_deref(), Some("0000320193"));
     assert_eq!(context.period.period_type.as_deref(), Some("forever"));
+    // The custom:period child is not the XBRL period and must not replace it.
+    assert_eq!(context.period.instant, None);
 
     let units: Vec<(&str, Option<&str>, Option<&str>)> = result
         .units
