@@ -1,0 +1,20 @@
+# cargo-audit configuration (read from backend/.cargo/audit.toml).
+# Keep this list in sync with [advisories].ignore in backend/deny.toml.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2026-0258 (GHSA-q83h-524g-xf6h): h2 0.3.x accepts unbounded empty
+    # HTTP/2 DATA frames (low-severity DoS). Patched only in h2 >= 0.4.16.
+    #
+    # h2 0.3 reaches us solely through warp 0.3 -> hyper 0.14. Moving to warp 0.4
+    # (hyper 1 / h2 0.4) is blocked on async-graphql-warp: every stable 7.x
+    # release requires warp 0.3, and warp 0.4 support exists only in the
+    # async-graphql 8.0 release candidates.
+    #
+    # Exposure: the backend is only reached through the nginx ingress with
+    # `backend-protocol: "HTTP"`, which proxies HTTP/1.1 upstream, so the
+    # HTTP/2 code path in h2 is not reachable from clients.
+    #
+    # Remove this once async-graphql 8.0 is released and warp is upgraded to 0.4.
+    "RUSTSEC-2026-0258",
+]
