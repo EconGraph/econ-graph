@@ -136,7 +136,7 @@ cargo test --test integration
 
 ```bash
 # Start PostgreSQL (using Docker)
-docker run -d --name econ-graph-db -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:15
+docker run -d --name econ-graph-db -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:18
 
 # Run migrations
 cd backend

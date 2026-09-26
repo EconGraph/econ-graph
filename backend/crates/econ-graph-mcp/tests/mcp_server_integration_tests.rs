@@ -1,3 +1,4 @@
+use econ_graph_core::test_utils::POSTGRES_IMAGE_TAG;
 /// Integration tests for MCP server that require real backend and chart API services
 /// These tests start up actual services and test end-to-end functionality
 use econ_graph_mcp::mcp_server::EconGraphMcpServer;
@@ -14,7 +15,7 @@ async fn create_test_database_pool() -> econ_graph_core::database::DatabasePool 
     use testcontainers::runners::AsyncRunner;
     use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 
-    let postgres = GenericImage::new("postgres", "18")
+    let postgres = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
         .with_wait_for(WaitFor::message_on_stdout(
             "database system is ready to accept connections",
         ))

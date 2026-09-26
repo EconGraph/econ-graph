@@ -17,15 +17,15 @@ use std::time::Duration;
 
 use chrono::{NaiveDate, Utc};
 use diesel::prelude::*;
-use diesel::sql_types::{Bool, Date, Int8, Nullable, Text, Uuid as SqlUuid};
+use diesel::sql_types::{Array, Bool, Date, Nullable, Numeric, Text, Uuid as SqlUuid};
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use econ_graph_core::error::{AppError, AppResult};
-use econ_graph_core::models::{DataSource, NewCrawlAttempt, NewDataPoint, NewDataSource};
-use econ_graph_core::schema::{data_points, data_sources, series_metadata};
+use econ_graph_core::models::{DataSource, NewCrawlAttempt, NewDataSource};
+use econ_graph_core::schema::{data_sources, series_metadata};
 use econ_graph_core::DatabasePool;
 use uuid::Uuid;
 
-use crate::adapter::{DiscoveredSeries, FetchedSeries};
+use crate::adapter::{DiscoveredSeries, FetchedPoint, FetchedSeries};
 use crate::source::SourceId;
 
 /// Rows per multi-row INSERT (keeps well under Postgres' 65535 bind-parameter limit).
@@ -41,7 +41,8 @@ pub struct SeriesWrite {
     pub series_id: Uuid,
     /// Whether the `economic_series` row was created by this call.
     pub series_created: bool,
-    /// Data points inserted or updated (after de-duplicating the input).
+    /// Data points inserted, or updated because their value changed (after de-duplicating the
+    /// input). Points whose stored value is already identical are not rewritten or counted.
     pub points_upserted: usize,
     /// Data points that did not exist before (`points_upserted` minus revisions of existing rows).
     pub points_new: usize,
@@ -204,18 +205,43 @@ struct UpsertedSeries {
 }
 
 #[derive(QueryableByName)]
-struct CountRow {
-    #[diesel(sql_type = Int8)]
-    n: i64,
+struct WrittenPoint {
+    #[diesel(sql_type = Bool)]
+    inserted: bool,
 }
 
-/// Number of `data_points` rows stored for `series_id`.
-async fn count_points(conn: &mut AsyncPgConnection, series_id: Uuid) -> QueryResult<i64> {
-    diesel::sql_query("SELECT COUNT(*) AS n FROM data_points WHERE series_id = $1")
-        .bind::<SqlUuid, _>(series_id)
-        .get_result::<CountRow>(conn)
-        .await
-        .map(|row| row.n)
+/// Upserts one chunk of points for `series_id` and returns one row per point actually written.
+///
+/// A conflicting row is only rewritten when its value changed, so re-crawling unchanged data
+/// creates no dead tuples. PostgreSQL 18's `RETURNING old.*` tells inserts from revisions in the
+/// same statement.
+async fn upsert_points(
+    conn: &mut AsyncPgConnection,
+    series_id: Uuid,
+    points: &[&FetchedPoint],
+) -> QueryResult<Vec<WrittenPoint>> {
+    diesel::sql_query(
+        "INSERT INTO data_points (series_id, date, value, revision_date, is_original_release) \
+         SELECT $1, t.date, t.value, t.revision_date, t.is_original_release \
+         FROM UNNEST($2::date[], $3::numeric[], $4::date[], $5::bool[]) \
+             AS t(date, value, revision_date, is_original_release) \
+         ON CONFLICT (series_id, date, revision_date, is_original_release) DO UPDATE \
+             SET value = EXCLUDED.value, updated_at = NOW() \
+             WHERE data_points.value IS DISTINCT FROM EXCLUDED.value \
+         RETURNING (old.id IS NULL) AS inserted",
+    )
+    .bind::<SqlUuid, _>(series_id)
+    .bind::<Array<Date>, _>(points.iter().map(|p| p.date).collect::<Vec<_>>())
+    .bind::<Array<Nullable<Numeric>>, _>(points.iter().map(|p| p.value.clone()).collect::<Vec<_>>())
+    .bind::<Array<Date>, _>(points.iter().map(|p| p.revision_date).collect::<Vec<_>>())
+    .bind::<Array<Bool>, _>(
+        points
+            .iter()
+            .map(|p| p.is_original_release)
+            .collect::<Vec<_>>(),
+    )
+    .load(conn)
+    .await
 }
 
 /// Upserts the `economic_series` row for `(source, external_id)` and all `fetched.points`, in one
@@ -226,7 +252,8 @@ async fn count_points(conn: &mut AsyncPgConnection, series_id: Uuid) -> QueryRes
 ///   stored ones; absent fields keep their stored values. Always sets `last_crawled_at`,
 ///   `last_updated`, `crawl_status = 'success'` and clears `crawl_error_message`.
 /// - Points: upserted on the `data_points` unique key `(series_id, date, revision_date,
-///   is_original_release)` in chunks of [`INSERT_CHUNK`]; a conflicting row gets the new value.
+///   is_original_release)` in chunks of [`INSERT_CHUNK`]; a conflicting row gets the new value
+///   only if it differs.
 ///   Duplicate keys in the input keep the last occurrence.
 /// - `start_date` / `end_date` are recomputed from the stored points.
 pub async fn persist_series(
@@ -267,7 +294,7 @@ pub async fn persist_series(
                      seasonal_adjustment = COALESCE($8, economic_series.seasonal_adjustment), \
                      last_crawled_at = NOW(), last_updated = NOW(), \
                      crawl_status = 'success', crawl_error_message = NULL \
-                 RETURNING id, (xmax = 0) AS inserted",
+                 RETURNING id, (old.id IS NULL) AS inserted",
             )
             .bind::<SqlUuid, _>(source_id)
             .bind::<Text, _>(&external_id)
@@ -281,41 +308,15 @@ pub async fn persist_series(
             .await?;
             let series_id = row.id;
 
-            let before = count_points(conn, series_id).await?;
-
-            let rows: Vec<NewDataPoint> = unique
-                .values()
-                .map(|p| NewDataPoint {
-                    series_id,
-                    date: p.date,
-                    value: p.value.clone(),
-                    revision_date: p.revision_date,
-                    is_original_release: p.is_original_release,
-                })
-                .collect();
-            let mut upserted = 0usize;
-            for chunk in rows.chunks(INSERT_CHUNK) {
-                use diesel::upsert::excluded;
-                upserted += diesel::insert_into(data_points::table)
-                    .values(chunk)
-                    .on_conflict((
-                        data_points::series_id,
-                        data_points::date,
-                        data_points::revision_date,
-                        data_points::is_original_release,
-                    ))
-                    .do_update()
-                    .set((
-                        data_points::value.eq(excluded(data_points::value)),
-                        data_points::updated_at.eq(Utc::now()),
-                    ))
-                    .execute(conn)
-                    .await?;
+            let points: Vec<&FetchedPoint> = unique.values().copied().collect();
+            let (mut upserted, mut new) = (0usize, 0usize);
+            for chunk in points.chunks(INSERT_CHUNK) {
+                let written = upsert_points(conn, series_id, chunk).await?;
+                upserted += written.len();
+                new += written.iter().filter(|w| w.inserted).count();
             }
 
-            let after = count_points(conn, series_id).await?;
-
-            if !rows.is_empty() {
+            if !points.is_empty() {
                 diesel::sql_query(
                     "UPDATE economic_series SET \
                          start_date = (SELECT MIN(date) FROM data_points WHERE series_id = $1), \
@@ -331,7 +332,7 @@ pub async fn persist_series(
                 series_id,
                 series_created: row.inserted,
                 points_upserted: upserted,
-                points_new: usize::try_from(after - before).unwrap_or(0),
+                points_new: new,
                 latest_date,
             })
     })

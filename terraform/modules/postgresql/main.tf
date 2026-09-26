@@ -107,7 +107,7 @@ resource "kubernetes_stateful_set" "postgresql" {
     namespace = var.namespace
     labels = {
       app     = "postgresql"
-      version = "15"
+      version = "18"
     }
   }
 
@@ -125,14 +125,18 @@ resource "kubernetes_stateful_set" "postgresql" {
       metadata {
         labels = {
           app     = "postgresql"
-          version = "15"
+          version = "18"
         }
       }
 
       spec {
         container {
           name  = "postgresql"
-          image = "postgres:15-alpine"
+          # Major-version bump: PostgreSQL 18 cannot start on an older data
+          # directory. This module has no deployment holding data yet. If one
+          # exists, back it up with pg_dumpall and restore into a fresh PVC (or
+          # run pg_upgrade) before applying; never point 18 at a 15 PVC.
+          image = "postgres:18-alpine"
 
           port {
             container_port = 5432

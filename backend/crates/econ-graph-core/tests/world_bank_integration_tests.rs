@@ -5,6 +5,7 @@
 
 use diesel::Connection;
 use econ_graph_core::models::DataSource;
+use econ_graph_core::test_utils::POSTGRES_IMAGE_TAG;
 use serial_test::serial;
 use testcontainers::core::WaitFor;
 use testcontainers::runners::AsyncRunner;
@@ -16,7 +17,7 @@ use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 async fn test_world_bank_data_source_database_integration() -> Result<(), Box<dyn std::error::Error>>
 {
     // Set up test database
-    let postgres = GenericImage::new("postgres", "18")
+    let postgres = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
         .with_wait_for(WaitFor::message_on_stdout(
             "database system is ready to accept connections",
         ))
@@ -66,7 +67,7 @@ async fn test_world_bank_data_source_database_integration() -> Result<(), Box<dy
 #[serial]
 async fn test_world_bank_data_source_persistence() -> Result<(), Box<dyn std::error::Error>> {
     // Set up test database
-    let postgres = GenericImage::new("postgres", "18")
+    let postgres = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
         .with_wait_for(WaitFor::message_on_stdout(
             "database system is ready to accept connections",
         ))

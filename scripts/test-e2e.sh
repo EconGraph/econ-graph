@@ -76,7 +76,7 @@ start_test_database() {
         -e POSTGRES_USER=testuser \
         -e POSTGRES_DB=econ_graph_test \
         -p 5433:5432 \
-        postgres:14 >/dev/null
+        postgres:18 >/dev/null
 
     if wait_for_postgres; then
         print_success "Test database started successfully"
