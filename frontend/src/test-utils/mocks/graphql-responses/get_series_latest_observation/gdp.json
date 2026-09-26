@@ -1,0 +1,13 @@
+{
+  "data": {
+    "seriesByExternalId": {
+      "id": "0192f0a1-0000-7000-8000-000000000001",
+      "units": "Billions of Dollars",
+      "latestObservation": {
+        "date": "2024-10-01",
+        "value": "29723.864900",
+        "revisionDate": "2025-03-27"
+      }
+    }
+  }
+}
