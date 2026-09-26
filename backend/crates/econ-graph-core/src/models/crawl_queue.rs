@@ -419,6 +419,73 @@ impl CrawlQueueItem {
         Ok(item)
     }
 
+    /// Up to `limit` claimable, due items of one `source` and `kind` other than `exclude`, in
+    /// `claim_next` order, as `(id, series_id)`. Nothing is locked: the caller picks which ones to
+    /// claim with [`CrawlQueueItem::claim_due_ids`]. Used by the worker to find a batch's mates.
+    pub async fn due_candidates(
+        pool: &DatabasePool,
+        source: &str,
+        kind: &str,
+        exclude: Uuid,
+        limit: i64,
+    ) -> AppResult<Vec<(Uuid, String)>> {
+        #[derive(QueryableByName)]
+        struct Candidate {
+            #[diesel(sql_type = SqlUuid)]
+            id: Uuid,
+            #[diesel(sql_type = Text)]
+            series_id: String,
+        }
+        let mut conn = get_conn(pool).await?;
+        let rows = diesel::sql_query(
+            "SELECT id, series_id FROM crawl_queue \
+             WHERE status IN ('pending', 'retrying') \
+               AND (scheduled_for IS NULL OR scheduled_for <= NOW()) \
+               AND source = $1 AND kind = $2 AND id <> $3 \
+             ORDER BY priority DESC, created_at ASC \
+             LIMIT $4",
+        )
+        .bind::<Text, _>(source)
+        .bind::<Text, _>(kind)
+        .bind::<SqlUuid, _>(exclude)
+        .bind::<BigInt, _>(limit)
+        .load::<Candidate>(&mut conn)
+        .await?;
+        Ok(rows.into_iter().map(|c| (c.id, c.series_id)).collect())
+    }
+
+    /// Claim those of `ids` that are still claimable and due, each with its own claim token,
+    /// in one statement. Rows another transaction holds locked are skipped, so concurrent callers
+    /// never block each other or claim the same row. Returns the claimed rows (any order).
+    pub async fn claim_due_ids(
+        pool: &DatabasePool,
+        ids: &[Uuid],
+        worker_id: &str,
+    ) -> AppResult<Vec<Self>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut conn = get_conn(pool).await?;
+        let items = diesel::sql_query(
+            "UPDATE crawl_queue \
+             SET status = 'processing', locked_by = $2, locked_at = NOW(), updated_at = NOW(), \
+                 started_at = NOW(), finished_at = NULL, claim_token = gen_random_uuid() \
+             WHERE id IN ( \
+                 SELECT id FROM crawl_queue \
+                 WHERE id = ANY($1) \
+                   AND status IN ('pending', 'retrying') \
+                   AND (scheduled_for IS NULL OR scheduled_for <= NOW()) \
+                 FOR UPDATE SKIP LOCKED \
+             ) \
+             RETURNING *",
+        )
+        .bind::<Array<SqlUuid>, _>(ids)
+        .bind::<Text, _>(worker_id)
+        .load::<Self>(&mut conn)
+        .await?;
+        Ok(items)
+    }
+
     // --- Lease-guarded transitions (for the worker that claimed the item) ---
     //
     // A worker's claim is a lease: `release_stuck` may take it away (and another worker may claim

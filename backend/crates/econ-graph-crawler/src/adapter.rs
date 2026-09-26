@@ -141,6 +141,9 @@ pub struct DiscoveredSeries {
     pub data_url: Option<String>,
 }
 
+/// Per-series results of [`SourceAdapter::fetch_batch`], keyed by external id.
+pub type BatchFetch = HashMap<String, Result<FetchedSeries, CrawlError>>;
+
 /// One external data source. Implementations are stateless apart from configuration and
 /// do all HTTP through [`CrawlCtx::http`].
 #[async_trait]
@@ -164,6 +167,34 @@ pub trait SourceAdapter: Send + Sync {
         external_id: &str,
         since: Option<NaiveDate>,
     ) -> Result<FetchedSeries, CrawlError>;
+
+    /// Groups series that one upstream request can fetch together: the worker only batches
+    /// `fetch_series` jobs whose ids return the same key (up to the policy's
+    /// [`max_batch`](SourcePolicy::max_batch)). `None`, the default, never batches the series.
+    fn batch_key(&self, _external_id: &str) -> Option<String> {
+        None
+    }
+
+    /// Fetches several series that share a [`batch_key`](Self::batch_key), only observations on
+    /// or after `since` when given (the earliest `since` of the batch's series).
+    ///
+    /// `Err` means the whole request failed and applies to every series in the batch. `Ok`
+    /// carries one result per requested id; an id missing from the map fails as
+    /// [`CrawlError::NotFound`]. The default calls [`fetch_series`](Self::fetch_series) once per
+    /// id, in order.
+    async fn fetch_batch(
+        &self,
+        ctx: &CrawlCtx,
+        external_ids: &[String],
+        since: Option<NaiveDate>,
+    ) -> Result<BatchFetch, CrawlError> {
+        let mut out = BatchFetch::with_capacity(external_ids.len());
+        for id in external_ids {
+            let fetched = self.fetch_series(ctx, id, since).await;
+            out.insert(id.clone(), fetched);
+        }
+        Ok(out)
+    }
 }
 
 /// Maps each [`SourceId`] to its adapter.
@@ -245,6 +276,24 @@ mod tests {
         r.register(Arc::new(Dummy(SourceId::Fred, "old")));
         assert!(r.register(Arc::new(Dummy(SourceId::Fred, "new"))).is_some());
         assert_eq!(r.ids(), vec![SourceId::Fred]);
+    }
+
+    #[test]
+    fn default_adapter_does_not_batch() {
+        assert_eq!(Dummy(SourceId::Bea, "").batch_key("X"), None);
+    }
+
+    #[tokio::test]
+    async fn default_fetch_batch_calls_fetch_series_per_id() {
+        let ctx = crate::testkit::test_ctx();
+        let ids = vec!["A".to_string(), "B".to_string()];
+        let out = Dummy(SourceId::Bea, "")
+            .fetch_batch(&ctx, &ids, None)
+            .await
+            .unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out["A"], Ok(FetchedSeries::default()));
+        assert_eq!(out["B"], Ok(FetchedSeries::default()));
     }
 
     #[test]
