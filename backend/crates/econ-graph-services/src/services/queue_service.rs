@@ -85,6 +85,11 @@ pub async fn update_queue_item_status(
             let update = UpdateCrawlQueueItem {
                 status: Some(status.to_string()),
                 error_message: error_message.map(Some),
+                // finished_at is NULL while an item is active; cancelled is terminal.
+                finished_at: Some(match status {
+                    QueueStatus::Cancelled => Some(Utc::now()),
+                    _ => None,
+                }),
                 ..Default::default()
             }
             .clearing_lock();

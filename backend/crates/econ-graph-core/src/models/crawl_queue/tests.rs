@@ -26,10 +26,24 @@ use uuid::Uuid;
 
 static MIGRATED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
 
-/// Pool on DATABASE_URL with migrations applied (once per test binary).
+/// Pool on a throwaway test database with migrations applied (once per test binary).
+///
+/// Some tests call table-wide operations (`release_stuck`, `purge_finished`) that touch every
+/// row, so this uses `TEST_DATABASE_URL`, or `DATABASE_URL` only when its database name contains
+/// "test" (as CI's `econ_graph_test` does), and refuses anything else.
 async fn test_pool() -> DatabasePool {
-    let url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must point at a Postgres database for crawl_queue tests");
+    let url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+        let url = std::env::var("DATABASE_URL").expect(
+            "set TEST_DATABASE_URL (or DATABASE_URL naming a *test* database) for crawl_queue tests",
+        );
+        let db_name = url.rsplit('/').next().unwrap_or("").split('?').next().unwrap_or("");
+        assert!(
+            db_name.contains("test"),
+            "crawl_queue tests run table-wide queue operations; refusing to use database \
+             {db_name:?} from DATABASE_URL. Point TEST_DATABASE_URL at a throwaway database."
+        );
+        url
+    });
     MIGRATED
         .get_or_init(|| async {
             crate::database::run_migrations(&url)
@@ -862,7 +876,8 @@ async fn test_purge_finished_works_in_batches() {
     diesel::sql_query(
         "INSERT INTO crawl_queue (source, series_id, priority, max_retries, status, kind, \
                                   finished_at, updated_at) \
-         SELECT $1, 'S' || g, 5, 3, 'completed', 'fetch_series', \
+         SELECT $1, 'S' || g, 5, 3, \
+                CASE WHEN g % 3 = 0 THEN 'cancelled' ELSE 'completed' END, 'fetch_series', \
                 NOW() - INTERVAL '30 days', NOW() - INTERVAL '30 days' \
          FROM generate_series(1, $2) AS g",
     )

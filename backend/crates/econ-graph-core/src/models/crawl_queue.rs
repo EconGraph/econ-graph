@@ -545,7 +545,7 @@ impl CrawlQueueItem {
         Ok(n > 0)
     }
 
-    /// Delete `completed` / `failed` rows that finished at least `older_than` ago (rows without
+    /// Delete `completed` / `failed` / `cancelled` rows that finished at least `older_than` ago (rows without
     /// `finished_at` fall back to `updated_at`). Deletes in batches of [`PURGE_BATCH_SIZE`] rows
     /// so it never holds locks on a large part of the table; rows locked by another transaction
     /// are skipped. Returns the number of rows deleted.
@@ -556,7 +556,7 @@ impl CrawlQueueItem {
             let n = diesel::sql_query(
                 "DELETE FROM crawl_queue WHERE id IN ( \
                      SELECT id FROM crawl_queue \
-                     WHERE status IN ('completed', 'failed') \
+                     WHERE status IN ('completed', 'failed', 'cancelled') \
                        AND COALESCE(finished_at, updated_at) \
                            <= NOW() - make_interval(secs => $1) \
                      LIMIT $2 \

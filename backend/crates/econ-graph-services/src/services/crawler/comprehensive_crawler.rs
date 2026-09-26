@@ -166,8 +166,10 @@ impl ComprehensiveCrawler {
                 max_retries: 3,
             };
 
-            CrawlQueueItem::create(pool, &queue_item).await?;
-            queued_count += 1;
+            // Skip series that already have an active queue item.
+            if CrawlQueueItem::enqueue(pool, &queue_item).await?.is_some() {
+                queued_count += 1;
+            }
         }
 
         println!("✅ Queued {} series for crawling", queued_count);
