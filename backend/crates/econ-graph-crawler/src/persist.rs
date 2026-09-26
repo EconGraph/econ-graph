@@ -7,8 +7,13 @@
 //!
 //! - [`data_source_id`]: the `data_sources` row for a [`SourceId`] (matches the seeded names, so
 //!   FRED/BLS/... map onto the existing rows; created from the core template if missing).
+//! - [`sync_datasets`]: upserts the `datasets` rows from a [`DatasetCatalog`] (at startup).
 //! - [`persist_series`]: upserts `economic_series` + `data_points` in one transaction.
 //! - [`persist_discovered`]: upserts `series_metadata` rows from catalog discovery.
+//!
+//! A series that names a dataset ([`SeriesDataset`]) is written with the dataset's id, its
+//! dimension values and the dataset's `default_measure`. Callers check the series against the
+//! [`DatasetCatalog`] first; persistence only resolves the synced row.
 //! - [`record_attempt`]: one `crawl_attempts` row per processed job (when the series exists).
 //! - [`latest_point_date`]: the `since` bound for incremental fetches.
 
@@ -17,7 +22,7 @@ use std::time::Duration;
 
 use chrono::{NaiveDate, Utc};
 use diesel::prelude::*;
-use diesel::sql_types::{Array, Bool, Date, Nullable, Numeric, Text, Uuid as SqlUuid};
+use diesel::sql_types::{Array, Bool, Date, Jsonb, Nullable, Numeric, Text, Uuid as SqlUuid};
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use econ_graph_core::error::{AppError, AppResult};
 use econ_graph_core::models::{DataSource, NewCrawlAttempt, NewDataSource};
@@ -26,6 +31,7 @@ use econ_graph_core::DatabasePool;
 use uuid::Uuid;
 
 use crate::adapter::{DiscoveredSeries, FetchedPoint, FetchedSeries};
+use crate::dataset::{DatasetCatalog, SeriesDataset};
 use crate::source::SourceId;
 
 /// Rows per multi-row INSERT (keeps well under Postgres' 65535 bind-parameter limit).
@@ -165,6 +171,107 @@ async fn data_source_id_conn(conn: &mut AsyncPgConnection, source: SourceId) -> 
         .await?)
 }
 
+/// Upserts one `datasets` row per definition in `catalog`, keyed by `(source_id, code)`, in one
+/// transaction. Existing rows get the file's name, description, components and default measure.
+/// Returns the number of datasets written.
+pub async fn sync_datasets(pool: &DatabasePool, catalog: &DatasetCatalog) -> AppResult<usize> {
+    let mut rows = Vec::with_capacity(catalog.len());
+    for (source, def) in catalog.iter() {
+        rows.push((
+            source,
+            def.code.clone(),
+            clip(&def.name, 500),
+            clip_opt(def.description.as_deref(), usize::MAX),
+            serde_json::to_value(&def.dimensions)?,
+            serde_json::to_value(&def.measures)?,
+            serde_json::to_value(&def.attributes)?,
+            def.default_measure.clone(),
+        ));
+    }
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    conn.transaction::<usize, AppError, _>(async move |conn| {
+        for (source, code, name, description, dimensions, measures, attributes, default_measure) in
+            &rows
+        {
+            let source_id = data_source_id_conn(conn, *source).await?;
+            diesel::sql_query(
+                "INSERT INTO datasets (source_id, code, name, description, dimensions, measures, \
+                     attributes, default_measure) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+                 ON CONFLICT (source_id, code) DO UPDATE SET \
+                     name = EXCLUDED.name, description = EXCLUDED.description, \
+                     dimensions = EXCLUDED.dimensions, measures = EXCLUDED.measures, \
+                     attributes = EXCLUDED.attributes, default_measure = EXCLUDED.default_measure, \
+                     updated_at = NOW()",
+            )
+            .bind::<SqlUuid, _>(source_id)
+            .bind::<Text, _>(code)
+            .bind::<Text, _>(name)
+            .bind::<Nullable<Text>, _>(description.as_deref())
+            .bind::<Jsonb, _>(dimensions)
+            .bind::<Jsonb, _>(measures)
+            .bind::<Jsonb, _>(attributes)
+            .bind::<Text, _>(default_measure)
+            .execute(conn)
+            .await?;
+        }
+        Ok(rows.len())
+    })
+    .await
+}
+
+#[derive(QueryableByName)]
+struct DatasetRow {
+    #[diesel(sql_type = Text)]
+    code: String,
+    #[diesel(sql_type = SqlUuid)]
+    id: Uuid,
+    #[diesel(sql_type = Text)]
+    default_measure: String,
+}
+
+/// The dataset columns written for a series: `(dataset_id, dimensions, default_measure)`.
+type DatasetColumns = (Uuid, serde_json::Value, String);
+
+/// `(id, default_measure)` of each of `source_id`'s datasets named in `codes`. A code without a
+/// row means the catalog was not synced ([`sync_datasets`]): an error, not a silent `NULL`.
+async fn dataset_rows(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    source_id: Uuid,
+    codes: &[&str],
+) -> AppResult<BTreeMap<String, (Uuid, String)>> {
+    if codes.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let rows: Vec<DatasetRow> = diesel::sql_query(
+        "SELECT code, id, default_measure FROM datasets WHERE source_id = $1 AND code = ANY($2)",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Array<Text>, _>(codes)
+    .load(conn)
+    .await?;
+    let found: BTreeMap<String, (Uuid, String)> = rows
+        .into_iter()
+        .map(|r| (r.code, (r.id, r.default_measure)))
+        .collect();
+    if let Some(code) = codes.iter().find(|c| !found.contains_key(**c)) {
+        return Err(AppError::ValidationError(format!(
+            "{source} dataset {code} is not in the datasets table (run sync_datasets at startup)"
+        )));
+    }
+    Ok(found)
+}
+
+fn dataset_columns(
+    rows: &BTreeMap<String, (Uuid, String)>,
+    dataset: Option<&SeriesDataset>,
+) -> Option<DatasetColumns> {
+    let dataset = dataset?;
+    let (id, default_measure) = &rows[&dataset.code];
+    Some((*id, dataset.dimensions_json(), default_measure.clone()))
+}
+
 /// `economic_series.id` for `(source, external_id)`, if the series exists.
 pub async fn find_series_id(
     pool: &DatabasePool,
@@ -256,6 +363,8 @@ async fn upsert_points(
 ///   only if it differs.
 ///   Duplicate keys in the input keep the last occurrence.
 /// - `start_date` / `end_date` are recomputed from the stored points.
+/// - Dataset: when `fetched.dataset` is set, `dataset_id`, `dimensions` and `default_measure` are
+///   written from it and the synced `datasets` row; when it is `None` the stored values are kept.
 pub async fn persist_series(
     pool: &DatabasePool,
     source: SourceId,
@@ -280,18 +389,25 @@ pub async fn persist_series(
     let latest_date = unique.keys().map(|k| k.0).max();
 
     conn.transaction::<SeriesWrite, AppError, _>(async move |conn| {
+            let codes: Vec<&str> = fetched.dataset.iter().map(|d| d.code.as_str()).collect();
+            let datasets = dataset_rows(conn, source, source_id, &codes).await?;
+            let dataset = dataset_columns(&datasets, fetched.dataset.as_ref());
             let row: UpsertedSeries = diesel::sql_query(
                 "INSERT INTO economic_series (source_id, external_id, title, description, units, \
                      frequency, seasonal_adjustment, is_active, first_discovered_at, last_crawled_at, \
-                     last_updated, crawl_status, crawl_error_message) \
+                     last_updated, crawl_status, crawl_error_message, dataset_id, dimensions, \
+                     default_measure) \
                  VALUES ($1, $2, COALESCE($3, $2), $4, $5, COALESCE($6, $7), $8, TRUE, NOW(), NOW(), \
-                     NOW(), 'success', NULL) \
+                     NOW(), 'success', NULL, $9, $10, $11) \
                  ON CONFLICT (source_id, external_id) DO UPDATE SET \
                      title = COALESCE($3, economic_series.title), \
                      description = COALESCE($4, economic_series.description), \
                      units = COALESCE($5, economic_series.units), \
                      frequency = COALESCE($6, economic_series.frequency), \
                      seasonal_adjustment = COALESCE($8, economic_series.seasonal_adjustment), \
+                     dataset_id = COALESCE($9, economic_series.dataset_id), \
+                     dimensions = COALESCE($10, economic_series.dimensions), \
+                     default_measure = COALESCE($11, economic_series.default_measure), \
                      last_crawled_at = NOW(), last_updated = NOW(), \
                      crawl_status = 'success', crawl_error_message = NULL \
                  RETURNING id, (old.id IS NULL) AS inserted",
@@ -304,6 +420,9 @@ pub async fn persist_series(
             .bind::<Nullable<Text>, _>(frequency.as_deref())
             .bind::<Text, _>(UNKNOWN_FREQUENCY)
             .bind::<Nullable<Text>, _>(seasonal.as_deref())
+            .bind::<Nullable<SqlUuid>, _>(dataset.as_ref().map(|d| d.0))
+            .bind::<Nullable<Jsonb>, _>(dataset.as_ref().map(|d| &d.1))
+            .bind::<Nullable<Text>, _>(dataset.as_ref().map(|d| d.2.as_str()))
             .get_result(conn)
             .await?;
             let series_id = row.id;
@@ -342,6 +461,8 @@ pub async fn persist_series(
 /// Upserts one `series_metadata` row per discovered series (key `(source_id, external_id)`), in
 /// one transaction, chunked. Existing rows get the new title/description/units/frequency/data_url,
 /// `last_discovered_at = NOW()` and `is_active = TRUE`. Duplicate ids in the input keep the last.
+/// Series with a dataset get its `dataset_id`, their `dimensions` and the dataset's
+/// `default_measure`; series without one keep the stored values.
 /// Returns the number of rows written.
 pub async fn persist_discovered(
     pool: &DatabasePool,
@@ -380,7 +501,20 @@ pub async fn persist_discovered(
         })
         .collect();
 
+    let codes: Vec<&str> = unique
+        .values()
+        .filter_map(|d| d.dataset.as_ref().map(|ds| ds.code.as_str()))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let with_dataset: Vec<&DiscoveredSeries> = unique
+        .values()
+        .copied()
+        .filter(|d| d.dataset.is_some())
+        .collect();
+
     conn.transaction::<usize, AppError, _>(async move |conn| {
+        let datasets = dataset_rows(conn, source, source_id, &codes).await?;
         let mut written = 0;
         for chunk in rows.chunks(INSERT_CHUNK) {
             let now = Utc::now();
@@ -400,6 +534,34 @@ pub async fn persist_discovered(
                 ))
                 .execute(conn)
                 .await?;
+        }
+        for chunk in with_dataset.chunks(INSERT_CHUNK) {
+            let mut ids = Vec::with_capacity(chunk.len());
+            let mut dataset_ids = Vec::with_capacity(chunk.len());
+            let mut dimensions = Vec::with_capacity(chunk.len());
+            let mut measures = Vec::with_capacity(chunk.len());
+            for d in chunk {
+                let (id, dims, measure) = dataset_columns(&datasets, d.dataset.as_ref())
+                    .expect("filtered to series with a dataset");
+                ids.push(clip(&d.external_id, 255));
+                dataset_ids.push(id);
+                dimensions.push(dims);
+                measures.push(measure);
+            }
+            diesel::sql_query(
+                "UPDATE series_metadata AS sm SET dataset_id = t.dataset_id, \
+                     dimensions = t.dimensions, default_measure = t.default_measure \
+                 FROM UNNEST($2::text[], $3::uuid[], $4::jsonb[], $5::text[]) \
+                     AS t(external_id, dataset_id, dimensions, default_measure) \
+                 WHERE sm.source_id = $1 AND sm.external_id = t.external_id",
+            )
+            .bind::<SqlUuid, _>(source_id)
+            .bind::<Array<Text>, _>(ids)
+            .bind::<Array<SqlUuid>, _>(dataset_ids)
+            .bind::<Array<Jsonb>, _>(dimensions)
+            .bind::<Array<Text>, _>(measures)
+            .execute(conn)
+            .await?;
         }
         Ok(written)
     })

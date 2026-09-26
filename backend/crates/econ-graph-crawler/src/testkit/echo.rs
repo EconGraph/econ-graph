@@ -15,6 +15,7 @@ use serde::Deserialize;
 use crate::adapter::{
     CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, NewSeriesMetadataLite, SourceAdapter,
 };
+use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
 use crate::source::SourceId;
 
@@ -24,13 +25,39 @@ const DEFAULT_BASE_URL: &str = "https://echo.invalid";
 /// `GET {base}/catalog` -> `{"series": [{"id": .., "title": ..}]}`.
 pub(crate) struct EchoAdapter {
     base_url: String,
+    /// Dataset codes returned by `datasets()`.
+    declared: Vec<&'static str>,
+    /// Dataset attached to every series, with the series id as the `id` dimension value when
+    /// the dataset has an `id` key.
+    dataset: Option<SeriesDataset>,
 }
 
 impl EchoAdapter {
     pub(crate) fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
+            declared: Vec::new(),
+            dataset: None,
         }
+    }
+
+    /// Declares `declared` and attaches `dataset` to every series (for dataset contract tests).
+    pub(crate) fn with_dataset(
+        mut self,
+        declared: Vec<&'static str>,
+        dataset: SeriesDataset,
+    ) -> Self {
+        self.declared = declared;
+        self.dataset = Some(dataset);
+        self
+    }
+
+    fn dataset_for(&self, id: &str) -> Option<SeriesDataset> {
+        let mut dataset = self.dataset.clone()?;
+        if let Some(v) = dataset.dimensions.get_mut("id") {
+            *v = id.to_string();
+        }
+        Some(dataset)
     }
 }
 
@@ -69,6 +96,10 @@ impl SourceAdapter for EchoAdapter {
         SourceId::Fred
     }
 
+    fn datasets(&self) -> Vec<&str> {
+        self.declared.clone()
+    }
+
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         let url = format!("{}/catalog", self.base_url);
         let body: CatalogBody = ctx.http.get_json(self.id(), &url, &[]).await?;
@@ -76,6 +107,7 @@ impl SourceAdapter for EchoAdapter {
             .series
             .into_iter()
             .map(|e| DiscoveredSeries {
+                dataset: self.dataset_for(&e.id),
                 data_url: Some(format!("{}/series/{}", self.base_url, e.id)),
                 external_id: e.id,
                 title: e.title,
@@ -121,6 +153,7 @@ impl SourceAdapter for EchoAdapter {
                 ..Default::default()
             }),
             points,
+            dataset: self.dataset_for(external_id),
         })
     }
 }
@@ -156,6 +189,128 @@ mod contract {
             min_series: 2,
         },
     }
+}
+
+/// The contract's dataset checks: an undeclared dataset or wrong dimension keys fail it.
+mod dataset_contract {
+    use super::EchoAdapter;
+    use crate::dataset::{parse_dataset_file, DatasetCatalog, SeriesDataset};
+    use crate::source::SourceId;
+    use crate::testkit::contract::{
+        assert_discover_ok, assert_fetch_ok, assert_series_datasets_in,
+    };
+    use crate::testkit::{test_ctx, MockSource, Reply, Route};
+
+    const ECHO: &str = "[[dataset]]\ncode = \"echo\"\nname = \"Echo\"\n\n\
+                        [[dataset.dimensions]]\nname = \"id\"\nlabel = \"Series\"\n";
+
+    async fn mock() -> MockSource {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/catalog"),
+            Reply::json(serde_json::json!({"series": [
+                {"id": "GDP", "title": "Gross domestic product"},
+                {"id": "CPI", "title": "Consumer prices"}
+            ]})),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/series/GDP"),
+            Reply::json(serde_json::json!({"title": "GDP", "points": []})),
+        )
+        .await;
+        mock
+    }
+
+    fn catalog() -> DatasetCatalog {
+        let mut c = DatasetCatalog::empty();
+        c.insert(SourceId::Fred, &["echo"], parse_dataset_file(ECHO).unwrap())
+            .unwrap();
+        c
+    }
+
+    fn series_of(adapter: &EchoAdapter, found: &[crate::DiscoveredSeries]) {
+        assert_series_datasets_in(
+            &catalog(),
+            adapter,
+            found
+                .iter()
+                .map(|s| (s.external_id.as_str(), s.dataset.as_ref())),
+        );
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "dataset echo is not declared by the adapter")]
+    async fn discover_fails_on_undeclared_dataset() {
+        let mock = mock().await;
+        let adapter = EchoAdapter::new(mock.base_url())
+            .with_dataset(vec![], SeriesDataset::new("echo", [("id", "")]));
+        assert_discover_ok(&adapter, &test_ctx(), &mock, 1).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "dataset echo is not declared by the adapter")]
+    async fn fetch_fails_on_undeclared_dataset() {
+        let mock = mock().await;
+        let adapter = EchoAdapter::new(mock.base_url())
+            .with_dataset(vec![], SeriesDataset::new("echo", [("id", "")]));
+        assert_fetch_ok(&adapter, &test_ctx(), &mock, "GDP", 0).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "datasets/fred.toml")]
+    async fn declared_dataset_without_definition_fails() {
+        let mock = mock().await;
+        let adapter = EchoAdapter::new(mock.base_url())
+            .with_dataset(vec!["echo"], SeriesDataset::new("echo", [("id", "")]));
+        assert_discover_ok(&adapter, &test_ctx(), &mock, 1).await;
+    }
+
+    #[tokio::test]
+    async fn declared_dataset_with_right_keys_passes() {
+        let mock = mock().await;
+        let adapter = EchoAdapter::new(mock.base_url())
+            .with_dataset(vec!["echo"], SeriesDataset::new("echo", [("id", "")]));
+        let found = adapter.discover(&test_ctx()).await.unwrap();
+        series_of(&adapter, &found);
+        assert_eq!(found[0].dataset.as_ref().unwrap().dimensions["id"], "GDP");
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "wrong dimension keys")]
+    async fn wrong_dimension_keys_fail() {
+        let mock = mock().await;
+        let adapter = EchoAdapter::new(mock.base_url())
+            .with_dataset(vec!["echo"], SeriesDataset::new("echo", [("series", "")]));
+        let found = adapter.discover(&test_ctx()).await.unwrap();
+        series_of(&adapter, &found);
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "have the same dataset echo")]
+    async fn duplicate_dimension_values_fail() {
+        let mock = mock().await;
+        // A fixed `key` dimension instead of `id`, so both series get the same values.
+        let mut c = DatasetCatalog::empty();
+        c.insert(
+            SourceId::Fred,
+            &["echo"],
+            parse_dataset_file(&ECHO.replace("\"id\"", "\"key\"")).unwrap(),
+        )
+        .unwrap();
+        let adapter = EchoAdapter::new(mock.base_url())
+            .with_dataset(vec!["echo"], SeriesDataset::new("echo", [("key", "same")]));
+        let found = adapter.discover(&test_ctx()).await.unwrap();
+        assert_series_datasets_in(
+            &c,
+            &adapter,
+            found
+                .iter()
+                .map(|s| (s.external_id.as_str(), s.dataset.as_ref())),
+        );
+    }
+
+    use crate::SourceAdapter as _;
 }
 
 /// Exercises the optional `malformed_reply` and `setup` arms of the macro.

@@ -11,18 +11,26 @@
 //!
 //! Each file is read once per process and cached, including a failure to read it, so the
 //! worker checks it at startup ([`us_states`]) rather than on its first job.
+//!
+//! Dataset definitions ([`datasets`]) are read once at startup by
+//! [`DatasetCatalog::load`](crate::dataset::DatasetCatalog::load), which keeps them.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use crate::dataset::{parse_dataset_file, DatasetDef};
 use crate::error::CrawlError;
+use crate::source::SourceId;
 
 /// Environment variable naming the reference data directory.
 pub const DATA_DIR_ENV: &str = "CRAWLER_DATA_DIR";
 
 /// File name of the U.S. states table in the data directory.
 pub const US_STATES_FILE: &str = "us_states.csv";
+
+/// Directory under [`data_dir`] holding one `<source>.toml` of dataset definitions per source.
+pub const DATASETS_DIR: &str = "datasets";
 
 /// Rows the states table must hold: the 50 states and DC.
 pub const US_STATE_COUNT: usize = 51;
@@ -58,6 +66,27 @@ pub fn us_states() -> Result<&'static [UsState], CrawlError> {
         .get_or_init(|| load_us_states(&data_dir().join(US_STATES_FILE)))
         .as_deref()
         .map_err(|e| CrawlError::Permanent(e.clone()))
+}
+
+/// The dataset definitions file for `source`: `datasets/<source>.toml` in [`data_dir`], where
+/// `<source>` is the lowercase [`SourceId::as_str`] (e.g. `world_bank.toml`).
+pub fn datasets_file(source: SourceId) -> PathBuf {
+    data_dir()
+        .join(DATASETS_DIR)
+        .join(format!("{}.toml", source.as_str().to_ascii_lowercase()))
+}
+
+/// `source`'s dataset definitions from [`datasets_file`], parsed and validated (not cached).
+///
+/// A missing or invalid file is a `Permanent` error, with the path in the message.
+pub fn datasets(source: SourceId) -> Result<Vec<DatasetDef>, CrawlError> {
+    load_datasets(&datasets_file(source)).map_err(CrawlError::Permanent)
+}
+
+fn load_datasets(path: &Path) -> Result<Vec<DatasetDef>, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("reading {}: {e} (set {DATA_DIR_ENV})", path.display()))?;
+    parse_dataset_file(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Reads, parses and checks a states table.
@@ -190,6 +219,46 @@ mod tests {
         let one = parse_us_states("fips,postal,name\n06,CA,California\n").unwrap();
         let e = check_complete(one).unwrap_err();
         assert!(e.contains("expected 51 rows") && e.contains("got 1"), "{e}");
+    }
+
+    /// Every shipped dataset file parses and validates.
+    #[test]
+    fn shipped_dataset_files_are_valid() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("data")
+            .join(DATASETS_DIR);
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|e| e == "toml") {
+                let stem = path
+                    .file_stem()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_ascii_uppercase();
+                assert!(
+                    stem.parse::<SourceId>().is_ok(),
+                    "{}: not named after a source",
+                    path.display()
+                );
+                load_datasets(&path).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn datasets_file_is_lowercase_source() {
+        assert!(datasets_file(SourceId::WorldBank).ends_with("datasets/world_bank.toml"));
+    }
+
+    /// A missing dataset file names its path and the environment variable.
+    #[test]
+    fn missing_dataset_file_names_path_and_env() {
+        let e = load_datasets(Path::new("/nonexistent/fred.toml")).unwrap_err();
+        assert!(
+            e.contains("/nonexistent/fred.toml") && e.contains(DATA_DIR_ENV),
+            "{e}"
+        );
     }
 
     /// A missing file names its path and the environment variable.

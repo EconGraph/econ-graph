@@ -178,6 +178,7 @@ impl SourceAdapter for CensusAdapter {
                     units: Some("Count".into()),
                     frequency: Some("Annual".into()),
                     data_url: None,
+                    dataset: None,
                 });
             }
         }
@@ -215,6 +216,7 @@ impl SourceAdapter for CensusAdapter {
         Ok(FetchedSeries {
             metadata: None,
             points,
+            dataset: None,
         })
     }
 }
