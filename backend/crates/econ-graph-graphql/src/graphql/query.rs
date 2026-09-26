@@ -146,6 +146,7 @@ impl Query {
             end_date: filter.as_ref().and_then(|f| f.end_date),
             original_only: filter.as_ref().and_then(|f| f.original_only),
             latest_revision_only: filter.as_ref().and_then(|f| f.latest_revision_only),
+            as_of: filter.as_ref().and_then(|f| f.as_of),
             limit: first.map(|f| f as i64),
             offset: after.and_then(|cursor| cursor.parse::<i64>().ok()),
         };
