@@ -544,9 +544,14 @@ mod tests {
             let resp = schema.execute(query).await;
             assert_eq!(resp.errors.len(), 1, "{role:?}: {:?}", resp.errors);
             let msg = &resp.errors[0].message;
+            let expected = if role.is_some() {
+                "Insufficient permissions"
+            } else {
+                "Authentication required"
+            };
             assert!(
-                msg.contains("Authentication required") || msg.contains("Insufficient permissions"),
-                "{role:?}: {msg}"
+                msg.contains(expected),
+                "{role:?}: expected {expected}, got {msg}"
             );
         }
     }
