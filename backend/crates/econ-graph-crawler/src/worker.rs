@@ -40,7 +40,7 @@
 //! alone through `fetch_series`. Each job then keeps its own result: its own persistence, its own
 //! `crawl_attempts` row and its own transition from the table above, so one bad series fails
 //! only its own job. An error for the whole call applies to every job in the batch. The breaker
-//! below counts each batch call as one result: the call's error, else the first per-series
+//! below counts each batch call as one result: the call's error, else any per-series
 //! `RateLimited` or `Auth`, else a success. Every job's lease starts when the batch is claimed,
 //! so `stuck_after` must cover a whole batch, not one job.
 //!
@@ -586,8 +586,8 @@ impl Worker {
             let since = since.flatten();
             let fetched =
                 guarded(async move { adapter.fetch_batch(&ctx, &request, since).await }).await;
-            // One breaker result per upstream call: the call's own error, else a per-series
-            // rate limit or auth failure (which the source applies to the whole call anyway).
+            // One breaker result per upstream call: the call's own error, else any per-series
+            // rate limit or auth failure (only the error kind matters to the breaker).
             let breaker_error = match &fetched {
                 Err(e) => Some(e),
                 Ok(map) => map.values().find_map(|r| match r {

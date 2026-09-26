@@ -1515,3 +1515,27 @@ async fn a_fetch_series_handler_turns_batching_off() {
     assert!(adapter.batch_calls().is_empty());
     assert!(adapter.series_calls().is_empty());
 }
+
+#[tokio::test]
+async fn breaker_counts_one_result_per_batch_call() {
+    let Some(db) = db().await else { return };
+    let adapter = Arc::new(BatchAdapter {
+        batching: true,
+        batch_error: Some(CrawlError::RateLimited { retry_after: None }),
+        ..Default::default()
+    });
+    let mut w = batch_worker(&db.pool, &adapter, 10);
+    w.config.pause_after_consecutive = 2;
+
+    enqueue_fetch(&db.pool, &["t5_kj_1", "t5_kj_2", "t5_kj_3"]).await;
+    assert_eq!(w.run_batch_once().await.expect("claimed").len(), 3);
+    assert!(
+        w.paused_sources().is_empty(),
+        "three rate-limited jobs in one call are one breaker result"
+    );
+
+    enqueue_fetch(&db.pool, &["t5_kk_1", "t5_kk_2"]).await;
+    assert_eq!(w.run_batch_once().await.expect("claimed").len(), 2);
+    assert_eq!(w.paused_sources(), vec![SRC]);
+    assert_eq!(adapter.batch_calls().len(), 2);
+}
