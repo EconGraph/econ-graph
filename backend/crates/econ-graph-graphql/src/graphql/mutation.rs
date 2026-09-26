@@ -666,9 +666,7 @@ mod tests {
             return None;
         };
         let guard = DB_LOCK.lock().await;
-        econ_graph_core::database::run_migrations(&url)
-            .await
-            .expect("migrations");
+        crate::graphql::test_db::migrate_once(&url).await;
         let pool = econ_graph_core::database::create_pool(&url)
             .await
             .expect("pool");

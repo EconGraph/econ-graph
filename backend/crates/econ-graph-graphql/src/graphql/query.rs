@@ -36,6 +36,36 @@ impl Query {
         }
     }
 
+    /// Get an economic series by its source's name and the source's own id for it
+    ///
+    /// `sourceName` is the data source's `name` exactly as `dataSources` returns it (for
+    /// example "Federal Reserve Economic Data (FRED)"), and `externalId` is the source's series
+    /// id (for example "GDP"). Returns null when no such series exists.
+    async fn series_by_external_id(
+        &self,
+        ctx: &Context<'_>,
+        source_name: String,
+        external_id: String,
+    ) -> Result<Option<EconomicSeriesType>> {
+        let pool = ctx.data::<DatabasePool>()?;
+
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+        use econ_graph_core::schema::{data_sources, economic_series};
+
+        let mut conn = pool.get().await?;
+        let series = economic_series::table
+            .inner_join(data_sources::table)
+            .filter(data_sources::name.eq(&source_name))
+            .filter(economic_series::external_id.eq(&external_id))
+            .select(EconomicSeries::as_select())
+            .first::<EconomicSeries>(&mut conn)
+            .await
+            .optional()?;
+
+        Ok(series.map(EconomicSeriesType::from))
+    }
+
     /// List economic series with filtering and pagination
     async fn series_list(
         &self,

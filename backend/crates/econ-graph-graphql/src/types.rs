@@ -161,6 +161,23 @@ impl EconomicSeriesType {
         Ok(count as i32)
     }
 
+    /// The series' newest observation: its latest date, at the newest revision of that date.
+    ///
+    /// Returns null when the series has no data points. The value itself can be null when the
+    /// source published the date without a number. Batched with a dataloader, so a list of
+    /// series costs one query per batch of up to 200 series.
+    async fn latest_observation(&self, ctx: &Context<'_>) -> Result<Option<LatestObservationType>> {
+        let series_uuid = Uuid::parse_str(&self.id)?;
+        let loaders = &ctx
+            .data::<crate::graphql::schema::GraphQLContext>()?
+            .data_loaders;
+        loaders
+            .latest_observation_loader
+            .try_load(series_uuid)
+            .await
+            .map_err(|_| GraphQLError::new("Failed to load the latest observation"))
+    }
+
     /// Fetch data points with filters using a custom DataLoader
     async fn data_points(
         &self,
@@ -286,6 +303,18 @@ impl From<DataPoint> for DataPointType {
             updated_at: data_point.updated_at,
         }
     }
+}
+
+/// The newest observation of a series: its latest date, at the newest revision of that date
+#[derive(SimpleObject, Clone, Debug, PartialEq)]
+#[graphql(name = "LatestObservation")]
+pub struct LatestObservationType {
+    /// Observation date
+    pub date: NaiveDate,
+    /// Value at the newest revision; null when the source published the date without a number
+    pub value: Option<BigDecimal>,
+    /// Publication date of the revision the value comes from
+    pub revision_date: NaiveDate,
 }
 
 /// GraphQL representation of a data source

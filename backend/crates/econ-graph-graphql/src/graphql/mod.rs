@@ -12,7 +12,11 @@ pub mod query;
 pub mod schema;
 
 #[cfg(test)]
+mod latest_observation_tests;
+#[cfg(test)]
 pub mod n_plus_one_tests;
+#[cfg(test)]
+pub(crate) mod test_db;
 
 // Re-export commonly used types
 pub use mutation::Mutation;
