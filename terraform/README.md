@@ -87,6 +87,14 @@ The Terraform configuration deploys a complete production-ready environment incl
 | `kubeconfig_path` | Path to kubeconfig | `"~/.kube/config"` |
 | `fred_api_key` | FRED API key | `""` |
 | `bls_api_key` | BLS API key | `""` |
+| `monitoring_basic_auth` | htpasswd line (`user:bcrypt-hash`) for basic auth in front of Grafana; generate with `htpasswd -nB admin` (prompts for the password). The bcrypt hash contains `$`, so single-quote it when setting `TF_VAR_monitoring_basic_auth`. Empty means no basic auth (Grafana's own login still applies). Sensitive. | `""` |
+
+Credentials have no committed defaults. Pass them through an untracked
+`terraform.tfvars` or `TF_VAR_*` environment variables (for example
+`export TF_VAR_database_password=...`), never through files in git.
+
+`postgres-only.tf` (PostgreSQL alone) requires `database_password` of at least
+16 characters and rejects placeholders such as `password` and `changeme`.
 
 ## Architecture
 
@@ -193,6 +201,8 @@ by `scripts/deploy/deploy.sh` (see `docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md`)
 - **Grafana**: `https://grafana.yourdomain.com`
   - Username: `admin`
   - Password: (generated, see terraform output)
+  - If `monitoring_basic_auth` is set, the ingress asks for that basic-auth
+    login first.
 - **Prometheus**: Internal cluster access only
 
 ## SSL/TLS Configuration
@@ -317,7 +327,7 @@ kubectl exec -it -n econgraph deployment/econgraph-backend -- /bin/bash
 ### Security Headers
 - CSP, HSTS, and other security headers configured
 - Rate limiting on API endpoints
-- Basic auth on monitoring endpoints
+- Optional basic auth on Grafana (set `monitoring_basic_auth`)
 
 ## Maintenance
 

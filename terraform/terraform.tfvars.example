@@ -38,6 +38,13 @@ bls_api_key = "your-bls-api-key-here"
 # enable_dns01_challenge = true
 # cloudflare_api_token = "your-cloudflare-api-token"
 
+# Basic auth in front of Grafana (optional, sensitive). An htpasswd line,
+# generated with: htpasswd -nB admin (prompts for the password).
+# The bcrypt hash contains $, so single-quote it if you set
+# TF_VAR_monitoring_basic_auth in a shell instead.
+# Leave unset to rely on Grafana's own login only.
+# monitoring_basic_auth = "admin:<bcrypt-hash>"
+
 # Monitoring configuration (uncomment to customize)
 # prometheus_retention = "30d"
 # prometheus_storage_size = "50Gi"

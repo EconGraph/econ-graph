@@ -6,10 +6,6 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.23"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.4"
-    }
   }
 }
 
@@ -26,15 +22,14 @@ variable "namespace" {
 }
 
 variable "database_password" {
-  description = "PostgreSQL database password"
+  description = "PostgreSQL database password (required; set via TF_VAR_database_password or an untracked tfvars file)"
   type        = string
-  default     = "password"
-}
+  sensitive   = true
 
-# Generate random password for internal services
-resource "random_password" "database_password" {
-  length  = 32
-  special = true
+  validation {
+    condition     = length(trimspace(var.database_password)) >= 16 && !contains(["password", "changeme"], lower(trimspace(var.database_password)))
+    error_message = "database_password must be a real secret of at least 16 characters, not a placeholder such as \"password\" or \"changeme\"."
+  }
 }
 
 # Create namespace
@@ -53,7 +48,7 @@ module "postgresql" {
   source = "./modules/postgresql"
 
   namespace = kubernetes_namespace.econgraph.metadata[0].name
-  password  = var.database_password != "" ? var.database_password : random_password.database_password.result
+  password  = var.database_password
 
   depends_on = [kubernetes_namespace.econgraph]
 }
@@ -61,7 +56,7 @@ module "postgresql" {
 # Outputs
 output "database_password" {
   description = "PostgreSQL database password"
-  value       = var.database_password != "" ? var.database_password : random_password.database_password.result
+  value       = var.database_password
   sensitive   = true
 }
 

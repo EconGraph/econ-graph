@@ -31,6 +31,18 @@ variable "cloudflare_api_token" {
   default     = ""
 }
 
+variable "monitoring_basic_auth" {
+  description = "htpasswd line (user:bcrypt-hash) for basic auth in front of Grafana, e.g. from `htpasswd -nB admin` (prompts for the password); single-quote it in TF_VAR_monitoring_basic_auth since the hash contains `$`. Empty disables basic auth; Grafana's own login still applies."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+locals {
+  # Only whether the value is set is revealed; count cannot take a sensitive value.
+  monitoring_basic_auth_enabled = nonsensitive(var.monitoring_basic_auth != "")
+}
+
 # Install NGINX Ingress Controller
 resource "helm_release" "nginx_ingress" {
   name       = "nginx-ingress"
@@ -646,20 +658,26 @@ resource "kubernetes_ingress_v1" "monitoring" {
   metadata {
     name      = "monitoring-ingress"
     namespace = "${var.namespace}-monitoring"
-    annotations = {
-      "kubernetes.io/ingress.class"                = "nginx"
-      "nginx.ingress.kubernetes.io/rewrite-target" = "/"
-      "nginx.ingress.kubernetes.io/ssl-redirect"   = "true"
-      "nginx.ingress.kubernetes.io/force-ssl-redirect" = "true"
+    annotations = merge(
+      {
+        "kubernetes.io/ingress.class"                    = "nginx"
+        "nginx.ingress.kubernetes.io/rewrite-target"     = "/"
+        "nginx.ingress.kubernetes.io/ssl-redirect"       = "true"
+        "nginx.ingress.kubernetes.io/force-ssl-redirect" = "true"
 
-      # SSL configuration
-      "cert-manager.io/cluster-issuer" = var.enable_cert_manager ? "letsencrypt-prod" : ""
-
-      # Authentication (basic auth for additional security)
-      "nginx.ingress.kubernetes.io/auth-type" = "basic"
-      "nginx.ingress.kubernetes.io/auth-secret" = "monitoring-auth"
-      "nginx.ingress.kubernetes.io/auth-realm" = "EconGraph Monitoring"
-    }
+        # SSL configuration
+        "cert-manager.io/cluster-issuer" = var.enable_cert_manager ? "letsencrypt-prod" : ""
+      },
+      # Authentication (basic auth for additional security), only when
+      # var.monitoring_basic_auth is set and the Secret below exists.
+      {
+        for k, v in {
+          "nginx.ingress.kubernetes.io/auth-type"   = "basic"
+          "nginx.ingress.kubernetes.io/auth-secret" = "monitoring-auth"
+          "nginx.ingress.kubernetes.io/auth-realm"  = "EconGraph Monitoring"
+        } : k => v if local.monitoring_basic_auth_enabled
+      }
+    )
   }
 
   spec {
@@ -695,16 +713,19 @@ resource "kubernetes_ingress_v1" "monitoring" {
   depends_on = [helm_release.nginx_ingress]
 }
 
-# Basic auth secret for monitoring
+# Basic auth secret for monitoring. Created only when var.monitoring_basic_auth
+# is set. The kubernetes provider base64-encodes `data` itself, so the
+# htpasswd line is passed as plain text.
 resource "kubernetes_secret" "monitoring_auth" {
+  count = local.monitoring_basic_auth_enabled ? 1 : 0
+
   metadata {
     name      = "monitoring-auth"
     namespace = "${var.namespace}-monitoring"
   }
 
   data = {
-    # Username: admin, Password: admin123 (change in production!)
-    auth = base64encode("admin:$2y$10$2b2cu8Fw7FoTN.oJCjRYEuVGmWBJPJgJoJGwFJJEWKCQKCvZKOqiC")
+    auth = var.monitoring_basic_auth
   }
 
   type = "Opaque"
