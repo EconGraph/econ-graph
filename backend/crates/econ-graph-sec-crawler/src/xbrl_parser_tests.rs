@@ -230,9 +230,7 @@ fn test_xbrl_parse_result_creation() {
 fn test_xbrl_parser_config_default() {
     let config = XbrlParserConfig::default();
 
-    assert_eq!(config.arelle_path, PathBuf::from("arelle"));
-    assert_eq!(config.python_env, None);
-    assert_eq!(config.cache_dir, PathBuf::from("/tmp/arelle_cache"));
+    assert_eq!(config.cache_dir, PathBuf::from("/tmp/xbrl_cache"));
     assert_eq!(config.max_file_size, 100 * 1024 * 1024); // 100MB
     assert_eq!(config.parse_timeout, 300); // 5 minutes
     assert!(config.validate_xbrl);
@@ -243,19 +241,14 @@ fn test_xbrl_parser_config_default() {
 #[test]
 fn test_xbrl_parser_config_custom() {
     let config = XbrlParserConfig {
-        arelle_path: PathBuf::from("/custom/arelle"),
-        python_env: Some(PathBuf::from("/custom/python")),
         cache_dir: PathBuf::from("/custom/cache"),
         max_file_size: 200 * 1024 * 1024, // 200MB
         parse_timeout: 600,               // 10 minutes
         validate_xbrl: false,
         extract_taxonomy: false,
         calculate_ratios: false,
-        use_arelle: false,
     };
 
-    assert_eq!(config.arelle_path, PathBuf::from("/custom/arelle"));
-    assert_eq!(config.python_env, Some(PathBuf::from("/custom/python")));
     assert_eq!(config.cache_dir, PathBuf::from("/custom/cache"));
     assert_eq!(config.max_file_size, 200 * 1024 * 1024);
     assert_eq!(config.parse_timeout, 600);
@@ -573,7 +566,6 @@ async fn test_cached_parse_keeps_facts_and_line_items() {
     // not just the statements.
     let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
-        use_arelle: false,
         cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
@@ -586,7 +578,6 @@ async fn test_cached_parse_keeps_facts_and_line_items() {
 
     // Mark the cache entry so the second result can only have come from the cache.
     let cache_file = XbrlCache::new(cache_dir.path().to_path_buf())
-        .for_parser_mode(false, false)
         .get_cache_file_path(&file_path)
         .await
         .unwrap();
@@ -613,7 +604,6 @@ async fn test_changed_document_misses_cache() {
     let cache_dir = TempDir::new().unwrap();
     let work_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
-        use_arelle: false,
         cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
@@ -624,7 +614,7 @@ async fn test_changed_document_misses_cache() {
         .await
         .unwrap();
     fs::write(&file_path, &original).await.unwrap();
-    let cache = XbrlCache::new(cache_dir.path().to_path_buf()).for_parser_mode(false, false);
+    let cache = XbrlCache::new(cache_dir.path().to_path_buf());
     let first_key = cache.get_cache_file_path(&file_path).await.unwrap();
     parser.parse_xbrl_document(&file_path).await.unwrap();
 
@@ -654,41 +644,9 @@ async fn test_changed_document_misses_cache() {
 }
 
 #[tokio::test]
-async fn test_arelle_fallback_is_not_cached() {
-    // Arelle "installed" (the version check passes) but failing on the document: the native
-    // fallback result must not be stored under the Arelle key, or Arelle would never be retried.
-    let cache_dir = TempDir::new().unwrap();
-    let parser = XbrlParser::with_config(XbrlParserConfig {
-        use_arelle: true,
-        arelle_path: PathBuf::from("/bin/echo"),
-        cache_dir: cache_dir.path().to_path_buf(),
-        ..Default::default()
-    })
-    .await
-    .unwrap();
-    let file_path = get_test_data_path("sample_10k.xml");
-
-    let result = parser.parse_xbrl_document(&file_path).await.unwrap();
-    assert!(
-        !result.facts.is_empty(),
-        "native fallback should have parsed"
-    );
-    let key = XbrlCache::new(cache_dir.path().to_path_buf())
-        .for_parser_mode(true, false)
-        .get_cache_file_path(&file_path)
-        .await
-        .unwrap();
-    assert!(
-        !key.exists(),
-        "fallback result was cached under the Arelle key"
-    );
-}
-
-#[tokio::test]
 async fn test_cache_write_leaves_only_the_entry() {
     let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
-        use_arelle: false,
         cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
@@ -699,7 +657,6 @@ async fn test_cache_write_leaves_only_the_entry() {
 
     // Entries are written to a temporary file and renamed into place; no temporary is left.
     let key = XbrlCache::new(cache_dir.path().to_path_buf())
-        .for_parser_mode(false, false)
         .get_cache_file_path(&file_path)
         .await
         .unwrap();
@@ -750,7 +707,6 @@ async fn test_native_parse_compound_units_forever_periods_and_custom_names() {
     fs::write(&file_path, doc).await.unwrap();
     let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
-        use_arelle: false,
         cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
@@ -799,7 +755,6 @@ async fn test_native_parse_reads_prefixed_contexts_and_units() {
     // member inside each entity. Those used to be skipped, and read as facts instead.
     let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
-        use_arelle: false,
         cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
@@ -853,7 +808,7 @@ async fn test_same_bytes_at_another_path_miss_cache() {
     // Parsed statements carry generated ids, so a copy of a document gets its own entry.
     let cache_dir = TempDir::new().unwrap();
     let work_dir = TempDir::new().unwrap();
-    let cache = XbrlCache::new(cache_dir.path().to_path_buf()).for_parser_mode(false, false);
+    let cache = XbrlCache::new(cache_dir.path().to_path_buf());
     let content = fs::read(get_test_data_path("sample_10k.xml"))
         .await
         .unwrap();
@@ -865,18 +820,6 @@ async fn test_same_bytes_at_another_path_miss_cache() {
         cache.get_cache_file_path(&a).await.unwrap(),
         cache.get_cache_file_path(&b).await.unwrap()
     );
-
-    // Each parser mode keys separately too.
-    let arelle = XbrlCache::new(cache_dir.path().to_path_buf()).for_parser_mode(true, false);
-    let arelle_dts = XbrlCache::new(cache_dir.path().to_path_buf()).for_parser_mode(true, true);
-    let keys = [
-        cache.get_cache_file_path(&a).await.unwrap(),
-        arelle.get_cache_file_path(&a).await.unwrap(),
-        arelle_dts.get_cache_file_path(&a).await.unwrap(),
-    ];
-    assert_ne!(keys[0], keys[1]);
-    assert_ne!(keys[1], keys[2]);
-    assert_ne!(keys[0], keys[2]);
 }
 
 #[tokio::test]
@@ -885,7 +828,6 @@ async fn test_unreadable_cache_entry_is_a_miss() {
     // off mid-write (invalid UTF-8), must not break parsing; they're re-parsed and replaced.
     let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
-        use_arelle: false,
         cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
@@ -894,7 +836,6 @@ async fn test_unreadable_cache_entry_is_a_miss() {
     let file_path = get_test_data_path("sample_10k.xml");
     parser.parse_xbrl_document(&file_path).await.unwrap();
     let cache_file = XbrlCache::new(cache_dir.path().to_path_buf())
-        .for_parser_mode(false, false)
         .get_cache_file_path(&file_path)
         .await
         .unwrap();
@@ -916,7 +857,6 @@ async fn test_parse_real_apple_xbrl_file() {
     // A fresh cache, so an entry left by an older parser can't stand in for this one's output.
     let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
-        use_arelle: false, // Use native parsing for testing
         cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
@@ -977,7 +917,6 @@ async fn test_parse_sample_xbrl_file() {
     // A fresh cache, so an entry left by an older parser can't stand in for this one's output.
     let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
-        use_arelle: false, // Use native parsing for testing
         cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
@@ -1038,7 +977,6 @@ async fn test_parse_real_jpmorgan_bank_xbrl_file() {
     // A fresh cache, so an entry left by an older parser can't stand in for this one's output.
     let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
-        use_arelle: false, // Use native parsing for testing
         cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
@@ -1113,7 +1051,6 @@ async fn test_parse_real_chevron_oil_company_xbrl_file() {
     // A fresh cache, so an entry left by an older parser can't stand in for this one's output.
     let cache_dir = TempDir::new().unwrap();
     let parser = XbrlParser::with_config(XbrlParserConfig {
-        use_arelle: false, // Use native parsing for testing
         cache_dir: cache_dir.path().to_path_buf(),
         ..Default::default()
     })
@@ -1189,7 +1126,6 @@ async fn test_parse_real_chevron_oil_company_xbrl_file() {
 #[tokio::test]
 async fn test_xbrl_file_detection() {
     let parser = XbrlParser::with_config(XbrlParserConfig {
-        use_arelle: false,
         ..Default::default()
     })
     .await
@@ -1221,60 +1157,5 @@ async fn test_xbrl_file_detection() {
     if chevron_path.exists() {
         let doc_type = parser.detect_document_type(&chevron_path).await.unwrap();
         assert_eq!(doc_type, DocumentType::Xbrl);
-    }
-}
-
-#[tokio::test]
-async fn test_arelle_integration() {
-    // Test Arelle integration with real XBRL file
-    let parser = XbrlParser::with_config(XbrlParserConfig {
-        use_arelle: true, // Use Arelle for comprehensive parsing
-        ..Default::default()
-    })
-    .await;
-
-    // If Arelle is not available, skip the test
-    if parser.is_err() {
-        println!("Skipping Arelle integration test - Arelle not available");
-        return;
-    }
-
-    let parser = parser.unwrap();
-    let file_path = get_test_data_path("apple_2025_q3_10q.xml");
-
-    // Check if the file exists
-    if !file_path.exists() {
-        println!(
-            "Skipping test - real XBRL file not found at {:?}",
-            file_path
-        );
-        return;
-    }
-
-    let result = parser.parse_xbrl_document(&file_path).await;
-
-    // Arelle parsing should work if available
-    match result {
-        Ok(parse_result) => {
-            println!("Arelle parsing successful!");
-            println!("Found {} statements", parse_result.statements.len());
-            println!("Found {} facts", parse_result.facts.len());
-            println!("Found {} contexts", parse_result.contexts.len());
-            println!("Found {} units", parse_result.units.len());
-            println!(
-                "Found {} taxonomy concepts",
-                parse_result.taxonomy_concepts.len()
-            );
-
-            // Basic assertions
-            assert!(!parse_result.facts.is_empty(), "Should extract facts");
-            assert!(!parse_result.contexts.is_empty(), "Should extract contexts");
-            assert!(!parse_result.units.is_empty(), "Should extract units");
-        }
-        Err(e) => {
-            // If Arelle fails, it's not necessarily a test failure
-            // Could be due to missing dependencies or network issues
-            println!("Arelle parsing failed (this may be expected): {}", e);
-        }
     }
 }

@@ -9,9 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 use tokio::fs;
-use tokio::process::Command as AsyncCommand;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use xml::reader::{EventReader, XmlEvent};
@@ -19,20 +17,14 @@ use xml::reader::{EventReader, XmlEvent};
 use crate::models::{StoredXbrlDocument, XbrlStorageStats};
 use bigdecimal::BigDecimal;
 use econ_graph_core::database::DatabasePool;
-use econ_graph_core::enums::{CompressionType, ProcessingStatus, StatementSection, StatementType};
+use econ_graph_core::enums::{StatementSection, StatementType};
 use econ_graph_core::models::{Company, FinancialLineItem, FinancialStatement};
 
 /// **XBRL Parser Configuration**
 ///
-/// Configuration for XBRL parsing using Arelle software.
+/// Configuration for the native XBRL parser.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct XbrlParserConfig {
-    /// Path to Arelle executable
-    pub arelle_path: PathBuf,
-
-    /// Python environment for Arelle
-    pub python_env: Option<PathBuf>,
-
     /// Cache directory for parsed data
     pub cache_dir: PathBuf,
 
@@ -50,23 +42,17 @@ pub struct XbrlParserConfig {
 
     /// Whether to calculate financial ratios
     pub calculate_ratios: bool,
-
-    /// Whether to use Arelle for parsing (false = native XML parsing)
-    pub use_arelle: bool,
 }
 
 impl Default for XbrlParserConfig {
     fn default() -> Self {
         Self {
-            arelle_path: PathBuf::from("arelle"),
-            python_env: None,
-            cache_dir: PathBuf::from("/tmp/arelle_cache"),
+            cache_dir: PathBuf::from("/tmp/xbrl_cache"),
             max_file_size: 100 * 1024 * 1024, // 100MB
             parse_timeout: 300,               // 5 minutes
             validate_xbrl: true,
             extract_taxonomy: true,
             calculate_ratios: true,
-            use_arelle: true,
         }
     }
 }
@@ -109,6 +95,7 @@ pub struct XbrlParser {
     taxonomy_cache: TaxonomyCache,
     statement_mapper: StatementMapper,
     fact_validator: FactValidator,
+    /// Not read yet: kept for DTS-aware parsing, which the `xbrl-parser` feature work picks up.
     dts_manager: Option<crate::dts_manager::DtsManager>,
 }
 
@@ -133,13 +120,7 @@ impl XbrlParser {
             .await
             .context("Failed to create cache directory")?;
 
-        // Verify Arelle is available only if using Arelle
-        if config.use_arelle {
-            Self::verify_arelle_installation(&config).await?;
-        }
-
-        let cache = XbrlCache::new(config.cache_dir.clone())
-            .for_parser_mode(config.use_arelle, pool.is_some());
+        let cache = XbrlCache::new(config.cache_dir.clone());
         let taxonomy_cache = TaxonomyCache::new();
         let statement_mapper = StatementMapper::new();
         let fact_validator = FactValidator::new();
@@ -168,34 +149,6 @@ impl XbrlParser {
         })
     }
 
-    /// Verify that Arelle is properly installed and accessible
-    async fn verify_arelle_installation(config: &XbrlParserConfig) -> Result<()> {
-        let mut cmd = if let Some(ref python_env) = config.python_env {
-            let mut cmd = AsyncCommand::new(python_env);
-            cmd.arg(&config.arelle_path);
-            cmd
-        } else {
-            AsyncCommand::new(&config.arelle_path)
-        };
-
-        let output = cmd
-            .arg("--version")
-            .output()
-            .await
-            .context("Failed to execute Arelle command")?;
-
-        if !output.status.success() {
-            return Err(anyhow::anyhow!(
-                "Arelle installation verification failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
-        let version = String::from_utf8_lossy(&output.stdout);
-        info!("Arelle version: {}", version.trim());
-        Ok(())
-    }
-
     /// Parse an XBRL document and extract comprehensive financial data
     pub async fn parse_xbrl_document(&self, xbrl_file: &Path) -> Result<XbrlParseResult> {
         info!("Parsing XBRL document: {:?}", xbrl_file);
@@ -221,20 +174,15 @@ impl XbrlParser {
         let document_type = self.detect_document_type(xbrl_file).await?;
         info!("Detected document type: {:?}", document_type);
 
-        let (parse_result, cacheable) = match document_type {
-            DocumentType::Xbrl => self.parse_xbrl_document_internal(xbrl_file).await?,
-            DocumentType::Ixbrl => (self.parse_ixbrl_document(xbrl_file).await?, true),
-            DocumentType::HtmlEmbedded => (self.parse_html_embedded_xbrl(xbrl_file).await?, true),
+        let parse_result = match document_type {
+            DocumentType::Xbrl => self.parse_xbrl_native(xbrl_file).await?,
+            DocumentType::Ixbrl => self.parse_ixbrl_document(xbrl_file).await?,
+            DocumentType::HtmlEmbedded => self.parse_html_embedded_xbrl(xbrl_file).await?,
         };
 
         // Cache the result, unless the file changed while it was being parsed (the result might
         // then come from either version, so it belongs under neither key).
-        if !cacheable {
-            warn!(
-                "{:?} fell back to the native parser; not caching the result",
-                xbrl_file
-            );
-        } else if self.cache.get_cache_file_path(xbrl_file).await? == cache_file {
+        if self.cache.get_cache_file_path(xbrl_file).await? == cache_file {
             self.cache.write_entry(&cache_file, &parse_result).await?;
         } else {
             warn!(
@@ -260,52 +208,6 @@ impl XbrlParser {
             // Default to XBRL for unknown formats
             Ok(DocumentType::Xbrl)
         }
-    }
-
-    /// Parse standard XBRL document. Also returns whether the result may be cached: a native
-    /// fallback after Arelle failed may not, since it would sit under the Arelle cache key and
-    /// stop Arelle from being retried.
-    async fn parse_xbrl_document_internal(
-        &self,
-        xbrl_file: &Path,
-    ) -> Result<(XbrlParseResult, bool)> {
-        // First, try Arelle for comprehensive parsing
-        if self.config.use_arelle {
-            match self.parse_with_arelle(xbrl_file).await {
-                Ok(statements) => {
-                    let result = XbrlParseResult {
-                        statements,
-                        line_items: Vec::new(),
-                        taxonomy_concepts: Vec::new(),
-                        contexts: Vec::new(),
-                        units: Vec::new(),
-                        facts: Vec::new(),
-                        validation_report: ValidationReport {
-                            is_valid: true,
-                            errors: Vec::new(),
-                            warnings: Vec::new(),
-                        },
-                        processing_metadata: ProcessingMetadata {
-                            document_type: DocumentType::Xbrl,
-                            file_size: 0,
-                            processing_time: std::time::Duration::from_millis(0),
-                            errors: Vec::new(),
-                            warnings: Vec::new(),
-                        },
-                    };
-                    return Ok((result, true));
-                }
-                Err(e) => {
-                    warn!(
-                        "Arelle parsing failed, falling back to native parser: {}",
-                        e
-                    );
-                    return Ok((self.parse_xbrl_native(xbrl_file).await?, false));
-                }
-            }
-        }
-
-        Ok((self.parse_xbrl_native(xbrl_file).await?, true))
     }
 
     /// Parse iXBRL (inline XBRL) document
@@ -362,7 +264,7 @@ impl XbrlParser {
         self.parse_xbrl_content(&xbrl_content).await
     }
 
-    /// Native XBRL parsing without Arelle dependency
+    /// Parse a standard XBRL instance document
     async fn parse_xbrl_native(&self, xbrl_file: &Path) -> Result<XbrlParseResult> {
         info!("Parsing XBRL document natively: {:?}", xbrl_file);
 
@@ -417,234 +319,9 @@ impl XbrlParser {
         })
     }
 
-    /// Parse XBRL document using Arelle with DTS support
-    async fn parse_with_arelle(&self, xbrl_file: &Path) -> Result<Vec<FinancialStatement>> {
-        let temp_output = self
-            .config
-            .cache_dir
-            .join(format!("output_{}.json", Uuid::new_v4()));
-
-        // Determine which script to use based on DTS manager availability
-        let script_path = if self.dts_manager.is_some() {
-            // Use simplified script with DTS support
-            let mut script_path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            script_path
-                .push("backend/crates/econ-graph-sec-crawler/scripts/simple_arelle_parser.py");
-            script_path
-        } else {
-            // Use basic script (fallback)
-            let mut script_path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            script_path.push("test_arelle.py");
-            script_path
-        };
-
-        let mut cmd = AsyncCommand::new("python3");
-        cmd.arg(script_path).arg(xbrl_file);
-
-        // Add taxonomy cache directory if using enhanced script
-        if self.dts_manager.is_some() {
-            if let Some(ref dts_manager) = self.dts_manager {
-                cmd.arg(dts_manager.get_cache_dir());
-            }
-        }
-
-        cmd.arg(&temp_output);
-
-        // Set timeout
-        cmd.kill_on_drop(true);
-
-        debug!("Executing Arelle command with DTS support: {:?}", cmd);
-
-        let output = tokio::time::timeout(
-            std::time::Duration::from_secs(self.config.parse_timeout),
-            cmd.output(),
-        )
-        .await
-        .context("Arelle parsing timed out")?
-        .context("Failed to execute Arelle command")?;
-
-        if !output.status.success() {
-            let error_msg = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!("Arelle parsing failed: {}", error_msg));
-        }
-
-        // Read and parse the output
-        let output_content = fs::read_to_string(&temp_output)
-            .await
-            .context("Failed to read Arelle output")?;
-
-        // Clean up temporary file
-        let _ = fs::remove_file(&temp_output).await;
-
-        // Parse the JSON output
-        let arelle_result: ArelleParseResult =
-            serde_json::from_str(&output_content).context("Failed to parse Arelle JSON output")?;
-
-        // Convert to our financial statement format
-        self.convert_arelle_result(arelle_result)
-    }
-
-    /// Convert Arelle parsing result to our financial statement format
-    fn convert_arelle_result(&self, result: ArelleParseResult) -> Result<Vec<FinancialStatement>> {
-        let mut statements = Vec::new();
-
-        // Group facts by context to create financial statements
-        let mut contexts: std::collections::HashMap<String, Vec<XbrlFact>> =
-            std::collections::HashMap::new();
-
-        for fact in result.facts {
-            let context_id = fact.context_ref.clone();
-            contexts.entry(context_id).or_default().push(fact);
-        }
-
-        for (context_id, facts) in contexts {
-            if let Some(statement) =
-                self.create_financial_statement_from_facts(&context_id, facts)?
-            {
-                statements.push(statement);
-            }
-        }
-
-        Ok(statements)
-    }
-
-    /// Create a financial statement from XBRL facts
-    fn create_financial_statement_from_facts(
-        &self,
-        context_id: &str,
-        facts: Vec<XbrlFact>,
-    ) -> Result<Option<FinancialStatement>> {
-        // This is a simplified implementation
-        // In practice, you'd need to map XBRL contexts to financial statement periods
-        // and organize facts by statement type (income statement, balance sheet, etc.)
-
-        if facts.is_empty() {
-            return Ok(None);
-        }
-
-        // Extract period information from context
-        let first_fact = &facts[0];
-        let period_end_date = self.extract_period_end_date(&first_fact.context_ref)?;
-        let fiscal_year = period_end_date.year();
-        let fiscal_quarter = self.get_fiscal_quarter(&period_end_date);
-
-        // Create financial statement
-        let statement = FinancialStatement {
-            id: Uuid::new_v4(),
-            company_id: Uuid::new_v4(), // This should be determined from the filing
-            filing_type: "10-K".to_string(), // This should be determined from the filing
-            form_type: "10-K".to_string(), // This should be determined from the filing
-            accession_number: "unknown".to_string(), // This should be determined from the filing
-            filing_date: chrono::Utc::now().date_naive(),
-            period_end_date,
-            fiscal_year,
-            fiscal_quarter,
-            document_type: "XBRL".to_string(),
-            document_url: "unknown".to_string(), // This should be determined from the filing
-            xbrl_file_oid: None,
-            xbrl_file_content: None,
-            xbrl_file_size_bytes: None,
-            xbrl_file_compressed: false,
-            xbrl_file_compression_type: CompressionType::None,
-            xbrl_file_hash: Some("".to_string()),
-            xbrl_processing_status: ProcessingStatus::Completed,
-            xbrl_processing_error: None,
-            xbrl_processing_started_at: None,
-            xbrl_processing_completed_at: Some(Utc::now()),
-            is_amended: false,
-            amendment_type: None,
-            original_filing_date: None,
-            is_restated: false,
-            restatement_reason: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-
-        Ok(Some(statement))
-    }
-
-    /// Extract period end date from XBRL context
-    fn extract_period_end_date(&self, _context_ref: &str) -> Result<chrono::NaiveDate> {
-        // This is a simplified implementation
-        // In practice, you'd need to parse the XBRL context to extract the period end date
-        Ok(chrono::Utc::now().date_naive())
-    }
-
-    /// Get fiscal quarter from date
-    fn get_fiscal_quarter(&self, date: &chrono::NaiveDate) -> Option<i32> {
-        let month = date.month();
-        match month {
-            1..=3 => Some(1),
-            4..=6 => Some(2),
-            7..=9 => Some(3),
-            10..=12 => Some(4),
-            _ => None,
-        }
-    }
-
-    /// Extract financial line items from XBRL facts
-    pub async fn extract_line_items(&self, xbrl_file: &Path) -> Result<Vec<FinancialLineItem>> {
-        let statements = self.parse_xbrl_document(xbrl_file).await?;
-        let mut line_items = Vec::new();
-
-        for statement in statements.statements {
-            // This is a simplified implementation
-            // In practice, you'd extract line items from the XBRL facts
-            // and map them to standardized financial statement line items
-        }
-
-        Ok(line_items)
-    }
-
-    /// Validate XBRL document
+    /// Validate an XBRL document by parsing it and checking its facts
     pub async fn validate_xbrl_document(&self, xbrl_file: &Path) -> Result<ValidationReport> {
-        let mut cmd = if let Some(ref python_env) = self.config.python_env {
-            let mut cmd = AsyncCommand::new(python_env);
-            cmd.arg(&self.config.arelle_path);
-            cmd
-        } else {
-            AsyncCommand::new(&self.config.arelle_path)
-        };
-
-        cmd.arg("--file").arg(xbrl_file).arg("--validate");
-
-        let output = cmd
-            .output()
-            .await
-            .context("Failed to execute Arelle validation")?;
-
-        let is_valid = output.status.success();
-        let errors = if is_valid {
-            Vec::new()
-        } else {
-            vec![String::from_utf8_lossy(&output.stderr).to_string()]
-        };
-
-        Ok(ValidationReport {
-            is_valid,
-            errors,
-            warnings: Vec::new(), // Arelle doesn't provide warnings in this format
-        })
-    }
-
-    /// Extract taxonomy concepts from XBRL document
-    pub async fn extract_taxonomy_concepts(
-        &self,
-        xbrl_file: &Path,
-    ) -> Result<Vec<TaxonomyConcept>> {
-        // This would use Arelle to extract taxonomy concepts
-        // For now, return empty vector
-        Ok(Vec::new())
-    }
-
-    /// Calculate financial ratios from parsed statements
-    pub async fn calculate_financial_ratios(
-        &self,
-        statements: &[FinancialStatement],
-    ) -> Result<Vec<FinancialRatio>> {
-        // This would calculate common financial ratios
-        // For now, return empty vector
-        Ok(Vec::new())
+        Ok(self.parse_xbrl_document(xbrl_file).await?.validation_report)
     }
 }
 
@@ -654,8 +331,6 @@ impl XbrlParser {
 #[derive(Debug, Clone)]
 pub struct XbrlCache {
     cache_dir: PathBuf,
-    /// Parser mode baked into cache keys, so Arelle and native results don't mix.
-    mode: &'static str,
 }
 
 /// Version of the parse output stored in [`XbrlCache`] entries. Bump it whenever a parser change
@@ -664,21 +339,7 @@ const XBRL_CACHE_VERSION: u32 = 2;
 
 impl XbrlCache {
     pub fn new(cache_dir: PathBuf) -> Self {
-        Self {
-            cache_dir,
-            mode: "native",
-        }
-    }
-
-    /// Key entries by parser mode (native, Arelle, or Arelle with a DTS manager, whose scripts
-    /// differ) as well as by document.
-    pub fn for_parser_mode(mut self, use_arelle: bool, has_dts_manager: bool) -> Self {
-        self.mode = match (use_arelle, has_dts_manager) {
-            (true, true) => "arelle-dts",
-            (true, false) => "arelle",
-            (false, _) => "native",
-        };
-        self
+        Self { cache_dir }
     }
 
     /// The cached parse of `xbrl_file`, or `None` on a miss.
@@ -734,7 +395,7 @@ impl XbrlCache {
         Ok(())
     }
 
-    /// Cache file for `xbrl_file`: named by the parser mode, [`XBRL_CACHE_VERSION`] and a hash of
+    /// Cache file for `xbrl_file`: named by [`XBRL_CACHE_VERSION`] and a hash of
     /// the document's path and content. The path is part of the key because parsed statements carry generated ids, so two
     /// documents with the same bytes must not share a result; the content is part of it so a
     /// replaced document misses.
@@ -745,57 +406,16 @@ impl XbrlCache {
         hasher.consume([0u8]);
         hasher.consume(&content);
         Ok(self.cache_dir.join(format!(
-            "{}-v{}-{:x}.json",
-            self.mode,
+            "native-v{}-{:x}.json",
             XBRL_CACHE_VERSION,
             hasher.finalize()
         )))
     }
 }
 
-/// **Arelle Parse Result**
-///
-/// Structure for Arelle JSON output.
-#[derive(Debug, Clone, Deserialize)]
-struct ArelleParseResult {
-    facts: Vec<XbrlFact>,
-    contexts: Vec<XbrlContext>,
-    units: Vec<XbrlUnit>,
-    taxonomy_concepts: Option<Vec<TaxonomyConcept>>,
-    dts_references: Option<Vec<DtsReference>>,
-    taxonomy_mapping: Option<HashMap<String, String>>,
-    success: Option<bool>,
-    metadata: Option<ArelleMetadata>,
-}
-
-/// **Arelle Metadata**
-///
-/// Metadata from Arelle parsing.
-#[derive(Debug, Clone, Deserialize)]
-struct ArelleMetadata {
-    instance_file: Option<String>,
-    temp_directory: Option<String>,
-    facts_count: Option<usize>,
-    contexts_count: Option<usize>,
-    units_count: Option<usize>,
-    concepts_count: Option<usize>,
-    dts_references_count: Option<usize>,
-}
-
-/// **DTS Reference**
-///
-/// DTS reference from Arelle output.
-#[derive(Debug, Clone, Deserialize)]
-struct DtsReference {
-    reference_type: String,
-    href: String,
-    role: Option<String>,
-    arcrole: Option<String>,
-}
-
 /// **XBRL Fact**
 ///
-/// Individual XBRL fact from Arelle output.
+/// Individual XBRL fact.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct XbrlFact {
     pub concept: String,
@@ -811,7 +431,7 @@ pub struct XbrlFact {
 
 /// **XBRL Context**
 ///
-/// XBRL context from Arelle output.
+/// XBRL context.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct XbrlContext {
     pub id: String,
@@ -2060,15 +1680,6 @@ impl XbrlParser {
 mod tests {
     use super::*;
     use std::path::Path;
-
-    #[tokio::test]
-    async fn test_xbrl_parser_creation() {
-        // This test would require Arelle to be installed
-        // For now, just test that the parser can be created
-        let config = XbrlParserConfig::default();
-        // Note: This will fail if Arelle is not installed
-        // In a real test environment, you'd mock the Arelle dependency
-    }
 
     #[tokio::test]
     async fn test_validation_report() {
