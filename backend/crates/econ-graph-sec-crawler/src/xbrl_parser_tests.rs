@@ -313,9 +313,29 @@ async fn test_xbrl_cache_operations() {
         .await
         .expect("Failed to write test file");
 
-    // Test storing and retrieving
+    // Test storing and retrieving a full parse result
+    let test_result = XbrlParseResult {
+        statements: test_statements,
+        line_items: Vec::new(),
+        taxonomy_concepts: Vec::new(),
+        contexts: Vec::new(),
+        units: Vec::new(),
+        facts: Vec::new(),
+        validation_report: ValidationReport {
+            is_valid: true,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        },
+        processing_metadata: ProcessingMetadata {
+            document_type: DocumentType::Xbrl,
+            file_size: 12,
+            processing_time: std::time::Duration::from_millis(5),
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        },
+    };
     cache
-        .store_parsed_result(&test_file, &test_statements)
+        .store_parsed_result(&test_file, &test_result)
         .await
         .expect("Failed to store result");
     let retrieved = cache
@@ -324,9 +344,10 @@ async fn test_xbrl_cache_operations() {
         .expect("Failed to retrieve result");
 
     assert!(retrieved.is_some());
-    let retrieved_statements = retrieved.unwrap();
-    assert_eq!(retrieved_statements.len(), 1);
-    assert_eq!(retrieved_statements[0].form_type, "10-K");
+    let retrieved = retrieved.unwrap();
+    assert_eq!(retrieved.statements.len(), 1);
+    assert_eq!(retrieved.statements[0].form_type, "10-K");
+    assert_eq!(retrieved.processing_metadata.file_size, 12);
 }
 
 #[tokio::test]
@@ -544,6 +565,60 @@ fn get_test_data_path(file_name: &str) -> PathBuf {
     path.push("test_data");
     path.push(file_name);
     path
+}
+
+#[tokio::test]
+async fn test_cached_parse_keeps_facts_and_line_items() {
+    // A second parse of the same file is served from the cache and must return the same data,
+    // not just the statements.
+    let cache_dir = TempDir::new().unwrap();
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        use_arelle: false,
+        cache_dir: cache_dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let file_path = get_test_data_path("sample_10k.xml");
+
+    let first = parser.parse_xbrl_document(&file_path).await.unwrap();
+    assert!(!first.facts.is_empty(), "sample should have facts");
+    let second = parser.parse_xbrl_document(&file_path).await.unwrap();
+
+    assert_eq!(second.facts.len(), first.facts.len());
+    assert_eq!(second.line_items.len(), first.line_items.len());
+    assert_eq!(second.statements.len(), first.statements.len());
+    assert_eq!(second.contexts.len(), first.contexts.len());
+    assert_eq!(second.units.len(), first.units.len());
+}
+
+#[tokio::test]
+async fn test_unreadable_cache_entry_is_a_miss() {
+    // Entries written before the cache stored full results (a bare statements array) must not
+    // break parsing.
+    let cache_dir = TempDir::new().unwrap();
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        use_arelle: false,
+        cache_dir: cache_dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let file_path = get_test_data_path("sample_10k.xml");
+    parser.parse_xbrl_document(&file_path).await.unwrap();
+
+    let mut entries = fs::read_dir(cache_dir.path()).await.unwrap();
+    let mut rewritten = 0;
+    while let Some(entry) = entries.next_entry().await.unwrap() {
+        if entry.path().extension().is_some_and(|e| e == "json") {
+            fs::write(entry.path(), "[]").await.unwrap();
+            rewritten += 1;
+        }
+    }
+    assert_eq!(rewritten, 1);
+
+    let result = parser.parse_xbrl_document(&file_path).await.unwrap();
+    assert!(!result.facts.is_empty(), "stale entry should be re-parsed");
 }
 
 #[tokio::test]

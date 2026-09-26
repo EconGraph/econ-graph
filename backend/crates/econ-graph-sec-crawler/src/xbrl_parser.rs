@@ -209,28 +209,9 @@ impl XbrlParser {
         }
 
         // Check cache first
-        if let Some(cached_statements) = self.cache.get_parsed_result(xbrl_file).await? {
+        if let Some(cached) = self.cache.get_parsed_result(xbrl_file).await? {
             info!("Using cached parsing result for {:?}", xbrl_file);
-            return Ok(XbrlParseResult {
-                statements: cached_statements,
-                line_items: Vec::new(), // Cache doesn't store line items
-                taxonomy_concepts: Vec::new(), // Cache doesn't store taxonomy concepts
-                contexts: Vec::new(),   // Cache doesn't store contexts
-                units: Vec::new(),      // Cache doesn't store units
-                facts: Vec::new(),      // Cache doesn't store facts
-                validation_report: ValidationReport {
-                    is_valid: true,
-                    errors: Vec::new(),
-                    warnings: Vec::new(),
-                },
-                processing_metadata: ProcessingMetadata {
-                    document_type: DocumentType::Xbrl,
-                    file_size: 0,
-                    processing_time: std::time::Duration::from_millis(0),
-                    errors: Vec::new(),
-                    warnings: Vec::new(),
-                },
-            });
+            return Ok(cached);
         }
 
         // Detect document type and parse accordingly
@@ -245,7 +226,7 @@ impl XbrlParser {
 
         // Cache the result
         self.cache
-            .store_parsed_result(xbrl_file, &parse_result.statements)
+            .store_parsed_result(xbrl_file, &parse_result)
             .await?;
 
         Ok(parse_result)
@@ -660,10 +641,10 @@ impl XbrlCache {
         Self { cache_dir }
     }
 
-    pub async fn get_parsed_result(
-        &self,
-        xbrl_file: &Path,
-    ) -> Result<Option<Vec<FinancialStatement>>> {
+    /// The cached parse of `xbrl_file`, or `None` on a miss. A cache file that no longer
+    /// deserializes (for example one written by an older version that only stored statements)
+    /// counts as a miss, so the document is parsed again and the entry overwritten.
+    pub async fn get_parsed_result(&self, xbrl_file: &Path) -> Result<Option<XbrlParseResult>> {
         let cache_file = self.get_cache_file_path(xbrl_file);
 
         if !cache_file.exists() {
@@ -671,14 +652,23 @@ impl XbrlCache {
         }
 
         let content = fs::read_to_string(&cache_file).await?;
-        let result: Vec<FinancialStatement> = serde_json::from_str(&content)?;
-        Ok(Some(result))
+        match serde_json::from_str(&content) {
+            Ok(result) => Ok(Some(result)),
+            Err(e) => {
+                warn!(
+                    "Ignoring unreadable XBRL cache entry {:?}: {}",
+                    cache_file, e
+                );
+                Ok(None)
+            }
+        }
     }
 
+    /// Cache the full parse result (statements, line items, facts, contexts, units, ...).
     pub async fn store_parsed_result(
         &self,
         xbrl_file: &Path,
-        result: &[FinancialStatement],
+        result: &XbrlParseResult,
     ) -> Result<()> {
         let cache_file = self.get_cache_file_path(xbrl_file);
         let content = serde_json::to_string_pretty(result)?;

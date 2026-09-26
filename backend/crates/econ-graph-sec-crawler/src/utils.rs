@@ -142,29 +142,30 @@ pub fn format_file_size(bytes: u64) -> String {
 pub fn parse_file_size(size_str: &str) -> Result<u64> {
     let size_str = size_str.trim().to_uppercase();
 
-    if size_str.ends_with("B") {
-        let number_part = &size_str[..size_str.len() - 1];
-        let number: f64 = number_part
-            .parse()
-            .map_err(|_| anyhow::anyhow!("Invalid file size format: {}", size_str))?;
+    // Longest suffix first so "1KB" isn't read as "1K" bytes. No unit means bytes.
+    const UNITS: [(&str, f64); 5] = [
+        ("TB", 1024.0 * 1024.0 * 1024.0 * 1024.0),
+        ("GB", 1024.0 * 1024.0 * 1024.0),
+        ("MB", 1024.0 * 1024.0),
+        ("KB", 1024.0),
+        ("B", 1.0),
+    ];
+    let (number_part, multiplier) = UNITS
+        .iter()
+        .find_map(|(unit, multiplier)| {
+            size_str
+                .strip_suffix(unit)
+                .map(|number| (number.trim(), *multiplier))
+        })
+        .unwrap_or((size_str.as_str(), 1.0));
 
-        if size_str.ends_with("TB") {
-            Ok((number * 1024.0 * 1024.0 * 1024.0 * 1024.0) as u64)
-        } else if size_str.ends_with("GB") {
-            Ok((number * 1024.0 * 1024.0 * 1024.0) as u64)
-        } else if size_str.ends_with("MB") {
-            Ok((number * 1024.0 * 1024.0) as u64)
-        } else if size_str.ends_with("KB") {
-            Ok((number * 1024.0) as u64)
-        } else {
-            Ok(number as u64)
-        }
-    } else {
-        // Assume bytes if no unit specified
-        Ok(size_str
-            .parse()
-            .map_err(|_| anyhow::anyhow!("Invalid file size format: {}", size_str))?)
+    let number: f64 = number_part
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid file size format: {}", size_str))?;
+    if !number.is_finite() || number < 0.0 {
+        return Err(anyhow::anyhow!("Invalid file size format: {}", size_str));
     }
+    Ok((number * multiplier) as u64)
 }
 
 /// **Retry Utilities**
@@ -323,6 +324,13 @@ mod tests {
         assert_eq!(parse_file_size("1KB").unwrap(), 1024);
         assert_eq!(parse_file_size("1MB").unwrap(), 1048576);
         assert_eq!(parse_file_size("1GB").unwrap(), 1073741824);
+        assert_eq!(parse_file_size("1TB").unwrap(), 1099511627776);
+        assert_eq!(parse_file_size("10B").unwrap(), 10);
+        assert_eq!(parse_file_size("2.5mb").unwrap(), 2621440);
+        assert_eq!(parse_file_size(" 3 KB ").unwrap(), 3072);
+        assert!(parse_file_size("KB").is_err());
+        assert!(parse_file_size("-1KB").is_err());
+        assert!(parse_file_size("1XB").is_err());
     }
 
     #[test]
