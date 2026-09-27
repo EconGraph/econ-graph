@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Get an access token for a seeded dev-realm user by password grant and print
-# its iss, aud and sub claims (or the raw token with --raw).
+# its iss, aud, sub and roles claims (or the raw token with --raw).
 #
 # Dev realm only: the password grant is enabled on econ-graph-web through
 # KC_WEB_DIRECT_GRANTS=true in docker-compose.yml and is off everywhere else.
@@ -49,6 +49,6 @@ printf '%s' "$token" | python3 -c '
 import base64, json, sys
 payload = sys.stdin.read().split(".")[1]
 claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
-for name in ("iss", "aud", "sub", "preferred_username", "azp"):
+for name in ("iss", "aud", "sub", "preferred_username", "azp", "roles"):
     print(f"{name}: {json.dumps(claims.get(name))}")
 '

@@ -100,8 +100,10 @@ export KEYCLOAK_GOOGLE_CLIENT_ID=... KEYCLOAK_GOOGLE_CLIENT_SECRET=...
 - Admin console: `kubectl -n econ-graph port-forward svc/keycloak-service 18080:8080`,
   then <http://localhost:18080/idp/admin>. The password is in the Secret:
   `kubectl -n econ-graph get secret econ-graph-keycloak -o jsonpath='{.data.admin-password}' | base64 -d`
-- The realm and the Google client are imported on the first start only. Change them
-  later in the admin console; redeploying does not overwrite an existing realm.
+- Every deploy re-applies `config/keycloak/econ-graph-realm.json` through the Job
+  `keycloak-realm-import` (keycloak-config-cli), so the realm, its roles and the
+  Google client follow the repository. Users and their role assignments are kept.
+  Logs: `kubectl -n econ-graph logs job/keycloak-realm-import -c keycloak-config-cli`.
 - Seeded test users exist only in the local docker-compose stack, never in the cluster.
 
 ## 🌐 Accessing the Application

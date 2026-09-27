@@ -87,6 +87,7 @@ jobs:
             - 'k8s/**'
             - 'terraform/**'
             - 'scripts/**'
+            - 'config/keycloak/**'
             - 'docker-compose.yml'
             - 'package.json'
   backend-build-cache:
@@ -220,6 +221,13 @@ jobs:
       working-directory: backend
       env:
         RUST_LOG: warn
+
+    - name: Check the Keycloak realm (roles match the catalog, placeholders render)
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        scripts/keycloak/test-check-keycloak-roles.sh
+        scripts/keycloak/test-render-realm.sh
+        scripts/check-keycloak-roles
 
   chart-api-integration-tests:
     name: Chart API Integration Tests

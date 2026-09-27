@@ -9,15 +9,13 @@
       "lastName": "Tester",
       "enabled": true,
       "emailVerified": true,
+      "realmRoles": ["default-roles-econ-graph"],
       "credentials": [
         {
           "type": "password",
           "value": "alice-dev-password",
           "temporary": false
         }
-      ],
-      "realmRoles": [
-        "default-roles-econ-graph"
       ]
     },
     {
@@ -28,15 +26,13 @@
       "lastName": "Tester",
       "enabled": true,
       "emailVerified": true,
+      "realmRoles": ["default-roles-econ-graph"],
       "credentials": [
         {
           "type": "password",
           "value": "bob-dev-password",
           "temporary": false
         }
-      ],
-      "realmRoles": [
-        "default-roles-econ-graph"
       ]
     },
     {
@@ -47,15 +43,13 @@
       "lastName": "Admin",
       "enabled": true,
       "emailVerified": true,
+      "realmRoles": ["default-roles-econ-graph", "admin"],
       "credentials": [
         {
           "type": "password",
           "value": "staff-admin-dev-password",
           "temporary": false
         }
-      ],
-      "realmRoles": [
-        "default-roles-econ-graph"
       ]
     }
   ]
