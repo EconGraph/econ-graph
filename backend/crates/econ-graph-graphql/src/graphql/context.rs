@@ -80,35 +80,6 @@ impl GraphQLContext {
         Ok(principal)
     }
 
-    /// Require every staff role.
-    ///
-    /// Kept only until each resolver asks for its specific role with [`Self::require_role`].
-    /// Legacy `admin` and `super_admin` users hold every staff role, so this passes exactly
-    /// for them, as before. Requiring all of them, not any, keeps a narrow staff composite
-    /// (say, audit readers) out of resolvers still guarded this way.
-    pub fn require_admin(&self) -> Result<&User> {
-        let user = self.current_user()?;
-        let is_admin = self.principal.as_ref().is_some_and(|principal| {
-            Role::all()
-                .iter()
-                .filter(|role| role.is_staff())
-                .all(|&role| principal.has_role(role))
-        });
-
-        if !is_admin {
-            warn!(
-                request_id = %self.request_id,
-                client_ip = self.client_ip.as_deref().unwrap_or("unknown"),
-                "Staff roles required, denied for user {}",
-                user.id
-            );
-            return Err(GraphQLError::new("Insufficient permissions"));
-        }
-
-        debug!("Staff roles granted for user {}", user.id);
-        Ok(user)
-    }
-
     /// Check if user is authenticated
     pub fn is_authenticated(&self) -> bool {
         self.principal.is_some()
@@ -140,12 +111,6 @@ pub fn current_user<'a>(ctx: &'a Context<'a>) -> Result<&'a User> {
 pub fn current_user_id_opt(ctx: &Context<'_>) -> Result<Option<uuid::Uuid>> {
     let context = ctx.data::<Arc<GraphQLContext>>()?;
     Ok(context.user.as_ref().map(|user| user.id))
-}
-
-/// Helper function to require admin role from GraphQL context
-pub fn require_admin<'a>(ctx: &'a Context<'a>) -> Result<&'a User> {
-    let context = ctx.data::<Arc<GraphQLContext>>()?;
-    context.require_admin()
 }
 
 /// Helper function to require a fine-grained role from GraphQL context
@@ -187,33 +152,8 @@ mod tests {
     }
 
     #[test]
-    fn require_admin_passes_exactly_for_legacy_admins() {
-        for role in ["admin", "super_admin", "superadmin", "Admin", "SUPER_ADMIN"] {
-            let ctx = GraphQLContext::new(Some(user(role)));
-            assert!(ctx.require_admin().is_ok(), "{role}");
-        }
-        for role in ["analyst", "viewer", "guest", "root", ""] {
-            let ctx = GraphQLContext::new(Some(user(role)));
-            let err = message(ctx.require_admin().unwrap_err());
-            assert_eq!(err, "Insufficient permissions", "{role}");
-        }
-    }
-
-    #[test]
-    fn require_admin_rejects_a_partial_staff_set() {
-        let mut ctx = GraphQLContext::new(Some(user("viewer")));
-        ctx.principal = Some(Principal::new(
-            ctx.user.as_ref().unwrap().id,
-            [Role::AdminAuditRead],
-        ));
-        assert!(ctx.require_admin().is_err());
-    }
-
-    #[test]
     fn anonymous_caller_must_authenticate() {
         let ctx = GraphQLContext::new(None);
-        let err = message(ctx.require_admin().unwrap_err());
-        assert_eq!(err, "Authentication required");
         let err = message(ctx.require_role(Role::AnnotationCreate).unwrap_err());
         assert_eq!(err, "Authentication required");
     }
@@ -226,9 +166,17 @@ mod tests {
         let err = message(viewer.require_role(Role::AdminUsersDelete).unwrap_err());
         assert_eq!(err, "Insufficient permissions");
 
-        let admin = GraphQLContext::new(Some(user("admin")));
-        for &role in Role::all() {
-            assert!(admin.require_role(role).is_ok(), "{role}");
+        for legacy in ["admin", "super_admin", "superadmin", "Admin", "SUPER_ADMIN"] {
+            let admin = GraphQLContext::new(Some(user(legacy)));
+            for &role in Role::all() {
+                assert!(admin.require_role(role).is_ok(), "{legacy}: {role}");
+            }
+        }
+        for legacy in ["analyst", "viewer", "guest"] {
+            let ctx = GraphQLContext::new(Some(user(legacy)));
+            for role in Role::all().iter().filter(|role| role.is_staff()) {
+                assert!(ctx.require_role(*role).is_err(), "{legacy}: {role}");
+            }
         }
     }
 
