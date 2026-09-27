@@ -5,7 +5,8 @@ metadata:
   namespace: econ-graph
   annotations:
     # CORS is enforced by the backend from CORS_ALLOWED_ORIGINS; no ingress CORS annotations.
-    # /graphql has its own rate-limited Ingress in graphql-ingress.yaml.
+    # /graphql has its own rate-limited Ingress in graphql-ingress.yaml; apply
+    # both manifests together, or /graphql has no route.
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "30"

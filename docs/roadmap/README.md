@@ -130,7 +130,6 @@ and [#182](https://github.com/EconGraph/econ-graph/pull/182) (backend CORS).
 
 | Item | Evidence |
 |---|---|
-| Fixed: no ingress sets CORS headers any more, so the backend's `CORS_ALLOWED_ORIGINS` (#182) is the only CORS policy ([#196](https://github.com/EconGraph/econ-graph/pull/196)) | `k8s/manifests/*ingress*.yaml`, `k8s/manifests/security-configmap.yaml`, `terraform/modules/ingress/main.tf` |
 | `/playground` is unauthenticated. `/mcp` requires a signed-in user's token since #185, a stopgap until MCP OAuth (Phase 6) | `econ-graph-backend/src/main.rs` (`graphql_playground`, `mcp_route`) |
 | GraphQL depth, complexity and rate limits exist but are not enforced. Ingress-level: the local ingress rate-limits `/graphql` per client IP at 20 requests a second, burst 100, 20 connections ([#246](https://github.com/EconGraph/econ-graph/pull/246)); `ssl-ingress.yaml`, `ingress-cloudflare-dns01.yaml` and the Terraform ingress do not (their `rate-limit*` annotations are not ingress-nginx names and do nothing). Locally, the backend NodePort 30080 and the admin frontend's `/admin/graphql` proxy skip the ingress and are not limited | `k8s/manifests/graphql-ingress.yaml`. `/graphql` calls `schema.execute` directly in the `graphql_filter` closure (`econ-graph-backend/src/main.rs`; the `graphql_handler` function there is unused). Nothing calls `SecureGraphQLServer::execute_secure_request` in `econ-graph-graphql/src/security/server.rs` |
 | Plaintext DB, monitoring and Google OAuth client-secret credentials in k8s manifests. The OAuth secret must be rotated | `k8s/manifests/postgres-deployment.yaml`, `configmap.yaml`, `ingress-cloudflare-dns01.yaml` |
@@ -138,6 +137,9 @@ and [#182](https://github.com/EconGraph/econ-graph/pull/182) (backend CORS).
 | Tokens are stored in `localStorage` | `frontend/src/contexts/AuthContext.tsx` and `admin-frontend/src/contexts/AuthContext.tsx` |
 | Terraform state files and provider binaries are committed to git | `terraform/k8s/terraform.tfstate`, `terraform.tfstate.backup`, `terraform/k8s/.terraform/` |
 | Security scans upload results but never fail the build | `.github/workflows/security.yml` |
+
+Fixed: no ingress sets CORS headers any more, so the backend's `CORS_ALLOWED_ORIGINS`
+(#182) is the only CORS policy ([#196](https://github.com/EconGraph/econ-graph/pull/196)).
 
 OAuth for `/mcp` is scheduled in Phase 6 of
 [auth-plans-permissions.md](./auth-plans-permissions.md). Items about

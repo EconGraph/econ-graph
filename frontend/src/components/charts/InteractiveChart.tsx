@@ -21,8 +21,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  FormControlLabel,
-  Switch,
   Grid,
   Chip,
   useTheme,
@@ -30,6 +28,12 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import {
+  DataTransformation,
+  TRANSFORMATION_OPTIONS,
+  describeTransformation,
+} from '../../utils/transformations';
+import { formatIsoDate, parseIsoDate } from '../../utils/dates';
 
 ChartJS.register(
   CategoryScale,
@@ -50,13 +54,21 @@ interface DataPoint {
 }
 
 interface ChartProps {
+  /** Points to plot, already transformed by the backend. */
   data: DataPoint[];
   title: string;
   units: string;
   frequency: string;
+  /** Transformation the data carries; the selector shows it. */
+  transformation?: DataTransformation;
+  /**
+   * Transformation the selector shows, when it differs from the data's (a newer choice
+   * that is still loading). Defaults to `transformation`.
+   */
+  selectedTransformation?: DataTransformation;
+  /** Called when the user picks another transformation; the caller refetches. */
+  onTransformationChange?: (transformation: DataTransformation) => void;
 }
-
-type TransformationType = 'none' | 'yoy' | 'qoq' | 'mom';
 
 /**
  * REQUIREMENT: Interactive charts with mouse-overs to see individual values and dates in tooltips
@@ -67,158 +79,60 @@ type TransformationType = 'none' | 'yoy' | 'qoq' | 'mom';
  * @param root0.title - The chart title.
  * @param root0.units - The units for the data values.
  * @param root0.frequency - The frequency of the data (daily, monthly, etc.).
+ * @param root0.transformation - The backend transformation the data carries.
+ * @param root0.selectedTransformation - The transformation the selector shows.
+ * @param root0.onTransformationChange - Called with a newly selected transformation.
  * @returns JSX element representing the interactive chart.
  */
-const InteractiveChart: React.FC<ChartProps> = ({ data, title, units, frequency }) => {
+const InteractiveChart: React.FC<ChartProps> = ({
+  data,
+  title,
+  units,
+  frequency,
+  transformation = 'NONE',
+  selectedTransformation = transformation,
+  onTransformationChange,
+}) => {
   const theme = useTheme();
 
   // State for chart controls
   const [startDate, setStartDate] = React.useState<Date | null>(null);
   const [endDate, setEndDate] = React.useState<Date | null>(null);
-  const [transformation, setTransformation] = React.useState<TransformationType>('none');
-  const [showOriginalReleases, setShowOriginalReleases] = React.useState(false);
-  const [showRevisedData, setShowRevisedData] = React.useState(true);
 
-  // Filter and transform data based on controls
-  const processedData = React.useMemo(() => {
-    let filteredData = data;
-
-    // Apply date range filter
-    if (startDate) {
-      filteredData = filteredData.filter(d => new Date(d.date) >= startDate);
-    }
-    if (endDate) {
-      filteredData = filteredData.filter(d => new Date(d.date) <= endDate);
-    }
-
-    // Apply revision filter
-    if (!showOriginalReleases && !showRevisedData) {
-      return { original: [], revised: [] };
-    }
-
-    const originalData = showOriginalReleases ? filteredData.filter(d => d.isOriginalRelease) : [];
-
-    const revisedData = showRevisedData
-      ? filteredData.filter(d => !d.isOriginalRelease || showOriginalReleases)
-      : [];
-
-    // Apply transformation
-    const transformData = (points: DataPoint[]) => {
-      if (transformation === 'none') return points;
-
-      return points
-        .map((point, _index) => {
-          if (point.value === null) return point;
-
-          let transformedValue: number | null = null;
-          const currentDate = new Date(point.date);
-
-          if (transformation === 'yoy') {
-            // Find data point from same period previous year
-            const previousYear = new Date(currentDate);
-            previousYear.setFullYear(currentDate.getFullYear() - 1);
-            const previousPoint = points.find(
-              p =>
-                Math.abs(new Date(p.date).getTime() - previousYear.getTime()) <
-                32 * 24 * 60 * 60 * 1000 // Within ~1 month
-            );
-            if (previousPoint?.value && previousPoint.value !== 0) {
-              transformedValue = ((point.value - previousPoint.value) / previousPoint.value) * 100;
-            }
-          } else if (transformation === 'qoq') {
-            // Find previous quarter (3 months ago)
-            const previousQuarter = new Date(currentDate);
-            previousQuarter.setMonth(currentDate.getMonth() - 3);
-            const previousPoint = points.find(
-              p =>
-                Math.abs(new Date(p.date).getTime() - previousQuarter.getTime()) <
-                45 * 24 * 60 * 60 * 1000 // Within ~1.5 months
-            );
-            if (previousPoint?.value && previousPoint.value !== 0) {
-              transformedValue = ((point.value - previousPoint.value) / previousPoint.value) * 100;
-            }
-          } else if (transformation === 'mom') {
-            // Find previous month
-            const previousMonth = new Date(currentDate);
-            previousMonth.setMonth(currentDate.getMonth() - 1);
-            const previousPoint = points.find(
-              p =>
-                Math.abs(new Date(p.date).getTime() - previousMonth.getTime()) <
-                16 * 24 * 60 * 60 * 1000 // Within ~2 weeks
-            );
-            if (previousPoint?.value && previousPoint.value !== 0) {
-              transformedValue = ((point.value - previousPoint.value) / previousPoint.value) * 100;
-            }
-          }
-
-          return { ...point, value: transformedValue };
-        })
-        .filter(p => p.value !== null);
-    };
-
-    return {
-      original: transformData(originalData),
-      revised: transformData(revisedData),
-    };
-  }, [data, startDate, endDate, transformation, showOriginalReleases, showRevisedData]);
+  // Filter by the chosen date range. Transformations are computed by the backend over the
+  // whole series, so filtering here keeps the first year of a year-over-year view.
+  const shownData = React.useMemo(
+    () =>
+      data.filter(d => {
+        const date = parseIsoDate(d.date);
+        return (!startDate || date >= startDate) && (!endDate || date <= endDate);
+      }),
+    [data, startDate, endDate]
+  );
 
   // Chart.js configuration
   const chartData = {
     datasets: [
-      ...(showRevisedData
-        ? [
-            {
-              label: showOriginalReleases ? 'Revised Data' : title,
-              data: processedData.revised.map(d => ({
-                x: d.date,
-                y: d.value,
-                originalRelease: d.isOriginalRelease,
-                revisionDate: d.revisionDate,
-              })),
-              borderColor: theme.palette.primary.main,
-              backgroundColor: theme.palette.primary.main + '20',
-              borderWidth: 2,
-              pointRadius: 3,
-              pointHoverRadius: 6,
-              tension: 0.1,
-            },
-          ]
-        : []),
-      ...(showOriginalReleases
-        ? [
-            {
-              label: 'Original Releases',
-              data: processedData.original.map(d => ({
-                x: d.date,
-                y: d.value,
-                originalRelease: d.isOriginalRelease,
-                revisionDate: d.revisionDate,
-              })),
-              borderColor: theme.palette.secondary.main,
-              backgroundColor: theme.palette.secondary.main + '20',
-              borderWidth: 2,
-              pointRadius: 3,
-              pointHoverRadius: 6,
-              tension: 0.1,
-              borderDash: [5, 5],
-            },
-          ]
-        : []),
+      {
+        label: title,
+        data: shownData.map(d => ({
+          x: d.date,
+          y: d.value,
+          originalRelease: d.isOriginalRelease,
+          revisionDate: d.revisionDate,
+        })),
+        borderColor: theme.palette.primary.main,
+        backgroundColor: theme.palette.primary.main + '20',
+        borderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 6,
+        tension: 0.1,
+      },
     ],
   };
 
-  const getTransformationLabel = (type: TransformationType): string => {
-    switch (type) {
-      case 'yoy':
-        return 'Year-over-Year % Change';
-      case 'qoq':
-        return 'Quarter-over-Quarter % Change';
-      case 'mom':
-        return 'Month-over-Month % Change';
-      default:
-        return '';
-    }
-  };
+  const transformationLabel = describeTransformation(transformation);
+  const transformed = transformation !== 'NONE';
 
   const chartOptions = {
     responsive: true,
@@ -230,15 +144,14 @@ const InteractiveChart: React.FC<ChartProps> = ({ data, title, units, frequency 
     plugins: {
       title: {
         display: true,
-        text: `${title}${transformation !== 'none' ? ` (${getTransformationLabel(transformation)})` : ''}`,
+        text: transformed ? `${title} (${transformationLabel})` : title,
         font: {
           size: 16,
           weight: 'bold' as const,
         },
       },
       legend: {
-        display: showOriginalReleases && showRevisedData,
-        position: 'top' as const,
+        display: false,
       },
       tooltip: {
         // REQUIREMENT: Mouse-overs to see individual values and corresponding dates in tooltips
@@ -254,13 +167,12 @@ const InteractiveChart: React.FC<ChartProps> = ({ data, title, units, frequency 
           label: (context: TooltipItem<'line'>) => {
             const value = context.parsed.y;
             const dataPoint = context.raw as any;
-            const transformationUnit = transformation !== 'none' ? '%' : units;
+            const transformationUnit = transformed ? '%' : units;
 
             let label = `${context.dataset.label}: ${value?.toFixed(2)} ${transformationUnit}`;
 
-            if (dataPoint.revisionDate && dataPoint.revisionDate !== context.parsed.x) {
-              const revisionDate = new Date(dataPoint.revisionDate).toLocaleDateString();
-              label += `\nRevised: ${revisionDate}`;
+            if (dataPoint.revisionDate && dataPoint.revisionDate !== dataPoint.x) {
+              label += `\nRevised: ${formatIsoDate(dataPoint.revisionDate)}`;
             }
 
             if (dataPoint.originalRelease) {
@@ -297,7 +209,7 @@ const InteractiveChart: React.FC<ChartProps> = ({ data, title, units, frequency 
       y: {
         title: {
           display: true,
-          text: transformation !== 'none' ? 'Percent Change' : units,
+          text: transformed ? 'Percent Change' : units,
         },
         grid: {
           color: theme.palette.divider,
@@ -355,53 +267,29 @@ const InteractiveChart: React.FC<ChartProps> = ({ data, title, units, frequency 
             <FormControl fullWidth size='small'>
               <InputLabel>Transformation</InputLabel>
               <Select
-                value={transformation}
-                onChange={e => setTransformation(e.target.value as TransformationType)}
+                value={selectedTransformation}
+                onChange={e => onTransformationChange?.(e.target.value as DataTransformation)}
                 label='Transformation'
+                disabled={!onTransformationChange}
               >
-                <MenuItem value='none'>None</MenuItem>
-                <MenuItem value='yoy'>Year-over-Year</MenuItem>
-                <MenuItem value='qoq'>Quarter-over-Quarter</MenuItem>
-                <MenuItem value='mom'>Month-over-Month</MenuItem>
+                {TRANSFORMATION_OPTIONS.map(option => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
               </Select>
             </FormControl>
-          </Grid>
-
-          {/* Revision controls */}
-          <Grid item xs={12} md={3}>
-            <Box>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={showRevisedData}
-                    onChange={e => setShowRevisedData(e.target.checked)}
-                    size='small'
-                  />
-                }
-                label='Revised Data'
-              />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={showOriginalReleases}
-                    onChange={e => setShowOriginalReleases(e.target.checked)}
-                    size='small'
-                  />
-                }
-                label='Original Releases'
-              />
-            </Box>
           </Grid>
         </Grid>
 
         {/* Active filters display */}
         <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-          {transformation !== 'none' && (
+          {transformed && (
             <Chip
-              label={getTransformationLabel(transformation)}
+              label={transformationLabel}
               size='small'
               color='primary'
-              onDelete={() => setTransformation('none')}
+              onDelete={onTransformationChange ? () => onTransformationChange('NONE') : undefined}
             />
           )}
           {startDate && (
@@ -435,9 +323,7 @@ const InteractiveChart: React.FC<ChartProps> = ({ data, title, units, frequency 
       {/* Chart info */}
       <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
         <Typography variant='caption' color='text.secondary'>
-          Frequency: {frequency} • Data Points:{' '}
-          {processedData.revised.length + processedData.original.length} •
-          {showOriginalReleases && showRevisedData && ' Both original and revised data shown'}
+          Frequency: {frequency} • Data Points: {shownData.filter(d => d.value !== null).length}
         </Typography>
       </Box>
     </Paper>

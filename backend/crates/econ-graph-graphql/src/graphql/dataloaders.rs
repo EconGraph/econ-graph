@@ -75,7 +75,8 @@ impl BatchFn<Uuid, Option<DataSource>> for DataSourceBatcher {
     }
 }
 
-/// DataLoader batcher for efficiently loading data points by series ID
+/// DataLoader batcher for efficiently loading data points by series ID.
+/// Returns the latest revision of each observation, not every revision.
 pub struct DataPointsBySeriesBatcher {
     pub pool: DatabasePool,
 }
@@ -102,6 +103,7 @@ impl BatchFn<Uuid, Vec<DataPoint>> for DataPointsBySeriesBatcher {
 
             let data_points = match dsl::data_points
                 .filter(dsl::series_id.eq_any(&keys))
+                .filter(econ_graph_core::models::revision_filter(None, false))
                 .order(dsl::date.desc())
                 .load::<DataPoint>(&mut conn)
                 .await
