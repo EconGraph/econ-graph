@@ -37,6 +37,11 @@ name = "obs_status"
 label = "Observation status"
 ```
 
+A dataset's code and its dimensions' names and declared order are part of every canonical
+external id built from them (see below): never rename or reorder them once series exist under
+that dataset, add a new dataset instead. `sync_datasets` never deletes a `datasets` row for a
+code a definitions file drops; remove the row by hand if a dataset is retired.
+
 In train 1 every dataset is stored long, because `data_points` holds one value per
 observation. A dataset therefore has the single measure `value`, which is also its
 `default_measure`. Both are the defaults, so leave them out. A source with several

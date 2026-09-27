@@ -585,6 +585,10 @@ fn validate_components_catches_what_the_database_cannot() {
         .push(Code::new("06", "California again"));
     assert_invalid(&repeated_code, "lists code \"06\" more than once");
 
+    let mut unknown_codelist = wdi_dataset(source_id);
+    unknown_codelist.dimensions.0[1].codelist = Some("planets".to_string());
+    assert_invalid(&unknown_codelist, "unknown codelist \"planets\"");
+
     assert!(wdi_dataset(source_id).validate_components().is_ok());
 
     let mut blank = bds_dataset(source_id);
@@ -603,7 +607,7 @@ fn wdi_dataset(source_id: Uuid) -> NewDataset {
         description: Some("Gross domestic product divided by midyear population".to_string()),
     }]);
     let mut area = DatasetComponent::new("area", "Country or area", ComponentType::String);
-    area.codelist = Some("countries".to_string());
+    area.codelist = Some(COUNTRIES_CODELIST.to_string());
     NewDataset::long(
         source_id,
         "WDI",

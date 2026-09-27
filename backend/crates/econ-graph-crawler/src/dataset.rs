@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use econ_graph_core::models::{
     Code, ComponentType, DatasetComponent, DatasetComponents, NewDataset, SeriesDimensions,
-    VALUE_MEASURE,
+    KNOWN_CODELISTS, VALUE_MEASURE,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -118,11 +118,9 @@ impl From<&CodeDef> for Code {
 /// Longest dataset code (`datasets.code` is `VARCHAR(100)`).
 pub const MAX_CODE_LEN: usize = 100;
 
-/// Shared code lists a component can name in `codelist` instead of inline `codes`: `countries`
-/// (ISO 3166 alpha-3 areas, from the global analysis area's `countries.csv`) and `us_states`
-/// (two-digit state FIPS codes, `us_states.csv`). The crawler only checks the name; DS-6 resolves
-/// a list to its codes for the API.
-pub const CODELISTS: &[&str] = &["countries", "us_states"];
+/// Shared code lists a component can name in `codelist` instead of inline `codes`: core's
+/// [`KNOWN_CODELISTS`], the one definition DS-6 also resolves for the API.
+pub const CODELISTS: &[&str] = KNOWN_CODELISTS;
 
 fn default_component_type() -> ComponentType {
     ComponentType::String
@@ -415,7 +413,8 @@ impl DatasetCatalog {
     }
 
     /// Loads one adapter's definitions from the reference data directory (nothing is read when it
-    /// declares no datasets).
+    /// declares no datasets, so a stray `<source>.toml` for an adapter that declares nothing is
+    /// not checked; [`load`](Self::load) covers every registered adapter, not every file on disk).
     pub fn load_adapter(&mut self, adapter: &dyn SourceAdapter) -> Result<(), CrawlError> {
         let declared = adapter.datasets();
         if declared.is_empty() {
@@ -882,7 +881,9 @@ label = "Observation status"
         assert!(e.to_string().contains("is listed as both"), "{e}");
     }
 
-    /// Every production adapter's declarations match the shipped dataset files.
+    /// Every production adapter's declarations match the shipped dataset files. Passes
+    /// vacuously until an adapter declares a dataset (DS-4, DS-5): every `datasets()` is empty
+    /// today, so `load_adapter` reads no file.
     #[test]
     fn default_registry_declarations_match_shipped_files() {
         DatasetCatalog::load(&crate::sources::default_registry()).unwrap();

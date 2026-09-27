@@ -748,13 +748,15 @@ struct DatasetRowTest {
     dimensions: serde_json::Value,
     #[diesel(sql_type = diesel::sql_types::Text)]
     default_measure: String,
+    #[diesel(sql_type = diesel::sql_types::Timestamptz)]
+    updated_at: chrono::DateTime<Utc>,
 }
 
 async fn dataset_row(pool: &DatabasePool, source: SourceId) -> Vec<DatasetRowTest> {
     let source_id = persist::data_source_id(pool, source).await.unwrap();
     let mut conn = pool.get().await.unwrap();
     diesel::sql_query(
-        "SELECT id, name, dimensions, default_measure FROM datasets \
+        "SELECT id, name, dimensions, default_measure, updated_at FROM datasets \
          WHERE source_id = $1 AND code = $2",
     )
     .bind::<diesel::sql_types::Uuid, _>(source_id)
@@ -794,6 +796,11 @@ async fn sync_datasets_upserts_rows() {
     let second = dataset_row(&db.pool, SRC).await;
     assert_eq!(second[0].id, first[0].id);
     assert_eq!(second[0].name, "Renamed");
+
+    // Syncing the same definition again is a no-op: `updated_at` does not move.
+    persist::sync_datasets(&db.pool, &catalog).await.unwrap();
+    let third = dataset_row(&db.pool, SRC).await;
+    assert_eq!(third[0].updated_at, second[0].updated_at);
 }
 
 #[tokio::test]
@@ -1943,4 +1950,49 @@ async fn breaker_counts_one_result_per_batch_call() {
     assert_eq!(w.run_batch_once().await.expect("claimed").len(), 2);
     assert_eq!(w.paused_sources(), vec![SRC]);
     assert_eq!(adapter.batch_calls().len(), 2);
+}
+
+/// The database, not just `check_all`, refuses a second series with the same dataset and
+/// dimension values: two `persist_discovered` calls (so `check_all` never sees both ids at
+/// once) collide on `uq_series_metadata_dataset_dimensions`, and `db_error` maps it to a
+/// `Permanent` failure naming the collision.
+#[tokio::test]
+async fn persist_discovered_rejects_a_dataset_key_collision_across_calls() {
+    let Some(db) = db().await else { return };
+    persist::sync_datasets(&db.pool, &test_catalog())
+        .await
+        .unwrap();
+    let first = DiscoveredSeries {
+        external_id: "t5_ds/a.USA".into(),
+        title: "A".into(),
+        description: None,
+        units: None,
+        frequency: None,
+        data_url: None,
+        dataset: test_dataset("t5_ds/a.USA"),
+    };
+    persist::persist_discovered(&db.pool, SRC, &[first])
+        .await
+        .unwrap();
+
+    // A different external id, same dataset and dimension values.
+    let second = DiscoveredSeries {
+        external_id: "t5_dup/a.USA".into(),
+        title: "A dup".into(),
+        description: None,
+        units: None,
+        frequency: None,
+        data_url: None,
+        dataset: test_dataset("t5_ds/a.USA"),
+    };
+    let e = persist::persist_discovered(&db.pool, SRC, &[second])
+        .await
+        .unwrap_err();
+    let e = db_error(e);
+    assert_eq!(e.kind(), "permanent");
+    assert!(
+        e.to_string()
+            .contains("already has this dataset and dimension values"),
+        "{e}"
+    );
 }
