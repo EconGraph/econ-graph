@@ -540,6 +540,19 @@ resource "kubernetes_ingress_v1" "production_ssl" {
             }
           }
         }
+        # The OIDC sign-in callback is a frontend route; Exact wins over the /auth prefix below.
+        path {
+          path      = "/auth/callback"
+          path_type = "Exact"
+          backend {
+            service {
+              name = "econ-graph-frontend-service"
+              port {
+                number = 3000
+              }
+            }
+          }
+        }
         path {
           path      = "/auth"
           path_type = "Prefix"
