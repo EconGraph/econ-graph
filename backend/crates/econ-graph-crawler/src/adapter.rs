@@ -147,6 +147,9 @@ pub struct DiscoveredSeries {
     pub dataset: Option<SeriesDataset>,
 }
 
+/// Per-series results of [`SourceAdapter::fetch_batch`], keyed by external id.
+pub type BatchFetch = HashMap<String, Result<FetchedSeries, CrawlError>>;
+
 /// One external data source. Implementations are stateless apart from configuration and
 /// do all HTTP through [`CrawlCtx::http`].
 #[async_trait]
@@ -178,6 +181,48 @@ pub trait SourceAdapter: Send + Sync {
         external_id: &str,
         since: Option<NaiveDate>,
     ) -> Result<FetchedSeries, CrawlError>;
+
+    /// Groups series that one upstream request can fetch together: the worker only batches
+    /// `fetch_series` jobs whose ids return the same key (up to the policy's
+    /// [`max_batch`](SourcePolicy::max_batch)). `None`, the default, never batches the series.
+    fn batch_key(&self, _external_id: &str) -> Option<String> {
+        None
+    }
+
+    /// Fetches several series that share a [`batch_key`](Self::batch_key), only observations on
+    /// or after `since` when given (the earliest `since` of the batch's series).
+    ///
+    /// `Err` means the whole request failed and applies to every series in the batch: return it
+    /// only for source-wide failures (rate limits, auth, a transport or server error), since a
+    /// non-retryable `Err` (`Parse`, `NotFound`, `Permanent`) fails every job in the batch
+    /// permanently. `Ok` carries one result per requested id; an id missing from the map fails
+    /// as [`CrawlError::NotFound`] and ids that weren't requested are ignored.
+    ///
+    /// The default calls [`fetch_series`](Self::fetch_series) once per id, in order, each with the
+    /// batch's `since` (so a more recent series may re-fetch some history). After the first
+    /// `RateLimited` it stops calling upstream and gives the remaining ids that (retryable)
+    /// error, keeping the results already fetched. Other errors, `Auth` included, stay with
+    /// their own series.
+    async fn fetch_batch(
+        &self,
+        ctx: &CrawlCtx,
+        external_ids: &[String],
+        since: Option<NaiveDate>,
+    ) -> Result<BatchFetch, CrawlError> {
+        let mut out = BatchFetch::with_capacity(external_ids.len());
+        let mut refused: Option<CrawlError> = None;
+        for id in external_ids {
+            let fetched = match &refused {
+                Some(e) => Err(e.clone()),
+                None => self.fetch_series(ctx, id, since).await,
+            };
+            if let Err(e @ CrawlError::RateLimited { .. }) = &fetched {
+                refused.get_or_insert_with(|| e.clone());
+            }
+            out.insert(id.clone(), fetched);
+        }
+        Ok(out)
+    }
 }
 
 /// Maps each [`SourceId`] to its adapter.
@@ -259,6 +304,73 @@ mod tests {
         r.register(Arc::new(Dummy(SourceId::Fred, "old")));
         assert!(r.register(Arc::new(Dummy(SourceId::Fred, "new"))).is_some());
         assert_eq!(r.ids(), vec![SourceId::Fred]);
+    }
+
+    #[test]
+    fn default_adapter_does_not_batch() {
+        assert_eq!(Dummy(SourceId::Bea, "").batch_key("X"), None);
+    }
+
+    #[tokio::test]
+    async fn default_fetch_batch_calls_fetch_series_per_id() {
+        let ctx = crate::testkit::test_ctx();
+        let ids = vec!["A".to_string(), "B".to_string()];
+        let out = Dummy(SourceId::Bea, "")
+            .fetch_batch(&ctx, &ids, None)
+            .await
+            .unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out["A"], Ok(FetchedSeries::default()));
+        assert_eq!(out["B"], Ok(FetchedSeries::default()));
+    }
+
+    /// Rate limited on ids starting with `"limited"`, unauthorised on `"denied"`, else not found.
+    struct Limited;
+
+    #[async_trait]
+    impl SourceAdapter for Limited {
+        fn id(&self) -> SourceId {
+            SourceId::Bea
+        }
+        async fn discover(&self, _: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
+            Ok(Vec::new())
+        }
+        async fn fetch_series(
+            &self,
+            _: &CrawlCtx,
+            id: &str,
+            _: Option<NaiveDate>,
+        ) -> Result<FetchedSeries, CrawlError> {
+            if id.starts_with("limited") {
+                Err(CrawlError::RateLimited { retry_after: None })
+            } else if id.starts_with("denied") {
+                Err(CrawlError::Auth(id.into()))
+            } else {
+                Err(CrawlError::NotFound(id.into()))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn default_fetch_batch_stops_calling_upstream_after_a_rate_limit() {
+        let ctx = crate::testkit::test_ctx();
+        let ids = vec![
+            "missing".to_string(),
+            "limited".to_string(),
+            "after".to_string(),
+        ];
+        let out = Limited.fetch_batch(&ctx, &ids, None).await.unwrap();
+        let limited = Err(CrawlError::RateLimited { retry_after: None });
+        // "after" would be NotFound had it been fetched.
+        assert_eq!(out["missing"], Err(CrawlError::NotFound("missing".into())));
+        assert_eq!(out["limited"], limited);
+        assert_eq!(out["after"], limited);
+
+        // An auth failure stays with its own series; later ids are still fetched.
+        let ids = vec!["denied".to_string(), "after".to_string()];
+        let out = Limited.fetch_batch(&ctx, &ids, None).await.unwrap();
+        assert_eq!(out["denied"], Err(CrawlError::Auth("denied".into())));
+        assert_eq!(out["after"], Err(CrawlError::NotFound("after".into())));
     }
 
     #[test]
