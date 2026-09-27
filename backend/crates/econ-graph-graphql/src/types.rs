@@ -170,7 +170,7 @@ impl EconomicSeriesType {
     async fn latest_observation(&self, ctx: &Context<'_>) -> Result<Option<LatestObservationType>> {
         let series_uuid = Uuid::parse_str(&self.id)?;
         let loaders = &ctx
-            .data::<crate::graphql::schema::GraphQLContext>()?
+            .data::<crate::graphql::schema::SchemaResources>()?
             .data_loaders;
         loaders
             .latest_observation_loader
