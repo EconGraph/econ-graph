@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use chrono::Utc;
 use quick_xml::events::Event;
 use quick_xml::name::ResolveResult;
 use quick_xml::{NsReader, Reader};
@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::fs;
-use tracing::{debug, error, info, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 use xml::reader::{EventReader, XmlEvent};
 
@@ -96,6 +96,7 @@ pub struct XbrlParser {
     statement_mapper: StatementMapper,
     fact_validator: FactValidator,
     /// Not read yet: kept for DTS-aware parsing, which the `xbrl-parser` feature work picks up.
+    #[allow(dead_code)]
     dts_manager: Option<crate::dts_manager::DtsManager>,
 }
 
