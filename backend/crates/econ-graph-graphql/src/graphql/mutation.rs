@@ -69,10 +69,11 @@ impl Mutation {
         ctx: &Context<'_>,
         input: CreateAnnotationInput,
     ) -> Result<ChartAnnotationType> {
+        // The author is the signed-in caller, never an id from the request.
+        let user_id = current_user(ctx)?.id;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
-        let user_id = uuid::Uuid::parse_str(&input.user_id)?;
         let series_id = uuid::Uuid::parse_str(&input.series_id)?;
 
         let annotation = collaboration_service
@@ -98,14 +99,14 @@ impl Mutation {
         ctx: &Context<'_>,
         input: AddCommentInput,
     ) -> Result<AnnotationCommentType> {
+        let user_id = current_user(ctx)?.id;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
-        let user_id = uuid::Uuid::parse_str(&input.user_id)?;
         let annotation_id = uuid::Uuid::parse_str(&input.annotation_id)?;
 
         let comment = collaboration_service
-            .add_comment(annotation_id, user_id, input.content)
+            .add_comment(user_id, annotation_id, input.content)
             .await?;
 
         Ok(AnnotationCommentType::from(comment))
@@ -117,10 +118,11 @@ impl Mutation {
         ctx: &Context<'_>,
         input: ShareChartInput,
     ) -> Result<ChartCollaboratorType> {
+        // The sharer is the signed-in caller, who must already be an admin on the chart.
+        let owner_user_id = current_user(ctx)?.id;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
-        let owner_user_id = uuid::Uuid::parse_str(&input.owner_user_id)?;
         let target_user_id = uuid::Uuid::parse_str(&input.target_user_id)?;
         let chart_id = uuid::Uuid::parse_str(&input.chart_id)?;
 
@@ -145,10 +147,10 @@ impl Mutation {
         ctx: &Context<'_>,
         input: DeleteAnnotationInput,
     ) -> Result<bool> {
+        let user_id = current_user(ctx)?.id;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
-        let user_id = uuid::Uuid::parse_str(&input.user_id)?;
         let annotation_id = uuid::Uuid::parse_str(&input.annotation_id)?;
 
         collaboration_service
@@ -867,6 +869,88 @@ mod tests {
             assert!(
                 msg.contains(expected),
                 "{role:?}: expected {expected}, got {msg}"
+            );
+        }
+    }
+}
+
+/// The collaboration API acts as the signed-in caller, never as a user id from the request.
+#[cfg(test)]
+mod collaboration_auth_tests {
+    use crate::graphql::context::GraphQLContext;
+    use crate::graphql::schema::create_schema_with_data;
+    use econ_graph_core::DatabasePool;
+    use std::sync::Arc;
+
+    /// A pool that never connects: every case here must stop before any database access.
+    fn unreachable_pool() -> DatabasePool {
+        let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
+            diesel_async::AsyncPgConnection,
+        >::new("postgres://nobody@127.0.0.1:1/none");
+        DatabasePool::builder()
+            .connection_timeout(std::time::Duration::from_secs(1))
+            .build_unchecked(manager)
+    }
+
+    /// Anonymous callers are refused by every collaboration mutation, and by the
+    /// `chartCollaborators` query, before it touches the database.
+    #[tokio::test]
+    async fn collaboration_mutations_require_a_signed_in_caller() {
+        let id = uuid::Uuid::new_v4();
+        let mutations = [
+            format!(
+                r#"mutation {{ createAnnotation(input: {{ seriesId: "{id}", annotationDate: "2024-01-01", title: "t", content: "c", annotationType: "note" }}) {{ id }} }}"#
+            ),
+            format!(
+                r#"mutation {{ addComment(input: {{ annotationId: "{id}", content: "c" }}) {{ id }} }}"#
+            ),
+            format!(
+                r#"mutation {{ shareChart(input: {{ targetUserId: "{id}", chartId: "{id}", permissionLevel: "admin" }}) {{ id }} }}"#
+            ),
+            format!(r#"mutation {{ deleteAnnotation(input: {{ annotationId: "{id}" }}) }}"#),
+            format!(r#"{{ chartCollaborators(chartId: "{id}") {{ id }} }}"#),
+        ];
+        let schema =
+            create_schema_with_data(unreachable_pool(), Arc::new(GraphQLContext::new(None)));
+        for mutation in mutations {
+            let resp = schema.execute(mutation.as_str()).await;
+            assert_eq!(resp.errors.len(), 1, "{mutation}: {:?}", resp.errors);
+            assert!(
+                resp.errors[0].message.contains("Authentication required"),
+                "{mutation}: {}",
+                resp.errors[0].message
+            );
+        }
+    }
+
+    /// The inputs no longer accept a user id, so a caller cannot act as someone else.
+    #[tokio::test]
+    async fn collaboration_inputs_reject_caller_supplied_user_ids() {
+        let id = uuid::Uuid::new_v4();
+        let mutations = [
+            format!(
+                r#"mutation {{ createAnnotation(input: {{ userId: "{id}", seriesId: "{id}", annotationDate: "2024-01-01", title: "t", content: "c", annotationType: "note" }}) {{ id }} }}"#
+            ),
+            format!(
+                r#"mutation {{ addComment(input: {{ userId: "{id}", annotationId: "{id}", content: "c" }}) {{ id }} }}"#
+            ),
+            format!(
+                r#"mutation {{ shareChart(input: {{ ownerUserId: "{id}", targetUserId: "{id}", chartId: "{id}", permissionLevel: "admin" }}) {{ id }} }}"#
+            ),
+            format!(
+                r#"mutation {{ deleteAnnotation(input: {{ userId: "{id}", annotationId: "{id}" }}) }}"#
+            ),
+        ];
+        let schema =
+            create_schema_with_data(unreachable_pool(), Arc::new(GraphQLContext::new(None)));
+        for mutation in mutations {
+            let resp = schema.execute(mutation.as_str()).await;
+            assert!(
+                resp.errors
+                    .iter()
+                    .any(|e| e.message.contains("userId") || e.message.contains("ownerUserId")),
+                "{mutation}: {:?}",
+                resp.errors
             );
         }
     }

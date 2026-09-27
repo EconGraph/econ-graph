@@ -263,24 +263,20 @@ impl Query {
             .collect())
     }
 
-    /// Get annotations for a specific series
+    /// Get annotations for a specific series: public ones, plus the caller's own private ones.
     async fn annotations_for_series(
         &self,
         ctx: &Context<'_>,
         series_id: String,
-        user_id: Option<ID>,
+        #[graphql(deprecation = "Ignored: the viewer is the signed-in caller")] user_id: Option<ID>,
     ) -> Result<Vec<ChartAnnotationType>> {
+        let _ = user_id;
+        let viewer = current_user_id_opt(ctx)?;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
-        let user_uuid = if let Some(uid) = user_id {
-            Some(uuid::Uuid::parse_str(&uid)?)
-        } else {
-            None
-        };
-
         let annotations = collaboration_service
-            .get_annotations_for_series(&series_id, user_uuid)
+            .get_annotations_for_series(&series_id, viewer)
             .await?;
         Ok(annotations
             .into_iter()
@@ -288,18 +284,19 @@ impl Query {
             .collect())
     }
 
-    /// Get comments for a specific annotation
+    /// Get comments for an annotation the caller can see (public, or their own)
     async fn comments_for_annotation(
         &self,
         ctx: &Context<'_>,
         annotation_id: ID,
     ) -> Result<Vec<AnnotationCommentType>> {
+        let viewer = current_user_id_opt(ctx)?;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let annotation_uuid = uuid::Uuid::parse_str(&annotation_id)?;
         let comments = collaboration_service
-            .get_comments_for_annotation(annotation_uuid)
+            .get_comments_for_annotation(annotation_uuid, viewer)
             .await?;
         Ok(comments
             .into_iter()
@@ -307,17 +304,21 @@ impl Query {
             .collect())
     }
 
-    /// Get collaborators for a specific chart
+    /// Get collaborators for a specific chart. Requires sign-in; only the chart's own
+    /// collaborators see the list, everyone else gets an empty one.
     async fn chart_collaborators(
         &self,
         ctx: &Context<'_>,
         chart_id: ID,
     ) -> Result<Vec<ChartCollaboratorType>> {
+        let viewer = current_user(ctx)?.id;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let chart_uuid = uuid::Uuid::parse_str(&chart_id)?;
-        let collaborators = collaboration_service.get_collaborators(chart_uuid).await?;
+        let collaborators = collaboration_service
+            .get_collaborators(chart_uuid, viewer)
+            .await?;
         Ok(collaborators
             .into_iter()
             .map(|(collaborator, _user)| ChartCollaboratorType::from(collaborator))

@@ -524,6 +524,15 @@ pub fn current_user<'a>(ctx: &'a Context<'a>) -> Result<&'a User> {
     context.current_user()
 }
 
+/// The signed-in caller's id, or `None` for an anonymous request.
+///
+/// Unlike `current_user(ctx).ok()`, a request with no `GraphQLContext` at all is an
+/// error rather than silently treated as anonymous.
+pub fn current_user_id_opt(ctx: &Context<'_>) -> Result<Option<uuid::Uuid>> {
+    let context = ctx.data::<Arc<GraphQLContext>>()?;
+    Ok(context.user.as_ref().map(|user| user.id))
+}
+
 /// Helper function to require admin role from GraphQL context
 pub fn require_admin<'a>(ctx: &'a Context<'a>) -> Result<&'a User> {
     let context = ctx.data::<Arc<GraphQLContext>>()?;

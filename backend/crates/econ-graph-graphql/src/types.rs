@@ -1003,8 +1003,6 @@ impl From<User> for UserType {
 /// Input for creating a new annotation
 #[derive(InputObject)]
 pub struct CreateAnnotationInput {
-    /// User ID creating the annotation
-    pub user_id: ID,
     /// Series ID the annotation is for
     pub series_id: ID,
     /// Date the annotation refers to
@@ -1026,8 +1024,6 @@ pub struct CreateAnnotationInput {
 /// Input for adding a comment to an annotation
 #[derive(InputObject)]
 pub struct AddCommentInput {
-    /// User ID adding the comment
-    pub user_id: ID,
     /// Annotation ID to comment on
     pub annotation_id: ID,
     /// Comment content
@@ -1037,8 +1033,6 @@ pub struct AddCommentInput {
 /// Input for sharing a chart with another user
 #[derive(InputObject)]
 pub struct ShareChartInput {
-    /// Owner user ID (who is sharing)
-    pub owner_user_id: ID,
     /// Target user ID (who to share with)
     pub target_user_id: ID,
     /// Chart ID to share
@@ -1050,8 +1044,6 @@ pub struct ShareChartInput {
 /// Input for deleting an annotation
 #[derive(InputObject)]
 pub struct DeleteAnnotationInput {
-    /// User ID requesting deletion
-    pub user_id: ID,
     /// Annotation ID to delete
     pub annotation_id: ID,
 }
