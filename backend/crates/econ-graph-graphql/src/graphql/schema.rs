@@ -3,7 +3,7 @@
 //! Schema creation and configuration for the EconGraph GraphQL API.
 //! Provides the main entry point for GraphQL operations.
 
-use async_graphql::{EmptySubscription, Schema};
+use async_graphql::{EmptySubscription, Schema, SchemaBuilder};
 use std::sync::Arc;
 
 use crate::graphql::dataloaders::DataLoaders;
@@ -21,6 +21,24 @@ pub struct SchemaResources {
     pub data_loaders: Arc<DataLoaders>,
     /// Security middleware
     pub security: Arc<SecurityMiddleware>,
+}
+
+/// Start a schema builder with the root types and every schema-level setting.
+///
+/// [`create_schema`], [`create_schema_with_data`] and [`sdl`] all build from
+/// this, so the committed `schema.graphql` snapshot describes the schema the
+/// server actually serves.
+fn schema_builder() -> SchemaBuilder<Query, Mutation, EmptySubscription> {
+    Schema::build(Query, Mutation, EmptySubscription)
+}
+
+/// Print the schema as GraphQL SDL.
+///
+/// Needs no database or context data: those don't change the schema's shape.
+/// The `schema_snapshot` test compares this with the committed
+/// `schema.graphql` at the crate root.
+pub fn sdl() -> String {
+    schema_builder().finish().sdl()
 }
 
 /// Create a new GraphQL schema with the provided context
@@ -56,7 +74,7 @@ pub fn create_schema(pool: DatabasePool) -> Schema<Query, Mutation, EmptySubscri
         security,
     };
 
-    Schema::build(Query, Mutation, EmptySubscription)
+    schema_builder()
         .data(context)
         .data(pool) // Add pool as separate context data
         .finish()
@@ -84,7 +102,7 @@ pub fn create_schema_with_data<T: Send + Sync + 'static>(
         security,
     };
 
-    Schema::build(Query, Mutation, EmptySubscription)
+    schema_builder()
         .data(context)
         .data(pool) // Add pool as separate context data
         .data(additional_data)

@@ -1,0 +1,1094 @@
+"""
+Input for adding a comment to an annotation
+"""
+input AddCommentInput {
+	"""
+	Annotation ID to comment on
+	"""
+	annotationId: ID!
+	"""
+	Comment content
+	"""
+	content: String!
+}
+
+"""
+GraphQL representation of an annotation comment
+"""
+type AnnotationCommentType {
+	"""
+	Comment ID
+	"""
+	id: ID!
+	"""
+	Associated annotation ID
+	"""
+	annotationId: ID!
+	"""
+	User who created the comment
+	"""
+	userId: ID!
+	"""
+	Comment content
+	"""
+	content: String!
+	"""
+	Whether the comment thread is resolved
+	"""
+	isResolved: Boolean
+	"""
+	Creation timestamp
+	"""
+	createdAt: DateTime
+	"""
+	Last update timestamp
+	"""
+	updatedAt: DateTime
+}
+
+"""
+GraphQL connection for audit logs
+"""
+type AuditLogConnection {
+	"""
+	List of audit log entries
+	"""
+	nodes: [AuditLogType!]!
+	"""
+	Total count of entries
+	"""
+	totalCount: Int!
+	"""
+	Pagination info
+	"""
+	pageInfo: PageInfo!
+}
+
+"""
+Input for filtering audit logs (admin only)
+"""
+input AuditLogFilterInput {
+	"""
+	Filter by user ID
+	"""
+	userId: ID
+	"""
+	Filter by action
+	"""
+	action: String
+	"""
+	Filter by resource type
+	"""
+	resourceType: String
+	"""
+	Created after date
+	"""
+	createdAfter: DateTime
+	"""
+	Created before date
+	"""
+	createdBefore: DateTime
+}
+
+"""
+GraphQL representation of an audit log entry
+"""
+type AuditLogType {
+	"""
+	Log entry ID
+	"""
+	id: ID!
+	"""
+	User ID who performed action
+	"""
+	userId: ID!
+	"""
+	User name who performed action
+	"""
+	userName: String!
+	"""
+	Action performed
+	"""
+	action: String!
+	"""
+	Type of resource affected
+	"""
+	resourceType: String!
+	"""
+	ID of resource affected
+	"""
+	resourceId: String
+	"""
+	IP address
+	"""
+	ipAddress: String
+	"""
+	User agent
+	"""
+	userAgent: String
+	"""
+	Additional details
+	"""
+	details: String
+	"""
+	Action timestamp
+	"""
+	createdAt: DateTime!
+}
+
+scalar BigDecimal
+
+"""
+GraphQL representation of a chart annotation
+"""
+type ChartAnnotationType {
+	"""
+	Annotation ID
+	"""
+	id: ID!
+	"""
+	User who created the annotation
+	"""
+	userId: ID!
+	"""
+	Associated series ID (if applicable)
+	"""
+	seriesId: String
+	"""
+	Associated chart ID (if applicable)
+	"""
+	chartId: ID
+	"""
+	Date the annotation refers to
+	"""
+	annotationDate: NaiveDate!
+	"""
+	Value the annotation refers to (if applicable)
+	"""
+	annotationValue: BigDecimal
+	"""
+	Annotation title
+	"""
+	title: String!
+	"""
+	Annotation description/content
+	"""
+	description: String
+	"""
+	Annotation color for display
+	"""
+	color: String
+	"""
+	Type of annotation (note, highlight, warning, etc.)
+	"""
+	annotationType: String
+	"""
+	Whether the annotation is visible to others
+	"""
+	isVisible: Boolean
+	"""
+	Whether the annotation is pinned
+	"""
+	isPinned: Boolean
+	"""
+	Tags associated with the annotation
+	"""
+	tags: [String]
+	"""
+	Creation timestamp
+	"""
+	createdAt: DateTime
+	"""
+	Last update timestamp
+	"""
+	updatedAt: DateTime
+}
+
+"""
+GraphQL representation of a chart collaborator
+"""
+type ChartCollaboratorType {
+	"""
+	Collaborator entry ID
+	"""
+	id: ID!
+	"""
+	Chart ID being shared
+	"""
+	chartId: ID!
+	"""
+	User ID of the collaborator
+	"""
+	userId: ID!
+	"""
+	User who invited this collaborator
+	"""
+	invitedBy: ID
+	"""
+	Role/permission level
+	"""
+	role: String
+	"""
+	Detailed permissions (JSON)
+	"""
+	permissions: String
+	"""
+	Creation timestamp
+	"""
+	createdAt: DateTime
+	"""
+	Last access timestamp
+	"""
+	lastAccessedAt: DateTime
+}
+
+"""
+Queue counts for one crawl source.
+"""
+type CrawlerSourceStatus {
+	"""
+	Source name as stored in the queue (e.g. FRED, WORLD_BANK).
+	"""
+	source: String!
+	pending: Int!
+	processing: Int!
+	retrying: Int!
+	"""
+	Jobs that failed permanently in the last 24 hours.
+	"""
+	failedLastDay: Int!
+	"""
+	When a job for this source last completed successfully.
+	"""
+	lastSuccess: DateTime
+}
+
+"""
+Crawler status, derived from the crawl queue (see `econ_graph_crawler::status`).
+"""
+type CrawlerStatus {
+	"""
+	A job is being processed, or one finished within the last 10 minutes.
+	"""
+	isRunning: Boolean!
+	"""
+	Distinct workers currently holding a job.
+	"""
+	activeWorkers: Int!
+	"""
+	When the most recent job completed successfully.
+	"""
+	lastCrawl: DateTime
+	"""
+	When the next waiting job becomes due (now if one is already due); null if none is waiting.
+	"""
+	nextScheduledCrawl: DateTime
+	"""
+	Jobs newly enqueued by `triggerCrawl` (active duplicates are not counted); null elsewhere.
+	"""
+	enqueuedCount: Int
+	"""
+	Per-source queue counts.
+	"""
+	sources: [CrawlerSourceStatus!]!
+}
+
+"""
+Input for creating a new annotation
+"""
+input CreateAnnotationInput {
+	"""
+	Series ID the annotation is for
+	"""
+	seriesId: ID!
+	"""
+	Date the annotation refers to
+	"""
+	annotationDate: NaiveDate!
+	"""
+	Value the annotation refers to (optional)
+	"""
+	annotationValue: BigDecimal
+	"""
+	Annotation title
+	"""
+	title: String!
+	"""
+	Annotation content/description
+	"""
+	content: String!
+	"""
+	Type of annotation (note, highlight, warning, etc.)
+	"""
+	annotationType: String!
+	"""
+	Color for display (optional)
+	"""
+	color: String
+	"""
+	Whether the annotation is public (visible to others)
+	"""
+	isPublic: Boolean
+}
+
+"""
+Input for creating a new user (admin only)
+"""
+input CreateUserInput {
+	"""
+	Email address
+	"""
+	email: String!
+	"""
+	Display name
+	"""
+	name: String!
+	"""
+	Password (for email-based users)
+	"""
+	password: String
+	"""
+	User role
+	"""
+	role: String!
+	"""
+	Organization (optional)
+	"""
+	organization: String
+	"""
+	Whether account is active
+	"""
+	isActive: Boolean
+	"""
+	Whether to send welcome email
+	"""
+	sendWelcomeEmail: Boolean
+}
+
+input DataFilter {
+	startDate: NaiveDate
+	endDate: NaiveDate
+	originalOnly: Boolean
+	latestRevisionOnly: Boolean
+	"""
+	Return each observation as it was known on this day (its newest revision published on or
+	before it). Takes precedence over `latestRevisionOnly`.
+	"""
+	asOf: NaiveDate
+}
+
+"""
+GraphQL representation of a data point
+"""
+type DataPoint {
+	id: ID!
+	seriesId: ID!
+	date: NaiveDate!
+	value: BigDecimal
+	revisionDate: NaiveDate!
+	isOriginalRelease: Boolean!
+	createdAt: DateTime!
+	updatedAt: DateTime!
+}
+
+"""
+Paginated result for data points
+"""
+type DataPointConnection {
+	nodes: [DataPoint!]!
+	totalCount: Int!
+	pageInfo: PageInfo!
+}
+
+type DataSourceType {
+	id: ID!
+	name: String!
+	description: String
+	baseUrl: String!
+	apiKeyRequired: Boolean!
+	rateLimitPerMinute: Int!
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	"""
+	Fetch all series for this data source using DataLoader
+	"""
+	series(first: Int! = 50, after: String): SeriesConnection!
+	"""
+	Get count of active series for this data source
+	"""
+	seriesCount: Int!
+}
+
+"""
+Data transformation enumeration for GraphQL
+"""
+enum DataTransformation {
+	NONE
+	YEAR_OVER_YEAR
+	QUARTER_OVER_QUARTER
+	MONTH_OVER_MONTH
+	PERCENT_CHANGE
+	LOG_DIFFERENCE
+}
+
+"""
+Implement the DateTime<Utc> scalar
+
+The input/output is a string in RFC3339 format.
+"""
+scalar DateTime
+
+"""
+Input for deleting an annotation
+"""
+input DeleteAnnotationInput {
+	"""
+	Annotation ID to delete
+	"""
+	annotationId: ID!
+}
+
+type EconomicSeriesType {
+	id: ID!
+	sourceId: ID!
+	externalId: String!
+	title: String!
+	description: String
+	units: String
+	frequency: String!
+	seasonalAdjustment: String
+	lastUpdated: DateTime
+	startDate: NaiveDate
+	endDate: NaiveDate
+	isActive: Boolean!
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	"""
+	Fetch the data source using direct database query
+	"""
+	source: DataSourceType
+	"""
+	Fetch the most recent observations, latest revision of each
+	"""
+	recentDataPoints(limit: Int! = 100): [DataPoint!]!
+	"""
+	Get data point count using direct database query
+	"""
+	dataPointCount: Int!
+	"""
+	Fetch data points with filters using a custom DataLoader
+	"""
+	dataPoints(filter: DataFilter, transformation: DataTransformation): [DataPoint!]!
+}
+
+type Mutation {
+	"""
+	Enqueue crawl jobs (admin only). Nothing is crawled in the request: the jobs go to
+	`crawl_queue` and the crawler workers process them.
+	
+	`series_ids` become `fetch_series` jobs for `source` (or for the single entry of
+	`sources`); every listed source without series gets a `discover_catalog` job. Returns the
+	current crawler status with `enqueuedCount` = jobs actually inserted (a job with an active
+	duplicate in the queue is skipped and not counted).
+	"""
+	triggerCrawl(input: TriggerCrawlInput!): CrawlerStatus!
+	"""
+	Create a new chart annotation
+	"""
+	createAnnotation(input: CreateAnnotationInput!): ChartAnnotationType!
+	"""
+	Add a comment to an annotation
+	"""
+	addComment(input: AddCommentInput!): AnnotationCommentType!
+	"""
+	Share a chart with another user
+	"""
+	shareChart(input: ShareChartInput!): ChartCollaboratorType!
+	"""
+	Delete an annotation
+	"""
+	deleteAnnotation(input: DeleteAnnotationInput!): Boolean!
+	"""
+	Create a new user (admin only)
+	"""
+	createUser(input: CreateUserInput!): UserType!
+	"""
+	Update user information (admin only)
+	"""
+	updateUser(id: ID!, input: UpdateUserInput!): UserType!
+	"""
+	Delete a user (admin only)
+	"""
+	deleteUser(id: ID!): Boolean!
+	"""
+	Suspend a user account (admin only)
+	"""
+	suspendUser(id: ID!): Boolean!
+	"""
+	Activate a user account (admin only)
+	"""
+	activateUser(id: ID!): Boolean!
+	"""
+	Force logout a user (admin only)
+	"""
+	forceLogoutUser(id: ID!): Boolean!
+}
+
+"""
+ISO 8601 calendar date without timezone.
+Format: %Y-%m-%d
+
+# Examples
+
+* `1994-11-13`
+* `2000-02-24`
+"""
+scalar NaiveDate
+
+"""
+Page information for pagination
+"""
+type PageInfo {
+	hasNextPage: Boolean!
+	hasPreviousPage: Boolean!
+	startCursor: String
+	endCursor: String
+}
+
+input PaginationInput {
+	first: Int
+	after: String
+	last: Int
+	before: String
+}
+
+type Query {
+	"""
+	Get a specific economic series by ID
+	"""
+	series(id: ID!): EconomicSeriesType
+	"""
+	List economic series with filtering and pagination
+	"""
+	seriesList(filter: SeriesFilter, pagination: PaginationInput): SeriesConnection!
+	"""
+	Get a specific data source by ID
+	"""
+	dataSource(id: ID!): DataSourceType
+	"""
+	List all data sources
+	"""
+	dataSources: [DataSourceType!]!
+	"""
+	Get data points for a specific series with filtering and transformation
+	"""
+	seriesData(seriesId: ID!, filter: DataFilter, transformation: DataTransformation, first: Int, after: String): DataPointConnection!
+	"""
+	Crawler status, derived from the crawl queue (workers keep no other state).
+	"""
+	crawlerStatus: CrawlerStatus!
+	"""
+	Get queue statistics
+	"""
+	queueStatistics: QueueStatistics!
+	"""
+	Search economic series using full-text search with spelling correction
+	"""
+	searchSeries(query: String!, source: String, frequency: SeriesFrequency, first: Int, after: String): SearchResult!
+	"""
+	Get search suggestions for partial queries
+	"""
+	searchSuggestions(partialQuery: String!, limit: Int): [SearchSuggestionType!]!
+	"""
+	Get annotations for a specific series: public ones, plus the caller's own private ones.
+	"""
+	annotationsForSeries(seriesId: String!, userId: ID @deprecated(reason: "Ignored: the viewer is the signed-in caller")): [ChartAnnotationType!]!
+	"""
+	Get comments for an annotation the caller can see (public, or their own)
+	"""
+	commentsForAnnotation(annotationId: ID!): [AnnotationCommentType!]!
+	"""
+	Get collaborators for a specific chart. Requires sign-in; only the chart's own
+	collaborators see the list, everyone else gets an empty one.
+	"""
+	chartCollaborators(chartId: ID!): [ChartCollaboratorType!]!
+	"""
+	Get user information by ID. Callers may read only their own record unless they are an admin.
+	"""
+	user(userId: ID!): UserType
+	"""
+	Get all users (admin only)
+	"""
+	users(filter: UserFilterInput, pagination: PaginationInput): UserConnection!
+	"""
+	Get user sessions (admin only)
+	"""
+	userSessions(userId: ID): [UserSessionType!]!
+	"""
+	Get active user sessions (admin only)
+	"""
+	activeSessions: [UserSessionType!]!
+	"""
+	Get system health metrics (admin only)
+	"""
+	systemHealth: SystemHealthType!
+	"""
+	Get security events (admin only)
+	"""
+	securityEvents(limit: Int): [SecurityEventType!]!
+	"""
+	Get audit logs (admin only)
+	"""
+	auditLogs(filter: AuditLogFilterInput, pagination: PaginationInput): AuditLogConnection!
+}
+
+"""
+Queue statistics for monitoring
+"""
+type QueueStatistics {
+	totalItems: Int!
+	pendingItems: Int!
+	processingItems: Int!
+	completedItems: Int!
+	failedItems: Int!
+	retryingItems: Int!
+	oldestPending: DateTime
+	averageProcessingTime: Float
+}
+
+"""
+Search result type
+"""
+type SearchResult {
+	series: [EconomicSeriesType!]!
+	totalCount: Int!
+	query: String!
+	tookMs: Int!
+}
+
+"""
+GraphQL representation of search suggestions
+"""
+type SearchSuggestionType {
+	"""
+	Suggested query text
+	"""
+	suggestion: String!
+	"""
+	Number of matching series
+	"""
+	matchCount: Int!
+	"""
+	Type of suggestion
+	"""
+	suggestionType: SuggestionTypeEnum!
+	"""
+	Confidence score
+	"""
+	confidence: Float!
+}
+
+"""
+GraphQL representation of a security event
+"""
+type SecurityEventType {
+	"""
+	Event ID
+	"""
+	id: ID!
+	"""
+	Event type
+	"""
+	eventType: String!
+	"""
+	User ID (if applicable)
+	"""
+	userId: ID
+	"""
+	User email (if applicable)
+	"""
+	userEmail: String
+	"""
+	IP address
+	"""
+	ipAddress: String
+	"""
+	User agent
+	"""
+	userAgent: String
+	"""
+	Event description
+	"""
+	description: String!
+	"""
+	Event severity
+	"""
+	severity: String!
+	"""
+	Event timestamp
+	"""
+	createdAt: DateTime!
+}
+
+"""
+Paginated result for series
+"""
+type SeriesConnection {
+	nodes: [EconomicSeriesType!]!
+	totalCount: Int!
+	pageInfo: PageInfo!
+}
+
+"""
+Input types for mutations and complex queries
+"""
+input SeriesFilter {
+	sourceId: ID
+	frequency: SeriesFrequency
+	isActive: Boolean
+	searchQuery: String
+}
+
+"""
+Series frequency enumeration for GraphQL
+"""
+enum SeriesFrequency {
+	DAILY
+	WEEKLY
+	MONTHLY
+	QUARTERLY
+	ANNUAL
+	IRREGULAR
+}
+
+"""
+Input for sharing a chart with another user
+"""
+input ShareChartInput {
+	"""
+	Target user ID (who to share with)
+	"""
+	targetUserId: ID!
+	"""
+	Chart ID to share
+	"""
+	chartId: ID!
+	"""
+	Permission level (view, comment, edit, admin)
+	"""
+	permissionLevel: String!
+}
+
+"""
+GraphQL enum for suggestion types
+"""
+enum SuggestionTypeEnum {
+	"""
+	Spelling correction
+	"""
+	CORRECTION
+	"""
+	Query completion
+	"""
+	COMPLETION
+	"""
+	Synonym expansion
+	"""
+	SYNONYM
+}
+
+"""
+GraphQL representation of system health
+"""
+type SystemHealthType {
+	"""
+	Overall system status
+	"""
+	status: String!
+	"""
+	System metrics
+	"""
+	metrics: SystemMetricsType!
+	"""
+	Last updated timestamp
+	"""
+	lastUpdated: DateTime!
+}
+
+"""
+GraphQL representation of system metrics
+"""
+type SystemMetricsType {
+	"""
+	Total number of users
+	"""
+	totalUsers: Int!
+	"""
+	Number of active users
+	"""
+	activeUsers: Int!
+	"""
+	Total number of sessions
+	"""
+	totalSessions: Int!
+	"""
+	Number of active sessions
+	"""
+	activeSessions: Int!
+	"""
+	Database size in MB
+	"""
+	databaseSizeMb: Float!
+	"""
+	Number of queue items
+	"""
+	queueItems: Int!
+	"""
+	API requests per minute
+	"""
+	apiRequestsPerMinute: Float!
+	"""
+	Average response time in milliseconds
+	"""
+	averageResponseTimeMs: Float!
+}
+
+input TriggerCrawlInput {
+	"""
+	Sources to crawl (e.g. FRED, BLS). A listed source with no series paired to it gets a
+	catalog-discovery job.
+	"""
+	sources: [String!]
+	"""
+	Series ids to fetch. They belong to `source`, or to the single entry of `sources`;
+	with neither (or several `sources`) the request is rejected.
+	"""
+	seriesIds: [String!]
+	"""
+	Queue priority, 1 (lowest) to 10 (highest). Default 5.
+	"""
+	priority: Int
+	"""
+	Source that every entry of `series_ids` belongs to.
+	"""
+	source: String
+}
+
+"""
+Input for updating a user (admin only)
+"""
+input UpdateUserInput {
+	"""
+	Email address
+	"""
+	email: String
+	"""
+	Display name (optional)
+	"""
+	name: String
+	"""
+	Avatar URL (optional)
+	"""
+	avatarUrl: String
+	"""
+	User role (optional)
+	"""
+	role: String
+	"""
+	Organization (optional)
+	"""
+	organization: String
+	"""
+	UI theme preference
+	"""
+	theme: String
+	"""
+	Default chart type preference
+	"""
+	defaultChartType: String
+	"""
+	Whether notifications are enabled
+	"""
+	notificationsEnabled: Boolean
+	"""
+	Whether collaboration features are enabled
+	"""
+	collaborationEnabled: Boolean
+	"""
+	Whether account is active (optional)
+	"""
+	isActive: Boolean
+	"""
+	Whether email is verified (optional)
+	"""
+	emailVerified: Boolean
+}
+
+"""
+GraphQL connection for users
+"""
+type UserConnection {
+	"""
+	List of users
+	"""
+	nodes: [UserType!]!
+	"""
+	Total count of users
+	"""
+	totalCount: Int!
+	"""
+	Pagination info
+	"""
+	pageInfo: PageInfo!
+}
+
+"""
+Input for filtering users (admin only)
+"""
+input UserFilterInput {
+	"""
+	Filter by role
+	"""
+	role: String
+	"""
+	Filter by organization
+	"""
+	organization: String
+	"""
+	Filter by active status
+	"""
+	isActive: Boolean
+	"""
+	Filter by email verified status
+	"""
+	emailVerified: Boolean
+	"""
+	Search term for name or email
+	"""
+	searchQuery: String
+}
+
+"""
+GraphQL representation of a user session
+"""
+type UserSessionType {
+	"""
+	Session ID
+	"""
+	id: ID!
+	"""
+	User ID
+	"""
+	userId: ID!
+	"""
+	Session creation time
+	"""
+	createdAt: DateTime!
+	"""
+	Last activity time
+	"""
+	lastActivity: DateTime!
+	"""
+	Session expiration time
+	"""
+	expiresAt: DateTime!
+	"""
+	User agent string
+	"""
+	userAgent: String
+	"""
+	IP address
+	"""
+	ipAddress: String
+	"""
+	Whether session is active
+	"""
+	isActive: Boolean!
+}
+
+"""
+GraphQL representation of a user
+"""
+type UserType {
+	"""
+	User ID
+	"""
+	id: ID!
+	"""
+	Email address
+	"""
+	email: String!
+	"""
+	Display name
+	"""
+	name: String!
+	"""
+	Avatar URL
+	"""
+	avatarUrl: String
+	"""
+	Authentication provider
+	"""
+	provider: String!
+	"""
+	User role
+	"""
+	role: String!
+	"""
+	Organization
+	"""
+	organization: String
+	"""
+	UI theme preference
+	"""
+	theme: String!
+	"""
+	Default chart type preference
+	"""
+	defaultChartType: String!
+	"""
+	Whether notifications are enabled
+	"""
+	notificationsEnabled: Boolean!
+	"""
+	Whether collaboration features are enabled
+	"""
+	collaborationEnabled: Boolean!
+	"""
+	Whether the account is active
+	"""
+	isActive: Boolean!
+	"""
+	Whether email is verified
+	"""
+	emailVerified: Boolean!
+	"""
+	Creation timestamp
+	"""
+	createdAt: DateTime!
+	"""
+	Last update timestamp
+	"""
+	updatedAt: DateTime!
+	"""
+	Last login timestamp
+	"""
+	lastLoginAt: DateTime
+}
+
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Provides a scalar specification URL for specifying the behavior of custom scalar types.
+"""
+directive @specifiedBy(url: String!) on SCALAR
+schema {
+	query: Query
+	mutation: Mutation
+}

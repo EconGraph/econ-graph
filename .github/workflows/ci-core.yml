@@ -221,6 +221,15 @@ jobs:
       env:
         RUST_LOG: warn
 
+    # The frontend validates its GraphQL operations against the committed
+    # schema.graphql, so the file must match what the backend serves. To
+    # regenerate it: UPDATE_SCHEMA=1 cargo test -p econ-graph-graphql --test schema_snapshot
+    - name: Check GraphQL schema snapshot
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test -p econ-graph-graphql --test schema_snapshot
+      working-directory: backend
+
   chart-api-integration-tests:
     name: Chart API Integration Tests
     runs-on: ubuntu-latest
