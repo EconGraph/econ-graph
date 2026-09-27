@@ -354,6 +354,7 @@ impl OidcVerifier {
     /// [`Self::with_min_refresh_interval`]. Keys older than [`MAX_STALE_KEY_AGE`] are not used:
     /// if the provider stays unreachable that long, tokens can no longer be checked.
     async fn key(&self, kid: &str) -> Result<DecodingKey, VerifyError> {
+        let started = Instant::now();
         if let Some(key) = self.cached(kid, MAX_KEY_AGE).await {
             return Ok(key);
         }
@@ -380,20 +381,17 @@ impl OidcVerifier {
         if let Some(key) = self.cached(kid, MAX_STALE_KEY_AGE).await {
             return Ok(key);
         }
-        let usable = self
-            .cache
-            .read()
-            .await
-            .fetched_at
-            .is_some_and(|at| at.elapsed() < MAX_STALE_KEY_AGE);
-        // A key id missing from keys fetched just now is unknown; one missing because the
-        // fetch failed may be a new key the provider could not tell us about.
-        if usable && last_error.is_none() {
+        let fetched_at = self.cache.read().await.fetched_at;
+        // A key id is unknown only if keys fetched since this request arrived lack it. When
+        // the refetch was throttled, or failed, the kid may be a new key the provider has not
+        // told us about yet, so the token can't be checked rather than being invalid.
+        let checked = fetched_at.is_some_and(|at| at >= started);
+        if checked && last_error.is_none() {
             Err(VerifyError::invalid(format!("unknown key id {kid:?}")))
         } else {
-            Err(VerifyError::Unavailable(
-                last_error.unwrap_or_else(|| "signing keys not fetched yet".into()),
-            ))
+            Err(VerifyError::Unavailable(last_error.unwrap_or_else(|| {
+                format!("key id {kid:?} not checked: signing keys were refetched too recently")
+            })))
         }
     }
 
@@ -918,13 +916,49 @@ mod verify_tests {
         verifier.verify(&issuer.sign(&claims)).await.unwrap();
         for i in 0..5 {
             let token = SigningKey::generate(&format!("random-{i}")).sign(&claims);
-            invalid(verifier.verify(&token).await);
+            let result = verifier.verify(&token).await;
+            // Not refetched, so not known to be invalid.
+            assert!(
+                matches!(result, Err(VerifyError::Unavailable(_))),
+                "{result:?}"
+            );
         }
         assert_eq!(
             issuer.jwks_requests(),
             1,
             "{MIN_REFRESH_INTERVAL:?} throttle"
         );
+    }
+
+    #[tokio::test]
+    async fn a_key_rotated_while_refetches_are_throttled_is_not_called_invalid() {
+        let issuer = TestIssuer::start().await;
+        // Long enough to cover generating the new RSA key in a debug build.
+        let interval = Duration::from_secs(3);
+        let verifier = OidcVerifier::with_client(
+            issuer.config(),
+            reqwest::Client::builder().no_proxy().build().unwrap(),
+        )
+        .with_min_refresh_interval(interval);
+        let claims = issuer.claims(Uuid::new_v4(), &[]);
+        let random = SigningKey::generate("random").sign(&claims);
+        verifier.verify(&issuer.sign(&claims)).await.unwrap();
+
+        // Anyone can start the throttle window with a made-up kid.
+        verifier.verify(&random).await.unwrap_err();
+        issuer.rotate("test-key-2", true);
+        let rotated = issuer.sign(&claims);
+        let result = verifier.verify(&rotated).await;
+        assert!(
+            matches!(result, Err(VerifyError::Unavailable(_))),
+            "{result:?}"
+        );
+
+        tokio::time::sleep(interval + Duration::from_millis(50)).await;
+        verifier.verify(&rotated).await.unwrap();
+        // Once refetched, a kid the provider doesn't publish is invalid.
+        tokio::time::sleep(interval + Duration::from_millis(50)).await;
+        invalid(verifier.verify(&random).await);
     }
 
     #[tokio::test]
