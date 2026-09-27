@@ -72,7 +72,6 @@ forward econgraph.com 1.1.1.1 8.8.8.8
 - `scripts/deploy/test-letsencrypt-cloudflare.sh` - Testing and validation script
 - `docs/deployment/LETSENCRYPT_CLOUDFLARE_DNS01_INTEGRATION.md` - Complete guide
 - `docs/deployment/CLUSTER_DNS_TROUBLESHOOTING.md` - DNS troubleshooting guide
-- `LETSENCRYPT_CLOUDFLARE_INTEGRATION_SUMMARY.md` - Implementation summary
 
 ### **Modified Files**
 - `terraform/modules/ingress/main.tf` - Added Cloudflare DNS-01 support
@@ -201,9 +200,8 @@ terraform apply
 
 ## Documentation References
 
-- [Complete Integration Guide](./docs/deployment/LETSENCRYPT_CLOUDFLARE_DNS01_INTEGRATION.md)
-- [DNS Troubleshooting Guide](./docs/deployment/CLUSTER_DNS_TROUBLESHOOTING.md)
-- [Implementation Summary](./LETSENCRYPT_CLOUDFLARE_INTEGRATION_SUMMARY.md)
+- [Complete Integration Guide](../deployment/LETSENCRYPT_CLOUDFLARE_DNS01_INTEGRATION.md)
+- [DNS Troubleshooting Guide](../deployment/CLUSTER_DNS_TROUBLESHOOTING.md)
 - [Pull Request #152](https://github.com/EconGraph/econ-graph/pull/152)
 
 ## Conclusion
