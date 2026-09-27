@@ -163,8 +163,8 @@ pub trait SourceAdapter: Send + Sync {
     /// `datasets/<source>.toml` (see [`crate::dataset`]). Every series it returns with a
     /// [`SeriesDataset`] must use one of these codes and the definition's dimension keys.
     /// Default: none.
-    fn datasets(&self) -> Vec<&str> {
-        Vec::new()
+    fn datasets(&self) -> &[&str] {
+        &[]
     }
 
     /// Lists the series this source offers.

@@ -21,6 +21,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+use econ_graph_core::models::{ComponentType, SeriesDimensions, VALUE_MEASURE};
 use serde::{Deserialize, Serialize};
 
 use crate::adapter::{AdapterRegistry, SourceAdapter};
@@ -28,17 +29,18 @@ use crate::error::CrawlError;
 use crate::source::SourceId;
 
 /// The one measure every train 1 dataset declares, and so its `default_measure`.
-pub const DEFAULT_MEASURE: &str = "value";
+pub const DEFAULT_MEASURE: &str = VALUE_MEASURE;
 
 /// Which dataset a series belongs to, and its value for each of the dataset's dimensions.
 ///
-/// A dimensionless dataset (one series per source id, e.g. FRED) has an empty `dimensions` map.
+/// A dimensionless dataset (one series per source id, e.g. FRED) has empty `dimensions`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SeriesDataset {
     /// Dataset code, unique within the source (e.g. `wdi`).
     pub code: String,
-    /// Dimension name to value (e.g. `indicator` -> `NY.GDP.PCAP.CD`, `area` -> `USA`).
-    pub dimensions: BTreeMap<String, String>,
+    /// Dimension name to value (e.g. `indicator` -> `NY.GDP.PCAP.CD`, `area` -> `USA`), stored
+    /// as the series' `dimensions`.
+    pub dimensions: SeriesDimensions,
 }
 
 impl SeriesDataset {
@@ -50,25 +52,16 @@ impl SeriesDataset {
     {
         Self {
             code: code.into(),
-            dimensions: dimensions
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect(),
+            dimensions: dimensions.into_iter().collect(),
         }
-    }
-
-    /// The dimension values as the JSON object stored in `dimensions`.
-    pub fn dimensions_json(&self) -> serde_json::Value {
-        serde_json::Value::Object(
-            self.dimensions
-                .iter()
-                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-                .collect(),
-        )
     }
 }
 
-/// One dimension, measure or attribute of a dataset (an SDMX component).
+/// One dimension, measure or attribute of a dataset, as written in a dataset file. Stored in the
+/// `datasets` component lists in the same JSON shape as core's [`DatasetComponent`], plus
+/// `codelist`.
+///
+/// [`DatasetComponent`]: econ_graph_core::models::DatasetComponent
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Component {
@@ -76,16 +69,31 @@ pub struct Component {
     pub name: String,
     /// Human-readable label (e.g. `Country or area`).
     pub label: String,
-    /// Value type, e.g. `code`, `string` or `number`. Informational.
-    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
-    pub value_type: Option<String>,
+    /// Value type. Omitted means `string`.
+    #[serde(rename = "type", default = "default_component_type")]
+    pub component_type: ComponentType,
     /// Unit of measure, for measures.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
     /// Labels for known code values (code -> label). Not a closed list: values outside it are
     /// accepted.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub codes: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codes: Option<BTreeMap<String, String>>,
+    /// Name of a shared reference code list the values come from (one of [`CODELISTS`]), instead
+    /// of inline `codes`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codelist: Option<String>,
+}
+
+/// Longest dataset code (`datasets.code` is `VARCHAR(100)`).
+pub const MAX_CODE_LEN: usize = 100;
+
+/// Shared code lists a component can name in `codelist`: reference files under the data
+/// directory (`countries`: ISO 3166 alpha-3 areas, `us_states`: two-digit state FIPS codes).
+pub const CODELISTS: &[&str] = &["countries", "us_states"];
+
+fn default_component_type() -> ComponentType {
+    ComponentType::String
 }
 
 /// A dataset definition, as written in `datasets/<source>.toml` and stored in `datasets`.
@@ -117,9 +125,10 @@ fn default_measures() -> Vec<Component> {
     vec![Component {
         name: DEFAULT_MEASURE.into(),
         label: "Value".into(),
-        value_type: Some("number".into()),
+        component_type: ComponentType::Decimal,
         unit: None,
-        codes: BTreeMap::new(),
+        codes: None,
+        codelist: None,
     }]
 }
 
@@ -163,6 +172,11 @@ impl DatasetDef {
                 "dataset code {code:?} must be ASCII letters, digits, '_' or '-'"
             ));
         }
+        if code.len() > MAX_CODE_LEN {
+            return Err(format!(
+                "dataset code {code:?} is longer than {MAX_CODE_LEN} characters"
+            ));
+        }
         if self.name.trim().is_empty() {
             return Err(format!("dataset {code}: empty name"));
         }
@@ -185,6 +199,19 @@ impl DatasetDef {
                     c.name
                 ));
             }
+            if c.codes.is_some() && c.codelist.is_some() {
+                return Err(format!(
+                    "dataset {code}: component {} has both codes and a codelist",
+                    c.name
+                ));
+            }
+            if let Some(list) = c.codelist.as_deref().filter(|l| !CODELISTS.contains(l)) {
+                return Err(format!(
+                    "dataset {code}: component {} names unknown codelist {list:?} (known: \
+                     {CODELISTS:?})",
+                    c.name
+                ));
+            }
             if !seen.insert(c.name.as_str()) {
                 return Err(format!(
                     "dataset {code}: component {} is declared twice",
@@ -203,9 +230,9 @@ impl DatasetDef {
     }
 
     /// Checks that `dimensions` has exactly this dataset's dimension keys.
-    pub fn check_dimensions(&self, dimensions: &BTreeMap<String, String>) -> Result<(), String> {
+    pub fn check_dimensions(&self, dimensions: &SeriesDimensions) -> Result<(), String> {
         let expected: BTreeSet<&str> = self.dimension_names().collect();
-        let got: BTreeSet<&str> = dimensions.keys().map(String::as_str).collect();
+        let got: BTreeSet<&str> = dimensions.0.keys().map(String::as_str).collect();
         if expected == got {
             return Ok(());
         }
@@ -222,16 +249,16 @@ impl DatasetDef {
     /// The canonical external id of the series with these dimension values:
     /// `{code}/{v1}.{v2}...`, values in declared dimension order (the SDMX series key).
     ///
-    /// Adapters of dimensioned datasets use this rather than formatting ids by hand. Fails if the
-    /// keys differ from the definition, if the dataset has no dimensions (its series keep the
-    /// source's own ids), or if a value contains `/`. An empty value is allowed (e.g. no state for
-    /// a national series). Values may contain `.` (WDI indicator codes do), so an id is not parsed
-    /// back into values; the stored `dimensions` are the source of truth.
-    pub fn external_id(&self, dimensions: &BTreeMap<String, String>) -> Result<String, String> {
-        self.check_dimensions(dimensions)?;
+    /// Series of a dimensioned dataset must use this id ([`DatasetCatalog::check`] rejects any
+    /// other), so adapters never format ids by hand. Fails (`Permanent`) if the keys differ from
+    /// the definition, if the dataset has no dimensions (its series keep the source's own ids), or
+    /// if a value is not allowed by [`canonical_external_id`].
+    pub fn external_id(&self, dimensions: &SeriesDimensions) -> Result<String, CrawlError> {
+        self.check_dimensions(dimensions)
+            .map_err(CrawlError::Permanent)?;
         let values: Vec<&str> = self
             .dimension_names()
-            .map(|name| dimensions[name].as_str())
+            .map(|name| dimensions.0[name].as_str())
             .collect();
         canonical_external_id(&self.code, &values)
     }
@@ -241,7 +268,7 @@ impl DatasetDef {
     pub fn series<K, V>(
         &self,
         dimensions: impl IntoIterator<Item = (K, V)>,
-    ) -> Result<(String, SeriesDataset), String>
+    ) -> Result<(String, SeriesDataset), CrawlError>
     where
         K: Into<String>,
         V: Into<String>,
@@ -254,20 +281,31 @@ impl DatasetDef {
 
 /// `{code}/{v1}.{v2}...` from values already in declared dimension order. Prefer
 /// [`DatasetDef::external_id`], which also checks the keys.
-pub fn canonical_external_id(code: &str, values: &[&str]) -> Result<String, String> {
+///
+/// No value may contain `/`, and only the first may contain `.` (WDI indicator codes such as
+/// `NY.GDP.PCAP.CD` do), so an id maps back to exactly one set of values. Empty values are
+/// allowed (e.g. no state for a national series).
+pub fn canonical_external_id(code: &str, values: &[&str]) -> Result<String, CrawlError> {
+    let err = |msg: String| Err(CrawlError::Permanent(msg));
     if !is_code(code) {
-        return Err(format!(
+        return err(format!(
             "dataset code {code:?} must be ASCII letters, digits, '_' or '-'"
         ));
     }
     if values.is_empty() {
-        return Err(format!(
+        return err(format!(
             "dataset {code} has no dimensions; its series keep the source's own ids"
         ));
     }
     if let Some(v) = values.iter().find(|v| v.contains('/')) {
-        return Err(format!(
+        return err(format!(
             "dataset {code}: dimension value {v:?} contains '/'"
+        ));
+    }
+    if let Some(v) = values[1..].iter().find(|v| v.contains('.')) {
+        return err(format!(
+            "dataset {code}: dimension value {v:?} contains '.' (only the first dimension's \
+             value may)"
         ));
     }
     Ok(format!("{code}/{}", values.join(".")))
@@ -317,8 +355,8 @@ impl DatasetCatalog {
         if declared.is_empty() {
             return Ok(());
         }
-        let defs = crate::reference::datasets(adapter.id())?;
-        self.insert(adapter.id(), &declared, defs)
+        let defs = crate::reference::datasets(adapter.id())?.to_vec();
+        self.insert(adapter.id(), declared, defs)
             .map_err(CrawlError::Permanent)
     }
 
@@ -384,8 +422,10 @@ impl DatasetCatalog {
     }
 
     /// Checks one series an adapter emitted. `None` (no dataset) passes, for now: the dataset
-    /// becomes required once every adapter declares one. A dataset the adapter did not declare, or
-    /// dimension keys other than the definition's, is a `Permanent` error naming the series.
+    /// becomes required once every adapter declares one. It is a `Permanent` error naming the
+    /// series if the adapter did not declare the dataset, if the dimension keys differ from the
+    /// definition, or if a series of a dimensioned dataset does not use its canonical external id
+    /// ([`DatasetDef::external_id`]).
     pub fn check(
         &self,
         source: SourceId,
@@ -395,42 +435,45 @@ impl DatasetCatalog {
         let Some(dataset) = dataset else {
             return Ok(None);
         };
+        let fail =
+            |msg: String| CrawlError::Permanent(format!("{source} series {external_id}: {msg}"));
         let def = self.get(source, &dataset.code).ok_or_else(|| {
-            CrawlError::Permanent(format!(
-                "{source} series {external_id}: dataset {} is not declared by the adapter",
+            fail(format!(
+                "dataset {} is not declared by the adapter",
                 dataset.code
             ))
         })?;
-        def.check_dimensions(&dataset.dimensions)
-            .map_err(|e| CrawlError::Permanent(format!("{source} series {external_id}: {e}")))?;
+        def.check_dimensions(&dataset.dimensions).map_err(fail)?;
+        if !def.dimensions.is_empty() {
+            let canonical = def
+                .external_id(&dataset.dimensions)
+                .map_err(|e| fail(e.to_string()))?;
+            if canonical != external_id {
+                return Err(fail(format!(
+                    "not the canonical external id {canonical:?} of its dimensions in dataset {}",
+                    dataset.code
+                )));
+            }
+        }
         Ok(Some(def))
     }
 
-    /// [`check`](Self::check) for a batch of series, which also rejects two series with the same
-    /// dataset and dimension values (the database allows one series per key). Series of a
-    /// dimensionless dataset are keyed by their external id alone, so they are not compared.
+    /// [`check`](Self::check) for a batch of series, which also rejects one external id listed
+    /// with two different datasets or dimension values. (Two ids with the same dataset and
+    /// dimension values cannot both pass `check`: the canonical id is a function of the values.)
     pub fn check_all<'a>(
         &self,
         source: SourceId,
         series: impl IntoIterator<Item = (&'a str, Option<&'a SeriesDataset>)>,
     ) -> Result<(), CrawlError> {
-        let mut keys: HashMap<(&str, &BTreeMap<String, String>), &str> = HashMap::new();
+        let mut by_id: HashMap<&str, &SeriesDataset> = HashMap::new();
         for (external_id, dataset) in series {
-            if self.check(source, external_id, dataset)?.is_none() {
-                continue;
-            }
-            let dataset = dataset.expect("check returned a definition");
-            if dataset.dimensions.is_empty() {
-                continue;
-            }
-            if let Some(other) =
-                keys.insert((dataset.code.as_str(), &dataset.dimensions), external_id)
-            {
-                if other != external_id {
+            let Some(dataset) = dataset else { continue };
+            self.check(source, external_id, Some(dataset))?;
+            if let Some(prev) = by_id.insert(external_id, dataset) {
+                if prev != dataset {
                     return Err(CrawlError::Permanent(format!(
-                        "{source}: series {other} and {external_id} have the same dataset {} \
-                         and dimensions {:?}",
-                        dataset.code, dataset.dimensions
+                        "{source}: series {external_id} is listed as both {prev:?} and {dataset:?}"
                     )));
                 }
             }
@@ -452,13 +495,11 @@ description = "World Bank indicators by country"
 [[dataset.dimensions]]
 name = "indicator"
 label = "Indicator"
-type = "code"
 
 [[dataset.dimensions]]
 name = "area"
 label = "Country or area"
-type = "code"
-codes = { USA = "United States" }
+codelist = "countries"
 
 [[dataset.attributes]]
 name = "obs_status"
@@ -469,11 +510,8 @@ label = "Observation status"
         parse_dataset_file(WDI).unwrap().remove(0)
     }
 
-    fn dims(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
+    fn dims(pairs: &[(&str, &str)]) -> SeriesDimensions {
+        pairs.iter().copied().collect()
     }
 
     #[test]
@@ -487,7 +525,9 @@ label = "Observation status"
         assert_eq!(d.measures.len(), 1);
         assert_eq!(d.measures[0].name, DEFAULT_MEASURE);
         assert_eq!(d.default_measure, DEFAULT_MEASURE);
-        assert_eq!(d.dimensions[1].codes["USA"], "United States");
+        assert_eq!(d.dimensions[1].codelist.as_deref(), Some("countries"));
+        assert_eq!(d.dimensions[1].component_type, ComponentType::String);
+        assert_eq!(d.measures[0].component_type, ComponentType::Decimal);
         assert_eq!(d.attributes[0].name, "obs_status");
     }
 
@@ -527,6 +567,34 @@ label = "Observation status"
             (&format!("{base}default_measure = \"level\"\n"), "train 1"),
             (&format!("{base}{base}"), "defined twice"),
             (&format!("{base}colour = \"red\"\n"), "unknown field"),
+            (
+                &format!(
+                    "[[dataset]]\ncode = \"{}\"\nname = \"X\"\n",
+                    "x".repeat(101)
+                ),
+                "longer than 100",
+            ),
+            (
+                &format!(
+                    "{base}[[dataset.dimensions]]\nname = \"area\"\nlabel = \"A\"\n\
+                     codelist = \"planets\"\n"
+                ),
+                "unknown codelist",
+            ),
+            (
+                &format!(
+                    "{base}[[dataset.dimensions]]\nname = \"area\"\nlabel = \"A\"\n\
+                     codelist = \"countries\"\ncodes = {{ USA = \"US\" }}\n"
+                ),
+                "both codes and a codelist",
+            ),
+            (
+                &format!(
+                    "{base}[[dataset.dimensions]]\nname = \"area\"\nlabel = \"A\"\n\
+                     type = \"code\"\n"
+                ),
+                "unknown variant",
+            ),
         ] {
             let e = parse_dataset_file(text).unwrap_err();
             assert!(e.contains(needle), "{text:?}: {e}");
@@ -547,28 +615,28 @@ label = "Observation status"
         assert_eq!(id2, "wdi/SP.POP.TOTL.FRA");
         assert_eq!(ds.code, "wdi");
         assert_eq!(
-            ds.dimensions_json(),
-            serde_json::json!({"indicator": "SP.POP.TOTL", "area": "FRA"})
+            ds.dimensions,
+            dims(&[("indicator", "SP.POP.TOTL"), ("area", "FRA")])
         );
     }
 
     #[test]
     fn canonical_external_id_rejects_bad_input() {
         let d = wdi();
-        assert!(d
-            .external_id(&dims(&[("indicator", "X")]))
-            .unwrap_err()
-            .contains("missing [\"area\"]"));
-        assert!(d
-            .external_id(&dims(&[("indicator", "X"), ("area", "a/b")]))
-            .unwrap_err()
-            .contains("'/'"));
-        assert!(canonical_external_id("FRED", &[])
-            .unwrap_err()
-            .contains("no dimensions"));
-        assert!(canonical_external_id("a/b", &["x"])
-            .unwrap_err()
-            .contains("dataset code"));
+        let err = |r: Result<String, CrawlError>| {
+            let e = r.unwrap_err();
+            assert_eq!(e.kind(), "permanent");
+            e.to_string()
+        };
+        assert!(err(d.external_id(&dims(&[("indicator", "X")]))).contains("missing [\"area\"]"));
+        assert!(err(d.external_id(&dims(&[("indicator", "X"), ("area", "a/b")]))).contains("'/'"));
+        // Only the first value may contain '.', so ids map back to one set of values.
+        assert!(
+            err(d.external_id(&dims(&[("indicator", "X"), ("area", "U.S")])))
+                .contains("only the first")
+        );
+        assert!(err(canonical_external_id("FRED", &[])).contains("no dimensions"));
+        assert!(err(canonical_external_id("a/b", &["x"])).contains("dataset code"));
         // Empty values are allowed (e.g. no state for a national series).
         assert_eq!(
             canonical_external_id("bds", &["national", "", "ESTAB"]).unwrap(),
@@ -656,19 +724,54 @@ label = "Observation status"
     }
 
     #[test]
-    fn check_all_rejects_duplicate_keys() {
+    fn check_requires_the_canonical_external_id() {
+        let c = catalog();
+        let ds = SeriesDataset::new("wdi", [("indicator", "X"), ("area", "USA")]);
+        let e = c
+            .check(SourceId::WorldBank, "X_USA", Some(&ds))
+            .unwrap_err();
+        assert_eq!(e.kind(), "permanent");
+        assert!(
+            e.to_string()
+                .contains("not the canonical external id \"wdi/X.USA\""),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn check_all_rejects_an_id_listed_twice_with_different_values() {
         let c = catalog();
         let a = SeriesDataset::new("wdi", [("indicator", "X"), ("area", "USA")]);
-        let b = a.clone();
         c.check_all(
             SourceId::WorldBank,
-            [("a", Some(&a)), ("a", Some(&a)), ("n", None)],
+            [
+                ("wdi/X.USA", Some(&a)),
+                ("wdi/X.USA", Some(&a)),
+                ("n", None),
+            ],
         )
         .unwrap();
-        let e = c
-            .check_all(SourceId::WorldBank, [("a", Some(&a)), ("b", Some(&b))])
+        let mut flat = DatasetCatalog::empty();
+        flat.insert(
+            SourceId::Fred,
+            &["a", "b"],
+            parse_dataset_file("[[dataset]]\ncode = \"a\"\nname = \"A\"\n[[dataset]]\ncode = \"b\"\nname = \"B\"\n").unwrap(),
+        )
+        .unwrap();
+        let (in_a, in_b) = (
+            SeriesDataset::new("a", Vec::<(String, String)>::new()),
+            SeriesDataset::new("b", Vec::<(String, String)>::new()),
+        );
+        let e = flat
+            .check_all(SourceId::Fred, [("GDP", Some(&in_a)), ("GDP", Some(&in_b))])
             .unwrap_err();
-        assert!(e.to_string().contains("same dataset wdi"), "{e}");
+        assert!(e.to_string().contains("is listed as both"), "{e}");
+    }
+
+    /// Every production adapter's declarations match the shipped dataset files.
+    #[test]
+    fn default_registry_declarations_match_shipped_files() {
+        DatasetCatalog::load(&crate::sources::default_registry()).unwrap();
     }
 
     /// A dimensionless dataset (e.g. FRED) holds many series, keyed by external id.

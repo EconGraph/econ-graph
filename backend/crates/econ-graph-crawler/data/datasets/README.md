@@ -20,13 +20,15 @@ description = "World Bank development indicators by country"
 [[dataset.dimensions]]
 name = "indicator"           # lowercase snake_case, the key in a series' dimensions
 label = "Indicator"
-type = "code"                # optional, informational
+type = "string"              # string (default), integer, decimal, date or boolean
 
 [[dataset.dimensions]]
 name = "area"
 label = "Country or area"
-type = "code"
-codes = { USA = "United States" }   # optional labels; not a closed list
+codelist = "countries"       # values from a shared reference list: countries or us_states
+
+# Or label the codes inline (not a closed list), instead of codelist:
+# codes = { national = "United States", state = "State" }
 
 # Optional attributes (observation or series flags).
 [[dataset.attributes]]

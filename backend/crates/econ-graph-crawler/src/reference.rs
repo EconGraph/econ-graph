@@ -12,12 +12,12 @@
 //! Each file is read once per process and cached, including a failure to read it, so the
 //! worker checks it at startup ([`us_states`]) rather than on its first job.
 //!
-//! Dataset definitions ([`datasets`]) are read once at startup by
-//! [`DatasetCatalog::load`](crate::dataset::DatasetCatalog::load), which keeps them.
+//! Dataset definitions ([`datasets`]) are cached the same way; the worker loads them at startup
+//! through [`DatasetCatalog::load`](crate::dataset::DatasetCatalog::load).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use crate::dataset::{parse_dataset_file, DatasetDef};
 use crate::error::CrawlError;
@@ -76,11 +76,38 @@ pub fn datasets_file(source: SourceId) -> PathBuf {
         .join(format!("{}.toml", source.as_str().to_ascii_lowercase()))
 }
 
-/// `source`'s dataset definitions from [`datasets_file`], parsed and validated (not cached).
+/// `source`'s dataset definitions from [`datasets_file`], parsed and validated, read on first use
+/// and cached (including a failure) like [`us_states`].
 ///
 /// A missing or invalid file is a `Permanent` error, with the path in the message.
-pub fn datasets(source: SourceId) -> Result<Vec<DatasetDef>, CrawlError> {
-    load_datasets(&datasets_file(source)).map_err(CrawlError::Permanent)
+pub fn datasets(source: SourceId) -> Result<&'static [DatasetDef], CrawlError> {
+    type Cache = Mutex<HashMap<SourceId, &'static Result<Vec<DatasetDef>, String>>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
+    let mut cache = CACHE
+        .get_or_init(Cache::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // One entry per source, so leaking gives the 'static lifetime at a bounded cost.
+    let entry = *cache
+        .entry(source)
+        .or_insert_with(|| Box::leak(Box::new(load_datasets(&datasets_file(source)))));
+    entry
+        .as_deref()
+        .map_err(|e| CrawlError::Permanent(e.clone()))
+}
+
+/// The definition of `source`'s dataset `code` (see [`datasets`]), for adapters that build
+/// canonical external ids with [`DatasetDef::external_id`] or [`DatasetDef::series`].
+pub fn dataset(source: SourceId, code: &str) -> Result<&'static DatasetDef, CrawlError> {
+    datasets(source)?
+        .iter()
+        .find(|d| d.code == code)
+        .ok_or_else(|| {
+            CrawlError::Permanent(format!(
+                "{source} dataset {code} is not defined in {}",
+                datasets_file(source).display()
+            ))
+        })
 }
 
 fn load_datasets(path: &Path) -> Result<Vec<DatasetDef>, String> {
