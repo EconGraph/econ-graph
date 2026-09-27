@@ -146,6 +146,7 @@ impl Query {
             end_date: filter.as_ref().and_then(|f| f.end_date),
             original_only: filter.as_ref().and_then(|f| f.original_only),
             latest_revision_only: filter.as_ref().and_then(|f| f.latest_revision_only),
+            as_of: filter.as_ref().and_then(|f| f.as_of),
             limit: first.map(|f| f as i64),
             offset: after.and_then(|cursor| cursor.parse::<i64>().ok()),
         };
@@ -262,24 +263,20 @@ impl Query {
             .collect())
     }
 
-    /// Get annotations for a specific series
+    /// Get annotations for a specific series: public ones, plus the caller's own private ones.
     async fn annotations_for_series(
         &self,
         ctx: &Context<'_>,
         series_id: String,
-        user_id: Option<ID>,
+        #[graphql(deprecation = "Ignored: the viewer is the signed-in caller")] user_id: Option<ID>,
     ) -> Result<Vec<ChartAnnotationType>> {
+        let _ = user_id;
+        let viewer = current_user_id_opt(ctx)?;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
-        let user_uuid = if let Some(uid) = user_id {
-            Some(uuid::Uuid::parse_str(&uid)?)
-        } else {
-            None
-        };
-
         let annotations = collaboration_service
-            .get_annotations_for_series(&series_id, user_uuid)
+            .get_annotations_for_series(&series_id, viewer)
             .await?;
         Ok(annotations
             .into_iter()
@@ -287,18 +284,19 @@ impl Query {
             .collect())
     }
 
-    /// Get comments for a specific annotation
+    /// Get comments for an annotation the caller can see (public, or their own)
     async fn comments_for_annotation(
         &self,
         ctx: &Context<'_>,
         annotation_id: ID,
     ) -> Result<Vec<AnnotationCommentType>> {
+        let viewer = current_user_id_opt(ctx)?;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let annotation_uuid = uuid::Uuid::parse_str(&annotation_id)?;
         let comments = collaboration_service
-            .get_comments_for_annotation(annotation_uuid)
+            .get_comments_for_annotation(annotation_uuid, viewer)
             .await?;
         Ok(comments
             .into_iter()
@@ -306,28 +304,38 @@ impl Query {
             .collect())
     }
 
-    /// Get collaborators for a specific chart
+    /// Get collaborators for a specific chart. Requires sign-in; only the chart's own
+    /// collaborators see the list, everyone else gets an empty one.
     async fn chart_collaborators(
         &self,
         ctx: &Context<'_>,
         chart_id: ID,
     ) -> Result<Vec<ChartCollaboratorType>> {
+        let viewer = current_user(ctx)?.id;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let chart_uuid = uuid::Uuid::parse_str(&chart_id)?;
-        let collaborators = collaboration_service.get_collaborators(chart_uuid).await?;
+        let collaborators = collaboration_service
+            .get_collaborators(chart_uuid, viewer)
+            .await?;
         Ok(collaborators
             .into_iter()
             .map(|(collaborator, _user)| ChartCollaboratorType::from(collaborator))
             .collect())
     }
 
-    /// Get user information by ID
+    /// Get user information by ID. Callers may read only their own record unless they are an admin.
     async fn user(&self, ctx: &Context<'_>, user_id: ID) -> Result<Option<UserType>> {
-        let pool = ctx.data::<DatabasePool>()?;
-
+        // Authenticate before parsing, so anonymous callers never see input validation errors.
+        let caller_id = current_user(ctx)?.id;
         let user_uuid = uuid::Uuid::parse_str(&user_id)?;
+
+        if caller_id != user_uuid {
+            require_admin(ctx)?;
+        }
+
+        let pool = ctx.data::<DatabasePool>()?;
 
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
@@ -599,7 +607,7 @@ impl Query {
     ) -> Result<Vec<SecurityEventType>> {
         // Require admin role
         let _admin_user = require_admin(ctx)?;
-        let _context = ctx.data::<crate::graphql::schema::GraphQLContext>()?;
+        let _context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
 
         // Get security events logic would go here
         // For now, return empty vector
@@ -615,7 +623,7 @@ impl Query {
     ) -> Result<AuditLogConnection> {
         // Require admin role
         let _admin_user = require_admin(ctx)?;
-        let _context = ctx.data::<crate::graphql::schema::GraphQLContext>()?;
+        let _context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
 
         // Get audit logs logic would go here
         // For now, return empty connection
@@ -832,6 +840,113 @@ impl Default for Query {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_user(role: &str) -> models::User {
+        let now = chrono::Utc::now();
+        models::User {
+            id: uuid::Uuid::new_v4(),
+            email: format!("{role}@example.test"),
+            name: role.into(),
+            avatar_url: None,
+            provider: "email".into(),
+            provider_id: None,
+            password_hash: None,
+            role: role.into(),
+            organization: None,
+            theme: "light".into(),
+            default_chart_type: "line".into(),
+            notifications_enabled: false,
+            collaboration_enabled: false,
+            is_active: true,
+            email_verified: true,
+            created_at: now,
+            updated_at: now,
+            last_login_at: None,
+        }
+    }
+
+    /// A pool that never connects: the authorization check must reject the request before
+    /// any database access, so this test needs no database.
+    fn unreachable_pool() -> DatabasePool {
+        let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
+            diesel_async::AsyncPgConnection,
+        >::new("postgres://nobody@127.0.0.1:1/none");
+        DatabasePool::builder()
+            .connection_timeout(std::time::Duration::from_secs(1))
+            .build_unchecked(manager)
+    }
+
+    #[tokio::test]
+    async fn test_user_query_rejects_other_users_before_db_access() {
+        let other_user_id = uuid::Uuid::new_v4();
+        let query = format!(r#"{{ user(userId: "{other_user_id}") {{ id email }} }}"#);
+        for u in [
+            None,
+            Some(test_user("guest")),
+            Some(test_user("viewer")),
+            Some(test_user("analyst")),
+        ] {
+            let role = u.as_ref().map(|u| u.role.clone());
+            let schema = crate::graphql::schema::create_schema_with_data(
+                unreachable_pool(),
+                std::sync::Arc::new(crate::graphql::context::GraphQLContext::new(u)),
+            );
+            let resp = schema.execute(query.as_str()).await;
+            assert_eq!(resp.errors.len(), 1, "{role:?}: {:?}", resp.errors);
+            let msg = &resp.errors[0].message;
+            let expected = if role.is_some() {
+                "Insufficient permissions"
+            } else {
+                "Authentication required"
+            };
+            assert!(
+                msg.contains(expected),
+                "{role:?}: expected {expected}, got {msg}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_user_query_requires_authentication_before_parsing_the_id() {
+        let schema = crate::graphql::schema::create_schema_with_data(
+            unreachable_pool(),
+            std::sync::Arc::new(crate::graphql::context::GraphQLContext::new(None)),
+        );
+        let resp = schema
+            .execute(r#"{ user(userId: "not-a-uuid") { id } }"#)
+            .await;
+        assert_eq!(resp.errors.len(), 1, "{:?}", resp.errors);
+        assert!(
+            resp.errors[0].message.contains("Authentication required"),
+            "{}",
+            resp.errors[0].message
+        );
+    }
+
+    #[tokio::test]
+    async fn test_user_query_lets_self_and_admin_past_the_check() {
+        // Both reach the database lookup, which fails here because the pool never connects.
+        let viewer = test_user("viewer");
+        let viewer_id = viewer.id;
+        for (u, target) in [
+            (viewer, viewer_id),
+            (test_user("admin"), uuid::Uuid::new_v4()),
+        ] {
+            let role = u.role.clone();
+            let schema = crate::graphql::schema::create_schema_with_data(
+                unreachable_pool(),
+                std::sync::Arc::new(crate::graphql::context::GraphQLContext::new(Some(u))),
+            );
+            let query = format!(r#"{{ user(userId: "{target}") {{ id }} }}"#);
+            let resp = schema.execute(query.as_str()).await;
+            assert_eq!(resp.errors.len(), 1, "{role}: {:?}", resp.errors);
+            let msg = &resp.errors[0].message;
+            assert!(
+                !msg.contains("permissions") && !msg.contains("Authentication"),
+                "{role}: should pass the authorization check, got {msg}"
+            );
+        }
+    }
 
     #[test]
     fn test_convert_series_filter_to_params() {

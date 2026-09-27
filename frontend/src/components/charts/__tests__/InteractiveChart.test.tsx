@@ -139,40 +139,33 @@ describe('InteractiveChart', () => {
     expect(screen.getByTestId('line-chart')).toBeInTheDocument();
   });
 
-  test('should handle data transformation selection', async () => {
-    // REQUIREMENT: Test data transformation options
-    // PURPOSE: Verify that users can switch between different data transformations
-    // This supports various analytical perspectives (levels, YoY, etc.)
+  test('should show the transformation it is given and report a new choice', async () => {
+    // Transformations are computed by the backend: the chart only shows the selector and
+    // reports the user's choice to its caller.
+    const user = userEvent.setup();
+    const onTransformationChange = vi.fn();
+    renderInteractiveChart({ transformation: 'NONE', onTransformationChange });
 
-    renderInteractiveChart();
-
-    // Find transformation selector by role
     const transformationSelect = screen.getByRole('combobox');
-
-    // Verify transformation selector exists and shows default value
-    expect(transformationSelect).toBeInTheDocument();
     expect(transformationSelect).toHaveTextContent('None');
 
-    // Verify chart still renders
-    expect(screen.getByTestId('line-chart')).toBeInTheDocument();
+    await user.click(transformationSelect);
+    await user.click(await screen.findByRole('option', { name: 'Year-over-Year' }));
+    expect(onTransformationChange).toHaveBeenCalledWith('YEAR_OVER_YEAR');
   });
 
-  test('should handle original vs revised data toggle', async () => {
-    // REQUIREMENT: Test original vs revised data filtering
-    // PURPOSE: Verify that users can choose between original releases and revisions
-    // This supports analysis of data revision patterns
+  test('should plot the given values without transforming them', () => {
+    const data = createMockDataPoints(3, 100);
+    renderInteractiveChart({ data, transformation: 'YEAR_OVER_YEAR' });
 
-    const user = userEvent.setup();
-    renderInteractiveChart();
-
-    // Find original data toggle
-    const originalOnlyToggle = screen.getByLabelText(/original releases/i);
-
-    // Toggle original data only
-    await user.click(originalOnlyToggle);
-
-    // Verify toggle state
-    expect(originalOnlyToggle).toBeChecked();
+    const chartElement = screen.getByTestId('line-chart');
+    const chartData = JSON.parse(chartElement.getAttribute('data-chart-data') || '{}');
+    const chartOptions = JSON.parse(chartElement.getAttribute('data-chart-options') || '{}');
+    expect(chartData.datasets[0].data.map((p: { y: number }) => p.y)).toEqual(
+      data.map(d => d.value)
+    );
+    expect(chartOptions.plugins.title.text).toContain('Year-over-Year % Change');
+    expect(chartOptions.scales.y.title.text).toBe('Percent Change');
   });
 
   test('should display chart with proper configuration', () => {
@@ -243,22 +236,6 @@ describe('InteractiveChart', () => {
     // Chart should still render efficiently
     expect(screen.getByTestId('line-chart')).toBeInTheDocument();
     expect(screen.getByText(/data points:/i)).toBeInTheDocument();
-  });
-
-  test('should show revision indicators when available', () => {
-    // REQUIREMENT: Test revision indicator display
-    // PURPOSE: Verify that data revisions are visually distinguished
-    // This helps users understand data quality and revision history
-
-    const dataWithRevisions = createMockDataPoints(5, 100).map((point, index) => ({
-      ...point,
-      isOriginalRelease: index % 2 === 0, // Alternate original/revised
-    }));
-
-    renderInteractiveChart({ data: dataWithRevisions });
-
-    // Should show revision controls
-    expect(screen.getByLabelText(/revised data/i)).toBeInTheDocument();
   });
 
   test('should handle frequency-specific formatting', () => {
@@ -337,7 +314,7 @@ describe('InteractiveChart', () => {
     expect(screen.getByText('Chart Controls')).toBeInTheDocument();
   });
 
-  test('should display chart legend when multiple series', () => {
+  test('should hide the legend for a single series', () => {
     // REQUIREMENT: Test legend display for multiple data series
     // PURPOSE: Verify that legend helps distinguish between different data series
     // This supports comparison of original vs revised data
@@ -345,13 +322,12 @@ describe('InteractiveChart', () => {
     const dataWithMultipleSeries = createMockDataPoints(10, 100);
     renderInteractiveChart({
       data: dataWithMultipleSeries,
-      showOriginalAndRevised: true
     });
 
     const chartElement = screen.getByTestId('line-chart');
     const chartOptions = JSON.parse(chartElement.getAttribute('data-chart-options') || '{}');
 
-    // Should have legend configuration (currently disabled in component)
+    // One dataset, so no legend
     expect(chartOptions.plugins.legend.display).toBe(false);
   });
 });

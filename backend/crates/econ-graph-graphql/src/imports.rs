@@ -97,4 +97,7 @@ pub use uuid::Uuid;
 // Note: These are already imported above, so we don't need to redefine them
 
 // Re-export GraphQL context utilities
-pub use crate::graphql::context::{current_user, require_admin, GraphQLContext};
+pub use crate::graphql::context::{
+    current_user, current_user_id_opt, require_admin, require_role, GraphQLContext,
+};
+pub use econ_graph_auth::{Principal, Role};

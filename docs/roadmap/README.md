@@ -28,7 +28,7 @@ request merges, its Doc link does not resolve; read the pull request instead.
 | Global analysis (world map, cross-country data) | [global-analysis.md](./global-analysis.md) | Draft ([#188](https://github.com/EconGraph/econ-graph/pull/188)) |
 | Release trains: what ships in which release | [releases.md](./releases.md) | Draft ([#190](https://github.com/EconGraph/econ-graph/pull/190)) |
 | Data sources: which sources, in what order | [data-sources.md](./data-sources.md) | Proposed ([#192](https://github.com/EconGraph/econ-graph/pull/192)) |
-| Analysis workspace: multi-series charts, saved charts, export | [analysis-workspace.md](./analysis-workspace.md) | Proposed ([#191](https://github.com/EconGraph/econ-graph/pull/191)) |
+| Analysis workspace: multi-series charts, saved charts, export | [analysis-workspace.md](./analysis-workspace.md) | Accepted ([#191](https://github.com/EconGraph/econ-graph/pull/191)) |
 | SEC EDGAR / XBRL financial data | [sec-financial-data.md](./sec-financial-data.md) | Draft ([#193](https://github.com/EconGraph/econ-graph/pull/193)) |
 | Feature flags and experiments | [feature-flags.md](./feature-flags.md) | Proposed ([#195](https://github.com/EconGraph/econ-graph/pull/195)) |
 | Security hardening | [SECURITY_IMPLEMENTATION_PLAN.md](../projects/SECURITY_IMPLEMENTATION_PLAN.md) | Needs a rewrite (see [Security](#security)) |
@@ -64,9 +64,9 @@ request merges, its Doc link does not resolve; read the pull request instead.
 
 ## What is built today
 
-Checked against `main` at `140fadf` (2026-09-26), which includes the JWT secret (#180) and backend CORS (#182) fixes.
+Checked against `main` at `eb7634d` (2026-09-26), which includes the JWT secret (#180), token subject (#181), backend CORS (#182) and `/mcp` token (#185) fixes.
 
-**Backend.** The backend is a Rust workspace in `backend/crates` built on Axum,
+**Backend.** The backend is a Rust workspace in `backend/crates` built on warp,
 async-graphql and Diesel on Postgres. Its crates are core, services, graphql, auth,
 crawler, crawler-worker, sec-crawler, mcp, metrics and backend. The crate split in
 `CRATE_SPLIT_PLAN.md` is complete. The pre-workspace trees `backend/src` and
@@ -96,15 +96,16 @@ finished, and Storybook and Playwright are set up. The global-analysis world map
 and the chart collaboration features (annotations, comments, sharing) are built.
 
 **Admin frontend.** The admin frontend mounts three crawler pages: Dashboard, Config
-and Logs. Logs runs on mock data.
+and Logs. Logs queries a `crawlerLogs` field the backend does not have, and its
+performance metrics are random mock values.
 
 **Auth.** Auth uses a custom HS256 JWT with no refresh token. Login works with
 Google, Facebook, or email and password (bcrypt). The code defines three role
 vocabularies that disagree with each other (details in
 [auth-plans-permissions.md](./auth-plans-permissions.md)).
 
-**Search.** Series search is `ILIKE` with a constant rank
-(`econ-graph-services/src/services/search_service.rs`).
+**Search.** Series search is `ILIKE` with a two-value rank (1.0 for a title match,
+0.5 for a description-only match) (`econ-graph-services/src/services/search_service.rs`).
 [#165](https://github.com/EconGraph/econ-graph/pull/165) adds a weighted tsvector and
 pg_trgm index and rewrites `docs/technical/FULLTEXT_SEARCH.md` to match.
 
@@ -125,20 +126,23 @@ The canonical findings list is
 made in the deleted `backend/src` and never reached the crates. They were redone in
 the crates by [#180](https://github.com/EconGraph/econ-graph/pull/180) (JWT secret)
 and [#182](https://github.com/EconGraph/econ-graph/pull/182) (backend CORS).
+[#185](https://github.com/EconGraph/econ-graph/pull/185) added a token check on `/mcp`.
 
 | Item | Evidence |
 |---|---|
-| Two ingress variants still allow any CORS origin (the backend no longer does, since #182) | `cors-allow-origin: "*"` in `k8s/manifests/ingress.yaml` and `ingress-cloudflare-dns01.yaml` |
-| `/mcp` and `/playground` are unauthenticated | `econ-graph-backend/src/main.rs` |
-| GraphQL depth, complexity and rate limits exist but are not enforced | `/graphql` calls `schema.execute` directly (`econ-graph-backend/src/main.rs`, `graphql_handler`). Nothing calls `SecureGraphQLServer::execute_secure_request` in `econ-graph-graphql/src/security/server.rs` |
-| Plaintext DB and monitoring credentials in k8s manifests | `k8s/manifests/postgres-deployment.yaml`, `configmap.yaml`, `ingress-cloudflare-dns01.yaml` |
+| `/playground` is unauthenticated. `/mcp` requires a signed-in user's token since #185, a stopgap until MCP OAuth (Phase 6) | `econ-graph-backend/src/main.rs` (`graphql_playground`, `mcp_route`) |
+| GraphQL depth, complexity and rate limits exist but are not enforced | `/graphql` calls `schema.execute` directly in the `graphql_filter` closure (`econ-graph-backend/src/main.rs`; the `graphql_handler` function there is unused). Nothing calls `SecureGraphQLServer::execute_secure_request` in `econ-graph-graphql/src/security/server.rs` |
+| Plaintext DB, monitoring and Google OAuth client-secret credentials in k8s manifests. The OAuth secret must be rotated | `k8s/manifests/postgres-deployment.yaml`, `configmap.yaml`, `ingress-cloudflare-dns01.yaml` |
 | Sealed Secrets / secrets submodule not set up | `k8s/secrets` is uninitialized. `SECRETS_MANAGEMENT.md` describes a target state, not the current one |
 | Tokens are stored in `localStorage` | `frontend/src/contexts/AuthContext.tsx` and `admin-frontend/src/contexts/AuthContext.tsx` |
-| Terraform state is local, and provider binaries are committed | `terraform/k8s/.terraform/` |
+| Terraform state files and provider binaries are committed to git | `terraform/k8s/terraform.tfstate`, `terraform.tfstate.backup`, `terraform/k8s/.terraform/` |
 | Security scans upload results but never fail the build | `.github/workflows/security.yml` |
 
-The ingress CORS and `/mcp` auth items are scheduled in Phase 0 (Hygiene) and
-Phase 6 of [auth-plans-permissions.md](./auth-plans-permissions.md). Items about
+Fixed: no ingress sets CORS headers any more, so the backend's `CORS_ALLOWED_ORIGINS`
+(#182) is the only CORS policy ([#196](https://github.com/EconGraph/econ-graph/pull/196)).
+
+OAuth for `/mcp` is scheduled in Phase 6 of
+[auth-plans-permissions.md](./auth-plans-permissions.md). Items about
 roles, permissions, MFA and session length belong there too.
 
 ### Admin UI
@@ -151,8 +155,8 @@ roles, permissions, MFA and session length belong there too.
 - [GITHUB_ISSUE_CRAWLER_LOGS.md](../../GITHUB_ISSUE_CRAWLER_LOGS.md). No
   `crawler_logs` query exists. `crawl_attempts` could back a logs view.
 - [ADMIN_SECURITY.md](../technical/ADMIN_SECURITY.md).
-- `UserManagementPage`, `MonitoringPage`, `SystemHealthPage` and `LoginPage` exist in
-  `admin-frontend/src/pages` but are not mounted in `App.tsx`.
+- `UserManagementPage`, `MonitoringPage`, `SystemHealthPage`, `DashboardPage` and
+  `auth/LoginPage` exist in `admin-frontend/src/pages` but are not mounted in `App.tsx`.
 - `AuthContext` calls `/api/admin/auth/*` endpoints that do not exist.
 
 ### Data federation and time series storage
@@ -166,7 +170,8 @@ global-analysis docs. The findings below are its inputs.
 
 - **The backend exists but nothing can reach it.** `GlobalAnalysisQuery`
   (`econ-graph-graphql/src/graphql/global_analysis.rs`) is never merged into the root
-  `Query`. Registering it as-is would expose `calculate_pairwise_correlation`, which
+  `Query`. Registering it as-is would expose `calculateCountryCorrelations`, whose results
+  come from `calculate_pairwise_correlation` in `global_analysis_service.rs`, which
   returns hard-coded values (0.75, p = 0.01). [#188](https://github.com/EconGraph/econ-graph/pull/188)
   recommends a generic `crossSection` query instead and deleting
   `GlobalAnalysisQuery`, and [releases.md](./releases.md) agrees. That choice is
@@ -338,7 +343,7 @@ useful but out of date.
 
 ### Other docs with stale roadmap sections
 
-- **`README.md` (root).** Its project structure still shows `backend/src`. The "Development Cost Transparency" block appears twice, and the file ends with trailing "CI trigger" lines.
+- **`README.md` (root).** Its project structure still shows `backend/src` and calls the backend Axum (it is warp). The "Development Cost Transparency" block appears twice, and the file ends with trailing "CI trigger" lines.
 - **`personas/frontend-developer.md`.** Its "Current Project Focus" section repeats the global roadmap, and its testing guidance still uses Jest.
 - **`personas/backend-engineer.md`.** Its crate list is out of date, and "Future Considerations" appears twice.
 - **`personas/security-engineer.md`.** It cites `backend/src/auth/services.rs`.

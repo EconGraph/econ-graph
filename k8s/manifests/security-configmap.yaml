@@ -72,24 +72,7 @@ data:
         # Rate limiting for API
         limit_req zone=api burst=20 nodelay;
         
-        # CORS for API
-        add_header Access-Control-Allow-Origin "https://www.econ-graph.com,https://econ-graph.com" always;
-        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, PATCH" always;
-        add_header Access-Control-Allow-Headers "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,Accept,Origin,X-CSRF-Token" always;
-        add_header Access-Control-Allow-Credentials "true" always;
-        add_header Access-Control-Max-Age "86400" always;
-        
-        # Handle preflight requests
-        if ($request_method = 'OPTIONS') {
-            add_header Access-Control-Allow-Origin "https://www.econ-graph.com,https://econ-graph.com";
-            add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, PATCH";
-            add_header Access-Control-Allow-Headers "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,Accept,Origin,X-CSRF-Token";
-            add_header Access-Control-Allow-Credentials "true";
-            add_header Access-Control-Max-Age "86400";
-            add_header Content-Length 0;
-            add_header Content-Type text/plain;
-            return 204;
-        }
+        # CORS is enforced by the backend from CORS_ALLOWED_ORIGINS.
     }
     
     # Security for GraphQL endpoint
@@ -97,22 +80,5 @@ data:
         # Rate limiting for GraphQL
         limit_req zone=api burst=30 nodelay;
         
-        # CORS for GraphQL
-        add_header Access-Control-Allow-Origin "https://www.econ-graph.com,https://econ-graph.com" always;
-        add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
-        add_header Access-Control-Allow-Headers "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,Accept,Origin,X-CSRF-Token" always;
-        add_header Access-Control-Allow-Credentials "true" always;
-        add_header Access-Control-Max-Age "86400" always;
-        
-        # Handle preflight requests
-        if ($request_method = 'OPTIONS') {
-            add_header Access-Control-Allow-Origin "https://www.econ-graph.com,https://econ-graph.com";
-            add_header Access-Control-Allow-Methods "GET, POST, OPTIONS";
-            add_header Access-Control-Allow-Headers "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,Accept,Origin,X-CSRF-Token";
-            add_header Access-Control-Allow-Credentials "true";
-            add_header Access-Control-Max-Age "86400";
-            add_header Content-Length 0;
-            add_header Content-Type text/plain;
-            return 204;
-        }
+        # CORS is enforced by the backend from CORS_ALLOWED_ORIGINS.
     }

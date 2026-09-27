@@ -121,14 +121,9 @@ let cors = warp::cors()
 ```
 
 #### Configuration:
-```yaml
-# k8s/manifests/ingress.yaml
-metadata:
-  annotations:
-    nginx.ingress.kubernetes.io/cors-allow-origin: "https://econgraph.com,https://admin.econgraph.com"
-    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
-    nginx.ingress.kubernetes.io/cors-allow-headers: "Content-Type, Authorization"
-```
+Done differently: the backend enforces CORS from `CORS_ALLOWED_ORIGINS` (#182), and the
+ingress manifests set no CORS annotations, so responses never carry two
+`Access-Control-Allow-Origin` headers.
 
 ### 1.3 PostgreSQL Credentials Security
 **Priority**: CRITICAL (CVSS 9.1)

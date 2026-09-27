@@ -89,7 +89,7 @@ impl EconomicSeriesType {
 
     /// Fetch the data source using DataLoader for efficient batching
     async fn source(&self, ctx: &Context<'_>) -> Result<Option<DataSourceType>> {
-        let context = ctx.data::<crate::graphql::schema::GraphQLContext>()?;
+        let context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
         let data_loaders = &context.data_loaders;
         let source_uuid = Uuid::parse_str(&self.source_id)?;
 
@@ -103,7 +103,7 @@ impl EconomicSeriesType {
         ctx: &Context<'_>,
         #[graphql(default = 100)] limit: i32,
     ) -> Result<Vec<DataPointType>> {
-        let context = ctx.data::<crate::graphql::schema::GraphQLContext>()?;
+        let context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
         let data_loaders = &context.data_loaders;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
@@ -119,7 +119,7 @@ impl EconomicSeriesType {
 
     /// Get data point count using DataLoader for efficient batching
     async fn data_point_count(&self, ctx: &Context<'_>) -> Result<i32> {
-        let context = ctx.data::<crate::graphql::schema::GraphQLContext>()?;
+        let context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
         let data_loaders = &context.data_loaders;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
@@ -308,7 +308,7 @@ impl DataSourceType {
         #[graphql(default = 50)] first: i32,
         after: Option<String>,
     ) -> Result<SeriesConnection> {
-        let context = ctx.data::<crate::graphql::schema::GraphQLContext>()?;
+        let context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
         let data_loaders = &context.data_loaders;
         let source_uuid = Uuid::parse_str(&self.id)?;
 
@@ -350,7 +350,7 @@ impl DataSourceType {
 
     /// Get count of active series for this data source
     async fn series_count(&self, ctx: &Context<'_>) -> Result<i32> {
-        let context = ctx.data::<crate::graphql::schema::GraphQLContext>()?;
+        let context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
         let data_loaders = &context.data_loaders;
         let source_uuid = Uuid::parse_str(&self.id)?;
 

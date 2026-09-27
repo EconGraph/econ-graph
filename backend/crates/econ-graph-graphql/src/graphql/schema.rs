@@ -11,9 +11,10 @@ use crate::graphql::{mutation::Mutation, query::Query};
 use crate::security::{SecurityConfig, SecurityMiddleware};
 use econ_graph_core::database::DatabasePool;
 
-/// GraphQL context containing shared resources
+/// Shared resources every request of a schema sees (the per-request caller is
+/// [`crate::graphql::context::GraphQLContext`])
 #[derive(Clone)]
-pub struct GraphQLContext {
+pub struct SchemaResources {
     /// Database connection pool
     pub pool: Arc<DatabasePool>,
     /// DataLoaders for efficient N+1 query prevention
@@ -49,7 +50,7 @@ pub fn create_schema(pool: DatabasePool) -> Schema<Query, Mutation, EmptySubscri
     let data_loaders = Arc::new(DataLoaders::new(pool.clone()));
     let security_config = SecurityConfig::default();
     let security = Arc::new(SecurityMiddleware::new(security_config));
-    let context = GraphQLContext {
+    let context = SchemaResources {
         pool: pool_arc,
         data_loaders,
         security,
@@ -77,7 +78,7 @@ pub fn create_schema_with_data<T: Send + Sync + 'static>(
     let data_loaders = Arc::new(DataLoaders::new(pool.clone()));
     let security_config = SecurityConfig::default();
     let security = Arc::new(SecurityMiddleware::new(security_config));
-    let context = GraphQLContext {
+    let context = SchemaResources {
         pool: pool_arc,
         data_loaders,
         security,
