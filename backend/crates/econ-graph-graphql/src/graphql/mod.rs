@@ -21,4 +21,4 @@ pub(crate) mod test_db;
 // Re-export commonly used types
 pub use mutation::Mutation;
 pub use query::Query;
-pub use schema::{create_schema, create_schema_with_data, GraphQLContext};
+pub use schema::{create_schema, create_schema_with_data, SchemaResources};

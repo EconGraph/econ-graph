@@ -12,7 +12,7 @@
 //!
 //! - **OAuth Integration**: Support for Google, GitHub, and other OAuth providers
 //! - **JWT Authentication**: Secure token-based authentication with configurable expiration
-//! - **Role-Based Access Control**: Granular permissions and role management
+//! - **Fine-grained roles**: the [`Role`] catalog, [`Principal`] and [`authorize`]
 //! - **User Management**: Complete user lifecycle management and profile handling
 //! - **Security Middleware**: Request authentication and authorization middleware
 //! - **Session Management**: Secure session handling and token refresh
@@ -43,6 +43,11 @@
 //! ```
 
 pub mod auth;
+pub mod roles;
 
 // Re-export commonly used auth types
 pub use auth::*;
+pub use roles::{
+    authorize, role_list, roles_for_legacy, Forbidden, Principal, Role, UnknownLegacyRole,
+    UnknownRole,
+};

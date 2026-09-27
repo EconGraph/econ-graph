@@ -1,0 +1,19 @@
+# Postgres for the release end-to-end suite (scripts/release-e2e.sh). The backend and the
+# frontend release build run on the host, from the checkout under test. Data lives in tmpfs,
+# and the script recreates the container on every run, so each run starts empty.
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: econ_graph_e2e
+    ports:
+      - "127.0.0.1:5439:5432"
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 2s
+      retries: 15

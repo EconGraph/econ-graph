@@ -637,7 +637,7 @@ impl Query {
     ) -> Result<Vec<SecurityEventType>> {
         // Require admin role
         let _admin_user = require_admin(ctx)?;
-        let _context = ctx.data::<crate::graphql::schema::GraphQLContext>()?;
+        let _context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
 
         // Get security events logic would go here
         // For now, return empty vector
@@ -653,7 +653,7 @@ impl Query {
     ) -> Result<AuditLogConnection> {
         // Require admin role
         let _admin_user = require_admin(ctx)?;
-        let _context = ctx.data::<crate::graphql::schema::GraphQLContext>()?;
+        let _context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
 
         // Get audit logs logic would go here
         // For now, return empty connection
