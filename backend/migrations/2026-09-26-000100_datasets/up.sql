@@ -4,7 +4,8 @@
 -- Observations stay in data_points. In train 1 every dataset is stored long: each measure is
 -- its own series, so default_measure is 'value' until wide datasets arrive with Iceberg.
 
--- Whether a components list is an array of {name, label, type, ...} objects that the Rust
+-- Whether a components list is an array of {name, label, type, unit?, codes?, codelist?}
+-- objects (codes being {code, label, unit?, description?} objects) that the Rust
 -- model (econ_graph_core::models::dataset::DatasetComponent) can read.
 CREATE FUNCTION dataset_components_valid(components JSONB) RETURNS BOOLEAN
 LANGUAGE sql IMMUTABLE AS $$
@@ -16,6 +17,22 @@ LANGUAGE sql IMMUTABLE AS $$
             OR jsonb_typeof(c -> 'label') IS DISTINCT FROM 'string'
             OR jsonb_typeof(c -> 'type') IS DISTINCT FROM 'string'
             OR c ->> 'type' NOT IN ('string', 'integer', 'decimal', 'date', 'boolean')
+            OR COALESCE(jsonb_typeof(c -> 'unit'), 'null') NOT IN ('string', 'null')
+            OR COALESCE(jsonb_typeof(c -> 'codelist'), 'null') NOT IN ('string', 'null')
+            OR CASE COALESCE(jsonb_typeof(c -> 'codes'), 'null')
+                WHEN 'null' THEN FALSE
+                WHEN 'array' THEN EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(c -> 'codes') AS code
+                    WHERE jsonb_typeof(code) <> 'object'
+                        OR jsonb_typeof(code -> 'code') IS DISTINCT FROM 'string'
+                        OR jsonb_typeof(code -> 'label') IS DISTINCT FROM 'string'
+                        OR COALESCE(jsonb_typeof(code -> 'unit'), 'null') NOT IN ('string', 'null')
+                        OR COALESCE(jsonb_typeof(code -> 'description'), 'null')
+                            NOT IN ('string', 'null')
+                )
+                ELSE TRUE
+            END
     ) ELSE FALSE END
 $$;
 
