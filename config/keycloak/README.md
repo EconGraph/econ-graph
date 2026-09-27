@@ -53,19 +53,23 @@ The realm file reads these environment variables when it is imported:
 | `KC_WEB_BASE_URL` | none (required) | Web app origin; redirect URIs are `<origin>/*` |
 | `KC_WEB_DIRECT_GRANTS` | `false` | Password grant on `econ-graph-web` (dev only) |
 | `KC_REALM_SSL_REQUIRED` | `external` | `none` in local compose |
-| `KC_GOOGLE_ENABLED` | `false` | Turn on "Sign in with Google" |
+| `KC_GOOGLE_ENABLED` | `false` | Set to `true` by the container command when a Google client id is configured |
 | `KC_GOOGLE_CLIENT_ID`, `KC_GOOGLE_CLIENT_SECRET` | `unset` | Google OAuth client |
+
+Placeholders are resolved once, when the realm is first imported. After that the
+values live in Keycloak's database, so a later change (for example a rotated Google
+client secret) is made in the admin console, or locally by recreating the volume.
 
 For Google sign-in locally, create an OAuth client in Google Cloud with redirect URI
 `http://localhost:8081/realms/econ-graph/broker/google/endpoint`, then:
 
 ```bash
-export KC_GOOGLE_ENABLED=true KC_GOOGLE_CLIENT_ID=... KC_GOOGLE_CLIENT_SECRET=...
+export KEYCLOAK_GOOGLE_CLIENT_ID=... KEYCLOAK_GOOGLE_CLIENT_SECRET=...
 docker compose up -d keycloak
 ```
 
 ## Kubernetes
 
-See `k8s/manifests/keycloak-deployment.yaml`. The realm file becomes the ConfigMap
-`keycloak-realm`; credentials live only in the Secret `keycloak-secrets`, which
-`scripts/deploy/create-keycloak-secret.sh` creates from environment variables.
+See `k8s/manifests/keycloak/` and the Keycloak section of `k8s/README.md`. The realm
+file becomes the ConfigMap `keycloak-realm`; credentials live only in the Secret
+`econ-graph-keycloak`, written by `scripts/deploy/create-secrets.sh`.

@@ -5,12 +5,18 @@
 # Dev realm only: the password grant is enabled on econ-graph-web through
 # KC_WEB_DIRECT_GRANTS=true in docker-compose.yml and is off everywhere else.
 #
-# Usage: scripts/keycloak/dev-token.sh [alice|bob|staff-admin] [--raw]
+# Usage: scripts/keycloak/dev-token.sh [alice|bob|staff-admin] [--raw]  (any order)
 # Env:   KEYCLOAK_URL (default http://localhost:8081)
 set -euo pipefail
 
-user="${1:-alice}"
-raw="${2:-}"
+user="alice"
+raw=false
+for arg in "$@"; do
+  case "$arg" in
+    --raw) raw=true ;;
+    *) user="$arg" ;;
+  esac
+done
 keycloak_url="${KEYCLOAK_URL:-http://localhost:8081}"
 
 case "$user" in
@@ -27,11 +33,14 @@ response="$(curl -sS --fail-with-body \
   -d scope=openid \
   --data-urlencode "username=${user}" \
   --data-urlencode "password=${password}" \
-  "${keycloak_url}/realms/econ-graph/protocol/openid-connect/token")"
+  "${keycloak_url}/realms/econ-graph/protocol/openid-connect/token")" || {
+  printf 'token request failed: %s\n' "${response:-no response from ${keycloak_url}}" >&2
+  exit 1
+}
 
 token="$(printf '%s' "$response" | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')"
 
-if [ "$raw" = "--raw" ]; then
+if [ "$raw" = true ]; then
   printf '%s\n' "$token"
   exit 0
 fi

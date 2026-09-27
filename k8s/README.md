@@ -78,21 +78,28 @@ terraform apply
 
 ## 🔐 Keycloak
 
-`scripts/deploy/deploy.sh` deploys Keycloak (its own Postgres, then Keycloak with
-the `econ-graph` realm from `config/keycloak/`) under `/idp` on the ingress host.
-Its credentials are never committed: the deploy script creates the Secret
-`keycloak-secrets` from environment variables and refuses placeholder values.
+`scripts/deploy/deploy.sh` deploys Keycloak from `k8s/manifests/keycloak/` (its own
+Postgres, then Keycloak with the `econ-graph` realm from `config/keycloak/`). Its
+credentials are never committed: they live in the Secret `econ-graph-keycloak`,
+written by `scripts/deploy/create-secrets.sh`, which generates the admin and
+database passwords and keeps them on later runs. `deploy.sh` skips Keycloak while
+that Secret does not exist.
 
 ```bash
-export KEYCLOAK_ADMIN_PASSWORD="$(openssl rand -base64 24)"
-export KEYCLOAK_DB_PASSWORD="$(openssl rand -base64 24)"
-# Optional, for Google sign-in (redirect URI <ingress>/idp/realms/econ-graph/broker/google/endpoint):
-export KC_GOOGLE_CLIENT_ID=... KC_GOOGLE_CLIENT_SECRET=...
+# Optional, for Google sign-in
+# (redirect URI http://localhost/idp/realms/econ-graph/broker/google/endpoint):
+export KEYCLOAK_GOOGLE_CLIENT_ID=... KEYCLOAK_GOOGLE_CLIENT_SECRET=...
 ./scripts/deploy/deploy.sh
 ```
 
-The issuer is `http://localhost:8080/idp/realms/econ-graph`. Seeded test users
-exist only in the local docker-compose stack, never in the cluster.
+- Issuer: `http://localhost/idp/realms/econ-graph`. Only `/idp/realms` and
+  `/idp/resources` are routed by the ingress.
+- Admin console: `kubectl -n econ-graph port-forward svc/keycloak-service 18080:8080`,
+  then <http://localhost:18080/idp/admin>. The password is in the Secret:
+  `kubectl -n econ-graph get secret econ-graph-keycloak -o jsonpath='{.data.admin-password}' | base64 -d`
+- The realm and the Google client are imported on the first start only. Change them
+  later in the admin console; redeploying does not overwrite an existing realm.
+- Seeded test users exist only in the local docker-compose stack, never in the cluster.
 
 ## 🌐 Accessing the Application
 

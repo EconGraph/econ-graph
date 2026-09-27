@@ -1,7 +1,8 @@
 # keycloak-postgres: Keycloak's own PostgreSQL database, separate from the app DB.
 #
-# The password comes from the Secret `keycloak-secrets` (key db-password), created
-# out of band by scripts/deploy/create-keycloak-secret.sh. Never commit it.
+# The password comes from the Secret `econ-graph-keycloak` (key db-password),
+# written by scripts/deploy/create-secrets.sh. Postgres reads it only when the data
+# volume is first initialised.
 apiVersion: v1
 kind: Service
 metadata:
@@ -53,7 +54,7 @@ spec:
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: keycloak-secrets
+              name: econ-graph-keycloak
               key: db-password
         volumeMounts:
         - name: keycloak-postgres-data

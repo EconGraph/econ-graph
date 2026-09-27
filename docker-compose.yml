@@ -73,7 +73,12 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.7.4
-    command: ["start-dev", "--import-realm"]
+    # Enable the Google identity provider only when its client id is configured.
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        if [ "$${KC_GOOGLE_CLIENT_ID:-unset}" != unset ]; then export KC_GOOGLE_ENABLED=true; fi
+        exec /opt/keycloak/bin/kc.sh start-dev --import-realm
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
@@ -87,9 +92,8 @@ services:
       KC_REALM_SSL_REQUIRED: none
       KC_WEB_BASE_URL: http://localhost:3000
       KC_WEB_DIRECT_GRANTS: "true"
-      KC_GOOGLE_ENABLED: ${KC_GOOGLE_ENABLED:-false}
-      KC_GOOGLE_CLIENT_ID: ${KC_GOOGLE_CLIENT_ID:-unset}
-      KC_GOOGLE_CLIENT_SECRET: ${KC_GOOGLE_CLIENT_SECRET:-unset}
+      KC_GOOGLE_CLIENT_ID: ${KEYCLOAK_GOOGLE_CLIENT_ID:-unset}
+      KC_GOOGLE_CLIENT_SECRET: ${KEYCLOAK_GOOGLE_CLIENT_SECRET:-unset}
     ports:
       - "${KEYCLOAK_PORT:-8081}:8080"
     volumes:
