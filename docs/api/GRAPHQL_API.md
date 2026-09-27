@@ -224,6 +224,21 @@ query GetSeriesData($seriesId: ID!, $transformation: DataTransformation) {
 }
 ```
 
+### Data as Known on a Past Date
+`asOf` returns each observation's newest revision published on or before that date, and omits
+observations first published later. It takes precedence over `latestRevisionOnly`.
+```graphql
+query GetSeriesAsOf($seriesId: ID!) {
+  seriesData(seriesId: $seriesId, filter: { asOf: "2024-03-15" }) {
+    nodes {
+      date
+      value
+      revisionDate
+    }
+  }
+}
+```
+
 ### Multiple Series Efficiently (No N+1)
 ```graphql
 query GetMultipleSeries($sourceId: ID!) {
