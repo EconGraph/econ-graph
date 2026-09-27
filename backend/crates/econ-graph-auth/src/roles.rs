@@ -217,7 +217,7 @@ const LEGACY_USER_ROLES: &[Role] = &[
 ///
 /// Temporary: it keeps today's behavior until Keycloak issues tokens with a `roles` claim,
 /// and is removed with the `users.role` column. `admin` and `super_admin` get every staff
-/// role (today both pass `require_admin`); `analyst`, `viewer` and `guest` get only the
+/// role (both were admins before); `analyst`, `viewer` and `guest` get only the
 /// signed-in user roles. Matching ignores ASCII case, as the old `UserRole` parser did.
 pub fn roles_for_legacy(legacy_role: &str) -> Result<BTreeSet<Role>, UnknownLegacyRole> {
     let staff = match legacy_role.to_ascii_lowercase().as_str() {

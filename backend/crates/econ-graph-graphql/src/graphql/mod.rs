@@ -11,6 +11,12 @@ pub mod mutation;
 pub mod query;
 pub mod schema;
 
+/// Serializes this crate's DB-backed tests, so migrations and table cleanups don't race.
+#[cfg(test)]
+pub(crate) static TEST_DB_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[cfg(test)]
+mod authorization_tests;
 #[cfg(test)]
 pub mod n_plus_one_tests;
 
