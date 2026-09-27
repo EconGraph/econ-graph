@@ -85,6 +85,26 @@ kubectl apply -f k8s/manifests/postgres.yaml
 echo "⏳ Waiting for PostgreSQL to be ready..."
 kubectl wait --for=condition=ready pod -l app=postgresql -n econ-graph --timeout=300s
 
+# Deploy Keycloak (its own Postgres, then Keycloak with the econ-graph realm).
+# Its credentials are in the Secret econ-graph-keycloak, written by
+# scripts/deploy/create-secrets.sh; without that Secret, Keycloak is skipped.
+KEYCLOAK_DEPLOYED=false
+if kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
+  echo "🔐 Deploying Keycloak..."
+  kubectl -n econ-graph create configmap keycloak-realm \
+    --from-file=econ-graph-realm.json=config/keycloak/econ-graph-realm.json \
+    --dry-run=client -o yaml | kubectl apply -f -
+  kubectl apply -f k8s/manifests/keycloak/postgres.yaml
+  echo "⏳ Waiting for Keycloak's PostgreSQL to be ready..."
+  kubectl -n econ-graph rollout status statefulset/keycloak-postgres --timeout=300s
+  kubectl apply -f k8s/manifests/keycloak/deployment.yaml
+  kubectl apply -f k8s/manifests/keycloak/ingress.yaml
+  KEYCLOAK_DEPLOYED=true
+else
+  echo "⚠️  Secret econ-graph-keycloak not found, skipping Keycloak."
+  echo "   Create it with scripts/deploy/create-secrets.sh (see the Keycloak section of k8s/README.md)."
+fi
+
 # Deploy application
 kubectl apply -f k8s/manifests/backend-deployment.yaml
 kubectl apply -f k8s/manifests/backend-service.yaml
@@ -138,6 +158,11 @@ kubectl wait --for=condition=available --timeout=300s deployment/econ-graph-admi
 # Wait for chart API service deployment
 echo "Waiting for chart API service deployment..."
 kubectl wait --for=condition=available --timeout=300s deployment/chart-api-service -n econ-graph
+
+if [ "$KEYCLOAK_DEPLOYED" = true ]; then
+  echo "Waiting for Keycloak deployment..."
+  kubectl wait --for=condition=available --timeout=600s deployment/keycloak -n econ-graph
+fi
 
 # Stop monitoring
 kill $MONITOR_PID 2>/dev/null || true
