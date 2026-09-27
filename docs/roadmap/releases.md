@@ -115,7 +115,7 @@ The State column tracks each item's PRs. Every PR updates its item's row when it
 | 2 | Rotate the leaked Google and Facebook credentials and move them into a Kubernetes Secret, along with the other plaintext credentials in `k8s/manifests` | Security section of the [index](./README.md) | Waiting on Joe to rotate |
 | 3 | The collaboration API takes the acting user from the verified token and never from the request, for reads as well as writes: today `annotationsForSeries` takes a `userId` argument (`backend/crates/econ-graph-graphql/src/graphql/query.rs:266-270`), so any caller can read another user's private annotations | [analysis-workspace.md](./analysis-workspace.md) phase 2; #194 | #194 open |
 | 4 | Attach the existing GraphQL depth and complexity limits (`backend/crates/econ-graph-graphql/src/security/*`) to the schema, and turn off `/playground` in deployed builds | Security section of the index | #221 draft |
-| 5 | `latestRevisionOnly` and `asOf` done in SQL | #184 (federation phase 0) | #184 open |
+| 5 | `latestRevisionOnly` and `asOf` done in SQL | #184 (federation phase 0) | #184 merged |
 | 6 | Ranked search with a weighted tsvector and pg_trgm. With tens of thousands of series, `ILIKE` with a constant rank stops being usable | #165 | #165 draft |
 | 7 | Series detail page on `series` and `seriesData`, with the existing transformations. Delete the mock generators | New | #204, #209 drafts |
 | 8 | Dashboard cards read the latest values of a fixed list of series (for example FRED `GDP`, `UNRATE`, `CPIAUCSL`, `FEDFUNDS`) | New | #212 draft |
