@@ -140,7 +140,7 @@ mod tests {
 
 #[cfg(test)]
 mod query_limit_tests {
-    use super::{create_schema_with_data, MAX_QUERY_DEPTH};
+    use super::{create_schema_with_data, MAX_QUERY_COMPLEXITY, MAX_QUERY_DEPTH};
     use econ_graph_core::database::DatabasePool;
 
     /// A pool that never connects: these queries are refused, or answered from the schema,
@@ -232,5 +232,26 @@ mod query_limit_tests {
             errors.iter().any(|e| e.contains("too complex")),
             "{errors:?}"
         );
+    }
+
+    /// Build a query with `n` aliased `__typename` selections, each costing 1, so its
+    /// complexity is exactly `n`. `__typename` needs no resolver or database.
+    fn typename_query(n: usize) -> String {
+        let fields: Vec<String> = (0..n).map(|i| format!("a{i}: __typename")).collect();
+        format!("{{ {} }}", fields.join(" "))
+    }
+
+    /// A query at exactly the complexity limit is accepted.
+    #[tokio::test]
+    async fn query_at_the_complexity_limit_is_accepted() {
+        let errors = errors(&typename_query(MAX_QUERY_COMPLEXITY)).await;
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    /// A query one field over the complexity limit is refused.
+    #[tokio::test]
+    async fn query_one_over_the_complexity_limit_is_refused() {
+        let errors = errors(&typename_query(MAX_QUERY_COMPLEXITY + 1)).await;
+        assert!(errors.iter().any(|e| e.contains("too complex")), "{errors:?}");
     }
 }
