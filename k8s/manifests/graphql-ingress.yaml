@@ -21,10 +21,11 @@
 # NodePort Service with externalTrafficPolicy: Cluster (the Service default)
 # every request is SNAT'd to the node IP and all clients share one bucket; use
 # externalTrafficPolicy: Local or hostPort so the controller sees the real
-# source IP directly, or, behind a trusted L7 load balancer, terminate PROXY
-# protocol (use-proxy-protocol) or trust its forwarded headers
-# (use-forwarded-headers plus proxy-real-ip-cidr) — these are two different
-# mechanisms, pick the one the LB actually speaks. Check $remote_addr in the
+# source IP directly, or, behind a trusted load balancer, either terminate
+# PROXY protocol (use-proxy-protocol; typical of an L4 LB) or trust its
+# forwarded headers (use-forwarded-headers plus proxy-real-ip-cidr; typical
+# of an L7 LB) — these are two different mechanisms, pick the one the LB
+# actually speaks. Check $remote_addr in the
 # controller logs either way. Everyone behind one NAT still shares one IP:
 # raise limit-rps, or add trusted ranges with
 # nginx.ingress.kubernetes.io/limit-whitelist.
