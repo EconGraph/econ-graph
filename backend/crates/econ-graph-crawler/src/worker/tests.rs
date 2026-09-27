@@ -886,6 +886,41 @@ async fn dataset_series_persist_dataset_id_and_dimensions() {
         dataset_columns(&db.pool, "economic_series", "t5_ds/a.USA").await,
         expected
     );
+
+    // A rediscovery or fetch with new dimension values replaces the stored ones on both tables.
+    let moved = SeriesDataset::new("t5_ds", [("indicator", "a"), ("area", "FRA")]);
+    let expected_moved = DatasetColumnsRow {
+        dataset_id: Some(dataset_id),
+        dimensions: Some(serde_json::json!({"indicator": "a", "area": "FRA"})),
+        default_measure: None,
+    };
+    let rediscovered = DiscoveredSeries {
+        external_id: "t5_ds/a.USA".into(),
+        title: "A".into(),
+        description: None,
+        units: None,
+        frequency: None,
+        data_url: None,
+        dataset: Some(moved.clone()),
+    };
+    persist::persist_discovered(&db.pool, SRC, &[rediscovered])
+        .await
+        .unwrap();
+    assert_eq!(
+        dataset_columns(&db.pool, "series_metadata", "t5_ds/a.USA").await,
+        expected_moved
+    );
+    let refetched = FetchedSeries {
+        dataset: Some(moved),
+        ..FetchedSeries::default()
+    };
+    persist::persist_series(&db.pool, SRC, "t5_ds/a.USA", &refetched)
+        .await
+        .unwrap();
+    assert_eq!(
+        dataset_columns(&db.pool, "economic_series", "t5_ds/a.USA").await,
+        expected_moved
+    );
 }
 
 #[tokio::test]

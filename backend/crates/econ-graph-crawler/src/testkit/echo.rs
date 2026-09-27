@@ -262,6 +262,8 @@ mod dataset_contract {
     #[tokio::test]
     #[should_panic(expected = "datasets/fred.toml")]
     async fn declared_dataset_without_definition_fails() {
+        // This caches "no fred.toml" for SourceId::Fred for the rest of the test binary
+        // (reference::datasets caches failures), so no other test may load FRED's datasets.
         let mock = mock().await;
         let adapter = EchoAdapter::new(mock.base_url())
             .with_dataset(vec!["echo"], SeriesDataset::new("echo", [("id", "")]));

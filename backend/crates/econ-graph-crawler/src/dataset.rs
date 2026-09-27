@@ -79,11 +79,40 @@ pub struct Component {
     /// Inline code list: `[{code, label, unit?, description?}]` for the values this component
     /// takes. Not a closed list: values outside it are accepted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub codes: Option<Vec<Code>>,
+    pub codes: Option<Vec<CodeDef>>,
     /// Name of a shared reference code list the values come from (one of [`CODELISTS`]), instead
     /// of inline `codes`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codelist: Option<String>,
+}
+
+/// One entry of an inline code list, as written in a dataset file: core's [`Code`] with unknown
+/// keys rejected, so a misspelt key such as `descripton` fails at startup instead of being
+/// dropped.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodeDef {
+    /// The value as stored in series dimensions, e.g. `06` or `NY.GDP.PCAP.CD`.
+    pub code: String,
+    /// Human-readable label.
+    pub label: String,
+    /// Unit of series with this value, e.g. `current US$` for a WDI indicator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    /// Longer description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+impl From<&CodeDef> for Code {
+    fn from(c: &CodeDef) -> Self {
+        Self {
+            code: c.code.clone(),
+            label: c.label.clone(),
+            unit: c.unit.clone(),
+            description: c.description.clone(),
+        }
+    }
 }
 
 /// Longest dataset code (`datasets.code` is `VARCHAR(100)`).
@@ -104,7 +133,10 @@ impl From<&Component> for DatasetComponent {
             label: c.label.clone(),
             component_type: c.component_type,
             unit: c.unit.clone(),
-            codes: c.codes.clone(),
+            codes: c
+                .codes
+                .as_ref()
+                .map(|codes| codes.iter().map(Code::from).collect()),
             codelist: c.codelist.clone(),
         }
     }
@@ -229,11 +261,14 @@ impl DatasetDef {
         }
         // Train 1: data_points holds one value, so datasets are stored long (see module docs).
         if !matches!(self.measures.as_slice(),
-            [m] if m.name == DEFAULT_MEASURE && self.default_measure == DEFAULT_MEASURE)
+            [m] if m.name == DEFAULT_MEASURE
+                && m.component_type == ComponentType::Decimal
+                && self.default_measure == DEFAULT_MEASURE)
         {
             return Err(format!(
-                "dataset {code}: train 1 stores one measure named {DEFAULT_MEASURE:?} (with \
-                 default_measure {DEFAULT_MEASURE:?}); publish other measures as a dimension"
+                "dataset {code}: train 1 stores one decimal measure named {DEFAULT_MEASURE:?} \
+                 (with default_measure {DEFAULT_MEASURE:?}); leave measures out, and publish \
+                 other measures as a dimension"
             ));
         }
         // The rules the database row must also meet (codes vs codelist, duplicate codes, ...).
@@ -621,6 +656,19 @@ label = "Observation status"
             (&format!("{base}default_measure = \"level\"\n"), "train 1"),
             (&format!("{base}{base}"), "defined twice"),
             (&format!("{base}colour = \"red\"\n"), "unknown field"),
+            (
+                &format!(
+                    "{base}[[dataset.dimensions]]\nname = \"geo\"\nlabel = \"G\"\n\
+                     codes = [{{ code = \"us\", label = \"US\", descripton = \"typo\" }}]\n"
+                ),
+                "unknown field",
+            ),
+            (
+                &format!(
+                    "{base}[[dataset.measures]]\nname = \"value\"\nlabel = \"Value\"\n"
+                ),
+                "one decimal measure",
+            ),
             (
                 &format!(
                     "[[dataset]]\ncode = \"{}\"\nname = \"X\"\n",
