@@ -131,7 +131,7 @@ The State column tracks each item's PRs. Every PR updates its item's row when it
 | 18 | Committed `schema.graphql` with a backend test that fails when it drifts, and the main frontend's operations validated against it | Admin UI phase 1, applied to the main frontend first | #208 draft |
 | 19 | Release mechanics: version bump, release notes, deploy from the tag | New | QA plan in `docs/release/v4.0.0-qa.md` (PR #238); version and tag workflow not started |
 | 20 | Datasets metadata: the `datasets` table and the `economic_series` dataset and dimension columns. Goes first: items 10 and 22 to 24 build on it | Federation phase 3's first PR; global analysis phase 3 | #220 draft |
-| 21 | BLS: widen the hard-coded series list to the main CPI, CES and LAUS series | [data-sources.md](./data-sources.md) | In progress |
+| 21 | BLS: widen the hard-coded series list to the main CPI, CES and LAUS series. Now 291 series from `data/bls_series.csv` (CPI-U, CES, CPS, LAUS by state), batched 50 per request with a key or 25 without. Newly listed series are fetched once the scheduler picks up discovered series (DATA-13, #228) or by `crawler enqueue` | [data-sources.md](./data-sources.md) | #235 draft |
 | 22 | FHFA HPI rebuilt on the published master CSV | [fhfa.md](../data-sources/fhfa.md) | In progress |
 | 23 | BEA: real NIPA table and line ids, and `fetch_series` | [bea.md](../data-sources/bea.md) | In progress |
 | 24 | World Bank WDI: `fetch_series` for the curated set of about 50 indicators | Global analysis phase 4 | In progress |
