@@ -118,8 +118,10 @@ impl From<&CodeDef> for Code {
 /// Longest dataset code (`datasets.code` is `VARCHAR(100)`).
 pub const MAX_CODE_LEN: usize = 100;
 
-/// Shared code lists a component can name in `codelist`: reference files under the data
-/// directory (`countries`: ISO 3166 alpha-3 areas, `us_states`: two-digit state FIPS codes).
+/// Shared code lists a component can name in `codelist` instead of inline `codes`: `countries`
+/// (ISO 3166 alpha-3 areas, from the global analysis area's `countries.csv`) and `us_states`
+/// (two-digit state FIPS codes, `us_states.csv`). The crawler only checks the name; DS-6 resolves
+/// a list to its codes for the API.
 pub const CODELISTS: &[&str] = &["countries", "us_states"];
 
 fn default_component_type() -> ComponentType {

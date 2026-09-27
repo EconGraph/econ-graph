@@ -259,15 +259,15 @@ mod dataset_contract {
         assert_fetch_ok(&adapter, &test_ctx(), &mock, "GDP", 0).await;
     }
 
-    #[tokio::test]
-    #[should_panic(expected = "datasets/fred.toml")]
-    async fn declared_dataset_without_definition_fails() {
-        // This caches "no fred.toml" for SourceId::Fred for the rest of the test binary
-        // (reference::datasets caches failures), so no other test may load FRED's datasets.
-        let mock = mock().await;
-        let adapter = EchoAdapter::new(mock.base_url())
-            .with_dataset(vec!["echo"], SeriesDataset::new("echo", [("id", "")]));
-        assert_discover_ok(&adapter, &test_ctx(), &mock, 1).await;
+    /// A declared dataset whose source has no definitions file fails with the file's path. This
+    /// reads the file directly rather than through `assert_discover_ok`, because
+    /// `reference::datasets` caches a failure for the rest of the process and the echo adapter
+    /// shares `SourceId::Fred` with the FRED contract tests.
+    #[test]
+    fn declared_dataset_without_definition_fails() {
+        let path = crate::reference::datasets_file(SourceId::Fred);
+        let e = crate::reference::load_datasets(&path).unwrap_err();
+        assert!(e.contains("datasets/fred.toml"), "{e}");
     }
 
     #[tokio::test]

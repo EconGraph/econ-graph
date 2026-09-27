@@ -1460,3 +1460,56 @@ fn db_error_fails_unsynced_datasets_permanently_and_retries_the_rest() {
     ));
     assert_eq!(e.kind(), "transient");
 }
+
+/// A `(dataset_id, dimensions)` collision is permanent (the same series would collide again);
+/// any other unique violation is retried.
+#[test]
+fn db_error_fails_dataset_key_collisions_permanently() {
+    use diesel::result::{DatabaseErrorInformation, DatabaseErrorKind, Error};
+
+    struct Info(&'static str);
+    impl DatabaseErrorInformation for Info {
+        fn message(&self) -> &str {
+            "duplicate key value violates unique constraint"
+        }
+        fn details(&self) -> Option<&str> {
+            None
+        }
+        fn hint(&self) -> Option<&str> {
+            None
+        }
+        fn table_name(&self) -> Option<&str> {
+            None
+        }
+        fn column_name(&self) -> Option<&str> {
+            None
+        }
+        fn constraint_name(&self) -> Option<&str> {
+            Some(self.0)
+        }
+        fn statement_position(&self) -> Option<i32> {
+            None
+        }
+    }
+    let unique = |constraint| {
+        db_error(econ_graph_core::AppError::Database(Error::DatabaseError(
+            DatabaseErrorKind::UniqueViolation,
+            Box::new(Info(constraint)),
+        )))
+    };
+    for constraint in [
+        "uq_economic_series_dataset_dimensions",
+        "uq_series_metadata_dataset_dimensions",
+    ] {
+        let e = unique(constraint);
+        assert_eq!(e.kind(), "permanent", "{constraint}");
+        assert!(
+            e.to_string().contains("already has this dataset and dimension values"),
+            "{e}"
+        );
+    }
+    assert_eq!(
+        unique("economic_series_source_id_external_id_key").kind(),
+        "transient"
+    );
+}
