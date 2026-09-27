@@ -27,7 +27,7 @@ import {
   TrendingUp as TrendingUpIcon,
 } from '@mui/icons-material';
 
-import InteractiveChart from '../components/charts/InteractiveChart';
+import SeriesChart from '../components/charts/SeriesChart';
 import { useSeriesData, useSeriesDetail, SeriesDataPoint } from '../hooks/useSeriesData';
 import { DataTransformation, describeTransformation } from '../utils/transformations';
 import { formatIsoDate } from '../utils/dates';
@@ -150,7 +150,7 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
     chart = (
       <Box>
         {data.isPreviousData && <LinearProgress aria-label='Loading transformation' />}
-        <InteractiveChart
+        <SeriesChart
           data={points}
           title={series.title}
           units={units}

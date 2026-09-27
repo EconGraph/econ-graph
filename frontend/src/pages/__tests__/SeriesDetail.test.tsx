@@ -44,7 +44,7 @@ vi.mock('react-chartjs-2', () => ({
   Line: ({ data, options }: any) => (
     <div
       data-testid='line-chart'
-      data-points={JSON.stringify(data.datasets[0].data.map((p: any) => [p.x, p.y]))}
+      data-points={JSON.stringify(data.datasets[0].data.map((p: any) => [p.date, p.y]))}
       data-title={options.plugins.title.text}
     />
   ),
