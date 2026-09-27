@@ -85,6 +85,13 @@ kubectl apply -f k8s/manifests/postgres.yaml
 echo "⏳ Waiting for PostgreSQL to be ready..."
 kubectl wait --for=condition=ready pod -l app=postgresql -n econ-graph --timeout=300s
 
+# Deploy PostgreSQL backups
+echo "🗄️  Deploying PostgreSQL backup CronJob..."
+kubectl apply -f k8s/manifests/postgres-backup-pvc.yaml
+kubectl apply -f k8s/manifests/postgres-backup-configmap.yaml
+kubectl apply -f k8s/manifests/postgres-backup-cronjob.yaml
+"$PROJECT_ROOT/scripts/deploy/protect-postgres-pv.sh"
+
 # Deploy application
 kubectl apply -f k8s/manifests/backend-deployment.yaml
 kubectl apply -f k8s/manifests/backend-service.yaml
