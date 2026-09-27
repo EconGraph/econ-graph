@@ -2471,6 +2471,21 @@ jobs:
     timeout-minutes: 60
     needs: [backend-smoke-tests]
 
+    services:
+      postgres:
+        image: *postgres_image
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -2485,6 +2500,7 @@ jobs:
       with:
         context: ./backend
         push: false
+        load: true
         tags: econ-graph-backend:test
         cache-from: type=gha
         cache-to: type=gha,mode=max
@@ -2494,17 +2510,65 @@ jobs:
       with:
         context: ./frontend
         push: false
+        load: true
         tags: econ-graph-frontend:test
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
     - name: Test Docker images
       run: |
+        trap 'docker rm -f backend-smoke-test frontend-smoke-test >/dev/null 2>&1 || true' EXIT
+
         echo "Testing backend Docker image..."
-        docker run --rm econ-graph-backend:test --version || echo "Backend image test completed"
+        docker run -d --name backend-smoke-test \
+          --network host \
+          -e DATABASE_URL="postgresql://postgres:password@localhost:5432/econ_graph_test" \
+          -e BACKEND_PORT=19876 \
+          -e JWT_SECRET=ci-only-jwt-secret \
+          econ-graph-backend:test
+        backend_ok=""
+        for i in $(seq 1 30); do
+          if ! docker ps --format '{{.Names}}' | grep -q '^backend-smoke-test$'; then
+            echo "Backend container exited unexpectedly" >&2
+            break
+          fi
+          if curl -fsS "http://localhost:19876/health" > /dev/null; then
+            echo "Backend image is healthy"
+            backend_ok=1
+            break
+          fi
+          sleep 2
+        done
+        if [ -z "$backend_ok" ]; then
+          echo "Backend image failed its health check" >&2
+          docker logs backend-smoke-test || true
+          docker rm -f backend-smoke-test || true
+          exit 1
+        fi
+        docker rm -f backend-smoke-test
 
         echo "Testing frontend Docker image..."
-        docker run --rm econ-graph-frontend:test --version || echo "Frontend image test completed"
+        docker run -d --name frontend-smoke-test -p 18080:3000 econ-graph-frontend:test
+        frontend_ok=""
+        for i in $(seq 1 15); do
+          if ! docker ps --format '{{.Names}}' | grep -q '^frontend-smoke-test$'; then
+            echo "Frontend container exited unexpectedly" >&2
+            break
+          fi
+          if curl -fsS "http://localhost:18080/" > /dev/null; then
+            echo "Frontend image is serving"
+            frontend_ok=1
+            break
+          fi
+          sleep 1
+        done
+        if [ -z "$frontend_ok" ]; then
+          echo "Frontend image failed to serve" >&2
+          docker logs frontend-smoke-test || true
+          docker rm -f frontend-smoke-test || true
+          exit 1
+        fi
+        docker rm -f frontend-smoke-test
 # Updated Wed Sep 17 08:11:38 PDT 2025
 
 # Workflow cache refresh: 2025-09-17 08:25:07 PDT
