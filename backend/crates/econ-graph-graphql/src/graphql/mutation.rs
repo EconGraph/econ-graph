@@ -25,8 +25,8 @@ pub struct Mutation;
 
 #[Object]
 impl Mutation {
-    /// Enqueue crawl jobs (admin only). Nothing is crawled in the request: the jobs go to
-    /// `crawl_queue` and the crawler workers process them.
+    /// Enqueue crawl jobs (requires `admin.crawlers:manage`). Nothing is crawled in the
+    /// request: the jobs go to `crawl_queue` and the crawler workers process them.
     ///
     /// `series_ids` become `fetch_series` jobs for `source` (or for the single entry of
     /// `sources`); every listed source without series gets a `discover_catalog` job. Returns the
@@ -37,7 +37,7 @@ impl Mutation {
         ctx: &Context<'_>,
         input: TriggerCrawlInput,
     ) -> Result<CrawlerStatusType> {
-        let admin = require_admin(ctx)?;
+        let caller = require_role(ctx, Role::AdminCrawlersManage)?;
         let pool = ctx.data::<DatabasePool>()?;
 
         let jobs = plan_trigger_crawl(&input).map_err(GraphQLError::new)?;
@@ -51,7 +51,7 @@ impl Mutation {
             }
         }
         tracing::info!(
-            user_id = %admin.id,
+            user_id = %caller.user_id,
             requested = jobs.len(),
             enqueued,
             "triggerCrawl enqueued jobs"
@@ -70,7 +70,7 @@ impl Mutation {
         input: CreateAnnotationInput,
     ) -> Result<ChartAnnotationType> {
         // The author is the signed-in caller, never an id from the request.
-        let user_id = current_user(ctx)?.id;
+        let user_id = require_role(ctx, Role::AnnotationCreate)?.user_id;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
@@ -99,7 +99,7 @@ impl Mutation {
         ctx: &Context<'_>,
         input: AddCommentInput,
     ) -> Result<AnnotationCommentType> {
-        let user_id = current_user(ctx)?.id;
+        let user_id = require_role(ctx, Role::AnnotationComment)?.user_id;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
@@ -119,7 +119,7 @@ impl Mutation {
         input: ShareChartInput,
     ) -> Result<ChartCollaboratorType> {
         // The sharer is the signed-in caller, who must already be an admin on the chart.
-        let owner_user_id = current_user(ctx)?.id;
+        let owner_user_id = require_role(ctx, Role::ChartShare)?.user_id;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
@@ -162,10 +162,11 @@ impl Mutation {
 
     // Admin User Management Mutations
 
-    /// Create a new user (admin only)
+    /// Create a new user (requires `admin.users:create`, and every staff role the new user's
+    /// `role` grants)
     async fn create_user(&self, ctx: &Context<'_>, input: CreateUserInput) -> Result<UserType> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
+        let caller = require_role(ctx, Role::AdminUsersCreate)?;
+        let role = require_grantable(ctx, caller, &input.role)?;
         let pool = ctx.data::<DatabasePool>()?;
 
         use bcrypt::{hash, DEFAULT_COST};
@@ -206,7 +207,7 @@ impl Mutation {
             provider: "email".to_string(),
             provider_id: None,
             password_hash,
-            role: input.role,
+            role,
             organization: input.organization,
             theme: "light".to_string(),
             default_chart_type: "line".to_string(),
@@ -224,15 +225,23 @@ impl Mutation {
         Ok(UserType::from(user))
     }
 
-    /// Update user information (admin only)
+    /// Update user information (requires `admin.users:update`; changing `role` also requires
+    /// every staff role it grants, and changing `isActive` requires `admin.users:suspend`)
     async fn update_user(
         &self,
         ctx: &Context<'_>,
         id: ID,
         input: UpdateUserInput,
     ) -> Result<UserType> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
+        let caller = require_role(ctx, Role::AdminUsersUpdate)?;
+        let role = input
+            .role
+            .as_deref()
+            .map(|role| require_grantable(ctx, caller, role))
+            .transpose()?;
+        if input.is_active.is_some() {
+            require_role(ctx, Role::AdminUsersSuspend)?;
+        }
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
 
@@ -253,6 +262,7 @@ impl Mutation {
             .optional()?;
 
         let existing_user = existing_user.ok_or_else(|| GraphQLError::new("User not found"))?;
+        require_manageable(ctx, caller, &existing_user)?;
 
         // Check if email is being changed and if it already exists
         if let Some(new_email) = &input.email {
@@ -299,7 +309,7 @@ impl Mutation {
         // Update role and email_verified if provided (these require separate updates)
         let mut final_user = updated_user;
 
-        if let Some(role) = input.role {
+        if let Some(role) = role {
             final_user = diesel::update(users::table.filter(users::id.eq(user_id)))
                 .set(users::role.eq(role))
                 .returning(User::as_select())
@@ -334,10 +344,9 @@ impl Mutation {
         Ok(UserType::from(final_user))
     }
 
-    /// Delete a user (admin only)
+    /// Delete a user (requires `admin.users:delete`)
     async fn delete_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
+        let caller = require_role(ctx, Role::AdminUsersDelete)?;
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
 
@@ -355,9 +364,8 @@ impl Mutation {
             .await
             .optional()?;
 
-        if user_exists.is_none() {
-            return Err(GraphQLError::new("User not found"));
-        }
+        let target = user_exists.ok_or_else(|| GraphQLError::new("User not found"))?;
+        require_manageable(ctx, caller, &target)?;
 
         // Delete user (cascade will handle related records)
         diesel::delete(users::table.filter(users::id.eq(user_id)))
@@ -367,10 +375,9 @@ impl Mutation {
         Ok(true)
     }
 
-    /// Suspend a user account (admin only)
+    /// Suspend a user account (requires `admin.users:suspend`)
     async fn suspend_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
+        let caller = require_role(ctx, Role::AdminUsersSuspend)?;
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
 
@@ -388,9 +395,8 @@ impl Mutation {
             .await
             .optional()?;
 
-        if user_exists.is_none() {
-            return Err(GraphQLError::new("User not found"));
-        }
+        let target = user_exists.ok_or_else(|| GraphQLError::new("User not found"))?;
+        require_manageable(ctx, caller, &target)?;
 
         // Suspend user
         diesel::update(users::table.filter(users::id.eq(user_id)))
@@ -401,10 +407,9 @@ impl Mutation {
         Ok(true)
     }
 
-    /// Activate a user account (admin only)
+    /// Activate a user account (requires `admin.users:suspend`)
     async fn activate_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
+        let caller = require_role(ctx, Role::AdminUsersSuspend)?;
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
 
@@ -422,9 +427,8 @@ impl Mutation {
             .await
             .optional()?;
 
-        if user_exists.is_none() {
-            return Err(GraphQLError::new("User not found"));
-        }
+        let target = user_exists.ok_or_else(|| GraphQLError::new("User not found"))?;
+        require_manageable(ctx, caller, &target)?;
 
         // Activate user
         diesel::update(users::table.filter(users::id.eq(user_id)))
@@ -435,10 +439,9 @@ impl Mutation {
         Ok(true)
     }
 
-    /// Force logout a user (admin only)
+    /// Force logout a user (requires `admin.sessions:revoke`)
     async fn force_logout_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
+        let caller = require_role(ctx, Role::AdminSessionsRevoke)?;
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
 
@@ -456,9 +459,8 @@ impl Mutation {
             .await
             .optional()?;
 
-        if user_exists.is_none() {
-            return Err(GraphQLError::new("User not found"));
-        }
+        let target = user_exists.ok_or_else(|| GraphQLError::new("User not found"))?;
+        require_manageable(ctx, caller, &target)?;
 
         // Delete all active sessions for the user
         diesel::delete(user_sessions::table.filter(user_sessions::user_id.eq(user_id)))
@@ -554,6 +556,97 @@ fn plan_trigger_crawl(
 impl Default for Mutation {
     fn default() -> Self {
         Self
+    }
+}
+
+/// Whether `roles` includes a staff role the caller lacks.
+fn exceeds_staff_roles(caller: &Principal, roles: &std::collections::BTreeSet<Role>) -> bool {
+    roles
+        .iter()
+        .any(|&role| role.is_staff() && !caller.has_role(role))
+}
+
+/// Refuse with "Insufficient permissions", logging the denial like `require_role` does.
+fn deny_user_admin(ctx: &Context<'_>, caller: &Principal, why: &str) -> GraphQLError {
+    let context = ctx.data::<Arc<GraphQLContext>>().ok();
+    tracing::warn!(
+        request_id = context.map_or("unknown", |c| c.request_id.as_str()),
+        client_ip = context
+            .and_then(|c| c.client_ip.as_deref())
+            .unwrap_or("unknown"),
+        "User {} denied: {why}",
+        caller.user_id
+    );
+    GraphQLError::new("Insufficient permissions")
+}
+
+/// Check a legacy `users.role` value the caller wants to give a user, and return it lowercased
+/// for storage. A narrow staff role (say, `admin.users:update` alone) must not mint or become a
+/// full admin, so the value may grant only staff roles the caller holds. Unknown values are
+/// refused: the context would give such a user no roles at all.
+fn require_grantable(ctx: &Context<'_>, caller: &Principal, legacy_role: &str) -> Result<String> {
+    let granted = econ_graph_auth::roles_for_legacy(legacy_role)
+        .map_err(|_| GraphQLError::new(format!("Unknown role: {legacy_role}")))?;
+    if exceeds_staff_roles(caller, &granted) {
+        return Err(deny_user_admin(
+            ctx,
+            caller,
+            &format!("may not grant legacy role {legacy_role}"),
+        ));
+    }
+    Ok(legacy_role.to_ascii_lowercase())
+}
+
+/// Refuse to act on a user who holds a staff role the caller lacks, so a narrow staff role
+/// cannot edit, delete, suspend or log out a fuller admin. An unknown legacy role grants
+/// nothing, so it never blocks. The target's roles come from `users.role`; when AUTH-5 drops
+/// that column, this must read the target's roles from Keycloak instead.
+fn require_manageable(ctx: &Context<'_>, caller: &Principal, target: &models::User) -> Result<()> {
+    let target_roles = econ_graph_auth::roles_for_legacy(&target.role).unwrap_or_default();
+    if exceeds_staff_roles(caller, &target_roles) {
+        return Err(deny_user_admin(
+            ctx,
+            caller,
+            &format!("user {} holds staff roles the caller lacks", target.id),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod user_admin_scope_tests {
+    use super::*;
+
+    fn target_roles(legacy: &str) -> std::collections::BTreeSet<Role> {
+        econ_graph_auth::roles_for_legacy(legacy).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_narrow_staff_role_cannot_act_on_a_full_admin() {
+        let caller = Principal::new(uuid::Uuid::new_v4(), [Role::AdminUsersUpdate]);
+        for legacy in ["admin", "super_admin", "ADMIN"] {
+            assert!(
+                exceeds_staff_roles(&caller, &target_roles(legacy)),
+                "{legacy}"
+            );
+        }
+        for legacy in ["viewer", "analyst", "guest", "root"] {
+            assert!(
+                !exceeds_staff_roles(&caller, &target_roles(legacy)),
+                "{legacy}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_full_admin_can_act_on_anyone() {
+        let caller = Principal::new(uuid::Uuid::new_v4(), Role::all().iter().copied());
+        for legacy in ["admin", "super_admin", "viewer"] {
+            assert!(
+                !exceeds_staff_roles(&caller, &target_roles(legacy)),
+                "{legacy}"
+            );
+        }
     }
 }
 
@@ -659,7 +752,7 @@ mod tests {
     // DB-backed: need DATABASE_URL (skipped otherwise); they empty crawl_queue.
     // ---------------------------------------------------------------------
 
-    static DB_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    use crate::graphql::TEST_DB_LOCK as DB_LOCK;
 
     async fn db() -> Option<(DatabasePool, tokio::sync::MutexGuard<'static, ()>)> {
         use diesel_async::RunQueryDsl;
