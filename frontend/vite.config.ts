@@ -41,8 +41,13 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
-    // Separate vendor chunks for better caching (Vite 8 bundles with Rolldown).
     rolldownOptions: {
+      // The silent sign-in iframe gets its own small page instead of booting the whole app.
+      input: {
+        main: resolve(import.meta.dirname, 'index.html'),
+        silentCallback: resolve(import.meta.dirname, 'silent-callback.html'),
+      },
+      // Separate vendor chunks for better caching (Vite 8 bundles with Rolldown).
       output: {
         codeSplitting: {
           groups: [
