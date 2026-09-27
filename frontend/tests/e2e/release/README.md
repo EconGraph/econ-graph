@@ -17,18 +17,24 @@ scripts/release-e2e.sh smoke.spec.ts          # one file (extra args go to `play
 scripts/release-e2e.sh --headed series-ui/    # one area, with a visible browser
 ```
 
-The script does four things:
+The script does five things:
 
-1. It starts a fresh Postgres 18 container from `docker-compose.release-e2e.yml`
+1. It starts a fresh Keycloak container from `docker-compose.release-e2e.yml` on
+   port 8081, importing the auth area's dev realm (`config/keycloak/`). Always,
+   even when `RELEASE_E2E_DATABASE_URL` is set: CI has no service-container
+   equivalent for it, since the realm and users files come from the checkout
+   under test.
+2. It starts a fresh Postgres 18 container from `docker-compose.release-e2e.yml`
    on port 5439, with data in tmpfs. It skips this when
    `RELEASE_E2E_DATABASE_URL` is set, which CI points at a service container.
    The script and the Playwright config ignore `DATABASE_URL`, so neither
    migrates or seeds your dev database.
-2. It builds `econ-graph-backend` and `seed-fixtures` in one cargo invocation.
-3. It runs `seed-fixtures`, which applies migrations and loads the series listed
+3. It builds `econ-graph-backend` and `seed-fixtures` in one cargo invocation.
+4. It runs `seed-fixtures`, which applies migrations and loads the series listed
    in `backend/crates/econ-graph-crawler/tests/fixtures/e2e-seed.json`.
-4. It runs Playwright. Playwright starts the backend on port 18080. It also
-   builds the frontend with `FLAG_PROFILE=release` and serves it with
+5. It runs Playwright. Playwright starts the backend on port 18080, pointed at
+   Keycloak through `OIDC_ISSUER`/`OIDC_AUDIENCE`. It also builds the frontend
+   with `FLAG_PROFILE=release` and `VITE_OIDC_ISSUER` set, and serves it with
    `vite preview` on port 18081, which proxies `/graphql` and `/api` to the
    backend. The auth REST calls go straight to the backend through
    `VITE_API_URL`.
@@ -73,10 +79,10 @@ Put them in `tests/e2e/release/<area>/`, for example
 
 ## Not in the stack yet
 
-- **Keycloak.** Auth specs are skipped until the auth area's dev realm (AUTH-3)
-  and the backend's OIDC verification (AUTH-5) land. Then the stack starts
-  Keycloak on port 8081 with that realm and its seeded users, and the frontend
-  and backend are pointed at its issuer.
+- **Sign-in UI.** `tests/e2e/release/auth/sign-in.spec.ts` checks the infra
+  directly (a dev-realm token is accepted by the backend); there is no UI to
+  drive yet. AUTH-9 (annotate on the series page) and AUTH-7 (sign-in through
+  `oidc-client-ts`) replace it with AUTH-10's real sign-in spec once they land.
 - **Release flags.** `FLAG_PROFILE=release` has no effect until the build-time
   flag switch lands. The frontend build already sets it.
 - **Search.** `/explore` search is broken on main, in both the backend and the

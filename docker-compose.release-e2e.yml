@@ -1,6 +1,14 @@
-# Postgres for the release end-to-end suite (scripts/release-e2e.sh). The backend and the
-# frontend release build run on the host, from the checkout under test. Data lives in tmpfs,
-# and the script recreates the container on every run, so each run starts empty.
+# Postgres and Keycloak for the release end-to-end suite (scripts/release-e2e.sh). The backend
+# and the frontend release build run on the host, from the checkout under test. Data lives in
+# tmpfs or a container-local dev store, and the script recreates both containers on every run,
+# so each run starts empty.
+#
+# Named so this stays its own compose project: without this, both this file and docker-compose.yml
+# (the dev stack) fall back to the directory name, and `up --force-recreate` here would tear down
+# and replace the dev stack's own keycloak container instead of adding a separate one. The two
+# stacks still can't run at once: they deliberately bind the same Keycloak port (8081), so the
+# issuer matches. Stop the dev stack's keycloak before running this one, or vice versa.
+name: econ-graph-release-e2e
 services:
   postgres:
     image: postgres:18
@@ -17,3 +25,33 @@ services:
       interval: 2s
       timeout: 2s
       retries: 15
+
+  # The dev realm from config/keycloak/, same issuer as the dev stack (port 8081). No
+  # keycloak-db here: `start-dev`'s embedded store lives in the container's own filesystem, so
+  # force-recreating the container each run already gives a clean realm, same as tmpfs Postgres
+  # above.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.4
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://localhost:8081
+      KC_HEALTH_ENABLED: "true"
+      # Placeholders in config/keycloak/econ-graph-realm.json. The release e2e frontend is the
+      # only origin this stack needs; KC_WEB_BASE_URL still must be set for the realm import.
+      KC_REALM_SSL_REQUIRED: none
+      KC_WEB_BASE_URL: http://localhost:3000
+      KC_WEB_E2E_BASE_URL: http://localhost:18081
+      KC_WEB_DIRECT_GRANTS: "true"
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - ./config/keycloak/econ-graph-realm.json:/opt/keycloak/data/import/econ-graph-realm.json:ro
+      - ./config/keycloak/dev/econ-graph-users-0.json:/opt/keycloak/data/import/econ-graph-users-0.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
