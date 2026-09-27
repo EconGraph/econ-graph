@@ -132,9 +132,10 @@ rejected because `--import-realm` creates resources directly, outside
 keycloak-config-cli's tracking, so removing one from the file later would leave it
 behind in the cluster; `kc.sh import --override true` deletes the realm and every
 account in it. keycloak-config-cli instead changes only what differs from the realm
-file and never touches users, their role mappings or sessions, so Google-brokered
-accounts survive a redeploy. A realm role, client or mapper removed from the file is
-removed from the cluster on the next deploy.
+file, so Google-brokered accounts, sessions and every user's role mappings survive a
+redeploy — as long as the roles they're mapped to stay in the file. A realm role,
+client or mapper removed from the file is removed from the cluster on the next
+deploy, taking any user's mapping to that role with it.
 
 The Job signs in as the admin from the Secret's `admin-username` / `admin-password`.
 If that password is changed in the admin console (Keycloak asks to replace the
