@@ -132,7 +132,7 @@ kubectl scale deployment econ-graph-frontend --replicas=2 -n econ-graph
 The application is configured via ConfigMap and Secrets:
 
 - **ConfigMap**: Contains non-sensitive configuration
-- **Secrets**: Contain every credential. They are never committed; see [Secrets](#secrets)
+- **Secrets**: Store credentials outside the manifests. Current manifests contain no credentials; Google and Facebook credentials committed before #227 remain in Git history and must be rotated. See [Secrets](#secrets)
 
 ### Database Connection
 
@@ -142,7 +142,7 @@ PostgreSQL runs in the cluster (`postgres-deployment.yaml`). The backend and cra
 
 ### Secrets
 
-No credential is committed. `scripts/deploy/create-secrets.sh` creates the Secrets below in the
+Current manifests contain no credentials. Google and Facebook credentials committed before #227 remain in Git history and must be rotated. `scripts/deploy/create-secrets.sh` creates the Secrets below in the
 `econ-graph` namespace from environment variables; `deploy.sh` runs it on every deploy. It is
 idempotent: internal passwords are generated with `openssl rand` on the first run and kept on
 later runs, optional keys that are unset keep their current value (or are omitted), and obvious

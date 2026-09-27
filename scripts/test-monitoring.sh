@@ -292,6 +292,7 @@ authenticate_grafana() {
     else
         local escaped="${grafana_password//\\/\\\\}"
         escaped="${escaped//\"/\\\"}"
+        escaped="${escaped//$'\n'/\\n}"
         login_body=$(printf '{"user":"admin","password":"%s"}' "$escaped")
     fi
 
