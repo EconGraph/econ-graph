@@ -32,11 +32,8 @@ pub use econ_graph_core::{
         // Chart annotations
         ChartAnnotation,
         ChartCollaborator,
-        CorrelationConnection,
-        CorrelationNetworkNode,
         // Global analysis
         Country,
-        CountryCorrelation,
         CountryImpactDetail,
         CountryWithEconomicData,
         DataPoint,
