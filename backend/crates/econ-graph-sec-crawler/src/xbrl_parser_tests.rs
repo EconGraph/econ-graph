@@ -1159,3 +1159,40 @@ async fn test_xbrl_file_detection() {
         assert_eq!(doc_type, DocumentType::Xbrl);
     }
 }
+
+#[tokio::test]
+async fn test_validate_reports_facts_found_but_flags_no_facts_as_invalid() {
+    let cache_dir = TempDir::new().unwrap();
+    let parser = XbrlParser::with_config(XbrlParserConfig {
+        cache_dir: cache_dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+
+    // A real XBRL instance parses with facts and is reported valid, with the usual warning
+    // that fact-level rules are not implemented.
+    let report = parser
+        .validate_xbrl_document(&get_test_data_path("sample_10k.xml"))
+        .await
+        .unwrap();
+    assert!(report.is_valid, "{report:?}");
+    assert!(report
+        .warnings
+        .iter()
+        .any(|w| w.contains("Fact-level XBRL validation is not implemented")));
+
+    // An XBRL instance with no facts (a bare <xbrl> root) parses without error but must not
+    // be reported valid: something that parses but yields no facts isn't a usable instance.
+    let work_dir = TempDir::new().unwrap();
+    let empty_xbrl = work_dir.path().join("empty.xml");
+    fs::write(
+        &empty_xbrl,
+        r#"<?xml version="1.0"?><xbrl xmlns="http://www.xbrl.org/2003/instance"></xbrl>"#,
+    )
+    .await
+    .unwrap();
+    let report = parser.validate_xbrl_document(&empty_xbrl).await.unwrap();
+    assert!(!report.is_valid, "{report:?}");
+    assert!(report.errors.iter().any(|e| e.contains("No XBRL facts")));
+}

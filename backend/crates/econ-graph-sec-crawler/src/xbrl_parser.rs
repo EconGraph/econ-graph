@@ -320,9 +320,23 @@ impl XbrlParser {
         })
     }
 
-    /// Validate an XBRL document by parsing it and checking its facts
+    /// Check that an XBRL document parses. Fact-level validation rules are not implemented yet
+    /// (`FactValidator` accepts every fact), so a document with facts is reported valid only
+    /// because it parsed; a document with none is reported invalid, since something that parses
+    /// but yields no facts is not a usable XBRL instance.
     pub async fn validate_xbrl_document(&self, xbrl_file: &Path) -> Result<ValidationReport> {
-        Ok(self.parse_xbrl_document(xbrl_file).await?.validation_report)
+        let result = self.parse_xbrl_document(xbrl_file).await?;
+        let mut report = result.validation_report;
+        report.warnings.push(
+            "Fact-level XBRL validation is not implemented; only parsing was checked".to_string(),
+        );
+        if result.facts.is_empty() {
+            report.is_valid = false;
+            report
+                .errors
+                .push("No XBRL facts found in document".to_string());
+        }
+        Ok(report)
     }
 }
 
