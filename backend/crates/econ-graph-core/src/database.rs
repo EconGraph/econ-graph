@@ -14,6 +14,20 @@ pub type DatabasePool = Pool<AsyncPgConnection>;
 /// Type alias for a pooled connection
 pub type PooledConn<'a> = PooledConnection<'a, AsyncPgConnection>;
 
+/// A database URL with its password (and any other userinfo) removed, safe to log.
+/// Falls back to a fixed placeholder if `database_url` doesn't parse as a URL, so a
+/// malformed value never lands in a log verbatim.
+pub fn redact_database_url(database_url: &str) -> String {
+    match url::Url::parse(database_url) {
+        Ok(mut url) => {
+            let _ = url.set_password(None);
+            let _ = url.set_username("");
+            url.to_string()
+        }
+        Err(_) => "<unparseable database URL, redacted>".to_string(),
+    }
+}
+
 /// Create a database connection pool
 pub async fn create_pool(database_url: &str) -> AppResult<DatabasePool> {
     let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
@@ -78,7 +92,7 @@ pub async fn run_migrations(database_url: &str) -> AppResult<()> {
 
         info!(
             "Attempting to connect to database for migrations: {}",
-            formatted_url
+            redact_database_url(&formatted_url)
         );
 
         // Try to establish connection
@@ -137,6 +151,30 @@ pub async fn check_database_health(pool: &DatabasePool) -> AppResult<()> {
 mod tests {
     use super::*;
     // Tests now use TestContainer directly for better control
+
+    #[test]
+    fn redact_database_url_strips_credentials() {
+        assert_eq!(
+            redact_database_url("postgres://econgraph:s3cret@db.internal:5432/econ_graph"),
+            "postgres://db.internal:5432/econ_graph"
+        );
+    }
+
+    #[test]
+    fn redact_database_url_handles_username_only() {
+        assert_eq!(
+            redact_database_url("postgres://econgraph@db.internal/econ_graph"),
+            "postgres://db.internal/econ_graph"
+        );
+    }
+
+    #[test]
+    fn redact_database_url_falls_back_on_unparseable_input() {
+        assert_eq!(
+            redact_database_url("not a url"),
+            "<unparseable database URL, redacted>"
+        );
+    }
 
     #[tokio::test]
     #[serial_test::serial]

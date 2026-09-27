@@ -14,7 +14,7 @@ use warp::{Filter, Reply as _};
 
 // Import from our new crates
 use econ_graph_auth::auth::{routes::auth_routes, services::AuthService};
-use econ_graph_core::{create_pool, AppError, AppResult, Config, DatabasePool};
+use econ_graph_core::{create_pool, redact_database_url, AppError, AppResult, Config, DatabasePool};
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
 use econ_graph_mcp::mcp_server::{mcp_handler, EconGraphMcpServer};
 
@@ -410,11 +410,11 @@ async fn main() -> AppResult<()> {
     info!("  - Server host: {}", config.server.host);
     info!("  - Server port: {}", config.server.port);
     info!("  - CORS origins: {:?}", cors_origins);
-    info!("  - Database URL: {}", config.database_url);
+    info!("  - Database URL: {}", redact_database_url(&config.database_url));
 
     // Create database connection pool
     info!("🗄️  Creating database connection pool...");
-    info!("  - Database URL: {}", config.database_url);
+    info!("  - Database URL: {}", redact_database_url(&config.database_url));
 
     let pool = create_pool(&config.database_url).await.map_err(|e| {
         let error = AppError::DatabaseError(format!("Failed to create database pool: {}", e));
