@@ -137,7 +137,7 @@ The State column tracks each item's PRs. Every PR updates its item's row when it
 | 24 | World Bank WDI: `fetch_series` for the curated set of about 50 indicators | Global analysis phase 4 | In progress |
 | 25 | Coverage: a report of series with and without data per source (exit criterion 2), and search hides series with no data points | New | In progress |
 | 26 | Scheduled refresh for every enabled source with an alert on crawl failure (exit criterion 3). The scheduler exists; the alert and per-source schedules are what's new | New | #210 draft |
-| 27 | Batch fetch in the crawler adapter contract and worker: `batch_key`, `fetch_batch`, a `max_batch` policy and batched claiming, so a source can serve many series per request. Items 21 to 24 build on it (BLS batches 50 series per request, or 25 without a key) | [data-sources.md](./data-sources.md) (#192, moved from train 3 into train 1) | #213 open |
+| 27 | Batch fetch in the crawler adapter contract and worker: `batch_key`, `fetch_batch`, a `max_batch` policy and batched claiming, so a source can serve many series per request. Items 21 to 24 build on it (BLS batches 50 series per request, or 25 without a key) | [data-sources.md](./data-sources.md) (#192, moved from train 3 into train 1) | #213 merged |
 
 ### Explicitly out
 
