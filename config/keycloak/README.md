@@ -6,6 +6,7 @@ Keycloak is EconGraph's identity provider. The realm is configuration as code:
 |---|---|---|
 | `econ-graph-realm.json` | docker-compose and k8s | Realm settings, clients, Google identity provider |
 | `dev/econ-graph-users-0.json` | docker-compose only | Seeded test users. Never deployed |
+| `qa/econ-graph-users-1.json` | `docker-compose.qa-users.yml` only | QA users `qa-alice`, `qa-bob`. Never deployed |
 
 Keycloak imports both files on first start (`--import-realm`). An existing realm is
 not overwritten, so after editing a file, reset the realm by dropping Keycloak's
@@ -64,7 +65,7 @@ The realm file reads these environment variables when it is imported:
 | `KC_WEB_E2E_BASE_URL` | none (required) | Second web origin: the release e2e frontend (`http://localhost:18081`) in compose, the same as `KC_WEB_BASE_URL` in k8s |
 | `KC_WEB_DIRECT_GRANTS` | `false` | Password grant on `econ-graph-web` (dev only) |
 | `KC_REALM_SSL_REQUIRED` | `external` | `none` in local compose |
-| `KC_GOOGLE_ENABLED` | `false` | Set to `true` by the container command when a Google client id is configured |
+| `KC_GOOGLE_ENABLED` | `false` | Set to `true` by the container command when both the Google client id and secret are configured |
 | `KC_GOOGLE_CLIENT_ID`, `KC_GOOGLE_CLIENT_SECRET` | `unset` | Google OAuth client |
 
 Placeholders are resolved once, when the realm is first imported. After that the
@@ -83,16 +84,17 @@ docker compose up -d keycloak
 
 Two more realm-local users, `qa-alice` and `qa-bob` (passwords `qa-alice-password`
 and `qa-bob-password`), live in `qa/econ-graph-users-1.json` for the release QA
-suite to run a two-account check against a deployed URL. They are off by default;
-opt in explicitly:
+suite to run a two-account check against a local compose stack. They are off by
+default; opt in explicitly. Users are imported only on the realm's first start, so
+reset the realm first (see above) if Keycloak has run before:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.qa-users.yml up -d keycloak
 ```
 
-Never reference this file, or `KC_WEB_DIRECT_GRANTS`, from a k8s manifest.
-`scripts/keycloak/check-no-dev-users-in-k8s.sh` (run in CI) fails the build if one
-does. Real Google sign-in stays a manual QA step.
+Never reference the dev or QA users, or `KC_WEB_DIRECT_GRANTS`, from k8s, deploy
+scripts or terraform. `scripts/keycloak/check-no-dev-users-in-k8s.sh` (run in CI)
+fails the build if they do. Real Google sign-in stays a manual QA step.
 
 ## Kubernetes
 

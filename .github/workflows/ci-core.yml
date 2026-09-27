@@ -735,6 +735,9 @@ jobs:
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
+    - name: Check dev/QA Keycloak data is not deployed to k8s
+      run: ./scripts/keycloak/check-no-dev-users-in-k8s.sh
+
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.98.1
       with:
@@ -789,9 +792,6 @@ jobs:
     - name: Run frontend linting
       working-directory: frontend
       run: npm run lint
-
-    - name: Check dev/QA Keycloak data is not deployed to k8s
-      run: ./scripts/keycloak/check-no-dev-users-in-k8s.sh
 
   security-audit:
     name: Security Audit

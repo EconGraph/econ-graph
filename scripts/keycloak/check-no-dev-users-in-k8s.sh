@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # F10: dev- and QA-only realm data must never reach the cluster.
 #
-# Fails if any k8s manifest under k8s/manifests/ references the dev seeded users
-# file, the QA-only users file, or turns on the password grant (KC_WEB_DIRECT_GRANTS).
+# Fails if anything that builds or deploys the cluster (k8s/, scripts/deploy/,
+# terraform/) references the dev or QA users (config/keycloak/dev or qa, or any
+# econ-graph-users-<n>.json) or turns on the password grant (KC_WEB_DIRECT_GRANTS).
 # Those are for docker-compose only; QA users are opted into with an explicit
 # docker-compose override (docker-compose.qa-users.yml), never in k8s.
 set -euo pipefail
@@ -14,7 +15,7 @@ fail=0
 check() {
   local pattern="$1" description="$2"
   local matches
-  matches="$(grep -rn --include='*.yaml' --include='*.yml' -E "$pattern" k8s/manifests/ || true)"
+  matches="$(grep -rnE "$pattern" k8s/ scripts/deploy/ terraform/ || true)"
   if [ -n "$matches" ]; then
     echo "check-no-dev-users-in-k8s: $description:" >&2
     echo "$matches" >&2
@@ -22,9 +23,8 @@ check() {
   fi
 }
 
-check 'econ-graph-users-0\.json' "a k8s manifest references the dev seeded users file"
-check 'econ-graph-users-1\.json' "a k8s manifest references the QA-only users file"
-check 'KC_WEB_DIRECT_GRANTS' "a k8s manifest sets KC_WEB_DIRECT_GRANTS (the password grant is dev-only)"
+check 'config/keycloak/(dev|qa)|econ-graph-users-[0-9]+\.json' "deploy config references the dev or QA users"
+check 'KC_WEB_DIRECT_GRANTS' "deploy config sets KC_WEB_DIRECT_GRANTS (the password grant is dev-only)"
 
 if [ "$fail" -ne 0 ]; then
   exit 1

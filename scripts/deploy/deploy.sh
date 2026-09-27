@@ -96,7 +96,7 @@ if kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
     --dry-run=client -o yaml | kubectl apply -f -
   kubectl apply -f k8s/manifests/keycloak/postgres.yaml
   echo "⏳ Waiting for Keycloak's PostgreSQL to be ready..."
-  kubectl wait --for=condition=ready pod -l app=keycloak-postgres -n econ-graph --timeout=300s
+  kubectl -n econ-graph rollout status statefulset/keycloak-postgres --timeout=300s
   kubectl apply -f k8s/manifests/keycloak/deployment.yaml
   kubectl apply -f k8s/manifests/keycloak/ingress.yaml
   KEYCLOAK_DEPLOYED=true
