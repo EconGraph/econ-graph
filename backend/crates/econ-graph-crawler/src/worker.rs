@@ -707,9 +707,27 @@ pub(crate) fn incremental_since(
     latest.checked_sub_signed(lookback)
 }
 
-/// Database failures while reading/persisting are infrastructure problems: retry later.
+/// Database failures while reading/persisting are infrastructure problems: retry later. The
+/// exceptions fail at once, because a retry would fail the same way: a dataset missing from
+/// `datasets` (not synced), and two series claiming the same dataset and dimension values.
 fn db_error(e: econ_graph_core::AppError) -> CrawlError {
-    CrawlError::Transient(format!("database: {e}"))
+    use diesel::result::{DatabaseErrorKind, Error as DieselError};
+    use econ_graph_core::AppError;
+    match &e {
+        AppError::ValidationError(msg) => CrawlError::Permanent(msg.clone()),
+        AppError::Database(DieselError::DatabaseError(
+            DatabaseErrorKind::UniqueViolation,
+            info,
+        )) if info
+            .constraint_name()
+            .is_some_and(|c| c.ends_with("_dataset_dimensions")) =>
+        {
+            CrawlError::Permanent(format!(
+                "another series already has this dataset and dimension values: {e}"
+            ))
+        }
+        _ => CrawlError::Transient(format!("database: {e}")),
+    }
 }
 
 /// Runs `fut` in its own task so a panic becomes `CrawlError::Transient`.
