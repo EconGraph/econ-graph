@@ -43,6 +43,14 @@ spec:
             name: econ-graph-backend-service
             port:
               number: 9876
+      # The OIDC sign-in callback is a frontend route; Exact wins over the /auth prefix below.
+      - path: /auth/callback
+        pathType: Exact
+        backend:
+          service:
+            name: econ-graph-frontend-service
+            port:
+              number: 3000
       - path: /auth
         pathType: Prefix
         backend:

@@ -453,8 +453,13 @@ resource "kubernetes_ingress_v1" "production_ssl" {
         if ($uri ~ "^/\.well-known/acme-challenge/") {
           return 200;
         }
-        # Security headers for all other requests
-        more_set_headers "X-Frame-Options: DENY";
+        # Security headers for all other requests. Only the Keycloak silent sign-in page may be
+        # framed, and only by this origin.
+        set $frame_options "DENY";
+        if ($uri = "/silent-callback.html") {
+          set $frame_options "SAMEORIGIN";
+        }
+        more_set_headers "X-Frame-Options: $frame_options";
         more_set_headers "X-Content-Type-Options: nosniff";
         more_set_headers "X-XSS-Protection: 1; mode=block";
         more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
@@ -531,6 +536,19 @@ resource "kubernetes_ingress_v1" "production_ssl" {
               name = "econ-graph-backend-service"
               port {
                 number = 9876
+              }
+            }
+          }
+        }
+        # The OIDC sign-in callback is a frontend route; Exact wins over the /auth prefix below.
+        path {
+          path      = "/auth/callback"
+          path_type = "Exact"
+          backend {
+            service {
+              name = "econ-graph-frontend-service"
+              port {
+                number = 3000
               }
             }
           }

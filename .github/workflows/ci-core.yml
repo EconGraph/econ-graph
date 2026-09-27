@@ -2490,6 +2490,10 @@ jobs:
         context: ./frontend
         push: false
         tags: econ-graph-frontend:test
+        # Keycloak issuer for sign-in, from the repository variable when set; unset hides Sign in.
+        build-args: |
+          VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER }}
+          VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID || 'econ-graph-web' }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
