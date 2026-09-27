@@ -269,8 +269,22 @@ async fn dimensioned_series_round_trips_and_filters() {
             .await
             .expect("update metadata");
     assert_eq!(updated.id, meta.id);
+    assert_eq!(updated.dataset_id, Some(dataset.id));
     assert_eq!(updated.dimensions, rediscovered.dimensions);
     assert_eq!(updated.default_measure.as_deref(), Some(VALUE_MEASURE));
+
+    // A rediscovery with no dataset clears all three.
+    let cleared = SeriesMetadata::get_or_create(
+        &pool,
+        source.id,
+        "BDS/state.06.ESTAB",
+        &new_metadata(source.id, "BDS/state.06.ESTAB"),
+    )
+    .await
+    .expect("clear dataset columns");
+    assert_eq!(cleared.dataset_id, None);
+    assert!(cleared.dimensions.0.is_empty());
+    assert_eq!(cleared.default_measure, None);
 }
 
 #[tokio::test]
@@ -451,6 +465,30 @@ async fn database_rejects_components_rust_cannot_read() {
         (
             "measures",
             r#"[{"name": "value", "label": "Value", "type": "decimal"}, 5]"#,
+        ),
+        (
+            "dimensions",
+            r#"[{"name": "a", "label": "A", "type": "string", "unit": 5}]"#,
+        ),
+        (
+            "dimensions",
+            r#"[{"name": "a", "label": "A", "type": "string", "codes": "x"}]"#,
+        ),
+        (
+            "dimensions",
+            r#"[{"name": "a", "label": "A", "type": "string", "codes": [{"code": 1, "label": "One"}]}]"#,
+        ),
+        (
+            "dimensions",
+            r#"[{"name": "a", "label": "A", "type": "string", "codes": [{"code": "x"}]}]"#,
+        ),
+        (
+            "dimensions",
+            r#"[{"name": "a", "label": "A", "type": "string", "codes": [{"code": "x", "label": "X", "unit": []}]}]"#,
+        ),
+        (
+            "dimensions",
+            r#"[{"name": "a", "label": "A", "type": "string", "codelist": {}}]"#,
         ),
     ];
     for (column, components) in cases {
