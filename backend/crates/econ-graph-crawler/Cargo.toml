@@ -8,6 +8,12 @@ license.workspace = true
 name = "crawler"
 path = "src/bin/crawler.rs"
 
+# Loads recorded fixtures through the adapters into a database (release e2e stack); no network.
+[[bin]]
+name = "seed-fixtures"
+path = "src/bin/seed_fixtures.rs"
+required-features = ["testkit"]
+
 [dependencies]
 # Core dependencies
 econ-graph-core = { path = "../econ-graph-core" }
