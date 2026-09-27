@@ -14,8 +14,13 @@ fail=0
 
 check() {
   local pattern="$1" description="$2"
-  local matches
-  matches="$(grep -rnE "$pattern" k8s/ scripts/deploy/ terraform/ || true)"
+  local matches grep_status=0
+  # grep exits 1 for "no matches"; anything higher means the scan itself failed.
+  matches="$(grep -rnE "$pattern" k8s/ scripts/deploy/ terraform/)" || grep_status=$?
+  if [ "$grep_status" -gt 1 ]; then
+    echo "check-no-dev-users-in-k8s: grep failed (exit $grep_status) scanning for $pattern" >&2
+    exit "$grep_status"
+  fi
   if [ -n "$matches" ]; then
     echo "check-no-dev-users-in-k8s: $description:" >&2
     echo "$matches" >&2
