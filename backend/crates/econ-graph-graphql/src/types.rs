@@ -116,7 +116,7 @@ impl EconomicSeriesType {
         Ok(source.map(|s| s.into()))
     }
 
-    /// Fetch recent data points using direct database query
+    /// Fetch the most recent observations, latest revision of each
     async fn recent_data_points(
         &self,
         ctx: &Context<'_>,
@@ -132,6 +132,7 @@ impl EconomicSeriesType {
         let mut conn = pool.get().await?;
         let data_points = dsl::data_points
             .filter(dsl::series_id.eq(series_uuid))
+            .filter(models::revision_filter(None, false))
             .order(dsl::date.desc())
             .limit(limit as i64)
             .load::<models::DataPoint>(&mut conn)
