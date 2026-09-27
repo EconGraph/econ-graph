@@ -5,7 +5,7 @@
 //! limiting, retries, persistence, queueing — live elsewhere in this crate.
 //!
 //! To add a source: add `pub mod <name>;` below and one `registry.register(..)`
-//! line in [`default_registry`].
+//! line in each of [`default_registry`] and [`registry_at`].
 
 use crate::adapter::AdapterRegistry;
 
@@ -36,4 +36,37 @@ pub fn default_registry() -> AdapterRegistry {
         registry.register(std::sync::Arc::new(adapter));
     }
     registry
+}
+
+/// Registry with every HTTP adapter pointed at `base_url` instead of its real upstream, plus the
+/// static catalogs. For mock upstreams serving recorded fixtures (tests and `seed-fixtures`).
+pub fn registry_at(base_url: &str) -> AdapterRegistry {
+    let mut registry = AdapterRegistry::new();
+    registry.register(std::sync::Arc::new(fred::FredAdapter::new(base_url)));
+    registry.register(std::sync::Arc::new(bls::BlsAdapter::new(base_url)));
+    registry.register(std::sync::Arc::new(world_bank::WorldBankAdapter::new(
+        base_url,
+    )));
+    registry.register(std::sync::Arc::new(imf::ImfAdapter::new(base_url)));
+    registry.register(std::sync::Arc::new(census::CensusAdapter::new(base_url)));
+    registry.register(std::sync::Arc::new(bea::BeaAdapter::new(base_url)));
+    registry.register(std::sync::Arc::new(fhfa::FhfaAdapter::new(base_url)));
+    for adapter in static_catalogs::StaticCatalogAdapter::all() {
+        registry.register(std::sync::Arc::new(adapter));
+    }
+    registry
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A new adapter has to be added to both registries, or `seed-fixtures` can't load its fixtures.
+    #[test]
+    fn registry_at_covers_every_default_adapter() {
+        assert_eq!(
+            registry_at("http://127.0.0.1:1").ids(),
+            default_registry().ids()
+        );
+    }
 }
