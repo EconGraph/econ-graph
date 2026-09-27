@@ -76,7 +76,7 @@ The Terraform configuration deploys a complete production-ready environment incl
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `domain` | Domain name for the application | `"econgraph.example.com"` |
-| `database_password` | PostgreSQL password | `"secure-password-123"` |
+| `database_password` | PostgreSQL password (16+ characters, set via `TF_VAR_database_password` or an untracked `terraform.tfvars`, never a committed default) | none |
 
 ### Optional Variables
 

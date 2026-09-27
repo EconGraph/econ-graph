@@ -76,9 +76,10 @@ admin_jwt_secret     = "your-admin-jwt-secret-256-bits"
 admin_session_key    = "your-admin-session-key-256-bits"
 admin_encryption_key = "your-admin-encryption-key-256-bits"
 
-# REQUIRED: Admin TLS certificates (base64 encoded)
-# admin_tls_cert = "base64-encoded-certificate"
-# admin_tls_key  = "base64-encoded-private-key"
+# REQUIRED: Admin TLS certificates (PEM text, not base64; the kubernetes
+# provider encodes Secret data itself)
+# admin_tls_cert = "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+# admin_tls_key  = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
 
 # Admin security settings
 admin_session_timeout = 1800  # 30 minutes
