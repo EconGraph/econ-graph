@@ -23,12 +23,26 @@
 //! returns [`JobOutcome::LeaseLost`] without touching the item again.
 //!
 //! Dispatch by `kind`: a [`JobHandler`] registered for `(source, kind)` wins; otherwise
-//! `fetch_series` calls [`SourceAdapter::fetch_series`](crate::SourceAdapter::fetch_series) with
+//! `fetch_series` calls [`SourceAdapter::fetch_series`] with
 //! `since` = the latest stored observation date minus the source's
 //! [`revision_lookback`](crate::SourcePolicy::revision_lookback) (so recent revisions are
 //! re-fetched; `None` for a series with no stored points) and `discover_catalog` calls
-//! [`SourceAdapter::discover`](crate::SourceAdapter::discover). Adapter and handler calls run in
+//! [`SourceAdapter::discover`]. Adapter and handler calls run in
 //! their own task, so a panic becomes a `Transient` error instead of killing the worker.
+//!
+//! Batching: when the claimed item is a `fetch_series` job with no registered handler, its
+//! source's [`max_batch`](crate::SourcePolicy::max_batch) is above 1 and the adapter gives its
+//! series a [`batch_key`](crate::SourceAdapter::batch_key), the worker also claims up to
+//! `max_batch - 1` other due `fetch_series` jobs of that source with the same key (looking at the
+//! next `max_batch * `[`BATCH_SCAN_PER_SLOT`] due jobs of the source, at most [`BATCH_SCAN_MAX`])
+//! and fetches them all with one [`SourceAdapter::fetch_batch`]
+//! call, passing the earliest `since` of the batch. A keyed item that finds no mates is fetched
+//! alone through `fetch_series`. Each job then keeps its own result: its own persistence, its own
+//! `crawl_attempts` row and its own transition from the table above, so one bad series fails
+//! only its own job. An error for the whole call applies to every job in the batch. The breaker
+//! below counts each batch call as one result: the call's error, else any per-series
+//! `RateLimited` or `Auth`, else a success. Every job's lease starts when the batch is claimed,
+//! so `stuck_after` must cover a whole batch, not one job.
 //!
 //! Per-source circuit breaker: after `pause_after_consecutive` consecutive `RateLimited` or `Auth`
 //! results for a source, the worker stops claiming that source for `pause_for` (via
@@ -56,7 +70,7 @@ use econ_graph_core::models::{CrawlQueueItem, JobKind, LeaseOutcome, QueueTransi
 use tokio::sync::watch;
 use uuid::Uuid;
 
-use crate::adapter::{AdapterRegistry, CrawlCtx};
+use crate::adapter::{AdapterRegistry, CrawlCtx, FetchedSeries, SourceAdapter};
 use crate::error::CrawlError;
 use crate::persist::{self, AttemptRecord};
 use crate::source::SourceId;
@@ -85,6 +99,14 @@ pub struct WorkerConfig {
 
 /// Default for [`WorkerConfig::queue_retention`]: 14 days.
 pub const DEFAULT_QUEUE_RETENTION: Duration = Duration::from_secs(14 * 24 * 60 * 60);
+
+/// Due jobs of the lead's source the worker looks through for batch mates, per slot in the
+/// batch (`max_batch * BATCH_SCAN_PER_SLOT`, at most [`BATCH_SCAN_MAX`]). Every claim of a
+/// batching source pays for this scan, so it stays proportional to the batch size.
+pub const BATCH_SCAN_PER_SLOT: usize = 50;
+
+/// Upper bound on the batch-mate scan, in queue rows.
+pub const BATCH_SCAN_MAX: usize = 2000;
 
 /// How often the maintenance loop purges finished queue rows.
 const PURGE_INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -306,7 +328,7 @@ impl Worker {
             if *stop.borrow() {
                 return;
             }
-            if self.run_once().await.is_some() {
+            if self.run_batch_once().await.is_some() {
                 continue;
             }
             tokio::select! {
@@ -375,8 +397,16 @@ impl Worker {
         }
     }
 
-    /// Claims and processes one item. `None` if nothing was due (or the claim failed).
+    /// Claims and processes one item, and any batch mates claimed with it (see the
+    /// [module docs](self)). Returns the claimed item's outcome; `None` if nothing was due (or
+    /// the claim failed).
     pub async fn run_once(&self) -> Option<JobOutcome> {
+        self.run_batch_once().await?.into_iter().next()
+    }
+
+    /// Like [`run_once`](Self::run_once), returning every outcome: the claimed item's first,
+    /// then its batch mates' in claim order.
+    pub async fn run_batch_once(&self) -> Option<Vec<JobOutcome>> {
         let filter = self.claim_filter()?;
         let item = match CrawlQueueItem::claim_next(
             &self.ctx.pool,
@@ -392,16 +422,96 @@ impl Worker {
                 return None;
             }
         };
-        let (source, kind) = (item.source.clone(), item.kind.clone());
-        let outcome = self.process(item).await;
-        let label = match &outcome {
-            JobOutcome::Completed(_) => "completed",
-            JobOutcome::Retrying { .. } => "retrying",
-            JobOutcome::Failed { .. } => "failed",
-            JobOutcome::LeaseLost { .. } => "lease_lost",
+        let batch = self.batch_mates(&item).await;
+        let mut items = vec![item];
+        let batch = match batch {
+            Some((source, adapter, mates)) if !mates.is_empty() => {
+                items.extend(mates);
+                Some((source, adapter))
+            }
+            _ => None,
         };
-        econ_graph_metrics::crawler::CRAWLER_QUEUE_METRICS.record_job(&source, &kind, label);
-        Some(outcome)
+        let jobs: Vec<(String, String)> = items
+            .iter()
+            .map(|i| (i.source.clone(), i.kind.clone()))
+            .collect();
+        let outcomes = match batch {
+            Some((source, adapter)) => self.process_batch(source, adapter, items).await,
+            None => vec![self.process(items.remove(0)).await],
+        };
+        for ((source, kind), outcome) in jobs.iter().zip(&outcomes) {
+            let label = match outcome {
+                JobOutcome::Completed(_) => "completed",
+                JobOutcome::Retrying { .. } => "retrying",
+                JobOutcome::Failed { .. } => "failed",
+                JobOutcome::LeaseLost { .. } => "lease_lost",
+            };
+            econ_graph_metrics::crawler::CRAWLER_QUEUE_METRICS.record_job(source, kind, label);
+        }
+        Some(outcomes)
+    }
+
+    /// Claims the due `fetch_series` jobs that can be fetched together with `lead` (same source
+    /// and batch key), up to the source's `max_batch` including `lead`. `None` when `lead`
+    /// doesn't batch.
+    async fn batch_mates(
+        &self,
+        lead: &CrawlQueueItem,
+    ) -> Option<(SourceId, Arc<dyn SourceAdapter>, Vec<CrawlQueueItem>)> {
+        let source = SourceId::from_str(&lead.source).ok()?;
+        if JobKind::from_str(&lead.kind).ok()? != JobKind::FetchSeries
+            || self.handlers.contains_key(&(source, JobKind::FetchSeries))
+        {
+            return None;
+        }
+        let max_batch = self.ctx.http.policy(source).max_batch;
+        if max_batch <= 1 {
+            return None;
+        }
+        let adapter = self.registry.get(source)?;
+        let key = adapter.batch_key(&lead.series_id)?;
+        let candidates = match CrawlQueueItem::due_candidates(
+            &self.ctx.pool,
+            &lead.source,
+            &lead.kind,
+            lead.id,
+            i64::try_from(
+                max_batch
+                    .saturating_mul(BATCH_SCAN_PER_SLOT)
+                    .min(BATCH_SCAN_MAX),
+            )
+            .unwrap_or(i64::MAX),
+        )
+        .await
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(id = %lead.id, error = %e, "looking up batch mates failed; fetching alone");
+                return Some((source, adapter, Vec::new()));
+            }
+        };
+        let wanted: Vec<Uuid> = candidates
+            .into_iter()
+            .filter(|(_, series_id)| adapter.batch_key(series_id).as_deref() == Some(key.as_str()))
+            .map(|(id, _)| id)
+            .take(max_batch - 1)
+            .collect();
+        let mut mates = match CrawlQueueItem::claim_due_ids(
+            &self.ctx.pool,
+            &wanted,
+            &self.config.worker_id,
+        )
+        .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(id = %lead.id, error = %e, "claiming batch mates failed; fetching alone");
+                Vec::new()
+            }
+        };
+        // Claim order, so outcomes line up with the queue's order.
+        mates.sort_by_key(|m| wanted.iter().position(|id| *id == m.id));
+        Some((source, adapter, mates))
     }
 
     async fn process(&self, item: CrawlQueueItem) -> JobOutcome {
@@ -426,20 +536,7 @@ impl Worker {
 
         let result = self.dispatch(source, kind, &item).await;
 
-        let tripped = self.breaker_lock().record(
-            source,
-            result.as_ref().err(),
-            self.config.pause_after_consecutive,
-            self.config.pause_for,
-        );
-        if tripped {
-            tracing::warn!(
-                %source,
-                consecutive = self.config.pause_after_consecutive,
-                pause_secs = self.config.pause_for.as_secs(),
-                "circuit breaker tripped: pausing source"
-            );
-        }
+        self.record_breaker(source, result.as_ref().err());
 
         if kind == JobKind::FetchSeries {
             self.record_attempt(source, &item, &result, started.elapsed())
@@ -447,6 +544,85 @@ impl Worker {
         }
         self.transition(source, &item, result, started.elapsed())
             .await
+    }
+
+    /// Fetches `items` (claimed `fetch_series` jobs of `source` sharing a batch key) with one
+    /// [`SourceAdapter::fetch_batch`] call, then records and transitions each job on its own.
+    async fn process_batch(
+        &self,
+        source: SourceId,
+        adapter: Arc<dyn SourceAdapter>,
+        items: Vec<CrawlQueueItem>,
+    ) -> Vec<JobOutcome> {
+        let started = Instant::now();
+        let policy = self.ctx.http.policy(source);
+        tracing::debug!(%source, jobs = items.len(), "processing batch");
+
+        // `since` for the batch is the earliest of its series (a full fetch if any has no points).
+        let mut results: Vec<Option<Dispatched>> = Vec::with_capacity(items.len());
+        let mut ids = Vec::with_capacity(items.len());
+        let mut since: Option<Option<NaiveDate>> = None;
+        for item in &items {
+            match persist::latest_point_date(&self.ctx.pool, source, &item.series_id).await {
+                Ok(latest) => {
+                    let own = latest.and_then(|d| incremental_since(d, policy));
+                    since = Some(match (since, own) {
+                        (None, own) => own,
+                        (Some(Some(a)), Some(b)) => Some(a.min(b)),
+                        (Some(_), _) => None,
+                    });
+                    ids.push(item.series_id.clone());
+                    results.push(None);
+                }
+                Err(e) => results.push(Some(Err(db_error(e)))),
+            }
+        }
+
+        let mut fetched = if ids.is_empty() {
+            Ok(Default::default())
+        } else {
+            let ctx = self.ctx.clone();
+            let request = ids.clone();
+            let since = since.flatten();
+            let fetched =
+                guarded(async move { adapter.fetch_batch(&ctx, &request, since).await }).await;
+            // One breaker result per upstream call: the call's own error, else any per-series
+            // rate limit or auth failure (only the error kind matters to the breaker).
+            let breaker_error = match &fetched {
+                Err(e) => Some(e),
+                Ok(map) => map.values().find_map(|r| match r {
+                    Err(e @ (CrawlError::RateLimited { .. } | CrawlError::Auth(_))) => Some(e),
+                    _ => None,
+                }),
+            };
+            self.record_breaker(source, breaker_error);
+            fetched
+        };
+        let fetch_time = started.elapsed();
+
+        let mut outcomes = Vec::with_capacity(items.len());
+        for (item, result) in items.iter().zip(results) {
+            // Each job's duration is the shared fetch plus its own persistence.
+            let own_started = Instant::now();
+            let result = match result {
+                Some(r) => r,
+                None => match &mut fetched {
+                    Err(e) => Err(e.clone()),
+                    Ok(map) => match map.remove(&item.series_id) {
+                        Some(Ok(series)) => self.persist(source, &item.series_id, &series).await,
+                        Some(Err(e)) => Err(e),
+                        None => Err(CrawlError::NotFound(format!(
+                            "{} missing from the batch response",
+                            item.series_id
+                        ))),
+                    },
+                },
+            };
+            let duration = fetch_time + own_started.elapsed();
+            self.record_attempt(source, item, &result, duration).await;
+            outcomes.push(self.transition(source, item, result, duration).await);
+        }
+        outcomes
     }
 
     async fn dispatch(&self, source: SourceId, kind: JobKind, item: &CrawlQueueItem) -> Dispatched {
@@ -484,7 +660,16 @@ impl Worker {
         let ctx = self.ctx.clone();
         let id = external_id.to_string();
         let fetched = guarded(async move { adapter.fetch_series(&ctx, &id, since).await }).await?;
-        let write = persist::persist_series(&self.ctx.pool, source, external_id, &fetched)
+        self.persist(source, external_id, &fetched).await
+    }
+
+    async fn persist(
+        &self,
+        source: SourceId,
+        external_id: &str,
+        fetched: &FetchedSeries,
+    ) -> Dispatched {
+        let write = persist::persist_series(&self.ctx.pool, source, external_id, fetched)
             .await
             .map_err(db_error)?;
         Ok(JobStats {
@@ -510,6 +695,23 @@ impl Worker {
             metadata_written: written,
             ..JobStats::default()
         })
+    }
+
+    fn record_breaker(&self, source: SourceId, error: Option<&CrawlError>) {
+        let tripped = self.breaker_lock().record(
+            source,
+            error,
+            self.config.pause_after_consecutive,
+            self.config.pause_for,
+        );
+        if tripped {
+            tracing::warn!(
+                %source,
+                consecutive = self.config.pause_after_consecutive,
+                pause_secs = self.config.pause_for.as_secs(),
+                "circuit breaker tripped: pausing source"
+            );
+        }
     }
 
     async fn record_attempt(

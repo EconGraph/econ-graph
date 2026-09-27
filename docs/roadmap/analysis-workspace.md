@@ -374,8 +374,8 @@ Each PR updates its row here when it merges or changes scope.
 |---|---|---|---|---|
 | UI-1 | Delete `/analysis`, `ProfessionalChart`, `ChartCollaboration` | Phase 1, item 17 | #199 | Ready |
 | UI-2 | `technical_analysis` build flag and first indicator tests | Phase 1 | | Waits for UI-1 and the frontend flags PR |
-| UI-3 | `seriesByExternalId(sourceName, externalId)` (exact `data_sources.name`) and `latestObservation` (newest date at its newest revision; null value kept), batched with a non-cached dataloader | Item 8 | #200 | Merged |
-| UI-4 | Series page on real data | Item 7 | #204 | Ready |
+| UI-3 | `seriesByExternalId` and `latestObservation` | Item 8 | #200 | Ready |
+| UI-4 | Series page on real data; drops the no-op bookmark, share and mock download buttons; log difference not offered until UI-11 | Item 7 | #204 | Merged |
 | UI-5 | One `SeriesChart` component | Phase 3 | #209 | Draft |
 | UI-6 | CSV download of the shown points | Item 7, export | #223 | Draft, waits for UI-5 |
 | UI-7 | Dashboard on real latest values; drops the dashboard's other fake panels (recent releases, collaboration badges, system status) and the no-op category buttons | Item 8 | #212 | Ready, merges after #200 |

@@ -116,7 +116,7 @@ impl EconomicSeriesType {
         Ok(source.map(|s| s.into()))
     }
 
-    /// Fetch recent data points using direct database query
+    /// Fetch the most recent observations, latest revision of each
     async fn recent_data_points(
         &self,
         ctx: &Context<'_>,
@@ -132,6 +132,7 @@ impl EconomicSeriesType {
         let mut conn = pool.get().await?;
         let data_points = dsl::data_points
             .filter(dsl::series_id.eq(series_uuid))
+            .filter(models::revision_filter(None, false))
             .order(dsl::date.desc())
             .limit(limit as i64)
             .load::<models::DataPoint>(&mut conn)
@@ -212,6 +213,13 @@ impl EconomicSeriesType {
 
         if filter.original_only.unwrap_or(false) {
             query = query.filter(dsl::is_original_release.eq(true));
+        }
+
+        if filter.as_of.is_some() || filter.latest_revision_only.unwrap_or(false) {
+            query = query.filter(models::revision_filter(
+                filter.as_of,
+                filter.original_only.unwrap_or(false),
+            ));
         }
 
         let data_points = query
@@ -651,6 +659,9 @@ pub struct DataFilterInput {
     pub end_date: Option<NaiveDate>,
     pub original_only: Option<bool>,
     pub latest_revision_only: Option<bool>,
+    /// Return each observation as it was known on this day (its newest revision published on or
+    /// before it). Takes precedence over `latestRevisionOnly`.
+    pub as_of: Option<NaiveDate>,
 }
 
 impl Default for DataFilterInput {
@@ -660,6 +671,7 @@ impl Default for DataFilterInput {
             end_date: None,
             original_only: Some(false),
             latest_revision_only: Some(false),
+            as_of: None,
         }
     }
 }
@@ -1020,8 +1032,6 @@ impl From<User> for UserType {
 /// Input for creating a new annotation
 #[derive(InputObject)]
 pub struct CreateAnnotationInput {
-    /// User ID creating the annotation
-    pub user_id: ID,
     /// Series ID the annotation is for
     pub series_id: ID,
     /// Date the annotation refers to
@@ -1043,8 +1053,6 @@ pub struct CreateAnnotationInput {
 /// Input for adding a comment to an annotation
 #[derive(InputObject)]
 pub struct AddCommentInput {
-    /// User ID adding the comment
-    pub user_id: ID,
     /// Annotation ID to comment on
     pub annotation_id: ID,
     /// Comment content
@@ -1054,8 +1062,6 @@ pub struct AddCommentInput {
 /// Input for sharing a chart with another user
 #[derive(InputObject)]
 pub struct ShareChartInput {
-    /// Owner user ID (who is sharing)
-    pub owner_user_id: ID,
     /// Target user ID (who to share with)
     pub target_user_id: ID,
     /// Chart ID to share
@@ -1067,8 +1073,6 @@ pub struct ShareChartInput {
 /// Input for deleting an annotation
 #[derive(InputObject)]
 pub struct DeleteAnnotationInput {
-    /// User ID requesting deletion
-    pub user_id: ID,
     /// Annotation ID to delete
     pub annotation_id: ID,
 }

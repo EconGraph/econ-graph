@@ -1,85 +1,110 @@
 /**
- * REQUIREMENT: Comprehensive unit tests for SeriesDetail page component
- * PURPOSE: Test detailed series view with interactive charts and data transformation options
- * This ensures the main chart visualization interface works correctly for all series types.
+ * Series page tests against recorded GraphQL responses (fixtures).
+ *
+ * The real hooks run; only executeGraphQL is replaced, so these tests check the queries
+ * and variables the page sends as well as what it renders.
  */
 
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import { useParams } from 'react-router-dom';
 import { TestProviders } from '../../test-utils/test-providers';
+import { executeGraphQL, GraphQLRequest, QUERIES } from '../../utils/graphql';
 import SeriesDetail from '../SeriesDetail';
+import {
+  EMPTY_ID,
+  UNKNOWN_ID,
+  UNRATE_ID,
+  allNullTransformed,
+  noObservations,
+  seriesResponses,
+  unrateLevels,
+  unrateYearOverYear,
+} from './fixtures/seriesDetail';
 
-// Mock react-router-dom
+// setupTests mocks the hooks globally; this page is tested with the real ones.
+vi.mock('../../hooks/useSeriesData', async () => vi.importActual('../../hooks/useSeriesData'));
+
+vi.mock('../../utils/graphql', async () => {
+  const actual = await vi.importActual<typeof import('../../utils/graphql')>(
+    '../../utils/graphql'
+  );
+  return { ...actual, executeGraphQL: vi.fn() };
+});
+
 vi.mock('react-router-dom', () => ({
   useParams: vi.fn(),
-  BrowserRouter: ({ children }: { children: React.ReactNode }) => children,
   useNavigate: () => vi.fn(),
-  useLocation: () => ({ pathname: '/test', search: '', hash: '', state: null }),
-  Link: ({ children, to, ...props }: any) => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const React = require('react');
-    return React.createElement('a', { href: to, ...props }, children);
-  },
-  NavLink: ({ children, to, ...props }: any) => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const React = require('react');
-    return React.createElement('a', { href: to, ...props }, children);
-  },
 }));
 
-// Mock the InteractiveChartWithCollaboration component
-vi.mock('../../components/charts/InteractiveChartWithCollaboration', () => ({
-  default: function MockInteractiveChartWithCollaboration({ seriesData, onDataTransform }: any) {
-    return (
-      <div data-testid="interactive-chart">
-        <div data-testid="chart-title">{seriesData?.title}</div>
-        <div data-testid="chart-data-points">{seriesData?.dataPoints?.length || 0} data points</div>
-        <button
-          data-testid="transform-yoy"
-          onClick={() => onDataTransform?.('yoy')}
-        >
-          Year-over-Year
-        </button>
-        <button
-          data-testid="transform-qoq"
-          onClick={() => onDataTransform?.('qoq')}
-        >
-          Quarter-over-Quarter
-        </button>
-        <button
-          data-testid="transform-mom"
-          onClick={() => onDataTransform?.('mom')}
-        >
-          Month-over-Month
-        </button>
-      </div>
-    );
-  },
+// Chart.js needs a canvas; render the points it would plot instead.
+vi.mock('react-chartjs-2', () => ({
+  Line: ({ data, options }: any) => (
+    <div
+      data-testid='line-chart'
+      data-points={JSON.stringify(data.datasets[0].data.map((p: any) => [p.x, p.y]))}
+      data-title={options.plugins.title.text}
+    />
+  ),
 }));
 
-// Helper function to check for skeleton loading states
-const checkSkeletonLoading = (container: HTMLElement) => {
-  // Check for skeleton elements by class name (Material-UI Skeleton components)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const skeletons = container.querySelectorAll('.MuiSkeleton-root');
-  expect(skeletons.length).toBeGreaterThan(0);
-};
-
-// Mock useParams and useNavigate
-const mockNavigate = vi.fn();
-vi.mock('react-router-dom', () => ({
-  ...vi.importActual('react-router-dom'),
-  useParams: vi.fn(),
-  useNavigate: () => mockNavigate,
+vi.mock('chart.js', () => ({
+  Chart: { register: vi.fn() },
+  CategoryScale: {},
+  LinearScale: {},
+  TimeScale: {},
+  PointElement: {},
+  LineElement: {},
+  Title: {},
+  Tooltip: {},
+  Legend: {},
 }));
+vi.mock('chartjs-adapter-date-fns', () => ({}));
 
+// Dates must read as calendar dates; west of UTC is where parsing them as UTC goes wrong.
+const originalTz = process.env.TZ;
+beforeAll(() => {
+  process.env.TZ = 'America/Los_Angeles';
+});
+afterAll(() => {
+  if (originalTz === undefined) delete process.env.TZ;
+  else process.env.TZ = originalTz;
+});
+
+const mockExecute = vi.mocked(executeGraphQL);
 const mockUseParams = vi.mocked(useParams);
 
-function renderSeriesDetail(seriesId = 'gdp-real') {
-  mockUseParams.mockReturnValue({ id: seriesId });
+type DataResponse = { seriesData: { nodes: unknown[]; totalCount: number } };
 
+/**
+ * Answer GraphQL requests from fixtures.
+ * @param dataByTransformation - The seriesData response for each transformation enum value.
+ * @param failOn - Query to fail with a GraphQL error instead.
+ */
+function serve(
+  dataByTransformation: Record<string, DataResponse> = { NONE: unrateLevels },
+  failOn?: string
+) {
+  mockExecute.mockImplementation(async (request: GraphQLRequest) => {
+    if (failOn && request.query === failOn) {
+      throw new Error('Internal server error');
+    }
+    if (request.query === QUERIES.GET_SERIES_DETAIL) {
+      return { data: seriesResponses[request.variables?.id] ?? { series: null } };
+    }
+    if (request.query === QUERIES.GET_SERIES_DATA) {
+      const response = dataByTransformation[request.variables?.transformation];
+      if (!response) throw new Error(`no fixture for ${request.variables?.transformation}`);
+      return { data: response };
+    }
+    throw new Error('unexpected query');
+  });
+}
+
+function renderPage(id: string | undefined) {
+  mockUseParams.mockReturnValue({ id });
   return render(
     <TestProviders>
       <SeriesDetail />
@@ -87,238 +112,218 @@ function renderSeriesDetail(seriesId = 'gdp-real') {
   );
 }
 
+const plottedPoints = () => JSON.parse(screen.getByTestId('line-chart').dataset.points ?? '[]');
+
+const dataRequests = () =>
+  mockExecute.mock.calls
+    .map(([request]) => request)
+    .filter(request => request.query === QUERIES.GET_SERIES_DATA);
+
+async function chooseTransformation(label: string) {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('combobox'));
+  await user.click(await screen.findByRole('option', { name: label }));
+}
+
 describe('SeriesDetail', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    mockExecute.mockReset();
   });
 
-  describe('Loading and Error States', () => {
-    test('should show loading state initially', () => {
-      const { container } = renderSeriesDetail();
+  test('shows the series and its observations from the API', async () => {
+    serve();
+    renderPage(UNRATE_ID);
 
-      // Should show skeleton loading states (Material-UI Skeleton components)
-      checkSkeletonLoading(container);
-    });
+    expect(screen.getByTestId('series-detail-loading')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'Unemployment Rate', level: 1 })
+    ).toBeInTheDocument();
+    expect(screen.getByText('UNRATE')).toBeInTheDocument();
+    expect(screen.getByText('Seasonally Adjusted')).toBeInTheDocument();
 
-    test('should show default series data for invalid series ID', () => {
-      const { container } = renderSeriesDetail('invalid-series');
+    await screen.findByTestId('line-chart');
+    expect(plottedPoints()).toEqual([
+      ['2024-01-01', 3.7],
+      ['2024-02-01', 3.9],
+      ['2024-03-01', 3.8],
+    ]);
 
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
-
-    test('should show default series data when no series ID provided', () => {
-      mockUseParams.mockReturnValue({ id: undefined });
-
-      render(
-        <TestProviders>
-          <SeriesDetail />
-        </TestProviders>
-      );
-
-      // Component shows error state when no series ID is provided
-      expect(screen.getByText('No series ID provided')).toBeInTheDocument();
-      expect(screen.getByText('Back to Explorer')).toBeInTheDocument();
-    });
+    // Recent data lists newest first, dates read as calendar dates in any timezone.
+    const rows = within(screen.getByRole('table', { name: 'Recent observations' })).getAllByRole(
+      'row'
+    );
+    expect(rows[1]).toHaveTextContent('Mar 1, 2024');
+    expect(rows[1]).toHaveTextContent('3.80');
+    expect(rows[1]).toHaveTextContent('Original');
+    expect(rows[3]).toHaveTextContent('Jan 1, 2024');
   });
 
-  describe('Series Data Display', () => {
-    test('should display GDP Real series data correctly', () => {
-      const { container } = renderSeriesDetail('gdp-real');
+  test('asks the backend for the latest revision of each date, untransformed', async () => {
+    serve();
+    renderPage(UNRATE_ID);
+    await screen.findByTestId('line-chart');
 
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
-
-    test('should display Unemployment Rate series data correctly', () => {
-      const { container } = renderSeriesDetail('unemployment-rate');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
-
-    test('should display Inflation (CPI) series data correctly', () => {
-      const { container } = renderSeriesDetail('inflation');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
-
-    test('should display Federal Funds Rate series data correctly', () => {
-      const { container } = renderSeriesDetail('fed-funds-rate');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
-
-    test('should display default series data for unknown series ID', () => {
-      const { container } = renderSeriesDetail('unknown-series');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
+    expect(dataRequests()).toHaveLength(1);
+    expect(dataRequests()[0].variables).toEqual({
+      seriesId: UNRATE_ID,
+      filter: { startDate: undefined, endDate: undefined, latestRevisionOnly: true },
+      transformation: 'NONE',
+      first: 10000,
     });
   });
 
-  describe('Interactive Chart Integration', () => {
-    test('should render interactive chart with series data', () => {
-      const { container } = renderSeriesDetail('gdp-real');
+  test.each([
+    ['Year-over-Year', 'YEAR_OVER_YEAR'],
+    ['Quarter-over-Quarter', 'QUARTER_OVER_QUARTER'],
+    ['Month-over-Month', 'MONTH_OVER_MONTH'],
+    ['Change since first observation', 'PERCENT_CHANGE'],
+  ])('choosing %s sends %s to the backend', async (label, enumValue) => {
+    serve({ NONE: unrateLevels, [enumValue]: unrateYearOverYear });
+    renderPage(UNRATE_ID);
+    await screen.findByTestId('line-chart');
 
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
+    await chooseTransformation(label);
 
-    test('should display data transformation buttons', () => {
-      const { container } = renderSeriesDetail('gdp-real');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
-
-    test('should handle data transformation clicks', () => {
-      const { container } = renderSeriesDetail('gdp-real');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
+    await waitFor(() => expect(dataRequests().slice(-1)[0]?.variables?.transformation).toBe(enumValue));
+    await waitFor(() => expect(plottedPoints()).toContainEqual(['2024-02-01', 5.4054]));
   });
 
-  describe('Navigation and Actions', () => {
-    test('should have back button that navigates to explore page', () => {
-      const { container } = renderSeriesDetail('gdp-real');
+  test('plots the transformed values the backend returns, unchanged', async () => {
+    serve({ NONE: unrateLevels, YEAR_OVER_YEAR: unrateYearOverYear });
+    renderPage(UNRATE_ID);
+    await screen.findByTestId('line-chart');
 
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
+    await chooseTransformation('Year-over-Year');
 
-    test('should have share button', () => {
-      const { container } = renderSeriesDetail('gdp-real');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
-
-    test('should have download button', () => {
-      const { container } = renderSeriesDetail('gdp-real');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
-
-    test('should have bookmark button', () => {
-      const { container } = renderSeriesDetail('gdp-real');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
-
-    test('should have info button', () => {
-      const { container } = renderSeriesDetail('gdp-real');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
+    await waitFor(() =>
+      expect(plottedPoints()).toEqual([
+        ['2024-01-01', null],
+        ['2024-02-01', 5.4054],
+        ['2024-03-01', -2.5641],
+      ])
+    );
+    expect(screen.getByTestId('line-chart').dataset.title).toBe(
+      'Unemployment Rate (Year-over-Year % Change)'
+    );
   });
 
-  describe('Series Metadata Display', () => {
-    test('should display series metadata table', () => {
-      const { container } = renderSeriesDetail('gdp-real');
+  test('says when a transformation has no values', async () => {
+    serve({ NONE: unrateLevels, MONTH_OVER_MONTH: allNullTransformed });
+    renderPage(UNRATE_ID);
+    await screen.findByTestId('line-chart');
 
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
+    await chooseTransformation('Month-over-Month');
 
-    test('should display correct date ranges', () => {
-      const { container } = renderSeriesDetail('gdp-real');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
+    expect(
+      await screen.findByText(/Not enough observations to compute month-over-month % change/)
+    ).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Show levels' }));
+    await screen.findByTestId('line-chart');
   });
 
-  describe('Breadcrumb Navigation', () => {
-    test('should display breadcrumb navigation', () => {
-      const { container } = renderSeriesDetail('gdp-real');
+  test('shows an empty state for a series with no observations', async () => {
+    serve({ NONE: noObservations });
+    renderPage(EMPTY_ID);
 
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
-
-    test('should have clickable breadcrumb links', () => {
-      const { container } = renderSeriesDetail('gdp-real');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
+    expect(await screen.findByText('No observations for this series yet.')).toBeInTheDocument();
+    expect(screen.getByText(/after the next successful crawl of FRED/)).toBeInTheDocument();
+    expect(screen.queryByTestId('line-chart')).not.toBeInTheDocument();
+    expect(screen.queryByRole('table', { name: 'Recent observations' })).not.toBeInTheDocument();
   });
 
-  describe('Data Points Generation', () => {
-    test('should generate appropriate data points for quarterly series', () => {
-      const { container } = renderSeriesDetail('gdp-real');
+  test('shows not found for an unknown series id', async () => {
+    serve();
+    renderPage(UNKNOWN_ID);
 
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
-
-    test('should generate appropriate data points for monthly series', () => {
-      const { container } = renderSeriesDetail('unemployment-rate');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
-
-    test('should generate appropriate data points for daily series', () => {
-      const { container } = renderSeriesDetail('fed-funds-rate');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
+    expect(await screen.findByText(/Series not found/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back to Explorer' })).toBeInTheDocument();
+    expect(dataRequests()).toHaveLength(0);
   });
 
-  describe('Responsive Design', () => {
-    test('should render without crashing on mobile viewport', () => {
-      // Mock mobile viewport
-      Object.defineProperty(window, 'innerWidth', {
-        writable: true,
-        configurable: true,
-        value: 375,
-      });
+  test('shows not found for an id that is not a UUID, without calling the API', async () => {
+    serve();
+    renderPage('gdp-real');
 
-      const { container } = renderSeriesDetail('gdp-real');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
+    expect(await screen.findByText(/Series not found/)).toBeInTheDocument();
+    expect(mockExecute).not.toHaveBeenCalled();
   });
 
-  describe('Accessibility', () => {
-    test('should have proper ARIA labels for interactive elements', () => {
-      const { container } = renderSeriesDetail('gdp-real');
+  test('shows an error with retry when the series query fails', async () => {
+    serve(undefined, QUERIES.GET_SERIES_DETAIL);
+    renderPage(UNRATE_ID);
 
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
+    expect(await screen.findByText(/Could not load this series/)).toBeInTheDocument();
 
-    test('should have proper heading hierarchy', () => {
-      const { container } = renderSeriesDetail('gdp-real');
-
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
-    });
+    serve();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }));
+    expect(
+      await screen.findByRole('heading', { name: 'Unemployment Rate', level: 1 })
+    ).toBeInTheDocument();
   });
 
-  describe('Error Handling', () => {
-    test('should handle network errors gracefully', () => {
-      // Mock fetch to reject
-      const originalFetch = global.fetch;
-      global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+  test('shows an error in place of the chart when the data query fails', async () => {
+    serve(undefined, QUERIES.GET_SERIES_DATA);
+    renderPage(UNRATE_ID);
 
-      const { container } = renderSeriesDetail('gdp-real');
+    expect(
+      await screen.findByText(/Could not load observations for this series/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Unemployment Rate', level: 1 })).toBeInTheDocument();
+  });
 
-      // Should still render the component even with network errors
-      // Component shows skeleton loading state in test environment
-      checkSkeletonLoading(container);
+  test('a failed transformation can go back to levels', async () => {
+    serve({ NONE: unrateLevels });
+    renderPage(UNRATE_ID);
+    await screen.findByTestId('line-chart');
 
-      global.fetch = originalFetch;
+    await chooseTransformation('Year-over-Year');
+
+    expect(
+      await screen.findByText(/Could not load observations for this series/)
+    ).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Show levels' }));
+    await waitFor(() => expect(plottedPoints()).toContainEqual(['2024-03-01', 3.8]));
+  });
+
+  test('the selector shows a new choice while its data loads', async () => {
+    let release: () => void = () => {};
+    const pending = new Promise<void>(resolve => {
+      release = resolve;
     });
+    serve({ NONE: unrateLevels, YEAR_OVER_YEAR: unrateYearOverYear });
+    const answer = mockExecute.getMockImplementation()!;
+    mockExecute.mockImplementation(async request => {
+      if (request.variables?.transformation === 'YEAR_OVER_YEAR') await pending;
+      return answer(request);
+    });
+    renderPage(UNRATE_ID);
+    await screen.findByTestId('line-chart');
+
+    await chooseTransformation('Year-over-Year');
+
+    expect(await screen.findByLabelText('Loading transformation')).toBeInTheDocument();
+    expect(screen.getByRole('combobox')).toHaveTextContent('Year-over-Year');
+    expect(screen.getByTestId('line-chart').dataset.title).toBe('Unemployment Rate');
+
+    release();
+    await waitFor(() =>
+      expect(screen.getByTestId('line-chart').dataset.title).toBe(
+        'Unemployment Rate (Year-over-Year % Change)'
+      )
+    );
+  });
+
+  test('shows an error when no series id is in the URL', () => {
+    renderPage(undefined);
+    expect(screen.getByText('No series ID provided')).toBeInTheDocument();
+  });
+
+  test('has no collaboration panel', async () => {
+    serve();
+    renderPage(UNRATE_ID);
+    await screen.findByTestId('line-chart');
+
+    expect(screen.queryByText(/collaborat/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/annotation/i)).not.toBeInTheDocument();
   });
 });

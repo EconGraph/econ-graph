@@ -100,11 +100,11 @@ export const QUERIES = {
     query GetSeriesDetail($id: ID!) {
       series(id: $id) {
         id
+        externalId
         title
         description
         source {
           name
-          description
         }
         frequency
         units
@@ -113,26 +113,23 @@ export const QUERIES = {
         endDate
         lastUpdated
         isActive
-        dataPointCount
       }
     }
   `,
 
-  // Get series data with transformations
+  // Get series observations, transformed on the backend
   GET_SERIES_DATA: `
     query GetSeriesData(
       $seriesId: ID!
       $filter: DataFilter
       $transformation: DataTransformation
       $first: Int
-      $after: String
     ) {
       seriesData(
         seriesId: $seriesId
         filter: $filter
         transformation: $transformation
         first: $first
-        after: $after
       ) {
         nodes {
           date
@@ -141,12 +138,6 @@ export const QUERIES = {
           isOriginalRelease
         }
         totalCount
-        pageInfo {
-          hasNextPage
-          hasPreviousPage
-          startCursor
-          endCursor
-        }
       }
     }
   `,
@@ -525,26 +516,24 @@ export interface SeriesListResponse {
 export interface SeriesDetailResponse {
   series: {
     id: string;
+    externalId: string;
     title: string;
-    description: string;
-    source: {
-      name: string;
-      description: string;
-    };
+    description: string | null;
+    source: { name: string } | null;
     frequency: string;
-    units: string;
-    seasonalAdjustment?: string;
-    startDate: string;
-    endDate: string;
-    lastUpdated: string;
+    units: string | null;
+    seasonalAdjustment: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    lastUpdated: string | null;
     isActive: boolean;
-    dataPointCount: number;
-  };
+  } | null;
 }
 
 export interface DataPoint {
   date: string;
-  value: number | null;
+  /** BigDecimal on the wire: a numeric string, or null where the value is missing. */
+  value: string | null;
   revisionDate: string;
   isOriginalRelease: boolean;
 }
@@ -553,12 +542,6 @@ export interface SeriesDataResponse {
   seriesData: {
     nodes: DataPoint[];
     totalCount: number;
-    pageInfo: {
-      hasNextPage: boolean;
-      hasPreviousPage: boolean;
-      startCursor?: string;
-      endCursor?: string;
-    };
   };
 }
 
