@@ -790,6 +790,9 @@ jobs:
       working-directory: frontend
       run: npm run lint
 
+    - name: Check dev/QA Keycloak data is not deployed to k8s
+      run: ./scripts/keycloak/check-no-dev-users-in-k8s.sh
+
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest

@@ -79,6 +79,21 @@ export KEYCLOAK_GOOGLE_CLIENT_ID=... KEYCLOAK_GOOGLE_CLIENT_SECRET=...
 docker compose up -d keycloak
 ```
 
+## QA-only users
+
+Two more realm-local users, `qa-alice` and `qa-bob` (passwords `qa-alice-password`
+and `qa-bob-password`), live in `qa/econ-graph-users-1.json` for the release QA
+suite to run a two-account check against a deployed URL. They are off by default;
+opt in explicitly:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.qa-users.yml up -d keycloak
+```
+
+Never reference this file, or `KC_WEB_DIRECT_GRANTS`, from a k8s manifest.
+`scripts/keycloak/check-no-dev-users-in-k8s.sh` (run in CI) fails the build if one
+does. Real Google sign-in stays a manual QA step.
+
 ## Kubernetes
 
 See `k8s/manifests/keycloak/` and the Keycloak section of `k8s/README.md`. The realm
