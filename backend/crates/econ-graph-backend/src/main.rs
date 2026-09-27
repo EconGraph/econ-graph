@@ -64,10 +64,10 @@ async fn graphql_handler(
 ///
 /// Deployed builds leave it unset, so the playground (and its schema explorer) is not public.
 fn playground_enabled(setting: Option<String>) -> bool {
-    matches!(
-        setting.as_deref().map(str::trim),
-        Some("true") | Some("TRUE") | Some("True") | Some("1")
-    )
+    setting
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|s| s == "1" || s.eq_ignore_ascii_case("true"))
 }
 
 async fn graphql_playground() -> Result<impl warp::Reply, Infallible> {
@@ -908,7 +908,7 @@ mod playground_tests {
     /// The playground is served only when explicitly turned on.
     #[test]
     fn playground_is_off_unless_explicitly_enabled() {
-        for on in ["true", "TRUE", "1", " true "] {
+        for on in ["true", "TRUE", "tRuE", "1", " true "] {
             assert!(playground_enabled(Some(on.to_string())), "{on:?}");
         }
         for off in ["", "false", "0", "yes", "on"] {
