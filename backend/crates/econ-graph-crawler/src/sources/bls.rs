@@ -199,10 +199,21 @@ struct DataRequest<'a> {
     registrationkey: Option<&'a str>,
 }
 
+/// Deserializes a JSON array field that BLS may send as an explicit `null` (not just omit) as an
+/// empty `Vec`. `#[serde(default)]` alone only covers a missing field, not an explicit `null`,
+/// which would otherwise fail the whole batch with a `Parse` error.
+fn null_as_empty_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::deserialize(deserializer)?.unwrap_or_default())
+}
+
 #[derive(Debug, Deserialize)]
 struct DataResponse {
     status: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
     message: Vec<String>,
     #[serde(rename = "Results", default)]
     results: Option<DataResults>,
@@ -210,7 +221,7 @@ struct DataResponse {
 
 #[derive(Debug, Default, Deserialize)]
 struct DataResults {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
     series: Vec<SeriesBody>,
 }
 
@@ -220,7 +231,7 @@ struct SeriesBody {
     series_id: Option<String>,
     #[serde(default)]
     catalog: Option<Catalog>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
     data: Vec<DataPoint>,
 }
 
@@ -241,7 +252,7 @@ struct DataPoint {
     year: String,
     period: String,
     value: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
     footnotes: Vec<Footnote>,
 }
 
@@ -1505,6 +1516,32 @@ mod tests {
         let absent: DataPoint =
             serde_json::from_value(json!({"year": "2024", "period": "M01", "value": "1"})).unwrap();
         assert_eq!(absent.footnotes().count(), 0);
+        // BLS may send an explicit `null` instead of omitting the field or sending `[{}]`.
+        let null_footnotes: DataPoint = serde_json::from_value(
+            json!({"year": "2024", "period": "M01", "value": "1", "footnotes": null}),
+        )
+        .unwrap();
+        assert_eq!(null_footnotes.footnotes().count(), 0);
+    }
+
+    /// `null` for a whole-response array field (not just an omitted one) doesn't fail parsing.
+    #[test]
+    fn null_arrays_parse_as_empty() {
+        let resp: DataResponse = serde_json::from_value(json!({
+            "status": "REQUEST_SUCCEEDED",
+            "message": null,
+            "Results": {"series": null},
+        }))
+        .unwrap();
+        assert!(resp.message.is_empty());
+        assert!(resp.results.unwrap().series.is_empty());
+
+        let body: SeriesBody = serde_json::from_value(json!({
+            "seriesID": "X",
+            "data": null,
+        }))
+        .unwrap();
+        assert!(body.data.is_empty());
     }
 
     #[tokio::test]
