@@ -127,13 +127,16 @@ made in the deleted `backend/src` and never reached the crates. They were redone
 the crates by [#180](https://github.com/EconGraph/econ-graph/pull/180) (JWT secret)
 and [#182](https://github.com/EconGraph/econ-graph/pull/182) (backend CORS).
 [#185](https://github.com/EconGraph/econ-graph/pull/185) added a token check on `/mcp`.
+[#227](https://github.com/EconGraph/econ-graph/pull/227) removed every credential
+committed under `k8s/`; each component reads Secrets created by
+`scripts/deploy/create-secrets.sh` (see the Secrets section of `k8s/README.md`).
 
 | Item | Evidence |
 |---|---|
 | Two ingress variants still allow any CORS origin (the backend no longer does, since #182) | `cors-allow-origin: "*"` in `k8s/manifests/ingress.yaml` and `ingress-cloudflare-dns01.yaml` |
 | `/playground` is unauthenticated. `/mcp` requires a signed-in user's token since #185, a stopgap until MCP OAuth (Phase 6) | `econ-graph-backend/src/main.rs` (`graphql_playground`, `mcp_route`) |
 | GraphQL depth, complexity and rate limits exist but are not enforced | `/graphql` calls `schema.execute` directly in the `graphql_filter` closure (`econ-graph-backend/src/main.rs`; the `graphql_handler` function there is unused). Nothing calls `SecureGraphQLServer::execute_secure_request` in `econ-graph-graphql/src/security/server.rs` |
-| Plaintext DB, monitoring and Google OAuth client-secret credentials in k8s manifests. The OAuth secret must be rotated | `k8s/manifests/postgres-deployment.yaml`, `configmap.yaml`, `ingress-cloudflare-dns01.yaml` |
+| The Google and Facebook credentials committed before #227 are still in git history and must be rotated | git history of `k8s/manifests/configmap.yaml` |
 | Sealed Secrets / secrets submodule not set up | `k8s/secrets` is uninitialized. `SECRETS_MANAGEMENT.md` describes a target state, not the current one |
 | Tokens are stored in `localStorage` | `frontend/src/contexts/AuthContext.tsx` and `admin-frontend/src/contexts/AuthContext.tsx` |
 | Terraform state files and provider binaries are committed to git | `terraform/k8s/terraform.tfstate`, `terraform.tfstate.backup`, `terraform/k8s/.terraform/` |

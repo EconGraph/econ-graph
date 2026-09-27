@@ -68,11 +68,14 @@ spec:
               name: econ-graph-config
               key: FRONTEND_PORT
         # Backend Configuration
+        # Credentials come from the econ-graph-secrets Secret, created out of band by
+        # scripts/deploy/create-secrets.sh. OAuth keys are optional: the script omits
+        # them when unset.
         - name: DATABASE_URL
           valueFrom:
-            configMapKeyRef:
-              name: econ-graph-config
-              key: DATABASE_URL
+            secretKeyRef:
+              name: econ-graph-secrets
+              key: database-url
         - name: RUST_LOG
           valueFrom:
             configMapKeyRef:
@@ -93,21 +96,31 @@ spec:
             secretKeyRef:
               name: econ-graph-secrets
               key: google-client-id
+              optional: true
         - name: GOOGLE_CLIENT_SECRET
           valueFrom:
             secretKeyRef:
               name: econ-graph-secrets
               key: google-client-secret
+              optional: true
         - name: FACEBOOK_APP_ID
           valueFrom:
             secretKeyRef:
               name: econ-graph-secrets
               key: facebook-app-id
+              optional: true
         - name: FACEBOOK_APP_SECRET
           valueFrom:
             secretKeyRef:
               name: econ-graph-secrets
               key: facebook-app-secret
+              optional: true
+        - name: FACEBOOK_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-secrets
+              key: facebook-access-token
+              optional: true
         resources:
           requests:
             memory: "256Mi"

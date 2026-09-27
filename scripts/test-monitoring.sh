@@ -276,10 +276,30 @@ test_grafana_dashboard() {
 authenticate_grafana() {
     print_status "INFO" "Authenticating with Grafana..."
 
+    # Password: GRAFANA_ADMIN_PASSWORD, else the grafana-admin Secret written by
+    # scripts/deploy/create-secrets.sh.
+    local grafana_password="${GRAFANA_ADMIN_PASSWORD:-}"
+    if [ -z "$grafana_password" ]; then
+        grafana_password=$(kubectl -n econ-graph get secret grafana-admin \
+            -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d 2>/dev/null || true)
+    fi
+
+    # Build the login body without putting the password on any command line
+    # (printf is a builtin; jq and curl read it from stdin).
+    local login_body
+    if command -v jq >/dev/null 2>&1; then
+        login_body=$(printf '%s' "$grafana_password" | jq -Rsc '{user: "admin", password: .}')
+    else
+        local escaped="${grafana_password//\\/\\\\}"
+        escaped="${escaped//\"/\\\"}"
+        login_body=$(printf '{"user":"admin","password":"%s"}' "$escaped")
+    fi
+
     # Create a session by logging in
-    local login_response=$(curl -s -c /tmp/grafana_cookies.txt -X POST "$GRAFANA_URL/login" \
-        -H "Content-Type: application/json" \
-        -d '{"user":"admin","password":"admin123"}' 2>/dev/null)
+    local login_response=$(printf '%s' "$login_body" |
+        curl -s -c /tmp/grafana_cookies.txt -X POST "$GRAFANA_URL/login" \
+            -H "Content-Type: application/json" \
+            -d @- 2>/dev/null)
 
     if [ -n "$login_response" ]; then
         print_status "SUCCESS" "Grafana authentication successful"
@@ -594,7 +614,7 @@ test_grafana_dashboard_data() {
             test_prometheus_metrics "$prometheus_id"
 
             print_status "SUCCESS" "Grafana dashboards should now show real data!"
-            print_status "INFO" "Access Grafana at: $GRAFANA_URL (admin/admin123)"
+            print_status "INFO" "Access Grafana at: $GRAFANA_URL (user admin, password in Secret grafana-admin)"
             print_status "INFO" "Available dashboards:"
             print_status "INFO" "  - EconGraph Platform Overview: $GRAFANA_URL/d/econgraph-overview/econgraph-platform-overview"
             print_status "INFO" "  - EconGraph Logs & Debugging: $GRAFANA_URL/d/econgraph-logging/econgraph-logs-and-debugging"
