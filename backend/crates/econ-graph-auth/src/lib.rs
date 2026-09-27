@@ -13,6 +13,8 @@
 //! - **OAuth Integration**: Support for Google, GitHub, and other OAuth providers
 //! - **JWT Authentication**: Secure token-based authentication with configurable expiration
 //! - **Fine-grained roles**: the [`Role`] catalog, [`Principal`] and [`authorize`]
+//! - **Identity-provider tokens**: [`oidc::OidcVerifier`] checks Keycloak access tokens, and
+//!   [`bearer::authenticate`] turns a request's bearer token into the signed-in [`Caller`]
 //! - **User Management**: Complete user lifecycle management and profile handling
 //! - **Security Middleware**: Request authentication and authorization middleware
 //! - **Session Management**: Secure session handling and token refresh
@@ -43,11 +45,14 @@
 //! ```
 
 pub mod auth;
+pub mod bearer;
+pub mod oidc;
 pub mod roles;
+#[cfg(any(test, feature = "testkit"))]
+pub mod testkit;
 
 // Re-export commonly used auth types
 pub use auth::*;
-pub use roles::{
-    authorize, role_list, roles_for_legacy, Forbidden, Principal, Role, UnknownLegacyRole,
-    UnknownRole,
-};
+pub use bearer::{authenticate, BearerError, Caller};
+pub use oidc::{OidcConfig, OidcConfigError, OidcVerifier, VerifiedToken, VerifyError};
+pub use roles::{authorize, role_list, Forbidden, Principal, Role, UnknownRole};
