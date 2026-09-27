@@ -27,8 +27,8 @@ name = "area"
 label = "Country or area"
 codelist = "countries"       # values from a shared reference list: countries or us_states
 
-# Or label the codes inline (not a closed list), instead of codelist:
-# codes = { national = "United States", state = "State" }
+# Or list the codes inline (not a closed list), instead of codelist:
+# codes = [{ code = "national", label = "United States" }, { code = "state", label = "State" }]
 
 # Optional attributes (observation or series flags).
 [[dataset.attributes]]
@@ -42,6 +42,7 @@ observation. A dataset therefore has the single measure `value`, which is also i
 measures publishes each one as its own series, with the measure as a dimension (for
 example Census BDS `variable`).
 
-A dataset with no dimensions, such as FRED, keeps the source's own series ids. A
-dataset with dimensions builds ids with `DatasetDef::external_id`, which formats the
-canonical id `{code}/{v1}.{v2}` and never needs to be written by hand.
+A source with its own series key (FRED, BLS, SDMX) keeps it as the external id and
+parses the dimension values from it. A source without one (Census BDS, WDI) builds ids
+with `DatasetDef::external_id`, which formats the canonical id `{code}/{v1}.{v2}` in
+declared dimension order and never needs to be written by hand.

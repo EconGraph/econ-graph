@@ -104,7 +104,6 @@ label = "Area"
 
 /// The dataset the test adapter attaches to `external_id`, chosen by its prefix:
 /// - `t5_ds/{indicator}.{area}` is in [`DATASET`] under its canonical id;
-/// - `t5_handmade_*` is in [`DATASET`] but not under its canonical id;
 /// - `t5_badkeys_*` has the wrong dimension keys;
 /// - `t5_undeclared_*` names a dataset the adapter does not declare;
 /// - anything else has none.
@@ -116,11 +115,6 @@ fn test_dataset(external_id: &str) -> Option<SeriesDataset> {
         Some(SeriesDataset::new(
             DATASET,
             [("indicator", indicator), ("area", area)],
-        ))
-    } else if external_id.starts_with("t5_handmade_") {
-        Some(SeriesDataset::new(
-            DATASET,
-            [("indicator", external_id), ("area", "USA")],
         ))
     } else if external_id.starts_with("t5_badkeys_") {
         Some(SeriesDataset::new(DATASET, [("indicator", external_id)]))
@@ -901,7 +895,7 @@ async fn undeclared_dataset_or_wrong_keys_fail_before_writing() {
         .await
         .unwrap();
     let mock = MockSource::start().await;
-    for id in ["t5_badkeys_x", "t5_undeclared_y", "t5_handmade_z"] {
+    for id in ["t5_badkeys_x", "t5_undeclared_y"] {
         mock.mount(
             &Route::get(format!("/series/{id}")),
             series_json("X", &[("2024-01-01", Some("1"))]),
@@ -912,7 +906,6 @@ async fn undeclared_dataset_or_wrong_keys_fail_before_writing() {
     for (id, needle) in [
         ("t5_badkeys_x", "wrong dimension keys"),
         ("t5_undeclared_y", "dataset t5_other is not declared"),
-        ("t5_handmade_z", "not the canonical external id"),
     ] {
         let job = enqueue(&db.pool, SRC.as_str(), id, JobKind::FetchSeries, 5).await;
         assert!(matches!(

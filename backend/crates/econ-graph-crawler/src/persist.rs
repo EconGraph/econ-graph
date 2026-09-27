@@ -177,25 +177,14 @@ async fn data_source_id_conn(conn: &mut AsyncPgConnection, source: SourceId) -> 
 /// and are only rewritten (bumping `updated_at` through its trigger) when one of them changed.
 /// Returns the number of definitions synced.
 pub async fn sync_datasets(pool: &DatabasePool, catalog: &DatasetCatalog) -> AppResult<usize> {
-    let mut rows = Vec::with_capacity(catalog.len());
-    for (source, def) in catalog.iter() {
-        rows.push((
-            source,
-            def.code.clone(),
-            clip(&def.name, 500),
-            clip_opt(def.description.as_deref(), usize::MAX),
-            serde_json::to_value(&def.dimensions)?,
-            serde_json::to_value(&def.measures)?,
-            serde_json::to_value(&def.attributes)?,
-            def.default_measure.clone(),
-        ));
-    }
+    use econ_graph_core::models::DatasetComponents;
+    let defs: Vec<_> = catalog.iter().collect();
     let mut conn = pool.get().await.map_err(conn_err)?;
     conn.transaction::<usize, AppError, _>(async move |conn| {
-        for (source, code, name, description, dimensions, measures, attributes, default_measure) in
-            &rows
-        {
+        for (source, def) in &defs {
             let source_id = data_source_id_conn(conn, *source).await?;
+            let row = def.to_new_dataset(source_id);
+            row.validate_components()?;
             diesel::sql_query(
                 "INSERT INTO datasets (source_id, code, name, description, dimensions, measures, \
                      attributes, default_measure) \
@@ -209,18 +198,18 @@ pub async fn sync_datasets(pool: &DatabasePool, catalog: &DatasetCatalog) -> App
                      IS DISTINCT FROM (EXCLUDED.name, EXCLUDED.description, EXCLUDED.dimensions, \
                          EXCLUDED.measures, EXCLUDED.attributes, EXCLUDED.default_measure)",
             )
-            .bind::<SqlUuid, _>(source_id)
-            .bind::<Text, _>(code)
-            .bind::<Text, _>(name)
-            .bind::<Nullable<Text>, _>(description.as_deref())
-            .bind::<Jsonb, _>(dimensions)
-            .bind::<Jsonb, _>(measures)
-            .bind::<Jsonb, _>(attributes)
-            .bind::<Text, _>(default_measure)
+            .bind::<SqlUuid, _>(row.source_id)
+            .bind::<Text, _>(&row.code)
+            .bind::<Text, _>(clip(&row.name, 500))
+            .bind::<Nullable<Text>, _>(clip_opt(row.description.as_deref(), usize::MAX))
+            .bind::<Jsonb, DatasetComponents>(row.dimensions)
+            .bind::<Jsonb, DatasetComponents>(row.measures)
+            .bind::<Jsonb, DatasetComponents>(row.attributes)
+            .bind::<Text, _>(&row.default_measure)
             .execute(conn)
             .await?;
         }
-        Ok(rows.len())
+        Ok(defs.len())
     })
     .await
 }

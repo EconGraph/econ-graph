@@ -191,8 +191,8 @@ mod contract {
     }
 }
 
-/// The contract's dataset checks: an undeclared dataset, wrong dimension keys or a hand-formatted
-/// external id fail it.
+/// The contract's dataset checks: an undeclared dataset, wrong dimension keys or two series with
+/// the same dimension values fail it.
 mod dataset_contract {
     use super::EchoAdapter;
     use crate::dataset::{parse_dataset_file, DatasetCatalog, SeriesDataset};
@@ -269,7 +269,7 @@ mod dataset_contract {
     }
 
     #[tokio::test]
-    async fn declared_dataset_with_canonical_ids_passes() {
+    async fn declared_dataset_with_right_keys_passes() {
         let mock = mock().await;
         let adapter = EchoAdapter::new(mock.base_url())
             .with_dataset(vec!["echo"], SeriesDataset::new("echo", [("id", "")]));
@@ -283,13 +283,8 @@ mod dataset_contract {
             })
             .collect();
         assert_eq!(ids, ["echo/GDP", "echo/CPI"]);
-        assert_series_datasets_in(
-            &catalog(),
-            &adapter,
-            ids.iter()
-                .map(String::as_str)
-                .zip(found.iter().map(|s| s.dataset.as_ref())),
-        );
+        // The source's own ids (GDP, CPI) are accepted as well as canonical ones.
+        series_of(&adapter, &found);
     }
 
     #[tokio::test]
@@ -303,14 +298,27 @@ mod dataset_contract {
     }
 
     #[tokio::test]
-    #[should_panic(expected = "not the canonical external id \"echo/GDP\"")]
-    async fn hand_formatted_external_id_fails() {
+    #[should_panic(expected = "have the same dataset echo")]
+    async fn two_series_with_the_same_dimensions_fail() {
         let mock = mock().await;
-        // The echo adapter keeps the upstream id (GDP) instead of the canonical echo/GDP.
+        // A fixed `key` dimension instead of `id`, so both series get the same values.
+        let mut c = DatasetCatalog::empty();
+        c.insert(
+            SourceId::Fred,
+            &["echo"],
+            parse_dataset_file(&ECHO.replace("\"id\"", "\"key\"")).unwrap(),
+        )
+        .unwrap();
         let adapter = EchoAdapter::new(mock.base_url())
-            .with_dataset(vec!["echo"], SeriesDataset::new("echo", [("id", "")]));
+            .with_dataset(vec!["echo"], SeriesDataset::new("echo", [("key", "same")]));
         let found = adapter.discover(&test_ctx()).await.unwrap();
-        series_of(&adapter, &found);
+        assert_series_datasets_in(
+            &c,
+            &adapter,
+            found
+                .iter()
+                .map(|s| (s.external_id.as_str(), s.dataset.as_ref())),
+        );
     }
 }
 
