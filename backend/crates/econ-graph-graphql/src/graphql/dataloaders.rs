@@ -364,6 +364,11 @@ pub struct DataLoaders {
     /// Non-caching, so series moving between datasets show on the next request.
     pub series_dataset_fields_loader:
         NonCachedLoader<Uuid, Option<SeriesDatasetFields>, SeriesDatasetFieldsBatcher>,
+    /// A non-caching data source loader for [`crate::graphql::datasets::DatasetType::source`].
+    /// `data_source_loader` above is cached for the schema's lifetime, so a dataset's source
+    /// resolver uses this one to keep faith with the "next request sees the edit" promise the
+    /// other two loaders make.
+    pub dataset_source_loader: NonCachedLoader<Uuid, Option<DataSource>, DataSourceBatcher>,
 }
 
 impl DataLoaders {
@@ -376,9 +381,16 @@ impl DataLoaders {
         let series_by_source_loader = Loader::new(SeriesBySourceBatcher { pool: pool.clone() });
         let series_count_loader = Loader::new(SeriesCountBatcher { pool: pool.clone() });
         let user_loader = Loader::new(UserBatcher { pool: pool.clone() });
-        let dataset_loader = NonCachedLoader::new(DatasetBatcher { pool: pool.clone() });
+        // A page of datasets or search results can ask for `dataset`, `dimensions` and
+        // `defaultMeasure` on many series at once; each is a separate load, so raise the batch
+        // size well past the dataloader crate's default of 200 pending *requests* (not unique
+        // keys) to keep them in one query rather than splitting a single page's worth.
+        let dataset_loader =
+            NonCachedLoader::new(DatasetBatcher { pool: pool.clone() }).with_max_batch_size(2000);
         let series_dataset_fields_loader =
-            NonCachedLoader::new(SeriesDatasetFieldsBatcher { pool: pool.clone() });
+            NonCachedLoader::new(SeriesDatasetFieldsBatcher { pool: pool.clone() })
+                .with_max_batch_size(2000);
+        let dataset_source_loader = NonCachedLoader::new(DataSourceBatcher { pool: pool.clone() });
 
         Self {
             data_source_loader,
@@ -389,6 +401,7 @@ impl DataLoaders {
             user_loader,
             dataset_loader,
             series_dataset_fields_loader,
+            dataset_source_loader,
         }
     }
 }

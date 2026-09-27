@@ -15,6 +15,9 @@ econ-graph-services = { path = "../econ-graph-services" }
 econ-graph-auth = { path = "../econ-graph-auth" }
 econ-graph-graphql = { path = "../econ-graph-graphql" }
 econ-graph-mcp = { path = "../econ-graph-mcp" }
+# Its reference data (us_states.csv) is checked at startup, next to econ-graph-core's; GraphQL
+# labels dataset dimension values from it.
+econ-graph-crawler = { path = "../econ-graph-crawler" }
 
 # Web framework
 warp.workspace = true
@@ -49,7 +52,6 @@ once_cell.workspace = true
 
 # Test dependencies
 [dev-dependencies]
-econ-graph-crawler = { path = "../econ-graph-crawler" }
 serial_test.workspace = true
 tokio-test.workspace = true
 testcontainers.workspace = true

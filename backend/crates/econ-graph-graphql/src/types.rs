@@ -135,14 +135,15 @@ impl EconomicSeriesType {
     }
 
     /// The series' dimension values within its dataset, in the dataset's dimension order,
-    /// with dimension and code labels. Empty for a series without dimensions.
+    /// with dimension and code labels. Keys the dataset does not declare follow in key order
+    /// with null labels. Empty for a series without dimensions.
     async fn dimensions(&self, ctx: &Context<'_>) -> Result<Vec<SeriesDimensionType>> {
         let (fields, dataset) = self.load_dataset(ctx).await?;
         Ok(label_dimensions(&fields.dimensions, dataset.as_ref()))
     }
 
     /// The measure a chart plots by default: the series' own override, else its dataset's.
-    /// Null for a series without a dataset.
+    /// Null when neither the series nor its dataset sets one.
     async fn default_measure(&self, ctx: &Context<'_>) -> Result<Option<String>> {
         let (fields, dataset) = self.load_dataset(ctx).await?;
         Ok(fields
@@ -273,7 +274,11 @@ impl EconomicSeriesType {
 
 impl From<EconomicSeries> for EconomicSeriesType {
     fn from(series: EconomicSeries) -> Self {
-        let dataset_fields = Some(SeriesDatasetFields::from(&series));
+        let dataset_fields = Some(SeriesDatasetFields {
+            dataset_id: series.dataset_id,
+            dimensions: series.dimensions,
+            default_measure: series.default_measure,
+        });
         Self {
             id: ID::from(series.id.to_string()),
             source_id: ID::from(series.source_id.to_string()),

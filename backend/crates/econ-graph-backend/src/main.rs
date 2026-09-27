@@ -419,6 +419,20 @@ async fn main() -> AppResult<()> {
         areas.all().len()
     );
 
+    // GraphQL labels dataset dimension values from this too ($CRAWLER_DATA_DIR): fail at
+    // startup, not the first time a Census-shaped series is queried.
+    let us_states = econ_graph_crawler::reference::us_states().map_err(|e| {
+        let error = AppError::ConfigError(e.to_string());
+        error.log_with_context("Application startup reference data");
+        eprintln!("❌ {}", e);
+        error
+    })?;
+    info!(
+        "🇺🇸 Reference data loaded from {}: {} states",
+        econ_graph_crawler::reference::data_dir().display(),
+        us_states.len()
+    );
+
     info!("📊 Configuration loaded successfully:");
     info!("  - Server host: {}", config.server.host);
     info!("  - Server port: {}", config.server.port);

@@ -95,6 +95,9 @@ COPY --from=backend-builder /app/backend/target/release/econ-graph-backend ./bac
 # Reference data the backend reads at runtime (econ-graph-core's data/).
 COPY backend/crates/econ-graph-core/data ./backend/reference
 ENV REFERENCE_DATA_DIR=/app/backend/reference
+# And the crawler's (e.g. us_states.csv), which GraphQL uses to label dataset codes.
+COPY backend/crates/econ-graph-crawler/data ./backend/crawler-data
+ENV CRAWLER_DATA_DIR=/app/backend/crawler-data
 
 # Copy Playwright configuration files (needed for E2E test configs)
 COPY frontend/ci/ ./ci/

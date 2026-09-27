@@ -126,7 +126,9 @@ impl Query {
         Ok(sources.into_iter().map(DataSourceType::from).collect())
     }
 
-    /// List datasets ordered by source and code, optionally only one source's.
+    /// List datasets, optionally only one source's, grouped by source id (in no particular
+    /// order across sources) and by code within a source. Unpaginated: sources publish a
+    /// handful of datasets each.
     async fn datasets(
         &self,
         ctx: &Context<'_>,
@@ -139,7 +141,9 @@ impl Query {
         let pool = ctx.data::<DatabasePool>()?;
         let mut query = datasets::table.into_boxed();
         if let Some(source_id) = source_id {
-            query = query.filter(datasets::source_id.eq(Uuid::parse_str(&source_id)?));
+            let source_id = Uuid::parse_str(&source_id)
+                .map_err(|_| async_graphql::Error::new("invalid data source id"))?;
+            query = query.filter(datasets::source_id.eq(source_id));
         }
 
         let mut conn = pool.get().await?;
@@ -162,7 +166,9 @@ impl Query {
         id: ID,
     ) -> Result<Option<crate::graphql::datasets::DatasetType>> {
         let pool = ctx.data::<DatabasePool>()?;
-        let dataset = models::Dataset::find_by_id(pool, Uuid::parse_str(&id)?).await?;
+        let id =
+            Uuid::parse_str(&id).map_err(|_| async_graphql::Error::new("invalid dataset id"))?;
+        let dataset = models::Dataset::find_by_id(pool, id).await?;
         Ok(dataset.map(crate::graphql::datasets::DatasetType))
     }
 

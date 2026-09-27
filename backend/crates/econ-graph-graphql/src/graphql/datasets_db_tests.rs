@@ -4,18 +4,22 @@
 // database. They run the embedded migrations once (idempotent), never drop the schema, and
 // give every test its own data source so rows from other tests can't interfere.
 
+use crate::graphql::dataloaders::DataLoaders;
 use crate::graphql::datasets::{DatasetBatcher, SeriesDatasetFields, SeriesDatasetFieldsBatcher};
-use crate::graphql::schema::create_schema;
-use async_graphql::Request;
+use crate::graphql::schema::{create_schema, GraphQLContext};
+use crate::security::{SecurityConfig, SecurityMiddleware};
+use crate::types::EconomicSeriesType;
+use async_graphql::{EmptyMutation, EmptySubscription, Request, Schema};
 use dataloader::non_cached::Loader;
 use dataloader::BatchFn;
 use econ_graph_core::database::{create_pool, run_migrations, DatabasePool};
+use econ_graph_core::models::COUNTRIES_CODELIST;
 use econ_graph_core::models::{
-    ComponentType, DataSource, Dataset, DatasetComponent, EconomicSeries, NewDataSource,
-    NewDataset, NewEconomicSeries, SeriesDimensions,
+    Code, ComponentType, DataSource, Dataset, DatasetComponent, EconomicSeries, NewDataSource,
+    NewDataset, NewEconomicSeries, SeriesDimensions, SeriesSearchResult,
 };
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -72,10 +76,10 @@ async fn new_source(pool: &DatabasePool) -> DataSource {
 
 async fn bds_dataset(pool: &DatabasePool, source_id: Uuid) -> Dataset {
     let mut state = DatasetComponent::new("state", "State", ComponentType::String);
-    state.codes = Some(BTreeMap::from([
-        ("06".to_string(), "California".to_string()),
-        ("36".to_string(), "New York".to_string()),
-    ]));
+    state.codes = Some(vec![
+        Code::new("06", "California"),
+        Code::new("36", "New York"),
+    ]);
     let mut new_dataset = NewDataset::long(
         source_id,
         "BDS",
@@ -262,6 +266,95 @@ async fn series_fields_resolve_dataset_labelled_dimensions_and_default_measure()
     );
 }
 
+/// A WDI-shaped dataset: indicators coded inline with units, areas from the countries list.
+async fn wdi_dataset(pool: &DatabasePool, source_id: Uuid) -> Dataset {
+    let mut indicator = DatasetComponent::new("indicator", "Indicator", ComponentType::String);
+    let mut gdp = Code::new("NY.GDP.PCAP.CD", "GDP per capita");
+    gdp.unit = Some("current US$".to_string());
+    gdp.description = Some("GDP divided by midyear population".to_string());
+    indicator.codes = Some(vec![gdp]);
+    let mut area = DatasetComponent::new("area", "Country or area", ComponentType::String);
+    area.codelist = Some(COUNTRIES_CODELIST.to_string());
+    Dataset::create(
+        pool,
+        &NewDataset::long(
+            source_id,
+            "WDI",
+            "World Development Indicators",
+            vec![indicator, area],
+        ),
+    )
+    .await
+    .expect("create dataset")
+}
+
+#[tokio::test]
+async fn code_lists_resolve_inline_and_shared_codes_alike() {
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let dataset = wdi_dataset(&pool, source.id).await;
+    let germany = new_series(
+        &pool,
+        source.id,
+        "WDI/NY.GDP.PCAP.CD.DEU",
+        Some((
+            dataset.id,
+            [("indicator", "NY.GDP.PCAP.CD"), ("area", "DEU")]
+                .into_iter()
+                .collect(),
+        )),
+    )
+    .await;
+
+    let data = execute(
+        &pool,
+        &format!(
+            r#"{{
+                dataset(id: "{dataset}") {{
+                    dimensions {{ name codelist codes {{ code label unit description }} }}
+                }}
+                series(id: "{germany}") {{
+                    dimensions {{ name label value valueLabel valueUnit }}
+                }}
+            }}"#,
+            dataset = dataset.id,
+            germany = germany.id,
+        ),
+    )
+    .await;
+
+    let dimensions = &data["dataset"]["dimensions"];
+    assert_eq!(
+        dimensions[0],
+        json!({
+            "name": "indicator",
+            "codelist": null,
+            "codes": [{
+                "code": "NY.GDP.PCAP.CD",
+                "label": "GDP per capita",
+                "unit": "current US$",
+                "description": "GDP divided by midyear population"
+            }]
+        })
+    );
+    assert_eq!(dimensions[1]["codelist"], "countries");
+    let areas = dimensions[1]["codes"].as_array().expect("area codes");
+    assert!(areas.len() > 249, "countries and aggregates listed");
+    assert!(areas.contains(
+        &json!({ "code": "DEU", "label": "Germany", "unit": null, "description": null })
+    ));
+
+    assert_eq!(
+        data["series"]["dimensions"],
+        json!([
+            { "name": "indicator", "label": "Indicator", "value": "NY.GDP.PCAP.CD",
+              "valueLabel": "GDP per capita", "valueUnit": "current US$" },
+            { "name": "area", "label": "Country or area", "value": "DEU",
+              "valueLabel": "Germany", "valueUnit": null }
+        ])
+    );
+}
+
 #[tokio::test]
 async fn series_default_measure_override_wins_over_dataset() {
     use diesel::prelude::*;
@@ -291,6 +384,123 @@ async fn series_default_measure_override_wins_over_dataset() {
     )
     .await;
     assert_eq!(data["series"]["defaultMeasure"], "rate");
+}
+
+#[tokio::test]
+async fn datasets_query_orders_by_code_and_lists_all_sources_without_filter() {
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let other = new_source(&pool).await;
+    let bds = bds_dataset(&pool, source.id).await;
+    let abs = Dataset::create(
+        &pool,
+        &NewDataset::long(source.id, "ABS", "A dataset", vec![]),
+    )
+    .await
+    .expect("create dataset");
+    let elsewhere = bds_dataset(&pool, other.id).await;
+
+    let data = execute(
+        &pool,
+        &format!(
+            r#"{{
+                mine: datasets(sourceId: "{source}") {{ code }}
+                all: datasets {{ id }}
+            }}"#,
+            source = source.id,
+        ),
+    )
+    .await;
+
+    assert_eq!(data["mine"], json!([{ "code": "ABS" }, { "code": "BDS" }]));
+    let all: Vec<&str> = data["all"]
+        .as_array()
+        .expect("all datasets")
+        .iter()
+        .filter_map(|d| d["id"].as_str())
+        .collect();
+    for dataset in [&bds, &abs, &elsewhere] {
+        assert!(all.contains(&dataset.id.to_string().as_str()));
+    }
+}
+
+/// Serves series built the way search results are: without their dataset columns. The test
+/// using it checks the fallback loader's output; batching is proven by the loader tests below.
+struct SearchLikeQuery {
+    results: Vec<SeriesSearchResult>,
+}
+
+#[async_graphql::Object]
+impl SearchLikeQuery {
+    async fn found(&self) -> Vec<EconomicSeriesType> {
+        self.results
+            .iter()
+            .cloned()
+            .map(EconomicSeriesType::from)
+            .collect()
+    }
+}
+
+#[tokio::test]
+async fn search_results_load_dataset_fields_by_series_id() {
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let dataset = bds_dataset(&pool, source.id).await;
+    let mut results = Vec::new();
+    for state in ["06", "36"] {
+        let series = new_series(
+            &pool,
+            source.id,
+            &format!("BDS/state.{state}.ESTAB"),
+            Some((dataset.id, state_dims(state))),
+        )
+        .await;
+        results.push(SeriesSearchResult {
+            id: series.id,
+            title: series.title,
+            description: None,
+            external_id: series.external_id,
+            source_id: series.source_id,
+            frequency: series.frequency,
+            units: String::new(),
+            start_date: chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+            end_date: None,
+            last_updated: chrono::Utc::now().naive_utc(),
+            is_active: true,
+            rank: 1.0,
+            similarity_score: 1.0,
+        });
+    }
+
+    let context = GraphQLContext {
+        pool: Arc::new(pool.clone()),
+        data_loaders: Arc::new(DataLoaders::new(pool.clone())),
+        security: Arc::new(SecurityMiddleware::new(SecurityConfig::default())),
+    };
+    let schema = Schema::build(
+        SearchLikeQuery { results },
+        EmptyMutation,
+        EmptySubscription,
+    )
+    .data(context)
+    .data(pool.clone())
+    .finish();
+    let response = schema
+        .execute("{ found { dataset { code } dimensions { name valueLabel } defaultMeasure } }")
+        .await;
+    assert!(response.errors.is_empty(), "{:?}", response.errors);
+    let data = response.data.into_json().expect("JSON");
+
+    let found = data["found"].as_array().expect("series");
+    assert_eq!(found.len(), 2);
+    for (series, label) in found.iter().zip(["California", "New York"]) {
+        assert_eq!(series["dataset"], json!({ "code": "BDS" }));
+        assert_eq!(
+            series["dimensions"][1],
+            json!({ "name": "state", "valueLabel": label })
+        );
+        assert_eq!(series["defaultMeasure"], "value");
+    }
 }
 
 /// Wraps a batch function and counts how many batches (one SQL query each) it runs.
