@@ -30,11 +30,11 @@ echo "Crawler-worker image built successfully"
 echo "Building frontend image..."
 cd ../frontend
 docker build \
-  --build-arg REACT_APP_API_URL="http://localhost" \
-  --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
-  --build-arg REACT_APP_WS_URL="ws://localhost/graphql" \
-  --build-arg REACT_APP_FACEBOOK_APP_ID="demo-facebook-app-id" \
-  --build-arg REACT_APP_GOOGLE_CLIENT_ID="80227441551-3dv05tkflnfrjpqv5fgii7b8br0brt7m.apps.googleusercontent.com" \
+  --build-arg VITE_API_URL="http://localhost" \
+  --build-arg VITE_GRAPHQL_URL="/graphql" \
+  --build-arg VITE_WS_URL="ws://localhost/graphql" \
+  --build-arg VITE_FACEBOOK_APP_ID="demo-facebook-app-id" \
+  --build-arg VITE_GOOGLE_CLIENT_ID="80227441551-3dv05tkflnfrjpqv5fgii7b8br0brt7m.apps.googleusercontent.com" \
   --build-arg NODE_ENV="production" \
   -t econ-graph-frontend:${VERSION} -t econ-graph-frontend:latest .
 echo "Frontend image built successfully"
@@ -59,18 +59,19 @@ docker build \
   -t econ-graph-admin-frontend:v1.0.0 -t econ-graph-admin-frontend:latest .
 echo "Admin frontend image built successfully"
 
-# Load images into kind cluster
-echo "Loading images into MicroK8s..."
-# Save images to temporary files and import
-docker save econ-graph-backend:${VERSION} | microk8s ctr images import - || true
-docker save econ-graph-crawler-worker:${VERSION} | microk8s ctr images import - || true
-docker save econ-graph-frontend:${VERSION} | microk8s ctr images import - || true
-docker save econ-graph-chart-api:v1.0.0 | microk8s ctr images import - || true
-docker save econ-graph-admin-frontend:v1.0.0 | microk8s ctr images import - || true
+# Load images into the kind cluster (nodes can't pull local-only images from
+# a registry, and the manifests set imagePullPolicy: Never for these)
+echo "Loading images into kind cluster 'econ-graph'..."
+KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-econ-graph}"
+kind load docker-image econ-graph-backend:${VERSION} --name "${KIND_CLUSTER_NAME}"
+kind load docker-image econ-graph-crawler-worker:${VERSION} --name "${KIND_CLUSTER_NAME}"
+kind load docker-image econ-graph-frontend:${VERSION} --name "${KIND_CLUSTER_NAME}"
+kind load docker-image econ-graph-chart-api:v1.0.0 --name "${KIND_CLUSTER_NAME}"
+kind load docker-image econ-graph-admin-frontend:v1.0.0 --name "${KIND_CLUSTER_NAME}"
 
 echo "All images built and loaded successfully!"
 echo ""
-echo "Images available in MicroK8s:"
+echo "Images available in kind cluster '${KIND_CLUSTER_NAME}':"
 echo "  - econ-graph-backend:${VERSION}"
 echo "  - econ-graph-crawler-worker:${VERSION}"
 echo "  - econ-graph-frontend:${VERSION}"

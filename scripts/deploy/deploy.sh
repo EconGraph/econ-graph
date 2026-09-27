@@ -96,7 +96,11 @@ kubectl apply -f k8s/manifests/frontend-service.yaml
 kubectl apply -f k8s/manifests/admin-frontend-deployment.yaml
 kubectl apply -f k8s/manifests/admin-frontend-service.yaml
 kubectl apply -f k8s/manifests/ingress.yaml
-kubectl apply -f k8s/manifests/admin-ingress.yaml
+if [ -f "k8s/manifests/admin-ingress.yaml" ]; then
+    kubectl apply -f k8s/manifests/admin-ingress.yaml
+else
+    echo "⚠️  k8s/manifests/admin-ingress.yaml not found, skipping (tracked separately)"
+fi
 
 # Deploy chart API service (internal only)
 echo "📊 Deploying chart API service..."
@@ -142,9 +146,56 @@ kubectl wait --for=condition=available --timeout=300s deployment/chart-api-servi
 # Stop monitoring
 kill $MONITOR_PID 2>/dev/null || true
 
+# Install cert-manager first: k8s/monitoring/letsencrypt-cloudflare-dns01.yaml
+# defines ClusterIssuer/Certificate resources whose CRDs cert-manager provides.
+echo "🔐 Installing cert-manager (provides the CRDs used by k8s/monitoring/)..."
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+echo "⏳ Waiting for cert-manager to be ready..."
+kubectl wait --for=condition=available --timeout=180s deployment/cert-manager -n cert-manager
+kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-webhook -n cert-manager
+kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-cainjector -n cert-manager
+
 # Deploy monitoring stack
 echo "📊 Deploying monitoring stack (Grafana + Loki + Prometheus)..."
-kubectl apply -f k8s/monitoring/
+# prometheus-rules-crawler.yaml is a PrometheusRule (monitoring.coreos.com/v1), which
+# only prometheus-operator provides. This deployment runs plain Prometheus (see
+# prometheus-deployment.yaml / prometheus-config.yaml, whose rule_files is empty), so
+# that CRD isn't installed and the rule wouldn't be consumed even if it were applied.
+# Skip it here; it needs prometheus-operator (or converting it to a rule_files entry)
+# before it can be applied. #210 (DATA-10) converts this file into a plain ConfigMap
+# consumed via rule_files instead of a PrometheusRule CRD — once #210 merges, drop
+# this skip and apply the file normally.
+#
+# letsencrypt-cloudflare-dns01.yaml is applied separately below, with a retry: the
+# cert-manager webhook can report "available" slightly before its CA bundle is
+# injected, so its ClusterIssuer/Certificate can transiently fail to apply even
+# though the deployments are ready.
+for f in k8s/monitoring/*.yaml; do
+    case "$(basename "$f")" in
+        prometheus-rules-crawler.yaml)
+            echo "⚠️  Skipping $f (needs prometheus-operator's PrometheusRule CRD, not installed)"
+            continue
+            ;;
+        letsencrypt-cloudflare-dns01.yaml)
+            continue
+            ;;
+    esac
+    kubectl apply -f "$f"
+done
+
+cert_manager_resources_applied=false
+for attempt in 1 2 3 4 5; do
+    if kubectl apply -f k8s/monitoring/letsencrypt-cloudflare-dns01.yaml; then
+        cert_manager_resources_applied=true
+        break
+    fi
+    echo "⏳ cert-manager webhook not ready yet, retrying ($attempt/5)..."
+    sleep 10
+done
+if [ "$cert_manager_resources_applied" != true ]; then
+    echo "❌ Failed to apply k8s/monitoring/letsencrypt-cloudflare-dns01.yaml after 5 attempts"
+    exit 1
+fi
 
 # Configure Grafana dashboards
 echo "📋 Configuring Grafana dashboards..."
