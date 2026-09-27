@@ -77,6 +77,9 @@ COPY --from=builder --chown=econuser:econuser /out/crawler-worker /app/crawler-w
 # Reference data read at runtime (not compiled in), e.g. the U.S. states table.
 COPY --chown=econuser:econuser crates/econ-graph-crawler/data /app/data
 ENV CRAWLER_DATA_DIR=/app/data
+# Shared reference data (econ-graph-core), e.g. the country table.
+COPY --chown=econuser:econuser crates/econ-graph-core/data /app/reference
+ENV REFERENCE_DATA_DIR=/app/reference
 
 USER econuser
 
@@ -99,6 +102,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder --chown=econuser:econuser /out/econ-graph-backend /app/econ-graph-backend
+# Shared reference data (econ-graph-core) read at runtime (not compiled in), e.g. the country table.
+COPY --chown=econuser:econuser crates/econ-graph-core/data /app/reference
+ENV REFERENCE_DATA_DIR=/app/reference
 
 USER econuser
 

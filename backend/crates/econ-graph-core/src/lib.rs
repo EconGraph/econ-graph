@@ -13,6 +13,7 @@ pub mod database;
 pub mod enums;
 pub mod error;
 pub mod models;
+pub mod reference;
 pub mod schema;
 
 pub mod test_utils;
