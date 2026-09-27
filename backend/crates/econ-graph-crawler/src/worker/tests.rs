@@ -596,6 +596,180 @@ async fn revision_filter_breaks_same_day_ties_and_pages_after_filtering() {
     );
 }
 
+/// Each observation date's value as known on `as_of` (newest revision when `None`), via #184's
+/// `revision_filter`, as `(date, value)` strings in date order.
+async fn values_as_of(
+    pool: &DatabasePool,
+    series_id: Uuid,
+    as_of: Option<NaiveDate>,
+) -> Vec<(String, String)> {
+    let mut conn = pool.get().await.unwrap();
+    data_points::table
+        .filter(data_points::series_id.eq(series_id))
+        .filter(econ_graph_core::models::revision_filter(as_of, false))
+        .order(data_points::date)
+        .select((data_points::date, data_points::value))
+        .load::<(NaiveDate, Option<BigDecimal>)>(&mut conn)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(date, v)| {
+            let v = v.map_or_else(|| ".".to_string(), |v| v.normalized().to_string());
+            (date.to_string(), v)
+        })
+        .collect()
+}
+
+/// FRED vintages end to end through the worker: the first fetch stores every vintage, the second
+/// asks FRED only for vintages from the newest stored one on, a revised observation ends up as two
+/// rows, the latest revision wins and `asOf` before a revision returns the old value.
+#[tokio::test]
+async fn fred_vintages_first_and_incremental_fetch() {
+    let Some(db) = db().await else { return };
+    const ID: &str = "t5_fred_gdp";
+    let fixture = |name: &str| {
+        std::fs::read_to_string(format!(
+            "{}/tests/fixtures/fred/{name}",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap()
+    };
+    let mock = MockSource::start().await;
+    mock.mount(
+        &Route::get("/series").query("series_id", ID),
+        Reply::json_str(fixture("series_gdp.json")),
+    )
+    .await;
+    mock.mount_expect(
+        &Route::get("/series/observations")
+            .query("series_id", ID)
+            .query(
+                "realtime_start",
+                crate::sources::fred::EARLIEST_REALTIME_START,
+            ),
+        Reply::json_str(fixture("observations_gdp.json")),
+        1,
+    )
+    .await;
+    mock.mount_expect(
+        &Route::get("/series/observations")
+            .query("series_id", ID)
+            .query("realtime_start", "2026-04-28"),
+        Reply::json_str(fixture("observations_gdp_since_2026-04-28.json")),
+        1,
+    )
+    .await;
+    let mut registry = AdapterRegistry::new();
+    registry.register(Arc::new(crate::sources::fred::FredAdapter::new(
+        mock.base_url(),
+    )));
+    let w = Worker::new(ctx(&db.pool), registry, config("t5-worker"));
+    let fetch = || async {
+        enqueue(
+            &db.pool,
+            SourceId::Fred.as_str(),
+            ID,
+            JobKind::FetchSeries,
+            5,
+        )
+        .await;
+        match w.run_once().await.expect("claimed") {
+            JobOutcome::Completed(stats) => stats,
+            other => panic!("expected Completed, got {other:?}"),
+        }
+    };
+    let row = |date: &str, value: &str| (date.to_string(), value.to_string());
+
+    // A point stored by the old current-values FRED adapter (revision_date = date) must not
+    // count as a known vintage: the first vintage fetch still asks for every vintage.
+    let old = persist::persist_series(
+        &db.pool,
+        SourceId::Fred,
+        ID,
+        &FetchedSeries {
+            metadata: None,
+            points: vec![revision("2025-04-01", "30485.729", "2025-04-01", true)],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        persist::latest_revision_date(&db.pool, SourceId::Fred, ID)
+            .await
+            .unwrap(),
+        None
+    );
+
+    // First vintage fetch: every vintage.
+    let stats = fetch().await;
+    assert_eq!(stats.new_points, 6);
+    let series_id = stats.series_id.unwrap();
+    assert_eq!(series_id, old.series_id);
+    assert_eq!(
+        values_as_of(&db.pool, series_id, None).await,
+        vec![
+            row("2025-04-01", "30485.729"),
+            row("2025-07-01", "31095.089"),
+            row("2026-01-01", "31722.514"),
+        ]
+    );
+    // Before its second revision, 2025-04-01 had its first revised value; before its first
+    // publication, 2025-07-01 isn't there at all.
+    assert_eq!(
+        values_as_of(&db.pool, series_id, Some(d("2025-09-01"))).await,
+        vec![row("2025-04-01", "30353.902")]
+    );
+
+    // Incremental fetch: vintages from 2026-04-29 on arrive. The re-read 2026-04-29 row carries a
+    // same-day correction and is updated in place; the three newer vintages are new rows, one of
+    // them a revision to an old quarter.
+    let stats = fetch().await;
+    assert_eq!(stats.points_written, 4);
+    assert_eq!(stats.new_points, 3);
+    // Nine vintage rows plus the old current-values row, which stays.
+    assert_eq!(point_count(&db.pool, series_id).await, 10);
+    assert_eq!(
+        values_as_of(&db.pool, series_id, None).await,
+        vec![
+            row("2025-04-01", "30502.3"),
+            row("2025-07-01", "31095.089"),
+            row("2026-01-01", "31688.25"),
+            row("2026-04-01", "32101.6"),
+        ]
+    );
+    // asOf before the revisions returns the old values, and the new quarter isn't out yet.
+    assert_eq!(
+        values_as_of(&db.pool, series_id, Some(d("2026-05-01"))).await,
+        vec![
+            row("2025-04-01", "30485.729"),
+            row("2025-07-01", "31095.089"),
+            row("2026-01-01", "31725"),
+        ]
+    );
+
+    // The revised observation is two rows: the original release and the revision.
+    let mut conn = db.pool.get().await.unwrap();
+    let jan: Vec<(NaiveDate, bool)> = data_points::table
+        .filter(data_points::series_id.eq(series_id))
+        .filter(data_points::date.eq(d("2026-01-01")))
+        .order(data_points::revision_date)
+        .select((data_points::revision_date, data_points::is_original_release))
+        .load(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(jan, vec![(d("2026-04-29"), true), (d("2026-05-28"), false)]);
+    mock.server().verify().await;
+    // Neither fetch limits observation dates: the first needs every date's history (the old row
+    // doesn't make it incremental), the second must see revisions to old dates.
+    for r in mock.received_requests().await {
+        assert!(
+            !r.url.query_pairs().any(|(k, _)| k == "observation_start"),
+            "{}",
+            r.url
+        );
+    }
+}
+
 #[tokio::test]
 async fn server_error_retries_with_counted_attempt_and_backoff() {
     let Some(db) = db().await else { return };
@@ -1258,6 +1432,9 @@ async fn release_stuck_runs_on_start() {
 #[derive(Default)]
 struct BatchAdapter {
     batching: bool,
+    /// When true, `tracks_vintages()` returns true, which must keep this adapter out of
+    /// batching even when it has a `batch_key`.
+    vintage_tracking: bool,
     /// `fetch_batch` calls: (ids, since).
     batch_calls: Mutex<Vec<(Vec<String>, Option<NaiveDate>)>>,
     /// `fetch_series` calls: (id, since).
@@ -1322,6 +1499,10 @@ impl SourceAdapter for BatchAdapter {
             .unwrap()
             .push((external_id.to_string(), since));
         self.series(external_id)
+    }
+
+    fn tracks_vintages(&self) -> bool {
+        self.vintage_tracking
     }
 
     fn batch_key(&self, external_id: &str) -> Option<String> {
@@ -1631,6 +1812,27 @@ async fn per_series_rate_limit_in_a_batch_counts_for_the_breaker() {
         matches!(&outcomes[1], JobOutcome::Retrying { error, .. } if error.kind() == "rate_limited")
     );
     assert_eq!(w.paused_sources(), vec![SRC]);
+}
+
+#[tokio::test]
+async fn a_vintage_tracking_adapter_is_never_batched() {
+    let Some(db) = db().await else { return };
+    let adapter = Arc::new(BatchAdapter {
+        batching: true,
+        vintage_tracking: true,
+        ..Default::default()
+    });
+    let w = batch_worker(&db.pool, &adapter, 10);
+    enqueue_fetch(&db.pool, &["t5_kv_1", "t5_kv_2"]).await;
+    // Same batch key, but vintage tracking keeps each job on the single-item path.
+    for _ in 0..2 {
+        let outcomes = w.run_batch_once().await.expect("claimed");
+        assert_eq!(outcomes.len(), 1);
+        assert!(matches!(outcomes[0], JobOutcome::Completed(_)));
+    }
+    assert!(w.run_batch_once().await.is_none());
+    assert!(adapter.batch_calls().is_empty());
+    assert_eq!(adapter.series_calls().len(), 2);
 }
 
 #[tokio::test]

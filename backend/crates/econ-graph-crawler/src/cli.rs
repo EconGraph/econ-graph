@@ -252,15 +252,24 @@ async fn fetch_one(
         pool: pool.clone(),
         keys: ApiKeys::from_env(),
     };
-    let since = if full {
+    let known_vintage = if full || !adapter.tracks_vintages() {
+        None
+    } else {
+        persist::latest_revision_date(&pool, source, external_id).await?
+    };
+    // A vintage-tracking adapter gets no `since`: with a known vintage it ignores it, and
+    // without one it must fetch every date's history.
+    let since = if full || adapter.tracks_vintages() {
         None
     } else {
         persist::latest_point_date(&pool, source, external_id)
             .await?
             .and_then(|latest| crate::worker::incremental_since(latest, ctx.http.policy(source)))
     };
-    tracing::info!(%source, series_id = external_id, ?since, "fetching");
-    let fetched = adapter.fetch_series(&ctx, external_id, since).await?;
+    tracing::info!(%source, series_id = external_id, ?since, ?known_vintage, "fetching");
+    let fetched = adapter
+        .fetch_series_incremental(&ctx, external_id, since, known_vintage)
+        .await?;
     let write = persist::persist_series(&pool, source, external_id, &fetched).await?;
     Ok(format!(
         "{source} {external_id}: {} point(s) written ({} new), latest {}, series {}{}\n",

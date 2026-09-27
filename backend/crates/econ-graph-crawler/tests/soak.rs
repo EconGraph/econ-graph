@@ -181,6 +181,19 @@ impl SourceAdapter for Tracking {
         external_id: &str,
         since: Option<NaiveDate>,
     ) -> Result<FetchedSeries, CrawlError> {
+        self.fetch_series_incremental(ctx, external_id, since, None)
+            .await
+    }
+    fn tracks_vintages(&self) -> bool {
+        self.inner.tracks_vintages()
+    }
+    async fn fetch_series_incremental(
+        &self,
+        ctx: &CrawlCtx,
+        external_id: &str,
+        since: Option<NaiveDate>,
+        known_vintage: Option<NaiveDate>,
+    ) -> Result<FetchedSeries, CrawlError> {
         let key = (self.inner.id(), external_id.to_string());
         if !self.t.inflight.lock().unwrap().insert(key.clone()) {
             AtomicUsize::fetch_add(&self.t.violations, 1, Ordering::SeqCst);
@@ -193,7 +206,10 @@ impl SourceAdapter for Tracking {
             .entry(key.clone())
             .or_default()
             .push(Instant::now());
-        let r = self.inner.fetch_series(ctx, external_id, since).await;
+        let r = self
+            .inner
+            .fetch_series_incremental(ctx, external_id, since, known_vintage)
+            .await;
         self.t.inflight.lock().unwrap().remove(&key);
         r
     }
