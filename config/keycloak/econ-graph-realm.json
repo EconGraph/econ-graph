@@ -26,11 +26,16 @@
       "frontchannelLogout": true,
       "rootUrl": "${KC_WEB_BASE_URL}",
       "baseUrl": "/",
-      "redirectUris": ["${KC_WEB_BASE_URL}/*"],
-      "webOrigins": ["${KC_WEB_BASE_URL}"],
+      "redirectUris": [
+        "${KC_WEB_BASE_URL}/auth/callback",
+        "${KC_WEB_BASE_URL}/silent-callback.html",
+        "${KC_WEB_E2E_BASE_URL}/auth/callback",
+        "${KC_WEB_E2E_BASE_URL}/silent-callback.html"
+      ],
+      "webOrigins": ["${KC_WEB_BASE_URL}", "${KC_WEB_E2E_BASE_URL}"],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "${KC_WEB_BASE_URL}/*"
+        "post.logout.redirect.uris": "${KC_WEB_BASE_URL}/##${KC_WEB_E2E_BASE_URL}/"
       },
       "defaultClientScopes": ["web-origins", "acr", "basic", "profile", "email", "roles"],
       "optionalClientScopes": ["offline_access"],

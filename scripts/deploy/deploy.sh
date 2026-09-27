@@ -94,11 +94,15 @@ if kubectl -n econ-graph get secret econ-graph-keycloak >/dev/null 2>&1; then
   kubectl -n econ-graph create configmap keycloak-realm \
     --from-file=econ-graph-realm.json=config/keycloak/econ-graph-realm.json \
     --dry-run=client -o yaml | kubectl apply -f -
-  kubectl apply -f k8s/manifests/keycloak/
+  kubectl apply -f k8s/manifests/keycloak/postgres.yaml
+  echo "⏳ Waiting for Keycloak's PostgreSQL to be ready..."
+  kubectl wait --for=condition=ready pod -l app=keycloak-postgres -n econ-graph --timeout=300s
+  kubectl apply -f k8s/manifests/keycloak/deployment.yaml
+  kubectl apply -f k8s/manifests/keycloak/ingress.yaml
   KEYCLOAK_DEPLOYED=true
 else
   echo "⚠️  Secret econ-graph-keycloak not found, skipping Keycloak."
-  echo "   Create it with scripts/deploy/create-secrets.sh (see k8s/README.md)."
+  echo "   Create it with scripts/deploy/create-secrets.sh (see the Keycloak section of k8s/README.md)."
 fi
 
 # Deploy application

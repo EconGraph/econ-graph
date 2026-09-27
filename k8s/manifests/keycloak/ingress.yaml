@@ -1,7 +1,6 @@
-# Routes Keycloak's public paths under /idp on the kind ingress host. Only the paths
-# Keycloak recommends exposing are routed: /realms (login, tokens, discovery) and
-# /resources (login page assets). The admin console, /admin, stays internal (see
-# deployment.yaml). Kept out of ingress.yaml so its CORS annotations do not apply:
+# Routes Keycloak's public paths under /idp on the kind ingress host: the econ-graph
+# realm (login, tokens, discovery) and /resources (login page assets). The master
+# realm and the admin console, /admin, stay internal (see deployment.yaml). Kept out of ingress.yaml so its CORS annotations do not apply:
 # Keycloak sets CORS itself from each client's web origins.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -18,7 +17,7 @@ spec:
   - host: localhost
     http:
       paths:
-      - path: /idp/realms
+      - path: /idp/realms/econ-graph
         pathType: Prefix
         backend:
           service:

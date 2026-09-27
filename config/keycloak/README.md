@@ -8,8 +8,14 @@ Keycloak is EconGraph's identity provider. The realm is configuration as code:
 | `dev/econ-graph-users-0.json` | docker-compose only | Seeded test users. Never deployed |
 
 Keycloak imports both files on first start (`--import-realm`). An existing realm is
-not overwritten, so after editing a file, recreate the local volume:
-`docker compose down -v keycloak keycloak-db && docker compose up -d keycloak`.
+not overwritten, so after editing a file, reset the realm by dropping Keycloak's
+database volume and starting again:
+
+```bash
+docker compose rm -sf keycloak keycloak-db
+docker volume rm "$(basename "$PWD")_keycloak_db_data"
+docker compose up -d keycloak
+```
 
 ## Local stack
 
@@ -33,12 +39,16 @@ passwords stable: the ids are the tokens' `sub`, which becomes `users.id`.
 | `bob` | `0199a0e0-0000-7000-8000-000000000b0b` | `bob-dev-password` |
 | `staff-admin` | `0199a0e0-0000-7000-8000-0000000005af` | `staff-admin-dev-password` |
 
-Roles arrive with the role catalog (AUTH-4); until then the users differ only by name.
+Imported users get no default roles automatically, so each one lists
+`default-roles-econ-graph`. Application roles arrive with the role catalog (AUTH-4);
+until then the users differ only by name.
 
 ## Clients
 
 - `econ-graph-web`: public client for the browser app. Authorization code with PKCE
-  (S256 required). Access tokens carry `aud: econ-graph-api` through an audience mapper.
+  (S256 required). Exact redirect URIs `<origin>/auth/callback` and
+  `<origin>/silent-callback.html`, post-logout redirect `<origin>/`, web origin
+  `<origin>`, for each origin below. Access tokens carry `aud: econ-graph-api` through an audience mapper.
   The password grant is enabled only where `KC_WEB_DIRECT_GRANTS=true`, which only
   docker-compose sets, so scripts and tests can get tokens without a browser.
 - `econ-graph-api`: bearer-only client representing the backend. It is the token
@@ -50,7 +60,8 @@ The realm file reads these environment variables when it is imported:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `KC_WEB_BASE_URL` | none (required) | Web app origin; redirect URIs are `<origin>/*` |
+| `KC_WEB_BASE_URL` | none (required) | Web app origin |
+| `KC_WEB_E2E_BASE_URL` | none (required) | Second web origin: the release e2e frontend (`http://localhost:18081`) in compose, the same as `KC_WEB_BASE_URL` in k8s |
 | `KC_WEB_DIRECT_GRANTS` | `false` | Password grant on `econ-graph-web` (dev only) |
 | `KC_REALM_SSL_REQUIRED` | `external` | `none` in local compose |
 | `KC_GOOGLE_ENABLED` | `false` | Set to `true` by the container command when a Google client id is configured |

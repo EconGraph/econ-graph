@@ -81,19 +81,22 @@ terraform apply
 `scripts/deploy/deploy.sh` deploys Keycloak from `k8s/manifests/keycloak/` (its own
 Postgres, then Keycloak with the `econ-graph` realm from `config/keycloak/`). Its
 credentials are never committed: they live in the Secret `econ-graph-keycloak`,
-written by `scripts/deploy/create-secrets.sh`, which generates the admin and
-database passwords and keeps them on later runs. `deploy.sh` skips Keycloak while
-that Secret does not exist.
+written by `scripts/deploy/create-secrets.sh` (from the secrets PR, which also makes
+`deploy.sh` run it). That script generates the admin and database passwords on its
+first run and keeps them afterwards. `deploy.sh` skips Keycloak while the Secret
+does not exist.
 
 ```bash
 # Optional, for Google sign-in
 # (redirect URI http://localhost/idp/realms/econ-graph/broker/google/endpoint):
 export KEYCLOAK_GOOGLE_CLIENT_ID=... KEYCLOAK_GOOGLE_CLIENT_SECRET=...
+./scripts/deploy/create-secrets.sh
 ./scripts/deploy/deploy.sh
 ```
 
-- Issuer: `http://localhost/idp/realms/econ-graph`. Only `/idp/realms` and
-  `/idp/resources` are routed by the ingress.
+- Issuer: `http://localhost/idp/realms/econ-graph`. Only `/idp/realms/econ-graph`
+  and `/idp/resources` are routed by the ingress; the master realm is not reachable
+  from outside the cluster.
 - Admin console: `kubectl -n econ-graph port-forward svc/keycloak-service 18080:8080`,
   then <http://localhost:18080/idp/admin>. The password is in the Secret:
   `kubectl -n econ-graph get secret econ-graph-keycloak -o jsonpath='{.data.admin-password}' | base64 -d`

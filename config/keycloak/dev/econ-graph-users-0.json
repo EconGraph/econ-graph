@@ -15,6 +15,9 @@
           "value": "alice-dev-password",
           "temporary": false
         }
+      ],
+      "realmRoles": [
+        "default-roles-econ-graph"
       ]
     },
     {
@@ -31,6 +34,9 @@
           "value": "bob-dev-password",
           "temporary": false
         }
+      ],
+      "realmRoles": [
+        "default-roles-econ-graph"
       ]
     },
     {
@@ -47,6 +53,9 @@
           "value": "staff-admin-dev-password",
           "temporary": false
         }
+      ],
+      "realmRoles": [
+        "default-roles-econ-graph"
       ]
     }
   ]

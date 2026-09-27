@@ -73,11 +73,11 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.7.4
-    # Enable the Google identity provider only when its client id is configured.
+    # Enable the Google identity provider only when its client id and secret are configured.
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        if [ "$${KC_GOOGLE_CLIENT_ID:-unset}" != unset ]; then export KC_GOOGLE_ENABLED=true; fi
+        if [ "$${KC_GOOGLE_CLIENT_ID:-unset}" != unset ] && [ "$${KC_GOOGLE_CLIENT_SECRET:-unset}" != unset ]; then export KC_GOOGLE_ENABLED=true; fi
         exec /opt/keycloak/bin/kc.sh start-dev --import-realm
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
@@ -91,6 +91,8 @@ services:
       # Placeholders in config/keycloak/econ-graph-realm.json
       KC_REALM_SSL_REQUIRED: none
       KC_WEB_BASE_URL: http://localhost:3000
+      # Frontend origin of the release e2e stack
+      KC_WEB_E2E_BASE_URL: http://localhost:18081
       KC_WEB_DIRECT_GRANTS: "true"
       KC_GOOGLE_CLIENT_ID: ${KEYCLOAK_GOOGLE_CLIENT_ID:-unset}
       KC_GOOGLE_CLIENT_SECRET: ${KEYCLOAK_GOOGLE_CLIENT_SECRET:-unset}
