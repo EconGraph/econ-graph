@@ -27,8 +27,8 @@ variable "database_password" {
   sensitive   = true
 
   validation {
-    condition     = length(trimspace(var.database_password)) >= 16 && !contains(["password", "changeme"], lower(trimspace(var.database_password)))
-    error_message = "database_password must be a real secret of at least 16 characters, not a placeholder such as \"password\" or \"changeme\"."
+    condition     = length(trimspace(var.database_password)) >= 16 && !contains(["your-secure-database-password-here", "secure-password-123"], lower(trimspace(var.database_password)))
+    error_message = "database_password must be a real secret of at least 16 characters (for example from `openssl rand -base64 24`), not the placeholder from terraform.tfvars.example."
   }
 }
 

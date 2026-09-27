@@ -61,9 +61,14 @@ variable "domain" {
 }
 
 variable "database_password" {
-  description = "PostgreSQL database password"
+  description = "PostgreSQL database password (required; set it to \"\" to generate a random one)"
   type        = string
   sensitive   = true
+
+  validation {
+    condition     = var.database_password == "" || (length(trimspace(var.database_password)) >= 16 && !contains(["your-secure-database-password-here", "secure-password-123"], lower(trimspace(var.database_password))))
+    error_message = "database_password must be empty (a random one is generated) or a real secret of at least 16 characters, not the placeholder from terraform.tfvars.example."
+  }
 }
 
 variable "fred_api_key" {

@@ -42,7 +42,7 @@ The Terraform configuration deploys a complete production-ready environment incl
    ```hcl
    # terraform.tfvars
    domain            = "econgraph.yourdomain.com"
-   database_password = "your-secure-password"
+   # database_password: set it with export TF_VAR_database_password="$(openssl rand -base64 24)"
    fred_api_key     = "your-fred-api-key"
    bls_api_key      = "your-bls-api-key"
    environment      = "prod"
@@ -76,7 +76,7 @@ The Terraform configuration deploys a complete production-ready environment incl
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `domain` | Domain name for the application | `"econgraph.example.com"` |
-| `database_password` | PostgreSQL password (16+ characters, set via `TF_VAR_database_password` or an untracked `terraform.tfvars`, never a committed default) | none |
+| `database_password` | PostgreSQL password, at least 16 characters (or `""` to generate one) | generate with `openssl rand -base64 24` |
 
 ### Optional Variables
 
@@ -94,7 +94,9 @@ Credentials have no committed defaults. Pass them through an untracked
 `export TF_VAR_database_password=...`), never through files in git.
 
 `postgres-only.tf` (PostgreSQL alone) requires `database_password` of at least
-16 characters and rejects placeholders such as `password` and `changeme`.
+16 characters. The full deploy (`main.tf`) applies the same rule, except that
+setting it to `""` generates a random password. Both reject the
+placeholder from `terraform.tfvars.example`.
 
 ## Architecture
 

@@ -4,8 +4,12 @@
 # REQUIRED: Domain configuration
 domain = "econgraph.example.com"
 
-# REQUIRED: Database password (use a strong password in production)
-database_password = "your-secure-database-password-here"
+# REQUIRED: Database password, at least 16 characters (or "" in the full
+# deploy to generate a random one). Prefer the environment:
+#   export TF_VAR_database_password="$(openssl rand -base64 24)"
+# A value set in terraform.tfvars overrides TF_VAR_*, and the placeholder is
+# rejected.
+# database_password = "your-secure-database-password-here"
 
 # Environment configuration
 environment = "prod"  # Options: dev, staging, prod
