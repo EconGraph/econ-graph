@@ -5,9 +5,9 @@ This directory contains documentation for the Continuous Integration and Continu
 ## Documentation Files
 
 ### CI Pipeline Documentation
-- **[CI Failure Analysis and Fixes](CI_FAILURE_ANALYSIS_AND_FIXES.md)** - Analysis of CI failures and their resolutions
+- **[CI Failure Analysis and Fixes](../../docs/archive/ci/docs/CI_FAILURE_ANALYSIS_AND_FIXES.md)** - Archived analysis of CI failures and their resolutions
 - **[CI Failure Troubleshooting](CI_FAILURE_TROUBLESHOOTING.md)** - Guide for troubleshooting common CI issues
-- **[E2E Test Failure Analysis](E2E_TEST_FAILURE_ANALYSIS.md)** - Analysis of end-to-end test failures and solutions
+- **[E2E Test Failure Analysis](../../docs/archive/ci/docs/E2E_TEST_FAILURE_ANALYSIS.md)** - Archived analysis of end-to-end test failures and solutions
 - **[Workflow Status Report](workflow-status-report.md)** - Current status of GitHub Actions workflows
 
 ### CI Infrastructure
@@ -109,5 +109,5 @@ The CI pipeline is configured in `.github/workflows/ci-core.yml` and includes:
 
 For common CI issues, see:
 - [CI Failure Troubleshooting](CI_FAILURE_TROUBLESHOOTING.md)
-- [E2E Test Failure Analysis](E2E_TEST_FAILURE_ANALYSIS.md)
-- [CI Failure Analysis and Fixes](CI_FAILURE_ANALYSIS_AND_FIXES.md)
+- [E2E Test Failure Analysis](../../docs/archive/ci/docs/E2E_TEST_FAILURE_ANALYSIS.md)
+- [CI Failure Analysis and Fixes](../../docs/archive/ci/docs/CI_FAILURE_ANALYSIS_AND_FIXES.md)
