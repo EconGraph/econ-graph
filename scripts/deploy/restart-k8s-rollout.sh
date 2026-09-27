@@ -208,6 +208,10 @@ fi
 
 # Apply updated manifests
 echo "📋 Applying updated Kubernetes manifests..."
+# ingress.yaml first: on clusters deployed before graphql-ingress.yaml existed it
+# still routes /graphql, and the admission webhook rejects a second Ingress for
+# the same host and path (kubectl applies the directory alphabetically).
+kubectl apply -f k8s/manifests/ingress.yaml
 kubectl apply -f k8s/manifests/
 
 # Apply security configurations

@@ -1,0 +1,53 @@
+# Rate-limited ingress for the GraphQL endpoint (the local/kind deployment;
+# ssl-ingress.yaml, ingress-cloudflare-dns01.yaml and the Terraform ingress are
+# not covered). Apply it after ingress.yaml, which no longer routes /graphql.
+# Two local routes to the backend skip the ingress and are not limited: the
+# backend NodePort 30080 (backend-service.yaml) and the admin frontend's
+# /admin/graphql proxy (admin-frontend-nginx-configmap.yaml).
+#
+# ingress-nginx applies limit-* annotations to a whole Ingress object, so the
+# /graphql path lives here, on its own, and ingress.yaml carries every other
+# path for the same host. The limits are per client IP ($binary_remote_addr):
+#   limit-rps 20 with limit-burst-multiplier 5: a client may burst to 100
+#   requests, then is held to 20 a second. Above that ingress-nginx answers
+#   503 (limit-req-status-code / limit-conn-status-code in the controller
+#   ConfigMap change it, 429 being the usual choice).
+#   limit-connections 20: at most 20 open connections per client.
+# The backend's query depth and complexity limits count fields, not rows, so
+# a seriesData page can still return thousands of points; this caps how often
+# one client can ask.
+#
+# Per-IP only holds if the controller sees the real client address. Behind a
+# NodePort Service with externalTrafficPolicy: Cluster (kind's default) every
+# request is SNAT'd to the node IP and all clients share one bucket; use
+# externalTrafficPolicy: Local, hostPort, or proxy protocol with
+# use-forwarded-headers, and check $remote_addr in the controller logs.
+# Everyone behind one NAT still shares one IP: raise limit-rps, or add trusted
+# ranges with nginx.ingress.kubernetes.io/limit-whitelist.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: econ-graph-graphql-ingress
+  namespace: econ-graph
+  annotations:
+    # CORS is enforced by the backend from CORS_ALLOWED_ORIGINS; no ingress CORS annotations.
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "5"
+    nginx.ingress.kubernetes.io/limit-connections: "20"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: localhost
+    http:
+      paths:
+      - path: /graphql
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
