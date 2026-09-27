@@ -29,6 +29,8 @@ serde.workspace = true
 serde_json.workspace = true
 # Dataset definitions (data/datasets/*.toml)
 toml.workspace = true
+# FHFA HPI master file
+csv.workspace = true
 
 # Error handling
 anyhow.workspace = true

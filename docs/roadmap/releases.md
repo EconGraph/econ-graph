@@ -132,7 +132,7 @@ The State column tracks each item's PRs. Every PR updates its item's row when it
 | 19 | Release mechanics: version bump, release notes, deploy from the tag | New | QA plan in `docs/release/v4.0.0-qa.md` (PR #238); version and tag workflow not started |
 | 20 | Datasets metadata: the `datasets` table and the `economic_series` dataset and dimension columns. Goes first: items 10 and 22 to 24 build on it | Federation phase 3's first PR; global analysis phase 3 | #220 merged (DS-1); #225 merged (DS-3: adapters declare datasets, TOML definitions under `data/datasets/`, the crawler writes `dataset_id` and `dimensions`); DS-6 #229, DS-4 #231, DS-5 #237 build on them |
 | 21 | BLS: widen the hard-coded series list to the main CPI, CES and LAUS series | [data-sources.md](./data-sources.md) | In progress |
-| 22 | FHFA HPI rebuilt on the published master CSV | [fhfa.md](../data-sources/fhfa.md) | In progress |
+| 22 | FHFA HPI rebuilt on the published master CSV: dataset `fhfa_hpi`, about 200 series (purchase-only and all-transactions; US, census divisions, states), one download per fetch batch | [fhfa.md](../data-sources/fhfa.md) | #240 draft |
 | 23 | BEA: real NIPA table and line ids, and `fetch_series` | [bea.md](../data-sources/bea.md) | In progress |
 | 24 | World Bank WDI: `fetch_series` for the curated set of about 50 indicators | Global analysis phase 4 | In progress |
 | 25 | Coverage: a report of series with and without data per source (exit criterion 2), and search hides series with no data points | New | In progress |

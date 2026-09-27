@@ -1,0 +1,442 @@
+hpi_type,hpi_flavor,frequency,level,place_name,place_id,yr,period,index_nsa,index_sa
+traditional,purchase-only,monthly,USA or Census Division,United States,USA,2024,10,203.17,203.78
+traditional,purchase-only,monthly,USA or Census Division,United States,USA,2024,11,204.40,205.01
+traditional,purchase-only,monthly,USA or Census Division,United States,USA,2024,12,205.63,206.24
+traditional,purchase-only,monthly,USA or Census Division,United States,USA,2025,1,206.86,207.47
+traditional,purchase-only,monthly,USA or Census Division,United States,USA,2025,2,208.09,208.70
+traditional,purchase-only,monthly,USA or Census Division,United States,USA,2025,3,209.32,209.93
+traditional,purchase-only,monthly,USA or Census Division,East North Central Division,DV_ENC,2024,10,206.34,206.96
+traditional,purchase-only,monthly,USA or Census Division,East North Central Division,DV_ENC,2024,11,207.57,208.19
+traditional,purchase-only,monthly,USA or Census Division,East North Central Division,DV_ENC,2024,12,208.80,209.41
+traditional,purchase-only,monthly,USA or Census Division,East North Central Division,DV_ENC,2025,1,210.03,210.65
+traditional,purchase-only,monthly,USA or Census Division,East North Central Division,DV_ENC,2025,2,211.26,211.88
+traditional,purchase-only,monthly,USA or Census Division,East North Central Division,DV_ENC,2025,3,212.49,213.10
+traditional,purchase-only,monthly,USA or Census Division,East South Central Division,DV_ESC,2024,10,209.51,210.12
+traditional,purchase-only,monthly,USA or Census Division,East South Central Division,DV_ESC,2024,11,210.74,211.35
+traditional,purchase-only,monthly,USA or Census Division,East South Central Division,DV_ESC,2024,12,211.97,212.58
+traditional,purchase-only,monthly,USA or Census Division,East South Central Division,DV_ESC,2025,1,213.20,213.81
+traditional,purchase-only,monthly,USA or Census Division,East South Central Division,DV_ESC,2025,2,214.43,215.04
+traditional,purchase-only,monthly,USA or Census Division,East South Central Division,DV_ESC,2025,3,215.66,216.27
+traditional,purchase-only,monthly,USA or Census Division,Middle Atlantic Division,DV_MA,2024,10,212.68,213.30
+traditional,purchase-only,monthly,USA or Census Division,Middle Atlantic Division,DV_MA,2024,11,213.91,214.53
+traditional,purchase-only,monthly,USA or Census Division,Middle Atlantic Division,DV_MA,2024,12,215.14,215.75
+traditional,purchase-only,monthly,USA or Census Division,Middle Atlantic Division,DV_MA,2025,1,216.37,216.99
+traditional,purchase-only,monthly,USA or Census Division,Middle Atlantic Division,DV_MA,2025,2,217.60,218.22
+traditional,purchase-only,monthly,USA or Census Division,Middle Atlantic Division,DV_MA,2025,3,218.83,219.44
+traditional,purchase-only,monthly,USA or Census Division,Mountain Division,DV_MT,2024,10,215.85,216.47
+traditional,purchase-only,monthly,USA or Census Division,Mountain Division,DV_MT,2024,11,217.08,217.69
+traditional,purchase-only,monthly,USA or Census Division,Mountain Division,DV_MT,2024,12,218.31,218.92
+traditional,purchase-only,monthly,USA or Census Division,Mountain Division,DV_MT,2025,1,219.54,220.16
+traditional,purchase-only,monthly,USA or Census Division,Mountain Division,DV_MT,2025,2,220.77,221.38
+traditional,purchase-only,monthly,USA or Census Division,Mountain Division,DV_MT,2025,3,222.00,222.61
+traditional,purchase-only,monthly,USA or Census Division,New England Division,DV_NE,2024,10,219.02,219.64
+traditional,purchase-only,monthly,USA or Census Division,New England Division,DV_NE,2024,11,220.25,220.87
+traditional,purchase-only,monthly,USA or Census Division,New England Division,DV_NE,2024,12,221.48,222.09
+traditional,purchase-only,monthly,USA or Census Division,New England Division,DV_NE,2025,1,222.71,223.33
+traditional,purchase-only,monthly,USA or Census Division,New England Division,DV_NE,2025,2,223.94,224.56
+traditional,purchase-only,monthly,USA or Census Division,New England Division,DV_NE,2025,3,225.17,225.78
+traditional,purchase-only,monthly,USA or Census Division,Pacific Division,DV_PAC,2024,10,222.19,222.81
+traditional,purchase-only,monthly,USA or Census Division,Pacific Division,DV_PAC,2024,11,223.42,224.03
+traditional,purchase-only,monthly,USA or Census Division,Pacific Division,DV_PAC,2024,12,224.65,225.26
+traditional,purchase-only,monthly,USA or Census Division,Pacific Division,DV_PAC,2025,1,225.88,226.50
+traditional,purchase-only,monthly,USA or Census Division,Pacific Division,DV_PAC,2025,2,227.11,227.72
+traditional,purchase-only,monthly,USA or Census Division,Pacific Division,DV_PAC,2025,3,228.34,228.95
+traditional,purchase-only,monthly,USA or Census Division,South Atlantic Division,DV_SA,2024,10,225.36,225.98
+traditional,purchase-only,monthly,USA or Census Division,South Atlantic Division,DV_SA,2024,11,226.59,227.21
+traditional,purchase-only,monthly,USA or Census Division,South Atlantic Division,DV_SA,2024,12,227.82,228.44
+traditional,purchase-only,monthly,USA or Census Division,South Atlantic Division,DV_SA,2025,1,229.05,229.67
+traditional,purchase-only,monthly,USA or Census Division,South Atlantic Division,DV_SA,2025,2,230.28,230.90
+traditional,purchase-only,monthly,USA or Census Division,South Atlantic Division,DV_SA,2025,3,231.51,232.12
+traditional,purchase-only,monthly,USA or Census Division,West North Central Division,DV_WNC,2024,10,228.53,229.15
+traditional,purchase-only,monthly,USA or Census Division,West North Central Division,DV_WNC,2024,11,229.76,230.38
+traditional,purchase-only,monthly,USA or Census Division,West North Central Division,DV_WNC,2024,12,230.99,231.60
+traditional,purchase-only,monthly,USA or Census Division,West North Central Division,DV_WNC,2025,1,232.22,232.84
+traditional,purchase-only,monthly,USA or Census Division,West North Central Division,DV_WNC,2025,2,233.45,234.06
+traditional,purchase-only,monthly,USA or Census Division,West North Central Division,DV_WNC,2025,3,234.68,235.29
+traditional,purchase-only,monthly,USA or Census Division,West South Central Division,DV_WSC,2024,10,231.70,232.31
+traditional,purchase-only,monthly,USA or Census Division,West South Central Division,DV_WSC,2024,11,232.93,233.54
+traditional,purchase-only,monthly,USA or Census Division,West South Central Division,DV_WSC,2024,12,234.16,234.77
+traditional,purchase-only,monthly,USA or Census Division,West South Central Division,DV_WSC,2025,1,235.39,236.00
+traditional,purchase-only,monthly,USA or Census Division,West South Central Division,DV_WSC,2025,2,236.62,237.23
+traditional,purchase-only,monthly,USA or Census Division,West South Central Division,DV_WSC,2025,3,237.85,238.46
+traditional,purchase-only,quarterly,USA or Census Division,United States,USA,2024,3,234.87,235.49
+traditional,purchase-only,quarterly,USA or Census Division,United States,USA,2024,4,236.10,236.72
+traditional,purchase-only,quarterly,USA or Census Division,United States,USA,2025,1,237.33,237.94
+traditional,purchase-only,quarterly,USA or Census Division,East North Central Division,DV_ENC,2024,3,238.04,238.66
+traditional,purchase-only,quarterly,USA or Census Division,East North Central Division,DV_ENC,2024,4,239.27,239.88
+traditional,purchase-only,quarterly,USA or Census Division,East North Central Division,DV_ENC,2025,1,240.50,241.11
+traditional,purchase-only,quarterly,USA or Census Division,East South Central Division,DV_ESC,2024,3,241.21,241.83
+traditional,purchase-only,quarterly,USA or Census Division,East South Central Division,DV_ESC,2024,4,242.44,243.06
+traditional,purchase-only,quarterly,USA or Census Division,East South Central Division,DV_ESC,2025,1,243.67,244.28
+traditional,purchase-only,quarterly,USA or Census Division,Middle Atlantic Division,DV_MA,2024,3,244.38,245.00
+traditional,purchase-only,quarterly,USA or Census Division,Middle Atlantic Division,DV_MA,2024,4,245.61,246.22
+traditional,purchase-only,quarterly,USA or Census Division,Middle Atlantic Division,DV_MA,2025,1,246.84,247.45
+traditional,purchase-only,quarterly,USA or Census Division,Mountain Division,DV_MT,2024,3,247.55,248.17
+traditional,purchase-only,quarterly,USA or Census Division,Mountain Division,DV_MT,2024,4,248.78,249.40
+traditional,purchase-only,quarterly,USA or Census Division,Mountain Division,DV_MT,2025,1,250.01,250.62
+traditional,purchase-only,quarterly,USA or Census Division,New England Division,DV_NE,2024,3,250.72,251.34
+traditional,purchase-only,quarterly,USA or Census Division,New England Division,DV_NE,2024,4,251.95,252.56
+traditional,purchase-only,quarterly,USA or Census Division,New England Division,DV_NE,2025,1,253.18,253.79
+traditional,purchase-only,quarterly,USA or Census Division,Pacific Division,DV_PAC,2024,3,253.89,254.50
+traditional,purchase-only,quarterly,USA or Census Division,Pacific Division,DV_PAC,2024,4,255.12,255.73
+traditional,purchase-only,quarterly,USA or Census Division,Pacific Division,DV_PAC,2025,1,256.35,256.96
+traditional,purchase-only,quarterly,USA or Census Division,South Atlantic Division,DV_SA,2024,3,257.06,257.68
+traditional,purchase-only,quarterly,USA or Census Division,South Atlantic Division,DV_SA,2024,4,258.29,258.91
+traditional,purchase-only,quarterly,USA or Census Division,South Atlantic Division,DV_SA,2025,1,259.52,260.13
+traditional,purchase-only,quarterly,USA or Census Division,West North Central Division,DV_WNC,2024,3,260.23,260.85
+traditional,purchase-only,quarterly,USA or Census Division,West North Central Division,DV_WNC,2024,4,261.46,262.08
+traditional,purchase-only,quarterly,USA or Census Division,West North Central Division,DV_WNC,2025,1,262.69,263.31
+traditional,purchase-only,quarterly,USA or Census Division,West South Central Division,DV_WSC,2024,3,263.40,264.01
+traditional,purchase-only,quarterly,USA or Census Division,West South Central Division,DV_WSC,2024,4,264.63,265.25
+traditional,purchase-only,quarterly,USA or Census Division,West South Central Division,DV_WSC,2025,1,265.86,266.47
+traditional,purchase-only,quarterly,State,Alabama,AL,2024,3,266.57,267.19
+traditional,purchase-only,quarterly,State,Alabama,AL,2024,4,267.80,268.42
+traditional,purchase-only,quarterly,State,Alabama,AL,2025,1,269.03,269.64
+traditional,purchase-only,quarterly,State,Alaska,AK,2024,3,269.74,270.36
+traditional,purchase-only,quarterly,State,Alaska,AK,2024,4,270.97,271.59
+traditional,purchase-only,quarterly,State,Alaska,AK,2025,1,272.20,272.81
+traditional,purchase-only,quarterly,State,Arizona,AZ,2024,3,272.91,273.52
+traditional,purchase-only,quarterly,State,Arizona,AZ,2024,4,274.14,274.75
+traditional,purchase-only,quarterly,State,Arizona,AZ,2025,1,275.37,275.98
+traditional,purchase-only,quarterly,State,Arkansas,AR,2024,3,276.08,276.69
+traditional,purchase-only,quarterly,State,Arkansas,AR,2024,4,277.31,277.93
+traditional,purchase-only,quarterly,State,Arkansas,AR,2025,1,278.54,279.15
+traditional,purchase-only,quarterly,State,California,CA,2024,3,279.25,279.87
+traditional,purchase-only,quarterly,State,California,CA,2024,4,280.48,281.10
+traditional,purchase-only,quarterly,State,California,CA,2025,1,281.71,282.32
+traditional,purchase-only,quarterly,State,Colorado,CO,2024,3,282.42,283.04
+traditional,purchase-only,quarterly,State,Colorado,CO,2024,4,283.65,284.27
+traditional,purchase-only,quarterly,State,Colorado,CO,2025,1,284.88,285.50
+traditional,purchase-only,quarterly,State,Connecticut,CT,2024,3,285.59,286.21
+traditional,purchase-only,quarterly,State,Connecticut,CT,2024,4,286.82,287.44
+traditional,purchase-only,quarterly,State,Connecticut,CT,2025,1,288.05,288.67
+traditional,purchase-only,quarterly,State,Delaware,DE,2024,3,288.76,289.38
+traditional,purchase-only,quarterly,State,Delaware,DE,2024,4,289.99,290.61
+traditional,purchase-only,quarterly,State,Delaware,DE,2025,1,291.22,291.83
+traditional,purchase-only,quarterly,State,District of Columbia,DC,2024,3,291.93,292.55
+traditional,purchase-only,quarterly,State,District of Columbia,DC,2024,4,293.16,293.78
+traditional,purchase-only,quarterly,State,District of Columbia,DC,2025,1,294.39,295.00
+traditional,purchase-only,quarterly,State,Florida,FL,2024,3,295.10,295.72
+traditional,purchase-only,quarterly,State,Florida,FL,2024,4,296.33,296.95
+traditional,purchase-only,quarterly,State,Florida,FL,2025,1,297.56,298.18
+traditional,purchase-only,quarterly,State,Georgia,GA,2024,3,298.27,298.88
+traditional,purchase-only,quarterly,State,Georgia,GA,2024,4,299.50,300.12
+traditional,purchase-only,quarterly,State,Georgia,GA,2025,1,300.73,301.34
+traditional,purchase-only,quarterly,State,Hawaii,HI,2024,3,301.44,302.06
+traditional,purchase-only,quarterly,State,Hawaii,HI,2024,4,302.67,303.29
+traditional,purchase-only,quarterly,State,Hawaii,HI,2025,1,303.90,304.51
+traditional,purchase-only,quarterly,State,Idaho,ID,2024,3,304.61,305.23
+traditional,purchase-only,quarterly,State,Idaho,ID,2024,4,305.84,306.46
+traditional,purchase-only,quarterly,State,Idaho,ID,2025,1,307.07,307.69
+traditional,purchase-only,quarterly,State,Illinois,IL,2024,3,307.78,308.39
+traditional,purchase-only,quarterly,State,Illinois,IL,2024,4,309.01,309.62
+traditional,purchase-only,quarterly,State,Illinois,IL,2025,1,310.24,310.85
+traditional,purchase-only,quarterly,State,Indiana,IN,2024,3,310.95,311.56
+traditional,purchase-only,quarterly,State,Indiana,IN,2024,4,312.18,312.80
+traditional,purchase-only,quarterly,State,Indiana,IN,2025,1,313.41,314.02
+traditional,purchase-only,quarterly,State,Iowa,IA,2024,3,314.12,314.74
+traditional,purchase-only,quarterly,State,Iowa,IA,2024,4,315.35,315.97
+traditional,purchase-only,quarterly,State,Iowa,IA,2025,1,316.58,317.19
+traditional,purchase-only,quarterly,State,Kansas,KS,2024,3,317.29,317.90
+traditional,purchase-only,quarterly,State,Kansas,KS,2024,4,318.52,319.13
+traditional,purchase-only,quarterly,State,Kansas,KS,2025,1,319.75,320.36
+traditional,purchase-only,quarterly,State,Kentucky,KY,2024,3,320.46,321.07
+traditional,purchase-only,quarterly,State,Kentucky,KY,2024,4,321.69,322.31
+traditional,purchase-only,quarterly,State,Kentucky,KY,2025,1,322.92,323.53
+traditional,purchase-only,quarterly,State,Louisiana,LA,2024,3,323.63,324.25
+traditional,purchase-only,quarterly,State,Louisiana,LA,2024,4,324.86,325.48
+traditional,purchase-only,quarterly,State,Louisiana,LA,2025,1,326.09,326.70
+traditional,purchase-only,quarterly,State,Maine,ME,2024,3,326.80,327.42
+traditional,purchase-only,quarterly,State,Maine,ME,2024,4,328.03,328.65
+traditional,purchase-only,quarterly,State,Maine,ME,2025,1,329.26,329.88
+traditional,purchase-only,quarterly,State,Maryland,MD,2024,3,329.97,330.59
+traditional,purchase-only,quarterly,State,Maryland,MD,2024,4,331.20,331.82
+traditional,purchase-only,quarterly,State,Maryland,MD,2025,1,332.43,333.05
+traditional,purchase-only,quarterly,State,Massachusetts,MA,2024,3,333.14,333.75
+traditional,purchase-only,quarterly,State,Massachusetts,MA,2024,4,334.37,334.99
+traditional,purchase-only,quarterly,State,Massachusetts,MA,2025,1,335.60,336.21
+traditional,purchase-only,quarterly,State,Michigan,MI,2024,3,336.31,336.93
+traditional,purchase-only,quarterly,State,Michigan,MI,2024,4,337.54,338.16
+traditional,purchase-only,quarterly,State,Michigan,MI,2025,1,338.77,339.38
+traditional,purchase-only,quarterly,State,Minnesota,MN,2024,3,339.48,340.10
+traditional,purchase-only,quarterly,State,Minnesota,MN,2024,4,340.71,341.33
+traditional,purchase-only,quarterly,State,Minnesota,MN,2025,1,341.94,342.56
+traditional,purchase-only,quarterly,State,Mississippi,MS,2024,3,342.65,343.26
+traditional,purchase-only,quarterly,State,Mississippi,MS,2024,4,343.88,344.50
+traditional,purchase-only,quarterly,State,Mississippi,MS,2025,1,345.11,345.72
+traditional,purchase-only,quarterly,State,Missouri,MO,2024,3,345.82,346.44
+traditional,purchase-only,quarterly,State,Missouri,MO,2024,4,347.05,347.67
+traditional,purchase-only,quarterly,State,Missouri,MO,2025,1,348.28,348.89
+traditional,purchase-only,quarterly,State,Montana,MT,2024,3,348.99,349.61
+traditional,purchase-only,quarterly,State,Montana,MT,2024,4,350.22,350.84
+traditional,purchase-only,quarterly,State,Montana,MT,2025,1,351.45,352.06
+traditional,purchase-only,quarterly,State,Nebraska,NE,2024,3,352.16,352.77
+traditional,purchase-only,quarterly,State,Nebraska,NE,2024,4,353.39,354.00
+traditional,purchase-only,quarterly,State,Nebraska,NE,2025,1,354.62,355.23
+traditional,purchase-only,quarterly,State,Nevada,NV,2024,3,355.33,355.94
+traditional,purchase-only,quarterly,State,Nevada,NV,2024,4,356.56,357.18
+traditional,purchase-only,quarterly,State,Nevada,NV,2025,1,357.79,358.40
+traditional,purchase-only,quarterly,State,New Hampshire,NH,2024,3,358.50,359.12
+traditional,purchase-only,quarterly,State,New Hampshire,NH,2024,4,359.73,360.35
+traditional,purchase-only,quarterly,State,New Hampshire,NH,2025,1,360.96,361.57
+traditional,purchase-only,quarterly,State,New Jersey,NJ,2024,3,361.67,362.28
+traditional,purchase-only,quarterly,State,New Jersey,NJ,2024,4,362.90,363.51
+traditional,purchase-only,quarterly,State,New Jersey,NJ,2025,1,364.13,364.74
+traditional,purchase-only,quarterly,State,New Mexico,NM,2024,3,364.84,365.46
+traditional,purchase-only,quarterly,State,New Mexico,NM,2024,4,366.07,366.69
+traditional,purchase-only,quarterly,State,New Mexico,NM,2025,1,367.30,367.92
+traditional,purchase-only,quarterly,State,New York,NY,2024,3,368.01,368.62
+traditional,purchase-only,quarterly,State,New York,NY,2024,4,369.24,369.86
+traditional,purchase-only,quarterly,State,New York,NY,2025,1,370.47,371.08
+traditional,purchase-only,quarterly,State,North Carolina,NC,2024,3,371.18,371.80
+traditional,purchase-only,quarterly,State,North Carolina,NC,2024,4,372.41,373.03
+traditional,purchase-only,quarterly,State,North Carolina,NC,2025,1,373.64,374.25
+traditional,purchase-only,quarterly,State,North Dakota,ND,2024,3,374.35,374.97
+traditional,purchase-only,quarterly,State,North Dakota,ND,2024,4,375.58,376.20
+traditional,purchase-only,quarterly,State,North Dakota,ND,2025,1,376.81,377.43
+traditional,purchase-only,quarterly,State,Ohio,OH,2024,3,377.52,378.13
+traditional,purchase-only,quarterly,State,Ohio,OH,2024,4,378.75,379.37
+traditional,purchase-only,quarterly,State,Ohio,OH,2025,1,379.98,380.59
+traditional,purchase-only,quarterly,State,Oklahoma,OK,2024,3,380.69,381.31
+traditional,purchase-only,quarterly,State,Oklahoma,OK,2024,4,381.92,382.54
+traditional,purchase-only,quarterly,State,Oklahoma,OK,2025,1,383.15,383.76
+traditional,purchase-only,quarterly,State,Oregon,OR,2024,3,383.86,384.48
+traditional,purchase-only,quarterly,State,Oregon,OR,2024,4,385.09,385.71
+traditional,purchase-only,quarterly,State,Oregon,OR,2025,1,386.32,386.94
+traditional,purchase-only,quarterly,State,Pennsylvania,PA,2024,3,387.03,387.64
+traditional,purchase-only,quarterly,State,Pennsylvania,PA,2024,4,388.26,388.88
+traditional,purchase-only,quarterly,State,Pennsylvania,PA,2025,1,389.49,390.10
+traditional,purchase-only,quarterly,State,Rhode Island,RI,2024,3,390.20,390.81
+traditional,purchase-only,quarterly,State,Rhode Island,RI,2024,4,391.43,392.05
+traditional,purchase-only,quarterly,State,Rhode Island,RI,2025,1,392.66,393.27
+traditional,purchase-only,quarterly,State,South Carolina,SC,2024,3,393.37,393.99
+traditional,purchase-only,quarterly,State,South Carolina,SC,2024,4,394.60,395.22
+traditional,purchase-only,quarterly,State,South Carolina,SC,2025,1,395.83,396.44
+traditional,purchase-only,quarterly,State,South Dakota,SD,2024,3,396.54,397.15
+traditional,purchase-only,quarterly,State,South Dakota,SD,2024,4,397.77,398.38
+traditional,purchase-only,quarterly,State,South Dakota,SD,2025,1,399.00,399.61
+traditional,purchase-only,quarterly,State,Tennessee,TN,2024,3,399.71,400.33
+traditional,purchase-only,quarterly,State,Tennessee,TN,2024,4,400.94,401.56
+traditional,purchase-only,quarterly,State,Tennessee,TN,2025,1,402.17,402.79
+traditional,purchase-only,quarterly,State,Texas,TX,2024,3,402.88,403.50
+traditional,purchase-only,quarterly,State,Texas,TX,2024,4,404.11,404.73
+traditional,purchase-only,quarterly,State,Texas,TX,2025,1,405.34,405.95
+traditional,purchase-only,quarterly,State,Utah,UT,2024,3,406.05,406.66
+traditional,purchase-only,quarterly,State,Utah,UT,2024,4,407.28,407.89
+traditional,purchase-only,quarterly,State,Utah,UT,2025,1,408.51,409.12
+traditional,purchase-only,quarterly,State,Vermont,VT,2024,3,409.22,409.84
+traditional,purchase-only,quarterly,State,Vermont,VT,2024,4,410.45,411.07
+traditional,purchase-only,quarterly,State,Vermont,VT,2025,1,411.68,412.30
+traditional,purchase-only,quarterly,State,Virginia,VA,2024,3,412.39,413.00
+traditional,purchase-only,quarterly,State,Virginia,VA,2024,4,413.62,414.24
+traditional,purchase-only,quarterly,State,Virginia,VA,2025,1,414.85,415.46
+traditional,purchase-only,quarterly,State,Washington,WA,2024,3,415.56,416.18
+traditional,purchase-only,quarterly,State,Washington,WA,2024,4,416.79,417.41
+traditional,purchase-only,quarterly,State,Washington,WA,2025,1,418.02,418.63
+traditional,purchase-only,quarterly,State,West Virginia,WV,2024,3,418.73,419.35
+traditional,purchase-only,quarterly,State,West Virginia,WV,2024,4,419.96,420.58
+traditional,purchase-only,quarterly,State,West Virginia,WV,2025,1,421.19,421.81
+traditional,purchase-only,quarterly,State,Wisconsin,WI,2024,3,421.90,422.51
+traditional,purchase-only,quarterly,State,Wisconsin,WI,2024,4,423.13,423.75
+traditional,purchase-only,quarterly,State,Wisconsin,WI,2025,1,424.36,424.97
+traditional,purchase-only,quarterly,State,Wyoming,WY,2024,3,425.07,425.69
+traditional,purchase-only,quarterly,State,Wyoming,WY,2024,4,426.30,426.92
+traditional,purchase-only,quarterly,State,Wyoming,WY,2025,1,427.53,428.14
+traditional,all-transactions,quarterly,USA or Census Division,United States,USA,2024,3,428.24,
+traditional,all-transactions,quarterly,USA or Census Division,United States,USA,2024,4,429.47,
+traditional,all-transactions,quarterly,USA or Census Division,United States,USA,2025,1,430.70,
+traditional,all-transactions,quarterly,USA or Census Division,East North Central Division,DV_ENC,2024,3,431.41,
+traditional,all-transactions,quarterly,USA or Census Division,East North Central Division,DV_ENC,2024,4,432.64,
+traditional,all-transactions,quarterly,USA or Census Division,East North Central Division,DV_ENC,2025,1,433.87,
+traditional,all-transactions,quarterly,USA or Census Division,East South Central Division,DV_ESC,2024,3,434.58,
+traditional,all-transactions,quarterly,USA or Census Division,East South Central Division,DV_ESC,2024,4,435.81,
+traditional,all-transactions,quarterly,USA or Census Division,East South Central Division,DV_ESC,2025,1,437.04,
+traditional,all-transactions,quarterly,USA or Census Division,Middle Atlantic Division,DV_MA,2024,3,437.75,
+traditional,all-transactions,quarterly,USA or Census Division,Middle Atlantic Division,DV_MA,2024,4,438.98,
+traditional,all-transactions,quarterly,USA or Census Division,Middle Atlantic Division,DV_MA,2025,1,440.21,
+traditional,all-transactions,quarterly,USA or Census Division,Mountain Division,DV_MT,2024,3,440.92,
+traditional,all-transactions,quarterly,USA or Census Division,Mountain Division,DV_MT,2024,4,442.15,
+traditional,all-transactions,quarterly,USA or Census Division,Mountain Division,DV_MT,2025,1,443.38,
+traditional,all-transactions,quarterly,USA or Census Division,New England Division,DV_NE,2024,3,444.09,
+traditional,all-transactions,quarterly,USA or Census Division,New England Division,DV_NE,2024,4,445.32,
+traditional,all-transactions,quarterly,USA or Census Division,New England Division,DV_NE,2025,1,446.55,
+traditional,all-transactions,quarterly,USA or Census Division,Pacific Division,DV_PAC,2024,3,447.26,
+traditional,all-transactions,quarterly,USA or Census Division,Pacific Division,DV_PAC,2024,4,448.49,
+traditional,all-transactions,quarterly,USA or Census Division,Pacific Division,DV_PAC,2025,1,449.72,
+traditional,all-transactions,quarterly,USA or Census Division,South Atlantic Division,DV_SA,2024,3,450.43,
+traditional,all-transactions,quarterly,USA or Census Division,South Atlantic Division,DV_SA,2024,4,451.66,
+traditional,all-transactions,quarterly,USA or Census Division,South Atlantic Division,DV_SA,2025,1,452.89,
+traditional,all-transactions,quarterly,USA or Census Division,West North Central Division,DV_WNC,2024,3,453.60,
+traditional,all-transactions,quarterly,USA or Census Division,West North Central Division,DV_WNC,2024,4,454.83,
+traditional,all-transactions,quarterly,USA or Census Division,West North Central Division,DV_WNC,2025,1,456.06,
+traditional,all-transactions,quarterly,USA or Census Division,West South Central Division,DV_WSC,2024,3,456.77,
+traditional,all-transactions,quarterly,USA or Census Division,West South Central Division,DV_WSC,2024,4,458.00,
+traditional,all-transactions,quarterly,USA or Census Division,West South Central Division,DV_WSC,2025,1,459.23,
+traditional,all-transactions,quarterly,State,Alabama,AL,2024,3,459.94,
+traditional,all-transactions,quarterly,State,Alabama,AL,2024,4,461.17,
+traditional,all-transactions,quarterly,State,Alabama,AL,2025,1,462.40,
+traditional,all-transactions,quarterly,State,Alaska,AK,2024,3,463.11,
+traditional,all-transactions,quarterly,State,Alaska,AK,2024,4,464.34,
+traditional,all-transactions,quarterly,State,Alaska,AK,2025,1,465.57,
+traditional,all-transactions,quarterly,State,Arizona,AZ,2024,3,466.28,
+traditional,all-transactions,quarterly,State,Arizona,AZ,2024,4,467.51,
+traditional,all-transactions,quarterly,State,Arizona,AZ,2025,1,468.74,
+traditional,all-transactions,quarterly,State,Arkansas,AR,2024,3,469.45,
+traditional,all-transactions,quarterly,State,Arkansas,AR,2024,4,470.68,
+traditional,all-transactions,quarterly,State,Arkansas,AR,2025,1,471.91,
+traditional,all-transactions,quarterly,State,California,CA,2024,3,472.62,
+traditional,all-transactions,quarterly,State,California,CA,2024,4,473.85,
+traditional,all-transactions,quarterly,State,California,CA,2025,1,475.08,
+traditional,all-transactions,quarterly,State,Colorado,CO,2024,3,475.79,
+traditional,all-transactions,quarterly,State,Colorado,CO,2024,4,477.02,
+traditional,all-transactions,quarterly,State,Colorado,CO,2025,1,478.25,
+traditional,all-transactions,quarterly,State,Connecticut,CT,2024,3,478.96,
+traditional,all-transactions,quarterly,State,Connecticut,CT,2024,4,480.19,
+traditional,all-transactions,quarterly,State,Connecticut,CT,2025,1,481.42,
+traditional,all-transactions,quarterly,State,Delaware,DE,2024,3,482.13,
+traditional,all-transactions,quarterly,State,Delaware,DE,2024,4,483.36,
+traditional,all-transactions,quarterly,State,Delaware,DE,2025,1,484.59,
+traditional,all-transactions,quarterly,State,District of Columbia,DC,2024,3,485.30,
+traditional,all-transactions,quarterly,State,District of Columbia,DC,2024,4,486.53,
+traditional,all-transactions,quarterly,State,District of Columbia,DC,2025,1,487.76,
+traditional,all-transactions,quarterly,State,Florida,FL,2024,3,488.47,
+traditional,all-transactions,quarterly,State,Florida,FL,2024,4,489.70,
+traditional,all-transactions,quarterly,State,Florida,FL,2025,1,490.93,
+traditional,all-transactions,quarterly,State,Georgia,GA,2024,3,491.64,
+traditional,all-transactions,quarterly,State,Georgia,GA,2024,4,492.87,
+traditional,all-transactions,quarterly,State,Georgia,GA,2025,1,494.10,
+traditional,all-transactions,quarterly,State,Hawaii,HI,2024,3,494.81,
+traditional,all-transactions,quarterly,State,Hawaii,HI,2024,4,496.04,
+traditional,all-transactions,quarterly,State,Hawaii,HI,2025,1,497.27,
+traditional,all-transactions,quarterly,State,Idaho,ID,2024,3,497.98,
+traditional,all-transactions,quarterly,State,Idaho,ID,2024,4,499.21,
+traditional,all-transactions,quarterly,State,Idaho,ID,2025,1,500.44,
+traditional,all-transactions,quarterly,State,Illinois,IL,2024,3,501.15,
+traditional,all-transactions,quarterly,State,Illinois,IL,2024,4,502.38,
+traditional,all-transactions,quarterly,State,Illinois,IL,2025,1,503.61,
+traditional,all-transactions,quarterly,State,Indiana,IN,2024,3,504.32,
+traditional,all-transactions,quarterly,State,Indiana,IN,2024,4,505.55,
+traditional,all-transactions,quarterly,State,Indiana,IN,2025,1,506.78,
+traditional,all-transactions,quarterly,State,Iowa,IA,2024,3,507.49,
+traditional,all-transactions,quarterly,State,Iowa,IA,2024,4,508.72,
+traditional,all-transactions,quarterly,State,Iowa,IA,2025,1,509.95,
+traditional,all-transactions,quarterly,State,Kansas,KS,2024,3,510.66,
+traditional,all-transactions,quarterly,State,Kansas,KS,2024,4,511.89,
+traditional,all-transactions,quarterly,State,Kansas,KS,2025,1,513.12,
+traditional,all-transactions,quarterly,State,Kentucky,KY,2024,3,513.83,
+traditional,all-transactions,quarterly,State,Kentucky,KY,2024,4,515.06,
+traditional,all-transactions,quarterly,State,Kentucky,KY,2025,1,516.29,
+traditional,all-transactions,quarterly,State,Louisiana,LA,2024,3,517.00,
+traditional,all-transactions,quarterly,State,Louisiana,LA,2024,4,518.23,
+traditional,all-transactions,quarterly,State,Louisiana,LA,2025,1,519.46,
+traditional,all-transactions,quarterly,State,Maine,ME,2024,3,520.17,
+traditional,all-transactions,quarterly,State,Maine,ME,2024,4,521.40,
+traditional,all-transactions,quarterly,State,Maine,ME,2025,1,522.63,
+traditional,all-transactions,quarterly,State,Maryland,MD,2024,3,523.34,
+traditional,all-transactions,quarterly,State,Maryland,MD,2024,4,524.57,
+traditional,all-transactions,quarterly,State,Maryland,MD,2025,1,525.80,
+traditional,all-transactions,quarterly,State,Massachusetts,MA,2024,3,526.51,
+traditional,all-transactions,quarterly,State,Massachusetts,MA,2024,4,527.74,
+traditional,all-transactions,quarterly,State,Massachusetts,MA,2025,1,528.97,
+traditional,all-transactions,quarterly,State,Michigan,MI,2024,3,529.68,
+traditional,all-transactions,quarterly,State,Michigan,MI,2024,4,530.91,
+traditional,all-transactions,quarterly,State,Michigan,MI,2025,1,532.14,
+traditional,all-transactions,quarterly,State,Minnesota,MN,2024,3,532.85,
+traditional,all-transactions,quarterly,State,Minnesota,MN,2024,4,534.08,
+traditional,all-transactions,quarterly,State,Minnesota,MN,2025,1,535.31,
+traditional,all-transactions,quarterly,State,Mississippi,MS,2024,3,536.02,
+traditional,all-transactions,quarterly,State,Mississippi,MS,2024,4,537.25,
+traditional,all-transactions,quarterly,State,Mississippi,MS,2025,1,538.48,
+traditional,all-transactions,quarterly,State,Missouri,MO,2024,3,539.19,
+traditional,all-transactions,quarterly,State,Missouri,MO,2024,4,540.42,
+traditional,all-transactions,quarterly,State,Missouri,MO,2025,1,541.65,
+traditional,all-transactions,quarterly,State,Montana,MT,2024,3,542.36,
+traditional,all-transactions,quarterly,State,Montana,MT,2024,4,543.59,
+traditional,all-transactions,quarterly,State,Montana,MT,2025,1,544.82,
+traditional,all-transactions,quarterly,State,Nebraska,NE,2024,3,545.53,
+traditional,all-transactions,quarterly,State,Nebraska,NE,2024,4,546.76,
+traditional,all-transactions,quarterly,State,Nebraska,NE,2025,1,547.99,
+traditional,all-transactions,quarterly,State,Nevada,NV,2024,3,548.70,
+traditional,all-transactions,quarterly,State,Nevada,NV,2024,4,549.93,
+traditional,all-transactions,quarterly,State,Nevada,NV,2025,1,551.16,
+traditional,all-transactions,quarterly,State,New Hampshire,NH,2024,3,551.87,
+traditional,all-transactions,quarterly,State,New Hampshire,NH,2024,4,553.10,
+traditional,all-transactions,quarterly,State,New Hampshire,NH,2025,1,554.33,
+traditional,all-transactions,quarterly,State,New Jersey,NJ,2024,3,555.04,
+traditional,all-transactions,quarterly,State,New Jersey,NJ,2024,4,556.27,
+traditional,all-transactions,quarterly,State,New Jersey,NJ,2025,1,557.50,
+traditional,all-transactions,quarterly,State,New Mexico,NM,2024,3,558.21,
+traditional,all-transactions,quarterly,State,New Mexico,NM,2024,4,559.44,
+traditional,all-transactions,quarterly,State,New Mexico,NM,2025,1,560.67,
+traditional,all-transactions,quarterly,State,New York,NY,2024,3,561.38,
+traditional,all-transactions,quarterly,State,New York,NY,2024,4,562.61,
+traditional,all-transactions,quarterly,State,New York,NY,2025,1,563.84,
+traditional,all-transactions,quarterly,State,North Carolina,NC,2024,3,564.55,
+traditional,all-transactions,quarterly,State,North Carolina,NC,2024,4,565.78,
+traditional,all-transactions,quarterly,State,North Carolina,NC,2025,1,567.01,
+traditional,all-transactions,quarterly,State,North Dakota,ND,2024,3,567.72,
+traditional,all-transactions,quarterly,State,North Dakota,ND,2024,4,568.95,
+traditional,all-transactions,quarterly,State,North Dakota,ND,2025,1,570.18,
+traditional,all-transactions,quarterly,State,Ohio,OH,2024,3,570.89,
+traditional,all-transactions,quarterly,State,Ohio,OH,2024,4,572.12,
+traditional,all-transactions,quarterly,State,Ohio,OH,2025,1,573.35,
+traditional,all-transactions,quarterly,State,Oklahoma,OK,2024,3,574.06,
+traditional,all-transactions,quarterly,State,Oklahoma,OK,2024,4,575.29,
+traditional,all-transactions,quarterly,State,Oklahoma,OK,2025,1,576.52,
+traditional,all-transactions,quarterly,State,Oregon,OR,2024,3,577.23,
+traditional,all-transactions,quarterly,State,Oregon,OR,2024,4,578.46,
+traditional,all-transactions,quarterly,State,Oregon,OR,2025,1,579.69,
+traditional,all-transactions,quarterly,State,Pennsylvania,PA,2024,3,580.40,
+traditional,all-transactions,quarterly,State,Pennsylvania,PA,2024,4,581.63,
+traditional,all-transactions,quarterly,State,Pennsylvania,PA,2025,1,582.86,
+traditional,all-transactions,quarterly,State,Rhode Island,RI,2024,3,583.57,
+traditional,all-transactions,quarterly,State,Rhode Island,RI,2024,4,584.80,
+traditional,all-transactions,quarterly,State,Rhode Island,RI,2025,1,586.03,
+traditional,all-transactions,quarterly,State,South Carolina,SC,2024,3,586.74,
+traditional,all-transactions,quarterly,State,South Carolina,SC,2024,4,587.97,
+traditional,all-transactions,quarterly,State,South Carolina,SC,2025,1,589.20,
+traditional,all-transactions,quarterly,State,South Dakota,SD,2024,3,589.91,
+traditional,all-transactions,quarterly,State,South Dakota,SD,2024,4,591.14,
+traditional,all-transactions,quarterly,State,South Dakota,SD,2025,1,592.37,
+traditional,all-transactions,quarterly,State,Tennessee,TN,2024,3,593.08,
+traditional,all-transactions,quarterly,State,Tennessee,TN,2024,4,594.31,
+traditional,all-transactions,quarterly,State,Tennessee,TN,2025,1,595.54,
+traditional,all-transactions,quarterly,State,Texas,TX,2024,3,596.25,
+traditional,all-transactions,quarterly,State,Texas,TX,2024,4,597.48,
+traditional,all-transactions,quarterly,State,Texas,TX,2025,1,598.71,
+traditional,all-transactions,quarterly,State,Utah,UT,2024,3,599.42,
+traditional,all-transactions,quarterly,State,Utah,UT,2024,4,600.65,
+traditional,all-transactions,quarterly,State,Utah,UT,2025,1,601.88,
+traditional,all-transactions,quarterly,State,Vermont,VT,2024,3,602.59,
+traditional,all-transactions,quarterly,State,Vermont,VT,2024,4,603.82,
+traditional,all-transactions,quarterly,State,Vermont,VT,2025,1,605.05,
+traditional,all-transactions,quarterly,State,Virginia,VA,2024,3,605.76,
+traditional,all-transactions,quarterly,State,Virginia,VA,2024,4,606.99,
+traditional,all-transactions,quarterly,State,Virginia,VA,2025,1,608.22,
+traditional,all-transactions,quarterly,State,Washington,WA,2024,3,608.93,
+traditional,all-transactions,quarterly,State,Washington,WA,2024,4,610.16,
+traditional,all-transactions,quarterly,State,Washington,WA,2025,1,611.39,
+traditional,all-transactions,quarterly,State,West Virginia,WV,2024,3,612.10,
+traditional,all-transactions,quarterly,State,West Virginia,WV,2024,4,613.33,
+traditional,all-transactions,quarterly,State,West Virginia,WV,2025,1,614.56,
+traditional,all-transactions,quarterly,State,Wisconsin,WI,2024,3,615.27,
+traditional,all-transactions,quarterly,State,Wisconsin,WI,2024,4,616.50,
+traditional,all-transactions,quarterly,State,Wisconsin,WI,2025,1,617.73,
+traditional,all-transactions,quarterly,State,Wyoming,WY,2024,3,618.44,
+traditional,all-transactions,quarterly,State,Wyoming,WY,2024,4,619.67,
+traditional,all-transactions,quarterly,State,Wyoming,WY,2025,1,620.90,
+traditional,all-transactions,quarterly,MSA,"Abilene, TX",10180,2024,3,513.83,
+traditional,purchase-only,quarterly,MSA,"Los Angeles-Long Beach-Glendale, CA (MSAD)",31084,2024,3,510.66,
+expanded-data,purchase-only,quarterly,USA or Census Division,United States,USA,2024,3,507.49,508.11
+non-metro,all-transactions,quarterly,State,California,CA,2024,3,504.32,
+distress-free,purchase-only,quarterly,MSA,"Atlanta-Sandy Springs-Alpharetta, GA",12060,2024,3,501.15,
+traditional,all-transactions,quarterly,MSA,"Abilene, TX",10180,2024,4,515.06,
+traditional,purchase-only,quarterly,MSA,"Los Angeles-Long Beach-Glendale, CA (MSAD)",31084,2024,4,511.89,
+expanded-data,purchase-only,quarterly,USA or Census Division,United States,USA,2024,4,508.72,509.34
+non-metro,all-transactions,quarterly,State,California,CA,2024,4,505.55,
+distress-free,purchase-only,quarterly,MSA,"Atlanta-Sandy Springs-Alpharetta, GA",12060,2024,4,502.38,
+traditional,all-transactions,quarterly,MSA,"Abilene, TX",10180,2025,1,516.29,
+traditional,purchase-only,quarterly,MSA,"Los Angeles-Long Beach-Glendale, CA (MSAD)",31084,2025,1,513.12,
+expanded-data,purchase-only,quarterly,USA or Census Division,United States,USA,2025,1,509.95,510.56
+non-metro,all-transactions,quarterly,State,California,CA,2025,1,506.78,
+distress-free,purchase-only,quarterly,MSA,"Atlanta-Sandy Springs-Alpharetta, GA",12060,2025,1,503.61,
