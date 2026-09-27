@@ -131,6 +131,9 @@ const STATUS_SUCCEEDED: &str = "REQUEST_SUCCEEDED";
 /// Prefix of BLS's per-series "does not exist" message; the series id follows it.
 const DOES_NOT_EXIST: &str = "series does not exist for series ";
 
+/// Prefix of BLS's informational "no data" message; the series id follows it.
+const NO_DATA_FOR_SERIES: &str = "no data available for series ";
+
 /// BLS adapter. See the module docs for request shape, batching, windowing and error mapping.
 #[derive(Debug, Clone)]
 pub struct BlsAdapter {
@@ -379,6 +382,17 @@ fn is_no_data_message(message: &str) -> bool {
 fn missing_series_id(message: &str) -> Option<&str> {
     let lower = message.to_ascii_lowercase();
     let at = lower.find(DOES_NOT_EXIST)? + DOES_NOT_EXIST.len();
+    message
+        .get(at..)?
+        .split(|c: char| c.is_whitespace() || c == ',' || c == '.')
+        .find(|s| !s.is_empty())
+}
+
+/// The series id named by a "No Data Available for Series X Year: Y" message, if `message` is
+/// one.
+fn no_data_series_id(message: &str) -> Option<&str> {
+    let lower = message.to_ascii_lowercase();
+    let at = lower.find(NO_DATA_FOR_SERIES)? + NO_DATA_FOR_SERIES.len();
     message
         .get(at..)?
         .split(|c: char| c.is_whitespace() || c == ',' || c == '.')
@@ -701,10 +715,20 @@ impl BlsAdapter {
                 }
                 let body = returned.remove(id);
                 if body.is_none() && partial {
-                    s.failed = Some(CrawlError::Transient(format!(
-                        "BLS series {id}: not returned ({})",
-                        resp.status
-                    )));
+                    // A "no data" message naming this id, with data already collected from newer
+                    // windows, is the end of its history, not a request failure: don't discard it.
+                    let no_data = resp
+                        .message
+                        .iter()
+                        .any(|m| no_data_series_id(m) == Some(*id));
+                    if no_data && !s.raw.is_empty() {
+                        s.done = true;
+                    } else {
+                        s.failed = Some(CrawlError::Transient(format!(
+                            "BLS series {id}: not returned ({})",
+                            resp.status
+                        )));
+                    }
                     continue;
                 }
                 let (catalog, data) = body.map(|b| (b.catalog, b.data)).unwrap_or_default();
@@ -1432,9 +1456,19 @@ mod tests {
             keyless_first <= 25,
             "keyless first fetch: {keyless_first} requests"
         );
-        // A refresh (5-year revision lookback) is one window with or without a key.
+        // A refresh (the policy's own revision lookback) is one window with or without a key.
+        let lookback_years = (SourcePolicy::default_for(SourceId::Bls)
+            .revision_lookback
+            .as_secs()
+            / (86_400 * 365)) as i32;
+        let end = 2026;
+        let start = end - lookback_years;
         for span in [MAX_YEARS_WITH_KEY, MAX_YEARS_WITHOUT_KEY] {
-            assert_eq!(year_windows(2021, 2026, span).len(), 1, "span {span}");
+            assert_eq!(
+                year_windows(start, end, span).len(),
+                1,
+                "span {span}, lookback {lookback_years}y"
+            );
         }
     }
 
@@ -1867,6 +1901,52 @@ mod tests {
         );
         assert_eq!(dates("NEW1"), vec![d(2024, 1, 1)]);
         assert_eq!(mock.received_requests().await.len(), 3);
+    }
+
+    /// A not-processed response that omits a series entirely (no entry in `Results.series`, not
+    /// even an empty one), but names it in an informational "No Data Available" message, ends its
+    /// history when it already has data instead of failing it transiently and losing that data.
+    #[tokio::test]
+    async fn omitted_series_named_no_data_after_data_keeps_the_data() {
+        let mock = MockSource::start().await;
+        mock.mount_expect(
+            &route().body_contains(json!({"seriesid": ["OLD1", "NEW1"], "startyear": "2015"})),
+            Reply::json(json!({"status": "REQUEST_SUCCEEDED", "message": [],
+                "Results": {"series": [
+                    {"seriesID": "OLD1", "data": [{"year": "2020", "period": "M01", "value": "1.0", "footnotes": [{}]}]},
+                    {"seriesID": "NEW1", "data": [{"year": "2020", "period": "M01", "value": "2.0", "footnotes": [{}]}]},
+                ]}})),
+            1,
+        )
+        .await;
+        mock.mount_expect(
+            &route().body_contains(json!({"seriesid": ["OLD1", "NEW1"], "startyear": "2005"})),
+            Reply::json(json!({"status": "REQUEST_NOT_PROCESSED",
+                "message": ["No Data Available for Series OLD1 Year: 2010"],
+                "Results": {"series": [
+                    {"seriesID": "NEW1", "data": [{"year": "2010", "period": "M01", "value": "3.0", "footnotes": [{}]}]},
+                ]}})),
+            1,
+        )
+        .await;
+        let mut ctx = test_ctx();
+        ctx.keys.bls = None;
+        let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2024);
+        let ids = vec!["OLD1".to_string(), "NEW1".to_string()];
+        let out = adapter.fetch_batch(&ctx, &ids, None).await.unwrap();
+        let dates = |id: &str| -> Vec<NaiveDate> {
+            out[id]
+                .as_ref()
+                .unwrap()
+                .points
+                .iter()
+                .map(|p| p.date)
+                .collect()
+        };
+        // OLD1 keeps its window-1 data instead of losing it to a Transient failure.
+        assert_eq!(dates("OLD1"), vec![d(2020, 1, 1)]);
+        assert_eq!(dates("NEW1"), vec![d(2010, 1, 1), d(2020, 1, 1)]);
+        assert_eq!(mock.received_requests().await.len(), 2);
     }
 
     #[test]
