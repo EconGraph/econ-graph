@@ -1504,7 +1504,8 @@ fn db_error_fails_dataset_key_collisions_permanently() {
         let e = unique(constraint);
         assert_eq!(e.kind(), "permanent", "{constraint}");
         assert!(
-            e.to_string().contains("already has this dataset and dimension values"),
+            e.to_string()
+                .contains("already has this dataset and dimension values"),
             "{e}"
         );
     }
