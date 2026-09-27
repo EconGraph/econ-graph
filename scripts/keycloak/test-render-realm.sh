@@ -47,6 +47,15 @@ got = json.loads(sys.argv[1])
 assert got == {"a": 'p\\q"r/&', "b": "${A}", "c": "plain default"}, got
 EOF
 
+# A value containing a newline (e.g. a multi-line secret) must not break the JSON.
+printf '{"secret": "${SECRET}"}\n' >"$scratch/newline-realm.json"
+rendered="$(env -i PATH="$PATH" SECRET=$'line one\nline two' "$render" "$scratch/newline-realm.json")"
+python3 - "$rendered" <<'EOF' || fail "a newline in a value should be escaped, not break the JSON"
+import json, sys
+got = json.loads(sys.argv[1])
+assert got == {"secret": "line one\nline two"}, got
+EOF
+
 if [ "$failures" -ne 0 ]; then
   echo "${failures} render-realm test(s) failed"
   exit 1

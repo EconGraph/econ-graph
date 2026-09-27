@@ -124,14 +124,17 @@ See `k8s/manifests/keycloak/` and the Keycloak section of `k8s/README.md`. The r
 file becomes the ConfigMap `keycloak-realm`; credentials live only in the Secret
 `econ-graph-keycloak`, written by `scripts/deploy/create-secrets.sh`.
 
-The realm is applied on every deploy by the Job `keycloak-realm-import`
-(`realm-import-job.yaml`), which runs [keycloak-config-cli](https://github.com/adorsys/keycloak-config-cli)
-against the running server. It changes only what differs from the realm file and never
-touches users, their role mappings or sessions, so Google-brokered accounts survive a
-redeploy. The alternatives were rejected: `--import-realm` skips an existing realm, and
-`kc.sh import --override true` deletes the realm and every account in it. A realm
-role, client or mapper removed from the file is removed from the cluster on the next
-deploy.
+The realm is created (on the first deploy) and applied (on every deploy after) by the
+Job `keycloak-realm-import` (`realm-import-job.yaml`), which runs
+[keycloak-config-cli](https://github.com/adorsys/keycloak-config-cli) against the
+running server. Keycloak itself does not import anything: the alternatives were
+rejected because `--import-realm` creates resources directly, outside
+keycloak-config-cli's tracking, so removing one from the file later would leave it
+behind in the cluster; `kc.sh import --override true` deletes the realm and every
+account in it. keycloak-config-cli instead changes only what differs from the realm
+file and never touches users, their role mappings or sessions, so Google-brokered
+accounts survive a redeploy. A realm role, client or mapper removed from the file is
+removed from the cluster on the next deploy.
 
 The Job signs in as the admin from the Secret's `admin-username` / `admin-password`.
 If that password is changed in the admin console (Keycloak asks to replace the

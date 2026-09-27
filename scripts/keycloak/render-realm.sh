@@ -6,8 +6,9 @@
 #
 # Usage: scripts/keycloak/render-realm.sh <realm.json>
 # A placeholder with no default and no variable set fails the render. Values are
-# spliced into JSON strings, so `"` and `\` in them are escaped; a value is never
-# scanned for placeholders of its own.
+# spliced into JSON strings, so `\`, `"` and the newline/carriage-return/tab
+# control characters in them are escaped; a value is never scanned for
+# placeholders of its own.
 set -euo pipefail
 
 if [ $# -ne 1 ]; then
@@ -31,6 +32,9 @@ while [[ "$rest" =~ $pattern ]]; do
   fi
   value="${value//\\/\\\\}"
   value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
   # Everything before the first match is done; keep scanning after it.
   rendered+="${rest%%"$placeholder"*}${value}"
   rest="${rest#*"$placeholder"}"

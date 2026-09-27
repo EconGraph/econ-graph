@@ -15,9 +15,12 @@
 # config/keycloak/econ-graph-realm.json. The seeded dev and QA test users are for the
 # local compose stack only and never deployed (CI enforces this).
 #
-# --import-realm creates the realm on the first start only. The Job in
-# realm-import-job.yaml then applies the realm file on every deploy, so later changes
-# to it (roles, clients, the Google client) reach the cluster without touching users.
+# The Job in realm-import-job.yaml creates the realm on the first deploy and applies
+# it on every deploy after, so later changes to it (roles, clients, the Google client)
+# reach the cluster without touching users. Keycloak itself does not import anything:
+# --import-realm would create resources (roles, composites) directly that
+# keycloak-config-cli does not then own, so removing one from the file later would
+# leave it behind in the cluster.
 #
 # The admin console is not exposed on the ingress. Reach it with
 #   kubectl -n econ-graph port-forward svc/keycloak-service 18080:8080
@@ -67,7 +70,7 @@ spec:
         args:
         - |
           if [ -n "${KC_GOOGLE_CLIENT_ID:-}" ] && [ -n "${KC_GOOGLE_CLIENT_SECRET:-}" ]; then export KC_GOOGLE_ENABLED=true; fi
-          exec /opt/keycloak/bin/kc.sh start --import-realm
+          exec /opt/keycloak/bin/kc.sh start
         env:
         - name: KC_BOOTSTRAP_ADMIN_USERNAME
           valueFrom:
@@ -126,10 +129,6 @@ spec:
           name: http
         - containerPort: 9000
           name: management
-        volumeMounts:
-        - name: realm
-          mountPath: /opt/keycloak/data/import
-          readOnly: true
         resources:
           requests:
             memory: "512Mi"
@@ -168,15 +167,6 @@ spec:
             - ALL
           seccompProfile:
             type: RuntimeDefault
-      volumes:
-      - name: realm
-        configMap:
-          name: keycloak-realm
-          # The ConfigMap also carries render-realm.sh for the realm-import Job;
-          # only the realm belongs in Keycloak's import directory.
-          items:
-          - key: econ-graph-realm.json
-            path: econ-graph-realm.json
       securityContext:
         seccompProfile:
           type: RuntimeDefault
