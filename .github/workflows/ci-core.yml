@@ -10,8 +10,11 @@ on:
       - 'LICENSE'
       - '.gitignore'
       - '.github/workflows/README.md'
+  # No branch filter: pull requests into another feature branch (stacked PRs)
+  # run the same checks as pull requests into main. Retargeting a child to main
+  # after its parent merges is an `edited` event, which does not run CI; the
+  # child's next push does.
   pull_request:
-    branches: [ main, develop ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -46,6 +49,14 @@ on:
         required: false
         default: ''
         type: string
+
+# One run per pull request: a new push to a pull request cancels the run
+# still going for its previous head. Pushes and manual runs are keyed by
+# commit, so every commit on main and develop keeps its own run and nothing
+# there is cancelled or queued behind another run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
