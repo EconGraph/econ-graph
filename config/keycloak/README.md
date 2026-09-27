@@ -8,7 +8,7 @@ Keycloak is EconGraph's identity provider. The realm is configuration as code:
 | `dev/econ-graph-users-0.json` | docker-compose only | Seeded test users. Never deployed |
 | `qa/econ-graph-users-1.json` | `docker-compose.qa-users.yml` only | QA users `qa-alice`, `qa-bob`. Never deployed |
 
-Keycloak imports both files on first start (`--import-realm`). An existing realm is
+Keycloak imports the mounted files on first start (`--import-realm`). An existing realm is
 not overwritten, so after editing a file, reset the realm by dropping Keycloak's
 database volume and starting again:
 
