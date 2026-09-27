@@ -6,15 +6,36 @@
 #
 # Usage: scripts/keycloak/render-realm.sh <realm.json>
 # A placeholder with no default and no variable set fails the render. Values are
-# spliced into JSON strings, so `\`, `"` and the newline/carriage-return/tab
-# control characters in them are escaped; a value is never scanned for
-# placeholders of its own.
+# spliced into JSON strings, so `\`, `"` and every ASCII control character
+# (0x00-0x1F: newline, tab, etc.) in them are escaped, per RFC 8259; a value is
+# never scanned for placeholders of its own.
 set -euo pipefail
 
 if [ $# -ne 1 ]; then
   echo "usage: $0 <realm.json>" >&2
   exit 2
 fi
+
+# Escapes `\`, `"` and every ASCII control character in $1 for a JSON string.
+json_escape() {
+  local s="$1" out="" c code
+  local len=${#s}
+  for (( i = 0; i < len; i++ )); do
+    c="${s:i:1}"
+    case "$c" in
+      '\') out+='\\' ;;
+      '"') out+='\"' ;;
+      *)
+        printf -v code '%d' "'$c"
+        if (( code < 32 )); then
+          printf -v c '\\u%04x' "$code"
+        fi
+        out+="$c"
+        ;;
+    esac
+  done
+  printf '%s' "$out"
+}
 
 rest="$(cat -- "$1")"
 rendered=""
@@ -30,11 +51,7 @@ while [[ "$rest" =~ $pattern ]]; do
     echo "render-realm: ${name} is not set and ${placeholder} has no default" >&2
     exit 1
   fi
-  value="${value//\\/\\\\}"
-  value="${value//\"/\\\"}"
-  value="${value//$'\n'/\\n}"
-  value="${value//$'\r'/\\r}"
-  value="${value//$'\t'/\\t}"
+  value="$(json_escape "$value")"
   # Everything before the first match is done; keep scanning after it.
   rendered+="${rest%%"$placeholder"*}${value}"
   rest="${rest#*"$placeholder"}"
