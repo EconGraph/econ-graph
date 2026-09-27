@@ -516,26 +516,24 @@ export interface SeriesListResponse {
 export interface SeriesDetailResponse {
   series: {
     id: string;
+    externalId: string;
     title: string;
-    description: string;
-    source: {
-      name: string;
-      description: string;
-    };
+    description: string | null;
+    source: { name: string } | null;
     frequency: string;
-    units: string;
-    seasonalAdjustment?: string;
-    startDate: string;
-    endDate: string;
-    lastUpdated: string;
+    units: string | null;
+    seasonalAdjustment: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    lastUpdated: string | null;
     isActive: boolean;
-    dataPointCount: number;
-  };
+  } | null;
 }
 
 export interface DataPoint {
   date: string;
-  value: number | null;
+  /** BigDecimal on the wire: a numeric string, or null where the value is missing. */
+  value: string | null;
   revisionDate: string;
   isOriginalRelease: boolean;
 }
@@ -544,12 +542,6 @@ export interface SeriesDataResponse {
   seriesData: {
     nodes: DataPoint[];
     totalCount: number;
-    pageInfo: {
-      hasNextPage: boolean;
-      hasPreviousPage: boolean;
-      startCursor?: string;
-      endCursor?: string;
-    };
   };
 }
 
