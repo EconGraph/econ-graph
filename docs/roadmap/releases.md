@@ -11,14 +11,14 @@ links back here from its own "Release trains" section.
 
 - **A train is a scope, not a date.** It leaves when its exit criteria pass. Nobody can
   estimate a revived project's pace yet, so dates would be guesses.
-- **Each train is a tag on `main`.** Every package is at `0.1.0` (`backend/Cargo.toml`,
+- **Each train is a tag on its release branch** (below). Every package is at `0.1.0` (`backend/Cargo.toml`,
   `frontend/package.json`, `admin-frontend/package.json`), but the repo already carries
   old demo tags from `v0.1` up to `v3.7.3`, including `v0.4.0` to `v0.7.0`. So the first
   train is `v4.0.0`, above every existing tag, and each later train bumps the minor
   version. The old tags stay: deleting published tags would break anyone who fetched them.
   Each release also pushes a `train-N` tag, which the feature flag file's `remove_by`
   check reads ([feature-flags.md](./feature-flags.md)).
-- **Work keeps landing as small PRs on `main`.** There are no release branches.
+- **Work keeps landing as small PRs on `main`.** The only branches cut from it are the release branches for QA.
   Unfinished work merges only behind build-time flags that compile it out of release
   builds. Runtime flags are for alpha and beta features that work end to end, never for
   mock data ([feature-flags.md](./feature-flags.md), #195).
@@ -33,6 +33,13 @@ links back here from its own "Release trains" section.
   `ChartCollaboration`, which run on mock data and a made-up chart id.
 - **A train can shrink but not grow.** If an item threatens the exit criteria, it moves
   to the next train. New ideas go to a later train, not the current one.
+
+- **QA runs on a release branch (Joe, 2026-09-27).** Work stays on `main` until a train
+  reaches QA. At that point `release/vX.Y` is cut from `main`, and the QA cycle, its fixes and the tag all happen on
+  that branch. `main` reopens for experimental work and the next train, and the areas
+  start scoping the next cut there, each scope reviewed by a Fable agent. Fixes land on
+  the branch first and are forward-ported to `main`. See the
+  [release process](../development/RELEASE_PROCESS.md).
 
 ## The gap the topic roadmaps don't cover
 
@@ -122,7 +129,7 @@ The State column tracks each item's PRs. Every PR updates its item's row when it
 | 16 | Release flags at build time: a flag file in the repo with metadata and a CI check, frontend flags folded in by Vite so flagged-off code is absent from the release bundle, and backend startup flags (for example `/mcp`) | [feature-flags.md](./feature-flags.md) phase 1 (#195) | #198 draft |
 | 17 | Flag off what can't work yet. The "Coming Soon" global tabs sit behind build-time flags that are off in every profile until the PRs that replace them delete them. `/mcp` is flagged off in release builds. The financial components and the XBRL parser are compiled out. Deleted as known bad: `/analysis` (`ProfessionalAnalysis`, a second series view on mock data) with `ProfessionalChart` and `ChartCollaboration`, the financial demo page's own inline fixtures (the mock GraphQL query documents that `components/financial` imports stay with those compiled-out components until SEC phase 4), the fake correlation code, and on the SEC side the Arelle path, the large-object placeholder, the hard-coded CIK list and the stubs that report success with nothing done | Global analysis phase 1; [feature-flags.md](./feature-flags.md) fork 1; [sec-financial-data.md](./sec-financial-data.md) phase 0 | #199 draft; more to come |
 | 18 | Committed `schema.graphql` with a backend test that fails when it drifts, and the main frontend's operations validated against it | Admin UI phase 1, applied to the main frontend first | #208 draft |
-| 19 | Release mechanics: version bump, release notes, deploy from the tag | New | Not started |
+| 19 | Release mechanics: version bump, release notes, deploy from the tag | New | QA plan in `docs/release/v4.0.0-qa.md` (PR #238); version and tag workflow not started |
 | 20 | Datasets metadata: the `datasets` table and the `economic_series` dataset and dimension columns. Goes first: items 10 and 22 to 24 build on it | Federation phase 3's first PR; global analysis phase 3 | #220 merged (DS-1); #225 merged (DS-3: adapters declare datasets, TOML definitions under `data/datasets/`, the crawler writes `dataset_id` and `dimensions`); DS-6 #229, DS-4 #231, DS-5 #237 build on them |
 | 21 | BLS: widen the hard-coded series list to the main CPI, CES and LAUS series | [data-sources.md](./data-sources.md) | In progress |
 | 22 | FHFA HPI rebuilt on the published master CSV | [fhfa.md](../data-sources/fhfa.md) | In progress |
@@ -188,14 +195,15 @@ MCP by [auth-plans-permissions.md](./auth-plans-permissions.md) and the admin ap
    - loads the map for three WDI indicators and sees a value for every country the World
      Bank reports one for (a sanity floor: at least 150 countries);
    - signs in through Keycloak and annotates a series publicly and privately, and a second
-     account sees the public annotation and not the private one.
+     account sees the public annotation and not the private one (live: as two QA-only
+     realm-local test users; the real Google sign-in is checked by hand, see the QA plan).
 6. The security items 1, 3 and 4 are merged, item 2's rotation is done, and no endpoint accepts a token Keycloak didn't issue.
-7. `v4.0.0` and `train-1` are tagged, with release notes that list the sources and features.
+7. `v4.0.0` and `train-1` are tagged on `release/v4.0`, with release notes that list the sources and features.
 
 Until the final QA phase, CI runs the Playwright suite against a local stack seeded from
-recorded fixtures, with no live API keys. Criteria 2, 3 and 5 against live sources are
-checked in a final QA phase that deploys with real API keys and runs the full end-to-end
-tests there (Joe, 2026-09-26). That deployment runs for at least seven days before the tag, for criterion 3. The tag comes after that phase passes.
+recorded fixtures, with no live API keys. Criteria 2, 3 and 5 against live sources, and
+criterion 6 against the live Keycloak, are checked in a final QA phase that deploys with real API keys and runs the full end-to-end
+tests there (Joe, 2026-09-26). That deployment runs for at least seven days before the tag, for criterion 3. The tag comes after that phase passes. Where it deploys is still open (open question 2), and the release pauses before the QA deploy until Joe decides. QA runs on the `release/v4.0` branch, cut from `main` when train 1's items are in.
 
 ### Forks for train 1
 
@@ -272,9 +280,9 @@ the topic roadmaps own the detail.
 ## Open questions for Joe
 
 1. Fork 4 above: what train 6 is.
-2. **Where does `v4.0.0` run?** The repo has Kubernetes manifests and Terraform, and the
-   leaked OAuth credentials suggest a deployment once existed. Nothing says whether one
-   runs today. The final QA phase (above) needs a target.
+2. **Where does `v4.0.0` run?** Pending (Joe, 2026-09-27: he has plans). This is a planned
+   pause: the release stops before the QA deploy until he decides, and all work up to that
+   step continues. The [QA plan](../release/v4.0.0-qa.md) lists what any target needs.
 3. **Which series go on the dashboard?** The proposal is FRED `GDP`, `UNRATE`,
    `CPIAUCSL` and `FEDFUNDS`, which match today's hard-coded cards.
 4. **API keys and network access.** FRED, BEA and Census need API keys, and the cloud
