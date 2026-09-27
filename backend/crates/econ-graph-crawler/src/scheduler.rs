@@ -58,7 +58,7 @@ use crate::sources::static_catalogs::is_static_catalog_source;
 /// `CrawlError::Permanent("... not implemented yet")`. Enqueuing refreshes for them would only
 /// produce failed jobs, so the scheduler skips them. Remove a source here once its adapter
 /// implements `fetch_series`.
-pub const FETCH_UNIMPLEMENTED: &[SourceId] = &[SourceId::WorldBank, SourceId::Imf, SourceId::Bea];
+pub const FETCH_UNIMPLEMENTED: &[SourceId] = &[SourceId::Imf, SourceId::Bea];
 
 /// How often each source's catalog is re-discovered.
 pub const DISCOVERY_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -648,11 +648,11 @@ mod tests {
             SourceId::Bls,
             SourceId::Census,
             SourceId::Fhfa,
+            SourceId::WorldBank,
         ] {
             assert!(supports_fetch(s), "{s}");
         }
         for s in [
-            SourceId::WorldBank,
             SourceId::Imf,
             SourceId::Bea,
             SourceId::Sec,
@@ -673,6 +673,7 @@ mod tests {
                 SourceId::Fred,
                 SourceId::Bls,
                 SourceId::Census,
+                SourceId::WorldBank,
                 SourceId::Fhfa
             ]
         );
