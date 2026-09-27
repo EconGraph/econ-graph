@@ -16,6 +16,8 @@ pub mod schema;
 pub(crate) static TEST_DB_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[cfg(test)]
+mod annotation_visibility_tests;
+#[cfg(test)]
 mod authorization_tests;
 #[cfg(test)]
 pub mod n_plus_one_tests;

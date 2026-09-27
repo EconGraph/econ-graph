@@ -1,4 +1,5 @@
 use crate::database::DatabasePool;
+use crate::enums::AnnotationVisibility;
 use crate::error::{AppError, AppResult};
 /**
  * REQUIREMENT: User authentication models for OAuth and collaboration
@@ -553,7 +554,7 @@ pub struct ChartAnnotation {
     pub description: Option<String>,
     pub color: Option<String>,
     pub annotation_type: Option<String>,
-    pub is_visible: Option<bool>,
+    pub visibility: AnnotationVisibility,
     pub is_pinned: Option<bool>,
     pub tags: Option<Vec<Option<String>>>,
     pub created_at: Option<DateTime<Utc>>,
@@ -573,7 +574,7 @@ pub struct NewChartAnnotation {
     pub description: Option<String>,
     pub color: Option<String>,
     pub annotation_type: Option<String>,
-    pub is_visible: Option<bool>,
+    pub visibility: AnnotationVisibility,
     pub is_pinned: Option<bool>,
     pub tags: Option<Vec<Option<String>>>,
 }
