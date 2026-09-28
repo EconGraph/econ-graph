@@ -20,6 +20,7 @@ import {
 import { Info, ZoomIn, ZoomOut, RestartAlt } from '@mui/icons-material';
 import * as d3 from 'd3';
 import * as topojson from 'topojson-client';
+import { loadWorldAtlas } from './worldAtlas';
 
 // Types for the component
 interface CountryData {
@@ -317,8 +318,8 @@ const GlobalEconomicNetworkMap: React.FC = () => {
       .attr('stroke-width', '2');
 
     // Load and render world map
-    d3.json('https://cdn.jsdelivr.net/npm/world-atlas@3/world/110m.json')
-      .then((world: any) => {
+    loadWorldAtlas()
+      .then(world => {
         // Draw world countries
         const worldFeatures = topojson.feature(world, world.objects.countries) as any;
         g.selectAll('.world-country')

@@ -31,6 +31,9 @@ cd "$PROJECT_ROOT"
 # Step 2: Deploy PostgreSQL in Kubernetes
 echo ""
 echo "📋 Step 2: Deploying PostgreSQL in Kubernetes..."
+kubectl apply -f k8s/manifests/namespace.yaml
+# PostgreSQL reads its passwords from the econ-graph-postgres Secret.
+./scripts/deploy/create-secrets.sh
 kubectl apply -f k8s/manifests/postgres-init.yaml
 kubectl apply -f k8s/manifests/postgres-deployment.yaml
 kubectl apply -f k8s/manifests/postgres.yaml

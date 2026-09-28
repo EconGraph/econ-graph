@@ -19,7 +19,7 @@ pub mod test_utils;
 
 // Re-export commonly used types
 pub use config::Config;
-pub use database::{create_pool, run_migrations, DatabasePool};
+pub use database::{create_pool, redact_database_url, run_migrations, DatabasePool};
 pub use error::{AppError, AppResult};
 
 // Re-export all models for convenience

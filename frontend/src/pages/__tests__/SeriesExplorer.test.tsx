@@ -9,6 +9,7 @@ import { vi } from 'vitest';
 import { render, setupTestEnvironment, cleanupTestEnvironment } from '../../test-utils/material-ui-test-setup';
 import { setMockScenario, MockScenarios } from '../../test-utils/mocks/simpleServer';
 import SeriesExplorer from '../SeriesExplorer';
+import { useSeriesSearch } from '../../hooks/useSeriesData';
 
 // Use MSW for GraphQL mocking - no need to mock GraphQL directly
 // MSW is already set up in setupTests.vitest.ts
@@ -84,8 +85,17 @@ vi.mock('../../hooks/useSeriesData', () => ({
     refetch: vi.fn(),
     remove: vi.fn(),
   })),
-  useSeriesSearch: vi.fn(() => ({
-    data: mockSearchResults,
+  // Behaves like the backend search: series whose title or description contains the query,
+  // from the chosen source if there is one
+  useSeriesSearch: vi.fn((query: string, filters?: { sourceId?: string }) => ({
+    data:
+      query.trim().length < 2
+        ? []
+        : mockSearchResults.filter(
+            series =>
+              `${series.title} ${series.description}`.toLowerCase().includes(query.toLowerCase()) &&
+              (!filters?.sourceId || series.sourceId === filters.sourceId)
+          ),
     isLoading: false,
     error: null,
     isError: false,
@@ -566,8 +576,8 @@ describe('SeriesExplorer', () => {
     // Should provide helpful guidance
     expect(screen.getByText(/try adjusting your search criteria/i)).toBeInTheDocument();
     
-    // Should provide action to browse all series
-    expect(screen.getByRole('button', { name: /browse all series/i })).toBeInTheDocument();
+    // Should provide action to clear the search
+    expect(screen.getByRole('button', { name: /clear search and filters/i })).toBeInTheDocument();
   });
 
   test('should handle loading state gracefully', async () => {
@@ -680,7 +690,7 @@ describe('SeriesExplorer', () => {
     expect(screen.getByText(/try adjusting your search criteria/i)).toBeInTheDocument();
     
     // Should offer alternative actions
-    const browseButton = screen.getByRole('button', { name: /browse all series/i });
+    const browseButton = screen.getByRole('button', { name: /clear search and filters/i });
     expect(browseButton).toBeInTheDocument();
   });
 
@@ -713,7 +723,7 @@ describe('SeriesExplorer', () => {
 
     // Should remain functional despite empty states
     expect(searchInput).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /browse all series/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /clear search and filters/i })).toBeInTheDocument();
   });
 
   test('should provide clear feedback for empty database scenario', async () => {
@@ -766,5 +776,308 @@ describe('SeriesExplorer', () => {
 
     // Should handle search execution gracefully
     expect(screen.getByText(/series explorer/i)).toBeInTheDocument();
+  });
+});
+
+describe('SeriesExplorer shows only what the backend returned', () => {
+  const searchHook = vi.mocked(useSeriesSearch);
+  const defaultSearch = searchHook.getMockImplementation();
+
+  beforeEach(() => {
+    setupTestEnvironment();
+  });
+
+  afterEach(() => {
+    if (defaultSearch) searchHook.mockImplementation(defaultSearch);
+    vi.restoreAllMocks();
+    cleanupTestEnvironment();
+  });
+
+  const searchReturning = (data: unknown[]) =>
+    ({ data, isLoading: false, isFetching: false, error: null, refetch: vi.fn() }) as any;
+
+  test('does not show a made-up search time', async () => {
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    await user.type(screen.getByPlaceholderText(/search economic series/i), 'unemployment');
+    await user.click(screen.getByRole('button', { name: /^search$/i }));
+
+    expect(await screen.findByText(/found 1 result$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/\d+ms/)).not.toBeInTheDocument();
+  });
+
+  test('a result without dates shows no dates', async () => {
+    searchHook.mockImplementation(() =>
+      searchReturning([
+        {
+          id: 'no-dates-1',
+          title: 'Series Without Dates',
+          description: 'Discovered but not yet crawled',
+          sourceId: 'bls',
+          frequency: 'Monthly',
+          units: 'Percent',
+          lastUpdated: null,
+          startDate: null,
+          endDate: null,
+        },
+      ])
+    );
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    await user.type(screen.getByPlaceholderText(/search economic series/i), 'series');
+
+    expect(await screen.findByText('Series Without Dates')).toBeInTheDocument();
+    expect(screen.getByText('Bureau of Labor Statistics')).toBeInTheDocument();
+    expect(screen.queryByText(/\d{4}-\d{2}-\d{2}/)).not.toBeInTheDocument();
+  });
+
+  test('a result with dates shows its own range', async () => {
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    await user.type(screen.getByPlaceholderText(/search economic series/i), 'unemployment');
+
+    expect(await screen.findByText('1948-01-01 - 2024-11-01')).toBeInTheDocument();
+  });
+
+  test('the source filter lists the data sources and sends the chosen id', async () => {
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    await user.click(screen.getByRole('combobox', { name: /source/i }));
+    const options = await screen.findAllByRole('option');
+    expect(options.map(option => option.textContent)).toEqual([
+      'All Sources',
+      'Federal Reserve Economic Data',
+      'Bureau of Labor Statistics',
+    ]);
+
+    await user.click(screen.getByRole('option', { name: 'Bureau of Labor Statistics' }));
+
+    await waitFor(() => {
+      expect(searchHook).toHaveBeenLastCalledWith('', { sourceId: 'bls', limit: 100 }, true);
+    });
+  });
+
+  test('series from other sources are not shown when a source is chosen', async () => {
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    await user.type(screen.getByPlaceholderText(/search economic series/i), 'rate');
+    expect(await screen.findByText('Unemployment Rate')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('combobox', { name: /source/i }));
+    await user.click(await screen.findByRole('option', { name: 'Bureau of Labor Statistics' }));
+
+    expect(await screen.findByText(/no series found/i)).toBeInTheDocument();
+  });
+
+  test('shows no loading placeholders before anything is searched', () => {
+    // React Query v4 reports a disabled query with no data as loading; only
+    // isInitialLoading means a request is in flight
+    searchHook.mockImplementation(
+      () => ({ ...searchReturning(undefined as any), isLoading: true, isInitialLoading: false }) as any
+    );
+    renderSeriesExplorer();
+
+    // The prompt renders only when the page isn't showing loading placeholders
+    expect(screen.getByText(/search for a series/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no series found/i)).not.toBeInTheDocument();
+  });
+
+  test('changing the search goes back to the first page of results', async () => {
+    const many = Array.from({ length: 45 }, (_, i) => ({
+      id: `series-${i}`,
+      title: `Rate Series ${String(i).padStart(2, '0')}`,
+      description: '',
+      sourceId: 'fred',
+      frequency: 'Monthly',
+      units: 'Percent',
+    }));
+    searchHook.mockImplementation((query: string) =>
+      searchReturning(
+        query.trim().length < 2
+          ? []
+          : many.filter(series => series.title.toLowerCase().includes(query.toLowerCase()))
+      )
+    );
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    const input = screen.getByPlaceholderText(/search economic series/i);
+    await user.type(input, 'rate');
+    await user.click(await screen.findByRole('button', { name: /go to page 3/i }));
+    expect(await screen.findByText('Rate Series 40')).toBeInTheDocument();
+
+    await user.type(input, ' series');
+    expect(await screen.findByText('Rate Series 00')).toBeInTheDocument();
+  });
+
+  test('shows loading placeholders while a search is in flight', async () => {
+    searchHook.mockImplementation(
+      () =>
+        ({
+          ...searchReturning(undefined as any),
+          isLoading: true,
+          isInitialLoading: true,
+        }) as any
+    );
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    await user.type(screen.getByPlaceholderText(/search economic series/i), 'gdp');
+
+    expect(screen.queryByText(/search for a series/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no series found/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^found/i)).not.toBeInTheDocument();
+  });
+
+  test('says when results hit the search limit instead of claiming a total', async () => {
+    const capped = Array.from({ length: 100 }, (_, i) => ({
+      id: `series-${i}`,
+      title: `Price Series ${i}`,
+      description: '',
+      sourceId: 'fred',
+      frequency: 'Monthly',
+      units: 'Index',
+    }));
+    searchHook.mockImplementation(() => searchReturning(capped));
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    await user.type(screen.getByPlaceholderText(/search economic series/i), 'price');
+
+    expect(await screen.findByText(/first 100 results/i)).toBeInTheDocument();
+    expect(screen.queryByText(/found 100 results/i)).not.toBeInTheDocument();
+  });
+
+  test('a failed search shows the error and no empty-results panel', async () => {
+    searchHook.mockImplementation(
+      () => ({ ...searchReturning(undefined as any), error: new Error('backend down') }) as any
+    );
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    await user.type(screen.getByPlaceholderText(/search economic series/i), 'gdp');
+
+    expect(await screen.findByText(/search failed: backend down/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no series found/i)).not.toBeInTheDocument();
+  });
+
+  test('sorts by title and by newest update', async () => {
+    searchHook.mockImplementation(() =>
+      searchReturning([
+        { id: 'b', title: 'Bravo', sourceId: 'fred', frequency: 'Monthly', lastUpdated: '2024-05-01T08:00:00Z' },
+        { id: 'c', title: 'Charlie', sourceId: 'fred', frequency: 'Monthly', lastUpdated: '2024-05-01T20:00:00Z' },
+        { id: 'a', title: 'Alpha', sourceId: 'fred', frequency: 'Monthly', lastUpdated: '2024-04-01T00:00:00Z' },
+      ])
+    );
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+    await user.type(screen.getByPlaceholderText(/search economic series/i), 'series');
+    await screen.findByText('Bravo');
+
+    const titles = () =>
+      screen.getAllByText(/^(Alpha|Bravo|Charlie)$/).map(element => element.textContent);
+    const chooseSort = async (label: string) => {
+      await user.click(screen.getByRole('button', { name: /advanced search/i }));
+      await user.click(screen.getByRole('combobox', { name: /sort by/i }));
+      await user.click(await screen.findByRole('option', { name: label }));
+    };
+
+    await chooseSort('Title');
+    await waitFor(() => expect(titles()).toEqual(['Alpha', 'Bravo', 'Charlie']));
+
+    await chooseSort('Last Updated');
+    await waitFor(() => expect(titles()).toEqual(['Charlie', 'Bravo', 'Alpha']));
+  });
+
+  test('the frequency filter lists the frequencies in the results and narrows them', async () => {
+    searchHook.mockImplementation(() =>
+      searchReturning([
+        { id: 'm', title: 'Monthly Series', sourceId: 'fred', frequency: 'Monthly' },
+        { id: 'q', title: 'Quarterly Series', sourceId: 'fred', frequency: 'Quarterly' },
+      ])
+    );
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+    await user.type(screen.getByPlaceholderText(/search economic series/i), 'series');
+    await screen.findByText('Monthly Series');
+
+    await user.click(screen.getByRole('combobox', { name: /frequency/i }));
+    const options = await screen.findAllByRole('option');
+    expect(options.map(option => option.textContent)).toEqual([
+      'All Frequencies',
+      'Monthly',
+      'Quarterly',
+    ]);
+    await user.click(screen.getByRole('option', { name: 'Quarterly' }));
+
+    await waitFor(() => expect(screen.queryByText('Monthly Series')).not.toBeInTheDocument());
+    expect(screen.getByText('Quarterly Series')).toBeInTheDocument();
+  });
+
+  test('sends a recognized frequency filter to the backend', async () => {
+    searchHook.mockImplementation(() =>
+      searchReturning([
+        { id: 'm', title: 'Monthly Series', sourceId: 'fred', frequency: 'Monthly' },
+        { id: 'q', title: 'Quarterly Series', sourceId: 'fred', frequency: 'Quarterly' },
+      ])
+    );
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+    await user.type(screen.getByPlaceholderText(/search economic series/i), 'series');
+    await screen.findByText('Monthly Series');
+
+    await user.click(screen.getByRole('combobox', { name: /frequency/i }));
+    await user.click(await screen.findByRole('option', { name: 'Monthly' }));
+
+    await waitFor(() =>
+      expect(searchHook).toHaveBeenLastCalledWith(
+        'series',
+        { sourceId: undefined, frequency: 'MONTHLY', limit: 100 },
+        true
+      )
+    );
+  });
+
+  test('exports CSV cells that could run as a spreadsheet formula with a leading quote', async () => {
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    let blobText = '';
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      void blob.text().then(text => {
+        blobText = text;
+      });
+      return 'blob:mock';
+    });
+    URL.revokeObjectURL = vi.fn();
+    try {
+      searchHook.mockImplementation(() =>
+        searchReturning([
+          {
+            id: 'x',
+            title: '=cmd|/c calc',
+            description: '',
+            sourceId: 'fred',
+            frequency: 'Monthly',
+          },
+        ])
+      );
+      const user = userEvent.setup();
+      renderSeriesExplorer();
+      await user.type(screen.getByPlaceholderText(/search economic series/i), 'cmd');
+      await screen.findByText('=cmd|/c calc');
+
+      await user.click(screen.getByRole('button', { name: /export results/i }));
+      await user.click(await screen.findByRole('menuitem', { name: /export as csv/i }));
+
+      await waitFor(() => expect(blobText).toContain("'=cmd|/c calc"));
+    } finally {
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+    }
   });
 });

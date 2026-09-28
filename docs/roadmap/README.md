@@ -1,6 +1,27 @@
 # EconGraph Roadmap
 
-This is the single entry point for EconGraph's roadmap. The project sat idle from
+> **Moved to Linear on 2026-09-27.** Roadmaps and release plans now live in
+> [Linear](https://linear.app/econgraph). Releases are issues ECO-5 (train 1, `v4.0.0`)
+> through ECO-11 (train 7), and each topic is a Linear project. This index is frozen as
+> of that date: its State column, the "What is built today" snapshot and the open-work
+> lists are no longer updated, and where they differ from Linear, Linear is current. The
+> stale-PR recommendations and the doc inventory below are kept only here.
+
+Linear projects:
+
+- [Auth, plans and permissions](https://linear.app/econgraph/project/auth-plans-and-permissions-852b7217015b)
+- [Admin UI](https://linear.app/econgraph/project/admin-ui-ad2b8b56fe3f)
+- [Federation and datasets](https://linear.app/econgraph/project/federation-and-datasets-2d6e3c5159f8)
+- [Global analysis](https://linear.app/econgraph/project/global-analysis-4d1fbf9d5143)
+- [Releases and release engineering](https://linear.app/econgraph/project/releases-and-release-engineering-ee56b60d9c7a)
+- [Data sources](https://linear.app/econgraph/project/data-sources-7b8a25b3313e)
+- [Analysis workspace](https://linear.app/econgraph/project/analysis-workspace-e2c63872061b), which also holds the product features
+- [SEC financial data](https://linear.app/econgraph/project/sec-financial-data-63d758410e88)
+- [Feature flags](https://linear.app/econgraph/project/feature-flags-bc727011a0f7)
+- [Security hardening](https://linear.app/econgraph/project/security-hardening-7a081ff9105c)
+- [CI and tooling](https://linear.app/econgraph/project/ci-and-tooling-cd91fbb406c6)
+
+This was the single entry point for EconGraph's roadmap until the move to Linear. The project sat idle from
 October 2025 to September 2026. The roadmap and plan docs written before that pause
 were scattered across `docs/`, the repo root, `admin-frontend/`, `personas/` and
 `super-secret-projects/`. Several of them duplicate each other, and some claim work
@@ -8,29 +29,28 @@ is finished when the code shows otherwise.
 
 This index:
 
-1. Links the current topic roadmaps.
+1. Links the topic roadmaps as they stood on 2026-09-27.
 2. Records what is actually built, checked against the code on 2026-09-26.
 3. Collects the open work that is still worth doing from the older docs.
 4. Lists every older plan or status doc with a verdict: keep, update, archive or delete.
 
-When a topic roadmap changes, update its row here. New roadmaps go in `docs/roadmap/<topic>.md`.
-
-Each topic doc lands in its own pull request, linked in the State column. Until that pull
-request merges, its Doc link does not resolve; read the pull request instead.
+Each topic doc was proposed in its own pull request, linked in the State column. Four of
+those pull requests (#178, #192, #193, #195) closed without merging, and their Doc links
+open the Linear design records instead.
 
 ## Topic roadmaps
 
 | Topic | Doc | State |
 |---|---|---|
-| Auth, commercial plans, teams and fine-grained permissions | [auth-plans-permissions.md](./auth-plans-permissions.md) | Draft ([#176](https://github.com/EconGraph/econ-graph/pull/176)) |
-| Admin UI | [admin-ui.md](./admin-ui.md) | Draft ([#177](https://github.com/EconGraph/econ-graph/pull/177)) |
-| Postgres metadata federated with Arrow Flight / Parquet time series | [federation.md](./federation.md) | Draft ([#178](https://github.com/EconGraph/econ-graph/pull/178)) |
-| Global analysis (world map, cross-country data) | [global-analysis.md](./global-analysis.md) | Draft ([#188](https://github.com/EconGraph/econ-graph/pull/188)) |
-| Release trains: what ships in which release | [releases.md](./releases.md) | Draft ([#190](https://github.com/EconGraph/econ-graph/pull/190)) |
-| Data sources: which sources, in what order | [data-sources.md](./data-sources.md) | Proposed ([#192](https://github.com/EconGraph/econ-graph/pull/192)) |
+| Auth, commercial plans, teams and fine-grained permissions | [auth-plans-permissions.md](./auth-plans-permissions.md) | Accepted ([#176](https://github.com/EconGraph/econ-graph/pull/176)) |
+| Admin UI | [admin-ui.md](./admin-ui.md) | Accepted ([#177](https://github.com/EconGraph/econ-graph/pull/177)) |
+| Postgres metadata federated with Arrow Flight / Parquet time series | [Linear design record](https://linear.app/econgraph/document/federation-roadmap-design-record-from-pr-178-a1ebb66c538d) | Moved to Linear; [#178](https://github.com/EconGraph/econ-graph/pull/178) closed without merging. Tracked under ECO-5 |
+| Global analysis (world map, cross-country data) | [global-analysis.md](./global-analysis.md) | Accepted ([#188](https://github.com/EconGraph/econ-graph/pull/188)) |
+| Release trains: what ships in which release | [releases.md](./releases.md) | Accepted for train 1 ([#190](https://github.com/EconGraph/econ-graph/pull/190)); fork 4 still open |
+| Data sources: which sources, in what order | [Linear design record](https://linear.app/econgraph/document/data-sources-roadmap-design-record-from-pr-192-2db0c59b5869) | Moved to Linear; [#192](https://github.com/EconGraph/econ-graph/pull/192) closed without merging. Tracked under ECO-5, plus ECO-202, ECO-203, ECO-204 |
 | Analysis workspace: multi-series charts, saved charts, export | [analysis-workspace.md](./analysis-workspace.md) | Accepted ([#191](https://github.com/EconGraph/econ-graph/pull/191)) |
-| SEC EDGAR / XBRL financial data | [sec-financial-data.md](./sec-financial-data.md) | Draft ([#193](https://github.com/EconGraph/econ-graph/pull/193)) |
-| Feature flags and experiments | [feature-flags.md](./feature-flags.md) | Proposed ([#195](https://github.com/EconGraph/econ-graph/pull/195)) |
+| SEC EDGAR / XBRL financial data | [Linear design record](https://linear.app/econgraph/document/sec-financial-data-roadmap-design-record-from-pr-193-3a5b22c09d18) | Moved to Linear; [#193](https://github.com/EconGraph/econ-graph/pull/193) closed without merging. Tracked as ECO-39, ECO-82, ECO-86, ECO-116, ECO-117, ECO-118, ECO-126, ECO-144 |
+| Feature flags and experiments | [Linear design record](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2) | Moved to Linear; [#195](https://github.com/EconGraph/econ-graph/pull/195) closed without merging. Tracked in the [Feature flags](https://linear.app/econgraph/project/feature-flags-bc727011a0f7) project, issues ECO-27, ECO-28, ECO-74, ECO-77, ECO-114, ECO-115, ECO-120, ECO-123, ECO-142 |
 | Security hardening | [SECURITY_IMPLEMENTATION_PLAN.md](../projects/SECURITY_IMPLEMENTATION_PLAN.md) | Needs a rewrite (see [Security](#security)) |
 | Product (user-facing features, business phases) | [ROADMAP.md](../business/ROADMAP.md) | Needs a rewrite (see [Product features](#product-features)) |
 
@@ -59,12 +79,22 @@ request merges, its Doc link does not resolve; read the pull request instead.
 - **Feature flags ([#195](https://github.com/EconGraph/econ-graph/pull/195)).** OpenFeature
   with flagd, flags checked into the repo as JSON. Flags are for release flags and kill
   switches only. Entitlements stay fine-grained roles and source switches stay in
-  `data_sources`. Code a topic roadmap replaces is deleted, not flagged. Experiments
-  wait for analytics and traffic.
+  `data_sources`. Unfinished screens are compiled out of release builds behind
+  build-time flags; code is deleted only when it is known bad (the fake correlations,
+  `imf.rs`, mock data), per [releases.md](./releases.md). Experiments wait for
+  analytics and traffic.
+- **Release trains ([releases.md](./releases.md)) and analysis workspace
+  ([analysis-workspace.md](./analysis-workspace.md)).** Train 1 (`v4.0.0`) is broad
+  real data behind pages that work: FRED, BLS, Census BDS, FHFA, BEA and World Bank
+  WDI; the series page on `series`/`seriesData` with CSV download; the world map on
+  `crossSection`; Keycloak sign-in with private and public annotations. `/analysis`,
+  `ProfessionalChart` and `ChartCollaboration` are deleted as known bad. MCP, the admin
+  app, saved charts and sharing wait for train 2. One chart component serves
+  `/series/:id` now and `/chart` later.
 
 ## What is built today
 
-Checked against `main` at `eb7634d` (2026-09-26), which includes the JWT secret (#180), token subject (#181), backend CORS (#182) and `/mcp` token (#185) fixes.
+Checked against `main` at `9dc14ea` (2026-09-27), which includes the JWT secret (#180), token subject (#181), backend CORS (#182) and `/mcp` token (#185) fixes.
 
 **Backend.** The backend is a Rust workspace in `backend/crates` built on warp,
 async-graphql and Diesel on Postgres. Its crates are core, services, graphql, auth,
@@ -78,7 +108,8 @@ stale.
 
 | Source | What works |
 |---|---|
-| FRED, BLS, Census BDS (national and per state, #175), FHFA | Discovery and observation fetch |
+| FRED, BLS, Census BDS (national and per state, #175) | Discovery and observation fetch |
+| FHFA | Discovery. Its fetch targets `api.fhfa.gov`, which probably never existed; train 1 rebuilds it on the published master CSV ([releases.md](./releases.md)) |
 | BEA, IMF, World Bank | Discovery only. `fetch_series` is not implemented |
 | BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN Stats, WTO | Hardcoded catalogs in `static_catalogs.rs`. Fetch always fails |
 | SEC EDGAR | Runs through `econ-graph-sec-crawler`, which `crawler-worker` calls |
@@ -93,7 +124,10 @@ Per-source rate limits live in `econ-graph-crawler/src/policy.rs`.
 
 **Frontend.** The main frontend is React and Vite. The Jest-to-Vitest migration is
 finished, and Storybook and Playwright are set up. The global-analysis world map
-and the chart collaboration features (annotations, comments, sharing) are built.
+renders, but on sample data. Collaboration UI (annotations, comments, sharing) exists
+in the frontend and backend, but the series-page panel cannot reach the backend and
+the API takes the acting user from the request; see
+[analysis-workspace.md](./analysis-workspace.md).
 
 **Admin frontend.** The admin frontend mounts three crawler pages: Dashboard, Config
 and Logs. Logs queries a `crawlerLogs` field the backend does not have, and its
@@ -161,7 +195,7 @@ roles, permissions, MFA and session length belong there too.
 
 ### Data federation and time series storage
 
-[federation.md](./federation.md) owns this area. No older doc covers it. The stale federation PRs #125 and #129 are reviewed there.
+The [federation roadmap](https://linear.app/econgraph/document/federation-roadmap-design-record-from-pr-178-a1ebb66c538d) owns this area. No older doc covers it. The stale federation PRs #125 and #129 are reviewed there.
 
 ### Global analysis
 
@@ -174,8 +208,8 @@ global-analysis docs. The findings below are its inputs.
   come from `calculate_pairwise_correlation` in `global_analysis_service.rs`, which
   returns hard-coded values (0.75, p = 0.01). [#188](https://github.com/EconGraph/econ-graph/pull/188)
   recommends a generic `crossSection` query instead and deleting
-  `GlobalAnalysisQuery`, and [releases.md](./releases.md) agrees. That choice is
-  Joe's to confirm.
+  `GlobalAnalysisQuery`, and [releases.md](./releases.md) adopts it: train 1 deletes
+  the fake correlations and builds the map on `crossSection`.
 - **The frontend runs on sample data.** Every global component uses hardcoded data
   (`MultiCountryDashboard`, `GlobalEventsExplorer`, `data/sampleCountryData.ts`). The
   queries in `frontend/src/utils/graphql.ts` are defined but unused.
@@ -189,7 +223,7 @@ global-analysis docs. The findings below are its inputs.
 
 ### SEC financial data
 
-[sec-financial-data.md](./sec-financial-data.md) owns this area and supersedes
+The [SEC financial data roadmap](https://linear.app/econgraph/document/sec-financial-data-roadmap-design-record-from-pr-193-3a5b22c09d18) owns this area and supersedes
 `SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md`. The findings below are its inputs.
 
 - **The XBRL parser is not on the live path.** The crawler stores the raw filings as
@@ -209,7 +243,7 @@ global-analysis docs. The findings below are its inputs.
 
 ### Data sources
 
-[data-sources.md](./data-sources.md) owns this area. It proposes a source order, a
+The [data sources roadmap](https://linear.app/econgraph/document/data-sources-roadmap-design-record-from-pr-192-2db0c59b5869) owns this area. It proposes a source order, a
 generic SDMX adapter, BIS for central-bank data, and deleting the static catalogs.
 The findings below are its inputs.
 
@@ -242,7 +276,7 @@ says which release each item lands in.
 | Chart export (PNG/SVG/PDF) | Open: `ProfessionalChart.tsx` `exportChart` is empty |
 | Saved searches, history, favorites | Open |
 | Statistical analysis, regression, forecasting | Open |
-| REST API and webhooks | Open: only auth routes are REST |
+| REST API and webhooks | Open: only auth, `/health` and `/metrics` are non-GraphQL routes |
 | Audit logging coverage | Partial: `audit_logs` table exists, write coverage unknown |
 | Mobile and WCAG accessibility | Partial |
 | ML, NL queries, alerts (roadmap phases 4 to 6) | Open, long term |
@@ -272,7 +306,7 @@ Each topic roadmap reviews the open 2025 PRs in its area and says what to keep:
 |---|---|---|
 | #141 Keycloak / mTLS, #149 JWT permissions | Close | [auth-plans-permissions.md](./auth-plans-permissions.md) |
 | #151 SEC admin UI | Close once its admin-frontend half is ported | [admin-ui.md](./admin-ui.md) |
-| #125 financial-data federation, #129 Iceberg | Close | [federation.md](./federation.md) |
+| #125 financial-data federation, #129 Iceberg | Close | [federation roadmap](https://linear.app/econgraph/document/federation-roadmap-design-record-from-pr-178-a1ebb66c538d) |
 | #154 global analysis UI improvements | Close and port its tests | [global-analysis.md](./global-analysis.md) |
 
 ## Doc inventory
@@ -294,7 +328,7 @@ useful but out of date.
 | `docs/development/GLOBAL_ANALYSIS_UI_ROADMAP.md` | Deleted | Duplicates phases 2 to 5 of the doc above |
 | [`docs/projects/frontend-developer-global-analysis-plan.md`](../archive/projects/frontend-developer-global-analysis-plan.md) | Archived | Week 1 is done. Its test-suite claim is false |
 | `docs/projects/global-analysis-ui-phase1.md` | Deleted | The same plan as the doc above with every box unchecked |
-| [`docs/development/SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md`](../archive/development/SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md) | Archived | Superseded by [sec-financial-data.md](./sec-financial-data.md). Its 2,835 lines include false completion claims |
+| [`docs/development/SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md`](../archive/development/SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md) | Archived | Superseded by the [SEC financial data roadmap](https://linear.app/econgraph/document/sec-financial-data-roadmap-design-record-from-pr-193-3a5b22c09d18). Its 2,835 lines include false completion claims |
 | [`docs/development/vitest-migration-plan.md`](../archive/development/vitest-migration-plan.md) | Archived | The migration is complete |
 | [`docs/technical/CRATE_SPLIT_PLAN.md`](../archive/technical/CRATE_SPLIT_PLAN.md) | Archived | The split is complete |
 | [`docs/technical/CRAWLER_MONITORING_IMPLEMENTATION_PLAN.md`](../archive/technical/CRAWLER_MONITORING_IMPLEMENTATION_PLAN.md) | Archived | Mostly done. Its paths are stale |

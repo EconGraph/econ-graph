@@ -167,7 +167,7 @@ source ports.env
   - ✅ Service status monitoring
 
 - **Grafana**: http://localhost:${GRAFANA_NODEPORT}
-  - ✅ Monitoring dashboards (admin/admin123)
+  - ✅ Monitoring dashboards (user admin, password in Secret `grafana-admin`, see k8s/README.md)
 
 ---
 
