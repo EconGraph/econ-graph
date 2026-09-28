@@ -216,11 +216,6 @@ type ChartAnnotationType {
 	Last update timestamp
 	"""
 	updatedAt: DateTime
-	"""
-	Deprecated alias for `visibility`: true when public. Kept so existing clients
-	(frontend queries not yet migrated to `visibility`) keep working.
-	"""
-	isVisible: Boolean! @deprecated(reason: "use visibility")
 }
 
 """
@@ -348,10 +343,6 @@ input CreateAnnotationInput {
 	Whether the annotation is public (visible to others)
 	"""
 	isPublic: Boolean
-	"""
-	Deprecated alias for `isPublic`. If both are given, `isPublic` wins.
-	"""
-	isVisible: Boolean @deprecated(reason: "use isPublic")
 }
 
 input DataFilter {
@@ -873,10 +864,6 @@ input UpdateAnnotationInput {
 	New public/private visibility, if changing
 	"""
 	isPublic: Boolean
-	"""
-	Deprecated alias for `isPublic`. If both are given, `isPublic` wins.
-	"""
-	isVisible: Boolean @deprecated(reason: "use isPublic")
 }
 
 """
@@ -1027,10 +1014,6 @@ type UserType {
 	lastLoginAt: DateTime
 }
 
-"""
-Marks an element of a GraphQL schema as no longer supported.
-"""
-directive @deprecated(reason: String = "No longer supported") on FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE
 """
 Directs the executor to include this field or fragment only when the `if` argument is true.
 """

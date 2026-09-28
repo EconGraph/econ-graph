@@ -75,8 +75,7 @@ impl Mutation {
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let series_id = uuid::Uuid::parse_str(&input.series_id)?;
-        // `isPublic` is canonical; `isVisible` is a deprecated alias kept for older clients.
-        let is_public = input.is_public.or(input.is_visible).unwrap_or(false);
+        let is_public = input.is_public.unwrap_or(false);
 
         let annotation = collaboration_service
             .create_annotation(
@@ -156,8 +155,7 @@ impl Mutation {
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let annotation_id = uuid::Uuid::parse_str(&input.annotation_id)?;
-        // `isPublic` is canonical; `isVisible` is a deprecated alias kept for older clients.
-        let is_public = input.is_public.or(input.is_visible);
+        let is_public = input.is_public;
 
         let annotation = collaboration_service
             .update_annotation(
