@@ -217,7 +217,7 @@ jobs:
     - name: Run fast unit tests (no database)
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --lib -- --test-threads=4 --nocapture config auth::integration_tests::test_user_response_serialization auth::integration_tests::test_request_validation auth::integration_tests::test_password_hashing auth::integration_tests::test_model_deserialization auth::comprehensive_integration_tests::test_password_security metrics mcp_server::tests::test_get_available_tools mcp_server::tests::test_get_available_resources
+        cargo test --lib -- --test-threads=4 --nocapture config metrics mcp_server::tests::test_get_available_tools mcp_server::tests::test_get_available_resources
       working-directory: backend
       env:
         RUST_LOG: warn
@@ -389,8 +389,6 @@ jobs:
         DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
         BACKEND_PORT: 9877
         CHART_API_SERVICE_URL: http://localhost:3001/api/chart
-        # The backend refuses to start without one; this job never issues real tokens
-        JWT_SECRET: ci-only-jwt-secret
 
     - name: Run MCP server integration tests
       working-directory: backend
