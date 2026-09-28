@@ -323,7 +323,8 @@ describe('SeriesDetail', () => {
     renderPage(UNRATE_ID);
     await screen.findByTestId('line-chart');
 
+    // Public annotations are read-only (SeriesDetailAnnotations.test.tsx); nothing to share.
     expect(screen.queryByText(/collaborat/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/annotation/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /share/i })).not.toBeInTheDocument();
   });
 });

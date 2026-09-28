@@ -275,6 +275,16 @@ vi.mock('./hooks/useSeriesData', () => ({
   })),
 }));
 
+vi.mock('./hooks/useSeriesAnnotations', () => ({
+  useSeriesAnnotations: vi.fn().mockImplementation(() => ({
+    data: [],
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+}));
+
 // Mock D3 modules
 vi.mock('d3-geo', () => ({
   geoPath: vi.fn(() => ({
