@@ -42,6 +42,8 @@ export default [
         URL: 'readonly',
         URLSearchParams: 'readonly',
         Blob: 'readonly',
+        AbortSignal: 'readonly',
+        DOMException: 'readonly',
 
         // DOM types
         HTMLElement: 'readonly',

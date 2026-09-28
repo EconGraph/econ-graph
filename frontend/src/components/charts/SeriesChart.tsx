@@ -34,6 +34,8 @@ import {
   DataTransformation,
   TRANSFORMATION_OPTIONS,
   describeTransformation,
+  transformedAxisTitle,
+  transformedUnits,
 } from '../../utils/transformations';
 import { formatIsoDate, parseIsoDate } from '../../utils/dates';
 import {
@@ -212,8 +214,9 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
   const transformationLabel = describeTransformation(transformation);
   const transformed = transformation !== 'NONE';
 
+  const valueUnit = transformedUnits(transformation, units);
+
   const chartOptions = React.useMemo(() => {
-    const valueUnit = transformed ? '%' : units;
     return {
       responsive: true,
       maintainAspectRatio: false,
@@ -252,9 +255,8 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
             label: (item: TooltipItem<'line'>) => {
               const point = item.raw as { date: string; revisionDate?: string };
               const value = item.parsed.y;
-              const lines = [
-                `${item.dataset.label}: ${value === null ? 'n/a' : value.toFixed(2)} ${valueUnit}`,
-              ];
+              const formattedValue = value === null ? 'n/a' : value.toFixed(2);
+              const lines = [`${item.dataset.label}: ${formattedValue} ${valueUnit}`.trimEnd()];
               if (point.revisionDate && point.revisionDate !== point.date) {
                 lines.push(`Revised: ${formatIsoDate(point.revisionDate)}`);
               }
@@ -297,7 +299,7 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
         y: {
           title: {
             display: true,
-            text: transformed ? 'Percent Change' : units,
+            text: transformedAxisTitle(transformation, units),
           },
           grid: {
             color: theme.palette.divider,
@@ -307,7 +309,9 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
     };
   }, [
     transformed,
+    transformation,
     units,
+    valueUnit,
     title,
     transformationLabel,
     theme,
