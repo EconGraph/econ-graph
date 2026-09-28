@@ -265,8 +265,15 @@ export async function clickAndObserve(
       ? { worked: false, disturbed: true, detail: broken }
       : { worked: true, disturbed: true, detail: `navigated to ${page.url()}` };
   }
+  if (visited.length > 0) {
+    // Navigated and came back to the same URL: a redirect may have dropped a parameter on the
+    // way. A clean round trip still has to change something below, so a link that only reloads
+    // the page it is on doesn't count as working.
+    const broken = await brokenNavigation(page, visited, isAppPath);
+    if (broken) return { worked: false, disturbed: true, detail: broken };
+  }
   const after = await observableState(page);
   if (after !== before) return { worked: true, disturbed: true, detail: 'changed the page' };
   if (effects.length > 0) return { worked: true, disturbed: true, detail: effects.join(', ') };
-  return { worked: false, disturbed: false, detail: 'nothing changed' };
+  return { worked: false, disturbed: visited.length > 0, detail: 'nothing changed' };
 }
