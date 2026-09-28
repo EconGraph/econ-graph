@@ -119,8 +119,16 @@ kubectl apply -f k8s/manifests/crawler-worker.yaml
 kubectl apply -f k8s/manifests/frontend-deployment.yaml
 kubectl apply -f k8s/manifests/frontend-service.yaml
 # admin-frontend-deployment/service and admin-ingress: not applied here (re-enabled
-# by ECO-242, train 2). See the note in build-images.sh for why.
-kubectl apply -f k8s/manifests/ingress.yaml
+# by ECO-242, train 2). See the note in build-images.sh for why. Delete any
+# admin-frontend resources a previous deploy left running, so a stale, broken
+# (401-on-everything) admin frontend doesn't keep serving traffic.
+kubectl delete -f k8s/manifests/admin-frontend-deployment.yaml --ignore-not-found
+kubectl delete -f k8s/manifests/admin-frontend-service.yaml --ignore-not-found
+# ingress.yaml routes /admin to the admin-frontend Service, which isn't deployed
+# above; apply it with that one path filtered out rather than pointing an ingress
+# rule at a nonexistent Service.
+yq 'del(.spec.rules[].http.paths[] | select(.backend.service.name == "econ-graph-admin-frontend-service"))' \
+  k8s/manifests/ingress.yaml | kubectl apply -f -
 
 # Deploy chart API service (internal only)
 echo "📊 Deploying chart API service..."
