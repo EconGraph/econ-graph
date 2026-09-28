@@ -955,7 +955,10 @@ pub struct UserType {
     pub avatar_url: Option<String>,
     /// Authentication provider
     pub provider: String,
-    /// User role
+    /// Legacy `users.role` column, no longer written or used for authorization
+    #[graphql(
+        deprecation = "Roles come from the identity provider's token; this legacy column is no longer written and will be removed"
+    )]
     pub role: String,
     /// Organization
     pub organization: Option<String>,
@@ -1061,8 +1064,6 @@ pub struct CreateUserInput {
     pub name: String,
     /// Password (for email-based users)
     pub password: Option<String>,
-    /// User role
-    pub role: String,
     /// Organization (optional)
     pub organization: Option<String>,
     /// Whether account is active
@@ -1080,8 +1081,6 @@ pub struct UpdateUserInput {
     pub name: Option<String>,
     /// Avatar URL (optional)
     pub avatar_url: Option<String>,
-    /// User role (optional)
-    pub role: Option<String>,
     /// Organization (optional)
     pub organization: Option<String>,
     /// UI theme preference
@@ -1101,7 +1100,10 @@ pub struct UpdateUserInput {
 /// Input for filtering users (admin only)
 #[derive(InputObject)]
 pub struct UserFilterInput {
-    /// Filter by role
+    /// Filter by the legacy `users.role` column
+    #[graphql(
+        deprecation = "Roles come from the identity provider's token; this legacy column is no longer written and will be removed"
+    )]
     pub role: Option<String>,
     /// Filter by organization
     pub organization: Option<String>,
