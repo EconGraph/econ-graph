@@ -73,7 +73,9 @@ echo "📋 Applying Kubernetes manifests..."
 # Apply in order
 kubectl apply -f k8s/manifests/namespace.yaml
 kubectl apply -f k8s/manifests/configmap.yaml
-kubectl apply -f k8s/manifests/secret.yaml
+# Credentials live in Secrets created out of band (never committed). The script
+# keeps existing values and generates missing internal passwords; see k8s/README.md.
+./scripts/deploy/create-secrets.sh
 
 # Deploy PostgreSQL
 echo "🗄️  Deploying PostgreSQL..."
@@ -113,8 +115,8 @@ fi
 # Deploy application
 kubectl apply -f k8s/manifests/backend-deployment.yaml
 kubectl apply -f k8s/manifests/backend-service.yaml
-# Queue worker (no Service). API keys come from the optional Secret crawler-api-keys;
-# see the header of k8s/manifests/crawler-worker.yaml for how to create it.
+# Queue worker (no Service). API keys come from the optional Secret crawler-api-keys,
+# written by create-secrets.sh from FRED_API_KEY, BLS_API_KEY, BEA_API_KEY, CENSUS_API_KEY.
 kubectl apply -f k8s/manifests/crawler-worker.yaml
 kubectl apply -f k8s/manifests/frontend-deployment.yaml
 kubectl apply -f k8s/manifests/frontend-service.yaml
@@ -315,7 +317,8 @@ echo "  Frontend: http://admin.econ-graph.local (add '127.0.0.1 admin.econ-graph
 echo "  Backend:  http://admin.econ-graph.local/api"
 echo "  GraphQL:  http://admin.econ-graph.local/graphql"
 echo "  Playground: http://admin.econ-graph.local/playground"
-echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT} (admin/admin123)"
+echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT}"
+echo "            (admin / password: kubectl -n econ-graph get secret grafana-admin -o jsonpath={.data.admin-password} | base64 -d)"
 echo ""
 echo "📊 Useful commands:"
 echo "  kubectl get pods -n econ-graph"
