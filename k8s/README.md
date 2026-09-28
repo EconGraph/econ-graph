@@ -36,7 +36,8 @@ k8s/
 │   ├── frontend-deployment.yaml # Frontend deployment
 │   ├── admin-frontend-deployment.yaml # Admin UI deployment
 │   ├── admin-frontend-service.yaml    # Admin UI service
-│   └── ingress.yaml     # Ingress configuration
+│   ├── ingress.yaml     # Ingress configuration
+│   └── graphql-ingress.yaml # /graphql, rate-limited per client IP
 └── README.md           # This file
 
 terraform/k8s/          # Terraform configuration

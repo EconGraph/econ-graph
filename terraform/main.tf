@@ -61,9 +61,14 @@ variable "domain" {
 }
 
 variable "database_password" {
-  description = "PostgreSQL database password"
+  description = "PostgreSQL database password (required; set it to \"\" to generate a random one)"
   type        = string
   sensitive   = true
+
+  validation {
+    condition     = var.database_password == "" || (length(trimspace(var.database_password)) >= 16 && !contains(["your-secure-database-password-here", "secure-password-123"], lower(trimspace(var.database_password))))
+    error_message = "database_password must be empty (a random one is generated) or a real secret of at least 16 characters, not the placeholder from terraform.tfvars.example."
+  }
 }
 
 variable "fred_api_key" {
@@ -88,6 +93,13 @@ variable "enable_dns01_challenge" {
 
 variable "cloudflare_api_token" {
   description = "Cloudflare API token for DNS-01 challenge"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "monitoring_basic_auth" {
+  description = "htpasswd line (user:bcrypt-hash) for basic auth on the Grafana ingress, e.g. from `htpasswd -nB admin` (prompts for the password); single-quote it in TF_VAR_monitoring_basic_auth since the hash contains `$`. Empty disables basic auth; Grafana's own login still applies."
   type        = string
   sensitive   = true
   default     = ""
@@ -158,9 +170,10 @@ resource "kubernetes_secret" "econgraph_secrets" {
   }
 
   data = {
-    "DATABASE_PASSWORD" = base64encode(var.database_password != "" ? var.database_password : random_password.database_password.result)
-    "FRED_API_KEY"      = base64encode(var.fred_api_key)
-    "BLS_API_KEY"       = base64encode(var.bls_api_key)
+    # The kubernetes provider base64-encodes `data` itself; pass plain values.
+    "DATABASE_PASSWORD" = var.database_password != "" ? var.database_password : random_password.database_password.result
+    "FRED_API_KEY"      = var.fred_api_key
+    "BLS_API_KEY"       = var.bls_api_key
   }
 }
 
@@ -218,6 +231,9 @@ module "ingress" {
   # DNS-01 challenge configuration
   enable_dns01_challenge = var.enable_dns01_challenge
   cloudflare_api_token   = var.cloudflare_api_token
+
+  # Optional basic auth in front of Grafana
+  monitoring_basic_auth = var.monitoring_basic_auth
 
   depends_on = [module.frontend, module.backend, module.monitoring]
 }

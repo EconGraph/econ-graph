@@ -131,6 +131,9 @@ kubectl delete -f k8s/manifests/admin-frontend-service.yaml --ignore-not-found
 # rule at a nonexistent Service.
 yq 'del(.spec.rules[].http.paths[] | select(.backend.service.name == "econ-graph-admin-frontend-service"))' \
   k8s/manifests/ingress.yaml | kubectl apply -f -
+# graphql-ingress.yaml rate-limits /graphql; ingress.yaml no longer routes it
+# (see the comment in ingress.yaml), so both manifests must be applied together.
+kubectl apply -f k8s/manifests/graphql-ingress.yaml
 
 # Deploy chart API service (internal only)
 echo "📊 Deploying chart API service..."
