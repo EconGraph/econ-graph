@@ -1371,8 +1371,9 @@ mod route_tests {
             .build_unchecked(manager)
     }
 
-    fn routes() -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-    {
+    fn routes(
+        playground_enabled: bool,
+    ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
         let pool = unreachable_pool();
         let schema = create_schema_with_data(pool.clone(), ());
         build_routes(
@@ -1380,7 +1381,7 @@ mod route_tests {
             schema,
             None,
             &["http://localhost:3000".to_string()],
-            false,
+            playground_enabled,
         )
     }
 
@@ -1405,7 +1406,7 @@ mod route_tests {
                 let res = warp::test::request()
                     .method(method)
                     .path(path)
-                    .reply(&routes())
+                    .reply(&routes(false))
                     .await;
                 assert_eq!(
                     res.status(),
@@ -1423,8 +1424,30 @@ mod route_tests {
         let res = warp::test::request()
             .method("GET")
             .path("/health")
-            .reply(&routes())
+            .reply(&routes(false))
             .await;
         assert_eq!(res.status(), 200);
+    }
+
+    /// `GET /playground` answers 200 through the full route set when enabled.
+    #[tokio::test]
+    async fn playground_route_answers_when_enabled() {
+        let res = warp::test::request()
+            .method("GET")
+            .path("/playground")
+            .reply(&routes(true))
+            .await;
+        assert_eq!(res.status(), 200);
+    }
+
+    /// `GET /playground` answers 404 through the full route set when disabled.
+    #[tokio::test]
+    async fn playground_route_answers_404_when_disabled() {
+        let res = warp::test::request()
+            .method("GET")
+            .path("/playground")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 404);
     }
 }
