@@ -95,16 +95,6 @@ const APP_PATH = new RegExp(
 );
 const isAppPath = (pathname: string) => APP_PATH.test(pathname);
 
-/**
- * Routes whose crawl can't pass until a named PR merges (the README's `test.fixme` rule). Delete
- * the entry when it does.
- */
-const BLOCKED: Record<string, string> = {
-  '/global':
-    'The page goes blank: it fetches the world outline from world-atlas@3 on jsDelivr, a version ' +
-    'that does not exist, and the rejected fetch is uncaught. MAP-3 (#202) bundles the outline.',
-};
-
 const describeControl = (c: Control) => `${c.role} "${c.name}"${c.href ? ` (${c.href})` : ''}`;
 
 const allowlisted = (scope: string, control: Control): AllowlistEntry | undefined =>
@@ -128,7 +118,6 @@ test.describe('every control on every route does something', () => {
 
   for (const route of routes.filter(r => r in ROUTE_URLS)) {
     test(`controls on ${route}`, async ({ page, request }) => {
-      test.fixme(route in BLOCKED, BLOCKED[route]);
       test.slow();
       const crawlsLayout = route === '/';
       const failures: string[] = [];

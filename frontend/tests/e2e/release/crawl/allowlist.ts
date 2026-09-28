@@ -4,10 +4,10 @@
 
 /**
  * Controls the every-control crawl (every-control.spec.ts) lets through although clicking them
- * changes nothing a visitor can see, or navigates to a page that doesn't work. Every entry needs a reason; the fix is to make the control
- * work or remove it, then delete its entry. The crawl reports an entry that excused nothing in a run
- * as a `stale allowlist entry` annotation, without failing, so the PR that fixes a control doesn't
- * have to touch this file. Release 1 ships with it as short as possible (plan review F9/A).
+ * changes nothing a visitor can see, or navigates to a page that doesn't work. Every entry needs a
+ * reason; the fix is to make the control work or remove it, then delete its entry. The crawl
+ * reports an entry that excused nothing in a run as a `stale allowlist entry` annotation, without
+ * failing, so the PR that fixes a control doesn't have to touch this file. Release 1 ships with it as short as possible (plan review F9/A).
  */
 export interface AllowlistEntry {
   /** The route's `path` as App.tsx writes it (e.g. '/series/:id'), or '*' for the header and sidebar. */
