@@ -2,7 +2,7 @@ name: Core CI Tests
 
 on:
   push:
-    branches: [ main, develop, optimize/ci-core-primary ]
+    branches: [ main, develop, optimize/ci-core-primary, 'release/**' ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -10,8 +10,11 @@ on:
       - 'LICENSE'
       - '.gitignore'
       - '.github/workflows/README.md'
+  # Every PR, whatever its base: stacked PRs get CI before they are retargeted.
+  # Retargeting a PR to main after its parent merges is an `edited` event, which
+  # does not run here (and `types: [edited]` would let title edits cancel runs),
+  # so the child's next push after retarget is its first run against main.
   pull_request:
-    branches: [ main, develop ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -47,6 +50,13 @@ on:
         default: ''
         type: string
 
+# One run per PR: a push cancels the run the previous push started, so review
+# rounds and rebases stop stacking up in the queue. Runs on main and develop
+# get a group of their own (the run id), so they are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
   # Line numbers in backtraces without full debuginfo: faster compiles and
@@ -65,9 +75,11 @@ jobs:
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
-    if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop'
+    if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' && !startsWith(github.ref, 'refs/heads/release/')
     outputs:
-      frontend_only: ${{ steps.filter.outputs.frontend == 'true' && steps.filter.outputs.backend == 'false' }}
+      # A change to neither side (or to a shared path) runs everything
+      frontend_only: ${{ steps.filter.outputs.frontend == 'true' && steps.filter.outputs.backend == 'false' && steps.filter.outputs.shared == 'false' }}
+      backend_only: ${{ steps.filter.outputs.backend == 'true' && steps.filter.outputs.frontend == 'false' && steps.filter.outputs.shared == 'false' }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -82,21 +94,28 @@ jobs:
           backend:
             - 'backend/**'
             - 'chart-api-service/**'
+          # Paths both sides depend on: CI itself, scripts, the dev stack, and
+          # infra manifests, which deploy the frontend as well as the backend
+          shared:
             - 'ci/**'
             - '.github/**'
-            - 'k8s/**'
-            - 'terraform/**'
             - 'scripts/**'
             - 'config/keycloak/**'
             - 'docker-compose.yml'
             - 'package.json'
+            - 'k8s/**'
+            - 'terraform/**'
+            # Frontend Tests checks every frontend GraphQL operation against
+            # this file; a backend-only PR that regenerates it must still run
+            # Frontend Tests, not just the backend side.
+            - 'backend/crates/econ-graph-graphql/schema.graphql'
   backend-build-cache:
     name: Backend Build Cache
     runs-on: ubuntu-latest
     needs: [changes]
-    # `changes` is skipped on main/develop; !cancelled() keeps that skip from
-    # skipping this job and every backend test job that needs it.
-    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || needs.changes.outputs.frontend_only != 'true') }}
+    # `changes` is skipped on main/develop/release/**; !cancelled() keeps that
+    # skip from skipping this job and every backend test job that needs it.
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/release/') || needs.changes.outputs.frontend_only != 'true') }}
     timeout-minutes: 90
 
     steps:
@@ -662,7 +681,10 @@ jobs:
     name: Admin Frontend Tests
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    needs: [changes]
+    # Skipped on backend-only PRs; a manual run always gets it. See
+    # backend-build-cache for the !cancelled() pattern
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changes.outputs.backend_only != 'true')) }}
 
     steps:
     - name: Checkout code
@@ -704,6 +726,11 @@ jobs:
     name: Frontend Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20 # Increased for resource-constrained CI
+    needs: [changes]
+    # Skipped on backend-only PRs (and frontend-integration-tests with it);
+    # pushes and manual runs always get it, so a manual E2E run is never
+    # skipped. See backend-build-cache for the !cancelled() pattern
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.backend_only != 'true') }}
 
     steps:
     - name: Checkout code
