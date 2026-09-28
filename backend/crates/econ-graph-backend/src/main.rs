@@ -804,10 +804,7 @@ async fn main() -> AppResult<()> {
         .map_err(|e| AppError::InternalError(format!("Failed to bind port {port}: {e}")))?
         .http1_only(true)
         .serve(make_svc)
-        .with_graceful_shutdown(async {
-            signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
-            info!("🛑 Received shutdown signal, gracefully shutting down...");
-        });
+        .with_graceful_shutdown(shutdown_signal());
 
     info!("✅ Server is now running and accepting connections!");
     server
@@ -816,6 +813,35 @@ async fn main() -> AppResult<()> {
 
     info!("✅ Server shutdown complete");
     Ok(())
+}
+
+/// Resolves on SIGINT (Ctrl-C) or SIGTERM, so orchestrators that stop a container with SIGTERM
+/// (Kubernetes, `docker stop`) get the same graceful drain as a local Ctrl-C.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(e) = signal::ctrl_c().await {
+            tracing::error!(error = %e, "listening for Ctrl-C failed");
+            std::future::pending::<()>().await;
+        }
+    };
+    #[cfg(unix)]
+    let term = async {
+        match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "listening for SIGTERM failed");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let term = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => info!("🛑 Received SIGINT, gracefully shutting down..."),
+        () = term => info!("🛑 Received SIGTERM, gracefully shutting down..."),
+    }
 }
 
 #[cfg(test)]

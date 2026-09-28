@@ -6,7 +6,7 @@
 
 This document provides detailed cost assumptions and productivity analysis for the EconGraph project, with specific citations to industry sources and academic research. All cost estimates are based on current market data and industry benchmarks.
 
-**📊 Live Cost Data**: This document is automatically updated from source data. See [data/cost-analysis.json](../data/cost-analysis.json) for the latest figures.
+**📊 Live Cost Data**: This document is automatically updated from source data. See [data/cost-analysis.json](../../data/cost-analysis.json) for the latest figures.
 
 **🔄 Auto-Update**: Run `./scripts/update-cost-analysis.sh` to update all cost figures from source data.
 
@@ -309,4 +309,4 @@ This analysis supports the cost assumptions used in EconGraph project documentat
 *Document Version: 1.0*
 *Prepared by: Product Manager*
 
-**📊 Source Data**: [data/cost-analysis.json](../data/cost-analysis.json) | **🔄 Update Script**: [scripts/update-cost-analysis.sh](../scripts/update-cost-analysis.sh)
+**📊 Source Data**: [data/cost-analysis.json](../../data/cost-analysis.json) | **🔄 Update Script**: [scripts/update-cost-analysis.sh](../../scripts/update-cost-analysis.sh)
