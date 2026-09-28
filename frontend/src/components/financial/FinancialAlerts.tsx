@@ -1,3 +1,4 @@
+/* eslint-disable local/no-dead-button -- unrouted in release 1; ECO-248 wires up or removes these buttons */
 import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { executeGraphQL } from '../../utils/graphql';
