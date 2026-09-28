@@ -209,7 +209,7 @@ source ports.env
 - **Backend**: http://localhost:${BACKEND_NODEPORT}
 - **GraphQL**: http://localhost:${BACKEND_NODEPORT}/graphql
 - **Health Check**: http://localhost:${BACKEND_NODEPORT}/health
-- **Grafana**: http://localhost:${GRAFANA_NODEPORT} (admin/admin123)
+- **Grafana**: http://localhost:${GRAFANA_NODEPORT} (user admin, password in Secret `grafana-admin`, see k8s/README.md)
 
 ### Internal Services (ClusterIP)
 - **Chart API Service**: `chart-api-service.econ-graph.svc.cluster.local:3001`
