@@ -21,12 +21,6 @@ export interface AllowlistEntry {
 
 export const ALLOWLIST: readonly AllowlistEntry[] = [
   {
-    route: '*',
-    role: 'button',
-    name: 'Navigate to FRED Data: Federal Reserve Economic Data',
-    reason: 'Opens /explore?source=<name>, but the explorer filters by source id only. ECO-246.',
-  },
-  {
     route: '/',
     role: 'button',
     name: 'Employment Data',
@@ -55,18 +49,6 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
     role: 'button',
     name: 'view details',
     reason: 'Recent Data Releases row icons have no handler. ECO-246.',
-  },
-  {
-    route: '/sources',
-    role: 'button',
-    name: 'View Details',
-    reason: 'Data source cards: "View Details" has no handler. ECO-246.',
-  },
-  {
-    route: '/sources',
-    role: 'link',
-    name: 'Browse Series',
-    reason: 'Opens /explore?source=<name>, but the explorer filters by source id only. ECO-246.',
   },
   {
     route: '/analysis/:id?',
