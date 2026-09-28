@@ -280,13 +280,21 @@ authenticate_grafana() {
     # scripts/deploy/create-secrets.sh.
     local grafana_password="${GRAFANA_ADMIN_PASSWORD:-}"
     if [ -z "$grafana_password" ]; then
-        grafana_password=$(kubectl -n econ-graph get secret grafana-admin \
-            -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d 2>/dev/null || true)
-    fi
-
-    if [ -z "$grafana_password" ]; then
-        print_status "ERROR" "Could not read the Grafana admin password (grafana-admin Secret missing or empty)"
-        return 1
+        local encoded_password
+        if ! encoded_password=$(kubectl -n econ-graph get secret grafana-admin \
+            -o jsonpath='{.data.admin-password}' 2>/dev/null); then
+            print_status "ERROR" "Could not read Grafana admin password from Secret grafana-admin"
+            return 1
+        fi
+        if [ -z "$encoded_password" ]; then
+            print_status "ERROR" "Grafana admin password is missing from Secret grafana-admin"
+            return 1
+        fi
+        if ! grafana_password=$(printf '%s' "$encoded_password" | base64 -d 2>/dev/null) ||
+            [ -z "$grafana_password" ]; then
+            print_status "ERROR" "Could not decode Grafana admin password from Secret grafana-admin"
+            return 1
+        fi
     fi
 
     # Build the login body without putting the password on any command line
