@@ -37,10 +37,7 @@ const PARAM = ':param';
  * Targets that go nowhere today, keyed `<path under src/>#<target>`, with the issue that fixes
  * each. Remove an entry when its fix lands.
  */
-const KNOWN_DEAD: Record<string, string> = {
-  'pages/ProfessionalAnalysis.tsx#/dashboard':
-    'UI-1 (ECO-54, #199) deletes this mock page and its route.',
-};
+const KNOWN_DEAD: Record<string, string> = {};
 
 /**
  * Lists the source files to scan.
@@ -220,7 +217,8 @@ function escape(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-const routes = appRoutes();
+// The catch-all ('*') isn't a page of its own, so a target only it matches is still dead.
+const routes = appRoutes().filter(route => route !== '*');
 const patterns = routes.map(routePattern);
 const targets = sourceFiles().flatMap(targetsIn);
 
@@ -248,7 +246,7 @@ const served = (target: string) => {
 describe('navigation targets', () => {
   it('finds the routes and the targets it checks', () => {
     // Guards against the scan silently finding nothing after a refactor.
-    expect(routes.length).toBeGreaterThanOrEqual(5);
+    expect(routes.length).toBeGreaterThanOrEqual(8);
     expect(targets.length).toBeGreaterThanOrEqual(25);
   });
 
@@ -264,7 +262,7 @@ describe('navigation targets', () => {
 
   it('matches targets against routes as React Router would', () => {
     expect(served('/series/:param')).toBe(true);
-    expect(served('/analysis')).toBe(true);
+    expect(served('/about')).toBe(true);
     expect(served('/explore?q=:param')).toBe(true);
     expect(served('/explore:param')).toBe(true);
     expect(served('/series/:param/:param')).toBe(false);

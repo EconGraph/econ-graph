@@ -10,7 +10,7 @@
  * failing, so the PR that fixes a control doesn't have to touch this file. Release 1 ships with it as short as possible (plan review F9/A).
  */
 export interface AllowlistEntry {
-  /** The route's `path` as App.tsx writes it (e.g. '/series/:id'), or '*' for the header and sidebar. */
+  /** The route's `path` as App.tsx writes it (e.g. '/series/:id'), or 'layout' for the header and sidebar. */
   route: string;
   role: 'link' | 'button' | 'tab' | 'checkbox' | 'switch' | 'combobox';
   /** The control's accessible name, exactly. */
@@ -49,17 +49,5 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
     role: 'button',
     name: 'view details',
     reason: 'Recent Data Releases row icons have no handler. ECO-246.',
-  },
-  {
-    route: '/analysis/:id?',
-    role: 'button',
-    name: 'Back to Dashboard',
-    reason: 'Goes to /dashboard, which no route serves. UI-1 (ECO-54, #199) deletes the page.',
-  },
-  {
-    route: '/analysis/:id?',
-    role: 'button',
-    name: 'Export Chart',
-    reason: 'Mock analysis page; UI-1 (ECO-54, #199) deletes the page and its route.',
   },
 ];

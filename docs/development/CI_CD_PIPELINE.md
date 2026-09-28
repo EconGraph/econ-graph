@@ -73,7 +73,7 @@ The EconGraph CI/CD pipeline consists of 5 main phases with 20+ individual jobs 
 #### Jobs:
 - **Comprehensive E2E Tests** - Full application workflow testing
   - Core Tests (Authentication, Navigation, Basic Features)
-  - Analysis Tests (Professional Analysis, Global Analysis)
+  - Analysis Tests (Global Analysis)
   - Debug Tests (Visual Checks, Console Logging)
   - Comprehensive Tests (Complete User Journeys)
   - Mobile Core Tests (Mobile Authentication, Navigation)
@@ -403,7 +403,7 @@ Enhanced caching for system packages and Rust toolchain:
 - **Exit Code Propagation**: Proper exit code handling ensures CI jobs turn red when tests fail
 - **Test Groups**:
   - **Core Tests**: Authentication, navigation, basic features
-  - **Analysis Tests**: Professional analysis, global analysis
+  - **Analysis Tests**: Global analysis
   - **Debug Tests**: Visual checks, console logging
   - **Comprehensive Tests**: Complete user journeys
   - **Mobile Core Tests**: Mobile authentication, navigation

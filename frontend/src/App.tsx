@@ -11,9 +11,9 @@ import SeriesExplorer from './pages/SeriesExplorer';
 import SeriesDetail from './pages/SeriesDetail';
 import DataSources from './pages/DataSources';
 import About from './pages/About';
-import ProfessionalAnalysis from './pages/ProfessionalAnalysis';
 import GlobalAnalysis from './pages/GlobalAnalysis';
 import PrivacyPolicy from './pages/PrivacyPolicy';
+import NotFound from './pages/NotFound';
 import AuthCallback from './pages/AuthCallback';
 import { CALLBACK_PATH } from './auth/oidcConfig';
 import ResetQueriesOnUserChange from './auth/ResetQueriesOnUserChange';
@@ -62,10 +62,10 @@ function App() {
                 <Route path='/series/:id' element={<SeriesDetail />} />
                 <Route path='/sources' element={<DataSources />} />
                 <Route path='/about' element={<About />} />
-                <Route path='/analysis/:id?' element={<ProfessionalAnalysis />} />
                 <Route path='/global' element={<GlobalAnalysis />} />
                 <Route path='/privacy' element={<PrivacyPolicy />} />
                 <Route path={CALLBACK_PATH} element={<AuthCallback />} />
+                <Route path='*' element={<NotFound />} />
               </Routes>
             </Container>
           </Box>

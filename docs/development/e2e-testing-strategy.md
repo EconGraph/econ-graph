@@ -28,13 +28,11 @@ The E2E tests are organized into specialized test suites that run in parallel:
 ### Desktop Test Suites
 - **Core Tests**: Basic functionality (navigation, authentication, dashboard)
 - **Global Analysis Tests**: World map, country selection, economic indicators (162 tests)
-- **Professional Analysis Tests**: Advanced charting, technical indicators (39 tests)
 - **Comprehensive Tests**: Integration/workflow tests (excludes specialized suites)
 
 ### Mobile Test Suites
 - **Mobile Core Tests**: Mobile versions of basic functionality
 - **Mobile Global Analysis Tests**: Mobile versions of global analysis features
-- **Mobile Professional Analysis Tests**: Mobile versions of professional analysis features
 - **Mobile Comprehensive Tests**: Mobile versions of comprehensive tests
 
 ## CI/CD Strategy
@@ -55,11 +53,9 @@ To run E2E tests in the core CI:
    - `all` - Run all E2E test suites
    - `core` - Basic functionality tests
    - `global-analysis` - Global analysis features
-   - `professional-analysis` - Professional analysis features
    - `comprehensive` - Integration tests
    - `mobile-core` - Mobile basic functionality
    - `mobile-global-analysis` - Mobile global analysis
-   - `mobile-professional-analysis` - Mobile professional analysis
    - `mobile-comprehensive` - Mobile comprehensive tests
 
 ### Nightly E2E Tests
@@ -82,7 +78,7 @@ The nightly E2E tests include all necessary dependencies:
 1. **Backend Services**: PostgreSQL, Rust backend with migrations
 2. **Frontend Services**: React frontend with build
 3. **E2E Test Containers**: Pre-built containers with Playwright browsers
-4. **Test Configurations**: Multiple test suites (core, analysis, comprehensive, global-analysis, professional-analysis)
+4. **Test Configurations**: Multiple test suites (core, analysis, comprehensive, global-analysis)
 
 ## Running Tests Locally
 
@@ -91,7 +87,6 @@ The nightly E2E tests include all necessary dependencies:
 # Run specific test suites
 npm run test:e2e:core
 npm run test:e2e:global-analysis
-npm run test:e2e:professional-analysis
 npm run test:e2e:comprehensive
 ```
 
@@ -100,7 +95,6 @@ npm run test:e2e:comprehensive
 # Run mobile test suites
 npm run test:e2e:mobile:core
 npm run test:e2e:mobile:global-analysis
-npm run test:e2e:mobile:professional-analysis
 npm run test:e2e:mobile:comprehensive
 ```
 
