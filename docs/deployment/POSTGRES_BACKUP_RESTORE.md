@@ -105,7 +105,7 @@ cluster to apply the CronJob/Job manifests to:
 
 This is *script-level* verification, not a full end-to-end test: it exercises
 the same commands the Job/CronJob containers run, but not the in-cluster
-wiring around them (the PVC mounts, the `econ-graph-secrets` Secret, the
+wiring around them (the PVC mounts, the `econ-graph-postgres` Secret, the
 CronJob schedule, or the actual `postgres-service` label selectors), and the
 restore ran into an empty database rather than over live data — the
 destructive `--clean` path the confirmation prompt exists for. That
