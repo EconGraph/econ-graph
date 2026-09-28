@@ -8,8 +8,31 @@ import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import { render, setupTestEnvironment, cleanupTestEnvironment } from '../../test-utils/material-ui-test-setup';
 import { setMockScenario, MockScenarios } from '../../test-utils/mocks/simpleServer';
-import SeriesExplorer from '../SeriesExplorer';
+import SeriesExplorer, { resolveSourceId, DataSourceOption } from '../SeriesExplorer';
 import { useSeriesSearch } from '../../hooks/useSeriesData';
+
+// setupTests.vitest.ts mocks react-router-dom's useSearchParams to always return an empty
+// URLSearchParams, which is fine for tests that only interact with the page (they never need
+// an initial URL), but leaves no way to render the page with a `source` param already in the
+// URL. This file-local override replaces that mock, only here, with one whose search params
+// are controllable per test, so the `resolveSourceId` fix can be exercised end-to-end.
+const routerTestState = vi.hoisted(() => ({
+  searchParams: new URLSearchParams(),
+  setSearchParams: vi.fn(),
+}));
+
+vi.mock('react-router-dom', () => ({
+  BrowserRouter: ({ children }: { children: React.ReactNode }) => children,
+  Routes: ({ children }: { children: React.ReactNode }) => children,
+  Route: ({ children }: { children: React.ReactNode }) => children,
+  useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: '/test', search: '', hash: '', state: null }),
+  useParams: () => ({}),
+  useSearchParams: () => [routerTestState.searchParams, routerTestState.setSearchParams],
+  Link: ({ children, to, ...props }: any) => React.createElement('a', { href: to, ...props }, children),
+  NavLink: ({ children, to, ...props }: any) =>
+    React.createElement('a', { href: to, ...props }, children),
+}));
 
 // Use MSW for GraphQL mocking - no need to mock GraphQL directly
 // MSW is already set up in setupTests.vitest.ts
@@ -18,7 +41,7 @@ import { useSeriesSearch } from '../../hooks/useSeriesData';
 const mockDataSources = [
   {
     id: 'fred',
-    name: 'Federal Reserve Economic Data',
+    name: 'Federal Reserve Economic Data (FRED)',
     description: 'Economic data from the Federal Reserve',
     base_url: 'https://fred.stlouisfed.org',
     api_key_required: false,
@@ -850,7 +873,7 @@ describe('SeriesExplorer shows only what the backend returned', () => {
     const options = await screen.findAllByRole('option');
     expect(options.map(option => option.textContent)).toEqual([
       'All Sources',
-      'Federal Reserve Economic Data',
+      'Federal Reserve Economic Data (FRED)',
       'Bureau of Labor Statistics',
     ]);
 
@@ -1079,5 +1102,116 @@ describe('SeriesExplorer shows only what the backend returned', () => {
       URL.createObjectURL = originalCreateObjectURL;
       URL.revokeObjectURL = originalRevokeObjectURL;
     }
+  });
+});
+
+describe('resolveSourceId', () => {
+  // The sidebar's "FRED Data" link and the data sources page's "Browse Series" link both used
+  // to put the source's display name in the `source` URL param instead of its id, and the
+  // backend's real FRED source name ("Federal Reserve Economic Data (FRED)") doesn't exactly
+  // match the sidebar's shorter label ("Federal Reserve Economic Data") — so an old bookmarked
+  // or hand-typed link needs to resolve by name too, not just by id.
+  const sources: DataSourceOption[] = [
+    { id: 'fred', name: 'Federal Reserve Economic Data (FRED)' },
+    { id: 'bls', name: 'Bureau of Labor Statistics' },
+  ];
+
+  test('an id param resolves to itself', () => {
+    expect(resolveSourceId('bls', sources)).toBe('bls');
+  });
+
+  test('an exact (case-insensitive) name param resolves to its id', () => {
+    expect(resolveSourceId('bureau of labor statistics', sources)).toBe('bls');
+  });
+
+  test('a name that is only a prefix of the real name still resolves', () => {
+    expect(resolveSourceId('Federal Reserve Economic Data', sources)).toBe('fred');
+  });
+
+  test('a param matching nothing resolves to undefined', () => {
+    expect(resolveSourceId('Not A Real Source', sources)).toBeUndefined();
+  });
+
+  test('an empty param resolves to undefined', () => {
+    expect(resolveSourceId('', sources)).toBeUndefined();
+  });
+
+  test('an exact name match wins over a shorter source name that is also a prefix match', () => {
+    // "World Bank" is itself a real source name, and also a prefix of "World Bank Open Data" —
+    // the exact match must win, or "World Bank" would resolve to the wrong source.
+    const ambiguousSources: DataSourceOption[] = [
+      { id: 'worldbank-open-data', name: 'World Bank Open Data' },
+      { id: 'worldbank', name: 'World Bank' },
+    ];
+    expect(resolveSourceId('World Bank', ambiguousSources)).toBe('worldbank');
+  });
+
+  test('a prefix matching more than one source resolves to undefined rather than guessing', () => {
+    const ambiguousSources: DataSourceOption[] = [
+      { id: 'worldbank-open-data', name: 'World Bank Open Data' },
+      { id: 'worldbank-group', name: 'World Bank Group' },
+    ];
+    expect(resolveSourceId('World Bank', ambiguousSources)).toBeUndefined();
+  });
+});
+
+describe('the explorer resolves a `source` URL param that names a source', () => {
+  const searchHook = vi.mocked(useSeriesSearch);
+  const defaultSearch = searchHook.getMockImplementation();
+
+  beforeEach(() => {
+    setupTestEnvironment();
+  });
+
+  afterEach(() => {
+    if (defaultSearch) searchHook.mockImplementation(defaultSearch);
+    routerTestState.searchParams = new URLSearchParams();
+    routerTestState.setSearchParams.mockClear();
+    cleanupTestEnvironment();
+  });
+
+  // End-to-end version of the resolveSourceId unit tests above: a `source` URL param holding a
+  // display name (as the sidebar's "FRED Data" link and the pre-fix `/sources` "Browse Series"
+  // link both sent) now pre-selects the matching source and filters by its id, instead of
+  // silently matching nothing.
+  test('a source name in the URL pre-selects that source and searches by its id', async () => {
+    routerTestState.searchParams = new URLSearchParams({ source: 'Federal Reserve Economic Data' });
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    expect(await screen.findByRole('combobox', { name: /source/i })).toHaveTextContent(
+      'Federal Reserve Economic Data'
+    );
+
+    await user.type(screen.getByPlaceholderText(/search economic series/i), 'gdp');
+    await waitFor(() => {
+      expect(searchHook).toHaveBeenLastCalledWith('gdp', { sourceId: 'fred', limit: 100 }, true);
+    });
+
+    // The URL keeps the exact `source` value it arrived with, not the id it resolved to: a
+    // same-site navigation is expected to keep every query parameter it arrived with, literally.
+    await waitFor(() => {
+      const calls = routerTestState.setSearchParams.mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      const [params] = calls[calls.length - 1];
+      expect((params as URLSearchParams).get('source')).toBe('Federal Reserve Economic Data');
+    });
+  });
+
+  test('a source param matching no known source searches all sources instead of matching nothing', async () => {
+    routerTestState.searchParams = new URLSearchParams({ source: 'Not A Real Source' });
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+
+    // Select shows no selection (matching how the unfiltered "All Sources" state renders
+    // for a fresh page load with no source in the URL at all).
+    const combo = await screen.findByRole('combobox', { name: /source/i });
+    expect(combo).not.toHaveTextContent('Federal Reserve Economic Data');
+    expect(combo).not.toHaveTextContent('Bureau of Labor Statistics');
+
+    await user.type(screen.getByPlaceholderText(/search economic series/i), 'gdp');
+    await waitFor(() => {
+      expect(searchHook).toHaveBeenLastCalledWith('gdp', { sourceId: undefined, limit: 100 }, true);
+    });
   });
 });

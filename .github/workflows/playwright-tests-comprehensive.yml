@@ -1,9 +1,13 @@
 name: Comprehensive Playwright Tests
 
 on:
-  push:
-    tags:
-      - 'v*'  # Trigger on version tags like v3.7.2, v3.8.0, etc.
+  # Manual only: this suite predates the Vite frontend migration (it still uses
+  # `cargo run --bin migrate`, which no longer exists, and CRA-era `npm start`/
+  # REACT_APP_* env vars) and the release process's release/vX.Y branch +
+  # vX.Y.Z(-rc.N) tag scheme (see docs/development/RELEASE_PROCESS.md), so it
+  # must not auto-fire on release tags. ci-core.yml and release-e2e.yml cover
+  # Playwright/E2E coverage on pushes and PRs.
+  workflow_dispatch:
 
 jobs:
   playwright-tests:
@@ -83,8 +87,6 @@ jobs:
         DATABASE_URL: postgres://postgres:postgres@localhost:5432/econ_graph_test
         BACKEND_PORT: 8080
         FRONTEND_PORT: 3000
-        # The backend refuses to start without one; this job never issues real tokens
-        JWT_SECRET: ci-only-jwt-secret
 
     - name: Build frontend
       working-directory: ./frontend

@@ -8,6 +8,7 @@ import jsxA11y from 'eslint-plugin-jsx-a11y';
 import testingLibrary from 'eslint-plugin-testing-library';
 import jsdoc from 'eslint-plugin-jsdoc';
 import importPlugin from 'eslint-plugin-import';
+import noDeadButton from './eslint-rules/no-dead-button.js';
 
 export default [
   js.configs.recommended,
@@ -338,5 +339,12 @@ export default [
       // Warn about unused imports (handled by no-unused-vars)
       '@typescript-eslint/no-unused-vars': 'warn',
     },
+  },
+  // Buttons that do nothing when clicked (ECO-247). Tests and stories render bare buttons.
+  {
+    files: ['src/**/*.tsx'],
+    ignores: ['**/*.test.tsx', '**/__tests__/**', '**/__mocks__/**', '**/*.stories.tsx'],
+    plugins: { local: { rules: { 'no-dead-button': noDeadButton } } },
+    rules: { 'local/no-dead-button': 'error' },
   },
 ];

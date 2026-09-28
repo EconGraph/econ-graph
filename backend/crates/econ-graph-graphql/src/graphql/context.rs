@@ -55,14 +55,13 @@ impl GraphQLContext {
         Self::new(Some(Caller { user, principal }))
     }
 
-    /// Test helper: a context for `user` with roles picked by the test's label in `users.role`:
-    /// `admin` and `super_admin` get every role, anything else only the signed-in user roles.
+    /// Test helper: a context for `user`, holding every role when `staff` is set, otherwise
+    /// only the non-staff roles.
     #[cfg(test)]
-    pub(crate) fn for_test_user(user: Option<User>) -> Self {
+    pub(crate) fn for_test_user(user: Option<User>, staff: bool) -> Self {
         let Some(user) = user else {
             return Self::anonymous();
         };
-        let staff = matches!(user.role.as_str(), "admin" | "super_admin");
         let roles: Vec<Role> = Role::all()
             .iter()
             .copied()
@@ -138,17 +137,13 @@ pub fn require_role<'a>(ctx: &'a Context<'a>, role: Role) -> Result<&'a Principa
 mod tests {
     use super::*;
 
-    fn user(role: &str) -> User {
+    fn user(label: &str) -> User {
         let now = chrono::Utc::now();
         User {
             id: uuid::Uuid::new_v4(),
-            email: format!("{role}@example.com"),
-            name: role.to_string(),
+            email: format!("{label}@example.com"),
+            name: label.to_string(),
             avatar_url: None,
-            provider: "email".to_string(),
-            provider_id: None,
-            password_hash: None,
-            role: role.to_string(),
             organization: None,
             theme: "light".to_string(),
             default_chart_type: "line".to_string(),
@@ -176,7 +171,7 @@ mod tests {
 
     #[test]
     fn require_role_checks_the_token_roles_not_users_role() {
-        // `users.role` says admin, but the token grants only annotation:create.
+        // The label says admin, but the token grants only annotation:create.
         let ctx = GraphQLContext::signed_in(user("admin"), [Role::AnnotationCreate]);
         let principal = ctx.require_role(Role::AnnotationCreate).unwrap();
         assert_eq!(principal.user_id, ctx.user.as_ref().unwrap().id);

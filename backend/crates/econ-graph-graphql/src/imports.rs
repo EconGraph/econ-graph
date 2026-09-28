@@ -22,7 +22,6 @@
 
 // Core crate imports
 pub use econ_graph_core::{
-    auth_models::{AuthProvider, User as AuthUser, UserRole},
     database::DatabasePool,
     error::{AppError, AppResult},
     // Additional imports for missing modules

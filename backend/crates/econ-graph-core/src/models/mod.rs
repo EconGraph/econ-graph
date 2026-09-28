@@ -40,5 +40,5 @@ pub use financial_statement::*;
 pub use global_analysis::*;
 pub use search::*;
 pub use series_metadata::*;
-pub use user::{AnnotationComment, ChartAnnotation, ChartCollaborator, NewUser, User, UserSession};
+pub use user::{AnnotationComment, ChartAnnotation, ChartCollaborator, NewUser, User};
 pub use xbrl_taxonomy_schema::*;

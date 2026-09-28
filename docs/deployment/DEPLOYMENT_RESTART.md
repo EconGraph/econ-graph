@@ -60,7 +60,10 @@ kind load docker-image econ-graph-frontend:latest --name econ-graph
 # Set kubectl context
 kubectl config use-context kind-econ-graph
 
-# Apply all manifests (includes updated image tags)
+# Apply all manifests (includes updated image tags). ingress.yaml goes first:
+# graphql-ingress.yaml sorts before it and would clash with an older
+# ingress.yaml that still routes /graphql
+kubectl apply -f k8s/manifests/ingress.yaml
 kubectl apply -f k8s/manifests/
 ```
 
