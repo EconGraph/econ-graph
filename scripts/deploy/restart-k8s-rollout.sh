@@ -208,6 +208,9 @@ fi
 
 # Apply updated manifests
 echo "📋 Applying updated Kubernetes manifests..."
+kubectl apply -f k8s/manifests/namespace.yaml
+# Credentials are not in the manifests; create or refresh the Secrets first.
+./scripts/deploy/create-secrets.sh
 kubectl apply -f k8s/manifests/
 
 # Apply security configurations
@@ -368,7 +371,7 @@ echo "    Backend:  http://localhost:${BACKEND_NODEPORT}"
 echo "    GraphQL:  http://localhost:${FRONTEND_NODEPORT}/graphql"
 echo "    Playground: off (set ENABLE_GRAPHQL_PLAYGROUND=true on the backend to serve /playground)"
 echo "    Health:   http://localhost:${BACKEND_NODEPORT}/health"
-echo "    Grafana:  http://localhost:${GRAFANA_NODEPORT} (admin/admin123)"
+echo "    Grafana:  http://localhost:${GRAFANA_NODEPORT} (user admin, password in Secret grafana-admin)"
 echo ""
 echo "🎯 Version deployed: v3.7.4"
 echo "   ✅ Integration tests fixed: All auth tests passing (11/11)"
@@ -392,7 +395,8 @@ echo "✅ Services are accessible via NodePort:"
 echo "  Frontend: http://localhost:${FRONTEND_NODEPORT}"
 echo "  Admin UI: http://admin.econ-graph.local/admin (add '127.0.0.1 admin.econ-graph.local' to /etc/hosts)"
 echo "  Backend:  http://localhost:${BACKEND_NODEPORT}"
-echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT} (admin/admin123)"
+echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT}"
+echo "            (admin / password: kubectl -n econ-graph get secret grafana-admin -o jsonpath={.data.admin-password} | base64 -d)"
 echo ""
 echo "🔒 Internal Services (not exposed externally):"
 echo "  Chart API Service: chart-api-service.econ-graph.svc.cluster.local:3001"

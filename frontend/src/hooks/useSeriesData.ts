@@ -190,19 +190,25 @@ export const useSeriesSearch = (
   },
   enabled = true
 ) => {
+  const trimmedQuery = query.trim();
   return useQuery(
-    ['seriesSearch', query, filters],
+    ['seriesSearch', trimmedQuery, filters],
     async () => {
-      if (!query || query.length < 2) return [];
+      if (trimmedQuery.length < 2) return [];
 
       const result = await executeGraphQL({
         query: QUERIES.SEARCH_SERIES,
-        variables: { query, filters },
+        variables: {
+          query: trimmedQuery,
+          source: filters?.sourceId,
+          frequency: filters?.frequency,
+          first: filters?.limit,
+        },
       });
-      return result.data?.searchSeries || [];
+      return result.data?.searchSeries?.series || [];
     },
     {
-      enabled: enabled && query.length >= 2,
+      enabled: enabled && trimmedQuery.length >= 2,
       staleTime: 2 * 60 * 1000, // 2 minutes
     }
   );
@@ -238,8 +244,8 @@ export const useDataSources = () => {
       });
       return result.data?.dataSources || [];
     },
-    suspense: true,
     staleTime: 30 * 60 * 1000, // 30 minutes
+    retry: 1, // the source list gates the Explore search, so don't hold it through long retries
   });
 };
 

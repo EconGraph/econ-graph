@@ -1,4 +1,4 @@
-import React, { Suspense, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -17,6 +17,7 @@ import {
   TableHead,
   TableRow,
   CircularProgress,
+  Alert,
 } from '@mui/material';
 import {
   AccountBalance as FedIcon,
@@ -77,8 +78,8 @@ const getDataSourceCategories = (name: string): string[] => {
  * @returns The DataSourcesContent component.
  */
 const DataSourcesContent: React.FC = () => {
-  // Fetch real data sources from backend - suspense: true eliminates need for isLoading/error checks
-  const { data: backendDataSources } = useDataSources();
+  // Fetch real data sources from backend
+  const { data: backendDataSources, isLoading, error } = useDataSources();
 
   // Transform backend data to frontend format
   const dataSources: DataSourceInfo[] = React.useMemo(() => {
@@ -141,6 +142,26 @@ const DataSourcesContent: React.FC = () => {
     return { totalSeries, healthySources };
   }, [dataSources]);
 
+  // A blocking spinner only while there is nothing to show yet; once sources have loaded
+  // once, a later refetch error stays a nonblocking banner and the cached list stays up
+  if (isLoading && !backendDataSources) {
+    return (
+      <Box
+        sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}
+      >
+        <CircularProgress aria-label='Loading data sources' />
+      </Box>
+    );
+  }
+
+  if (error && !backendDataSources) {
+    return (
+      <Alert severity='error'>
+        Could not load data sources: {error instanceof Error ? error.message : 'unknown error'}
+      </Alert>
+    );
+  }
+
   return (
     <Box>
       {/* Page header */}
@@ -152,6 +173,14 @@ const DataSourcesContent: React.FC = () => {
           Economic data providers and their current status
         </Typography>
       </Box>
+
+      {/* A refresh failed, but the list below is still the last good data */}
+      {error ? (
+        <Alert severity='warning' sx={{ mb: 4 }}>
+          Showing the last loaded sources; refreshing failed:{' '}
+          {error instanceof Error ? error.message : 'unknown error'}
+        </Alert>
+      ) : null}
 
       {/* Summary statistics */}
       <Paper sx={{ p: 3, mb: 4 }}>
@@ -358,22 +387,4 @@ const DataSourcesContent: React.FC = () => {
   );
 };
 
-/**
- * DataSources wrapper with Suspense boundary for loading states.
- * @returns The DataSources component with Suspense boundary.
- */
-const DataSources: React.FC = () => (
-  <Suspense
-    fallback={
-      <Box
-        sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}
-      >
-        <CircularProgress />
-      </Box>
-    }
-  >
-    <DataSourcesContent />
-  </Suspense>
-);
-
-export default DataSources;
+export default DataSourcesContent;

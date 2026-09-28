@@ -45,8 +45,18 @@ validator.workspace = true
 # HTTP client
 reqwest.workspace = true
 
+# Test identity provider (the `testkit` feature)
+aws-lc-rs = { version = "1.15", optional = true }
+base64 = { version = "0.22", optional = true }
+
+[features]
+# `econ_graph_auth::testkit`: a local OIDC provider that serves a JWKS and mints tokens.
+testkit = ["dep:aws-lc-rs", "dep:base64"]
+
 # Test dependencies
 [dev-dependencies]
+aws-lc-rs = "1.15"
+base64 = "0.22"
 diesel-async.workspace = true
 serial_test.workspace = true
 tokio-test.workspace = true
