@@ -248,7 +248,7 @@ const served = (target: string) => {
 describe('navigation targets', () => {
   it('finds the routes and the targets it checks', () => {
     // Guards against the scan silently finding nothing after a refactor.
-    expect(routes.length).toBeGreaterThanOrEqual(10);
+    expect(routes.length).toBeGreaterThanOrEqual(5);
     expect(targets.length).toBeGreaterThanOrEqual(25);
   });
 

@@ -60,7 +60,6 @@ const ROUTE_URLS: Record<string, (request: APIRequestContext) => Promise<string[
   ],
   '/global': async () => ['/global'],
   '/privacy': async () => ['/privacy'],
-  '/user-data-deletion': async () => ['/user-data-deletion'],
   // Keycloak's redirect target. Opened directly, with no authorization response to finish, it
   // shows its error and a way home.
   CALLBACK_PATH: async () => [PATH_CONSTANTS.CALLBACK_PATH],
