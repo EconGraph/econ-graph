@@ -41,6 +41,13 @@ fi
 # Set kubectl context
 kubectl config use-context kind-econ-graph
 
+# Preserve both data and backup PVs before any resource or namespace deletion.
+# A failed patch stops teardown before it can remove the namespace.
+if kubectl get pvc postgresql-data-postgresql-0 -n econ-graph >/dev/null 2>&1 ||
+   kubectl get pvc postgres-backup-data -n econ-graph >/dev/null 2>&1; then
+    "$PROJECT_ROOT/scripts/deploy/protect-postgres-pv.sh"
+fi
+
 # Remove application resources
 echo "📋 Removing application resources..."
 kubectl delete -f k8s/manifests/admin-ingress.yaml --ignore-not-found=true
@@ -63,15 +70,14 @@ kubectl delete -f k8s/manifests/configmap.yaml --ignore-not-found=true
 
 echo "✅ Application resources removed successfully!"
 
-# Deleting the namespace deletes the PostgreSQL PVC (postgresql-data-*) and
-# the backup PVC (postgres-backup-data) with it. Confirm before doing that,
-# unless the PV's reclaim policy is Retain (see protect-postgres-pv.sh), in
-# which case the underlying volume survives even if the PVC object doesn't.
+# Deleting the namespace deletes the PostgreSQL and backup PVC objects.
+# Their bound PVs have been set to Retain above, so their contents survive.
+# Still confirm because reattaching Released volumes requires manual work.
 DELETE_NAMESPACE="${ASSUME_YES}"
 if [ "${ASSUME_YES}" != "true" ]; then
     echo ""
     echo "⚠️  Deleting the 'econ-graph' namespace deletes its PostgreSQL PVCs."
-    echo "   Unless the PV's reclaim policy is Retain, the data is gone with them."
+    echo "   Their retained PVs must be manually reattached after deletion."
     read -p "Delete the namespace (and its PVCs)? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
