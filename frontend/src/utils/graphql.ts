@@ -4,6 +4,8 @@
  * This enables efficient data fetching with the Rust backend GraphQL API.
  */
 
+import { getAccessToken } from '../auth/accessToken';
+
 const GRAPHQL_ENDPOINT = import.meta.env.VITE_GRAPHQL_URL || '/graphql';
 
 // Debug: Log the GraphQL endpoint being used
@@ -38,12 +40,18 @@ export async function executeGraphQL<T = any>(
   // if (MSW_DEBUG) {
   //   console.log('🔧 executeGraphQL called with:', { endpoint: GRAPHQL_ENDPOINT, request });
   // }
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+  // Signed-in requests carry the Keycloak access token; anonymous ones carry none.
+  const token = await getAccessToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   const response = await fetch(GRAPHQL_ENDPOINT, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
+    headers,
     body: JSON.stringify(request),
   });
 

@@ -15,37 +15,20 @@ import App from '../App';
 
 // Mock authentication context
 const mockAuthContext = {
-  signInWithGoogle: vi.fn(),
-  signInWithFacebook: vi.fn(),
-  signInWithEmail: vi.fn(),
-  signUp: vi.fn(),
-  signOut: vi.fn(),
-  updateProfile: vi.fn(),
-  refreshUser: vi.fn(),
-  clearError: vi.fn(),
   user: {
     id: 'test-user-1',
     email: 'test@example.com',
     name: 'Test User',
-    avatar_url: null,
-    provider: 'email',
-    provider_id: 'test-provider-id',
-    password_hash: null,
-    role: 'user',
-    organization: null,
-    theme: null,
-    default_chart_type: null,
-    notifications_enabled: true,
-    collaboration_enabled: true,
-    is_active: true,
-    email_verified: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    last_login_at: new Date().toISOString(),
   },
   isAuthenticated: true,
   isLoading: false,
+  isConfigured: true,
+  accountUrl: null,
   error: null,
+  signIn: vi.fn(),
+  signOut: vi.fn(),
+  completeSignIn: vi.fn(),
+  clearError: vi.fn(),
 };
 
 // Mock the AuthContext
