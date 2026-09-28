@@ -271,6 +271,9 @@ mod query_limit_tests {
     #[tokio::test]
     async fn query_one_over_the_complexity_limit_is_refused() {
         let errors = errors(&typename_query(MAX_QUERY_COMPLEXITY + 1)).await;
-        assert!(errors.iter().any(|e| e.contains("too complex")), "{errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("too complex")),
+            "{errors:?}"
+        );
     }
 }
