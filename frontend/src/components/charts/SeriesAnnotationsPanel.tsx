@@ -51,7 +51,8 @@ const SeriesAnnotationsPanel: React.FC<SeriesAnnotationsPanelProps> = ({
   const rows = React.useRef(new Map<string, HTMLElement>());
 
   // Bring an annotation picked on the chart into view in the list. Only the list scrolls,
-  // so the page stays on the chart that was clicked.
+  // so the page stays on the chart that was clicked. Also re-run when the rows remount or
+  // reorder (after loading or an error), since the selection may have changed meanwhile.
   React.useEffect(() => {
     const container = list.current;
     const row = selectedId ? rows.current.get(selectedId) : undefined;
@@ -63,7 +64,7 @@ const SeriesAnnotationsPanel: React.FC<SeriesAnnotationsPanelProps> = ({
     } else if (top + row.offsetHeight > container.scrollTop + container.clientHeight) {
       container.scrollTop = top + row.offsetHeight - container.clientHeight;
     }
-  }, [selectedId]);
+  }, [selectedId, annotations, isLoading, error]);
 
   let body: React.ReactNode;
   if (isLoading) {
