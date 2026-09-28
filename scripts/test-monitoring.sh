@@ -284,25 +284,29 @@ authenticate_grafana() {
             -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d 2>/dev/null || true)
     fi
 
+    if [ -z "$grafana_password" ]; then
+        print_status "ERROR" "Could not read the Grafana admin password (grafana-admin Secret missing or empty)"
+        return 1
+    fi
+
     # Build the login body without putting the password on any command line
-    # (printf is a builtin; jq and curl read it from stdin).
+    # (printf is a builtin; jq/python3 and curl read it from stdin), using a
+    # real JSON serializer rather than manual shell escaping.
     local login_body
     if command -v jq >/dev/null 2>&1; then
         login_body=$(printf '%s' "$grafana_password" | jq -Rsc '{user: "admin", password: .}')
     else
-        local escaped="${grafana_password//\\/\\\\}"
-        escaped="${escaped//\"/\\\"}"
-        escaped="${escaped//$'\n'/\\n}"
-        login_body=$(printf '{"user":"admin","password":"%s"}' "$escaped")
+        login_body=$(GRAFANA_PASSWORD="$grafana_password" python3 -c \
+            'import json, os; print(json.dumps({"user": "admin", "password": os.environ["GRAFANA_PASSWORD"]}))')
     fi
 
-    # Create a session by logging in
-    local login_response=$(printf '%s' "$login_body" |
-        curl -s -c /tmp/grafana_cookies.txt -X POST "$GRAFANA_URL/login" \
+    # Create a session by logging in. -f makes curl fail (nonzero exit) on an
+    # HTTP error response, so success is judged from the exit status rather
+    # than from the response body being nonempty.
+    if printf '%s' "$login_body" |
+        curl -sSf -c /tmp/grafana_cookies.txt -X POST "$GRAFANA_URL/login" \
             -H "Content-Type: application/json" \
-            -d @- 2>/dev/null)
-
-    if [ -n "$login_response" ]; then
+            -d @- >/dev/null 2>&1; then
         print_status "SUCCESS" "Grafana authentication successful"
         return 0
     else
