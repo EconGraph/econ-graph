@@ -71,24 +71,28 @@ const qaUser = (n: 1 | 2, username: string, displayName: string): ReleaseUser =>
 /**
  * Who each spec signs in as. `annotator` writes public and private annotations and `viewer` checks
  * it sees only the public one (auth/sign-in.spec.ts); `journey` annotates at the end of
- * journey.spec.ts.
+ * journey.spec.ts; `publicAnnotator` writes a public annotation for series-ui/annotations.spec.ts
+ * to check an anonymous viewer sees it.
  *
  * The dev realm has a user per role, so no user signs in from two specs at once (Keycloak's
  * brute-force detection locks a user out when that happens). The deployed realm has only the two
- * QA users, so there `journey` is the viewer, and deployed mode runs one spec at a time
- * (playwright.release.config.ts).
+ * QA users, so there `journey` and `publicAnnotator` share `qa-bob`, safe only because deployed
+ * mode runs one spec at a time (playwright.release.config.ts).
  */
-export const USERS: Record<'annotator' | 'viewer' | 'journey', ReleaseUser> = DEPLOYED
-  ? {
-      annotator: qaUser(1, 'qa-alice', 'QA Alice'),
-      viewer: qaUser(2, 'qa-bob', 'QA Bob'),
-      journey: qaUser(2, 'qa-bob', 'QA Bob'),
-    }
-  : {
-      annotator: devUser('alice', 'Alice Tester'),
-      viewer: devUser('bob', 'Bob Tester'),
-      journey: devUser('dave', 'Dave Tester'),
-    };
+export const USERS: Record<'annotator' | 'viewer' | 'journey' | 'publicAnnotator', ReleaseUser> =
+  DEPLOYED
+    ? {
+        annotator: qaUser(1, 'qa-alice', 'QA Alice'),
+        viewer: qaUser(2, 'qa-bob', 'QA Bob'),
+        journey: qaUser(2, 'qa-bob', 'QA Bob'),
+        publicAnnotator: qaUser(2, 'qa-bob', 'QA Bob'),
+      }
+    : {
+        annotator: devUser('alice', 'Alice Tester'),
+        viewer: devUser('bob', 'Bob Tester'),
+        journey: devUser('dave', 'Dave Tester'),
+        publicAnnotator: devUser('carol', 'Carol Tester'),
+      };
 
 /**
  * Fails fast with what to set when deployed mode lacks what the signed-in specs need.

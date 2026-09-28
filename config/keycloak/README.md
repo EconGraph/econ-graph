@@ -41,6 +41,7 @@ passwords stable: the ids are the tokens' `sub`, which becomes `users.id`.
 | `alice` | `0199a0e0-0000-7000-8000-00000000a11c` | `alice-dev-password` |
 | `bob` | `0199a0e0-0000-7000-8000-000000000b0b` | `bob-dev-password` |
 | `dave` | `0199a0e0-0000-7000-8000-00000000da7e` | `dave-dev-password` |
+| `carol` | `0199a0e0-0000-7000-8000-00000000ca01` | `carol-dev-password` |
 | `staff-admin` | `0199a0e0-0000-7000-8000-0000000005af` | `staff-admin-dev-password` |
 
 Imported users get no default roles automatically, so each one lists
