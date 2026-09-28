@@ -26,7 +26,7 @@ request merges, its Doc link does not resolve; read the pull request instead.
 | Admin UI | [admin-ui.md](./admin-ui.md) | Draft ([#177](https://github.com/EconGraph/econ-graph/pull/177)) |
 | Postgres metadata federated with Arrow Flight / Parquet time series | [federation.md](./federation.md) | Draft ([#178](https://github.com/EconGraph/econ-graph/pull/178)) |
 | Global analysis (world map, cross-country data) | [global-analysis.md](./global-analysis.md) | Draft ([#188](https://github.com/EconGraph/econ-graph/pull/188)) |
-| Release trains: what ships in which release | [releases.md](./releases.md) | Draft ([#190](https://github.com/EconGraph/econ-graph/pull/190)) |
+| Release trains: what ships in which release | [releases.md](./releases.md) | Accepted for train 1 ([#190](https://github.com/EconGraph/econ-graph/pull/190)); fork 4 still open |
 | Data sources: which sources, in what order | [data-sources.md](./data-sources.md) | Proposed ([#192](https://github.com/EconGraph/econ-graph/pull/192)) |
 | Analysis workspace: multi-series charts, saved charts, export | [analysis-workspace.md](./analysis-workspace.md) | Accepted ([#191](https://github.com/EconGraph/econ-graph/pull/191)) |
 | SEC EDGAR / XBRL financial data | [sec-financial-data.md](./sec-financial-data.md) | Draft ([#193](https://github.com/EconGraph/econ-graph/pull/193)) |
@@ -59,12 +59,22 @@ request merges, its Doc link does not resolve; read the pull request instead.
 - **Feature flags ([#195](https://github.com/EconGraph/econ-graph/pull/195)).** OpenFeature
   with flagd, flags checked into the repo as JSON. Flags are for release flags and kill
   switches only. Entitlements stay fine-grained roles and source switches stay in
-  `data_sources`. Code a topic roadmap replaces is deleted, not flagged. Experiments
-  wait for analytics and traffic.
+  `data_sources`. Unfinished screens are compiled out of release builds behind
+  build-time flags; code is deleted only when it is known bad (the fake correlations,
+  `imf.rs`, mock data), per [releases.md](./releases.md). Experiments wait for
+  analytics and traffic.
+- **Release trains ([releases.md](./releases.md)) and analysis workspace
+  ([analysis-workspace.md](./analysis-workspace.md)).** Train 1 (`v4.0.0`) is broad
+  real data behind pages that work: FRED, BLS, Census BDS, FHFA, BEA and World Bank
+  WDI; the series page on `series`/`seriesData` with CSV download; the world map on
+  `crossSection`; Keycloak sign-in with private and public annotations. `/analysis`,
+  `ProfessionalChart` and `ChartCollaboration` are deleted as known bad. MCP, the admin
+  app, saved charts and sharing wait for train 2. One chart component serves
+  `/series/:id` now and `/chart` later.
 
 ## What is built today
 
-Checked against `main` at `eb7634d` (2026-09-26), which includes the JWT secret (#180), token subject (#181), backend CORS (#182) and `/mcp` token (#185) fixes.
+Checked against `main` at `9dc14ea` (2026-09-27), which includes the JWT secret (#180), token subject (#181), backend CORS (#182) and `/mcp` token (#185) fixes.
 
 **Backend.** The backend is a Rust workspace in `backend/crates` built on warp,
 async-graphql and Diesel on Postgres. Its crates are core, services, graphql, auth,
@@ -78,7 +88,8 @@ stale.
 
 | Source | What works |
 |---|---|
-| FRED, BLS, Census BDS (national and per state, #175), FHFA | Discovery and observation fetch |
+| FRED, BLS, Census BDS (national and per state, #175) | Discovery and observation fetch |
+| FHFA | Discovery. Its fetch targets `api.fhfa.gov`, which probably never existed; train 1 rebuilds it on the published master CSV ([releases.md](./releases.md)) |
 | BEA, IMF, World Bank | Discovery only. `fetch_series` is not implemented |
 | BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN Stats, WTO | Hardcoded catalogs in `static_catalogs.rs`. Fetch always fails |
 | SEC EDGAR | Runs through `econ-graph-sec-crawler`, which `crawler-worker` calls |
@@ -93,7 +104,10 @@ Per-source rate limits live in `econ-graph-crawler/src/policy.rs`.
 
 **Frontend.** The main frontend is React and Vite. The Jest-to-Vitest migration is
 finished, and Storybook and Playwright are set up. The global-analysis world map
-and the chart collaboration features (annotations, comments, sharing) are built.
+renders, but on sample data. Collaboration UI (annotations, comments, sharing) exists
+in the frontend and backend, but the series-page panel cannot reach the backend and
+the API takes the acting user from the request; see
+[analysis-workspace.md](./analysis-workspace.md).
 
 **Admin frontend.** The admin frontend mounts three crawler pages: Dashboard, Config
 and Logs. Logs queries a `crawlerLogs` field the backend does not have, and its
@@ -174,8 +188,8 @@ global-analysis docs. The findings below are its inputs.
   come from `calculate_pairwise_correlation` in `global_analysis_service.rs`, which
   returns hard-coded values (0.75, p = 0.01). [#188](https://github.com/EconGraph/econ-graph/pull/188)
   recommends a generic `crossSection` query instead and deleting
-  `GlobalAnalysisQuery`, and [releases.md](./releases.md) agrees. That choice is
-  Joe's to confirm.
+  `GlobalAnalysisQuery`, and [releases.md](./releases.md) adopts it: train 1 deletes
+  the fake correlations and builds the map on `crossSection`.
 - **The frontend runs on sample data.** Every global component uses hardcoded data
   (`MultiCountryDashboard`, `GlobalEventsExplorer`, `data/sampleCountryData.ts`). The
   queries in `frontend/src/utils/graphql.ts` are defined but unused.
@@ -242,7 +256,7 @@ says which release each item lands in.
 | Chart export (PNG/SVG/PDF) | Open: `ProfessionalChart.tsx` `exportChart` is empty |
 | Saved searches, history, favorites | Open |
 | Statistical analysis, regression, forecasting | Open |
-| REST API and webhooks | Open: only auth routes are REST |
+| REST API and webhooks | Open: only auth, `/health` and `/metrics` are non-GraphQL routes |
 | Audit logging coverage | Partial: `audit_logs` table exists, write coverage unknown |
 | Mobile and WCAG accessibility | Partial |
 | ML, NL queries, alerts (roadmap phases 4 to 6) | Open, long term |
