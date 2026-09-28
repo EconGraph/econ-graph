@@ -45,6 +45,8 @@ pub struct User {
     pub last_login_at: Option<DateTime<Utc>>,
 }
 
+/// A new `users` row. `users.role` is left to its column default: roles come from the
+/// identity provider's tokens, and the column is dropped when the in-house login is retired.
 #[derive(Debug, Serialize, Deserialize, Insertable)]
 #[diesel(table_name = users)]
 pub struct NewUser {
@@ -54,7 +56,6 @@ pub struct NewUser {
     pub provider: String,
     pub provider_id: Option<String>,
     pub password_hash: Option<String>,
-    pub role: String,
     pub organization: Option<String>,
     pub theme: String,
     pub default_chart_type: String,
@@ -176,7 +177,6 @@ impl User {
             provider: "email".to_string(),
             provider_id: None,
             password_hash: Some(password_hash),
-            role: "viewer".to_string(),
             organization: None,
             theme: "light".to_string(),
             default_chart_type: "line".to_string(),
@@ -257,7 +257,6 @@ impl User {
             provider,
             provider_id: Some(provider_id),
             password_hash: None,
-            role: "viewer".to_string(),
             organization: None,
             theme: "light".to_string(),
             default_chart_type: "line".to_string(),
@@ -349,6 +348,71 @@ impl User {
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
         Ok(user)
+    }
+
+    /// The `users` row for identity-provider subject `id`, created on first sight.
+    ///
+    /// Users sign in through the identity provider, so the API first meets them on their first
+    /// request. The row takes the token's email when it is verified, fits the column and no
+    /// other row uses it; otherwise an unguessable placeholder `<id>.<random>@users.invalid`,
+    /// because `users.email` is required and unique. An unverified address is never stored:
+    /// other code (the legacy OAuth login) links accounts by email. A row that already exists is returned unchanged, whatever the token now says.
+    /// Concurrent first requests are safe: the insert does nothing if the row appeared.
+    pub async fn get_or_create_for_subject(
+        pool: &DatabasePool,
+        id: Uuid,
+        email: Option<&str>,
+        email_verified: bool,
+        name: Option<&str>,
+    ) -> AppResult<User> {
+        let mut conn = pool.get().await.map_err(|e| {
+            AppError::DatabaseError(format!("Failed to get database connection: {}", e))
+        })?;
+        async fn find(
+            conn: &mut diesel_async::AsyncPgConnection,
+            id: Uuid,
+        ) -> AppResult<Option<User>> {
+            users::table
+                .find(id)
+                .select(User::as_select())
+                .first::<User>(conn)
+                .await
+                .optional()
+                .map_err(|e| AppError::DatabaseError(e.to_string()))
+        }
+
+        if let Some(user) = find(&mut conn, id).await? {
+            return Ok(user);
+        }
+
+        let placeholder = format!("{id}.{}@users.invalid", Uuid::new_v4().simple());
+        let name = name.unwrap_or("New user");
+        let email = email.filter(|email| email_verified && email.len() <= 255);
+        let mut candidates = vec![(placeholder.as_str(), false)];
+        if let Some(email) = email {
+            candidates.insert(0, (email, true));
+        }
+        for (email, verified) in candidates {
+            diesel::insert_into(users::table)
+                .values((
+                    users::id.eq(id),
+                    users::email.eq(email),
+                    users::name.eq(truncate_chars(name, 255)),
+                    users::provider.eq("keycloak"),
+                    users::provider_id.eq(id.to_string()),
+                    users::email_verified.eq(verified),
+                ))
+                .on_conflict_do_nothing()
+                .execute(&mut conn)
+                .await
+                .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+            if let Some(user) = find(&mut conn, id).await? {
+                return Ok(user);
+            }
+        }
+        Err(AppError::DatabaseError(format!(
+            "could not create a users row for subject {id}"
+        )))
     }
 
     /// Convert to user profile for API responses
@@ -626,4 +690,9 @@ pub struct NewChartCollaborator {
     pub invited_by: Option<Uuid>,
     pub role: Option<String>,
     pub permissions: Option<serde_json::Value>,
+}
+
+/// The first `max` characters of `s`.
+fn truncate_chars(s: &str, max: usize) -> &str {
+    s.char_indices().nth(max).map_or(s, |(end, _)| &s[..end])
 }

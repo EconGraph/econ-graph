@@ -195,11 +195,10 @@ impl Mutation {
 
     // Admin User Management Mutations
 
-    /// Create a new user (requires `admin.users:create`, and every staff role the new user's
-    /// `role` grants)
+    /// Create a new user (requires `admin.users:create`). The new user's roles are assigned in
+    /// the identity provider, not here.
     async fn create_user(&self, ctx: &Context<'_>, input: CreateUserInput) -> Result<UserType> {
-        let caller = require_role(ctx, Role::AdminUsersCreate)?;
-        let role = require_grantable(ctx, caller, &input.role)?;
+        require_role(ctx, Role::AdminUsersCreate)?;
         let pool = ctx.data::<DatabasePool>()?;
 
         use bcrypt::{hash, DEFAULT_COST};
@@ -240,7 +239,6 @@ impl Mutation {
             provider: "email".to_string(),
             provider_id: None,
             password_hash,
-            role,
             organization: input.organization,
             theme: "light".to_string(),
             default_chart_type: "line".to_string(),
@@ -258,8 +256,8 @@ impl Mutation {
         Ok(UserType::from(user))
     }
 
-    /// Update user information (requires `admin.users:update`; changing `role` also requires
-    /// every staff role it grants, and changing `isActive` requires `admin.users:suspend`)
+    /// Update user information (requires `admin.users:update`; changing `isActive` also
+    /// requires `admin.users:suspend`). Roles are assigned in the identity provider.
     async fn update_user(
         &self,
         ctx: &Context<'_>,
@@ -267,11 +265,6 @@ impl Mutation {
         input: UpdateUserInput,
     ) -> Result<UserType> {
         let caller = require_role(ctx, Role::AdminUsersUpdate)?;
-        let role = input
-            .role
-            .as_deref()
-            .map(|role| require_grantable(ctx, caller, role))
-            .transpose()?;
         if input.is_active.is_some() {
             require_role(ctx, Role::AdminUsersSuspend)?;
         }
@@ -339,16 +332,8 @@ impl Mutation {
             .get_result(&mut conn)
             .await?;
 
-        // Update role and email_verified if provided (these require separate updates)
+        // Update email_verified, email and is_active if provided (separate updates)
         let mut final_user = updated_user;
-
-        if let Some(role) = role {
-            final_user = diesel::update(users::table.filter(users::id.eq(user_id)))
-                .set(users::role.eq(role))
-                .returning(User::as_select())
-                .get_result(&mut conn)
-                .await?;
-        }
 
         if let Some(email_verified) = input.email_verified {
             final_user = diesel::update(users::table.filter(users::id.eq(user_id)))
@@ -592,13 +577,6 @@ impl Default for Mutation {
     }
 }
 
-/// Whether `roles` includes a staff role the caller lacks.
-fn exceeds_staff_roles(caller: &Principal, roles: &std::collections::BTreeSet<Role>) -> bool {
-    roles
-        .iter()
-        .any(|&role| role.is_staff() && !caller.has_role(role))
-}
-
 /// Refuse with "Insufficient permissions", logging the denial like `require_role` does.
 fn deny_user_admin(ctx: &Context<'_>, caller: &Principal, why: &str) -> GraphQLError {
     let context = ctx.data::<Arc<GraphQLContext>>().ok();
@@ -613,73 +591,65 @@ fn deny_user_admin(ctx: &Context<'_>, caller: &Principal, why: &str) -> GraphQLE
     GraphQLError::new("Insufficient permissions")
 }
 
-/// Check a legacy `users.role` value the caller wants to give a user, and return it lowercased
-/// for storage. A narrow staff role (say, `admin.users:update` alone) must not mint or become a
-/// full admin, so the value may grant only staff roles the caller holds. Unknown values are
-/// refused: the context would give such a user no roles at all.
-fn require_grantable(ctx: &Context<'_>, caller: &Principal, legacy_role: &str) -> Result<String> {
-    let granted = econ_graph_auth::roles_for_legacy(legacy_role)
-        .map_err(|_| GraphQLError::new(format!("Unknown role: {legacy_role}")))?;
-    if exceeds_staff_roles(caller, &granted) {
-        return Err(deny_user_admin(
-            ctx,
-            caller,
-            &format!("may not grant legacy role {legacy_role}"),
-        ));
-    }
-    Ok(legacy_role.to_ascii_lowercase())
+/// Whether `caller` holds every staff role in the catalog.
+fn holds_every_staff_role(caller: &Principal) -> bool {
+    Role::all()
+        .iter()
+        .filter(|role| role.is_staff())
+        .all(|&role| caller.has_role(role))
 }
 
-/// Refuse to act on a user who holds a staff role the caller lacks, so a narrow staff role
-/// cannot edit, delete, suspend or log out a fuller admin. An unknown legacy role grants
-/// nothing, so it never blocks. The target's roles come from `users.role`; when AUTH-5 drops
-/// that column, this must read the target's roles from Keycloak instead.
+/// Refuse to act on another user unless the caller holds every staff role.
+///
+/// The API cannot see another user's roles (they live in the identity provider and arrive
+/// only in that user's own tokens), so it cannot tell whether the target is a fuller admin
+/// than the caller. A narrow staff role (say, `admin.users:update` alone) therefore acts only
+/// on the caller's own account; editing, deleting, suspending or logging out anyone else takes
+/// the full staff set.
 fn require_manageable(ctx: &Context<'_>, caller: &Principal, target: &models::User) -> Result<()> {
-    let target_roles = econ_graph_auth::roles_for_legacy(&target.role).unwrap_or_default();
-    if exceeds_staff_roles(caller, &target_roles) {
-        return Err(deny_user_admin(
-            ctx,
-            caller,
-            &format!("user {} holds staff roles the caller lacks", target.id),
-        ));
+    if target.id == caller.user_id || holds_every_staff_role(caller) {
+        return Ok(());
     }
-    Ok(())
+    Err(deny_user_admin(
+        ctx,
+        caller,
+        &format!("acting on user {} needs every staff role", target.id),
+    ))
 }
 
 #[cfg(test)]
 mod user_admin_scope_tests {
     use super::*;
 
-    fn target_roles(legacy: &str) -> std::collections::BTreeSet<Role> {
-        econ_graph_auth::roles_for_legacy(legacy).unwrap_or_default()
+    fn staff() -> Vec<Role> {
+        Role::all()
+            .iter()
+            .copied()
+            .filter(|r| r.is_staff())
+            .collect()
     }
 
     #[test]
-    fn a_narrow_staff_role_cannot_act_on_a_full_admin() {
-        let caller = Principal::new(uuid::Uuid::new_v4(), [Role::AdminUsersUpdate]);
-        for legacy in ["admin", "super_admin", "ADMIN"] {
+    fn only_the_full_staff_set_counts() {
+        assert!(holds_every_staff_role(&Principal::new(
+            uuid::Uuid::new_v4(),
+            staff()
+        )));
+        assert!(holds_every_staff_role(&Principal::new(
+            uuid::Uuid::new_v4(),
+            Role::all().iter().copied()
+        )));
+        for missing in staff() {
+            let partial = staff().into_iter().filter(|&r| r != missing);
             assert!(
-                exceeds_staff_roles(&caller, &target_roles(legacy)),
-                "{legacy}"
+                !holds_every_staff_role(&Principal::new(uuid::Uuid::new_v4(), partial)),
+                "{missing}"
             );
         }
-        for legacy in ["viewer", "analyst", "guest", "root"] {
-            assert!(
-                !exceeds_staff_roles(&caller, &target_roles(legacy)),
-                "{legacy}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_full_admin_can_act_on_anyone() {
-        let caller = Principal::new(uuid::Uuid::new_v4(), Role::all().iter().copied());
-        for legacy in ["admin", "super_admin", "viewer"] {
-            assert!(
-                !exceeds_staff_roles(&caller, &target_roles(legacy)),
-                "{legacy}"
-            );
-        }
+        assert!(!holds_every_staff_role(&Principal::new(
+            uuid::Uuid::new_v4(),
+            []
+        )));
     }
 }
 
@@ -840,7 +810,7 @@ mod tests {
     ) -> async_graphql::Response {
         let schema = crate::graphql::schema::create_schema_with_data(
             pool.clone(),
-            Arc::new(crate::graphql::context::GraphQLContext::new(user)),
+            Arc::new(crate::graphql::context::GraphQLContext::for_test_user(user)),
         );
         schema.execute(query).await
     }
@@ -982,7 +952,7 @@ mod tests {
             let role = u.as_ref().map(|u| u.role.clone());
             let schema = crate::graphql::schema::create_schema_with_data(
                 unreachable_pool(),
-                Arc::new(crate::graphql::context::GraphQLContext::new(u)),
+                Arc::new(crate::graphql::context::GraphQLContext::for_test_user(u)),
             );
             let resp = schema.execute(query).await;
             assert_eq!(resp.errors.len(), 1, "{role:?}: {:?}", resp.errors);
@@ -1037,7 +1007,7 @@ mod collaboration_auth_tests {
             format!(r#"{{ chartCollaborators(chartId: "{id}") {{ id }} }}"#),
         ];
         let schema =
-            create_schema_with_data(unreachable_pool(), Arc::new(GraphQLContext::new(None)));
+            create_schema_with_data(unreachable_pool(), Arc::new(GraphQLContext::anonymous()));
         for mutation in mutations {
             let resp = schema.execute(mutation.as_str()).await;
             assert_eq!(resp.errors.len(), 1, "{mutation}: {:?}", resp.errors);
@@ -1068,7 +1038,7 @@ mod collaboration_auth_tests {
             ),
         ];
         let schema =
-            create_schema_with_data(unreachable_pool(), Arc::new(GraphQLContext::new(None)));
+            create_schema_with_data(unreachable_pool(), Arc::new(GraphQLContext::anonymous()));
         for mutation in mutations {
             let resp = schema.execute(mutation.as_str()).await;
             assert!(

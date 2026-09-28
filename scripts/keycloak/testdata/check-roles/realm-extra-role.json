@@ -1,0 +1,58 @@
+{
+  "realm": "econ-graph",
+  "roles": {
+    "realm": [
+      {
+        "name": "user",
+        "composite": true,
+        "composites": {
+          "client": {
+            "econ-graph-api": [
+              "annotation:create",
+              "api:mcp"
+            ]
+          }
+        }
+      },
+      {
+        "name": "admin",
+        "composite": true,
+        "composites": {
+          "realm": [
+            "user"
+          ],
+          "client": {
+            "econ-graph-api": [
+              "admin.users:read"
+            ]
+          }
+        }
+      },
+      {
+        "name": "super_admin",
+        "composite": true,
+        "composites": {
+          "realm": [
+            "admin"
+          ]
+        }
+      }
+    ],
+    "client": {
+      "econ-graph-api": [
+        {
+          "name": "annotation:create"
+        },
+        {
+          "name": "api:mcp"
+        },
+        {
+          "name": "admin.users:read"
+        },
+        {
+          "name": "chart:delete"
+        }
+      ]
+    }
+  }
+}
