@@ -81,11 +81,6 @@ spec:
             configMapKeyRef:
               name: econ-graph-config
               key: RUST_LOG
-        - name: JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: econ-graph-secrets
-              key: jwt-secret
         - name: CORS_ALLOWED_ORIGINS
           valueFrom:
             configMapKeyRef:
@@ -104,36 +99,6 @@ spec:
           value: "http://keycloak-service:8080/idp/realms/econ-graph/protocol/openid-connect/certs"
         - name: OIDC_REQUIRED
           value: "true"
-        - name: GOOGLE_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              name: econ-graph-secrets
-              key: google-client-id
-              optional: true
-        - name: GOOGLE_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: econ-graph-secrets
-              key: google-client-secret
-              optional: true
-        - name: FACEBOOK_APP_ID
-          valueFrom:
-            secretKeyRef:
-              name: econ-graph-secrets
-              key: facebook-app-id
-              optional: true
-        - name: FACEBOOK_APP_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: econ-graph-secrets
-              key: facebook-app-secret
-              optional: true
-        - name: FACEBOOK_ACCESS_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: econ-graph-secrets
-              key: facebook-access-token
-              optional: true
         resources:
           requests:
             memory: "256Mi"

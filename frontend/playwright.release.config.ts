@@ -56,9 +56,6 @@ const webServer: PlaywrightTestConfig['webServer'] = [
       DATABASE_URL: databaseUrl ?? '', // set: checked above whenever this runs
       BACKEND_PORT: String(backendPort),
       CORS_ALLOWED_ORIGINS: frontendUrl,
-      // Only signs tokens for this throwaway stack. Unrelated to Keycloak: still required by
-      // the in-house JWT code AUTH-6 will remove.
-      JWT_SECRET: 'release-e2e-only-jwt-secret',
       // The dev realm from docker-compose.release-e2e.yml's keycloak service.
       OIDC_ISSUER,
       OIDC_AUDIENCE: 'econ-graph-api',

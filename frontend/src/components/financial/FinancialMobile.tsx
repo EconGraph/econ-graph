@@ -183,15 +183,18 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
                 <FileText className='h-4 w-4' />
                 <span className='sr-only'>Search</span>
               </Button>
+              {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
               <Button variant='ghost' size='sm'>
                 <Share2 className='h-4 w-4 mr-1' />
                 Share
               </Button>
+              {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
               <Button variant='ghost' size='sm'>
                 <FileText className='h-4 w-4 mr-1' />
                 Bookmark
               </Button>
               <div className='relative'>
+                {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
                 <Button variant='ghost' size='sm'>
                   <AlertTriangle className='h-5 w-5' />
                 </Button>
@@ -213,10 +216,12 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
                   <div className='mt-6 space-y-4'>
                     <div className='space-y-2'>
                       <h3 className='font-medium'>Quick Actions</h3>
+                      {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
                       <Button variant='outline' className='w-full justify-start'>
                         <Download className='h-4 w-4 mr-2' />
                         Export
                       </Button>
+                      {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
                       <Button variant='outline' className='w-full justify-start'>
                         <Menu className='h-4 w-4 mr-2' />
                         Settings

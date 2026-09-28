@@ -57,10 +57,6 @@ warp.workspace = true
 # GraphQL (needed for error types)
 async-graphql.workspace = true
 
-# Authentication (needed for user model)
-bcrypt.workspace = true
-jsonwebtoken.workspace = true
-
 # Test dependencies
 [dev-dependencies]
 serial_test.workspace = true

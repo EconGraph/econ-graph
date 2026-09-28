@@ -195,67 +195,6 @@ impl Mutation {
 
     // Admin User Management Mutations
 
-    /// Create a new user (requires `admin.users:create`). The new user's roles are assigned in
-    /// the identity provider, not here.
-    async fn create_user(&self, ctx: &Context<'_>, input: CreateUserInput) -> Result<UserType> {
-        require_role(ctx, Role::AdminUsersCreate)?;
-        let pool = ctx.data::<DatabasePool>()?;
-
-        use bcrypt::{hash, DEFAULT_COST};
-        use diesel::prelude::*;
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::models::User;
-        use econ_graph_core::schema::users;
-
-        let mut conn = pool.get().await?;
-
-        // Check if user already exists
-        let existing_user: Option<User> = users::table
-            .filter(users::email.eq(&input.email))
-            .select(User::as_select())
-            .first(&mut conn)
-            .await
-            .optional()?;
-
-        if existing_user.is_some() {
-            return Err(GraphQLError::new("User with this email already exists"));
-        }
-
-        // Hash password if provided
-        let password_hash = if let Some(password) = &input.password {
-            Some(
-                hash(password, DEFAULT_COST)
-                    .map_err(|e| GraphQLError::new(format!("Password hashing failed: {}", e)))?,
-            )
-        } else {
-            None
-        };
-
-        // Create new user
-        let new_user = models::NewUser {
-            email: input.email,
-            name: input.name,
-            avatar_url: None,
-            provider: "email".to_string(),
-            provider_id: None,
-            password_hash,
-            organization: input.organization,
-            theme: "light".to_string(),
-            default_chart_type: "line".to_string(),
-            notifications_enabled: true,
-            collaboration_enabled: true,
-            email_verified: false,
-        };
-
-        let user = diesel::insert_into(users::table)
-            .values(&new_user)
-            .returning(User::as_select())
-            .get_result(&mut conn)
-            .await?;
-
-        Ok(UserType::from(user))
-    }
-
     /// Update user information (requires `admin.users:update`; changing `isActive` also
     /// requires `admin.users:suspend`). Roles are assigned in the identity provider.
     async fn update_user(
@@ -456,37 +395,6 @@ impl Mutation {
 
         Ok(true)
     }
-
-    /// Force logout a user (requires `admin.sessions:revoke`)
-    async fn force_logout_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        let caller = require_role(ctx, Role::AdminSessionsRevoke)?;
-        let pool = ctx.data::<DatabasePool>()?;
-        let user_id = uuid::Uuid::parse_str(&id)?;
-
-        use diesel::prelude::*;
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::{user_sessions, users};
-
-        let mut conn = pool.get().await?;
-
-        // Check if user exists
-        let user_exists: Option<models::User> = users::table
-            .filter(users::id.eq(user_id))
-            .select(models::User::as_select())
-            .first(&mut conn)
-            .await
-            .optional()?;
-
-        let target = user_exists.ok_or_else(|| GraphQLError::new("User not found"))?;
-        require_manageable(ctx, caller, &target)?;
-
-        // Delete all active sessions for the user
-        diesel::delete(user_sessions::table.filter(user_sessions::user_id.eq(user_id)))
-            .execute(&mut conn)
-            .await?;
-
-        Ok(true)
-    }
 }
 
 /// Turns a `triggerCrawl` input into queue rows, or a validation message.
@@ -604,8 +512,8 @@ fn holds_every_staff_role(caller: &Principal) -> bool {
 /// The API cannot see another user's roles (they live in the identity provider and arrive
 /// only in that user's own tokens), so it cannot tell whether the target is a fuller admin
 /// than the caller. A narrow staff role (say, `admin.users:update` alone) therefore acts only
-/// on the caller's own account; editing, deleting, suspending or logging out anyone else takes
-/// the full staff set.
+/// on the caller's own account; editing, deleting or suspending anyone else takes the full
+/// staff set.
 fn require_manageable(ctx: &Context<'_>, caller: &Principal, target: &models::User) -> Result<()> {
     if target.id == caller.user_id || holds_every_staff_role(caller) {
         return Ok(());
@@ -779,17 +687,13 @@ mod tests {
         Some((pool, guard))
     }
 
-    fn user(role: &str) -> User {
+    fn user(label: &str) -> User {
         let now = chrono::Utc::now();
         User {
             id: Uuid::new_v4(),
-            email: format!("{role}@example.test"),
-            name: role.into(),
+            email: format!("{label}@example.test"),
+            name: label.into(),
             avatar_url: None,
-            provider: "email".into(),
-            provider_id: None,
-            password_hash: None,
-            role: role.into(),
             organization: None,
             theme: "light".into(),
             default_chart_type: "line".into(),
@@ -808,11 +712,19 @@ mod tests {
         user: Option<User>,
         query: &str,
     ) -> async_graphql::Response {
+        let staff = user.as_ref().is_some_and(|u| is_staff_label(&u.name));
         let schema = crate::graphql::schema::create_schema_with_data(
             pool.clone(),
-            Arc::new(crate::graphql::context::GraphQLContext::for_test_user(user)),
+            Arc::new(crate::graphql::context::GraphQLContext::for_test_user(
+                user, staff,
+            )),
         );
         schema.execute(query).await
+    }
+
+    /// Whether a `user()` test helper label should hold every staff role.
+    fn is_staff_label(label: &str) -> bool {
+        matches!(label, "admin" | "super_admin")
     }
 
     async fn queue_rows(pool: &DatabasePool) -> Vec<(String, String, String)> {
@@ -949,22 +861,24 @@ mod tests {
             Some(user("viewer")),
             Some(user("analyst")),
         ] {
-            let role = u.as_ref().map(|u| u.role.clone());
+            let label = u.as_ref().map(|u| u.name.clone());
             let schema = crate::graphql::schema::create_schema_with_data(
                 unreachable_pool(),
-                Arc::new(crate::graphql::context::GraphQLContext::for_test_user(u)),
+                Arc::new(crate::graphql::context::GraphQLContext::for_test_user(
+                    u, false,
+                )),
             );
             let resp = schema.execute(query).await;
-            assert_eq!(resp.errors.len(), 1, "{role:?}: {:?}", resp.errors);
+            assert_eq!(resp.errors.len(), 1, "{label:?}: {:?}", resp.errors);
             let msg = &resp.errors[0].message;
-            let expected = if role.is_some() {
+            let expected = if label.is_some() {
                 "Insufficient permissions"
             } else {
                 "Authentication required"
             };
             assert!(
                 msg.contains(expected),
-                "{role:?}: expected {expected}, got {msg}"
+                "{label:?}: expected {expected}, got {msg}"
             );
         }
     }
