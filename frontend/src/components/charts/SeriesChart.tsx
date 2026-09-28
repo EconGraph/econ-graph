@@ -367,7 +367,12 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
         </Box>
       </Box>
 
-      <Box sx={{ height: 400 }} data-testid='series-chart' aria-label={`Line chart of ${title}`}>
+      <Box
+        sx={{ height: 400 }}
+        data-testid='series-chart'
+        role='img'
+        aria-label={`Line chart of ${title}`}
+      >
         <Line data={chartData} options={chartOptions} />
       </Box>
 
