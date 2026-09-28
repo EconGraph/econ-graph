@@ -4,6 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+# Unfinished XBRL parser, DTS (taxonomy) download, financial ratio calculator and the
+# config/*.json they load. Off by default so the live crawl only stores filings; the XBRL
+# parser work later builds on it.
+xbrl-parser = ["dep:quick-xml", "dep:xml", "dep:regex", "dep:md5", "econ-graph-core/financial-ratios"]
+
 [dependencies]
 # Workspace dependencies
 tokio.workspace = true
@@ -48,19 +55,17 @@ tracing-subscriber.workspace = true
 
 # File system operations
 walkdir = "2.5"
-tempfile = "3.27"
 
 # XML parsing for XBRL
-quick-xml = "0.42"
-roxmltree = "0.21"
-xml = "1.4"
+quick-xml = { version = "0.42", optional = true }
+xml = { version = "1.4", optional = true }
 
 # Database
 diesel = { version = "2.3", features = ["postgres", "chrono", "uuid", "numeric"] }
 diesel-async = { version = "=0.9.2", features = ["postgres", "bb8"] }
 
 # Regular expressions
-regex = "1.13"
+regex = { version = "1.13", optional = true }
 
 # Retry logic
 backoff = "0.4"
@@ -74,7 +79,7 @@ zstd = "0.14"
 # Hashing for file integrity
 sha2.workspace = true
 hex = "0.4"
-md5 = "0.8"
+md5 = { version = "0.8", optional = true }
 
 # Local dependencies
 econ-graph-core = { path = "../econ-graph-core" }
@@ -95,6 +100,10 @@ serial_test.workspace = true
 assert_matches = "1.5"
 rstest = "0.27"
 rstest_reuse = "0.7"
+
+[[test]]
+name = "xbrl_financial_integration_tests"
+required-features = ["xbrl-parser"]
 
 [[bin]]
 name = "sec-crawler"

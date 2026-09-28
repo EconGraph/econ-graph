@@ -220,6 +220,8 @@ jobs:
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         cargo clippy --all-targets --all-features -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
+        # The SEC crawler's XBRL parser is off by default; also lint its default build.
+        cargo clippy -p econ-graph-sec-crawler --all-targets -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
       working-directory: backend
 
     - name: Check Rust documentation
@@ -499,7 +501,8 @@ jobs:
       working-directory: backend
 
     # Required: the crawler crate, crawler worker, all SEC crawler lib tests (no database
-    # needed) and the crawl_queue model / queue service tests. These must pass for the job
+    # needed; default build and with the xbrl-parser feature), the core financial ratio
+    # tests and the crawl_queue model / queue service tests. These must pass for the job
     # (and the PR) to go green.
     # The long soak test (tests/soak.rs) is #[ignore]d and runs manually only; its fast
     # limiter-conformance tests run here.
@@ -509,6 +512,9 @@ jobs:
         cargo test -p econ-graph-crawler --all-features -- --test-threads=1
         cargo test -p econ-graph-crawler-worker -- --test-threads=1
         cargo test -p econ-graph-sec-crawler --lib -- --test-threads=1
+        # The XBRL parser is compiled out by default (feature xbrl-parser); test it here too.
+        cargo test -p econ-graph-sec-crawler --features xbrl-parser --lib -- --test-threads=1
+        cargo test -p econ-graph-core --features financial-ratios --lib financial_ratios -- --test-threads=1
         cargo test -p econ-graph-core crawl_queue -- --test-threads=1
         cargo test -p econ-graph-services queue_service -- --test-threads=1
       working-directory: backend
@@ -521,7 +527,11 @@ jobs:
       continue-on-error: true
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --workspace --no-fail-fast --lib --bins --tests -- --test-threads=1
+        status=0
+        cargo test --workspace --no-fail-fast --lib --bins --tests -- --test-threads=1 || status=$?
+        # The XBRL integration tests need the xbrl-parser feature (required-features).
+        cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --tests -- --test-threads=1 || status=$?
+        exit $status
       working-directory: backend
 
     # TODO: ~45 doctests across the workspace do not compile (stale examples).
@@ -531,7 +541,11 @@ jobs:
       continue-on-error: true
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --workspace --no-fail-fast --doc
+        status=0
+        cargo test --workspace --no-fail-fast --doc || status=$?
+        # Doctests in the SEC crawler's feature-gated XBRL parser code.
+        cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --doc || status=$?
+        exit $status
       working-directory: backend
 
   backend-db-tests:
