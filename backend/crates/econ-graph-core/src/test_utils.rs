@@ -1,6 +1,6 @@
 //! Test utilities for the econ-graph-core crate
 
-use crate::database::DatabasePool;
+use crate::database::{redact_database_url, DatabasePool};
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 
@@ -29,7 +29,10 @@ impl TestContainer {
         println!("DEBUG: Creating TestContainer in test mode");
         // Check if we should use testcontainers or external DB
         if let Ok(database_url) = std::env::var("DATABASE_URL") {
-            println!("DEBUG: Using external DATABASE_URL: {}", database_url);
+            println!(
+                "DEBUG: Using external DATABASE_URL: {}",
+                redact_database_url(&database_url)
+            );
             // Use external database if DATABASE_URL is set
             let pool = crate::database::create_pool(&database_url)
                 .await

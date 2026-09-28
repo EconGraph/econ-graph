@@ -365,8 +365,9 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
 
           <Grid item xs={12} sm={6} md={3}>
             <FormControl fullWidth size='small'>
-              <InputLabel>Transformation</InputLabel>
+              <InputLabel id='series-transformation-label'>Transformation</InputLabel>
               <Select
+                labelId='series-transformation-label'
                 value={selectedTransformation}
                 onChange={e => onTransformationChange?.(e.target.value as DataTransformation)}
                 label='Transformation'

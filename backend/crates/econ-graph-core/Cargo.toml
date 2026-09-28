@@ -25,6 +25,9 @@ uuid.workspace = true
 bigdecimal.workspace = true
 rust_decimal.workspace = true
 
+# URL parsing (for redacting credentials before logging)
+url.workspace = true
+
 # Error handling
 anyhow.workspace = true
 thiserror.workspace = true
