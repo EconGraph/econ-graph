@@ -87,7 +87,7 @@ const SeriesAnnotationsPanel: React.FC<SeriesAnnotationsPanelProps> = ({
   } else if (annotations.length === 0) {
     body = (
       <Typography variant='body2' color='text.secondary'>
-        No public annotations on this series yet.
+        No annotations on this series yet.
       </Typography>
     );
   } else {

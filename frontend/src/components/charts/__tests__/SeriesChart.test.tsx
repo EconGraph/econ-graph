@@ -204,4 +204,42 @@ describe('SeriesChart', () => {
     await userEvent.click(screen.getByRole('option', { name: 'Month-over-Month' }));
     expect(onTransformationChange).toHaveBeenCalledWith('MONTH_OVER_MONTH');
   });
+
+  describe('onPointClick', () => {
+    test('is called with the shown observation nearest the click', () => {
+      const onPointClick = vi.fn();
+      renderChart({
+        dateRange: { start: parseIsoDate('2024-02-01'), end: null },
+        onPointClick,
+      });
+
+      // With the range applied, index 0 is February, not January.
+      lastLineProps().options.onClick({ type: 'click' }, [{ datasetIndex: 0, index: 0 }]);
+      expect(onPointClick).toHaveBeenCalledWith(MONTHLY[1]);
+    });
+
+    test('is not called for a click the annotation plugin already handled', () => {
+      const onPointClick = vi.fn();
+      const onAnnotationClick = vi.fn();
+      renderChart({
+        annotations: [{ kind: 'point', id: 'a1', label: 'Note', date: '2024-02-01' }],
+        onAnnotationClick,
+        onPointClick,
+      });
+
+      // Chart.js passes the same event to the plugin's click handler and then to onClick.
+      const { options } = lastLineProps();
+      const event = { type: 'click' };
+      options.plugins.annotation.annotations.a1.click({}, event);
+      options.onClick(event, [{ datasetIndex: 0, index: 1 }]);
+
+      expect(onAnnotationClick).toHaveBeenCalledWith('a1');
+      expect(onPointClick).not.toHaveBeenCalled();
+    });
+
+    test('leaves the chart without a click handler when not given', () => {
+      renderChart();
+      expect(lastLineProps().options.onClick).toBeUndefined();
+    });
+  });
 });
