@@ -1,0 +1,94 @@
+# Backup and restore scripts shared by postgres-backup-cronjob.yaml and
+# scripts/deploy/restore-postgres-backup.sh (which runs the restore.sh
+# script below inside a one-off Job).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-backup-scripts
+  namespace: econ-graph
+data:
+  backup.sh: |
+    #!/bin/sh
+    set -eu
+
+    BACKUP_DIR="${BACKUP_DIR:-/backups}"
+    RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
+    STAMP="$(date -u +%Y%m%d-%H%M%S)"
+    DEST="${BACKUP_DIR}/econ_graph-${STAMP}.dump"
+    PARTIAL="${DEST}.partial"
+    trap 'rm -f "${PARTIAL}"' EXIT
+
+    echo "Dumping database '${PGDATABASE}' from ${PGHOST}:${PGPORT} to ${PARTIAL}"
+    pg_dump --format=custom --no-owner --no-privileges --file="${PARTIAL}"
+
+    echo "Verifying archive integrity"
+    pg_restore --file=/dev/null "${PARTIAL}"
+
+    # Only give the dump its final name (picked up by sync.sh / restore.sh /
+    # the retention find below) once it's confirmed valid, so a failed or
+    # truncated dump never sits under a name that looks like a good backup.
+    mv "${PARTIAL}" "${DEST}"
+
+    echo "Backup OK: $(du -h "${DEST}" | cut -f1) written"
+
+    if [ "${RETENTION_DAYS}" -gt 0 ]; then
+      echo "Pruning backups older than ${RETENTION_DAYS} day(s) in ${BACKUP_DIR}"
+      find "${BACKUP_DIR}" -maxdepth 1 -name 'econ_graph-*.dump' -mtime "+${RETENTION_DAYS}" -print -delete
+    fi
+
+    ln -sf "${DEST}" "${BACKUP_DIR}/latest.dump"
+    echo "Done."
+
+  sync.sh: |
+    #!/bin/sh
+    set -eu
+
+    BACKUP_DIR="${BACKUP_DIR:-/backups}"
+    DESTINATION="${BACKUP_DESTINATION:-}"
+
+    if [ "${DESTINATION}" != "s3" ]; then
+      echo "BACKUP_DESTINATION not set to 's3'; backups stay on the PVC only."
+      exit 0
+    fi
+
+    if [ -z "${BACKUP_S3_BUCKET:-}" ]; then
+      echo "BACKUP_DESTINATION=s3 but BACKUP_S3_BUCKET is empty" >&2
+      exit 1
+    fi
+
+    ENDPOINT_ARGS=""
+    if [ -n "${BACKUP_S3_ENDPOINT:-}" ]; then
+      ENDPOINT_ARGS="--endpoint-url ${BACKUP_S3_ENDPOINT}"
+    fi
+
+    echo "Syncing ${BACKUP_DIR} to s3://${BACKUP_S3_BUCKET}/${BACKUP_S3_PREFIX:-}"
+    # --exclude latest.dump: it's a symlink to a dump already being synced,
+    # and `aws s3 sync` follows symlinks by default, which would upload the
+    # same content twice under two keys.
+    # shellcheck disable=SC2086
+    aws s3 sync "${BACKUP_DIR}" "s3://${BACKUP_S3_BUCKET}/${BACKUP_S3_PREFIX:-}" \
+      --exclude "latest.dump" ${ENDPOINT_ARGS} --only-show-errors
+    echo "Sync complete."
+
+  restore.sh: |
+    #!/bin/sh
+    set -eu
+
+    BACKUP_DIR="${BACKUP_DIR:-/backups}"
+    FILE="${BACKUP_FILE:-${BACKUP_DIR}/latest.dump}"
+
+    if [ ! -e "${FILE}" ]; then
+      echo "Backup file not found: ${FILE}" >&2
+      echo "Available backups in ${BACKUP_DIR}:" >&2
+      ls -1 "${BACKUP_DIR}"/econ_graph-*.dump 1>&2 2>/dev/null || echo "  (none)" >&2
+      exit 1
+    fi
+
+    echo "Restoring ${FILE} into database '${PGDATABASE}' on ${PGHOST}:${PGPORT}"
+    # --single-transaction: a failed restore rolls back cleanly instead of
+    # leaving the database with some objects dropped and never recreated.
+    pg_restore --clean --if-exists --no-owner --no-privileges \
+      --single-transaction --exit-on-error \
+      --dbname="${PGDATABASE}" "${FILE}"
+
+    echo "Restore complete."

@@ -1,0 +1,109 @@
+# Nightly PostgreSQL backup.
+#
+# Writes a pg_dump to postgres-backup-data (a PVC separate from the
+# database's own postgresql-data volume, see postgres-backup-pvc.yaml), so a
+# lost/corrupted/torn-down primary volume doesn't take the backups with it.
+#
+# To also ship backups to object storage, set BACKUP_DESTINATION=s3 and the
+# BACKUP_S3_* env vars below (and provide AWS credentials, e.g. via a
+# Secret referenced through envFrom). The sync container is a no-op when
+# BACKUP_DESTINATION is unset, so the PVC-only dev default needs no further
+# configuration.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: econ-graph
+  labels:
+    app: postgres-backup
+    component: backup
+spec:
+  schedule: "0 8 * * *"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: postgres-backup
+            component: backup
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            fsGroup: 999
+          initContainers:
+          - name: pg-dump
+            image: postgres:18
+            command: ["/scripts/backup.sh"]
+            env:
+            - name: PGHOST
+              value: "postgres-service"
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: "postgres"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: econ-graph-postgres
+                  key: postgres-password
+            - name: PGDATABASE
+              value: "econ_graph"
+            - name: BACKUP_DIR
+              value: "/backups"
+            - name: BACKUP_RETENTION_DAYS
+              value: "14"
+            volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: backup-data
+              mountPath: /backups
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+              seccompProfile:
+                type: RuntimeDefault
+          containers:
+          - name: backup-sync
+            image: amazon/aws-cli:2.17.62
+            command: ["/scripts/sync.sh"]
+            env:
+            - name: BACKUP_DIR
+              value: "/backups"
+            - name: BACKUP_DESTINATION
+              value: "" # set to "s3" to also push to object storage
+            - name: BACKUP_S3_BUCKET
+              value: ""
+            - name: BACKUP_S3_PREFIX
+              value: "postgres/econ-graph"
+            - name: BACKUP_S3_ENDPOINT
+              value: "" # optional, for S3-compatible endpoints (e.g. MinIO)
+            volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: backup-data
+              mountPath: /backups
+              readOnly: true
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+              seccompProfile:
+                type: RuntimeDefault
+          volumes:
+          - name: scripts
+            configMap:
+              name: postgres-backup-scripts
+              defaultMode: 0555
+          - name: backup-data
+            persistentVolumeClaim:
+              claimName: postgres-backup-data
