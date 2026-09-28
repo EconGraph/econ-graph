@@ -80,6 +80,10 @@ jobs:
       # A change to neither side (or to a shared path) runs everything
       frontend_only: ${{ steps.filter.outputs.frontend == 'true' && steps.filter.outputs.backend == 'false' && steps.filter.outputs.shared == 'false' }}
       backend_only: ${{ steps.filter.outputs.backend == 'true' && steps.filter.outputs.frontend == 'false' && steps.filter.outputs.shared == 'false' }}
+      # Jobs that only check one kind of file run when that kind changed
+      deps: ${{ steps.filter.outputs.deps }}
+      docker: ${{ steps.filter.outputs.docker }}
+      migrations: ${{ steps.filter.outputs.migrations }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -109,6 +113,50 @@ jobs:
             # this file; a backend-only PR that regenerates it must still run
             # Frontend Tests, not just the backend side.
             - 'backend/crates/econ-graph-graphql/schema.graphql'
+            # Docker Build Test needs the backend build, so a change to either
+            # image it actually builds runs both. Only backend/ and frontend/
+            # have a Dockerfile that job builds; the ci/, admin-frontend/ and
+            # chart-api-service/ Dockerfiles are unrelated to it.
+            - 'backend/Dockerfile'
+            - 'backend/.dockerignore'
+            - 'frontend/Dockerfile'
+            - 'frontend/.dockerignore'
+            - 'frontend/nginx.conf'
+          # Each gated job also runs when this workflow changes, so a broken
+          # job definition shows up on the PR rather than on main.
+          deps:
+            - '.github/workflows/ci-core.yml'
+            - 'backend/Cargo.toml'
+            - 'backend/**/Cargo.toml'
+            - 'backend/Cargo.lock'
+            - 'backend/deny.toml'
+            - 'backend/.cargo/audit.toml'
+            - 'rust-toolchain.toml'
+            - 'frontend/package.json'
+            - 'frontend/package-lock.json'
+            - 'frontend/.license-checker.json'
+            - 'admin-frontend/package.json'
+            - 'admin-frontend/package-lock.json'
+          # Docker Build Test builds the whole backend and frontend inside the
+          # image, so a dependency or toolchain bump can break it with no
+          # Dockerfile touched (a new -sys crate needing a system library, an
+          # npm package with a native build step, an MSRV bump).
+          docker:
+            - '.github/workflows/ci-core.yml'
+            - 'backend/Dockerfile'
+            - 'backend/.dockerignore'
+            - 'frontend/Dockerfile'
+            - 'frontend/.dockerignore'
+            - 'frontend/nginx.conf'
+            - 'backend/**/Cargo.toml'
+            - 'backend/Cargo.lock'
+            - 'rust-toolchain.toml'
+            - 'frontend/package.json'
+            - 'frontend/package-lock.json'
+          migrations:
+            - '.github/workflows/ci-core.yml'
+            - 'backend/migrations/**'
+            - 'backend/scripts/check_migration_order.py'
   backend-build-cache:
     name: Backend Build Cache
     runs-on: ubuntu-latest
@@ -149,6 +197,10 @@ jobs:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: [changes]
+    # Only when migrations changed; every push to main and manual run still gets
+    # it. !cancelled(): `changes` is skipped on main.
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.migrations == 'true') }}
 
     steps:
     - name: Checkout code
@@ -834,6 +886,11 @@ jobs:
     name: Security Audit
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    needs: [changes]
+    # Only when dependency manifests or lockfiles changed; every push to main and
+    # manual run still gets it (security.yml also audits daily). !cancelled():
+    # `changes` is skipped on main.
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.deps == 'true') }}
 
     steps:
     - name: Checkout code
@@ -890,6 +947,10 @@ jobs:
     name: License Compliance Check
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    needs: [changes]
+    # Only when dependency manifests or lockfiles changed; every push to main and
+    # manual run still gets it. !cancelled(): `changes` is skipped on main.
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.deps == 'true') }}
 
     steps:
     - name: Checkout code
@@ -2509,7 +2570,12 @@ jobs:
     name: Docker Build Test
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    needs: [backend-smoke-tests]
+    needs: [changes, backend-smoke-tests]
+    # Only when a Dockerfile or .dockerignore changed; every push to main and
+    # manual run still gets it. Smoke tests must have passed if they ran; a
+    # frontend-only PR skips backend-build-cache and backend-smoke-tests
+    # entirely (frontend_only), which this job doesn't need in that case.
+    if: ${{ !cancelled() && (needs.backend-smoke-tests.result == 'success' || (needs.backend-smoke-tests.result == 'skipped' && needs.changes.outputs.frontend_only == 'true')) && (github.event_name != 'pull_request' || needs.changes.outputs.docker == 'true') }}
 
     services:
       postgres:
