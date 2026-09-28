@@ -81,8 +81,8 @@ Put them in `tests/e2e/release/<area>/`, for example
 
 - **Sign-in UI.** `tests/e2e/release/auth/sign-in.spec.ts` checks the infra
   directly (a dev-realm token is accepted by the backend); there is no UI to
-  drive yet. AUTH-9 (annotate on the series page) and AUTH-7 (sign-in through
-  `oidc-client-ts`) replace it with AUTH-10's real sign-in spec once they land.
+  drive yet. AUTH-9 (annotate on the series page) replaces it with AUTH-10's
+  real sign-in spec once it lands.
 - **Release flags.** `FLAG_PROFILE=release` has no effect until the build-time
   flag switch lands. The frontend build already sets it.
 - **Search.** `/explore` search is broken on main, in both the backend and the

@@ -97,8 +97,7 @@ export default defineConfig({
         FLAG_PROFILE: 'release',
         BACKEND_URL: backendUrl,
         VITE_API_URL: backendUrl,
-        // Unused until AUTH-7's sign-in UI lands and reads it; wired here so the release e2e
-        // stack, and AUTH-10's spec, have it as soon as that UI does.
+        // Read by AUTH-7's sign-in UI (oidc-client-ts). AUTH-10's real sign-in spec uses it too.
         VITE_OIDC_ISSUER: oidcIssuer,
       },
     },
