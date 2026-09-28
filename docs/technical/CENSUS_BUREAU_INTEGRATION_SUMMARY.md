@@ -44,7 +44,7 @@ Finer levels (county, metro area) have thousands of areas and are skipped.
 **Fetching** (`fetch_series`) is supported for both kinds of id. Any other id (including the bare
 `CENSUS_BDS_{VARIABLE}_state` ids older discovery runs recorded) is a `Permanent` error, and the
 refresh scheduler never enqueues it. The request is
-`GET {base}/timeseries/bds?get={VARIABLE},YEAR&for={us:*|state:FIPS}[&key=KEY]` (all years; the
+`GET {base}/timeseries/bds?get={VARIABLE},YEAR&for={us:*|state:FIPS}&key=KEY` (all years; the
 old comma-separated `YEAR=` list hit the API's "204 No Content" limitation for multi-year queries).
 `since` is applied client-side by year. Each row becomes a point dated January 1 of its `YEAR`.
 Rows of the wrong width or with an unparseable year are skipped; empty or non-numeric values are

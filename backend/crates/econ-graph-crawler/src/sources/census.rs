@@ -133,21 +133,22 @@ impl CensusAdapter {
         key: &str,
         file: &str,
     ) -> Result<Value, CrawlError> {
+        let url = self.url(&format!("{BDS_PATH}/{file}"));
         let body = ctx
             .http
-            .get_text(
-                SourceId::Census,
-                &self.url(&format!("{BDS_PATH}/{file}")),
-                &[("key", key)],
-            )
+            .get_text(SourceId::Census, &url, &[("key", key)])
             .await
             .map_err(classify_census_error)?;
         serde_json::from_str(&body).map_err(|e| {
-            if is_invalid_key_page(&body) {
+            let err = if is_invalid_key_page(&body) {
                 CrawlError::Auth(format!("Census {file}: API key rejected (Invalid Key)"))
             } else {
                 CrawlError::Parse(format!("Census {file}: response is not JSON: {e}"))
-            }
+            };
+            // `get_text` only counts the HTTP request as successful; this classification is
+            // ours, so we record it ourselves (get_json's decode() would do this for us).
+            ctx.http.record_response_error(SourceId::Census, &url, &err);
+            err
         })
     }
 }
