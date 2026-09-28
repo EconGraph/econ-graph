@@ -77,8 +77,8 @@ pub use econ_graph_services::services::{
 
 // GraphQL framework imports
 pub use async_graphql::{
-    Context, EmptyMutation, EmptySubscription, Enum, Error as GraphQLError, InputObject, Object,
-    Result, Schema, SimpleObject, ID,
+    ComplexObject, Context, EmptyMutation, EmptySubscription, Enum, Error as GraphQLError,
+    InputObject, Object, Result, Schema, SimpleObject, ID,
 };
 
 // Standard library and external crate imports
@@ -98,3 +98,4 @@ pub use crate::graphql::context::{
     current_user, current_user_id_opt, require_role, GraphQLContext,
 };
 pub use econ_graph_auth::{Principal, Role};
+pub use econ_graph_core::enums::AnnotationVisibility;

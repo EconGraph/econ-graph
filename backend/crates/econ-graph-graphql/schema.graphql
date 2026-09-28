@@ -47,6 +47,20 @@ type AnnotationCommentType {
 }
 
 """
+GraphQL enum for a chart annotation's visibility
+"""
+enum AnnotationVisibilityEnum {
+	"""
+	Visible only to its author
+	"""
+	PRIVATE
+	"""
+	Visible to everyone
+	"""
+	PUBLIC
+}
+
+"""
 GraphQL connection for audit logs
 """
 type AuditLogConnection {
@@ -183,9 +197,9 @@ type ChartAnnotationType {
 	"""
 	annotationType: String
 	"""
-	Whether the annotation is visible to others
+	Who can see the annotation (private: author only; public: everyone)
 	"""
-	isVisible: Boolean
+	visibility: AnnotationVisibilityEnum!
 	"""
 	Whether the annotation is pinned
 	"""
@@ -202,6 +216,11 @@ type ChartAnnotationType {
 	Last update timestamp
 	"""
 	updatedAt: DateTime
+	"""
+	Deprecated alias for `visibility`: true when public. Kept so existing clients
+	(frontend queries not yet migrated to `visibility`) keep working.
+	"""
+	isVisible: Boolean! @deprecated(reason: "use visibility")
 }
 
 """
@@ -329,6 +348,10 @@ input CreateAnnotationInput {
 	Whether the annotation is public (visible to others)
 	"""
 	isPublic: Boolean
+	"""
+	Deprecated alias for `isPublic`. If both are given, `isPublic` wins.
+	"""
+	isVisible: Boolean @deprecated(reason: "use isPublic")
 }
 
 """
@@ -500,6 +523,10 @@ type Mutation {
 	Share a chart with another user
 	"""
 	shareChart(input: ShareChartInput!): ChartCollaboratorType!
+	"""
+	Update an annotation (only its author may update it)
+	"""
+	updateAnnotation(input: UpdateAnnotationInput!): ChartAnnotationType!
 	"""
 	Delete an annotation
 	"""
@@ -871,6 +898,40 @@ input TriggerCrawlInput {
 	Source that every entry of `series_ids` belongs to.
 	"""
 	source: String
+}
+
+"""
+Input for updating an annotation (only its author may update it)
+"""
+input UpdateAnnotationInput {
+	"""
+	Annotation ID to update
+	"""
+	annotationId: ID!
+	"""
+	New title, if changing
+	"""
+	title: String
+	"""
+	New content/description, if changing
+	"""
+	content: String
+	"""
+	New color, if changing
+	"""
+	color: String
+	"""
+	New annotation type, if changing
+	"""
+	annotationType: String
+	"""
+	New public/private visibility, if changing
+	"""
+	isPublic: Boolean
+	"""
+	Deprecated alias for `isPublic`. If both are given, `isPublic` wins.
+	"""
+	isVisible: Boolean @deprecated(reason: "use isPublic")
 }
 
 """
