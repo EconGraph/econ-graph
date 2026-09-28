@@ -1,0 +1,11 @@
+# Override to additionally import the QA-only users (qa-alice, qa-bob) into the
+# dev-realm Keycloak. Off by default; use explicitly:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.qa-users.yml up -d keycloak
+#
+# Never combine with the k8s manifests: scripts/keycloak/check-no-dev-users-in-k8s.sh
+# fails CI if a k8s manifest references this file.
+services:
+  keycloak:
+    volumes:
+      - ./config/keycloak/qa/econ-graph-users-1.json:/opt/keycloak/data/import/econ-graph-users-1.json:ro

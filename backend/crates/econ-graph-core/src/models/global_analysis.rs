@@ -312,25 +312,6 @@ pub struct TradePartner {
     pub relationship_type: String, // "Export", "Import", "Bilateral"
 }
 
-/// Economic correlation network node
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CorrelationNetworkNode {
-    pub country: Country,
-    pub connections: Vec<CorrelationConnection>,
-    pub centrality_score: f64,
-    pub cluster_id: Option<i32>,
-}
-
-/// Connection between countries in correlation network
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CorrelationConnection {
-    pub target_country: Country,
-    pub correlation_coefficient: f64,
-    pub indicator_category: String,
-    pub significance_level: f64,
-    pub connection_strength: f64, // Normalized 0-1
-}
-
 /// Global economic event with country impacts
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalEventWithImpacts {
