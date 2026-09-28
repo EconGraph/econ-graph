@@ -270,7 +270,7 @@ query GetMultipleSeries($sourceId: ID!) {
 
 ## Development Tools
 
-- **GraphQL Playground** - Available at `/graphql/playground` in development
+- **GraphQL Playground** - Served at `/playground` only when the backend runs with `ENABLE_GRAPHQL_PLAYGROUND=true` (docker-compose sets it; deployed environments do not)
 - **Introspection** - Full schema introspection support
 - **Query Validation** - Automatic query validation and error reporting
 

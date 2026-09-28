@@ -319,7 +319,7 @@ echo "  Frontend: http://admin.econ-graph.local (add '127.0.0.1 admin.econ-graph
 # Admin UI: not deployed here (re-enabled by ECO-242, train 2).
 echo "  Backend:  http://admin.econ-graph.local/api"
 echo "  GraphQL:  http://admin.econ-graph.local/graphql"
-echo "  Playground: http://admin.econ-graph.local/playground"
+echo "  Playground: off (set ENABLE_GRAPHQL_PLAYGROUND=true on the backend to serve /playground)"
 echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT}"
 echo "            (admin / password: kubectl -n econ-graph get secret grafana-admin -o jsonpath={.data.admin-password} | base64 -d)"
 echo ""
