@@ -14,7 +14,6 @@ data:
   # econ-graph-secrets Secret created by scripts/deploy/create-secrets.sh)
   RUST_LOG: "info"
   CORS_ORIGIN: "http://localhost:3000"
-  GOOGLE_CLIENT_ID: "80227441551-3dv05tkflnfrjpqv5fgii7b8br0brt7m.apps.googleusercontent.com"
 
   # Chart API Service configuration
   CHART_API_SERVICE_URL: "http://chart-api-service.econ-graph.svc.cluster.local:3001/api/chart"
