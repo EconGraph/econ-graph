@@ -93,9 +93,9 @@ PostgreSQL server in this environment, since the sandbox has no running k8s
 cluster to apply the CronJob/Job manifests to:
 
 1. Created a test database with a table and rows.
-2. Ran `backup.sh` against it (same commands the CronJob's `pg-dump`
-   container runs) — produced a verified `.dump` file and a `latest.dump`
-   symlink.
+2. Ran an earlier version of `backup.sh` against it — produced a `.dump`
+   file and a `latest.dump` symlink. The newer full-archive read check
+   (`pg_restore --file=/dev/null`) was added after this test.
 3. Created a second, empty database and ran `restore.sh` against it (same
    commands the restore `Job`'s container runs) — the table and rows came
    back correctly.
@@ -103,9 +103,9 @@ cluster to apply the CronJob/Job manifests to:
    `BACKUP_FILE`) fails loudly and lists what's actually available, rather
    than silently doing nothing.
 
-This is *script-level* verification, not a full end-to-end test: it exercises
-the same commands the Job/CronJob containers run, but not the in-cluster
-wiring around them (the PVC mounts, the `econ-graph-postgres` Secret, the
+This is *script-level* verification of the original dump/restore flow, not a
+full end-to-end test of the current manifests. It does not cover the newer
+archive read check or the in-cluster wiring (the PVC mounts, the `econ-graph-postgres` Secret, the
 CronJob schedule, or the actual `postgres-service` label selectors), and the
 restore ran into an empty database rather than over live data — the
 destructive `--clean` path the confirmation prompt exists for. That
