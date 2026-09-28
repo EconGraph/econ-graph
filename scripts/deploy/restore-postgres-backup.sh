@@ -88,7 +88,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: econ-graph-secrets
-              key: database-password
+              key: postgres-superuser-password
         - name: PGDATABASE
           value: "econ_graph"
         - name: BACKUP_DIR
