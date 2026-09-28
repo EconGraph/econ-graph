@@ -43,14 +43,12 @@ kubectl config use-context kind-econ-graph
 
 # Preserve both data and backup PVs before any resource or namespace deletion.
 # A failed patch stops teardown before it can remove the namespace.
-if kubectl get pvc postgresql-data-postgresql-0 -n econ-graph >/dev/null 2>&1 ||
-   kubectl get pvc postgres-backup-data -n econ-graph >/dev/null 2>&1; then
-    "$PROJECT_ROOT/scripts/deploy/protect-postgres-pv.sh"
-fi
+"$PROJECT_ROOT/scripts/deploy/protect-postgres-pv.sh"
 
 # Remove application resources
 echo "📋 Removing application resources..."
 kubectl delete -f k8s/manifests/admin-ingress.yaml --ignore-not-found=true
+kubectl delete -f k8s/manifests/graphql-ingress.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/ingress.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/frontend-service.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/frontend-deployment.yaml --ignore-not-found=true
@@ -65,7 +63,10 @@ kubectl delete -f k8s/manifests/postgres.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/postgres-deployment.yaml --ignore-not-found=true
 kubectl delete -f k8s/manifests/postgres-init.yaml --ignore-not-found=true
 kubectl delete cronjob postgres-backup -n econ-graph --ignore-not-found=true
-kubectl delete -f k8s/manifests/secret.yaml --ignore-not-found=true
+# Secrets created by scripts/deploy/create-secrets.sh (the namespace deletion
+# below would remove them too; listed so the intent is explicit).
+kubectl -n econ-graph delete secret econ-graph-secrets econ-graph-postgres crawler-api-keys \
+    econ-graph-keycloak grafana-admin monitoring-auth --ignore-not-found=true
 kubectl delete -f k8s/manifests/configmap.yaml --ignore-not-found=true
 
 echo "✅ Application resources removed successfully!"

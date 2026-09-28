@@ -29,11 +29,11 @@ terraform apply -auto-approve
 cd "$PROJECT_ROOT"
 
 # Step 2: Deploy PostgreSQL in Kubernetes
-# The StatefulSet reads its superuser password from this Secret.
-kubectl apply -f k8s/manifests/namespace.yaml
-kubectl apply -f k8s/manifests/secret.yaml
 echo ""
 echo "📋 Step 2: Deploying PostgreSQL in Kubernetes..."
+kubectl apply -f k8s/manifests/namespace.yaml
+# PostgreSQL reads its passwords from the econ-graph-postgres Secret.
+./scripts/deploy/create-secrets.sh
 kubectl apply -f k8s/manifests/postgres-init.yaml
 kubectl apply -f k8s/manifests/postgres-deployment.yaml
 kubectl apply -f k8s/manifests/postgres.yaml
@@ -69,7 +69,7 @@ echo "🌐 Your EconGraph application is now running at:"
 echo "  Frontend: http://localhost/"
 echo "  Backend:  http://localhost:9876"
 echo "  GraphQL:  http://localhost/graphql"
-echo "  Playground: http://localhost/playground"
+echo "  Playground: off (set ENABLE_GRAPHQL_PLAYGROUND=true on the backend to serve /playground)"
 echo ""
 echo "📊 Monitor your deployment:"
 echo "  kubectl get pods -n econ-graph"

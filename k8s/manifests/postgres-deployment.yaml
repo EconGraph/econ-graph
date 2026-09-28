@@ -30,11 +30,20 @@ spec:
           value: "econ_graph"
         - name: POSTGRES_USER
           value: "postgres"
+        # Passwords come from the econ-graph-postgres Secret, created out of band by
+        # scripts/deploy/create-secrets.sh. Both only take effect when the data
+        # volume is initialised for the first time.
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: econ-graph-secrets
-              key: postgres-superuser-password
+              name: econ-graph-postgres
+              key: postgres-password
+        # Read by the init script in postgres-init.yaml to create the app user.
+        - name: APP_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-postgres
+              key: app-password
         - name: PGDATA
           value: "/data/pgdata"
         volumeMounts:
@@ -87,6 +96,9 @@ spec:
       - name: postgresql-init
         configMap:
           name: postgresql-init
+          # Executable, so the entrypoint runs the init script in its own shell
+          # instead of sourcing it.
+          defaultMode: 0555
       securityContext:
         fsGroup: 999
   volumeClaimTemplates:

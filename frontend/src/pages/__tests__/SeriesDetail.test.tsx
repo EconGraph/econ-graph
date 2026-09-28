@@ -44,7 +44,7 @@ vi.mock('react-chartjs-2', () => ({
   Line: ({ data, options }: any) => (
     <div
       data-testid='line-chart'
-      data-points={JSON.stringify(data.datasets[0].data.map((p: any) => [p.x, p.y]))}
+      data-points={JSON.stringify(data.datasets[0].data.map((p: any) => [p.date, p.y]))}
       data-title={options.plugins.title.text}
     />
   ),
@@ -323,7 +323,8 @@ describe('SeriesDetail', () => {
     renderPage(UNRATE_ID);
     await screen.findByTestId('line-chart');
 
+    // Public annotations are read-only (SeriesDetailAnnotations.test.tsx); nothing to share.
     expect(screen.queryByText(/collaborat/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/annotation/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /share/i })).not.toBeInTheDocument();
   });
 });

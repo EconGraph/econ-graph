@@ -19,7 +19,7 @@ This document covers what was added to fix that, and how to use it.
   S3 sync instead.
 - **`postgres-backup-configmap.yaml`**: the `backup.sh` / `sync.sh` /
   `restore.sh` scripts the CronJob and restore job run. `backup.sh` also
-  verifies the dump with `pg_restore --list` before it's considered
+  reads the entire dump with `pg_restore --file=/dev/null` before it's considered
   successful, and prunes dumps older than `BACKUP_RETENTION_DAYS` (default
   14).
 - **`scripts/deploy/protect-postgres-pv.sh`**: sets the bound
@@ -43,13 +43,11 @@ This document covers what was added to fix that, and how to use it.
 
 ## Credentials
 
-The `econ-graph-secrets` Secret has a separate
-`postgres-superuser-password` key for PostgreSQL, backup, and restore.
-The existing `database-password` application key is preserved. PostgreSQL
-uses its password only at first database initialization; if an existing
-database has a different superuser password, update the new Secret key to
-the actual database password before starting the backup CronJob. Verify
-with a manual backup after deployment.
+The backup and restore jobs read `postgres-password` from the same
+`econ-graph-postgres` Secret as the PostgreSQL StatefulSet. The
+`scripts/deploy/create-secrets.sh` script preserves existing values. A
+PostgreSQL password change in an existing data volume still requires an
+explicit database-side change; verify with a manual backup after deployment.
 
 ## Manual backup
 

@@ -4,6 +4,7 @@
 
 use diesel::prelude::*;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use econ_graph_core::redact_database_url;
 use econ_graph_core::test_utils::POSTGRES_IMAGE_TAG;
 use imara_diff::{Algorithm, BasicLineDiffPrinter, Diff, InternedInput, UnifiedDiffConfig};
 use std::fs;
@@ -114,7 +115,7 @@ fn generate_schema_with_diesel(database_url: &str) -> Result<String, Box<dyn std
     let diesel_path = diesel_cmd.ok_or("diesel CLI not found in PATH or common locations")?;
 
     println!("Using diesel at: {}", diesel_path);
-    println!("Database URL: {}", database_url);
+    println!("Database URL: {}", redact_database_url(database_url));
 
     let output = Command::new(diesel_path)
         .args(["print-schema", "--database-url", database_url])

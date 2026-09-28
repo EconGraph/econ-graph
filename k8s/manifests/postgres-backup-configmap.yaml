@@ -22,7 +22,7 @@ data:
     pg_dump --format=custom --no-owner --no-privileges --file="${PARTIAL}"
 
     echo "Verifying archive integrity"
-    pg_restore --list "${PARTIAL}" > /dev/null
+    pg_restore --file=/dev/null "${PARTIAL}"
 
     # Only give the dump its final name (picked up by sync.sh / restore.sh /
     # the retention find below) once it's confirmed valid, so a failed or

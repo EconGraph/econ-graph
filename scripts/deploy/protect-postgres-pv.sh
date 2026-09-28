@@ -15,7 +15,9 @@ protect_pvc() {
     local required="$2"
     local pv_name current_policy
 
-    if ! kubectl get pvc "${pvc_name}" -n "${NAMESPACE}" >/dev/null 2>&1; then
+    local pvc_resource
+    pvc_resource="$(kubectl get pvc "${pvc_name}" -n "${NAMESPACE}" -o name --ignore-not-found)"
+    if [ -z "${pvc_resource}" ]; then
         if [ "${required}" = true ]; then
             echo "❌ PVC ${pvc_name} not found in namespace ${NAMESPACE}." >&2
             return 1

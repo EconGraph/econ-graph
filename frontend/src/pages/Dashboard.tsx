@@ -222,6 +222,7 @@ const Dashboard: React.FC = () => {
                   {/* Collaboration indicator */}
                   {collaborationMode && (
                     <Tooltip title='Collaboration enabled'>
+                      {/* eslint-disable-next-line local/no-dead-button -- ECO-246: no handler yet */}
                       <IconButton size='small' sx={{ ml: 1 }}>
                         <Badge badgeContent='3' color='primary' max={99}>
                           <CollaborationIcon fontSize='small' />
@@ -276,6 +277,7 @@ const Dashboard: React.FC = () => {
               sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}
             >
               <Typography variant='h6'>Recent Data Releases</Typography>
+              {/* eslint-disable-next-line local/no-dead-button -- ECO-246: no handler yet */}
               <IconButton size='small' aria-label='refresh data'>
                 <RefreshIcon />
               </IconButton>
@@ -293,6 +295,7 @@ const Dashboard: React.FC = () => {
                     },
                   }}
                   secondaryAction={
+                    // eslint-disable-next-line local/no-dead-button -- ECO-246: no handler yet
                     <IconButton edge='end' aria-label='view details'>
                       <OpenInNewIcon />
                     </IconButton>

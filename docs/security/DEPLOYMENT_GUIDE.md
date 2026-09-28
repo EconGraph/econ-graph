@@ -437,18 +437,10 @@ data:
 
 ### Secret
 
-Create `k8s/secret.yaml`:
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: econ-graph-secret
-  namespace: econ-graph
-type: Opaque
-data:
-  DATABASE_URL: cG9zdGdyZXNxbDovL2Vjb25fZ3JhcGg6c2VjdXJlX3Bhc3N3b3JkQGxvY2FsaG9zdC9lY29uX2dyYXBo
-```
+Do not commit a Secret manifest. Create the Secrets out of band with
+`scripts/deploy/create-secrets.sh`; the database URL is stored in the
+`econ-graph-secrets` Secret under the key `database-url`. See
+[k8s/README.md](../../k8s/README.md#secrets) for the Secret names and keys.
 
 ### Deployment
 
@@ -481,8 +473,8 @@ spec:
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
-              name: econ-graph-secret
-              key: DATABASE_URL
+              name: econ-graph-secrets
+              key: database-url
         envFrom:
         - configMapRef:
             name: econ-graph-config
