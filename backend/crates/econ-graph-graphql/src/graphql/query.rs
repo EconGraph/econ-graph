@@ -884,7 +884,7 @@ mod tests {
             let role = u.as_ref().map(|u| u.role.clone());
             let schema = crate::graphql::schema::create_schema_with_data(
                 unreachable_pool(),
-                std::sync::Arc::new(crate::graphql::context::GraphQLContext::new(u)),
+                std::sync::Arc::new(crate::graphql::context::GraphQLContext::for_test_user(u)),
             );
             let resp = schema.execute(query.as_str()).await;
             assert_eq!(resp.errors.len(), 1, "{role:?}: {:?}", resp.errors);
@@ -905,7 +905,7 @@ mod tests {
     async fn test_user_query_requires_authentication_before_parsing_the_id() {
         let schema = crate::graphql::schema::create_schema_with_data(
             unreachable_pool(),
-            std::sync::Arc::new(crate::graphql::context::GraphQLContext::new(None)),
+            std::sync::Arc::new(crate::graphql::context::GraphQLContext::anonymous()),
         );
         let resp = schema
             .execute(r#"{ user(userId: "not-a-uuid") { id } }"#)
@@ -930,7 +930,9 @@ mod tests {
             let role = u.role.clone();
             let schema = crate::graphql::schema::create_schema_with_data(
                 unreachable_pool(),
-                std::sync::Arc::new(crate::graphql::context::GraphQLContext::new(Some(u))),
+                std::sync::Arc::new(crate::graphql::context::GraphQLContext::for_test_user(
+                    Some(u),
+                )),
             );
             let query = format!(r#"{{ user(userId: "{target}") {{ id }} }}"#);
             let resp = schema.execute(query.as_str()).await;

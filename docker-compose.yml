@@ -25,6 +25,12 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:password@postgres:5432/econ_graph
       RUST_LOG: info
+      # Sign-in with the dev Keycloak realm (the `keycloak` service). Tokens name the
+      # browser-facing URL as issuer; the API fetches signing keys from the service directly.
+      # Set OIDC_ISSUER to an empty value to run with sign-in off (every caller anonymous).
+      OIDC_ISSUER: ${OIDC_ISSUER-http://localhost:8081/realms/econ-graph}
+      OIDC_AUDIENCE: econ-graph-api
+      OIDC_JWKS_URL: http://keycloak:8080/realms/econ-graph/protocol/openid-connect/certs
     ports:
       - "8000:8000"
     depends_on:
@@ -124,6 +130,12 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:password@postgres:5432/econ_graph
       RUST_LOG: debug
+      # Sign-in with the dev Keycloak realm (the `keycloak` service). Tokens name the
+      # browser-facing URL as issuer; the API fetches signing keys from the service directly.
+      # Set OIDC_ISSUER to an empty value to run with sign-in off (every caller anonymous).
+      OIDC_ISSUER: ${OIDC_ISSUER-http://localhost:8081/realms/econ-graph}
+      OIDC_AUDIENCE: econ-graph-api
+      OIDC_JWKS_URL: http://keycloak:8080/realms/econ-graph/protocol/openid-connect/certs
     ports:
       - "8000:8000"
     depends_on:

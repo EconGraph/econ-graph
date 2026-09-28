@@ -7,7 +7,7 @@
 
 use crate::graphql::context::GraphQLContext;
 use crate::graphql::schema::create_schema_with_data;
-use econ_graph_auth::{Principal, Role};
+use econ_graph_auth::Role;
 use econ_graph_core::models::User;
 use econ_graph_core::DatabasePool;
 use std::sync::Arc;
@@ -47,11 +47,9 @@ fn user() -> User {
     }
 }
 
-/// A signed-in caller holding exactly `roles`, whatever their legacy `users.role`.
+/// A signed-in caller holding exactly `roles`.
 fn caller_with(user: User, roles: impl IntoIterator<Item = Role>) -> GraphQLContext {
-    let mut ctx = GraphQLContext::new(Some(user));
-    ctx.principal = Some(Principal::new(ctx.user.as_ref().unwrap().id, roles));
-    ctx
+    GraphQLContext::signed_in(user, roles)
 }
 
 async fn errors(ctx: GraphQLContext, query: &str) -> Vec<String> {
@@ -81,7 +79,7 @@ fn protected() -> Vec<(&'static str, Role, String)> {
         (
             "createUser",
             Role::AdminUsersCreate,
-            r#"mutation { createUser(input: { email: "a@example.test", name: "a", role: "viewer" }) { __typename } }"#.into(),
+            r#"mutation { createUser(input: { email: "a@example.test", name: "a" }) { __typename } }"#.into(),
         ),
         (
             "updateUser",
@@ -194,7 +192,7 @@ async fn each_resolver_denies_a_caller_holding_every_other_role() {
 #[tokio::test]
 async fn each_resolver_asks_an_anonymous_caller_to_sign_in() {
     for (name, _, query) in protected() {
-        let errs = errors(GraphQLContext::new(None), &query).await;
+        let errs = errors(GraphQLContext::anonymous(), &query).await;
         assert_eq!(errs.len(), 1, "{name}: {errs:?}");
         assert!(
             errs[0].contains("Authentication required"),
@@ -244,47 +242,19 @@ fn all_but(missing: Role) -> Vec<Role> {
         .collect()
 }
 
+/// Roles are assigned in the identity provider: the user mutations no longer take one.
 #[tokio::test]
-async fn a_user_admin_cannot_grant_staff_roles_they_lack() {
+async fn user_mutations_no_longer_take_a_role() {
     let id = Uuid::new_v4();
-    let cases = [
-        (
-            Role::AdminUsersCreate,
-            r#"mutation { createUser(input: { email: "a@example.test", name: "a", role: "admin" }) { __typename } }"#.to_string(),
-        ),
-        (
-            Role::AdminUsersUpdate,
-            format!(r#"mutation {{ updateUser(id: "{id}", input: {{ role: "super_admin" }}) {{ __typename }} }}"#),
-        ),
-    ];
-    for (role, query) in cases {
-        // Only the admin role for this mutation: granting `admin` would add every staff role.
-        let errs = errors(caller_with(user(), [role]), &query).await;
-        assert_eq!(errs.len(), 1, "{role}: {errs:?}");
-        assert!(
-            errs[0].contains("Insufficient permissions"),
-            "{role}: {errs:?}"
-        );
-
-        // Holding every role, granting `admin` passes the check.
+    for query in [
+        r#"mutation { createUser(input: { email: "a@example.test", name: "a", role: "admin" }) { __typename } }"#.to_string(),
+        format!(r#"mutation {{ updateUser(id: "{id}", input: {{ role: "super_admin" }}) {{ __typename }} }}"#),
+    ] {
         let errs = errors(caller_with(user(), Role::all().iter().copied()), &query).await;
-        assert!(!errs.iter().any(|e| is_auth_error(e)), "{role}: {errs:?}");
+        assert_eq!(errs.len(), 1, "{query}: {errs:?}");
+        assert!(errs[0].contains("role"), "{query}: {errs:?}");
+        assert!(!is_auth_error(&errs[0]), "{query}: {errs:?}");
     }
-}
-
-#[tokio::test]
-async fn a_user_admin_may_grant_a_non_staff_role() {
-    let query = r#"mutation { createUser(input: { email: "a@example.test", name: "a", role: "viewer" }) { __typename } }"#;
-    let errs = errors(caller_with(user(), [Role::AdminUsersCreate]), query).await;
-    assert!(!errs.iter().any(|e| is_auth_error(e)), "{errs:?}");
-}
-
-#[tokio::test]
-async fn an_unknown_legacy_role_is_refused() {
-    let query = r#"mutation { createUser(input: { email: "a@example.test", name: "a", role: "root" }) { __typename } }"#;
-    let errs = errors(caller_with(user(), Role::all().iter().copied()), query).await;
-    assert_eq!(errs.len(), 1, "{errs:?}");
-    assert!(errs[0].contains("Unknown role: root"), "{errs:?}");
 }
 
 #[tokio::test]
@@ -310,17 +280,17 @@ async fn changing_is_active_needs_the_suspend_role() {
 }
 
 /// Needs `DATABASE_URL` (skipped otherwise): the target check runs after the target is read.
-async fn insert_user(pool: &DatabasePool, legacy_role: &str) -> Uuid {
+async fn insert_user(pool: &DatabasePool) -> User {
+    use diesel::prelude::*;
     use diesel_async::RunQueryDsl;
     use econ_graph_core::schema::users;
     let new_user = econ_graph_core::models::NewUser {
         email: format!("{}@example.test", Uuid::new_v4()),
-        name: legacy_role.into(),
+        name: "target".into(),
         avatar_url: None,
         provider: "email".into(),
         provider_id: None,
         password_hash: None,
-        role: legacy_role.into(),
         organization: None,
         theme: "light".into(),
         default_chart_type: "line".into(),
@@ -331,14 +301,29 @@ async fn insert_user(pool: &DatabasePool, legacy_role: &str) -> Uuid {
     let mut conn = pool.get().await.unwrap();
     diesel::insert_into(users::table)
         .values(&new_user)
-        .returning(users::id)
+        .returning(User::as_returning())
         .get_result(&mut conn)
         .await
         .unwrap()
 }
 
+/// The row of `id` as the test left it: (email, is_active), or `None` once deleted.
+async fn email_and_status(pool: &DatabasePool, id: Uuid) -> Option<(String, bool)> {
+    use diesel::prelude::*;
+    use diesel_async::RunQueryDsl;
+    use econ_graph_core::schema::users;
+    let mut conn = pool.get().await.unwrap();
+    users::table
+        .filter(users::id.eq(id))
+        .select((users::email, users::is_active))
+        .first(&mut conn)
+        .await
+        .optional()
+        .unwrap()
+}
+
 #[tokio::test]
-async fn a_narrow_staff_role_cannot_act_on_a_fuller_admin() {
+async fn acting_on_another_user_needs_every_staff_role() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
         eprintln!("DATABASE_URL not set; skipping DB-backed target check test");
         return;
@@ -350,10 +335,10 @@ async fn a_narrow_staff_role_cannot_act_on_a_fuller_admin() {
     let pool = econ_graph_core::database::create_pool(&url)
         .await
         .expect("pool");
-    let run = |roles: Vec<Role>, query: String| {
+    let run = |caller: User, roles: Vec<Role>, query: String| {
         let pool = pool.clone();
         async move {
-            let schema = create_schema_with_data(pool, Arc::new(caller_with(user(), roles)));
+            let schema = create_schema_with_data(pool, Arc::new(caller_with(caller, roles)));
             let resp = schema.execute(query.as_str()).await;
             resp.errors
                 .into_iter()
@@ -361,6 +346,7 @@ async fn a_narrow_staff_role_cannot_act_on_a_fuller_admin() {
                 .collect::<Vec<_>>()
         }
     };
+    // Suspend before activate and delete last, so each one finds the row.
     let mutations = |id: Uuid| {
         vec![
             format!(
@@ -373,56 +359,42 @@ async fn a_narrow_staff_role_cannot_act_on_a_fuller_admin() {
             format!(r#"mutation {{ deleteUser(id: "{id}") }}"#),
         ]
     };
-    // Every role but one staff role a legacy admin holds.
+    // Every role but one staff role.
     let narrow = all_but(Role::AdminAuditRead);
 
-    let admin = insert_user(&pool, "admin").await;
-    let admin_email = {
-        use diesel::prelude::*;
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::users;
-        let mut conn = pool.get().await.unwrap();
-        users::table
-            .filter(users::id.eq(admin))
-            .select(users::email)
-            .first::<String>(&mut conn)
-            .await
-            .unwrap()
-    };
-    for query in mutations(admin) {
-        let errs = run(narrow.clone(), query.clone()).await;
+    let target = insert_user(&pool).await;
+    let before = email_and_status(&pool, target.id).await;
+    for query in mutations(target.id) {
+        let errs = run(user(), narrow.clone(), query.clone()).await;
         assert_eq!(errs.len(), 1, "{query}: {errs:?}");
         assert!(
             errs[0].contains("Insufficient permissions"),
             "{query}: {errs:?}"
         );
     }
-    // Nothing was changed: the admin still exists, active, with their original email.
-    {
-        use diesel::prelude::*;
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::users;
-        let mut conn = pool.get().await.unwrap();
-        let (email, is_active): (String, bool) = users::table
-            .filter(users::id.eq(admin))
-            .select((users::email, users::is_active))
-            .first(&mut conn)
-            .await
-            .expect("the admin was deleted");
-        assert!(is_active);
-        assert_eq!(email, admin_email);
-    }
+    assert_eq!(
+        email_and_status(&pool, target.id).await,
+        before,
+        "the target was changed"
+    );
 
-    // The same caller may act on a user who holds no staff roles.
-    let viewer = insert_user(&pool, "viewer").await;
-    for query in mutations(viewer) {
-        let errs = run(narrow.clone(), query.clone()).await;
+    // The same narrow caller may act on their own account.
+    let me = insert_user(&pool).await;
+    for query in mutations(me.id) {
+        let errs = run(me.clone(), narrow.clone(), query.clone()).await;
         assert!(errs.is_empty(), "{query}: {errs:?}");
     }
+    assert_eq!(email_and_status(&pool, me.id).await, None);
 
-    // A full admin may act on another admin.
-    for query in mutations(admin) {
-        let errs = run(Role::all().to_vec(), query.clone()).await;
+    // Holding every staff role, a caller may act on anyone.
+    let staff: Vec<Role> = Role::all()
+        .iter()
+        .copied()
+        .filter(|r| r.is_staff())
+        .collect();
+    for query in mutations(target.id) {
+        let errs = run(user(), staff.clone(), query.clone()).await;
         assert!(errs.is_empty(), "{query}: {errs:?}");
     }
+    assert_eq!(email_and_status(&pool, target.id).await, None);
 }
