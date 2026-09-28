@@ -348,10 +348,6 @@ input CreateUserInput {
 	"""
 	password: String
 	"""
-	User role
-	"""
-	role: String!
-	"""
 	Organization (optional)
 	"""
 	organization: String
@@ -483,8 +479,8 @@ type EconomicSeriesType {
 
 type Mutation {
 	"""
-	Enqueue crawl jobs (admin only). Nothing is crawled in the request: the jobs go to
-	`crawl_queue` and the crawler workers process them.
+	Enqueue crawl jobs (requires `admin.crawlers:manage`). Nothing is crawled in the
+	request: the jobs go to `crawl_queue` and the crawler workers process them.
 	
 	`series_ids` become `fetch_series` jobs for `source` (or for the single entry of
 	`sources`); every listed source without series gets a `discover_catalog` job. Returns the
@@ -509,27 +505,29 @@ type Mutation {
 	"""
 	deleteAnnotation(input: DeleteAnnotationInput!): Boolean!
 	"""
-	Create a new user (admin only)
+	Create a new user (requires `admin.users:create`). The new user's roles are assigned in
+	the identity provider, not here.
 	"""
 	createUser(input: CreateUserInput!): UserType!
 	"""
-	Update user information (admin only)
+	Update user information (requires `admin.users:update`; changing `isActive` also
+	requires `admin.users:suspend`). Roles are assigned in the identity provider.
 	"""
 	updateUser(id: ID!, input: UpdateUserInput!): UserType!
 	"""
-	Delete a user (admin only)
+	Delete a user (requires `admin.users:delete`)
 	"""
 	deleteUser(id: ID!): Boolean!
 	"""
-	Suspend a user account (admin only)
+	Suspend a user account (requires `admin.users:suspend`)
 	"""
 	suspendUser(id: ID!): Boolean!
 	"""
-	Activate a user account (admin only)
+	Activate a user account (requires `admin.users:suspend`)
 	"""
 	activateUser(id: ID!): Boolean!
 	"""
-	Force logout a user (admin only)
+	Force logout a user (requires `admin.sessions:revoke`)
 	"""
 	forceLogoutUser(id: ID!): Boolean!
 }
@@ -613,31 +611,32 @@ type Query {
 	"""
 	chartCollaborators(chartId: ID!): [ChartCollaboratorType!]!
 	"""
-	Get user information by ID. Callers may read only their own record unless they are an admin.
+	Get user information by ID. Callers may read their own record; reading anyone else's
+	requires `admin.users:read`.
 	"""
 	user(userId: ID!): UserType
 	"""
-	Get all users (admin only)
+	Get all users (requires `admin.users:read`)
 	"""
 	users(filter: UserFilterInput, pagination: PaginationInput): UserConnection!
 	"""
-	Get user sessions (admin only)
+	Get user sessions (requires `admin.sessions:read`)
 	"""
 	userSessions(userId: ID): [UserSessionType!]!
 	"""
-	Get active user sessions (admin only)
+	Get active user sessions (requires `admin.sessions:read`)
 	"""
 	activeSessions: [UserSessionType!]!
 	"""
-	Get system health metrics (admin only)
+	Get system health metrics (requires `admin.system:read`)
 	"""
 	systemHealth: SystemHealthType!
 	"""
-	Get security events (admin only)
+	Get security events (requires `admin.security:read`)
 	"""
 	securityEvents(limit: Int): [SecurityEventType!]!
 	"""
-	Get audit logs (admin only)
+	Get audit logs (requires `admin.audit:read`)
 	"""
 	auditLogs(filter: AuditLogFilterInput, pagination: PaginationInput): AuditLogConnection!
 }
@@ -891,10 +890,6 @@ input UpdateUserInput {
 	"""
 	avatarUrl: String
 	"""
-	User role (optional)
-	"""
-	role: String
-	"""
 	Organization (optional)
 	"""
 	organization: String
@@ -947,9 +942,9 @@ Input for filtering users (admin only)
 """
 input UserFilterInput {
 	"""
-	Filter by role
+	Filter by the legacy `users.role` column
 	"""
-	role: String
+	role: String @deprecated(reason: "Roles come from the identity provider's token; this legacy column is no longer written and will be removed")
 	"""
 	Filter by organization
 	"""
@@ -1031,9 +1026,9 @@ type UserType {
 	"""
 	provider: String!
 	"""
-	User role
+	Legacy `users.role` column, no longer written or used for authorization
 	"""
-	role: String!
+	role: String! @deprecated(reason: "Roles come from the identity provider's token; this legacy column is no longer written and will be removed")
 	"""
 	Organization
 	"""
@@ -1076,6 +1071,10 @@ type UserType {
 	lastLoginAt: DateTime
 }
 
+"""
+Marks an element of a GraphQL schema as no longer supported.
+"""
+directive @deprecated(reason: String = "No longer supported") on FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE
 """
 Directs the executor to include this field or fragment only when the `if` argument is true.
 """

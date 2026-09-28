@@ -310,16 +310,16 @@ const mockUseAuth = vi.fn(() => ({
     id: 'test-user-1',
     email: 'test@example.com',
     name: 'Test User',
-    role: 'user',
-    preferences: {
-      theme: 'light',
-    },
   },
   isAuthenticated: true,
   isLoading: false,
-  login: vi.fn(),
-  logout: vi.fn(),
-  register: vi.fn(),
+  isConfigured: true,
+  accountUrl: null,
+  error: null,
+  signIn: vi.fn(),
+  signOut: vi.fn(),
+  completeSignIn: vi.fn(),
+  clearError: vi.fn(),
 }));
 
 vi.mock('@/hooks/useAuth', () => ({

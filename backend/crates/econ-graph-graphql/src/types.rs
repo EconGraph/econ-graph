@@ -247,6 +247,7 @@ impl From<EconomicSeries> for EconomicSeriesType {
 }
 
 impl From<search::SeriesSearchResult> for EconomicSeriesType {
+    /// Exposes a search hit as a series; search results carry no creation or update timestamps.
     fn from(result: search::SeriesSearchResult) -> Self {
         Self {
             id: ID::from(result.id.to_string()),
@@ -254,11 +255,11 @@ impl From<search::SeriesSearchResult> for EconomicSeriesType {
             external_id: result.external_id,
             title: result.title,
             description: result.description,
-            units: Some(result.units),
+            units: result.units,
             frequency: result.frequency,
             seasonal_adjustment: None,
-            last_updated: Some(result.last_updated.and_utc()),
-            start_date: Some(result.start_date),
+            last_updated: result.last_updated,
+            start_date: result.start_date,
             end_date: result.end_date,
             is_active: result.is_active,
             created_at: chrono::Utc::now(), // Not available in search result
@@ -687,13 +688,13 @@ pub struct SeriesSearchResultType {
     /// Data frequency (Monthly, Quarterly, etc.)
     pub frequency: String,
     /// Data units
-    pub units: String,
+    pub units: Option<String>,
     /// Series start date
-    pub start_date: NaiveDate,
+    pub start_date: Option<NaiveDate>,
     /// Series end date (if applicable)
     pub end_date: Option<NaiveDate>,
     /// Last update timestamp
-    pub last_updated: DateTime<Utc>,
+    pub last_updated: Option<DateTime<Utc>>,
     /// Whether the series is active
     pub is_active: bool,
     /// Search relevance ranking score
@@ -703,6 +704,7 @@ pub struct SeriesSearchResultType {
 }
 
 impl From<SeriesSearchResult> for SeriesSearchResultType {
+    /// Converts a service search result, ids as GraphQL `ID`s.
     fn from(result: SeriesSearchResult) -> Self {
         Self {
             id: ID::from(result.id),
@@ -714,7 +716,7 @@ impl From<SeriesSearchResult> for SeriesSearchResultType {
             units: result.units,
             start_date: result.start_date,
             end_date: result.end_date,
-            last_updated: DateTime::from_naive_utc_and_offset(result.last_updated, Utc),
+            last_updated: result.last_updated,
             is_active: result.is_active,
             rank: result.rank,
             similarity_score: result.similarity_score,
@@ -953,7 +955,10 @@ pub struct UserType {
     pub avatar_url: Option<String>,
     /// Authentication provider
     pub provider: String,
-    /// User role
+    /// Legacy `users.role` column, no longer written or used for authorization
+    #[graphql(
+        deprecation = "Roles come from the identity provider's token; this legacy column is no longer written and will be removed"
+    )]
     pub role: String,
     /// Organization
     pub organization: Option<String>,
@@ -1059,8 +1064,6 @@ pub struct CreateUserInput {
     pub name: String,
     /// Password (for email-based users)
     pub password: Option<String>,
-    /// User role
-    pub role: String,
     /// Organization (optional)
     pub organization: Option<String>,
     /// Whether account is active
@@ -1078,8 +1081,6 @@ pub struct UpdateUserInput {
     pub name: Option<String>,
     /// Avatar URL (optional)
     pub avatar_url: Option<String>,
-    /// User role (optional)
-    pub role: Option<String>,
     /// Organization (optional)
     pub organization: Option<String>,
     /// UI theme preference
@@ -1099,7 +1100,10 @@ pub struct UpdateUserInput {
 /// Input for filtering users (admin only)
 #[derive(InputObject)]
 pub struct UserFilterInput {
-    /// Filter by role
+    /// Filter by the legacy `users.role` column
+    #[graphql(
+        deprecation = "Roles come from the identity provider's token; this legacy column is no longer written and will be removed"
+    )]
     pub role: Option<String>,
     /// Filter by organization
     pub organization: Option<String>,

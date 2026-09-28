@@ -1,0 +1,33 @@
+# Routes Keycloak's public paths under /idp on the kind ingress host: the econ-graph
+# realm (login, tokens, discovery) and /resources (login page assets). The master
+# realm and the admin console, /admin, stay internal (see deployment.yaml). Kept out of ingress.yaml so its CORS annotations do not apply:
+# Keycloak sets CORS itself from each client's web origins.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak-ingress
+  namespace: econ-graph
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    # Keycloak's session cookies and redirects exceed nginx's default 4k buffer.
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: localhost
+    http:
+      paths:
+      - path: /idp/realms/econ-graph
+        pathType: Prefix
+        backend:
+          service:
+            name: keycloak-service
+            port:
+              number: 8080
+      - path: /idp/resources
+        pathType: Prefix
+        backend:
+          service:
+            name: keycloak-service
+            port:
+              number: 8080

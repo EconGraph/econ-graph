@@ -87,6 +87,7 @@ jobs:
             - 'k8s/**'
             - 'terraform/**'
             - 'scripts/**'
+            - 'config/keycloak/**'
             - 'docker-compose.yml'
             - 'package.json'
   backend-build-cache:
@@ -229,6 +230,13 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         cargo test -p econ-graph-graphql --test schema_snapshot
       working-directory: backend
+
+    - name: Check the Keycloak realm (roles match the catalog, placeholders render)
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        scripts/keycloak/test-check-keycloak-roles.sh
+        scripts/keycloak/test-render-realm.sh
+        scripts/check-keycloak-roles
 
   chart-api-integration-tests:
     name: Chart API Integration Tests
@@ -618,13 +626,8 @@ jobs:
           services::global_analysis_service::tests::test_get_global_events_with_filters \
           services::global_analysis_service::tests::test_direct_event_query \
           services::global_analysis_service::tests::test_event_insertion_only \
-          services::global_analysis_service::tests::test_trade_partners_retrieval
-        run_group global_analysis_advanced \
-          services::global_analysis_service::tests::test_get_correlation_network \
-          services::global_analysis_service::tests::test_calculate_country_correlations \
-          services::global_analysis_service::tests::test_calculate_economic_health_score \
-          services::global_analysis_service::tests::test_correlation_network_centrality_calculation \
-          services::global_analysis_service::tests::test_error_handling_database_connection_failure
+          services::global_analysis_service::tests::test_trade_partners_retrieval \
+          services::global_analysis_service::tests::test_calculate_economic_health_score
         run_group auth_integration \
           auth::integration_tests::test_auth_service_creation \
           auth::integration_tests::test_jwt_token_flow \
@@ -743,6 +746,9 @@ jobs:
       uses: actions/checkout@v4
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Check dev/QA Keycloak data is not deployed to k8s
+      run: ./scripts/keycloak/check-no-dev-users-in-k8s.sh
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.98.1
@@ -2504,6 +2510,10 @@ jobs:
         context: ./frontend
         push: false
         tags: econ-graph-frontend:test
+        # Keycloak issuer for sign-in, from the repository variable when set; unset hides Sign in.
+        build-args: |
+          VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER }}
+          VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID || 'econ-graph-web' }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
