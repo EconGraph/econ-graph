@@ -418,6 +418,21 @@ describe('SeriesDetail annotation editing', () => {
     });
   });
 
+  test('keeps the delete dialog open when the backend deletes nothing', async () => {
+    viewAs('alice');
+    serve('alice', { [MUTATIONS.DELETE_ANNOTATION]: { deleteAnnotation: false } });
+    renderPage();
+    await loaded();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Delete Lockdown trough' }));
+    const dialog = screen.getByRole('dialog', { name: 'Delete annotation?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+    expect(await within(dialog).findByText('Could not delete the annotation.')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Delete annotation?' })).toBeInTheDocument();
+  });
+
   test('shows the comment thread and posts a comment', async () => {
     viewAs('alice');
     serve('alice');

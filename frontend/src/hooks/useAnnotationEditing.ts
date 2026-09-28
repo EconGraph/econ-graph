@@ -78,7 +78,11 @@ export function useAnnotationMutations(seriesId: string) {
         query: MUTATIONS.DELETE_ANNOTATION,
         variables: { input: { annotationId } },
       });
-      return result.data?.deleteAnnotation ?? false;
+      // Anything but `true` means nothing was deleted; fail so the dialog shows it.
+      if (result.data?.deleteAnnotation !== true) {
+        throw new Error('Could not delete the annotation.');
+      }
+      return true;
     },
     { onSuccess: refresh }
   );
