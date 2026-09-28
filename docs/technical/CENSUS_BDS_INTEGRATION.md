@@ -231,7 +231,7 @@ cargo test -p econ-graph-crawler --all-features sources::census::tests::fetch_pa
 `CENSUS_API_KEY` is required (free at <https://api.census.gov/data/key_signup.html>).
 
 ### Database Migrations
-Migration `2026-09-26-000010_census_api_key_required` marks the Census data source row as
+Migration `2026-09-28-000001_census_api_key_required` marks the Census data source row as
 requiring `CENSUS_API_KEY`. The backend applies it at startup.
 
 ### Monitoring
