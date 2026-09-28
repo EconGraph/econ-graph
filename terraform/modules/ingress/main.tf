@@ -723,7 +723,10 @@ resource "kubernetes_ingress_v1" "monitoring" {
     }
   }
 
-  depends_on = [helm_release.nginx_ingress]
+  # kubernetes_secret.monitoring_auth: the auth-secret annotation above names a Secret
+  # that must exist (and keep existing) whenever it's set, so the Ingress depends on it
+  # too, not just on nginx_ingress.
+  depends_on = [helm_release.nginx_ingress, kubernetes_secret.monitoring_auth]
 }
 
 # Basic auth secret for monitoring. Created only when var.monitoring_basic_auth
