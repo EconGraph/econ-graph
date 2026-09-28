@@ -2,6 +2,8 @@
 // Licensed under the Microsoft Reference Source License (MS-RSL).
 // See LICENSE file for complete terms and conditions.
 
+import { readFileSync } from 'node:fs';
+
 import { expect, test, type Page } from '@playwright/test';
 
 import { seededSeriesId, signInOnKeycloak, uniqueTitle } from './auth/helpers';
@@ -12,10 +14,9 @@ import { SEEDED } from './fixtures';
 // checked against GDP's publication cadence instead of the fixture's values.
 //
 // Exit criterion 5's cross-area journey, in one browser session: find a series by searching, open
-// it, read its chart, apply every transformation, then sign in and annotate it. The areas' own
-// specs cover each page in depth; this checks the pages hand off to each other.
-//
-// Not yet: downloading the CSV between the chart and the annotation. It lands with UI-6 (#223).
+// it, read its chart, apply every transformation, download the shown points, then sign in and
+// annotate it. The areas' own specs cover each page in depth; this checks the pages hand off to
+// each other.
 
 const series = SEEDED.fredGdp;
 
@@ -41,6 +42,17 @@ async function latestShown(page: Page) {
  * @returns The number.
  */
 const parseShown = (shown: string) => Number(shown.replace(/,/g, ''));
+
+/**
+ * The series page's displayed date ("Apr 1, 2026") as the CSV's `YYYY-MM-DD`.
+ * @param shown - The date as `formatIsoDate` renders it.
+ * @returns The ISO calendar date.
+ */
+const toIsoDate = (shown: string) => {
+  const parsed = new Date(shown);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
+};
 
 test.describe('release journey', () => {
   test.slow();
@@ -114,6 +126,34 @@ test.describe('release journey', () => {
           expect(Number.isFinite(parseShown(shown.value)), shown.value).toBe(true);
           expect(shown.value).not.toEqual(levels.value);
         }
+      }
+    });
+
+    await test.step('download shows the levels just charted', async () => {
+      // The loop above ends back on levels (SEEDED.fredGdp.transformations' last entry).
+      const [download] = await Promise.all([
+        page.waitForEvent('download'),
+        page.getByRole('button', { name: 'Download CSV' }).click(),
+      ]);
+      expect(download.suggestedFilename()).toBe(`${series.externalId}.csv`);
+      const raw = readFileSync(await download.path(), 'utf8');
+      // Drop the UTF-8 byte-order mark before splitting into lines.
+      const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+      const lines = text.trim().split('\r\n');
+      expect(lines[0]).toBe(`Title,${series.title}`);
+      expect(lines[1]).toBe(`Source,${series.sourceName}`);
+      expect(lines[2]).toBe(`Units,${series.units}`);
+      expect(lines[3]).toBe('Transformation,None');
+      expect(lines[4]).toMatch(/^Retrieved at,/);
+      expect(lines[5]).toBe('date,value');
+      const [date, value] = lines[lines.length - 1].split(',');
+      const shown = await latestShown(page);
+      expect(date).toBe(toIsoDate(shown.date));
+      if (!DEPLOYED) {
+        expect(Number(value)).toBe(parseShown(series.latestShown.value));
+      } else {
+        // Live values are unknown; the page rounds to 2 decimal places for display.
+        expect(Math.abs(Number(value) - parseShown(shown.value))).toBeLessThan(0.01);
       }
     });
 
