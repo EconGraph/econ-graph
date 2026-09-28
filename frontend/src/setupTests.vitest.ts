@@ -130,6 +130,7 @@ vi.mock('chart.js', () => ({
   registerables: [],
   CategoryScale: vi.fn(),
   LinearScale: vi.fn(),
+  TimeScale: vi.fn(),
   PointElement: vi.fn(),
   LineElement: vi.fn(),
   BarElement: vi.fn(),
