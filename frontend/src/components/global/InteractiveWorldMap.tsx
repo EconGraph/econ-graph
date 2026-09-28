@@ -9,11 +9,12 @@
 import React, { useRef, useEffect, Suspense } from 'react';
 import * as d3 from 'd3';
 import * as topojson from 'topojson-client';
-import { Box, CircularProgress } from '@mui/material';
+import { Alert, Box, Button, CircularProgress } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
 import { CountryData, MapViewState } from '../../types/globalAnalysis';
 import { useWorldMap } from './hooks/useWorldMap';
 import { useCountryData } from './hooks/useCountryData';
+import { loadWorldAtlas } from './worldAtlas';
 
 interface InteractiveWorldMapProps {
   /** Array of country data to display on the map. */
@@ -48,20 +49,20 @@ interface InteractiveWorldMapProps {
   colorScheme?: string;
 }
 
-// Fetch world atlas data using React Query
+// Load the bundled world atlas using React Query
 const useWorldAtlasData = () => {
   return useQuery({
     queryKey: ['world-atlas'],
-    queryFn: async () => {
-      const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@3/world/110m.json');
-      if (!response.ok) {
-        throw new Error('Failed to load world map data');
-      }
-      return response.json();
-    },
+    queryFn: loadWorldAtlas,
     staleTime: Infinity, // Atlas data never changes
     cacheTime: Infinity,
     suspense: true,
+    // Show a load failure (e.g. a stale chunk after a deploy) in place of the map
+    // instead of throwing it past the Suspense boundary.
+    useErrorBoundary: false,
+    // Retry once for a transient network error rather than the default three;
+    // a chunk that is really missing needs a reload.
+    retry: 1,
   });
 };
 
@@ -86,10 +87,10 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
   const svgRef = useRef<SVGSVGElement>(null);
 
   // Load world atlas data with Suspense
-  const { data: worldData } = useWorldAtlasData();
+  const { data: worldData, isError } = useWorldAtlasData();
 
   // Custom hooks for map logic
-  const { path, zoomBehavior } = useWorldMap(svgRef, projection);
+  const { path, zoomBehavior } = useWorldMap(svgRef, projection, [width, height]);
   const { processedData, colorScale } = useCountryData(data, selectedIndicator, colorScheme);
 
   // Initialize D3 map
@@ -108,8 +109,11 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
       .style('border-radius', '8px')
       .style('box-shadow', '0 2px 8px rgba(0,0,0,0.1)');
 
-    // Create map container
-    const mapContainer = svg.append('g').attr('class', 'map-container');
+    // Create map container, keeping any zoom the user already applied
+    const mapContainer = svg
+      .append('g')
+      .attr('class', 'map-container')
+      .attr('transform', d3.zoomTransform(svg.node() as SVGSVGElement).toString());
 
     // Create countries group
     const countriesGroup = mapContainer.append('g').attr('class', 'countries');
@@ -210,13 +214,16 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
         .attr('font-family', 'Arial, sans-serif')
         .attr('fill', '#2c3e50')
         .attr('font-weight', '500')
-        .text((d: any) => d.properties.NAME)
+        .text((d: any) => d.properties.name)
         .style('pointer-events', 'none')
         .style('text-shadow', '1px 1px 2px rgba(255,255,255,0.8)');
     }
 
-    // Set up zoom behavior
-    svg.call(zoomBehavior);
+    // Set up zoom behavior; useWorldMap creates it in an effect, so it is null
+    // on the first render.
+    if (zoomBehavior) {
+      svg.call(zoomBehavior);
+    }
   }, [
     worldData,
     processedData,
@@ -232,6 +239,23 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
     onCountryClick,
     onCountryHover,
   ]);
+
+  if (isError) {
+    return (
+      <Box display='flex' justifyContent='center' alignItems='center' width={width} height={height}>
+        <Alert
+          severity='error'
+          action={
+            <Button color='inherit' size='small' onClick={() => window.location.reload()}>
+              Reload
+            </Button>
+          }
+        >
+          Failed to load world map data
+        </Alert>
+      </Box>
+    );
+  }
 
   return (
     <Box
