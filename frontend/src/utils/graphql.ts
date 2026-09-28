@@ -188,7 +188,7 @@ export const QUERIES = {
     query SearchSeries(
       $query: String!
       $source: String
-      $frequency: SeriesFrequencyType
+      $frequency: SeriesFrequency
       $first: Int
       $after: String
     ) {
@@ -203,11 +203,14 @@ export const QUERIES = {
           id
           title
           description
+          sourceId
           source {
             name
           }
           frequency
           units
+          startDate
+          endDate
           lastUpdated
         }
         totalCount
