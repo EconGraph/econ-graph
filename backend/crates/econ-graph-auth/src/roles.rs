@@ -200,38 +200,6 @@ pub fn authorize(principal: &Principal, role: Role) -> Result<(), Forbidden> {
     }
 }
 
-/// A `users.role` value that the legacy mapping does not know.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("unknown legacy role: {0:?}")]
-pub struct UnknownLegacyRole(pub String);
-
-/// Roles every signed-in legacy user gets, whatever their `users.role`.
-const LEGACY_USER_ROLES: &[Role] = &[
-    Role::AnnotationCreate,
-    Role::AnnotationComment,
-    Role::ChartShare,
-    Role::ApiMcp,
-];
-
-/// Map a legacy `users.role` value onto fine-grained roles.
-///
-/// Temporary: it keeps today's behavior until Keycloak issues tokens with a `roles` claim,
-/// and is removed with the `users.role` column. `admin` and `super_admin` get every staff
-/// role (today both pass `require_admin`); `analyst`, `viewer` and `guest` get only the
-/// signed-in user roles. Matching ignores ASCII case, as the old `UserRole` parser did.
-pub fn roles_for_legacy(legacy_role: &str) -> Result<BTreeSet<Role>, UnknownLegacyRole> {
-    let staff = match legacy_role.to_ascii_lowercase().as_str() {
-        "super_admin" | "superadmin" | "admin" => true,
-        "analyst" | "viewer" | "guest" => false,
-        _ => return Err(UnknownLegacyRole(legacy_role.to_string())),
-    };
-    let mut roles: BTreeSet<Role> = LEGACY_USER_ROLES.iter().copied().collect();
-    if staff {
-        roles.extend(Role::ALL.iter().copied().filter(|role| role.is_staff()));
-    }
-    Ok(roles)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,17 +217,6 @@ mod tests {
             Role::AdminSystemRead,
             Role::AdminSecurityRead,
             Role::AdminAuditRead,
-        ]
-        .into_iter()
-        .collect()
-    }
-
-    fn user_roles() -> BTreeSet<Role> {
-        [
-            Role::AnnotationCreate,
-            Role::AnnotationComment,
-            Role::ChartShare,
-            Role::ApiMcp,
         ]
         .into_iter()
         .collect()
@@ -312,21 +269,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_staff_roles_get_user_and_staff_roles() {
-        let expected: BTreeSet<Role> = user_roles().union(&staff_roles()).copied().collect();
-        for legacy in ["admin", "super_admin", "superadmin", "ADMIN"] {
-            assert_eq!(roles_for_legacy(legacy).unwrap(), expected, "{legacy}");
-        }
-    }
-
-    #[test]
-    fn legacy_non_staff_roles_get_only_user_roles() {
-        for legacy in ["analyst", "viewer", "guest", "Viewer"] {
-            assert_eq!(roles_for_legacy(legacy).unwrap(), user_roles(), "{legacy}");
-        }
-    }
-
-    #[test]
     fn staff_set_is_every_admin_role() {
         let from_catalog: BTreeSet<Role> = Role::all()
             .iter()
@@ -334,16 +276,6 @@ mod tests {
             .filter(|r| r.is_staff())
             .collect();
         assert_eq!(from_catalog, staff_roles());
-    }
-
-    #[test]
-    fn unknown_legacy_role_is_rejected() {
-        for bad in ["", "root", "read_only", "support"] {
-            assert_eq!(
-                roles_for_legacy(bad),
-                Err(UnknownLegacyRole(bad.to_string()))
-            );
-        }
     }
 
     #[test]
@@ -378,18 +310,6 @@ mod tests {
         let principal = Principal::new(Uuid::nil(), []);
         for &role in Role::all() {
             assert_eq!(authorize(&principal, role), Err(Forbidden(role)));
-        }
-    }
-
-    #[test]
-    fn legacy_viewer_cannot_use_staff_roles() {
-        let principal = Principal::new(Uuid::nil(), roles_for_legacy("viewer").unwrap());
-        for &role in Role::all().iter().filter(|r| r.is_staff()) {
-            assert!(authorize(&principal, role).is_err(), "{role}");
-        }
-        let admin = Principal::new(Uuid::nil(), roles_for_legacy("admin").unwrap());
-        for &role in Role::all() {
-            assert!(authorize(&admin, role).is_ok(), "{role}");
         }
     }
 }
