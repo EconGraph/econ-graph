@@ -25,7 +25,7 @@ metadata:
       more_set_headers "X-Content-Type-Options: nosniff";
       more_set_headers "X-XSS-Protection: 1; mode=block";
       more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
-      more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' wss:";
+      more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://lh3.googleusercontent.com; font-src 'self'; connect-src 'self' wss:";
     
     # Rate limiting
     nginx.ingress.kubernetes.io/rate-limit: "100"
@@ -109,6 +109,8 @@ metadata:
     
     # Authentication (basic auth for additional security)
     nginx.ingress.kubernetes.io/auth-type: "basic"
+    # The monitoring-auth Secret (key `auth`, one htpasswd line) is created out of
+    # band by scripts/deploy/create-secrets.sh from MONITORING_BASIC_AUTH.
     nginx.ingress.kubernetes.io/auth-secret: "monitoring-auth"
     nginx.ingress.kubernetes.io/auth-realm: "EconGraph Monitoring"
     
@@ -135,15 +137,3 @@ spec:
             name: grafana-service
             port:
               number: 3000
-
----
-# Basic auth secret for monitoring
-apiVersion: v1
-kind: Secret
-metadata:
-  name: monitoring-auth
-  namespace: econ-graph
-type: Opaque
-data:
-  # Username: admin, Password: admin123 (change in production!)
-  auth: YWRtaW46JGFwcjEkS2J6bWl4S1kkWGV6U1NkRjZ6dHlGcXl0Z0h4d2JqLg==

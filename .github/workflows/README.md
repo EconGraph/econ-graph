@@ -11,7 +11,11 @@ This directory contains the CI/CD workflows for the EconGraph project, cleaned u
 - Frontend tests, quality checks, security audits, and E2E tests
 - All essential functionality validation
 
-**Triggers**: Push to main/develop, PRs, manual dispatch
+**Triggers**: Push to main/develop/`release/**` (REL-6: a release branch gets CI on every merge into it, same as main), every PR whatever its base branch (so stacked PRs are tested before they are retargeted), manual dispatch. Changes only to top-level Markdown files, `docs/**`, `LICENSE` or `.gitignore` don't run it.
+
+**Concurrency**: one run per PR. A push cancels the run the previous push started, so review rounds don't pile up in the queue. Runs on main and develop are never cancelled.
+
+**Path filters** (`changes` job): a PR that touches only `frontend/` or `admin-frontend/` skips the backend build and the test jobs that depend on it (Backend Migration Validation Tests and the quality, security and license jobs still run); one that touches only `backend/` or `chart-api-service/` skips the frontend test jobs. Shared paths (`.github/`, `ci/`, `scripts/`, `config/keycloak/`, `docker-compose.yml`, `package.json`, `k8s/`, `terraform/`, since infra manifests deploy the frontend too, and the committed GraphQL `schema.graphql`, since Frontend Tests checks every frontend operation against it) and pushes to main run every job (Admin Frontend Tests only runs on PRs and manual dispatch).
 
 ### Security (`security.yml`)
 **Purpose**: Daily security vulnerability scanning

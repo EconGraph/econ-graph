@@ -5,6 +5,8 @@ metadata:
   namespace: econ-graph
   annotations:
     # CORS is enforced by the backend from CORS_ALLOWED_ORIGINS; no ingress CORS annotations.
+    # /graphql has its own rate-limited Ingress in graphql-ingress.yaml; apply
+    # both manifests together, or /graphql has no route.
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
@@ -36,13 +38,15 @@ spec:
             name: econ-graph-backend-service
             port:
               number: 9876
-      - path: /graphql
-        pathType: Prefix
+      # /graphql is served by graphql-ingress.yaml, which rate-limits it.
+      # The OIDC sign-in callback is a frontend route; Exact wins over the /auth prefix below.
+      - path: /auth/callback
+        pathType: Exact
         backend:
           service:
-            name: econ-graph-backend-service
+            name: econ-graph-frontend-service
             port:
-              number: 9876
+              number: 3000
       - path: /auth
         pathType: Prefix
         backend:
