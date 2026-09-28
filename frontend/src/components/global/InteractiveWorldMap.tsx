@@ -214,7 +214,7 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
         .attr('font-family', 'Arial, sans-serif')
         .attr('fill', '#2c3e50')
         .attr('font-weight', '500')
-        .text((d: any) => d.properties.NAME)
+        .text((d: any) => d.properties.name)
         .style('pointer-events', 'none')
         .style('text-shadow', '1px 1px 2px rgba(255,255,255,0.8)');
     }

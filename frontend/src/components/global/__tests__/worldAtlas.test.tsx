@@ -72,4 +72,30 @@ describe('bundled world atlas', () => {
     }, WAIT);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it('labels countries by name (world-atlas uses lowercase properties.name)', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <InteractiveWorldMap
+          data={[]}
+          selectedIndicator='gdp'
+          timeRange={{ start: new Date('2020-01-01'), end: new Date('2024-01-01') }}
+          onCountryClick={vi.fn()}
+          onCountryHover={vi.fn()}
+          mapView={{ scale: 1, translation: [0, 0], rotation: [0, 0, 0] }}
+          onMapViewChange={vi.fn()}
+          width={800}
+          height={400}
+          showLabels
+        />
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => {
+      const labels = document.querySelectorAll('text.country-label');
+      expect(labels).toHaveLength(COUNTRY_COUNT);
+      expect(Array.from(labels).some(label => label.textContent?.trim())).toBe(true);
+    }, WAIT);
+  });
 });
