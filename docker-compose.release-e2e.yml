@@ -42,7 +42,7 @@ services:
       # only origin this stack needs; KC_WEB_BASE_URL still must be set for the realm import.
       KC_REALM_SSL_REQUIRED: none
       KC_WEB_BASE_URL: http://localhost:3000
-      KC_WEB_E2E_BASE_URL: http://localhost:18081
+      KC_WEB_E2E_BASE_URL: http://localhost:${RELEASE_FRONTEND_PORT:-18081}
       KC_WEB_DIRECT_GRANTS: "true"
     ports:
       - "127.0.0.1:8081:8080"

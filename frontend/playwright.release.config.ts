@@ -19,10 +19,8 @@ const frontendUrl = `http://localhost:${frontendPort}`;
 const backendBin = process.env.RELEASE_BACKEND_BIN ?? '../backend/target/debug/econ-graph-backend';
 
 // Keycloak's own port is fixed by docker-compose.release-e2e.yml (KC_HOSTNAME + the port
-// mapping), unlike the backend/frontend ports above. Its realm does depend on frontendPort,
-// though: config/keycloak/econ-graph-realm.json's KC_WEB_E2E_BASE_URL is hardcoded to
-// `http://localhost:18081` in that compose file, so a redirect URI or CORS mismatch will show up
-// if RELEASE_FRONTEND_PORT is ever overridden alongside a sign-in flow (AUTH-10).
+// mapping), unlike the backend/frontend ports above. Its realm's KC_WEB_E2E_BASE_URL reads
+// RELEASE_FRONTEND_PORT (default 18081) from that same compose file, so it tracks frontendPort.
 const oidcIssuer = 'http://localhost:8081/realms/econ-graph';
 
 // Deliberately not DATABASE_URL, which often points at a dev database: the backend migrates
