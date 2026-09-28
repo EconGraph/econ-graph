@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""Check that the Keycloak realm's econ-graph-api client roles match the role catalog.
+
+The backend's fine-grained roles are the `Role` enum in econ-graph-auth; the realm
+export defines the same set as client roles on `econ-graph-api` (see
+docs/roadmap/auth-plans-permissions.md). This fails when a role is in one and not
+the other, when the realm defines a client role twice, when a composite role
+refers to an econ-graph-api role that the realm does not define, when the
+`admin` or `super_admin` composite lacks a catalog role, or when the `user`
+composite or the realm's default role grants a staff (`admin.*`) role.
+
+Usage:
+  scripts/check-keycloak-roles [--realm PATH] [--roles-file PATH]
+
+Without --roles-file, the catalog comes from
+`cargo run -p econ-graph-auth --bin econ-graph-roles -- --list` in backend/.
+Exits 0 when they match, 1 on a mismatch, 2 on a usage or input error.
+"""
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_REALM = REPO_ROOT / "config" / "keycloak" / "econ-graph-realm.json"
+API_CLIENT = "econ-graph-api"
+# Staff composites that must grant every role in the catalog.
+FULL_COMPOSITES = ("admin", "super_admin")
+# The composite every account holds; it and the realm's default role grant no staff role.
+USER_COMPOSITE = "user"
+
+
+def catalog_from_cargo():
+    result = subprocess.run(
+        ["cargo", "run", "--quiet", "-p", "econ-graph-auth", "--bin", "econ-graph-roles", "--", "--list"],
+        cwd=REPO_ROOT / "backend",
+        stdout=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        print(f"error: econ-graph-roles exited with {result.returncode}", file=sys.stderr)
+        sys.exit(2)
+    return result.stdout
+
+
+def parse_catalog(text):
+    return {line.strip() for line in text.splitlines() if line.strip()}
+
+
+def check(realm, catalog):
+    """Return the list of problems; empty when the realm matches the catalog."""
+    problems = []
+    roles = realm.get("roles") or {}
+    defined = [role.get("name") for role in (roles.get("client") or {}).get(API_CLIENT) or []]
+    defined_set = set(defined)
+
+    for name in sorted(n for n in defined_set if defined.count(n) > 1):
+        problems.append(f"client role {name!r} is defined more than once in the realm")
+    for name in sorted(catalog - defined_set):
+        problems.append(f"role {name!r} is in the Role enum but not a client role on {API_CLIENT}")
+    for name in sorted(defined_set - catalog):
+        problems.append(f"client role {name!r} on {API_CLIENT} is not in the Role enum")
+
+    composites = list(roles.get("realm") or [])
+    for client_roles in (roles.get("client") or {}).values():
+        composites.extend(client_roles or [])
+    for role in composites:
+        referenced = ((role.get("composites") or {}).get("client") or {}).get(API_CLIENT) or []
+        for name in referenced:
+            if name not in defined_set:
+                problems.append(
+                    f"composite {role.get('name')!r} includes {API_CLIENT} role {name!r}, "
+                    "which the realm does not define"
+                )
+
+    realm_roles = {role.get("name"): role for role in roles.get("realm") or []}
+    for composite in FULL_COMPOSITES:
+        if composite not in realm_roles:
+            problems.append(f"realm role {composite!r} is missing")
+            continue
+        for name in sorted(catalog - api_roles_granted(realm_roles, composite)):
+            problems.append(f"composite {composite!r} does not grant {name!r}")
+    if USER_COMPOSITE not in realm_roles:
+        problems.append(f"realm role {USER_COMPOSITE!r} is missing")
+    default_role = (realm.get("defaultRole") or {}).get("name")
+    for composite in dict.fromkeys(r for r in (USER_COMPOSITE, default_role) if r in realm_roles):
+        granted = api_roles_granted(realm_roles, composite)
+        for name in sorted(n for n in granted if n.startswith("admin.")):
+            problems.append(f"composite {composite!r} grants staff role {name!r}")
+    return problems
+
+
+def api_roles_granted(realm_roles, name):
+    """The econ-graph-api roles a realm role grants, following nested realm composites."""
+    granted, seen, pending = set(), set(), [name]
+    while pending:
+        current = pending.pop()
+        if current in seen or current not in realm_roles:
+            continue
+        seen.add(current)
+        composites = realm_roles[current].get("composites") or {}
+        granted.update((composites.get("client") or {}).get(API_CLIENT) or [])
+        pending.extend(composites.get("realm") or [])
+    return granted
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--realm", type=Path, default=DEFAULT_REALM, help="realm export JSON")
+    parser.add_argument(
+        "--roles-file",
+        type=Path,
+        help="role catalog, one name per line (default: run econ-graph-roles --list)",
+    )
+    args = parser.parse_args()
+
+    try:
+        realm = json.loads(args.realm.read_text())
+        catalog_text = args.roles_file.read_text() if args.roles_file else catalog_from_cargo()
+    except (OSError, json.JSONDecodeError) as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 2
+    catalog = parse_catalog(catalog_text)
+    if not catalog:
+        print("error: the role catalog is empty", file=sys.stderr)
+        return 2
+
+    problems = check(realm, catalog)
+    for problem in problems:
+        print(f"check-keycloak-roles: {problem}", file=sys.stderr)
+    if problems:
+        return 1
+    print(f"check-keycloak-roles: {len(catalog)} roles match {args.realm.name}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

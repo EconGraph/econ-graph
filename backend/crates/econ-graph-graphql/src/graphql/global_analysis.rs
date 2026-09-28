@@ -1,7 +1,7 @@
 //! # Global Analysis GraphQL Resolvers
 //!
 //! This module provides GraphQL resolvers for global economic analysis features.
-//! It includes country analysis, correlation networks, and global event impact analysis.
+//! It includes country analysis and global event impact analysis.
 //!
 //! # Design Principles
 //!
@@ -102,48 +102,6 @@ impl From<TradePartner> for TradePartnerType {
             trade_value_usd: partner.trade_value_usd.to_string(),
             trade_intensity: partner.trade_intensity,
             relationship_type: partner.relationship_type,
-        }
-    }
-}
-
-/// Correlation network node for visualization
-#[derive(SimpleObject)]
-pub struct CorrelationNetworkNodeType {
-    pub country: CountryType,
-    pub connections: Vec<CorrelationConnectionType>,
-    pub centrality_score: f64,
-    pub cluster_id: Option<i32>,
-}
-
-impl From<CorrelationNetworkNode> for CorrelationNetworkNodeType {
-    fn from(node: CorrelationNetworkNode) -> Self {
-        Self {
-            country: node.country.into(),
-            connections: node.connections.into_iter().map(Into::into).collect(),
-            centrality_score: node.centrality_score,
-            cluster_id: node.cluster_id,
-        }
-    }
-}
-
-/// Connection between countries in correlation network
-#[derive(SimpleObject)]
-pub struct CorrelationConnectionType {
-    pub target_country: CountryType,
-    pub correlation_coefficient: f64,
-    pub indicator_category: String,
-    pub significance_level: f64,
-    pub connection_strength: f64,
-}
-
-impl From<CorrelationConnection> for CorrelationConnectionType {
-    fn from(connection: CorrelationConnection) -> Self {
-        Self {
-            target_country: connection.target_country.into(),
-            correlation_coefficient: connection.correlation_coefficient,
-            indicator_category: connection.indicator_category,
-            significance_level: connection.significance_level,
-            connection_strength: connection.connection_strength,
         }
     }
 }
@@ -256,34 +214,6 @@ impl From<EventCountryImpact> for EventCountryImpactType {
     }
 }
 
-/// Economic indicator category enum
-#[derive(Enum, Copy, Clone, Eq, PartialEq)]
-pub enum IndicatorCategoryType {
-    GDP,
-    Trade,
-    Employment,
-    Inflation,
-    MonetaryPolicy,
-    FiscalPolicy,
-    Financial,
-    Demographics,
-}
-
-impl std::fmt::Display for IndicatorCategoryType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            IndicatorCategoryType::GDP => write!(f, "GDP"),
-            IndicatorCategoryType::Trade => write!(f, "Trade"),
-            IndicatorCategoryType::Employment => write!(f, "Employment"),
-            IndicatorCategoryType::Inflation => write!(f, "Inflation"),
-            IndicatorCategoryType::MonetaryPolicy => write!(f, "MonetaryPolicy"),
-            IndicatorCategoryType::FiscalPolicy => write!(f, "FiscalPolicy"),
-            IndicatorCategoryType::Financial => write!(f, "Financial"),
-            IndicatorCategoryType::Demographics => write!(f, "Demographics"),
-        }
-    }
-}
-
 /// Global Analysis Query resolvers
 #[derive(Default)]
 pub struct GlobalAnalysisQuery;
@@ -302,29 +232,6 @@ impl GlobalAnalysisQuery {
             .map_err(|e| async_graphql::Error::new(format!("Failed to get countries: {}", e)))?;
 
         Ok(countries.into_iter().map(Into::into).collect())
-    }
-
-    /// Get correlation network for a specific indicator category
-    async fn correlation_network(
-        &self,
-        ctx: &Context<'_>,
-        indicator_category: IndicatorCategoryType,
-        min_correlation: Option<f64>,
-    ) -> Result<Vec<CorrelationNetworkNodeType>> {
-        let pool = ctx.data::<DatabasePool>()?;
-        let min_corr = min_correlation.unwrap_or(0.3);
-
-        let network = GlobalAnalysisService::get_correlation_network(
-            &pool,
-            &indicator_category.to_string(),
-            min_corr,
-        )
-        .await
-        .map_err(|e| {
-            async_graphql::Error::new(format!("Failed to get correlation network: {}", e))
-        })?;
-
-        Ok(network.into_iter().map(Into::into).collect())
     }
 
     /// Get global economic events with their country impacts
@@ -354,71 +261,6 @@ impl GlobalAnalysisQuery {
         .map_err(|e| async_graphql::Error::new(format!("Failed to get global events: {}", e)))?;
 
         Ok(events.into_iter().map(Into::into).collect())
-    }
-
-    /// Calculate correlations between countries for a specific indicator
-    async fn calculate_country_correlations(
-        &self,
-        ctx: &Context<'_>,
-        indicator_category: IndicatorCategoryType,
-        start_date: String,
-        end_date: String,
-        min_correlation: Option<f64>,
-    ) -> Result<Vec<CountryCorrelationType>> {
-        let pool = ctx.data::<DatabasePool>()?;
-
-        let start = NaiveDate::parse_from_str(&start_date, "%Y-%m-%d")
-            .map_err(|_| async_graphql::Error::new("Invalid start_date format. Use YYYY-MM-DD"))?;
-        let end = NaiveDate::parse_from_str(&end_date, "%Y-%m-%d")
-            .map_err(|_| async_graphql::Error::new("Invalid end_date format. Use YYYY-MM-DD"))?;
-
-        let min_corr = min_correlation.unwrap_or(0.3);
-
-        let correlations = GlobalAnalysisService::calculate_country_correlations(
-            &pool,
-            &indicator_category.to_string(),
-            start,
-            end,
-            min_corr,
-        )
-        .await
-        .map_err(|e| {
-            async_graphql::Error::new(format!("Failed to calculate correlations: {}", e))
-        })?;
-
-        Ok(correlations.into_iter().map(Into::into).collect())
-    }
-}
-
-/// Country correlation GraphQL type
-#[derive(SimpleObject)]
-pub struct CountryCorrelationType {
-    pub id: String,
-    pub country_a_id: String,
-    pub country_b_id: String,
-    pub indicator_category: String,
-    pub correlation_coefficient: String,
-    pub time_period_start: String,
-    pub time_period_end: String,
-    pub sample_size: i32,
-    pub p_value: Option<String>,
-    pub is_significant: bool,
-}
-
-impl From<CountryCorrelation> for CountryCorrelationType {
-    fn from(correlation: CountryCorrelation) -> Self {
-        Self {
-            id: correlation.id.to_string(),
-            country_a_id: correlation.country_a_id.to_string(),
-            country_b_id: correlation.country_b_id.to_string(),
-            indicator_category: correlation.indicator_category,
-            correlation_coefficient: correlation.correlation_coefficient.to_string(),
-            time_period_start: correlation.time_period_start.to_string(),
-            time_period_end: correlation.time_period_end.to_string(),
-            sample_size: correlation.sample_size,
-            p_value: correlation.p_value.map(|p| p.to_string()),
-            is_significant: correlation.is_significant,
-        }
     }
 }
 

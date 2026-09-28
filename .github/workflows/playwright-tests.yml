@@ -1,9 +1,11 @@
 name: Playwright Tests
 
 on:
-  push:
-    tags:
-      - 'v*'  # Trigger on version tags like v3.7.2, v3.8.0, etc.
+  # Manual only: this suite predates the Vite frontend migration and the release
+  # process's release/vX.Y branch + vX.Y.Z(-rc.N) tag scheme (see
+  # docs/development/RELEASE_PROCESS.md), so it must not auto-fire on release tags.
+  # ci-core.yml and release-e2e.yml cover Playwright/E2E coverage on pushes and PRs.
+  workflow_dispatch:
 
 jobs:
   grafana-dashboard-validation:

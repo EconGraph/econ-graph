@@ -814,8 +814,27 @@ pub struct SearchParamsInput {
     pub sort_by: Option<SearchSortOrderEnum>,
 }
 
+/// GraphQL enum for a chart annotation's visibility
+#[derive(Clone, Copy, Enum, Eq, PartialEq)]
+pub enum AnnotationVisibilityEnum {
+    /// Visible only to its author
+    Private,
+    /// Visible to everyone
+    Public,
+}
+
+impl From<AnnotationVisibility> for AnnotationVisibilityEnum {
+    fn from(visibility: AnnotationVisibility) -> Self {
+        match visibility {
+            AnnotationVisibility::Private => AnnotationVisibilityEnum::Private,
+            AnnotationVisibility::Public => AnnotationVisibilityEnum::Public,
+        }
+    }
+}
+
 /// GraphQL representation of a chart annotation
 #[derive(Clone, SimpleObject)]
+#[graphql(complex)]
 pub struct ChartAnnotationType {
     /// Annotation ID
     pub id: ID,
@@ -837,8 +856,8 @@ pub struct ChartAnnotationType {
     pub color: Option<String>,
     /// Type of annotation (note, highlight, warning, etc.)
     pub annotation_type: Option<String>,
-    /// Whether the annotation is visible to others
-    pub is_visible: Option<bool>,
+    /// Who can see the annotation (private: author only; public: everyone)
+    pub visibility: AnnotationVisibilityEnum,
     /// Whether the annotation is pinned
     pub is_pinned: Option<bool>,
     /// Tags associated with the annotation
@@ -862,12 +881,22 @@ impl From<ChartAnnotation> for ChartAnnotationType {
             description: annotation.description,
             color: annotation.color,
             annotation_type: annotation.annotation_type,
-            is_visible: annotation.is_visible,
+            visibility: annotation.visibility.into(),
             is_pinned: annotation.is_pinned,
             tags: annotation.tags,
             created_at: annotation.created_at,
             updated_at: annotation.updated_at,
         }
+    }
+}
+
+#[ComplexObject]
+impl ChartAnnotationType {
+    /// Deprecated alias for `visibility`: true when public. Kept so existing clients
+    /// (frontend queries not yet migrated to `visibility`) keep working.
+    #[graphql(deprecation = "use visibility")]
+    async fn is_visible(&self) -> bool {
+        self.visibility == AnnotationVisibilityEnum::Public
     }
 }
 
@@ -953,10 +982,6 @@ pub struct UserType {
     pub name: String,
     /// Avatar URL
     pub avatar_url: Option<String>,
-    /// Authentication provider
-    pub provider: String,
-    /// User role
-    pub role: String,
     /// Organization
     pub organization: Option<String>,
     /// UI theme preference
@@ -986,8 +1011,6 @@ impl From<User> for UserType {
             email: user.email,
             name: user.name,
             avatar_url: user.avatar_url,
-            provider: user.provider,
-            role: user.role,
             organization: user.organization,
             theme: user.theme,
             default_chart_type: user.default_chart_type,
@@ -1021,6 +1044,9 @@ pub struct CreateAnnotationInput {
     pub color: Option<String>,
     /// Whether the annotation is public (visible to others)
     pub is_public: Option<bool>,
+    /// Deprecated alias for `isPublic`. If both are given, `isPublic` wins.
+    #[graphql(deprecation = "use isPublic")]
+    pub is_visible: Option<bool>,
 }
 
 /// Input for adding a comment to an annotation
@@ -1043,6 +1069,26 @@ pub struct ShareChartInput {
     pub permission_level: String,
 }
 
+/// Input for updating an annotation (only its author may update it)
+#[derive(InputObject)]
+pub struct UpdateAnnotationInput {
+    /// Annotation ID to update
+    pub annotation_id: ID,
+    /// New title, if changing
+    pub title: Option<String>,
+    /// New content/description, if changing
+    pub content: Option<String>,
+    /// New color, if changing
+    pub color: Option<String>,
+    /// New annotation type, if changing
+    pub annotation_type: Option<String>,
+    /// New public/private visibility, if changing
+    pub is_public: Option<bool>,
+    /// Deprecated alias for `isPublic`. If both are given, `isPublic` wins.
+    #[graphql(deprecation = "use isPublic")]
+    pub is_visible: Option<bool>,
+}
+
 /// Input for deleting an annotation
 #[derive(InputObject)]
 pub struct DeleteAnnotationInput {
@@ -1051,25 +1097,6 @@ pub struct DeleteAnnotationInput {
 }
 
 // Admin GraphQL Types
-
-/// Input for creating a new user (admin only)
-#[derive(InputObject)]
-pub struct CreateUserInput {
-    /// Email address
-    pub email: String,
-    /// Display name
-    pub name: String,
-    /// Password (for email-based users)
-    pub password: Option<String>,
-    /// User role
-    pub role: String,
-    /// Organization (optional)
-    pub organization: Option<String>,
-    /// Whether account is active
-    pub is_active: Option<bool>,
-    /// Whether to send welcome email
-    pub send_welcome_email: Option<bool>,
-}
 
 /// Input for updating a user (admin only)
 #[derive(InputObject)]
@@ -1080,8 +1107,6 @@ pub struct UpdateUserInput {
     pub name: Option<String>,
     /// Avatar URL (optional)
     pub avatar_url: Option<String>,
-    /// User role (optional)
-    pub role: Option<String>,
     /// Organization (optional)
     pub organization: Option<String>,
     /// UI theme preference
@@ -1101,8 +1126,6 @@ pub struct UpdateUserInput {
 /// Input for filtering users (admin only)
 #[derive(InputObject)]
 pub struct UserFilterInput {
-    /// Filter by role
-    pub role: Option<String>,
     /// Filter by organization
     pub organization: Option<String>,
     /// Filter by active status
@@ -1139,27 +1162,6 @@ pub struct UserConnection {
     pub page_info: PageInfo,
 }
 
-/// GraphQL representation of a user session
-#[derive(Clone, SimpleObject)]
-pub struct UserSessionType {
-    /// Session ID
-    pub id: ID,
-    /// User ID
-    pub user_id: ID,
-    /// Session creation time
-    pub created_at: DateTime<Utc>,
-    /// Last activity time
-    pub last_activity: DateTime<Utc>,
-    /// Session expiration time
-    pub expires_at: DateTime<Utc>,
-    /// User agent string
-    pub user_agent: Option<String>,
-    /// IP address
-    pub ip_address: Option<String>,
-    /// Whether session is active
-    pub is_active: bool,
-}
-
 /// GraphQL representation of system health
 #[derive(Clone, SimpleObject)]
 pub struct SystemHealthType {
@@ -1178,10 +1180,6 @@ pub struct SystemMetricsType {
     pub total_users: i32,
     /// Number of active users
     pub active_users: i32,
-    /// Total number of sessions
-    pub total_sessions: i32,
-    /// Number of active sessions
-    pub active_sessions: i32,
     /// Database size in MB
     pub database_size_mb: f64,
     /// Number of queue items

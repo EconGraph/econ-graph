@@ -207,6 +207,7 @@ const MultiCountryDashboard: React.FC = () => {
       <Typography variant='h4' gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         📊 Multi-Country Economic Dashboard
         <Tooltip title='Compare economic indicators across multiple countries with interactive charts and analysis'>
+          {/* eslint-disable-next-line local/no-dead-button -- ECO-246: no handler yet */}
           <IconButton size='small'>
             <Info />
           </IconButton>

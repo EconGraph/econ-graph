@@ -41,13 +41,13 @@ variable "allowed_admin_ips" {
 }
 
 variable "admin_tls_cert" {
-  description = "TLS certificate for admin domain (base64 encoded)"
+  description = "TLS certificate for admin domain, PEM text (not base64; the kubernetes provider encodes Secret data itself)"
   type        = string
   sensitive   = true
 }
 
 variable "admin_tls_key" {
-  description = "TLS private key for admin domain (base64 encoded)"
+  description = "TLS private key for admin domain, PEM text (not base64; the kubernetes provider encodes Secret data itself)"
   type        = string
   sensitive   = true
 }

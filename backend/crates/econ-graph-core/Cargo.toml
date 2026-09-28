@@ -31,6 +31,9 @@ uuid.workspace = true
 bigdecimal.workspace = true
 rust_decimal.workspace = true
 
+# URL parsing (for redacting credentials before logging)
+url.workspace = true
+
 # Error handling
 anyhow.workspace = true
 thiserror.workspace = true
@@ -59,10 +62,6 @@ warp.workspace = true
 
 # GraphQL (needed for error types)
 async-graphql.workspace = true
-
-# Authentication (needed for user model)
-bcrypt.workspace = true
-jsonwebtoken.workspace = true
 
 # Test dependencies
 [dev-dependencies]

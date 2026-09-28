@@ -87,6 +87,7 @@ jobs:
             - 'k8s/**'
             - 'terraform/**'
             - 'scripts/**'
+            - 'config/keycloak/**'
             - 'docker-compose.yml'
             - 'package.json'
   backend-build-cache:
@@ -218,10 +219,26 @@ jobs:
     - name: Run fast unit tests (no database)
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --lib -- --test-threads=4 --nocapture config auth::integration_tests::test_user_response_serialization auth::integration_tests::test_request_validation auth::integration_tests::test_password_hashing auth::integration_tests::test_model_deserialization auth::comprehensive_integration_tests::test_password_security metrics mcp_server::tests::test_get_available_tools mcp_server::tests::test_get_available_resources
+        cargo test --lib -- --test-threads=4 --nocapture config metrics mcp_server::tests::test_get_available_tools mcp_server::tests::test_get_available_resources
       working-directory: backend
       env:
         RUST_LOG: warn
+
+    # The frontend validates its GraphQL operations against the committed
+    # schema.graphql, so the file must match what the backend serves. To
+    # regenerate it: UPDATE_SCHEMA=1 cargo test -p econ-graph-graphql --test schema_snapshot
+    - name: Check GraphQL schema snapshot
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo test -p econ-graph-graphql --test schema_snapshot
+      working-directory: backend
+
+    - name: Check the Keycloak realm (roles match the catalog, placeholders render)
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        scripts/keycloak/test-check-keycloak-roles.sh
+        scripts/keycloak/test-render-realm.sh
+        scripts/check-keycloak-roles
 
   chart-api-integration-tests:
     name: Chart API Integration Tests
@@ -374,8 +391,6 @@ jobs:
         DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
         BACKEND_PORT: 9877
         CHART_API_SERVICE_URL: http://localhost:3001/api/chart
-        # The backend refuses to start without one; this job never issues real tokens
-        JWT_SECRET: ci-only-jwt-secret
 
     - name: Run MCP server integration tests
       working-directory: backend
@@ -623,13 +638,8 @@ jobs:
           services::global_analysis_service::tests::test_get_global_events_with_filters \
           services::global_analysis_service::tests::test_direct_event_query \
           services::global_analysis_service::tests::test_event_insertion_only \
-          services::global_analysis_service::tests::test_trade_partners_retrieval
-        run_group global_analysis_advanced \
-          services::global_analysis_service::tests::test_get_correlation_network \
-          services::global_analysis_service::tests::test_calculate_country_correlations \
-          services::global_analysis_service::tests::test_calculate_economic_health_score \
-          services::global_analysis_service::tests::test_correlation_network_centrality_calculation \
-          services::global_analysis_service::tests::test_error_handling_database_connection_failure
+          services::global_analysis_service::tests::test_trade_partners_retrieval \
+          services::global_analysis_service::tests::test_calculate_economic_health_score
         run_group auth_integration \
           auth::integration_tests::test_auth_service_creation \
           auth::integration_tests::test_jwt_token_flow \
@@ -748,6 +758,9 @@ jobs:
       uses: actions/checkout@v4
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
+
+    - name: Check dev/QA Keycloak data is not deployed to k8s
+      run: ./scripts/keycloak/check-no-dev-users-in-k8s.sh
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@1.98.1
@@ -2485,6 +2498,21 @@ jobs:
     timeout-minutes: 60
     needs: [backend-smoke-tests]
 
+    services:
+      postgres:
+        image: *postgres_image
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -2499,6 +2527,7 @@ jobs:
       with:
         context: ./backend
         push: false
+        load: true
         tags: econ-graph-backend:test
         cache-from: type=gha
         cache-to: type=gha,mode=max
@@ -2508,17 +2537,69 @@ jobs:
       with:
         context: ./frontend
         push: false
+        load: true
         tags: econ-graph-frontend:test
+        # Keycloak issuer for sign-in, from the repository variable when set; unset hides Sign in.
+        build-args: |
+          VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER }}
+          VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID || 'econ-graph-web' }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
     - name: Test Docker images
       run: |
+        trap 'docker rm -f backend-smoke-test frontend-smoke-test >/dev/null 2>&1 || true' EXIT
+
         echo "Testing backend Docker image..."
-        docker run --rm econ-graph-backend:test --version || echo "Backend image test completed"
+        docker run -d --name backend-smoke-test \
+          --network host \
+          -e DATABASE_URL="postgresql://postgres:password@localhost:5432/econ_graph_test" \
+          -e BACKEND_PORT=19876 \
+          -e JWT_SECRET=ci-only-jwt-secret \
+          econ-graph-backend:test
+        backend_ok=""
+        for i in $(seq 1 30); do
+          if ! docker ps --format '{{.Names}}' | grep -q '^backend-smoke-test$'; then
+            echo "Backend container exited unexpectedly" >&2
+            break
+          fi
+          if curl -fsS "http://localhost:19876/health" > /dev/null; then
+            echo "Backend image is healthy"
+            backend_ok=1
+            break
+          fi
+          sleep 2
+        done
+        if [ -z "$backend_ok" ]; then
+          echo "Backend image failed its health check" >&2
+          docker logs backend-smoke-test || true
+          docker rm -f backend-smoke-test || true
+          exit 1
+        fi
+        docker rm -f backend-smoke-test
 
         echo "Testing frontend Docker image..."
-        docker run --rm econ-graph-frontend:test --version || echo "Frontend image test completed"
+        docker run -d --name frontend-smoke-test -p 18080:3000 econ-graph-frontend:test
+        frontend_ok=""
+        for i in $(seq 1 15); do
+          if ! docker ps --format '{{.Names}}' | grep -q '^frontend-smoke-test$'; then
+            echo "Frontend container exited unexpectedly" >&2
+            break
+          fi
+          if curl -fsS "http://localhost:18080/" > /dev/null; then
+            echo "Frontend image is serving"
+            frontend_ok=1
+            break
+          fi
+          sleep 1
+        done
+        if [ -z "$frontend_ok" ]; then
+          echo "Frontend image failed to serve" >&2
+          docker logs frontend-smoke-test || true
+          docker rm -f frontend-smoke-test || true
+          exit 1
+        fi
+        docker rm -f frontend-smoke-test
 # Updated Wed Sep 17 08:11:38 PDT 2025
 
 # Workflow cache refresh: 2025-09-17 08:25:07 PDT

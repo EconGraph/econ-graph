@@ -17,14 +17,24 @@ metadata:
       if ($uri ~ "^/\.well-known/acme-challenge/") {
         return 200;
       }
-      # Security headers for all other requests
-      more_set_headers "X-Frame-Options: DENY";
+      # Security headers for all other requests. Only the Keycloak silent sign-in page may be
+      # framed, and only by this origin.
+      set $frame_options "DENY";
+      set $frame_ancestors "'none'";
+      if ($uri = "/silent-callback.html") {
+        set $frame_options "SAMEORIGIN";
+        set $frame_ancestors "'self'";
+      }
+      more_set_headers "X-Frame-Options: $frame_options";
       more_set_headers "X-Content-Type-Options: nosniff";
       more_set_headers "X-XSS-Protection: 1; mode=block";
       more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
       more_set_headers "Permissions-Policy: geolocation=(), microphone=(), camera=()";
       more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload";
-      more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.econ-graph.com wss:; frame-ancestors 'none';";
+      # Sign-in needs the Keycloak issuer (VITE_OIDC_ISSUER) reachable: 'self' covers it when
+      # Keycloak is served on this host; a separate Keycloak origin must be added to
+      # connect-src and to a frame-src directive before that issuer is used.
+      more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.econ-graph.com wss:; frame-ancestors $frame_ancestors;";
     
     # Rate Limiting
     nginx.ingress.kubernetes.io/rate-limit: "100"
@@ -87,6 +97,14 @@ spec:
             name: econ-graph-backend-service
             port:
               number: 9876
+      # The OIDC sign-in callback is a frontend route; Exact wins over the /auth prefix below.
+      - path: /auth/callback
+        pathType: Exact
+        backend:
+          service:
+            name: econ-graph-frontend-service
+            port:
+              number: 3000
       - path: /auth
         pathType: Prefix
         backend:
