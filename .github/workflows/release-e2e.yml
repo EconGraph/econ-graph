@@ -11,6 +11,8 @@ on:
     paths:
       - 'frontend/**'
       - 'backend/**'
+      - 'config/keycloak/**'
+      - 'docker-compose.release-e2e.yml'
       - 'scripts/release-e2e.sh'
       - '.github/workflows/release-e2e.yml'
   workflow_dispatch:

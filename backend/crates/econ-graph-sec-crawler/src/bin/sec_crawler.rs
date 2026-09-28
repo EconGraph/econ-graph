@@ -257,7 +257,6 @@ async fn stats_command(crawler: SecEdgarCrawler) -> Result<()> {
     println!("Storage Statistics:");
     println!("  Total files: {}", stats.total_files);
     println!("  Total size: {} bytes", stats.total_size_bytes);
-    println!("  Large object files: {}", stats.large_object_files);
     println!("  Bytea files: {}", stats.bytea_files);
     println!("  Compressed files: {}", stats.compressed_files);
     println!("  Uncompressed files: {}", stats.uncompressed_files);

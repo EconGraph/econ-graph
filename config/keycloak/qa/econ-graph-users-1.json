@@ -1,0 +1,27 @@
+{
+  "realm": "econ-graph",
+  "users": [
+    {
+      "id": "0199a0e0-0000-7000-8000-0000000a11ca",
+      "username": "qa-alice",
+      "email": "qa-alice@example.com",
+      "firstName": "QA",
+      "lastName": "Alice",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": ["default-roles-econ-graph"],
+      "credentials": [{ "type": "password", "value": "qa-alice-password", "temporary": false }]
+    },
+    {
+      "id": "0199a0e0-0000-7000-8000-0000000b0bca",
+      "username": "qa-bob",
+      "email": "qa-bob@example.com",
+      "firstName": "QA",
+      "lastName": "Bob",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": ["default-roles-econ-graph"],
+      "credentials": [{ "type": "password", "value": "qa-bob-password", "temporary": false }]
+    }
+  ]
+}
