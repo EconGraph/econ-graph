@@ -18,6 +18,11 @@ const backendUrl = `http://localhost:${backendPort}`;
 const frontendUrl = `http://localhost:${frontendPort}`;
 const backendBin = process.env.RELEASE_BACKEND_BIN ?? '../backend/target/debug/econ-graph-backend';
 
+// Keycloak's own port is fixed by docker-compose.release-e2e.yml (KC_HOSTNAME + the port
+// mapping), unlike the backend/frontend ports above. Its realm's KC_WEB_E2E_BASE_URL reads
+// RELEASE_FRONTEND_PORT (default 18081) from that same compose file, so it tracks frontendPort.
+const oidcIssuer = 'http://localhost:8081/realms/econ-graph';
+
 // Deliberately not DATABASE_URL, which often points at a dev database: the backend migrates
 // whatever database it is given.
 const databaseUrl = process.env.RELEASE_E2E_DATABASE_URL;
@@ -68,8 +73,12 @@ export default defineConfig({
         DATABASE_URL: databaseUrl,
         BACKEND_PORT: String(backendPort),
         CORS_ALLOWED_ORIGINS: frontendUrl,
-        // Only signs tokens for this throwaway stack.
+        // Only signs tokens for this throwaway stack. Unrelated to Keycloak: still required by
+        // the in-house JWT code AUTH-6 will remove.
         JWT_SECRET: 'release-e2e-only-jwt-secret',
+        // The dev realm from docker-compose.release-e2e.yml's keycloak service.
+        OIDC_ISSUER: oidcIssuer,
+        OIDC_AUDIENCE: 'econ-graph-api',
         RUST_LOG: process.env.RUST_LOG ?? 'warn',
       },
     },
@@ -86,6 +95,8 @@ export default defineConfig({
         FLAG_PROFILE: 'release',
         BACKEND_URL: backendUrl,
         VITE_API_URL: backendUrl,
+        // Read by AUTH-7's sign-in UI (oidc-client-ts). AUTH-10's real sign-in spec uses it too.
+        VITE_OIDC_ISSUER: oidcIssuer,
       },
     },
   ],
