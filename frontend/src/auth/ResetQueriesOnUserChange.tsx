@@ -3,7 +3,7 @@
  * renewal), so data fetched with one user's token is never shown to another or to anonymous.
  */
 
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from '../contexts/AuthContext';
@@ -18,7 +18,9 @@ const ResetQueriesOnUserChange = (): null => {
   const userId = isLoading ? undefined : (user?.id ?? null);
   const previous = useRef<string | null | undefined>(undefined);
 
-  useEffect(() => {
+  // A layout effect, so the reset runs before the browser paints the render that switched
+  // users; a passive effect could let that render show the previous user's cached data.
+  useLayoutEffect(() => {
     if (userId === undefined) {
       return;
     }

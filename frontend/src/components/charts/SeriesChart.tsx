@@ -9,6 +9,8 @@ import {
   Legend,
   TimeScale,
   TooltipItem,
+  type ActiveElement,
+  type ChartEvent,
 } from 'chart.js';
 import annotationPlugin from 'chartjs-plugin-annotation';
 import { Line } from 'react-chartjs-2';
@@ -73,6 +75,11 @@ const formatDate = (date: Date): string =>
 
 const NO_ANNOTATIONS: readonly SeriesChartAnnotation[] = [];
 
+// Click events the annotation plugin has already handled. Chart.js hands the same event object
+// to the plugin first and then to the chart's own onClick, which skips events listed here, so
+// a click on an annotation doesn't also pick the point under it.
+const annotationClicks = new WeakSet<object>();
+
 export interface SeriesChartProps {
   /** Points to plot, already transformed by the backend, in any order. */
   data: readonly SeriesChartPoint[];
@@ -103,6 +110,11 @@ export interface SeriesChartProps {
    * (`useCallback`); a new one each render rebuilds the chart options.
    */
   onAnnotationClick?: (id: string) => void;
+  /**
+   * Called with the observation nearest a click on the plot (not on an annotation), for
+   * example to annotate it. Pass a stable function (`useCallback`).
+   */
+  onPointClick?: (point: SeriesChartPoint) => void;
 }
 
 /**
@@ -120,6 +132,7 @@ export interface SeriesChartProps {
  * @param props.onDateRangeChange - Called when the user changes the date range.
  * @param props.annotations - Notes to draw on the chart.
  * @param props.onAnnotationClick - Called with a clicked annotation's id.
+ * @param props.onPointClick - Called with the observation nearest a click on the plot.
  * @returns The chart with its controls.
  */
 const SeriesChart: React.FC<SeriesChartProps> = ({
@@ -134,8 +147,20 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
   onDateRangeChange,
   annotations = NO_ANNOTATIONS,
   onAnnotationClick,
+  onPointClick,
 }) => {
   const theme = useTheme();
+
+  const handleAnnotationClick = React.useMemo(
+    () =>
+      onAnnotationClick || onPointClick
+        ? (id: string, event: unknown) => {
+            if (typeof event === 'object' && event !== null) annotationClicks.add(event);
+            onAnnotationClick?.(id);
+          }
+        : undefined,
+    [onAnnotationClick, onPointClick]
+  );
 
   const [ownRange, setOwnRange] = React.useState<SeriesChartDateRange>(EMPTY_DATE_RANGE);
   const range = dateRange ?? ownRange;
@@ -156,9 +181,9 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
         annotations,
         visibleRange(range, shownData),
         theme.palette.warning.main,
-        onAnnotationClick
+        handleAnnotationClick
       ),
-    [annotations, range, shownData, theme.palette.warning.main, onAnnotationClick]
+    [annotations, range, shownData, theme.palette.warning.main, handleAnnotationClick]
   );
 
   const chartData = React.useMemo(
@@ -196,6 +221,14 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
         mode: 'index' as const,
         intersect: false,
       },
+      // With the index interaction, the active element is the point nearest the click's x.
+      onClick: onPointClick
+        ? (event: ChartEvent, elements: ActiveElement[]) => {
+            if (annotationClicks.has(event)) return;
+            const point = elements.length > 0 ? shownData[elements[0].index] : undefined;
+            if (point) onPointClick(point);
+          }
+        : undefined,
       plugins: {
         title: {
           display: true,
@@ -272,7 +305,17 @@ const SeriesChart: React.FC<SeriesChartProps> = ({
         },
       },
     };
-  }, [transformed, units, title, transformationLabel, theme, annotationOptions, range]);
+  }, [
+    transformed,
+    units,
+    title,
+    transformationLabel,
+    theme,
+    annotationOptions,
+    range,
+    shownData,
+    onPointClick,
+  ]);
 
   return (
     <Paper sx={{ p: 3 }}>

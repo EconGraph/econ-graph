@@ -169,14 +169,15 @@ export function visibleRange(
  * @param range - The visible range (see `visibleRange`); only annotations overlapping it
  * are drawn.
  * @param defaultColor - Colour for annotations without one.
- * @param onClick - Called with an annotation's id when it is clicked.
+ * @param onClick - Called with an annotation's id, and the plugin's click event, when it is
+ * clicked.
  * @returns Plugin options for `plugins.annotation.annotations`.
  */
 export function buildAnnotationOptions(
   annotations: readonly SeriesChartAnnotation[],
   range: SeriesChartDateRange,
   defaultColor: string,
-  onClick?: (id: string) => void
+  onClick?: (id: string, event: unknown) => void
 ): Record<string, AnnotationOptions> {
   const options: Record<string, AnnotationOptions> = {};
   for (const annotation of annotations) {
@@ -187,7 +188,9 @@ export function buildAnnotationOptions(
       adjustScaleRange: false,
       borderColor: color,
       label: { display: true, content: annotation.label, position: 'start' as const },
-      click: onClick ? () => onClick(annotation.id) : undefined,
+      click: onClick
+        ? (_context: unknown, event: unknown) => onClick(annotation.id, event)
+        : undefined,
     };
     if (annotation.kind === 'point') {
       options[annotation.id] = {

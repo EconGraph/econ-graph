@@ -5,8 +5,22 @@ import SeriesAnnotationsPanel from '../SeriesAnnotationsPanel';
 import type { SeriesAnnotation } from '../../../hooks/useSeriesAnnotations';
 
 const ANNOTATIONS: SeriesAnnotation[] = [
-  { id: 'a', date: '2020-04-01', title: 'Lockdown trough', description: null },
-  { id: 'b', date: '2020-01-01', title: 'Pre-pandemic peak', description: null },
+  {
+    id: 'a',
+    authorId: 'u1',
+    date: '2020-04-01',
+    title: 'Lockdown trough',
+    description: null,
+    visibility: 'PUBLIC',
+  },
+  {
+    id: 'b',
+    authorId: 'u1',
+    date: '2020-01-01',
+    title: 'Pre-pandemic peak',
+    description: null,
+    visibility: 'PUBLIC',
+  },
 ];
 
 describe('SeriesAnnotationsPanel', () => {
@@ -32,6 +46,6 @@ describe('SeriesAnnotationsPanel', () => {
     render(<SeriesAnnotationsPanel annotations={[]} isLoading />);
 
     expect(screen.getByTestId('annotations-loading')).toBeInTheDocument();
-    expect(screen.queryByText(/No public annotations/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No annotations/)).not.toBeInTheDocument();
   });
 });

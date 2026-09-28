@@ -12,6 +12,7 @@ import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import { useParams } from 'react-router-dom';
 import { TestProviders } from '../../test-utils/test-providers';
+import { useAuth } from '../../contexts/AuthContext';
 import { executeGraphQL, GraphQLRequest, QUERIES } from '../../utils/graphql';
 import { parseIsoDate } from '../../utils/dates';
 import SeriesDetail from '../SeriesDetail';
@@ -92,12 +93,29 @@ const annotationRequests = () =>
     .map(([request]) => request)
     .filter(request => request.query === QUERIES.GET_ANNOTATIONS_FOR_SERIES);
 
+// Each annotation's row is the first button in its list item; the rest are its controls.
 const listRows = () =>
-  within(screen.getByRole('list', { name: 'Annotations' })).getAllByRole('button');
+  within(screen.getByRole('list', { name: 'Annotations' }))
+    .getAllByRole('listitem')
+    .map(item => within(item).getAllByRole('button')[0]);
 
 describe('SeriesDetail annotations', () => {
   beforeEach(() => {
     mockExecute.mockReset();
+    // A build without sign-in: the public, read-only view. Signed-in editing is tested in
+    // SeriesDetailAnnotationEditing.test.tsx.
+    vi.mocked(useAuth).mockReturnValue({
+      user: null,
+      isAuthenticated: false,
+      isLoading: false,
+      isConfigured: false,
+      accountUrl: null,
+      error: null,
+      signIn: vi.fn(),
+      signOut: vi.fn(),
+      completeSignIn: vi.fn(),
+      clearError: vi.fn(),
+    });
   });
 
   test('asks for the series annotations without a user id', async () => {
@@ -106,8 +124,20 @@ describe('SeriesDetail annotations', () => {
 
     await screen.findByRole('list', { name: 'Annotations' });
     expect(annotationRequests()).toHaveLength(1);
+    // The viewer comes from the access token, never from a query argument.
     expect(annotationRequests()[0].variables).toEqual({ seriesId: GDP_ID });
-    expect(QUERIES.GET_ANNOTATIONS_FOR_SERIES).not.toMatch(/userId/);
+    expect(QUERIES.GET_ANNOTATIONS_FOR_SERIES).toMatch(/annotationsForSeries\(seriesId: \$seriesId\)/);
+  });
+
+  test('shows no annotate or edit controls when sign-in is not configured', async () => {
+    serve();
+    renderPage();
+
+    await screen.findByRole('list', { name: 'Annotations' });
+    expect(screen.queryByRole('button', { name: /add annotation/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /sign in/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^edit /i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^delete /i })).not.toBeInTheDocument();
   });
 
   test('draws public annotations on the chart at their dates', async () => {
@@ -161,11 +191,11 @@ describe('SeriesDetail annotations', () => {
     expect(selected()[0]).toHaveTextContent('Pre-pandemic peak');
   });
 
-  test('says so when the series has no public annotations', async () => {
+  test('says so when the series has no annotations', async () => {
     serve({ annotationsForSeries: [] });
     renderPage();
 
-    expect(await screen.findByText('No public annotations on this series yet.')).toBeInTheDocument();
+    expect(await screen.findByText('No annotations on this series yet.')).toBeInTheDocument();
     await screen.findByTestId('line-chart');
     expect(screen.queryAllByTestId('chart-annotation')).toHaveLength(0);
   });

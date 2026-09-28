@@ -31,6 +31,7 @@ import SeriesChart, { SeriesChartAnnotation } from '../components/charts/SeriesC
 import SeriesAnnotationsPanel from '../components/charts/SeriesAnnotationsPanel';
 import { useSeriesData, useSeriesDetail, SeriesDataPoint } from '../hooks/useSeriesData';
 import { useSeriesAnnotations } from '../hooks/useSeriesAnnotations';
+import { useSeriesAnnotationEditor } from '../components/annotations/useSeriesAnnotationEditor';
 import { DataTransformation, describeTransformation } from '../utils/transformations';
 import { formatIsoDate } from '../utils/dates';
 
@@ -71,6 +72,16 @@ const formatValue = (value: number | null): string =>
 const hasValues = (points: SeriesDataPoint[] | undefined): points is SeriesDataPoint[] =>
   !!points && points.some(p => p.value !== null);
 
+/**
+ * Today as a local calendar date.
+ * @returns `YYYY-MM-DD`.
+ */
+const todayIso = () => {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+};
+
 const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
   const navigate = useNavigate();
   const [transformation, setTransformation] = React.useState<DataTransformation>('NONE');
@@ -92,6 +103,21 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
       })),
     [annotations.data]
   );
+
+  // The create form opens on the latest observation unless a point on the chart was clicked.
+  const latestDate = React.useMemo(() => {
+    const points = data.data?.points ?? [];
+    for (let i = points.length - 1; i >= 0; i--) {
+      if (points[i].value !== null) return points[i].date;
+    }
+    return undefined;
+  }, [data.data?.points]);
+  const editor = useSeriesAnnotationEditor({
+    seriesId,
+    defaultDate: latestDate ?? series?.endDate?.slice(0, 10) ?? todayIso(),
+    onCreated: setSelectedAnnotationId,
+    onDeleted: id => setSelectedAnnotationId(selected => (selected === id ? null : selected)),
+  });
 
   if (detail.isLoading) {
     return <PageSkeleton />;
@@ -176,6 +202,7 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
           onTransformationChange={setTransformation}
           annotations={chartAnnotations}
           onAnnotationClick={setSelectedAnnotationId}
+          onPointClick={editor.onPointClick}
         />
       </Box>
     );
@@ -253,8 +280,11 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
               onRetry={() => annotations.refetch()}
               selectedId={selectedAnnotationId}
               onSelect={setSelectedAnnotationId}
+              headerAction={editor.headerAction}
+              renderAnnotationExtra={editor.renderAnnotationExtra}
             />
           </Box>
+          {editor.dialogs}
 
           <Card sx={{ mb: 3 }}>
             <CardContent>

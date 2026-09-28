@@ -53,6 +53,5 @@ export const GRAPHQL_OPERATION_SKIP_LIST: Readonly<Record<string, string>> = {
   // and the now-uncalled GetAnnotations with it). Fix or delete them (series search
   // is #165).
   'utils/graphql.ts#GetChartCollaborators': 'series-ui: unused, UI-5 removed its other caller',
-  'utils/graphql.ts#GetCommentsForAnnotation': 'series-ui: unused, UI-5 removed its other caller',
   'utils/graphql.ts#SearchSeriesFulltext': 'series-ui: unused, fix or delete with series search',
 };
