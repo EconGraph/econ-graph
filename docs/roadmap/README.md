@@ -1,6 +1,27 @@
 # EconGraph Roadmap
 
-This is the single entry point for EconGraph's roadmap. The project sat idle from
+> **Moved to Linear on 2026-09-27.** Roadmaps and release plans now live in
+> [Linear](https://linear.app/econgraph). Releases are issues ECO-5 (train 1, `v4.0.0`)
+> through ECO-11 (train 7), and each topic is a Linear project. This index is frozen as
+> of that date: its State column, the "What is built today" snapshot and the open-work
+> lists are no longer updated, and where they differ from Linear, Linear is current. The
+> stale-PR recommendations and the doc inventory below are kept only here.
+
+Linear projects:
+
+- [Auth, plans and permissions](https://linear.app/econgraph/project/auth-plans-and-permissions-852b7217015b)
+- [Admin UI](https://linear.app/econgraph/project/admin-ui-ad2b8b56fe3f)
+- [Federation and datasets](https://linear.app/econgraph/project/federation-and-datasets-2d6e3c5159f8)
+- [Global analysis](https://linear.app/econgraph/project/global-analysis-4d1fbf9d5143)
+- [Releases and release engineering](https://linear.app/econgraph/project/releases-and-release-engineering-ee56b60d9c7a)
+- [Data sources](https://linear.app/econgraph/project/data-sources-7b8a25b3313e)
+- [Analysis workspace](https://linear.app/econgraph/project/analysis-workspace-e2c63872061b), which also holds the product features
+- [SEC financial data](https://linear.app/econgraph/project/sec-financial-data-63d758410e88)
+- [Feature flags](https://linear.app/econgraph/project/feature-flags-bc727011a0f7)
+- [Security hardening](https://linear.app/econgraph/project/security-hardening-7a081ff9105c)
+- [CI and tooling](https://linear.app/econgraph/project/ci-and-tooling-cd91fbb406c6)
+
+This was the single entry point for EconGraph's roadmap until the move to Linear. The project sat idle from
 October 2025 to September 2026. The roadmap and plan docs written before that pause
 were scattered across `docs/`, the repo root, `admin-frontend/`, `personas/` and
 `super-secret-projects/`. Several of them duplicate each other, and some claim work
@@ -8,23 +29,14 @@ is finished when the code shows otherwise.
 
 This index:
 
-1. Links the current topic roadmaps.
+1. Links the topic roadmaps as they stood on 2026-09-27.
 2. Records what is actually built, checked against the code on 2026-09-26.
 3. Collects the open work that is still worth doing from the older docs.
 4. Lists every older plan or status doc with a verdict: keep, update, archive or delete.
 
-When a topic roadmap changes, update its row here. New roadmaps go in `docs/roadmap/<topic>.md`.
-
-Each topic doc landed in its own pull request, linked in the State column. Until that pull
-request merges, its Doc link does not resolve; read the pull request instead.
-
-As of 2026-09-27, roadmap tracking has moved to Linear (Joe's decision). New topic
-roadmaps are written directly as Linear issues and documents rather than as PRs here.
-A topic doc PR still open when its content was verified in Linear was closed without
-merging; its Doc column below links the Linear design-record document instead, and the
-release-1 work it covered is tracked under Linear issue ECO-5 and its sub-issues, not
-in a file in this directory. A topic doc that had already merged before the cutover
-stays here and keeps its own PR history.
+Each topic doc was proposed in its own pull request, linked in the State column. Four of
+those pull requests (#178, #192, #193, #195) closed without merging, and their Doc links
+open the Linear design records instead.
 
 ## Topic roadmaps
 
@@ -183,7 +195,7 @@ roles, permissions, MFA and session length belong there too.
 
 ### Data federation and time series storage
 
-[federation.md](./federation.md) owns this area. No older doc covers it. The stale federation PRs #125 and #129 are reviewed there.
+The [federation roadmap](https://linear.app/econgraph/document/federation-roadmap-design-record-from-pr-178-a1ebb66c538d) owns this area. No older doc covers it. The stale federation PRs #125 and #129 are reviewed there.
 
 ### Global analysis
 
@@ -211,7 +223,7 @@ global-analysis docs. The findings below are its inputs.
 
 ### SEC financial data
 
-[sec-financial-data.md](./sec-financial-data.md) owns this area and supersedes
+The [SEC financial data roadmap](https://linear.app/econgraph/document/sec-financial-data-roadmap-design-record-from-pr-193-3a5b22c09d18) owns this area and supersedes
 `SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md`. The findings below are its inputs.
 
 - **The XBRL parser is not on the live path.** The crawler stores the raw filings as
@@ -231,7 +243,7 @@ global-analysis docs. The findings below are its inputs.
 
 ### Data sources
 
-[data-sources.md](./data-sources.md) owns this area. It proposes a source order, a
+The [data sources roadmap](https://linear.app/econgraph/document/data-sources-roadmap-design-record-from-pr-192-2db0c59b5869) owns this area. It proposes a source order, a
 generic SDMX adapter, BIS for central-bank data, and deleting the static catalogs.
 The findings below are its inputs.
 
@@ -294,7 +306,7 @@ Each topic roadmap reviews the open 2025 PRs in its area and says what to keep:
 |---|---|---|
 | #141 Keycloak / mTLS, #149 JWT permissions | Close | [auth-plans-permissions.md](./auth-plans-permissions.md) |
 | #151 SEC admin UI | Close once its admin-frontend half is ported | [admin-ui.md](./admin-ui.md) |
-| #125 financial-data federation, #129 Iceberg | Close | [federation.md](./federation.md) |
+| #125 financial-data federation, #129 Iceberg | Close | [federation roadmap](https://linear.app/econgraph/document/federation-roadmap-design-record-from-pr-178-a1ebb66c538d) |
 | #154 global analysis UI improvements | Close and port its tests | [global-analysis.md](./global-analysis.md) |
 
 ## Doc inventory
@@ -316,7 +328,7 @@ useful but out of date.
 | `docs/development/GLOBAL_ANALYSIS_UI_ROADMAP.md` | Deleted | Duplicates phases 2 to 5 of the doc above |
 | [`docs/projects/frontend-developer-global-analysis-plan.md`](../archive/projects/frontend-developer-global-analysis-plan.md) | Archived | Week 1 is done. Its test-suite claim is false |
 | `docs/projects/global-analysis-ui-phase1.md` | Deleted | The same plan as the doc above with every box unchecked |
-| [`docs/development/SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md`](../archive/development/SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md) | Archived | Superseded by [sec-financial-data.md](./sec-financial-data.md). Its 2,835 lines include false completion claims |
+| [`docs/development/SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md`](../archive/development/SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md) | Archived | Superseded by the [SEC financial data roadmap](https://linear.app/econgraph/document/sec-financial-data-roadmap-design-record-from-pr-193-3a5b22c09d18). Its 2,835 lines include false completion claims |
 | [`docs/development/vitest-migration-plan.md`](../archive/development/vitest-migration-plan.md) | Archived | The migration is complete |
 | [`docs/technical/CRATE_SPLIT_PLAN.md`](../archive/technical/CRATE_SPLIT_PLAN.md) | Archived | The split is complete |
 | [`docs/technical/CRAWLER_MONITORING_IMPLEMENTATION_PLAN.md`](../archive/technical/CRAWLER_MONITORING_IMPLEMENTATION_PLAN.md) | Archived | Mostly done. Its paths are stale |
