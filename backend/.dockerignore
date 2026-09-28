@@ -1,5 +1,5 @@
-# Build context for backend/Dockerfile. Only Cargo.toml, Cargo.lock (if present),
-# crates/ and migrations/ are used.
+# Build context for backend/Dockerfile. Only Cargo.toml, Cargo.lock, crates/
+# and migrations/ are used.
 
 # Rust build artifacts
 target/
@@ -9,8 +9,8 @@ target/
 scripts/
 *.sql
 
-# NOTE: Cargo.lock is deliberately NOT ignored: it is gitignored, but when a local
-# lockfile exists the image build should honour it.
+# NOTE: Cargo.lock must NOT be ignored here: it is committed and the build
+# uses `cargo build --locked`.
 
 # IDE files
 .vscode/
