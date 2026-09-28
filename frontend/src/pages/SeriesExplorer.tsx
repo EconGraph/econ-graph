@@ -54,7 +54,7 @@ const SEARCH_LIMIT = 100;
 /** How long typing must pause before the search is sent. */
 const SEARCH_DEBOUNCE_MS = 250;
 
-interface DataSourceOption {
+export interface DataSourceOption {
   id: string;
   name: string;
 }
@@ -100,6 +100,26 @@ const BACKEND_FREQUENCIES = new Set([
   'Annual',
   'Irregular',
 ]);
+
+/**
+ * Resolves a `source` URL parameter to a listed source's id. The parameter is normally
+ * already an id, but older links (the sidebar, the data sources page) put the source's
+ * display name in the URL instead, and that name doesn't always match exactly (it may
+ * be missing a "(FRED)"-style suffix) — so a name match falls back to a prefix match.
+ * @param param - The raw `source` URL parameter, if any.
+ * @param sources - The sources the backend lists.
+ * @returns The matching source's id, or undefined when nothing matches.
+ */
+export const resolveSourceId = (param: string, sources: DataSourceOption[]): string | undefined => {
+  if (!param) return undefined;
+  const byId = sources.find(source => source.id === param);
+  if (byId) return byId.id;
+  const lowerParam = param.toLowerCase();
+  const byName = sources.find(source => source.name.toLowerCase() === lowerParam);
+  if (byName) return byName.id;
+  const prefixMatches = sources.filter(source => source.name.toLowerCase().startsWith(lowerParam));
+  return prefixMatches.length === 1 ? prefixMatches[0].id : undefined;
+};
 
 /**
  * The frequency as the backend's SeriesFrequency enum names it (its variants, upper-cased),
@@ -150,11 +170,13 @@ const SeriesExplorer: React.FC = () => {
   );
 
   // Only a source the backend listed is used, so an old link that put the source name in
-  // the URL searches all sources instead of matching nothing. While the list is loading, the
-  // source from the URL is held and the search waits for it.
-  const sourceListed = dataSources.some(ds => ds.id === selectedSource);
+  // the URL (the sidebar, the data sources page) resolves to that source's id instead of
+  // matching nothing. While the list is loading, the source from the URL is held and the
+  // search waits for it.
+  const resolvedSourceId = resolveSourceId(selectedSource, dataSources);
+  const sourceListed = resolvedSourceId !== undefined;
   const waitingForSources = Boolean(selectedSource) && Boolean(dataSourcesResult?.isLoading);
-  const activeSource = sourceListed || waitingForSources ? selectedSource : '';
+  const activeSource = sourceListed ? resolvedSourceId : waitingForSources ? selectedSource : '';
 
   // Send the search once typing pauses, not on every keystroke
   const [debouncedQuery, setDebouncedQuery] = React.useState(searchQuery.trim());
@@ -232,14 +254,17 @@ const SeriesExplorer: React.FC = () => {
   const endIndex = startIndex + itemsPerPage;
   const paginatedSeries = filteredSeries.slice(startIndex, endIndex);
 
-  // Update URL parameters when filters change
+  // Update URL parameters when filters change. `source` is written back as `selectedSource`,
+  // not the resolved id: a link that arrived with a source name (the sidebar's, say) keeps
+  // that same name in the URL rather than having it silently rewritten to the id it resolved
+  // to — a same-site navigation is expected to keep every query parameter it arrived with.
   React.useEffect(() => {
     const params = new URLSearchParams();
     if (searchQuery) params.set('q', searchQuery);
-    if (activeSource) params.set('source', activeSource);
+    if (selectedSource) params.set('source', selectedSource);
     if (selectedFrequency) params.set('frequency', selectedFrequency);
     setSearchParams(params, { replace: true });
-  }, [searchQuery, activeSource, selectedFrequency, setSearchParams]);
+  }, [searchQuery, selectedSource, selectedFrequency, setSearchParams]);
 
   // Keyboard shortcuts
   React.useEffect(() => {
@@ -457,7 +482,7 @@ const SeriesExplorer: React.FC = () => {
               <InputLabel id='source-filter-label'>Source</InputLabel>
               <Select
                 labelId='source-filter-label'
-                value={sourceListed ? selectedSource : ''}
+                value={sourceListed ? resolvedSourceId : ''}
                 onChange={e => {
                   setSelectedSource(e.target.value);
                   setCurrentPage(1);

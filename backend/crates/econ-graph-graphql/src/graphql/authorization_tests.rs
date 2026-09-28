@@ -30,10 +30,6 @@ fn user() -> User {
         email: "caller@example.test".into(),
         name: "caller".into(),
         avatar_url: None,
-        provider: "email".into(),
-        provider_id: None,
-        password_hash: None,
-        role: "viewer".into(),
         organization: None,
         theme: "light".into(),
         default_chart_type: "line".into(),
@@ -77,11 +73,6 @@ fn protected() -> Vec<(&'static str, Role, String)> {
             r#"mutation { triggerCrawl(input: { sources: ["FRED"], seriesIds: ["GDP"] }) { __typename } }"#.into(),
         ),
         (
-            "createUser",
-            Role::AdminUsersCreate,
-            r#"mutation { createUser(input: { email: "a@example.test", name: "a" }) { __typename } }"#.into(),
-        ),
-        (
             "updateUser",
             Role::AdminUsersUpdate,
             format!(r#"mutation {{ updateUser(id: "{id}", input: {{ name: "a" }}) {{ __typename }} }}"#),
@@ -100,11 +91,6 @@ fn protected() -> Vec<(&'static str, Role, String)> {
             "activateUser",
             Role::AdminUsersSuspend,
             format!(r#"mutation {{ activateUser(id: "{id}") }}"#),
-        ),
-        (
-            "forceLogoutUser",
-            Role::AdminSessionsRevoke,
-            format!(r#"mutation {{ forceLogoutUser(id: "{id}") }}"#),
         ),
         (
             "createAnnotation",
@@ -136,16 +122,6 @@ fn protected() -> Vec<(&'static str, Role, String)> {
             "user (another user)",
             Role::AdminUsersRead,
             format!(r#"{{ user(userId: "{id}") {{ __typename }} }}"#),
-        ),
-        (
-            "userSessions",
-            Role::AdminSessionsRead,
-            "{ userSessions { __typename } }".into(),
-        ),
-        (
-            "activeSessions",
-            Role::AdminSessionsRead,
-            "{ activeSessions { __typename } }".into(),
         ),
         (
             "systemHealth",
@@ -242,19 +218,17 @@ fn all_but(missing: Role) -> Vec<Role> {
         .collect()
 }
 
-/// Roles are assigned in the identity provider: the user mutations no longer take one.
+/// Roles are assigned in the identity provider: updateUser no longer takes one.
 #[tokio::test]
-async fn user_mutations_no_longer_take_a_role() {
+async fn update_user_no_longer_takes_a_role() {
     let id = Uuid::new_v4();
-    for query in [
-        r#"mutation { createUser(input: { email: "a@example.test", name: "a", role: "admin" }) { __typename } }"#.to_string(),
-        format!(r#"mutation {{ updateUser(id: "{id}", input: {{ role: "super_admin" }}) {{ __typename }} }}"#),
-    ] {
-        let errs = errors(caller_with(user(), Role::all().iter().copied()), &query).await;
-        assert_eq!(errs.len(), 1, "{query}: {errs:?}");
-        assert!(errs[0].contains("role"), "{query}: {errs:?}");
-        assert!(!is_auth_error(&errs[0]), "{query}: {errs:?}");
-    }
+    let query = format!(
+        r#"mutation {{ updateUser(id: "{id}", input: {{ role: "super_admin" }}) {{ __typename }} }}"#
+    );
+    let errs = errors(caller_with(user(), Role::all().iter().copied()), &query).await;
+    assert_eq!(errs.len(), 1, "{query}: {errs:?}");
+    assert!(errs[0].contains("role"), "{query}: {errs:?}");
+    assert!(!is_auth_error(&errs[0]), "{query}: {errs:?}");
 }
 
 #[tokio::test]
@@ -288,9 +262,6 @@ async fn insert_user(pool: &DatabasePool) -> User {
         email: format!("{}@example.test", Uuid::new_v4()),
         name: "target".into(),
         avatar_url: None,
-        provider: "email".into(),
-        provider_id: None,
-        password_hash: None,
         organization: None,
         theme: "light".into(),
         default_chart_type: "line".into(),
@@ -355,7 +326,6 @@ async fn acting_on_another_user_needs_every_staff_role() {
             ),
             format!(r#"mutation {{ suspendUser(id: "{id}") }}"#),
             format!(r#"mutation {{ activateUser(id: "{id}") }}"#),
-            format!(r#"mutation {{ forceLogoutUser(id: "{id}") }}"#),
             format!(r#"mutation {{ deleteUser(id: "{id}") }}"#),
         ]
     };

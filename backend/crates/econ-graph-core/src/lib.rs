@@ -7,7 +7,6 @@
 //! Core data models, database schema, and shared utilities for the EconGraph system.
 //! This crate provides the foundation layer that other crates depend on.
 
-pub mod auth_models;
 pub mod config;
 pub mod database;
 pub mod enums;

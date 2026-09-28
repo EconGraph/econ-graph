@@ -304,12 +304,9 @@ const DataSourcesContent: React.FC = () => {
                 <Button
                   size='small'
                   startIcon={<TrendingUpIcon />}
-                  href={`/explore?source=${encodeURIComponent(source.name)}`}
+                  href={`/explore?source=${encodeURIComponent(source.id)}`}
                 >
                   Browse Series
-                </Button>
-                <Button size='small' color='inherit'>
-                  View Details
                 </Button>
               </CardActions>
             </Card>
