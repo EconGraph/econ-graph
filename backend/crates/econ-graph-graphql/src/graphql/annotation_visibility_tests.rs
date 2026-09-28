@@ -60,7 +60,8 @@ async fn make_user(pool: &DatabasePool, name: &str) -> User {
 
 /// Runs `query` against the real schema, as `user` (or anonymous when `None`).
 async fn run_as(pool: &DatabasePool, user: Option<User>, query: &str) -> async_graphql::Response {
-    let schema = create_schema_with_data(pool.clone(), Arc::new(GraphQLContext::new(user)));
+    let schema =
+        create_schema_with_data(pool.clone(), Arc::new(GraphQLContext::for_test_user(user)));
     schema.execute(query).await
 }
 
