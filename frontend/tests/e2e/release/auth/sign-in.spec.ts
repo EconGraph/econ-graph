@@ -4,9 +4,11 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { seededSeriesId, signInOnKeycloak, uniqueTitle, type DevUser } from './helpers';
+import { USERS, type ReleaseUser } from '../env';
 
-// Live QA: the same flows on the deployed site with two real accounts, on any series page.
+import { seededSeriesId, signInOnKeycloak, uniqueTitle } from './helpers';
+
+// Live QA: the same flows on the deployed site as the two QA-only realm users (USERS in env.ts).
 //
 // Serial, in one file: bob and the anonymous visitor look for the annotations alice creates, and
 // the last test deletes them. Sign-ins of one user also must not overlap (see helpers.ts). Titles
@@ -20,6 +22,8 @@ const AFTER_SIGN_IN = { timeout: 15_000 };
 test.describe('sign-in and annotation privacy', () => {
   test.slow();
 
+  const alice = USERS.annotator;
+  const bob = USERS.viewer;
   const publicTitle = uniqueTitle('Public e2e annotation');
   const privateTitle = uniqueTitle('Private e2e annotation');
   let seriesPath: string;
@@ -35,7 +39,7 @@ test.describe('sign-in and annotation privacy', () => {
    * @param page - The test's page (a fresh browser context).
    * @param user - Who signs in.
    */
-  async function openSeriesAs(page: Page, user: DevUser) {
+  async function openSeriesAs(page: Page, user: ReleaseUser) {
     await page.goto(seriesPath);
     await page.getByRole('button', { name: 'Sign in to annotate' }).click();
     await signInOnKeycloak(page, user);
@@ -62,20 +66,20 @@ test.describe('sign-in and annotation privacy', () => {
     await page.goto('/about');
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 
-    await signInOnKeycloak(page, 'alice');
+    await signInOnKeycloak(page, alice);
 
     // Back through the callback route to where sign-in started, signed in.
     await expect(page).toHaveURL(/\/about$/, AFTER_SIGN_IN);
     const userMenu = page.getByRole('button', { name: 'user menu' });
     await expect(userMenu).toBeVisible(AFTER_SIGN_IN);
     await userMenu.click();
-    await expect(page.getByRole('menu').getByText('Alice Tester')).toBeVisible();
-    await expect(page.getByRole('menu').getByText('alice@example.com')).toBeVisible();
+    await expect(page.getByRole('menu').getByText(alice.displayName)).toBeVisible();
+    await expect(page.getByRole('menu').getByText(alice.email)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toHaveCount(0);
   });
 
   test('alice adds a public and a private annotation', async ({ page }) => {
-    await openSeriesAs(page, 'alice');
+    await openSeriesAs(page, alice);
 
     await addAnnotation(page, publicTitle, true);
     await addAnnotation(page, privateTitle, false);
@@ -97,7 +101,7 @@ test.describe('sign-in and annotation privacy', () => {
   });
 
   test('bob sees only the public annotation, without edit or delete', async ({ page }) => {
-    await openSeriesAs(page, 'bob');
+    await openSeriesAs(page, bob);
     const list = annotationsList(page);
 
     await expect(list.getByText(publicTitle, { exact: true })).toBeVisible();
@@ -125,7 +129,7 @@ test.describe('sign-in and annotation privacy', () => {
 
   // Cleans up this run's annotations on the seeded series when the earlier tests pass.
   test('alice deletes both annotations', async ({ page }) => {
-    await openSeriesAs(page, 'alice');
+    await openSeriesAs(page, alice);
     const list = annotationsList(page);
 
     for (const title of [publicTitle, privateTitle]) {

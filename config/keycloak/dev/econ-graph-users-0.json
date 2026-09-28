@@ -36,6 +36,23 @@
       ]
     },
     {
+      "id": "0199a0e0-0000-7000-8000-00000000da7e",
+      "username": "dave",
+      "email": "dave@example.com",
+      "firstName": "Dave",
+      "lastName": "Tester",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": ["default-roles-econ-graph"],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dave-dev-password",
+          "temporary": false
+        }
+      ]
+    },
+    {
       "id": "0199a0e0-0000-7000-8000-0000000005af",
       "username": "staff-admin",
       "email": "staff-admin@example.com",
