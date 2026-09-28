@@ -62,7 +62,9 @@ CREATE TABLE datasets (
     CONSTRAINT datasets_code_not_blank CHECK (btrim(code) <> ''),
     CONSTRAINT datasets_dimensions_valid CHECK (dataset_components_valid(dimensions)),
     CONSTRAINT datasets_measures_valid CHECK (
-        dataset_components_valid(measures) AND jsonb_array_length(measures) > 0
+        -- `<> '[]'` rather than jsonb_array_length: AND has no evaluation order, and
+        -- jsonb_array_length raises on a non-array instead of failing the check.
+        dataset_components_valid(measures) AND measures <> '[]'::jsonb
     ),
     CONSTRAINT datasets_attributes_valid CHECK (dataset_components_valid(attributes)),
     CONSTRAINT datasets_default_measure_declared CHECK (

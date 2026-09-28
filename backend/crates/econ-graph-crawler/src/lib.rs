@@ -79,7 +79,7 @@ pub mod testkit;
 pub mod worker;
 
 pub use adapter::{
-    AdapterRegistry, ApiKeys, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
+    AdapterRegistry, ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
     NewSeriesMetadataLite, SourceAdapter,
 };
 pub use dataset::{DatasetCatalog, DatasetDef, SeriesDataset};

@@ -29,6 +29,12 @@ pub struct SourcePolicy {
     /// revisions are re-fetched (`since = latest - revision_lookback`). Zero re-fetches only
     /// from the latest stored date.
     pub revision_lookback: Duration,
+    /// Most `fetch_series` jobs the worker claims and fetches together in one
+    /// [`SourceAdapter::fetch_batch`](crate::SourceAdapter::fetch_batch) call. Only applies to
+    /// adapters whose [`batch_key`](crate::SourceAdapter::batch_key) groups series; 1 (the
+    /// default for every source) fetches one series per job. Every job's lease starts when the
+    /// batch is claimed, so the worker's `stuck_after` must cover a whole batch.
+    pub max_batch: usize,
 }
 
 const DAY: Duration = Duration::from_secs(24 * 60 * 60);
@@ -40,7 +46,8 @@ impl SourcePolicy {
     /// legacy `enhanced_crawler_scheduler`; SEC uses 8/s (under SEC's 10/s fair-access limit,
     /// matching the SEC crawler default); every other source gets 1 req/s with concurrency 2.
     /// Revision lookback: FRED 730 days, BLS 5 years (BLS revises seasonal factors for five
-    /// years), everything else 365 days.
+    /// years), everything else 365 days. Every source starts with `max_batch` 1; an adapter that
+    /// implements batching raises it for its source.
     pub fn default_for(source: SourceId) -> Self {
         let base = SourcePolicy {
             requests_per_second: 1.0,
@@ -51,6 +58,7 @@ impl SourcePolicy {
             max_backoff: Duration::from_secs(30 * 60),
             needs_api_key: false,
             revision_lookback: DAY * 365,
+            max_batch: 1,
         };
         match source {
             SourceId::Fred => SourcePolicy {
@@ -149,6 +157,7 @@ mod tests {
             assert!(p.burst >= 1, "{id}");
             assert!(p.max_concurrency >= 1, "{id}");
             assert!(p.base_backoff <= p.max_backoff, "{id}");
+            assert!(p.max_batch >= 1, "{id}");
         }
     }
 

@@ -461,11 +461,6 @@ resource "kubernetes_ingress_v1" "production_ssl" {
         more_set_headers "Permissions-Policy: geolocation=(), microphone=(), camera=()";
         more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload";
       EOT
-      "nginx.ingress.kubernetes.io/cors-allow-credentials" = "true"
-      "nginx.ingress.kubernetes.io/cors-allow-headers"     = "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,Accept,Origin,X-CSRF-Token"
-      "nginx.ingress.kubernetes.io/cors-allow-methods"     = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-      "nginx.ingress.kubernetes.io/cors-allow-origin"      = "https://${var.domain},https://*.${var.domain}"
-      "nginx.ingress.kubernetes.io/cors-max-age"           = "86400"
       "nginx.ingress.kubernetes.io/proxy-body-size"        = "10m"
       "nginx.ingress.kubernetes.io/proxy-buffer-size"      = "16k"
       "nginx.ingress.kubernetes.io/proxy-buffers-number"   = "8"

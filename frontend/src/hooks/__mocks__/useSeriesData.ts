@@ -74,7 +74,20 @@ export const useSeriesSearch = vi.fn(() => ({
 }));
 
 export const useSeriesDetail = vi.fn(() => ({
-  data: mockSearchResults[0],
+  data: {
+    id: mockSearchResults[0].id,
+    externalId: 'GDPC1',
+    title: mockSearchResults[0].title,
+    description: mockSearchResults[0].description,
+    source: { name: 'FRED' },
+    frequency: mockSearchResults[0].frequency,
+    units: mockSearchResults[0].units,
+    seasonalAdjustment: null,
+    startDate: '1947-01-01',
+    endDate: '2024-10-01',
+    lastUpdated: mockSearchResults[0].lastUpdated,
+    isActive: true,
+  },
   isLoading: false,
   error: null,
   isError: false,
@@ -83,11 +96,11 @@ export const useSeriesDetail = vi.fn(() => ({
 
 export const useSeriesData = vi.fn(() => ({
   data: {
-    series: mockSearchResults[0],
-    dataPoints: [
-      { date: '2024-10-01', value: 27360.0 },
-      { date: '2024-07-01', value: 27280.5 },
-      { date: '2024-04-01', value: 27180.2 },
+    transformation: 'NONE',
+    points: [
+      { date: '2024-04-01', value: 27180.2, revisionDate: '2024-10-30', isOriginalRelease: false },
+      { date: '2024-07-01', value: 27280.5, revisionDate: '2024-10-30', isOriginalRelease: false },
+      { date: '2024-10-01', value: 27360.0, revisionDate: '2024-10-30', isOriginalRelease: true },
     ],
   },
   isLoading: false,
