@@ -354,36 +354,6 @@ input CreateAnnotationInput {
 	isVisible: Boolean @deprecated(reason: "use isPublic")
 }
 
-"""
-Input for creating a new user (admin only)
-"""
-input CreateUserInput {
-	"""
-	Email address
-	"""
-	email: String!
-	"""
-	Display name
-	"""
-	name: String!
-	"""
-	Password (for email-based users)
-	"""
-	password: String
-	"""
-	Organization (optional)
-	"""
-	organization: String
-	"""
-	Whether account is active
-	"""
-	isActive: Boolean
-	"""
-	Whether to send welcome email
-	"""
-	sendWelcomeEmail: Boolean
-}
-
 input DataFilter {
 	startDate: NaiveDate
 	endDate: NaiveDate
@@ -532,11 +502,6 @@ type Mutation {
 	"""
 	deleteAnnotation(input: DeleteAnnotationInput!): Boolean!
 	"""
-	Create a new user (requires `admin.users:create`). The new user's roles are assigned in
-	the identity provider, not here.
-	"""
-	createUser(input: CreateUserInput!): UserType!
-	"""
 	Update user information (requires `admin.users:update`; changing `isActive` also
 	requires `admin.users:suspend`). Roles are assigned in the identity provider.
 	"""
@@ -553,10 +518,6 @@ type Mutation {
 	Activate a user account (requires `admin.users:suspend`)
 	"""
 	activateUser(id: ID!): Boolean!
-	"""
-	Force logout a user (requires `admin.sessions:revoke`)
-	"""
-	forceLogoutUser(id: ID!): Boolean!
 }
 
 """
@@ -646,14 +607,6 @@ type Query {
 	Get all users (requires `admin.users:read`)
 	"""
 	users(filter: UserFilterInput, pagination: PaginationInput): UserConnection!
-	"""
-	Get user sessions (requires `admin.sessions:read`)
-	"""
-	userSessions(userId: ID): [UserSessionType!]!
-	"""
-	Get active user sessions (requires `admin.sessions:read`)
-	"""
-	activeSessions: [UserSessionType!]!
 	"""
 	Get system health metrics (requires `admin.system:read`)
 	"""
@@ -854,14 +807,6 @@ type SystemMetricsType {
 	"""
 	activeUsers: Int!
 	"""
-	Total number of sessions
-	"""
-	totalSessions: Int!
-	"""
-	Number of active sessions
-	"""
-	activeSessions: Int!
-	"""
 	Database size in MB
 	"""
 	databaseSizeMb: Float!
@@ -1003,10 +948,6 @@ Input for filtering users (admin only)
 """
 input UserFilterInput {
 	"""
-	Filter by the legacy `users.role` column
-	"""
-	role: String @deprecated(reason: "Roles come from the identity provider's token; this legacy column is no longer written and will be removed")
-	"""
 	Filter by organization
 	"""
 	organization: String
@@ -1022,44 +963,6 @@ input UserFilterInput {
 	Search term for name or email
 	"""
 	searchQuery: String
-}
-
-"""
-GraphQL representation of a user session
-"""
-type UserSessionType {
-	"""
-	Session ID
-	"""
-	id: ID!
-	"""
-	User ID
-	"""
-	userId: ID!
-	"""
-	Session creation time
-	"""
-	createdAt: DateTime!
-	"""
-	Last activity time
-	"""
-	lastActivity: DateTime!
-	"""
-	Session expiration time
-	"""
-	expiresAt: DateTime!
-	"""
-	User agent string
-	"""
-	userAgent: String
-	"""
-	IP address
-	"""
-	ipAddress: String
-	"""
-	Whether session is active
-	"""
-	isActive: Boolean!
 }
 
 """
@@ -1082,14 +985,6 @@ type UserType {
 	Avatar URL
 	"""
 	avatarUrl: String
-	"""
-	Authentication provider
-	"""
-	provider: String!
-	"""
-	Legacy `users.role` column, no longer written or used for authorization
-	"""
-	role: String! @deprecated(reason: "Roles come from the identity provider's token; this legacy column is no longer written and will be removed")
 	"""
 	Organization
 	"""

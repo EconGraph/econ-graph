@@ -44,24 +44,25 @@ async fn db() -> Option<(DatabasePool, tokio::sync::MutexGuard<'static, ()>)> {
     Some((pool, guard))
 }
 
-/// Creates (or fetches) a real `users` row for `name`, e.g. "alice" or "bob".
+/// Creates a real `users` row for `name`, e.g. "alice" or "bob".
 async fn make_user(pool: &DatabasePool, name: &str) -> User {
-    User::create_or_get_oauth(
+    User::get_or_create_for_subject(
         pool,
-        "email".to_string(),
-        format!("{name}-auth8"),
-        format!("{name}@auth8.test"),
-        name.to_string(),
-        None,
+        uuid::Uuid::new_v4(),
+        Some(&format!("{name}@auth8.test")),
+        true,
+        Some(name),
     )
     .await
     .expect("create test user")
 }
 
-/// Runs `query` against the real schema, as `user` (or anonymous when `None`).
+/// Runs `query` against the real schema, as `user` (or anonymous when `None`); never staff.
 async fn run_as(pool: &DatabasePool, user: Option<User>, query: &str) -> async_graphql::Response {
-    let schema =
-        create_schema_with_data(pool.clone(), Arc::new(GraphQLContext::for_test_user(user)));
+    let schema = create_schema_with_data(
+        pool.clone(),
+        Arc::new(GraphQLContext::for_test_user(user, false)),
+    );
     schema.execute(query).await
 }
 

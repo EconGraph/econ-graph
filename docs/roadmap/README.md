@@ -164,8 +164,8 @@ and [#182](https://github.com/EconGraph/econ-graph/pull/182) (backend CORS).
 
 | Item | Evidence |
 |---|---|
-| Fixed: `/mcp` requires a signed-in user's token ([#185](https://github.com/EconGraph/econ-graph/pull/185)), a stopgap until MCP OAuth (Phase 6), and `/playground` is served only when `ENABLE_GRAPHQL_PLAYGROUND` is set, which only local development does ([#221](https://github.com/EconGraph/econ-graph/pull/221)) | `econ-graph-backend/src/main.rs` |
-| GraphQL depth (15) and complexity (1000) limits are enforced by both schema builders ([#221](https://github.com/EconGraph/econ-graph/pull/221)). Per-client rate limits still exist only in the unused `SecureGraphQLServer` | `econ-graph-graphql/src/graphql/schema.rs`; `econ-graph-graphql/src/security/server.rs` |
+| `/playground` is unauthenticated. `/mcp` requires a signed-in user's token since #185, a stopgap until MCP OAuth (Phase 6) | `econ-graph-backend/src/main.rs` (`graphql_playground`, `mcp_route`) |
+| GraphQL depth, complexity and rate limits exist but are not enforced | `/graphql` calls `schema.execute` directly in the `graphql_filter` closure (`econ-graph-backend/src/main.rs`; the `graphql_handler` function there is unused). Nothing calls `SecureGraphQLServer::execute_secure_request` in `econ-graph-graphql/src/security/server.rs` |
 | Plaintext DB, monitoring and Google OAuth client-secret credentials in k8s manifests. The OAuth secret must be rotated | `k8s/manifests/postgres-deployment.yaml`, `configmap.yaml`, `ingress-cloudflare-dns01.yaml` |
 | Sealed Secrets / secrets submodule not set up | `k8s/secrets` is uninitialized. `SECRETS_MANAGEMENT.md` describes a target state, not the current one |
 | Tokens are stored in `localStorage` | `frontend/src/contexts/AuthContext.tsx` and `admin-frontend/src/contexts/AuthContext.tsx` |

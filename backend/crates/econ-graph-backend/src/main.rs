@@ -13,7 +13,6 @@ use tracing::{info, Instrument};
 use warp::{Filter, Reply as _};
 
 // Import from our new crates
-use econ_graph_auth::auth::{routes::auth_routes, services::AuthService};
 use econ_graph_auth::{authenticate, BearerError, Caller, OidcConfig, OidcVerifier, Role};
 use econ_graph_core::{
     create_pool, redact_database_url, AppError, AppResult, Config, DatabasePool,
@@ -509,6 +508,105 @@ fn mcp_route(
         .unify()
 }
 
+/// Every route this server answers on. There is no in-house sign-in: `/auth/*` answers nowhere
+/// on this backend (the frontend's own `/auth/callback` is a separate ingress rule that serves
+/// the frontend, not this process).
+fn build_routes(
+    pool: DatabasePool,
+    schema: async_graphql::Schema<
+        econ_graph_graphql::graphql::query::Query,
+        econ_graph_graphql::graphql::mutation::Mutation,
+        async_graphql::EmptySubscription,
+    >,
+    verifier: Option<Arc<OidcVerifier>>,
+    cors_origins: &[String],
+    playground_enabled: bool,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let cors = cors_filter(cors_origins);
+
+    // GraphQL endpoint: anonymous without a token, the token's caller with a valid one.
+    let pool_for_graphql = pool.clone();
+    let verifier_for_graphql = verifier.clone();
+    let graphql_filter = warp::path("graphql")
+        .and(warp::header::headers_cloned())
+        .and(async_graphql_warp::graphql(schema))
+        .and_then(
+            move |headers: warp::http::HeaderMap<warp::http::HeaderValue>,
+                  (_schema, request): (
+                async_graphql::Schema<
+                    econ_graph_graphql::graphql::query::Query,
+                    econ_graph_graphql::graphql::mutation::Mutation,
+                    async_graphql::EmptySubscription,
+                >,
+                async_graphql::Request,
+            )| {
+                let pool_for_graphql = pool_for_graphql.clone();
+                let verifier = verifier_for_graphql.clone();
+                async move {
+                    let caller = match graphql_caller(
+                        &pool_for_graphql,
+                        verifier.as_deref(),
+                        authorization_header(&headers),
+                    )
+                    .await
+                    {
+                        Ok(caller) => caller,
+                        Err(refusal) => return Ok::<_, Infallible>(refusal.into_response()),
+                    };
+
+                    let auth_context = std::sync::Arc::new(
+                        econ_graph_graphql::graphql::context::GraphQLContext::new(caller),
+                    );
+                    let auth_schema = econ_graph_graphql::graphql::schema::create_schema_with_data(
+                        pool_for_graphql.clone(),
+                        auth_context,
+                    );
+
+                    Ok(GraphQLResponse::from(auth_schema.execute(request).await).into_response())
+                }
+            },
+        );
+
+    // GraphQL Playground: off unless ENABLE_GRAPHQL_PLAYGROUND=true (local development).
+    let playground_filter =
+        warp::path("playground")
+            .and(warp::get())
+            .and_then(move || async move {
+                if playground_enabled {
+                    graphql_playground().await.map_err(|never| match never {})
+                } else {
+                    Err(warp::reject::not_found())
+                }
+            });
+
+    // Health check
+    let health_filter = warp::path("health").and(warp::get()).and_then(health_check);
+
+    // Metrics endpoint for Prometheus
+    let metrics_filter = warp::path("metrics")
+        .and(warp::get())
+        .and_then(metrics::metrics_handler);
+
+    // Root endpoint
+    let root_filter = warp::path::end()
+        .and(warp::get())
+        .and_then(move || root_handler(playground_enabled));
+
+    // MCP Server routes. MCP requires a signed-in user's bearer token holding `api:mcp`.
+    // MCP OAuth (auth roadmap phase 6) will replace this.
+    let mcp_server = Arc::new(EconGraphMcpServer::new(Arc::new(pool.clone())));
+    let mcp_filter = mcp_route(pool, verifier, mcp_server);
+
+    root_filter
+        .or(graphql_filter)
+        .or(playground_filter)
+        .or(health_filter)
+        .or(metrics_filter)
+        .or(mcp_filter)
+        .with(cors)
+        .with(warp::trace::request())
+}
+
 #[tokio::main]
 async fn main() -> AppResult<()> {
     // Initialize tracing with more detailed output
@@ -546,14 +644,6 @@ async fn main() -> AppResult<()> {
             "not set"
         }
     );
-    info!(
-        "  - JWT_SECRET: {:?}",
-        if std::env::var("JWT_SECRET").is_ok() {
-            "set"
-        } else {
-            "not set"
-        }
-    );
 
     // Load configuration
     info!("📋 Loading configuration from environment...");
@@ -562,13 +652,6 @@ async fn main() -> AppResult<()> {
         error.log_with_context("Application startup configuration loading");
         eprintln!("❌ Failed to load configuration: {}", e);
         error
-    })?;
-
-    // Refuse to start without a JWT signing secret rather than sign tokens with a known key.
-    econ_graph_auth::auth::services::jwt_secret().map_err(|e| {
-        e.log_with_context("Application startup JWT secret check");
-        eprintln!("❌ {}", e);
-        e
     })?;
 
     // Validate CORS origins (CORS_ALLOWED_ORIGINS, comma-separated; defaults to the local
@@ -639,10 +722,6 @@ async fn main() -> AppResult<()> {
     let schema = create_schema_with_data(pool.clone(), ());
     info!("🎯 GraphQL schema created");
 
-    // Create authentication service
-    let auth_service = AuthService::new(pool.clone());
-    info!("🔐 Authentication service created");
-
     // Initialize metrics
     info!("📊 Initializing Prometheus metrics...");
     let _metrics = &metrics::METRICS; // Initialize metrics
@@ -660,98 +739,15 @@ async fn main() -> AppResult<()> {
     // Crawling does not run in this process: the API only enqueues crawl_queue jobs, and the
     // separate `crawler-worker` binary (econ-graph-crawler) processes them.
 
-    // Create Warp filters. Browsers may call the API only from the configured frontend origins.
-    let cors = cors_filter(&cors_origins);
-
-    // GraphQL endpoint: anonymous without a token, the token's caller with a valid one.
-    let pool_for_graphql = pool.clone();
-    let verifier_for_graphql = verifier.clone();
-    let graphql_filter = warp::path("graphql")
-        .and(warp::header::headers_cloned())
-        .and(async_graphql_warp::graphql(schema.clone()))
-        .and_then(
-            move |headers: warp::http::HeaderMap<warp::http::HeaderValue>,
-                  (_schema, request): (
-                async_graphql::Schema<
-                    econ_graph_graphql::graphql::query::Query,
-                    econ_graph_graphql::graphql::mutation::Mutation,
-                    async_graphql::EmptySubscription,
-                >,
-                async_graphql::Request,
-            )| {
-                let pool_for_graphql = pool_for_graphql.clone();
-                let verifier = verifier_for_graphql.clone();
-                async move {
-                    let caller = match graphql_caller(
-                        &pool_for_graphql,
-                        verifier.as_deref(),
-                        authorization_header(&headers),
-                    )
-                    .await
-                    {
-                        Ok(caller) => caller,
-                        Err(refusal) => return Ok::<_, Infallible>(refusal.into_response()),
-                    };
-
-                    let auth_context = std::sync::Arc::new(
-                        econ_graph_graphql::graphql::context::GraphQLContext::new(caller),
-                    );
-                    let auth_schema = econ_graph_graphql::graphql::schema::create_schema_with_data(
-                        pool_for_graphql.clone(),
-                        auth_context,
-                    );
-
-                    Ok(GraphQLResponse::from(auth_schema.execute(request).await).into_response())
-                }
-            },
-        );
-
     // GraphQL Playground: off unless ENABLE_GRAPHQL_PLAYGROUND=true (local development).
     let playground_enabled = playground_enabled(std::env::var("ENABLE_GRAPHQL_PLAYGROUND").ok());
-    let playground_filter =
-        warp::path("playground")
-            .and(warp::get())
-            .and_then(move || async move {
-                if playground_enabled {
-                    graphql_playground().await.map_err(|never| match never {})
-                } else {
-                    Err(warp::reject::not_found())
-                }
-            });
-
-    // Health check
-    let health_filter = warp::path("health").and(warp::get()).and_then(health_check);
-
-    // Metrics endpoint for Prometheus
-    let metrics_filter = warp::path("metrics")
-        .and(warp::get())
-        .and_then(metrics::metrics_handler);
-
-    // Root endpoint
-    let root_filter = warp::path::end()
-        .and(warp::get())
-        .and_then(move || root_handler(playground_enabled));
-
-    // Authentication routes
-    let auth_filter = auth_routes(auth_service);
-
-    // MCP Server routes
-    let mcp_server = Arc::new(EconGraphMcpServer::new(Arc::new(pool.clone())));
-
-    // MCP requires a signed-in user's bearer token holding `api:mcp`.
-    // MCP OAuth (auth roadmap phase 6) will replace this.
-    let mcp_filter = mcp_route(pool.clone(), verifier.clone(), mcp_server.clone());
-
-    // Combine all routes
-    let routes = root_filter
-        .or(graphql_filter)
-        .or(playground_filter)
-        .or(health_filter)
-        .or(metrics_filter)
-        .or(auth_filter)
-        .or(mcp_filter)
-        .with(cors)
-        .with(warp::trace::request());
+    let routes = build_routes(
+        pool.clone(),
+        schema.clone(),
+        verifier.clone(),
+        &cors_origins,
+        playground_enabled,
+    );
 
     // Initialize metrics
     info!("📊 Initializing Prometheus metrics...");
@@ -1097,7 +1093,6 @@ mod request_auth_tests {
             );
             assert!(caller.user.is_active);
             assert_eq!(caller.user.email, format!("{sub}@example.test"));
-            assert_eq!(caller.user.provider, "keycloak");
         }
 
         set_active(&pool, sub, false).await;
@@ -1255,7 +1250,6 @@ mod request_auth_tests {
             (user.id, user.email.as_str(), user.name.as_str()),
             (id, email.as_str(), "Ada")
         );
-        assert_eq!(user.provider, "keycloak");
         assert!(user.email_verified && user.is_active);
         // Seen again, with other claims: the row is returned unchanged.
         let again = User::get_or_create_for_subject(&pool, id, Some("x@example.test"), true, None)
@@ -1358,5 +1352,79 @@ mod playground_tests {
             assert!(!playground_enabled(Some(off.to_string())), "{off:?}");
         }
         assert!(!playground_enabled(None));
+    }
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::build_routes;
+    use econ_graph_core::DatabasePool;
+    use econ_graph_graphql::graphql::schema::create_schema_with_data;
+
+    /// A pool that never connects: routes that answer without touching the database don't need it.
+    fn unreachable_pool() -> DatabasePool {
+        let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
+            diesel_async::AsyncPgConnection,
+        >::new("postgres://nobody@127.0.0.1:1/none");
+        DatabasePool::builder()
+            .connection_timeout(std::time::Duration::from_secs(1))
+            .build_unchecked(manager)
+    }
+
+    fn routes() -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
+    {
+        let pool = unreachable_pool();
+        let schema = create_schema_with_data(pool.clone(), ());
+        build_routes(
+            pool,
+            schema,
+            None,
+            &["http://localhost:3000".to_string()],
+            false,
+        )
+    }
+
+    /// There is no in-house sign-in: no route under `/auth/` answers on the backend, for any
+    /// method. (The frontend's own `/auth/callback` is a separate ingress rule that serves the
+    /// frontend, not this process, so it isn't covered here.)
+    #[tokio::test]
+    async fn no_route_under_auth_answers() {
+        for path in [
+            "/auth/login",
+            "/auth/register",
+            "/auth/logout",
+            "/auth/refresh",
+            "/auth/google",
+            "/auth/facebook",
+            "/auth/facebook/data-deletion",
+            "/auth/callback",
+            "/auth/",
+            "/auth",
+        ] {
+            for method in ["GET", "POST", "DELETE"] {
+                let res = warp::test::request()
+                    .method(method)
+                    .path(path)
+                    .reply(&routes())
+                    .await;
+                assert_eq!(
+                    res.status(),
+                    404,
+                    "{method} {path} should not be answered by the backend"
+                );
+            }
+        }
+    }
+
+    /// Sanity check that the test harness's route set is wired up correctly: real routes still
+    /// answer, so the 404s above are `/auth/*` being genuinely absent, not a broken filter.
+    #[tokio::test]
+    async fn other_routes_still_answer() {
+        let res = warp::test::request()
+            .method("GET")
+            .path("/health")
+            .reply(&routes())
+            .await;
+        assert_eq!(res.status(), 200);
     }
 }

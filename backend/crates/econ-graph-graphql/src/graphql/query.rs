@@ -376,9 +376,6 @@ impl Query {
         let mut query = users::table.into_boxed();
 
         if let Some(filter) = &filter {
-            if let Some(role) = &filter.role {
-                query = query.filter(users::role.eq(role));
-            }
             if let Some(organization) = &filter.organization {
                 query = query.filter(users::organization.eq(organization));
             }
@@ -402,9 +399,6 @@ impl Query {
         // Get total count (rebuild query to avoid move)
         let mut count_query = users::table.into_boxed();
         if let Some(filter) = &filter {
-            if let Some(role) = &filter.role {
-                count_query = count_query.filter(users::role.eq(role));
-            }
             if let Some(organization) = &filter.organization {
                 count_query = count_query.filter(users::organization.eq(organization));
             }
@@ -471,82 +465,6 @@ impl Query {
         })
     }
 
-    /// Get user sessions (requires `admin.sessions:read`)
-    async fn user_sessions(
-        &self,
-        ctx: &Context<'_>,
-        user_id: Option<ID>,
-    ) -> Result<Vec<UserSessionType>> {
-        require_role(ctx, Role::AdminSessionsRead)?;
-        let pool = ctx.data::<DatabasePool>()?;
-
-        use diesel::prelude::*;
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::user_sessions;
-
-        let mut conn = pool.get().await?;
-
-        let mut query = user_sessions::table.into_boxed();
-
-        if let Some(user_id_str) = user_id {
-            let user_uuid = uuid::Uuid::parse_str(&user_id_str)?;
-            query = query.filter(user_sessions::user_id.eq(user_uuid));
-        }
-
-        let sessions: Vec<models::UserSession> = query
-            .select(models::UserSession::as_select())
-            .order(user_sessions::created_at.desc())
-            .load(&mut conn)
-            .await?;
-
-        Ok(sessions
-            .into_iter()
-            .map(|session| UserSessionType {
-                id: ID::from(session.id),
-                user_id: ID::from(session.user_id),
-                created_at: session.created_at,
-                last_activity: session.last_used_at,
-                expires_at: session.expires_at,
-                user_agent: session.user_agent,
-                ip_address: session.ip_address,
-                is_active: session.expires_at > Utc::now(),
-            })
-            .collect())
-    }
-
-    /// Get active user sessions (requires `admin.sessions:read`)
-    async fn active_sessions(&self, ctx: &Context<'_>) -> Result<Vec<UserSessionType>> {
-        require_role(ctx, Role::AdminSessionsRead)?;
-        let pool = ctx.data::<DatabasePool>()?;
-
-        use diesel::prelude::*;
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::user_sessions;
-
-        let mut conn = pool.get().await?;
-
-        let sessions: Vec<models::UserSession> = user_sessions::table
-            .filter(user_sessions::expires_at.gt(Utc::now()))
-            .select(models::UserSession::as_select())
-            .order(user_sessions::last_used_at.desc())
-            .load(&mut conn)
-            .await?;
-
-        Ok(sessions
-            .into_iter()
-            .map(|session| UserSessionType {
-                id: ID::from(session.id),
-                user_id: ID::from(session.user_id),
-                created_at: session.created_at,
-                last_activity: session.last_used_at,
-                expires_at: session.expires_at,
-                user_agent: session.user_agent,
-                ip_address: session.ip_address,
-                is_active: true, // All sessions here are active by definition
-            })
-            .collect())
-    }
-
     /// Get system health metrics (requires `admin.system:read`)
     async fn system_health(&self, ctx: &Context<'_>) -> Result<SystemHealthType> {
         require_role(ctx, Role::AdminSystemRead)?;
@@ -554,7 +472,7 @@ impl Query {
 
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::{crawl_queue, user_sessions, users};
+        use econ_graph_core::schema::{crawl_queue, users};
 
         let mut conn = pool.get().await?;
 
@@ -563,15 +481,6 @@ impl Query {
 
         let active_users: i64 = users::table
             .filter(users::last_login_at.gt(Utc::now() - chrono::Duration::hours(24)))
-            .count()
-            .get_result(&mut conn)
-            .await?;
-
-        // Get session counts
-        let total_sessions: i64 = user_sessions::table.count().get_result(&mut conn).await?;
-
-        let active_sessions: i64 = user_sessions::table
-            .filter(user_sessions::expires_at.gt(Utc::now()))
             .count()
             .get_result(&mut conn)
             .await?;
@@ -585,8 +494,6 @@ impl Query {
             metrics: SystemMetricsType {
                 total_users: total_users as i32,
                 active_users: active_users as i32,
-                total_sessions: total_sessions as i32,
-                active_sessions: active_sessions as i32,
                 database_size_mb: 0.0, // Would need special query for this
                 queue_items: queue_items as i32,
                 api_requests_per_minute: 0.0, // Would need metrics collection
@@ -836,17 +743,13 @@ impl Default for Query {
 mod tests {
     use super::*;
 
-    fn test_user(role: &str) -> models::User {
+    fn test_user(label: &str) -> models::User {
         let now = chrono::Utc::now();
         models::User {
             id: uuid::Uuid::new_v4(),
-            email: format!("{role}@example.test"),
-            name: role.into(),
+            email: format!("{label}@example.test"),
+            name: label.into(),
             avatar_url: None,
-            provider: "email".into(),
-            provider_id: None,
-            password_hash: None,
-            role: role.into(),
             organization: None,
             theme: "light".into(),
             default_chart_type: "line".into(),
@@ -881,22 +784,24 @@ mod tests {
             Some(test_user("viewer")),
             Some(test_user("analyst")),
         ] {
-            let role = u.as_ref().map(|u| u.role.clone());
+            let label = u.as_ref().map(|u| u.name.clone());
             let schema = crate::graphql::schema::create_schema_with_data(
                 unreachable_pool(),
-                std::sync::Arc::new(crate::graphql::context::GraphQLContext::for_test_user(u)),
+                std::sync::Arc::new(crate::graphql::context::GraphQLContext::for_test_user(
+                    u, false,
+                )),
             );
             let resp = schema.execute(query.as_str()).await;
-            assert_eq!(resp.errors.len(), 1, "{role:?}: {:?}", resp.errors);
+            assert_eq!(resp.errors.len(), 1, "{label:?}: {:?}", resp.errors);
             let msg = &resp.errors[0].message;
-            let expected = if role.is_some() {
+            let expected = if label.is_some() {
                 "Insufficient permissions"
             } else {
                 "Authentication required"
             };
             assert!(
                 msg.contains(expected),
-                "{role:?}: expected {expected}, got {msg}"
+                "{label:?}: expected {expected}, got {msg}"
             );
         }
     }
@@ -923,24 +828,25 @@ mod tests {
         // Both reach the database lookup, which fails here because the pool never connects.
         let viewer = test_user("viewer");
         let viewer_id = viewer.id;
-        for (u, target) in [
-            (viewer, viewer_id),
-            (test_user("admin"), uuid::Uuid::new_v4()),
+        for (u, target, staff) in [
+            (viewer, viewer_id, false),
+            (test_user("admin"), uuid::Uuid::new_v4(), true),
         ] {
-            let role = u.role.clone();
+            let label = u.name.clone();
             let schema = crate::graphql::schema::create_schema_with_data(
                 unreachable_pool(),
                 std::sync::Arc::new(crate::graphql::context::GraphQLContext::for_test_user(
                     Some(u),
+                    staff,
                 )),
             );
             let query = format!(r#"{{ user(userId: "{target}") {{ id }} }}"#);
             let resp = schema.execute(query.as_str()).await;
-            assert_eq!(resp.errors.len(), 1, "{role}: {:?}", resp.errors);
+            assert_eq!(resp.errors.len(), 1, "{label}: {:?}", resp.errors);
             let msg = &resp.errors[0].message;
             assert!(
                 !msg.contains("permissions") && !msg.contains("Authentication"),
-                "{role}: should pass the authorization check, got {msg}"
+                "{label}: should pass the authorization check, got {msg}"
             );
         }
     }
