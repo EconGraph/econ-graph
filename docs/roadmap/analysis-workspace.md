@@ -137,8 +137,8 @@ the "My charts" list, not a separate page.
   it unless it's known bad. So `utils/technicalAnalysis.ts` stays in the tree. Once
   `ProfessionalChart` is deleted nothing imports it, so it is already absent from the
   bundle. A build flag `technical_analysis` in the flag file (`kind: build`, `remove_by:
-  unscheduled`, off in every profile), compiled in through the flags area's build-time define, following
-  [feature-flags.md](./feature-flags.md), gates any future indicator overlay on the one
+  unscheduled`, off in every profile), compiled in through the flags area's build-time define, following the
+  [feature flags roadmap](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2), gates any future indicator overlay on the one
   chart component. The overlay would be computed on the transformed series the server
   returns. The file has no tests today, and the flag PR adds them. The same file's
   `calculateCorrelation` and `calculateStandardDeviation` don't come back on the
@@ -150,7 +150,7 @@ the "My charts" list, not a separate page.
 
 ### 3. What a saved chart is
 
-A new app-side table (it belongs to the app plane in [federation.md](./federation.md),
+A new app-side table (it belongs to the app plane in the [federation roadmap](https://linear.app/econgraph/document/federation-roadmap-design-record-from-pr-178-a1ebb66c538d),
 and refers to series by id only). `uuidv7()` is PostgreSQL 18's built-in, which `main`
 requires since the uuidv7 shim was dropped:
 
@@ -226,8 +226,8 @@ The same PR fixes the tables that point at charts:
   sharing. A CHECK requires the columns of exactly one anchor kind to be set.
 - **Anchors use natural keys, never data-side row ids.** A data point is the series'
   stable id plus a date, not a `data_points` row id, with an optional `revision_date`
-  to name the vintage the note is about. Annotations live on the app plane in
-  [federation.md](./federation.md), and observations move to Iceberg there, so a row id
+  to name the vintage the note is about. Annotations live on the app plane in the
+  [federation roadmap](https://linear.app/econgraph/document/federation-roadmap-design-record-from-pr-178-a1ebb66c538d), and observations move to Iceberg there, so a row id
   would break at the plane split or at the next data reload. Natural keys survive both.
 - **One annotation model or two: deferred.** The SEC side has its own tables:
   `financial_annotations` and `annotation_replies`, with threads and a status (the
@@ -375,7 +375,7 @@ Each PR updates its row here when it merges or changes scope.
 | UI-1 | Delete `/analysis`, `ProfessionalChart`, `ChartCollaboration` | Phase 1, item 17 | #199 | Ready |
 | UI-2 | `technical_analysis` build flag and first indicator tests | Phase 1 | | Waits for UI-1 and the frontend flags PR |
 | UI-3 | `seriesByExternalId` and `latestObservation` | Item 8 | #200 | Ready |
-| UI-4 | Series page on real data | Item 7 | #204 | Ready |
+| UI-4 | Series page on real data; drops the no-op bookmark, share and mock download buttons; log difference not offered until UI-11 | Item 7 | #204 | Merged |
 | UI-5 | One `SeriesChart` component | Phase 3 | #209 | Draft |
 | UI-6 | CSV download of the shown points | Item 7, export | #223 | Draft, waits for UI-5 |
 | UI-7 | Dashboard on real latest values; drops the dashboard's other fake panels (recent releases, collaboration badges, system status) and the no-op category buttons | Item 8 | #212 | Ready, merges after #200 |

@@ -361,7 +361,7 @@ impl DtsManager {
         self.cache_dir.join(&schema.schema_filename)
     }
 
-    /// Create a mapping of taxonomy files for Arelle
+    /// Map downloaded taxonomy files (by source URL and file name) to their cached file names
     pub async fn create_taxonomy_mapping(
         &self,
         statement_id: Uuid,

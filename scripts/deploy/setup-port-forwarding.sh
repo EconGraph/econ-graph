@@ -37,7 +37,7 @@ GRAFANA_PID=$!
 echo "  ✅ Grafana port forwarding started (PID: $GRAFANA_PID)"
 echo "     URL: http://localhost:30001"
 echo "     Username: admin"
-echo "     Password: admin123"
+echo "     Password: kubectl -n econ-graph get secret grafana-admin -o jsonpath={.data.admin-password} | base64 -d"
 
 # Start Backend port forwarding (if needed)
 echo "🔧 Starting Backend port forwarding..."
@@ -70,7 +70,7 @@ echo ""
 echo "📋 Service URLs:"
 echo "  Frontend: http://localhost/"
 echo "  Backend:  http://localhost:9876"
-echo "  Grafana:  http://localhost:30001 (admin/admin123)"
+echo "  Grafana:  http://localhost:30001 (user admin, password in Secret grafana-admin)"
 echo ""
 echo "🛑 To stop port forwarding:"
 echo "  kill $GRAFANA_PID"

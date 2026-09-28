@@ -9,7 +9,6 @@ pub struct Config {
     pub cors: CorsConfig,
     pub crawler: CrawlerConfig,
     pub rate_limits: RateLimitConfig,
-    pub oauth: OAuthConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,16 +34,6 @@ pub struct CrawlerConfig {
 pub struct RateLimitConfig {
     pub fred_rate_limit_per_minute: u32,
     pub bls_rate_limit_per_minute: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OAuthConfig {
-    pub google_client_id: Option<String>,
-    pub google_client_secret: Option<String>,
-    pub facebook_app_id: Option<String>,
-    pub facebook_app_secret: Option<String>,
-    pub facebook_access_token: Option<String>,
-    pub jwt_secret: Option<String>,
 }
 
 impl Config {
@@ -101,15 +90,6 @@ impl Config {
                     .parse()
                     .unwrap_or(500),
             },
-
-            oauth: OAuthConfig {
-                google_client_id: env::var("GOOGLE_CLIENT_ID").ok(),
-                google_client_secret: env::var("GOOGLE_CLIENT_SECRET").ok(),
-                facebook_app_id: env::var("FACEBOOK_APP_ID").ok(),
-                facebook_app_secret: env::var("FACEBOOK_APP_SECRET").ok(),
-                facebook_access_token: env::var("FACEBOOK_ACCESS_TOKEN").ok(),
-                jwt_secret: env::var("JWT_SECRET").ok(),
-            },
         })
     }
 }
@@ -140,14 +120,6 @@ impl Default for Config {
             rate_limits: RateLimitConfig {
                 fred_rate_limit_per_minute: 120,
                 bls_rate_limit_per_minute: 500,
-            },
-            oauth: OAuthConfig {
-                google_client_id: None,
-                google_client_secret: None,
-                facebook_app_id: None,
-                facebook_app_secret: None,
-                facebook_access_token: None,
-                jwt_secret: Some("test-jwt-secret".to_string()),
             },
         }
     }

@@ -10,6 +10,24 @@ The GraphQL API layer for the EconGraph system, providing enterprise-grade Graph
 - **Authentication**: JWT-based authentication and authorization with role-based access control
 - **Monitoring**: Comprehensive metrics and monitoring for API performance and security
 
+## Schema snapshot
+
+`schema.graphql` in this crate is the SDL the server serves, printed by
+`econ_graph_graphql::graphql::sdl()`. The `schema_snapshot` test (run in CI by the
+`backend-smoke-tests` job, "Backend Smoke Tests (Fast)") fails when the two differ, and the frontend's
+`src/__tests__/graphql-operations.test.ts` validates every frontend GraphQL operation
+against this file.
+
+A PR that changes the schema regenerates the file and commits it. From `backend/`:
+
+```bash
+UPDATE_SCHEMA=1 cargo test -p econ-graph-graphql --test schema_snapshot
+```
+
+If a frontend operation stops validating, fix the operation. Operations that are known
+to fail are listed in `frontend/src/__tests__/graphqlOperationSkipList.ts`; remove an
+entry in the PR that fixes or deletes its operation.
+
 ## Testing
 
 The crate includes comprehensive tests to ensure GraphQL API functionality, security measures, and performance optimizations work correctly.

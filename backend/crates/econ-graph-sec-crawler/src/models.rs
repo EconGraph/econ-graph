@@ -401,70 +401,6 @@ pub struct XbrlDocument {
     pub validation_errors: Vec<String>,
 }
 
-/// **CrawlProgress Model**
-///
-/// Progress information for long-running crawl operations.
-/// Used for monitoring and reporting progress to users.
-///
-/// # Progress Information
-/// - Current operation status
-/// - Progress percentages
-/// - Estimated time remaining
-/// - Current item being processed
-///
-/// # Examples
-/// ```rust,no_run
-/// use econ_graph_sec_crawler::models::CrawlProgress;
-/// use uuid::Uuid;
-/// use chrono::Utc;
-///
-/// // Progress update for company crawling
-/// let progress = CrawlProgress {
-///     operation_id: Uuid::new_v4(),
-///     operation_type: "company_filings".to_string(),
-///     current_item: "0000320193-23-000006".to_string(),
-///     items_processed: 15,
-///     total_items: 25,
-///     progress_percentage: 60.0,
-///     estimated_remaining_seconds: 300,
-///     current_phase: "downloading".to_string(),
-///     start_time: Utc::now(),
-///     last_updated: Utc::now(),
-/// };
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CrawlProgress {
-    /// ID of the crawl operation
-    pub operation_id: Uuid,
-
-    /// Type of operation being performed
-    pub operation_type: String,
-
-    /// Current item being processed
-    pub current_item: String,
-
-    /// Number of items processed so far
-    pub items_processed: u32,
-
-    /// Total number of items to process
-    pub total_items: u32,
-
-    /// Progress percentage (0.0 to 100.0)
-    pub progress_percentage: f64,
-
-    /// Estimated time remaining in seconds
-    pub estimated_remaining_seconds: u64,
-
-    /// Current phase of the operation
-    pub current_phase: String,
-
-    /// When the operation started
-    pub start_time: DateTime<Utc>,
-
-    /// When this progress update was generated
-    pub last_updated: DateTime<Utc>,
-}
-
 /// **SEC EDGAR API Response Models**
 ///
 /// Models for parsing SEC EDGAR API responses.
@@ -719,7 +655,7 @@ pub struct StoredXbrlDocument {
     /// SHA-256 hash of the original file
     pub file_hash: String,
 
-    /// Storage method used ("large_object" or "bytea")
+    /// Storage method used (always "bytea")
     pub storage_method: String,
 
     /// When this record was created
@@ -736,9 +672,6 @@ pub struct XbrlStorageStats {
 
     /// Total size of all files in bytes (original size)
     pub total_size_bytes: u64,
-
-    /// Number of files stored as Large Objects
-    pub large_object_files: u64,
 
     /// Number of files stored as bytea
     pub bytea_files: u64,
@@ -781,6 +714,7 @@ pub struct XbrlStorageStats {
 ///     reference_arcrole: Some("http://www.w3.org/1999/xlink/properties/linkbase".to_string()),
 /// };
 /// ```
+#[cfg(feature = "xbrl-parser")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DtsReference {
     /// Type of reference: "schemaRef" or "linkbaseRef"

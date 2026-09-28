@@ -11,6 +11,7 @@ pub mod economic_series;
 pub mod educational_content;
 pub mod financial_annotation;
 pub mod financial_line_item;
+#[cfg(feature = "financial-ratios")]
 pub mod financial_ratios;
 pub mod financial_statement;
 pub mod global_analysis;
@@ -35,10 +36,11 @@ pub use educational_content::{
 };
 pub use financial_annotation::*;
 pub use financial_line_item::*;
+#[cfg(feature = "financial-ratios")]
 pub use financial_ratios::*;
 pub use financial_statement::*;
 pub use global_analysis::*;
 pub use search::*;
 pub use series_metadata::*;
-pub use user::{AnnotationComment, ChartAnnotation, ChartCollaborator, NewUser, User, UserSession};
+pub use user::{AnnotationComment, ChartAnnotation, ChartCollaborator, NewUser, User};
 pub use xbrl_taxonomy_schema::*;

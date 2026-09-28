@@ -44,8 +44,8 @@ use crate::schema::financial_statements;
 ///     fiscal_quarter: None, // Annual filing
 ///     document_type: "10-K".to_string(),
 ///     document_url: "https://www.sec.gov/Archives/edgar/data/320193/000032019323000006/aapl-20230930.htm".to_string(),
-///     xbrl_file_oid: Some(12345), // PostgreSQL Large Object OID
-///     xbrl_file_content: None, // Not using bytea storage
+///     xbrl_file_oid: None, // Unused: the SEC crawler stores files as bytea
+///     xbrl_file_content: None, // Set once the XBRL file is downloaded
 ///     xbrl_file_size_bytes: Some(2048576), // 2MB
 ///     xbrl_file_compressed: Some(true),
 ///     xbrl_file_compression_type: Some("zstd".to_string()),
@@ -113,8 +113,8 @@ pub struct FinancialStatement {
     /// Direct link to the HTML or PDF version of the filing
     pub document_url: String,
 
-    /// PostgreSQL Large Object OID for XBRL file - Nullable, file may not be downloaded yet
-    /// Used for storing large XBRL files as PostgreSQL Large Objects
+    /// PostgreSQL Large Object OID for the XBRL file. Not written: the SEC crawler stores files
+    /// in `xbrl_file_content` and rejects files over its size limit
     pub xbrl_file_oid: Option<u32>,
 
     /// XBRL file content stored as bytea - Nullable, file may not be downloaded yet

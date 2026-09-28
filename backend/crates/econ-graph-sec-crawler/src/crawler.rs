@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::models::{
-    CrawlConfig, CrawlProgress, CrawlResult, DtsReference, FilingInfo, SecCompany,
-};
-use crate::storage::{XbrlStorage, XbrlStorageConfig};
+#[cfg(feature = "xbrl-parser")]
+use crate::models::DtsReference;
+use crate::models::{CrawlConfig, CrawlResult, FilingInfo, SecCompany};
+use crate::storage::{XbrlFileTooLarge, XbrlStorage, XbrlStorageConfig};
 use crate::submissions::EdgarSubmissions;
 use crate::utils::{
     get_fiscal_quarter, pad_cik, parse_accession_number, parse_sec_date, unpad_cik,
@@ -125,6 +125,16 @@ pub fn sec_http_fetcher(
 /// A filing-level failure and whether the queue should retry the company.
 fn db_error(context: &str, e: impl std::fmt::Display) -> CrawlError {
     CrawlError::Transient(format!("SEC: {context}: {e}"))
+}
+
+/// Maps a failure to store a filing's XBRL file: a file over the size limit is permanent (a retry
+/// would download the same file), anything else is a database error and retryable.
+fn storage_error(e: anyhow::Error) -> CrawlError {
+    if e.downcast_ref::<XbrlFileTooLarge>().is_some() {
+        CrawlError::Permanent(format!("SEC: {e}"))
+    } else {
+        db_error("storing XBRL file", format!("{e:#}"))
+    }
 }
 
 /// **SEC EDGAR Crawler**
@@ -274,7 +284,7 @@ impl SecEdgarCrawler {
                 }
                 Err(e) => {
                     crawl.result.filings_failed += 1;
-                    let error_msg = format!("Failed to download filing {}: {}", accession, e);
+                    let error_msg = format!("Filing {} failed: {}", accession, e);
                     error!("{}", error_msg);
                     crawl.result.errors.push(error_msg);
                     if e.is_retryable() {
@@ -484,14 +494,16 @@ impl SecEdgarCrawler {
                 Some(&xbrl_url),
             )
             .await
-            .map_err(|e| db_error("storing XBRL file", format!("{e:#}")))?;
+            .map_err(storage_error)?;
 
         info!(
             "Stored XBRL file: {} ({} bytes, compressed: {})",
             accession_number, file_size, stored_doc.compressed_size
         );
 
-        // Discover and download DTS components
+        // Discover and download DTS components. Only the XBRL parser uses them, so the live crawl
+        // skips this unless the parser is compiled in.
+        #[cfg(feature = "xbrl-parser")]
         if let Err(e) = self
             .download_dts_components(content.as_bytes(), &xbrl_url, &stored_doc.id)
             .await
@@ -507,6 +519,7 @@ impl SecEdgarCrawler {
     }
 
     /// Download DTS (Discoverable Taxonomy Set) components for an XBRL instance
+    #[cfg(feature = "xbrl-parser")]
     async fn download_dts_components(
         &self,
         xbrl_content: &[u8],
@@ -538,6 +551,7 @@ impl SecEdgarCrawler {
     }
 
     /// Discover DTS references in XBRL content
+    #[cfg(feature = "xbrl-parser")]
     fn discover_dts_references(&self, xbrl_content: &[u8]) -> Result<Vec<DtsReference>> {
         use quick_xml::events::Event;
         use quick_xml::Reader;
@@ -604,6 +618,7 @@ impl SecEdgarCrawler {
     }
 
     /// Download a single taxonomy component
+    #[cfg(feature = "xbrl-parser")]
     async fn download_taxonomy_component(
         &self,
         reference: &DtsReference,
@@ -633,24 +648,6 @@ impl SecEdgarCrawler {
         );
 
         Ok(())
-    }
-
-    /// Get crawl progress for a running operation
-    pub async fn get_crawl_progress(&self, operation_id: Uuid) -> Result<CrawlProgress> {
-        // TODO: Implement progress tracking with database storage
-        // For now, return a placeholder progress
-        Ok(CrawlProgress {
-            operation_id,
-            operation_type: "company_filings".to_string(),
-            current_item: "Unknown".to_string(),
-            items_processed: 0,
-            total_items: 0,
-            progress_percentage: 0.0,
-            start_time: Utc::now(),
-            last_updated: Utc::now(),
-            estimated_remaining_seconds: 0,
-            current_phase: "Initializing".to_string(),
-        })
     }
 
     /// Get storage statistics
@@ -729,104 +726,21 @@ impl SecEdgarCrawler {
         Ok(results)
     }
 
-    /// Crawl all companies in the S&P 500 index
-    pub async fn crawl_sp500_companies(&self) -> Result<Vec<CrawlResult>> {
-        info!("Starting S&P 500 company crawl");
-
-        // Load S&P 500 CIKs from a predefined list
-        let sp500_ciks = self.load_sp500_ciks().await?;
-
-        info!("Found {} S&P 500 companies to crawl", sp500_ciks.len());
-
-        self.crawl_multiple_companies(sp500_ciks).await
-    }
-
-    /// Load S&P 500 CIKs from a predefined list or external source
-    async fn load_sp500_ciks(&self) -> Result<Vec<String>> {
-        // For now, return a small sample of major companies
-        // In production, this would load from a comprehensive S&P 500 list
-        Ok(vec![
-            "0000320193".to_string(), // Apple Inc.
-            "0000789019".to_string(), // Microsoft Corporation
-            "0001018724".to_string(), // Amazon.com Inc.
-            "0001067983".to_string(), // Alphabet Inc. (Google)
-            "0000078003".to_string(), // Tesla Inc.
-            "0000789019".to_string(), // NVIDIA Corporation
-            "0000079038".to_string(), // Meta Platforms Inc. (Facebook)
-            "0001341439".to_string(), // Berkshire Hathaway Inc.
-            "0001032975".to_string(), // Johnson & Johnson
-            "0000066740".to_string(), // JPMorgan Chase & Co.
-        ])
-    }
-
-    /// Crawl companies by industry (SIC code)
-    pub async fn crawl_companies_by_industry(&self, sic_code: &str) -> Result<Vec<CrawlResult>> {
-        info!("Starting crawl for industry SIC code: {}", sic_code);
-
-        // Get companies by SIC code from SEC
-        let companies = self.get_companies_by_sic(sic_code).await?;
-        let ciks: Vec<String> = companies.into_iter().map(|c| c.cik).collect();
-
-        self.crawl_multiple_companies(ciks).await
-    }
-
-    /// Get companies by SIC code from SEC EDGAR
-    async fn get_companies_by_sic(&self, sic_code: &str) -> Result<Vec<SecCompany>> {
-        // This would require implementing SEC company search API
-        // For now, return a placeholder
-        warn!("SIC-based company search not yet implemented, returning empty list");
-        Ok(Vec::new())
-    }
-
-    /// Crawl recent filings (last N days)
-    pub async fn crawl_recent_filings(&self, days: u32) -> Result<Vec<CrawlResult>> {
-        let start_date = Utc::now().date_naive() - chrono::Duration::days(days as i64);
-
-        info!("Starting crawl for recent filings since: {}", start_date);
-
-        // Get recent filings from SEC
-        let recent_filings = self.get_recent_filings(Some(start_date), None).await?;
-
-        // Group by company CIK
-        let mut company_filings: std::collections::HashMap<String, Vec<FilingInfo>> =
-            std::collections::HashMap::new();
-        for filing in recent_filings {
-            // Extract CIK from filing info (this would need to be implemented)
-            // For now, we'll need to modify the approach
-        }
-
-        let ciks: Vec<String> = company_filings.keys().cloned().collect();
-        self.crawl_multiple_companies(ciks).await
-    }
-
-    /// Get recent filings from SEC EDGAR
-    async fn get_recent_filings(
-        &self,
-        start_date: Option<chrono::NaiveDate>,
-        end_date: Option<chrono::NaiveDate>,
-    ) -> Result<Vec<FilingInfo>> {
-        // This would require implementing SEC filings search API
-        // For now, return a placeholder
-        warn!("Recent filings search not yet implemented, returning empty list");
-        Ok(Vec::new())
-    }
-
     /// Parse and store XBRL data after downloading
+    #[cfg(feature = "xbrl-parser")]
     pub async fn parse_and_store_xbrl(&self, accession_number: &str) -> Result<()> {
         info!("Parsing and storing XBRL data for: {}", accession_number);
 
         // Retrieve the XBRL file from storage
         let xbrl_content = self.storage.retrieve_xbrl_file(accession_number).await?;
 
-        // Parse using our XBRL parser with Arelle
         use crate::xbrl_parser::{XbrlParser, XbrlParserConfig};
 
-        let config = XbrlParserConfig {
-            use_arelle: true, // Use Arelle for comprehensive parsing
-            ..Default::default()
-        };
-
-        let parser = XbrlParser::with_config_and_database(config, Some(self.pool.clone())).await?;
+        let parser = XbrlParser::with_config_and_database(
+            XbrlParserConfig::default(),
+            Some(self.pool.clone()),
+        )
+        .await?;
 
         // Create a temporary file for parsing
         let temp_file = std::env::temp_dir().join(format!("{}.xml", accession_number));
@@ -886,6 +800,26 @@ mod tests {
                 "{bad:?} should be rejected"
             );
         }
+    }
+
+    #[test]
+    fn oversized_file_is_a_permanent_filing_error() {
+        let too_large = storage_error(
+            XbrlFileTooLarge {
+                accession_number: "0000000001-24-000001".to_string(),
+                compressed_size: 17,
+                max_size: 16,
+            }
+            .into(),
+        );
+        assert!(
+            matches!(&too_large, CrawlError::Permanent(m) if m.contains("too large, not stored")),
+            "{too_large:?}"
+        );
+        assert!(!too_large.is_retryable());
+
+        let db = storage_error(anyhow::anyhow!("connection refused"));
+        assert!(db.is_retryable(), "{db:?}");
     }
 
     #[test]

@@ -951,3 +951,89 @@ async fn test_purge_finished_works_in_batches() {
         .unwrap();
     assert_eq!(left, 0);
 }
+
+#[tokio::test]
+#[serial]
+async fn test_due_candidates_and_claim_due_ids() {
+    let pool = test_pool().await;
+    let src = unique_source("BATCH");
+    let other_src = unique_source("BATCHO");
+    let enqueue = |item: NewCrawlQueueItem| {
+        let pool = pool.clone();
+        async move {
+            CrawlQueueItem::enqueue(&pool, &item)
+                .await
+                .unwrap()
+                .unwrap()
+        }
+    };
+    let lead = enqueue(new_item(&src, "LEAD")).await;
+    let a = enqueue(new_item(&src, "A")).await;
+    let b = enqueue(NewCrawlQueueItem {
+        priority: 9,
+        ..new_item(&src, "B")
+    })
+    .await;
+    let future = enqueue(NewCrawlQueueItem {
+        scheduled_for: Some(Utc::now() + chrono::Duration::hours(1)),
+        ..new_item(&src, "FUTURE")
+    })
+    .await;
+    let _discover = enqueue(NewCrawlQueueItem {
+        kind: JobKind::DiscoverCatalog.as_str().to_string(),
+        ..new_item(&src, "CATALOG")
+    })
+    .await;
+    let _elsewhere = enqueue(new_item(&other_src, "A")).await;
+
+    let kind = JobKind::FetchSeries.as_str();
+    let found = CrawlQueueItem::due_candidates(&pool, &src, kind, lead.id, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        found,
+        vec![(b.id, "B".to_string()), (a.id, "A".to_string())],
+        "same source and kind, due, lead excluded, claim order"
+    );
+    let limited = CrawlQueueItem::due_candidates(&pool, &src, kind, lead.id, 1)
+        .await
+        .unwrap();
+    assert_eq!(limited.len(), 1);
+
+    // A row claimed meanwhile and a row not yet due are not claimed.
+    let taken = CrawlQueueItem::claim_by_id(&pool, a.id, "other")
+        .await
+        .unwrap()
+        .unwrap();
+    let claimed = CrawlQueueItem::claim_due_ids(&pool, &[a.id, b.id, future.id], "w")
+        .await
+        .unwrap();
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].id, b.id);
+    let b_row = reload(&pool, b.id).await;
+    assert_eq!(b_row.status, "processing");
+    assert_eq!(b_row.locked_by.as_deref(), Some("w"));
+    assert!(b_row.claim_token.is_some());
+    assert_eq!(b_row.claim_token, claimed[0].claim_token);
+    assert_eq!(reload(&pool, a.id).await.claim_token, taken.claim_token);
+    assert_eq!(reload(&pool, future.id).await.status, "pending");
+    assert!(CrawlQueueItem::claim_due_ids(&pool, &[], "w")
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        CrawlQueueItem::complete(&pool, &b_row).await.unwrap(),
+        LeaseOutcome::Applied
+    );
+
+    let c = enqueue(new_item(&src, "C")).await;
+    let d = enqueue(new_item(&src, "D")).await;
+    let both = CrawlQueueItem::claim_due_ids(&pool, &[c.id, d.id], "w")
+        .await
+        .unwrap();
+    assert_eq!(both.len(), 2);
+    assert_ne!(
+        both[0].claim_token, both[1].claim_token,
+        "each claimed row gets its own claim token"
+    );
+}

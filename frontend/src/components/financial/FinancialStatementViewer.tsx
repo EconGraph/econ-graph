@@ -264,12 +264,15 @@ const FinancialStatementViewerContent: React.FC<FinancialStatementViewerProps> =
         </CardHeader>
         <CardContent>
           <div className='flex space-x-2'>
+            {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
             <Button variant='outline' size='sm'>
               Balance Sheet
             </Button>
+            {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
             <Button variant='outline' size='sm'>
               Income Statement
             </Button>
+            {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
             <Button variant='outline' size='sm'>
               Cash Flow
             </Button>
@@ -477,7 +480,9 @@ const FinancialStatementViewerContent: React.FC<FinancialStatementViewerProps> =
               <div className='text-sm text-gray-600'>
                 <p>User and team annotations for this statement</p>
                 <div className='flex space-x-2 mt-3'>
+                  {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
                   <Button variant='outline'>Add Annotation</Button>
+                  {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
                   <Button variant='outline'>Export Statement</Button>
                 </div>
               </div>
@@ -709,9 +714,11 @@ const FinancialStatementViewerContent: React.FC<FinancialStatementViewerProps> =
         </CardHeader>
         <CardContent>
           <div className='flex space-x-2'>
+            {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
             <Button variant='outline' size='sm'>
               ← Previous
             </Button>
+            {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
             <Button variant='outline' size='sm'>
               Next →
             </Button>
