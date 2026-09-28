@@ -15,22 +15,30 @@ This index:
 
 When a topic roadmap changes, update its row here. New roadmaps go in `docs/roadmap/<topic>.md`.
 
-Each topic doc lands in its own pull request, linked in the State column. Until that pull
+Each topic doc landed in its own pull request, linked in the State column. Until that pull
 request merges, its Doc link does not resolve; read the pull request instead.
+
+As of 2026-09-27, roadmap tracking has moved to Linear (Joe's decision). New topic
+roadmaps are written directly as Linear issues and documents rather than as PRs here.
+A topic doc PR still open when its content was verified in Linear was closed without
+merging; its Doc column below links the Linear design-record document instead, and the
+release-1 work it covered is tracked under Linear issue ECO-5 and its sub-issues, not
+in a file in this directory. A topic doc that had already merged before the cutover
+stays here and keeps its own PR history.
 
 ## Topic roadmaps
 
 | Topic | Doc | State |
 |---|---|---|
-| Auth, commercial plans, teams and fine-grained permissions | [auth-plans-permissions.md](./auth-plans-permissions.md) | Draft ([#176](https://github.com/EconGraph/econ-graph/pull/176)) |
-| Admin UI | [admin-ui.md](./admin-ui.md) | Draft ([#177](https://github.com/EconGraph/econ-graph/pull/177)) |
-| Postgres metadata federated with Arrow Flight / Parquet time series | [federation.md](./federation.md) | Draft ([#178](https://github.com/EconGraph/econ-graph/pull/178)) |
-| Global analysis (world map, cross-country data) | [global-analysis.md](./global-analysis.md) | Draft ([#188](https://github.com/EconGraph/econ-graph/pull/188)) |
+| Auth, commercial plans, teams and fine-grained permissions | [auth-plans-permissions.md](./auth-plans-permissions.md) | Accepted ([#176](https://github.com/EconGraph/econ-graph/pull/176)) |
+| Admin UI | [admin-ui.md](./admin-ui.md) | Accepted ([#177](https://github.com/EconGraph/econ-graph/pull/177)) |
+| Postgres metadata federated with Arrow Flight / Parquet time series | [Linear design record](https://linear.app/econgraph/document/federation-roadmap-design-record-from-pr-178-a1ebb66c538d) | Moved to Linear; [#178](https://github.com/EconGraph/econ-graph/pull/178) closed without merging. Tracked under ECO-5 |
+| Global analysis (world map, cross-country data) | [global-analysis.md](./global-analysis.md) | Accepted ([#188](https://github.com/EconGraph/econ-graph/pull/188)) |
 | Release trains: what ships in which release | [releases.md](./releases.md) | Accepted for train 1 ([#190](https://github.com/EconGraph/econ-graph/pull/190)); fork 4 still open |
-| Data sources: which sources, in what order | [data-sources.md](./data-sources.md) | Proposed ([#192](https://github.com/EconGraph/econ-graph/pull/192)) |
+| Data sources: which sources, in what order | [Linear design record](https://linear.app/econgraph/document/data-sources-roadmap-design-record-from-pr-192-2db0c59b5869) | Moved to Linear; [#192](https://github.com/EconGraph/econ-graph/pull/192) closed without merging. Tracked under ECO-5, plus ECO-202, ECO-203, ECO-204 |
 | Analysis workspace: multi-series charts, saved charts, export | [analysis-workspace.md](./analysis-workspace.md) | Accepted ([#191](https://github.com/EconGraph/econ-graph/pull/191)) |
-| SEC EDGAR / XBRL financial data | [sec-financial-data.md](./sec-financial-data.md) | Draft ([#193](https://github.com/EconGraph/econ-graph/pull/193)) |
-| Feature flags and experiments | [feature-flags.md](./feature-flags.md) | Proposed ([#195](https://github.com/EconGraph/econ-graph/pull/195)) |
+| SEC EDGAR / XBRL financial data | [Linear design record](https://linear.app/econgraph/document/sec-financial-data-roadmap-design-record-from-pr-193-3a5b22c09d18) | Moved to Linear; [#193](https://github.com/EconGraph/econ-graph/pull/193) closed without merging. Tracked as ECO-39, ECO-82, ECO-86, ECO-116, ECO-117, ECO-118, ECO-126, ECO-144 |
+| Feature flags and experiments | [Linear design record](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2) | Moved to Linear; [#195](https://github.com/EconGraph/econ-graph/pull/195) closed without merging. Tracked in the [Feature flags](https://linear.app/econgraph/project/feature-flags-bc727011a0f7) project, issues ECO-27, ECO-28, ECO-74, ECO-77, ECO-114, ECO-115, ECO-120, ECO-123, ECO-142 |
 | Security hardening | [SECURITY_IMPLEMENTATION_PLAN.md](../projects/SECURITY_IMPLEMENTATION_PLAN.md) | Needs a rewrite (see [Security](#security)) |
 | Product (user-facing features, business phases) | [ROADMAP.md](../business/ROADMAP.md) | Needs a rewrite (see [Product features](#product-features)) |
 
