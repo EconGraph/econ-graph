@@ -118,14 +118,9 @@ kubectl apply -f k8s/manifests/backend-service.yaml
 kubectl apply -f k8s/manifests/crawler-worker.yaml
 kubectl apply -f k8s/manifests/frontend-deployment.yaml
 kubectl apply -f k8s/manifests/frontend-service.yaml
-kubectl apply -f k8s/manifests/admin-frontend-deployment.yaml
-kubectl apply -f k8s/manifests/admin-frontend-service.yaml
+# admin-frontend-deployment/service and admin-ingress: not applied here (re-enabled
+# by ECO-242, train 2). See the note in build-images.sh for why.
 kubectl apply -f k8s/manifests/ingress.yaml
-if [ -f "k8s/manifests/admin-ingress.yaml" ]; then
-    kubectl apply -f k8s/manifests/admin-ingress.yaml
-else
-    echo "⚠️  k8s/manifests/admin-ingress.yaml not found, skipping (tracked separately)"
-fi
 
 # Deploy chart API service (internal only)
 echo "📊 Deploying chart API service..."
@@ -160,9 +155,7 @@ kubectl wait --for=condition=available --timeout=300s deployment/crawler-worker 
 echo "Waiting for frontend deployment..."
 kubectl wait --for=condition=available --timeout=300s deployment/econ-graph-frontend -n econ-graph
 
-# Wait for admin frontend deployment
-echo "Waiting for admin frontend deployment..."
-kubectl wait --for=condition=available --timeout=300s deployment/econ-graph-admin-frontend -n econ-graph
+# Admin frontend deployment: not waited on here (re-enabled by ECO-242, train 2).
 
 # Wait for chart API service deployment
 echo "Waiting for chart API service deployment..."
@@ -310,7 +303,7 @@ echo "✅ Deployment completed successfully!"
 echo ""
 echo "🌐 Application URLs:"
 echo "  Frontend: http://admin.econ-graph.local (add '127.0.0.1 admin.econ-graph.local' to /etc/hosts)"
-echo "  Admin UI: http://admin.econ-graph.local/admin"
+# Admin UI: not deployed here (re-enabled by ECO-242, train 2).
 echo "  Backend:  http://admin.econ-graph.local/api"
 echo "  GraphQL:  http://admin.econ-graph.local/graphql"
 echo "  Playground: http://admin.econ-graph.local/playground"
@@ -322,7 +315,6 @@ echo "  kubectl get services -n econ-graph"
 echo "  kubectl logs -f deployment/econ-graph-backend -n econ-graph"
 echo "  kubectl logs -f deployment/crawler-worker -n econ-graph"
 echo "  kubectl logs -f deployment/econ-graph-frontend -n econ-graph"
-echo "  kubectl logs -f deployment/econ-graph-admin-frontend -n econ-graph"
 echo "  kubectl logs -f deployment/chart-api-service -n econ-graph"
 echo ""
 echo "🔒 Internal Services (not exposed externally):"
