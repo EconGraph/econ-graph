@@ -31,7 +31,10 @@ spec:
         - name: POSTGRES_USER
           value: "postgres"
         - name: POSTGRES_PASSWORD
-          value: "password"
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-secrets
+              key: postgres-superuser-password
         - name: PGDATA
           value: "/data/pgdata"
         volumeMounts:
