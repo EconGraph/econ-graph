@@ -9,8 +9,8 @@
 //! # Discovery
 //!
 //! Two requests, both required (as in the old code):
-//! - `GET {base}/timeseries/bds/variables.json` -> `{"variables": {NAME: {"label": ..}, ..}}`
-//! - `GET {base}/timeseries/bds/geography.json` -> `{"fips": [{"name": .., "geoLevelDisplay": ..}, ..]}`
+//! - `GET {base}/timeseries/bds/variables.json?key=KEY` -> `{"variables": {NAME: {"label": ..}, ..}}`
+//! - `GET {base}/timeseries/bds/geography.json?key=KEY` -> `{"fips": [{"name": .., "geoLevelDisplay": ..}, ..]}`
 //!
 //! Variables are filtered with the old keyword rules ([`is_economic_variable`]) and crossed with
 //! the geography levels that give single series (annual, units "Count"):
@@ -29,7 +29,7 @@
 //! and per-state (`CENSUS_BDS_{VARIABLE}_state_{FIPS}`). Any other id, including the bare
 //! `_state` ids older discovery runs persisted (one value per state and year, not a single
 //! series), is `Permanent`. The request is
-//! `GET {base}/timeseries/bds?get={VARIABLE},YEAR&for={us:*|state:FIPS}[&key=KEY]`, i.e. all
+//! `GET {base}/timeseries/bds?get={VARIABLE},YEAR&for={us:*|state:FIPS}&key=KEY`, i.e. all
 //! years (the old
 //! comma-separated `YEAR=` list hit the API's "204 No Content" limitation for multi-year
 //! queries); `since` is applied client-side by year. Each row becomes a point dated January 1 of
@@ -39,8 +39,12 @@
 //!
 //! # API key
 //!
-//! Optional. The Census API serves low volumes keylessly and the old code never sent a key, so
-//! `ctx.keys.census` (`CENSUS_API_KEY`) is sent as `key=` only when set; it is never required.
+//! Required. The Census Data API rejects requests without a key ("A valid key must be included
+//! with each data API request", checked live on 2026-09-26), so `ctx.keys.census`
+//! (`CENSUS_API_KEY`) is sent as `key=` on every request, the metadata files included. Without
+//! it, discovery and fetching fail with `Auth` ("CENSUS_API_KEY not set") before any request, as
+//! for FRED and BEA; `Auth` is never retried. Keys are free at
+//! <https://api.census.gov/data/key_signup.html>.
 //!
 //! # Errors
 //!
@@ -73,6 +77,10 @@ const ID_PREFIX: &str = "CENSUS_BDS_";
 
 /// National geography level.
 const NATIONAL_GEO: &str = "us";
+
+/// The error when `CENSUS_API_KEY` is missing.
+const MISSING_KEY: &str = "CENSUS_API_KEY not set: the Census Data API rejects requests without \
+                           a key (free at https://api.census.gov/data/key_signup.html)";
 
 /// State geography level. Its series ids end in `_state_{FIPS}`.
 const STATE_GEO: &str = "state";
@@ -108,16 +116,40 @@ impl CensusAdapter {
         format!("{}{path}", self.base_url)
     }
 
-    /// A BDS metadata file (`variables.json`, `geography.json`), requested without the API key.
-    async fn metadata_json(&self, ctx: &CrawlCtx, file: &str) -> Result<Value, CrawlError> {
-        ctx.http
-            .get_json(
-                SourceId::Census,
-                &self.url(&format!("{BDS_PATH}/{file}")),
-                &[],
-            )
+    /// The API key, required on every request. Missing -> `Auth` before any request is made.
+    fn api_key<'a>(&self, ctx: &'a CrawlCtx) -> Result<&'a str, CrawlError> {
+        ctx.keys
+            .census
+            .as_deref()
+            .ok_or_else(|| CrawlError::Auth(MISSING_KEY.into()))
+    }
+
+    /// A BDS metadata file (`variables.json`, `geography.json`). Fetched as text, not
+    /// `get_json`, on purpose: a rejected key comes back as a 200 HTML "Invalid Key" page, which
+    /// must be `Auth`; any other non-JSON body is `Parse`.
+    async fn metadata_json(
+        &self,
+        ctx: &CrawlCtx,
+        key: &str,
+        file: &str,
+    ) -> Result<Value, CrawlError> {
+        let url = self.url(&format!("{BDS_PATH}/{file}"));
+        let body = ctx
+            .http
+            .get_text(SourceId::Census, &url, &[("key", key)])
             .await
-            .map_err(classify_census_error)
+            .map_err(classify_census_error)?;
+        serde_json::from_str(&body).map_err(|e| {
+            let err = if is_invalid_key_page(&body) {
+                CrawlError::Auth(format!("Census {file}: API key rejected (Invalid Key)"))
+            } else {
+                CrawlError::Parse(format!("Census {file}: response is not JSON: {e}"))
+            };
+            // `get_text` only counts the HTTP request as successful; this classification is
+            // ours, so we record it ourselves (get_json's decode() would do this for us).
+            ctx.http.record_response_error(SourceId::Census, &url, &err);
+            err
+        })
     }
 }
 
@@ -136,8 +168,10 @@ impl SourceAdapter for CensusAdapter {
     /// One series per economic variable for the nation and for each state and DC, limited to the
     /// levels `geography.json` lists. See the module docs.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
-        let variables = parse_variables(&self.metadata_json(ctx, "variables.json").await?)?;
-        let geographies = parse_geographies(&self.metadata_json(ctx, "geography.json").await?)?;
+        let key = self.api_key(ctx)?;
+        let variables = parse_variables(&self.metadata_json(ctx, key, "variables.json").await?)?;
+        let geographies =
+            parse_geographies(&self.metadata_json(ctx, key, "geography.json").await?)?;
 
         // (id suffix, area name) for every single series the listed geography levels give.
         let mut areas: Vec<(String, String)> = Vec::new();
@@ -187,23 +221,26 @@ impl SourceAdapter for CensusAdapter {
     }
 
     /// All years of a national or per-state series, filtered to `since`'s year and later.
-    /// Unsupported ids fail as `Permanent` without a request.
+    /// A missing key fails as `Auth` (checked first) and an unsupported id as `Permanent`, both
+    /// without a request.
     async fn fetch_series(
         &self,
         ctx: &CrawlCtx,
         external_id: &str,
         since: Option<NaiveDate>,
     ) -> Result<FetchedSeries, CrawlError> {
+        let key = self.api_key(ctx)?;
         let (variable, area) = parse_series_id(external_id)?;
         let get = format!("{variable},YEAR");
         let for_geo = match area {
             Area::National => format!("{NATIONAL_GEO}:*"),
             Area::State(fips) => format!("{STATE_GEO}:{fips}"),
         };
-        let mut query = vec![("get", get.as_str()), ("for", for_geo.as_str())];
-        if let Some(key) = ctx.keys.census.as_deref() {
-            query.push(("key", key));
-        }
+        let query = [
+            ("get", get.as_str()),
+            ("for", for_geo.as_str()),
+            ("key", key),
+        ];
         let body = ctx
             .http
             .get_text(SourceId::Census, &self.url(BDS_PATH), &query)
@@ -232,6 +269,11 @@ pub fn classify_census_error(err: CrawlError) -> CrawlError {
         }
         e => e,
     }
+}
+
+/// Census answers a rejected key with a 200 HTML page saying "Invalid Key".
+fn is_invalid_key_page(body: &str) -> bool {
+    body.to_ascii_lowercase().contains("invalid key")
 }
 
 /// The area a fetchable series covers.
@@ -304,7 +346,7 @@ fn parse_bds_rows(
         )));
     }
     let rows: Vec<Vec<Value>> = serde_json::from_str(body).map_err(|e| {
-        if body.to_ascii_lowercase().contains("invalid key") {
+        if is_invalid_key_page(body) {
             CrawlError::Auth(format!(
                 "Census {external_id}: API key rejected (Invalid Key)"
             ))
@@ -515,9 +557,15 @@ mod tests {
             estab_ca.description.as_deref(),
             Some("Business Dynamics Statistics: Number of establishments for California")
         );
-        // Metadata endpoints never carry the key.
+        // Metadata requests carry the key too.
         for r in mock.received_requests().await {
-            assert!(r.url.query().is_none(), "{}", r.url);
+            let pairs: Vec<(String, String)> = r.url.query_pairs().into_owned().collect();
+            assert_eq!(
+                pairs,
+                [("key".to_string(), TEST_API_KEY.to_string())],
+                "{}",
+                r.url
+            );
         }
         mock.server().verify().await;
     }
@@ -588,21 +636,44 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_works_without_a_key_and_applies_since() {
+    async fn fetch_applies_since() {
+        let mock = MockSource::start().await;
+        mock.mount(&Route::get("/timeseries/bds"), Reply::json_str(ESTAB_US))
+            .await;
+        let s = CensusAdapter::new(mock.base_url())
+            .fetch_series(&test_ctx(), "CENSUS_BDS_ESTAB_us", Some(d("2021-06-30")))
+            .await
+            .unwrap();
+        let dates: Vec<NaiveDate> = s.points.iter().map(|p| p.date).collect();
+        assert_eq!(dates, [d("2021-01-01"), d("2022-01-01")]);
+    }
+
+    /// The Census API rejects keyless requests, so a missing key fails before any request.
+    #[tokio::test]
+    async fn missing_key_is_auth_error_without_requests() {
         let mock = MockSource::start().await;
         mock.mount(&Route::get("/timeseries/bds"), Reply::json_str(ESTAB_US))
             .await;
         let mut ctx = test_ctx();
         ctx.keys.census = None;
-        let s = CensusAdapter::new(mock.base_url())
-            .fetch_series(&ctx, "CENSUS_BDS_ESTAB_us", Some(d("2021-06-30")))
+        let adapter = CensusAdapter::new(mock.base_url());
+
+        let e = adapter
+            .fetch_series(&ctx, "CENSUS_BDS_ESTAB_us", None)
             .await
-            .unwrap();
-        let dates: Vec<NaiveDate> = s.points.iter().map(|p| p.date).collect();
-        assert_eq!(dates, [d("2021-01-01"), d("2022-01-01")]);
-        let reqs = mock.received_requests().await;
-        assert_eq!(reqs.len(), 1);
-        assert!(!reqs[0].url.query_pairs().any(|(k, _)| k == "key"));
+            .unwrap_err();
+        assert_eq!(e, CrawlError::Auth(MISSING_KEY.into()));
+        assert!(!e.is_retryable());
+        // The key is checked before the id, so an unsupported id also reports the missing key.
+        let e = adapter
+            .fetch_series(&ctx, "CENSUS_BDS_ESTAB_county", None)
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind(), "auth", "{e}");
+        assert!(e.to_string().contains("CENSUS_API_KEY not set"), "{e}");
+        let e = adapter.discover(&ctx).await.unwrap_err();
+        assert_eq!(e, CrawlError::Auth(MISSING_KEY.into()));
+        assert!(mock.received_requests().await.is_empty());
     }
 
     /// County and metro-area levels are skipped; only the listed levels produce series.
@@ -745,6 +816,19 @@ mod tests {
         .await;
         let e = CensusAdapter::new(mock.base_url())
             .fetch_series(&test_ctx(), "CENSUS_BDS_ESTAB_us", None)
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind(), "auth", "{e}");
+
+        // Invalid key on a metadata file: discovery fails with Auth, not Parse.
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/timeseries/bds/variables.json"),
+            Reply::text("<html><body><h1>Invalid Key</h1></body></html>"),
+        )
+        .await;
+        let e = CensusAdapter::new(mock.base_url())
+            .discover(&test_ctx())
             .await
             .unwrap_err();
         assert_eq!(e.kind(), "auth", "{e}");

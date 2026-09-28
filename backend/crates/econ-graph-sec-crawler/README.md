@@ -1,6 +1,6 @@
 # EconGraph SEC Crawler
 
-SEC EDGAR XBRL crawler for the EconGraph system, providing comprehensive functionality for crawling SEC EDGAR filings and downloading XBRL financial data. This crate includes advanced features like rate limiting, retry logic, progress tracking, and financial ratio calculation for reliable financial data acquisition.
+SEC EDGAR XBRL crawler for the EconGraph system, providing comprehensive functionality for crawling SEC EDGAR filings and downloading XBRL financial data. This crate includes advanced features like rate limiting, retry logic, and financial ratio calculation for reliable financial data acquisition.
 
 ## Features
 
@@ -10,7 +10,6 @@ SEC EDGAR XBRL crawler for the EconGraph system, providing comprehensive functio
 - **Retry Logic**: Robust retry mechanisms with exponential backoff
 - **Financial Analysis**: Automated financial ratio calculation and analysis
 - **Data Validation**: Comprehensive data validation and quality checks
-- **Progress Tracking**: Real-time progress monitoring and status reporting
 
 ## Testing
 
