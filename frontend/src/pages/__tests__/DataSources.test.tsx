@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import { renderWithProviders } from '../../test-utils/test-providers';
 import DataSources from '../DataSources';
+import { useDataSources } from '../../hooks/useSeriesData';
 
 // Mock the hooks module BEFORE importing the component
 const mockDataSources = [
@@ -453,6 +454,42 @@ describe('DataSources', () => {
       // Should handle cases where data sources are temporarily unavailable
       // This would be tested with mocked unavailable data
       expect(screen.getAllByText('Data Sources').length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Loading and error states', () => {
+    const dataSourcesHook = vi.mocked(useDataSources);
+
+    test('shows a spinner, not zero counts, while sources load', () => {
+      dataSourcesHook.mockReturnValueOnce({ data: undefined, isLoading: true, error: null } as any);
+      renderWithProviders(<DataSources />);
+
+      expect(screen.getByLabelText(/loading data sources/i)).toBeInTheDocument();
+      expect(screen.queryByText(/active sources/i)).not.toBeInTheDocument();
+    });
+
+    test('shows the error when sources fail to load', () => {
+      dataSourcesHook.mockReturnValueOnce({
+        data: undefined,
+        isLoading: false,
+        error: new Error('backend down'),
+      } as any);
+      renderWithProviders(<DataSources />);
+
+      expect(screen.getByText(/could not load data sources: backend down/i)).toBeInTheDocument();
+    });
+
+    test('keeps the cached sources visible when a later refresh fails', () => {
+      dataSourcesHook.mockReturnValueOnce({
+        data: mockDataSources,
+        isLoading: false,
+        error: new Error('backend down'),
+      } as any);
+      renderWithProviders(<DataSources />);
+
+      expect(screen.getByText(/showing the last loaded sources/i)).toBeInTheDocument();
+      expect(screen.getByText(/active sources/i)).toBeInTheDocument();
+      expect(screen.queryByText(/^could not load data sources/i)).not.toBeInTheDocument();
     });
   });
 });

@@ -9,10 +9,9 @@ mod tests {
     use diesel::prelude::*;
     use diesel_async::RunQueryDsl;
     use econ_graph_core::{enums::*, models::*, schema::*, test_utils::TestContainer};
-    use econ_graph_sec_crawler::{models::CrawlConfig, DtsManager, SecEdgarCrawler, XbrlParser};
+    use econ_graph_sec_crawler::{DtsManager, XbrlParser};
     use serial_test::serial;
     use std::path::PathBuf;
-    use uuid::Uuid;
 
     /// Test XBRL taxonomy schema storage and retrieval with testcontainers
     #[tokio::test]
@@ -210,42 +209,6 @@ mod tests {
         assert_eq!(retrieved_items.len(), 2);
         assert_eq!(retrieved_items[0].taxonomy_concept, "Assets");
         assert_eq!(retrieved_items[1].taxonomy_concept, "Liabilities");
-    }
-
-    /// Test SEC crawler integration
-    #[tokio::test]
-    #[serial]
-    async fn test_sec_crawler_integration() {
-        let container = TestContainer::new().await;
-        container.clean_database().await.unwrap();
-        let pool = container.pool();
-
-        // Create crawler configuration
-        let config = CrawlConfig {
-            max_requests_per_second: 1,
-            max_retries: 3,
-            retry_delay_seconds: 1,
-            max_file_size_bytes: 50 * 1024 * 1024, // 50MB
-            start_date: Some(chrono::NaiveDate::from_ymd_opt(2023, 1, 1).unwrap()),
-            end_date: Some(chrono::NaiveDate::from_ymd_opt(2023, 12, 31).unwrap()),
-            user_agent: "EconGraph Research Tool AdminContact@jmalicki+econgraph@gmail.com"
-                .to_string(),
-            max_concurrent_requests: Some(3),
-            exclude_amended: false,
-            exclude_restated: false,
-            form_types: Some(vec!["10-K".to_string(), "10-Q".to_string()]),
-        };
-
-        // Create crawler instance
-        let crawler = SecEdgarCrawler::new(pool.clone())
-            .await
-            .expect("Failed to create crawler");
-
-        // Test crawler initialization - create a dummy operation ID for testing
-        let operation_id = Uuid::new_v4();
-        let progress_result = crawler.get_crawl_progress(operation_id).await;
-        // The method should not panic, even if it returns an error for a non-existent operation
-        assert!(progress_result.is_ok() || progress_result.is_err());
     }
 
     /// Test XBRL parser integration

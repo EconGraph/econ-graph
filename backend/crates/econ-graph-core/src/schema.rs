@@ -10,6 +10,10 @@ pub mod sql_types {
     pub struct AnnotationType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "annotation_visibility"))]
+    pub struct AnnotationVisibility;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "assignment_status"))]
     pub struct AssignmentStatus;
 
@@ -136,6 +140,9 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::AnnotationVisibility;
+
     chart_annotations (id) {
         id -> Uuid,
         user_id -> Uuid,
@@ -151,11 +158,11 @@ diesel::table! {
         color -> Nullable<Varchar>,
         #[max_length = 20]
         annotation_type -> Nullable<Varchar>,
-        is_visible -> Nullable<Bool>,
         is_pinned -> Nullable<Bool>,
         tags -> Nullable<Array<Nullable<Text>>>,
         created_at -> Nullable<Timestamptz>,
         updated_at -> Nullable<Timestamptz>,
+        visibility -> AnnotationVisibility,
     }
 }
 
