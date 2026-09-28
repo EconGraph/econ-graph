@@ -22,15 +22,16 @@ This document covers what was added to fix that, and how to use it.
   verifies the dump with `pg_restore --list` before it's considered
   successful, and prunes dumps older than `BACKUP_RETENTION_DAYS` (default
   14).
-- **`scripts/deploy/protect-postgres-pv.sh`**: sets the `PersistentVolume`
-  backing PostgreSQL's data PVC to `persistentVolumeReclaimPolicy: Retain`.
-  Run automatically by `setup-local-k8s.sh` and `deploy.sh` after PostgreSQL
-  comes up. With this set, deleting the PVC (or the namespace) leaves the
-  underlying volume (now `Released`, not `Bound`) and its data intact
-  instead of deleting it; a human then decides whether to reclaim or delete
-  it.
+- **`scripts/deploy/protect-postgres-pv.sh`**: sets the bound
+  `PersistentVolume`s for both PostgreSQL data and backups to
+  `persistentVolumeReclaimPolicy: Retain`. It runs after PostgreSQL comes
+  up and again before teardown. A backup PVC using delayed binding may not
+  have a PV until the first backup job; teardown protects it once bound.
+  Deleting either PVC leaves its PV `Released` for manual reattachment.
 - **`scripts/deploy/teardown.sh`**: now prompts before deleting the
   `econ-graph` namespace (which owns both the PostgreSQL and backup PVCs).
+  Before removing resources, it sets both bound PVs to Retain and stops if
+  that step fails.
   Pass `--yes`/`-y` to skip that prompt non-interactively (e.g. in CI).
   This does **not** also delete the kind cluster: on kind, the cluster's
   node is what actually stores every PV's data (Retain policy included), so
@@ -39,6 +40,16 @@ This document covers what was added to fix that, and how to use it.
 - **`scripts/deploy/backup-postgres-now.sh`**: triggers an ad-hoc backup
   without waiting for the nightly schedule.
 - **`scripts/deploy/restore-postgres-backup.sh`**: runs the restore.
+
+## Credentials
+
+The `econ-graph-secrets` Secret has a separate
+`postgres-superuser-password` key for PostgreSQL, backup, and restore.
+The existing `database-password` application key is preserved. PostgreSQL
+uses its password only at first database initialization; if an existing
+database has a different superuser password, update the new Secret key to
+the actual database password before starting the backup CronJob. Verify
+with a manual backup after deployment.
 
 ## Manual backup
 
