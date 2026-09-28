@@ -28,13 +28,16 @@ echo "Crawler-worker image built successfully"
 
 # Build frontend image
 echo "Building frontend image..."
+if [ -z "${VITE_OIDC_ISSUER:-}" ]; then
+  echo "Warning: VITE_OIDC_ISSUER is not set; the frontend image will have sign-in hidden." >&2
+fi
 cd ../frontend
 docker build \
   --build-arg REACT_APP_API_URL="http://localhost" \
   --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
   --build-arg REACT_APP_WS_URL="ws://localhost/graphql" \
-  --build-arg REACT_APP_FACEBOOK_APP_ID="demo-facebook-app-id" \
-  --build-arg REACT_APP_GOOGLE_CLIENT_ID="80227441551-3dv05tkflnfrjpqv5fgii7b8br0brt7m.apps.googleusercontent.com" \
+  --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER:-}" \
+  --build-arg VITE_OIDC_CLIENT_ID="${VITE_OIDC_CLIENT_ID:-econ-graph-web}" \
   --build-arg NODE_ENV="production" \
   -t econ-graph-frontend:${VERSION} -t econ-graph-frontend:latest .
 echo "Frontend image built successfully"

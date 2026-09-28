@@ -39,6 +39,14 @@ spec:
             port:
               number: 9876
       # /graphql is served by graphql-ingress.yaml, which rate-limits it.
+      # The OIDC sign-in callback is a frontend route; Exact wins over the /auth prefix below.
+      - path: /auth/callback
+        pathType: Exact
+        backend:
+          service:
+            name: econ-graph-frontend-service
+            port:
+              number: 3000
       - path: /auth
         pathType: Prefix
         backend:

@@ -1,0 +1,34 @@
+{
+  "_comment": "Series the release end-to-end stack loads with `seed-fixtures`. Each entry is fetched through its source's real adapter against a local mock upstream that serves the listed fixtures (paths relative to this directory), then written with the worker's persistence. See frontend/tests/e2e/release/README.md.",
+  "series": [
+    {
+      "source": "FRED",
+      "external_id": "GDP",
+      "routes": [
+        { "method": "GET", "path": "/series", "fixture": "fred/series_gdp.json" },
+        { "method": "GET", "path": "/series/observations", "fixture": "fred/observations_gdp.json" }
+      ]
+    },
+    {
+      "source": "BLS",
+      "external_id": "CUUR0000SA0",
+      "routes": [
+        { "method": "POST", "path": "/timeseries/data/", "fixture": "bls/cpi_monthly.json" }
+      ]
+    },
+    {
+      "source": "CENSUS",
+      "external_id": "CENSUS_BDS_ESTAB_us",
+      "routes": [
+        { "method": "GET", "path": "/timeseries/bds", "fixture": "census/bds_estab_us.json" }
+      ]
+    },
+    {
+      "source": "FHFA",
+      "external_id": "USHPI",
+      "routes": [
+        { "method": "GET", "path": "/v1/house-price-index/national", "fixture": "fhfa/hpi_national.json" }
+      ]
+    }
+  ]
+}
