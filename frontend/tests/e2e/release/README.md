@@ -68,9 +68,17 @@ Put them in `tests/e2e/release/<area>/`, for example
   the adapter makes as `method`, `path`, optional `query` and `fixture`. Add the
   series to `fixtures.ts`. The seed fails on any request the manifest doesn't
   cover, so a stale fixture shows up there, not as an empty page.
+- **Need a signed-in user?** Use `signInOnKeycloak` from `auth/helpers.ts`,
+  which drives Keycloak's login page, and `uniqueTitle` for rows you create.
+  Never sign the same dev user in from two specs at once: the realm's
+  brute-force detection can then lock that user out (for a minute, by default).
+  alice and bob belong to the auth area's serial group in
+  `auth/sign-in.spec.ts`; an area that needs a signed-in user adds its own dev
+  user, or its test joins that file.
 - **Keep specs independent.** They run in parallel against one shared database.
   A spec that writes, such as an annotation, creates its own rows and must not
-  depend on rows another spec creates.
+  depend on rows another spec creates (the auth group's serial tests are the one
+  exception).
 - **Blocked by unmerged work?** Write the spec anyway and mark it `test.fixme`
   with a reason that names the blocking PR. Change it to `test` when the blocker
   merges.
@@ -79,10 +87,6 @@ Put them in `tests/e2e/release/<area>/`, for example
 
 ## Not in the stack yet
 
-- **Sign-in UI.** `tests/e2e/release/auth/sign-in.spec.ts` checks the infra
-  directly (a dev-realm token is accepted by the backend); there is no UI to
-  drive yet. AUTH-9 (annotate on the series page) replaces it with AUTH-10's
-  real sign-in spec once it lands.
 - **Release flags.** `FLAG_PROFILE=release` has no effect until the build-time
   flag switch lands. The frontend build already sets it.
 - **Search.** `/explore` search is broken on main, in both the backend and the
