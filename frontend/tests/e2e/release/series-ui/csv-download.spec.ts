@@ -20,9 +20,14 @@ test.describe('download CSV', () => {
     async ({ page, request }) => {
       const seriesId = await seededSeriesId(request, SEEDED.fredGdp);
       await page.goto(`/series/${seriesId}`);
-      // fred/observations_gdp.json has 5 observations, one of them missing ("."), so 4 shown
-      // points (SeriesDetail.tsx filters nulls before capping at the last 10).
-      const shownPointCount = 4;
+      // fred/observations_gdp.json's 4 non-missing observations (its 5th, 2025-10-01, is "." and
+      // dropped before the chart or this table ever see it).
+      const shownObservations = [
+        { date: '2025-04-01', value: 30485.729 },
+        { date: '2025-07-01', value: 31095.089 },
+        { date: '2026-01-01', value: 31722.514 },
+        { date: '2026-04-01', value: 32101.6 },
+      ];
       await expect(page.getByRole('columnheader', { name: 'Date' })).toBeVisible();
 
       const downloadPromise = page.waitForEvent('download');
@@ -33,9 +38,26 @@ test.describe('download CSV', () => {
       const csvPath = await download.path();
       const csv = readFileSync(csvPath as string, 'utf-8');
       const lines = csv.trim().split('\n');
-      expect(lines[0].toLowerCase()).toContain('date');
+      const header = lines[0].toLowerCase().split(',');
+      const dateCol = header.findIndex(h => h.includes('date'));
+      const valueCol = header.findIndex(h => h.includes('value'));
+      expect(dateCol, 'a date column').toBeGreaterThanOrEqual(0);
+      expect(valueCol, 'a value column').toBeGreaterThanOrEqual(0);
+
       // One line per shown point, plus the header.
-      expect(lines.length).toBe(shownPointCount + 1);
+      expect(lines.length).toBe(shownObservations.length + 1);
+      const rows = lines.slice(1).map(line => {
+        const cells = line.split(',');
+        return { date: cells[dateCol].trim(), value: Number(cells[valueCol].replace(/[^0-9.-]/g, '')) };
+      });
+      for (const observation of shownObservations) {
+        expect(rows).toContainEqual(
+          expect.objectContaining({
+            date: expect.stringContaining(observation.date),
+            value: observation.value,
+          })
+        );
+      }
     }
   );
 });

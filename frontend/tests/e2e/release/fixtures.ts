@@ -57,6 +57,14 @@ export const SEEDED = {
     sourceName: 'Bureau of Labor Statistics (BLS)',
     externalId: 'CUUR0000SA0',
     title: 'All items in U.S. city average, all urban consumers, not seasonally adjusted',
+    // cpi_monthly.json's newest two points: March 2024 (312.332) over February 2024 (310.326).
+    transformations: [
+      {
+        label: 'Month-over-Month',
+        description: 'Month-over-Month % Change',
+        latestShown: { date: 'Mar 1, 2024', value: '0.65' },
+      },
+    ],
   },
   censusEstablishments: {
     source: 'CENSUS',

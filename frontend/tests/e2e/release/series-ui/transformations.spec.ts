@@ -4,6 +4,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { DEPLOYED } from '../env';
 import { SEEDED } from '../fixtures';
 import { seededSeriesId } from '../auth/helpers';
 
@@ -43,6 +44,21 @@ async function applyTransformation(page: Page, option: string) {
   });
 }
 
+/**
+ * The Recent Data table's newest row (SeriesDetail.tsx shows the last 10 points, newest first).
+ * @param page - The test's page.
+ * @returns Its date and value cells' text.
+ */
+async function latestShown(page: Page): Promise<{ date: string; value: string }> {
+  const cells = page
+    .getByRole('table', { name: 'Recent observations' })
+    .locator('tbody tr')
+    .first()
+    .getByRole('cell');
+  const [date, value] = await Promise.all([cells.nth(0).innerText(), cells.nth(1).innerText()]);
+  return { date, value };
+}
+
 // Live QA: apply each transformation on a series page and check the chart and the value column
 // both switch to it. The chart itself is drawn on a canvas (not queryable), so the "Recent
 // Data" table's value column header, which the page derives from the same transformation,
@@ -59,24 +75,40 @@ test.describe('series transformations', () => {
     await page.goto(`/series/${seriesId}`);
     await expect(transformationSelect(page)).toBeVisible();
 
-    const cases: Array<{ option: string; columnHeader: string }> = [
-      { option: 'Year-over-Year', columnHeader: 'Year-over-Year % Change' },
-      { option: 'Quarter-over-Quarter', columnHeader: 'Quarter-over-Quarter % Change' },
+    const cases = [
+      {
+        option: 'Year-over-Year',
+        columnHeader: 'Year-over-Year % Change',
+        expected: SEEDED.fredGdp.transformations[0].latestShown,
+      },
+      {
+        option: 'Quarter-over-Quarter',
+        columnHeader: 'Quarter-over-Quarter % Change',
+        expected: SEEDED.fredGdp.transformations[1].latestShown,
+      },
       {
         option: 'Change since first observation',
         columnHeader: '% Change since First Observation',
+        expected: SEEDED.fredGdp.transformations[3].latestShown,
       },
     ];
 
-    for (const { option, columnHeader } of cases) {
+    for (const { option, columnHeader, expected } of cases) {
       await applyTransformation(page, option);
       await expect(page.getByRole('columnheader', { name: columnHeader, exact: true })).toBeVisible();
       await expect(transformationChip(page, columnHeader)).toBeVisible();
+      // Fixture mode only: deployed runs compare against live data, not recorded fixtures.
+      if (!DEPLOYED) await expect.poll(() => latestShown(page)).toEqual(expected);
     }
 
     // Back to none: the chip disappears and the column header reads the series' own units.
     await applyTransformation(page, 'None');
     await expect(page.getByRole('columnheader', { name: 'Billions of Dollars', exact: true })).toBeVisible();
+    if (!DEPLOYED) {
+      await expect
+        .poll(() => latestShown(page))
+        .toEqual(SEEDED.fredGdp.transformations[4].latestShown);
+    }
     for (const { columnHeader } of cases) {
       await expect(page.getByRole('columnheader', { name: columnHeader, exact: true })).toHaveCount(
         0
@@ -96,6 +128,11 @@ test.describe('series transformations', () => {
       page.getByRole('columnheader', { name: 'Month-over-Month % Change', exact: true })
     ).toBeVisible();
     await expect(transformationChip(page, 'Month-over-Month % Change')).toBeVisible();
+    if (!DEPLOYED) {
+      await expect
+        .poll(() => latestShown(page))
+        .toEqual(SEEDED.blsCpi.transformations[0].latestShown);
+    }
   });
 
   // The schema has LOG_DIFFERENCE, but the backend computes ratio - 1 rather than a log, so the
