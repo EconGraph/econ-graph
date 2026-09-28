@@ -126,18 +126,42 @@ impl Query {
         Ok(sources.into_iter().map(DataSourceType::from).collect())
     }
 
-    /// Get data points for a specific series with filtering and transformation
+    /// Get data points for a specific series with filtering and transformation, one page at a
+    /// time in date order. `totalCount` counts every matching point; read the next page with
+    /// `after: pageInfo.endCursor` until `pageInfo.hasNextPage` is false. A transformed page
+    /// has the values it would have in the whole series.
     async fn series_data(
         &self,
         ctx: &Context<'_>,
         series_id: ID,
         filter: Option<DataFilterInput>,
         transformation: Option<DataTransformationType>,
+        #[graphql(desc = "Page size. Defaults to and is capped at 10000; must not be negative.")]
         first: Option<i32>,
+        #[graphql(
+            desc = "Start after this cursor (a previous page's endCursor). A cursor is the number of points up to and including the one it names."
+        )]
         after: Option<String>,
     ) -> Result<DataPointConnection> {
         let pool = ctx.data::<DatabasePool>()?;
         let series_uuid = Uuid::parse_str(&series_id)?;
+
+        if first.is_some_and(|first| first < 0) {
+            return Err(async_graphql::Error::new("first must not be negative"));
+        }
+        // A cursor is the number of matching points up to and including the one it names, so
+        // `after: endCursor` continues where the last page stopped.
+        let offset = match after {
+            Some(cursor) => match cursor.parse::<i64>() {
+                Ok(offset) if offset >= 0 => offset,
+                _ => {
+                    return Err(async_graphql::Error::new(format!(
+                        "Invalid cursor: {cursor}"
+                    )))
+                }
+            },
+            None => 0,
+        };
 
         // Convert GraphQL inputs to service parameters
         let query_params = models::DataQueryParams {
@@ -147,33 +171,47 @@ impl Query {
             original_only: filter.as_ref().and_then(|f| f.original_only),
             latest_revision_only: filter.as_ref().and_then(|f| f.latest_revision_only),
             as_of: filter.as_ref().and_then(|f| f.as_of),
-            limit: first.map(|f| f as i64),
-            offset: after.and_then(|cursor| cursor.parse::<i64>().ok()),
+            limit: first.map(i64::from),
+            offset: Some(offset),
         };
 
-        let data_points = series_service::get_series_data(&pool, query_params).await?;
-        let total_count = data_points.len();
+        let transformation =
+            transformation.filter(|&transformation| transformation != DataTransformationType::None);
+        let context = transformation.and_then(transformation_context);
+        let page = series_service::get_series_data(pool, query_params, context).await?;
+        let has_next_page = page.has_next_page();
+        let page_len = page.points.len() as i64;
 
-        // Apply transformation if requested
-        let result_points = if let Some(transformation) = transformation {
-            // Apply the requested transformation to the data points
-            apply_data_transformation(data_points, transformation)
-                .await?
-                .into_iter()
-                .map(DataPointType::from)
-                .collect()
-        } else {
-            data_points.into_iter().map(DataPointType::from).collect()
+        let points = match transformation {
+            Some(transformation) => {
+                // A page after the first transforms with the earlier points it compares against,
+                // so each point gets the value it would have in the whole series.
+                let context_len = page.context.len();
+                let mut points = page.context;
+                points.extend(page.points);
+                apply_data_transformation(points, transformation)
+                    .await?
+                    .into_iter()
+                    .skip(context_len)
+                    .collect()
+            }
+            None => page.points,
         };
 
+        let cursor = |position: i64| Some(position.to_string());
         Ok(DataPointConnection {
-            nodes: result_points,
-            total_count: total_count as i32,
+            nodes: points.into_iter().map(DataPointType::from).collect(),
+            total_count: i32::try_from(page.total_count).unwrap_or(i32::MAX),
             page_info: PageInfo {
-                has_next_page: false, // Simplified - implement proper pagination
-                has_previous_page: false,
-                start_cursor: None,
-                end_cursor: None,
+                has_next_page,
+                has_previous_page: page.offset > 0,
+                start_cursor: if page_len > 0 {
+                    cursor(page.offset + 1)
+                } else {
+                    None
+                },
+                // Set even on an empty page, so `after: endCursor` never moves backwards.
+                end_cursor: cursor(page.offset + page_len),
             },
         })
     }
@@ -707,14 +745,10 @@ pub async fn apply_data_transformation(
         DataTransformation::YearOverYear => {
             // For YoY, we need to find the value from exactly one year ago
             for (_i, point) in sorted_points.iter().enumerate() {
-                let previous_year_value = sorted_points
-                    .iter()
-                    .find(|p| {
-                        // Look for a point approximately one year earlier
-                        let days_diff = (point.date - p.date).num_days();
-                        days_diff >= 360 && days_diff <= 370 // Allow some flexibility for exact dates
-                    })
-                    .and_then(|p| p.value.as_ref().cloned());
+                // A point approximately one year earlier (some flexibility for exact dates)
+                let previous_year_value =
+                    earliest_in_window(&sorted_points, point.date, YOY_WINDOW.0, YOY_WINDOW.1)
+                        .and_then(|p| p.value.as_ref().cloned());
 
                 let transformed_value = point.calculate_yoy_change(previous_year_value);
 
@@ -728,13 +762,10 @@ pub async fn apply_data_transformation(
         DataTransformation::QuarterOverQuarter => {
             // For QoQ, compare with previous quarter (approximately 3 months)
             for (_i, point) in sorted_points.iter().enumerate() {
-                let previous_quarter_value = sorted_points
-                    .iter()
-                    .find(|p| {
-                        let days_diff = (point.date - p.date).num_days();
-                        days_diff >= 85 && days_diff <= 95 // ~3 months with flexibility
-                    })
-                    .and_then(|p| p.value.as_ref());
+                // ~3 months with flexibility
+                let previous_quarter_value =
+                    earliest_in_window(&sorted_points, point.date, QOQ_WINDOW.0, QOQ_WINDOW.1)
+                        .and_then(|p| p.value.as_ref());
 
                 let transformed_value = point.calculate_qoq_change(previous_quarter_value);
 
@@ -747,13 +778,10 @@ pub async fn apply_data_transformation(
         DataTransformation::MonthOverMonth => {
             // For MoM, compare with previous month
             for (_i, point) in sorted_points.iter().enumerate() {
-                let previous_month_value = sorted_points
-                    .iter()
-                    .find(|p| {
-                        let days_diff = (point.date - p.date).num_days();
-                        days_diff >= 28 && days_diff <= 32 // ~1 month with flexibility
-                    })
-                    .and_then(|p| p.value.as_ref());
+                // ~1 month with flexibility
+                let previous_month_value =
+                    earliest_in_window(&sorted_points, point.date, MOM_WINDOW.0, MOM_WINDOW.1)
+                        .and_then(|p| p.value.as_ref());
 
                 let transformed_value = point.calculate_mom_change(previous_month_value);
 
@@ -764,28 +792,23 @@ pub async fn apply_data_transformation(
         }
 
         DataTransformation::PercentChange => {
-            // For percent change, compare each point with the first point
-            if let Some(base_point) = sorted_points.first() {
-                if let Some(base_value) = &base_point.value {
-                    for point in &sorted_points {
-                        let transformed_value = if let Some(current_value) = &point.value {
-                            if !base_value.is_zero() {
-                                Some(
-                                    ((current_value - base_value) / base_value)
-                                        * BigDecimal::from(100),
-                                )
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-
-                        let mut transformed_point = point.clone();
-                        transformed_point.value = transformed_value;
-                        transformed_points.push(transformed_point);
+            // For percent change, compare each point with the first point. Without a usable
+            // base every point is empty, but still returned.
+            let base_value = sorted_points
+                .first()
+                .and_then(|p| p.value.clone())
+                .filter(|base| !base.is_zero());
+            for point in &sorted_points {
+                let transformed_value = match (&point.value, &base_value) {
+                    (Some(current_value), Some(base_value)) => {
+                        Some(((current_value - base_value) / base_value) * BigDecimal::from(100))
                     }
-                }
+                    _ => None,
+                };
+
+                let mut transformed_point = point.clone();
+                transformed_point.value = transformed_value;
+                transformed_points.push(transformed_point);
             }
         }
 
@@ -795,16 +818,7 @@ pub async fn apply_data_transformation(
                 let transformed_value = if i > 0 {
                     let prev_point = &sorted_points[i - 1];
                     match (&point.value, &prev_point.value) {
-                        (Some(current), Some(previous)) => {
-                            if *current > 0 && *previous > 0 {
-                                // Approximate natural log using decimal operations
-                                // This is a simplified implementation - in production you might want a more accurate log
-                                let ratio = current / previous;
-                                Some(ratio - BigDecimal::from(1)) // Simplified log approximation
-                            } else {
-                                None
-                            }
-                        }
+                        (Some(current), Some(previous)) => log_difference(current, previous),
                         _ => None,
                     }
                 } else {
@@ -826,11 +840,73 @@ pub async fn apply_data_transformation(
     Ok(transformed_points)
 }
 
+/// The first point in `sorted` (ordered by date) dated `min_days` to `max_days` days before
+/// `date`. A binary search, so a transform of a full page stays linear-logarithmic.
+fn earliest_in_window(
+    sorted: &[econ_graph_core::models::DataPoint],
+    date: chrono::NaiveDate,
+    min_days: i64,
+    max_days: i64,
+) -> Option<&econ_graph_core::models::DataPoint> {
+    let days_before = |days| {
+        date.checked_sub_signed(chrono::Duration::days(days))
+            .unwrap_or(chrono::NaiveDate::MIN)
+    };
+    let (from, to) = (days_before(max_days), days_before(min_days));
+    let first = sorted.partition_point(|p| p.date < from);
+    sorted.get(first).filter(|p| p.date <= to)
+}
+
+/// Look-back window (min, max days before), shared by [`apply_data_transformation`]'s lookup and
+/// [`transformation_context`]'s page context, so a page always sees enough history to match.
+const YOY_WINDOW: (i64, i64) = (360, 370);
+const QOQ_WINDOW: (i64, i64) = (85, 95);
+const MOM_WINDOW: (i64, i64) = (28, 32);
+
+/// The earlier points `transformation` compares a point with, if any. The windows cover the
+/// look-back ranges in [`apply_data_transformation`].
+fn transformation_context(
+    transformation: DataTransformationType,
+) -> Option<series_service::PageContext> {
+    use series_service::PageContext;
+    match transformation {
+        DataTransformationType::None => None,
+        DataTransformationType::YearOverYear => Some(PageContext::Days(YOY_WINDOW.1)),
+        DataTransformationType::QuarterOverQuarter => Some(PageContext::Days(QOQ_WINDOW.1)),
+        DataTransformationType::MonthOverMonth => Some(PageContext::Days(MOM_WINDOW.1)),
+        DataTransformationType::LogDifference => Some(PageContext::PreviousPoint),
+        DataTransformationType::PercentChange => Some(PageContext::FirstPoint),
+    }
+}
+
+/// `ln(current) - ln(previous)`, or `None` unless both values are positive. Computed in `f64`,
+/// which is plenty for a displayed growth rate (a positive value too small for `f64` counts as
+/// zero).
+fn log_difference(
+    current: &bigdecimal::BigDecimal,
+    previous: &bigdecimal::BigDecimal,
+) -> Option<bigdecimal::BigDecimal> {
+    use bigdecimal::ToPrimitive;
+    let (current, previous) = (current.to_f64()?, previous.to_f64()?);
+    if !(current > 0.0 && previous > 0.0) {
+        return None;
+    }
+    let diff = current.ln() - previous.ln();
+    if !diff.is_finite() {
+        return None;
+    }
+    // f64's Display is the shortest string that round-trips, so no binary noise digits.
+    diff.to_string().parse().ok()
+}
+
 impl Default for Query {
     fn default() -> Self {
         Self
     }
 }
+
+#[cfg(test)]
+mod series_data_tests;
 
 #[cfg(test)]
 mod tests {
