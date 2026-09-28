@@ -1,4 +1,3 @@
-/* eslint-disable local/no-dead-button -- unrouted in release 1; ECO-248 wires up or removes these buttons */
 import React, { useState, useEffect } from 'react';
 import {
   Card,
@@ -160,13 +159,16 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               </Box>
             </Box>
             <Box sx={{ display: 'flex', gap: 1 }}>
+              {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
               <Button variant='outlined' startIcon={<RefreshCw />}>
                 Refresh
               </Button>
+              {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
               <Button variant='contained' startIcon={<Download />}>
                 Download
               </Button>
               {_showCollaborativeFeatures && (
+                // eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet
                 <Button variant='outlined' startIcon={<Share2 />}>
                   Share
                 </Button>

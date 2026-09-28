@@ -1,4 +1,3 @@
-/* eslint-disable local/no-dead-button -- unrouted in release 1; ECO-248 wires up or removes these buttons */
 import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { executeGraphQL } from '../../utils/graphql';
@@ -461,10 +460,12 @@ const FinancialAlertsContentComponent: React.FC<FinancialAlertsProps> = ({
               <div className='text-sm text-muted-foreground'>
                 {stats.unread} Unread • {stats.critical} critical • {stats.active} active
               </div>
+              {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
               <Button variant='outline' size='sm' aria-label='Refresh alerts'>
                 <Settings className='h-4 w-4 mr-2' />
                 Refresh
               </Button>
+              {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
               <Button variant='outline' size='sm'>
                 <Settings className='h-4 w-4 mr-2' />
                 Settings
@@ -614,9 +615,11 @@ const FinancialAlertsContentComponent: React.FC<FinancialAlertsProps> = ({
         </CardHeader>
         <CardContent>
           <div className='flex space-x-2'>
+            {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
             <Button variant='outline' size='sm'>
               Mark All as Read
             </Button>
+            {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
             <Button variant='outline' size='sm'>
               Dismiss All
             </Button>
@@ -679,6 +682,7 @@ const FinancialAlertsContentComponent: React.FC<FinancialAlertsProps> = ({
         <CardContent>
           <div className='space-y-2'>
             <div className='text-sm'>Notification preferences</div>
+            {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
             <Button variant='outline' size='sm'>
               Configure Alerts
             </Button>
@@ -692,6 +696,7 @@ const FinancialAlertsContentComponent: React.FC<FinancialAlertsProps> = ({
           <CardTitle>Export Alerts</CardTitle>
         </CardHeader>
         <CardContent>
+          {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
           <Button variant='outline' className='w-full'>
             Export Alert History
           </Button>

@@ -31,12 +31,16 @@ tester.run('no-dead-button', noDeadButton, {
     '<IconButton onMouseDown={keepFocus} aria-label="show password" />',
     '<IconButton {...props} />',
     '<ListItemButton onClick={() => go(item)} />',
+    // The trigger passes its handler down to its child.
+    '<SheetTrigger asChild><Button aria-label="Menu" /></SheetTrigger>',
     // Other components are not checked.
     '<Chip label="GDP" />',
     '<Foo.Button />',
   ],
   invalid: [
     { code: '<Button>View Details</Button>', errors: [{ messageId: 'dead' }] },
+    { code: '<Button component="span">Save</Button>', errors: [{ messageId: 'dead' }] },
+    { code: "<IconButton component={'span'} />", errors: [{ messageId: 'dead' }] },
     { code: '<IconButton size="small" />', errors: [{ messageId: 'dead' }] },
     { code: '<ListItemButton selected />', errors: [{ messageId: 'dead' }] },
     { code: "<Button type='button'>Refresh</Button>", errors: [{ messageId: 'dead' }] },

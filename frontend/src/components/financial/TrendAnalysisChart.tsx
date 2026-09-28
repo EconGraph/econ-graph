@@ -1,4 +1,3 @@
-/* eslint-disable local/no-dead-button -- unrouted in release 1; ECO-248 wires up or removes these buttons */
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -506,12 +505,15 @@ const TrendAnalysisChartComponent: React.FC<TrendAnalysisChartProps> = ({
         </CardHeader>
         <CardContent>
           <div className='flex items-center space-x-2'>
+            {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
             <Button variant='outline' size='sm'>
               Zoom In
             </Button>
+            {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
             <Button variant='outline' size='sm'>
               Zoom Out
             </Button>
+            {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
             <Button variant='outline' size='sm'>
               Reset View
             </Button>
@@ -541,6 +543,7 @@ const TrendAnalysisChartComponent: React.FC<TrendAnalysisChartProps> = ({
           <CardTitle>Export Chart</CardTitle>
         </CardHeader>
         <CardContent>
+          {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
           <Button variant='outline' className='w-full'>
             <Download className='h-4 w-4 mr-2' />
             Export Chart
@@ -569,6 +572,7 @@ const TrendAnalysisChartComponent: React.FC<TrendAnalysisChartProps> = ({
         <CardContent>
           <div className='space-y-2'>
             <p className='text-sm'>Industry benchmark comparison available</p>
+            {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
             <Button variant='outline' size='sm'>
               View Benchmarks
             </Button>

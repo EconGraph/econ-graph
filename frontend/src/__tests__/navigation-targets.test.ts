@@ -64,6 +64,8 @@ function sourceFiles(dir: string = SRC_DIR): string[] {
  * @returns The text, or null when the node is not a literal.
  */
 function literalText(node: ts.Node): string | null {
+  // Look through `('/x')` and `'/x' as const`.
+  while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)) node = node.expression;
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
   if (ts.isTemplateExpression(node)) {
     return node.head.text + node.templateSpans.map(span => PARAM + span.literal.text).join('');
@@ -248,6 +250,16 @@ describe('navigation targets', () => {
     // Guards against the scan silently finding nothing after a refactor.
     expect(routes.length).toBeGreaterThanOrEqual(10);
     expect(targets.length).toBeGreaterThanOrEqual(25);
+  });
+
+  it('reads literals through parentheses and `as`', () => {
+    const expr = (code: string) =>
+      (ts.createSourceFile('x.ts', code, ts.ScriptTarget.Latest, true).statements[0] as ts.ExpressionStatement)
+        .expression;
+    expect(literalText(expr("('/about')"))).toBe('/about');
+    expect(literalText(expr("'/about' as const"))).toBe('/about');
+    expect(literalText(expr('(`/series/${id}` as string)'))).toBe('/series/:param');
+    expect(literalText(expr('path'))).toBeNull();
   });
 
   it('matches targets against routes as React Router would', () => {

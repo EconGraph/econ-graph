@@ -1,4 +1,3 @@
-/* eslint-disable local/no-dead-button -- unrouted in release 1; ECO-248 wires up or removes these buttons */
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -727,10 +726,12 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
             </CardHeader>
             <CardContent>
               <div className='space-y-2'>
+                {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
                 <Button variant='outline' size='sm' className='w-full'>
                   <Share2 className='h-4 w-4 mr-2' />
                   Email Link
                 </Button>
+                {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
                 <Button variant='outline' size='sm' className='w-full'>
                   <Mail className='h-4 w-4 mr-2' />
                   Generate Share Link
@@ -780,6 +781,7 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                         </div>
                         <div className='flex items-center space-x-2'>
                           <Badge className={getStatusColor(job.status)}>{job.status}</Badge>
+                          {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
                           <Button
                             variant='ghost'
                             size='sm'
@@ -834,14 +836,17 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
               <CardTitle>Quick Actions</CardTitle>
             </CardHeader>
             <CardContent className='space-y-2'>
+              {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
               <Button variant='outline' size='sm' className='w-full'>
                 <Share2 className='h-4 w-4 mr-2' />
                 Share Analysis
               </Button>
+              {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
               <Button variant='outline' size='sm' className='w-full'>
                 <Mail className='h-4 w-4 mr-2' />
                 Email Report
               </Button>
+              {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
               <Button variant='outline' size='sm' className='w-full'>
                 <Printer className='h-4 w-4 mr-2' />
                 Print Summary

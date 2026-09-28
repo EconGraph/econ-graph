@@ -1,4 +1,3 @@
-/* eslint-disable local/no-dead-button -- unrouted in release 1; ECO-248 wires up or removes these buttons */
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
@@ -439,6 +438,7 @@ const GlobalEconomicNetworkMap: React.FC = () => {
       <Typography variant='h4' gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         🌍 Interactive Global Economic Network Map
         <Tooltip title='Explore economic correlations between countries through an interactive network visualization'>
+          {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
           <IconButton size='small'>
             <Info />
           </IconButton>
@@ -538,16 +538,19 @@ const GlobalEconomicNetworkMap: React.FC = () => {
           <Grid item xs={12} md={4}>
             <Box sx={{ display: 'flex', gap: 1 }}>
               <Tooltip title='Zoom In'>
+                {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
                 <IconButton>
                   <ZoomIn />
                 </IconButton>
               </Tooltip>
               <Tooltip title='Zoom Out'>
+                {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
                 <IconButton>
                   <ZoomOut />
                 </IconButton>
               </Tooltip>
               <Tooltip title='Reset View'>
+                {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
                 <IconButton>
                   <RestartAlt />
                 </IconButton>
