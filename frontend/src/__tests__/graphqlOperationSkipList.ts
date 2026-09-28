@@ -54,8 +54,4 @@ export const GRAPHQL_OPERATION_SKIP_LIST: Readonly<Record<string, string>> = {
   // is #165).
   'utils/graphql.ts#GetChartCollaborators': 'series-ui: unused, UI-5 removed its other caller',
   'utils/graphql.ts#SearchSeriesFulltext': 'series-ui: unused, fix or delete with series search',
-
-  // Reachable today. Must be gone before v4.0.0 (train 1).
-  // The dashboard sends SearchSeries through useSeriesSearch.
-  'utils/graphql.ts#SearchSeries': 'series-ui: reachable, UI-9 fixes it',
 };
