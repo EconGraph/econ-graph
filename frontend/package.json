@@ -22,6 +22,7 @@
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
     "@types/topojson-client": "3.1.5",
+    "@types/topojson-specification": "1.0.5",
     "ajv": "8.20.0",
     "axios": "^1.20.0",
     "chart.js": "4.5.1",
@@ -54,7 +55,8 @@
     "tailwind-merge": "^3.7.0",
     "topojson-client": "^3.1.0",
     "vaul": "^1.1.2",
-    "web-vitals": "3.5.2"
+    "web-vitals": "3.5.2",
+    "world-atlas": "2.0.2"
   },
   "devDependencies": {
     "@apollo/client": "4.3.1",
