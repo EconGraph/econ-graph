@@ -29,6 +29,9 @@ terraform apply -auto-approve
 cd "$PROJECT_ROOT"
 
 # Step 2: Deploy PostgreSQL in Kubernetes
+# The StatefulSet reads its superuser password from this Secret.
+kubectl apply -f k8s/manifests/namespace.yaml
+kubectl apply -f k8s/manifests/secret.yaml
 echo ""
 echo "📋 Step 2: Deploying PostgreSQL in Kubernetes..."
 kubectl apply -f k8s/manifests/postgres-init.yaml
