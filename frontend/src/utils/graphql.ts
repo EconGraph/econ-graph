@@ -4,6 +4,8 @@
  * This enables efficient data fetching with the Rust backend GraphQL API.
  */
 
+import { getAccessToken } from '../auth/accessToken';
+
 const GRAPHQL_ENDPOINT = import.meta.env.VITE_GRAPHQL_URL || '/graphql';
 
 // Debug: Log the GraphQL endpoint being used
@@ -38,12 +40,18 @@ export async function executeGraphQL<T = any>(
   // if (MSW_DEBUG) {
   //   console.log('🔧 executeGraphQL called with:', { endpoint: GRAPHQL_ENDPOINT, request });
   // }
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+  // Signed-in requests carry the Keycloak access token; anonymous ones carry none.
+  const token = await getAccessToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   const response = await fetch(GRAPHQL_ENDPOINT, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
+    headers,
     body: JSON.stringify(request),
   });
 
@@ -100,11 +108,11 @@ export const QUERIES = {
     query GetSeriesDetail($id: ID!) {
       series(id: $id) {
         id
+        externalId
         title
         description
         source {
           name
-          description
         }
         frequency
         units
@@ -113,26 +121,23 @@ export const QUERIES = {
         endDate
         lastUpdated
         isActive
-        dataPointCount
       }
     }
   `,
 
-  // Get series data with transformations
+  // Get series observations, transformed on the backend
   GET_SERIES_DATA: `
     query GetSeriesData(
       $seriesId: ID!
       $filter: DataFilter
       $transformation: DataTransformation
       $first: Int
-      $after: String
     ) {
       seriesData(
         seriesId: $seriesId
         filter: $filter
         transformation: $transformation
         first: $first
-        after: $after
       ) {
         nodes {
           date
@@ -141,12 +146,6 @@ export const QUERIES = {
           isOriginalRelease
         }
         totalCount
-        pageInfo {
-          hasNextPage
-          hasPreviousPage
-          startCursor
-          endCursor
-        }
       }
     }
   `,
@@ -189,7 +188,7 @@ export const QUERIES = {
     query SearchSeries(
       $query: String!
       $source: String
-      $frequency: SeriesFrequencyType
+      $frequency: SeriesFrequency
       $first: Int
       $after: String
     ) {
@@ -204,11 +203,14 @@ export const QUERIES = {
           id
           title
           description
+          sourceId
           source {
             name
           }
           frequency
           units
+          startDate
+          endDate
           lastUpdated
         }
         totalCount
@@ -258,38 +260,31 @@ export const QUERIES = {
   `,
 
   // Collaboration queries
+  // The backend returns public annotations, plus the caller's own private ones when the
+  // request carries a signed-in user's token.
   GET_ANNOTATIONS_FOR_SERIES: `
-    query GetAnnotationsForSeries($seriesId: String!, $userId: ID) {
-      annotationsForSeries(seriesId: $seriesId, userId: $userId) {
+    query GetAnnotationsForSeries($seriesId: String!) {
+      annotationsForSeries(seriesId: $seriesId) {
         id
-        user_id
-        series_id
-        chart_id
-        annotation_date
-        annotation_value
+        userId
+        annotationDate
         title
         description
         color
-        annotation_type
-        is_visible
-        is_pinned
-        tags
-        created_at
-        updated_at
+        visibility
       }
     }
   `,
 
+  // Comments on an annotation the caller can see, oldest first.
   GET_COMMENTS_FOR_ANNOTATION: `
     query GetCommentsForAnnotation($annotationId: ID!) {
       commentsForAnnotation(annotationId: $annotationId) {
         id
-        annotation_id
-        user_id
+        annotationId
+        userId
         content
-        is_resolved
-        created_at
-        updated_at
+        createdAt
       }
     }
   `,
@@ -305,24 +300,6 @@ export const QUERIES = {
         permissions
         created_at
         last_accessed_at
-      }
-    }
-  `,
-
-  GET_ANNOTATIONS: `
-    query GetAnnotations($chartId: ID!) {
-      annotationsForChart(chartId: $chartId) {
-        id
-        user_id
-        chart_id
-        title
-        description
-        content
-        annotation_type
-        is_visible
-        is_pinned
-        created_at
-        updated_at
       }
     }
   `,
@@ -435,24 +412,32 @@ export const MUTATIONS = {
   `,
 
   // Collaboration mutations
+  // The author is the signed-in caller; the backend takes it from the token.
   CREATE_ANNOTATION: `
     mutation CreateAnnotation($input: CreateAnnotationInput!) {
       createAnnotation(input: $input) {
         id
         userId
-        seriesId
-        chartId
         annotationDate
-        annotationValue
         title
         description
         color
-        annotationType
-        isVisible
-        isPinned
-        tags
-        createdAt
-        updatedAt
+        visibility
+      }
+    }
+  `,
+
+  // Only the annotation's author may update it.
+  UPDATE_ANNOTATION: `
+    mutation UpdateAnnotation($input: UpdateAnnotationInput!) {
+      updateAnnotation(input: $input) {
+        id
+        userId
+        annotationDate
+        title
+        description
+        color
+        visibility
       }
     }
   `,
@@ -464,9 +449,7 @@ export const MUTATIONS = {
         annotationId
         userId
         content
-        isResolved
         createdAt
-        updatedAt
       }
     }
   `,
@@ -525,26 +508,24 @@ export interface SeriesListResponse {
 export interface SeriesDetailResponse {
   series: {
     id: string;
+    externalId: string;
     title: string;
-    description: string;
-    source: {
-      name: string;
-      description: string;
-    };
+    description: string | null;
+    source: { name: string } | null;
     frequency: string;
-    units: string;
-    seasonalAdjustment?: string;
-    startDate: string;
-    endDate: string;
-    lastUpdated: string;
+    units: string | null;
+    seasonalAdjustment: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    lastUpdated: string | null;
     isActive: boolean;
-    dataPointCount: number;
-  };
+  } | null;
 }
 
 export interface DataPoint {
   date: string;
-  value: number | null;
+  /** BigDecimal on the wire: a numeric string, or null where the value is missing. */
+  value: string | null;
   revisionDate: string;
   isOriginalRelease: boolean;
 }
@@ -553,12 +534,6 @@ export interface SeriesDataResponse {
   seriesData: {
     nodes: DataPoint[];
     totalCount: number;
-    pageInfo: {
-      hasNextPage: boolean;
-      hasPreviousPage: boolean;
-      startCursor?: string;
-      endCursor?: string;
-    };
   };
 }
 
@@ -572,32 +547,32 @@ export interface SearchSeriesResponse {
 }
 
 // Collaboration types
+/** Who can see an annotation: only its author, or everyone. */
+export type AnnotationVisibility = 'PRIVATE' | 'PUBLIC';
+
+/** An annotation as `GetAnnotationsForSeries` and the annotation mutations select it. */
 export interface ChartAnnotationType {
   id: string;
-  user_id: string;
-  series_id?: string;
-  chart_id?: string;
-  annotation_date: string;
-  annotation_value?: number;
+  /** Author's user id (the identity provider's `sub`). */
+  userId: string;
+  /** Observation date the note is about, `YYYY-MM-DD`. */
+  annotationDate: string;
   title: string;
-  description?: string;
-  color?: string;
-  annotation_type?: string;
-  is_visible?: boolean;
-  is_pinned?: boolean;
-  tags?: string[];
-  created_at?: string;
-  updated_at?: string;
+  description: string | null;
+  /** Free text, up to 7 characters (default `#2196f3`); `useSeriesAnnotations` checks it. */
+  color: string | null;
+  visibility: AnnotationVisibility;
 }
 
+/** A comment as `GetCommentsForAnnotation` and `AddComment` select it. */
 export interface AnnotationCommentType {
   id: string;
-  annotation_id: string;
-  user_id: string;
+  annotationId: string;
+  /** Author's user id (the identity provider's `sub`). */
+  userId: string;
   content: string;
-  is_resolved?: boolean;
-  created_at?: string;
-  updated_at?: string;
+  /** RFC 3339 timestamp. */
+  createdAt: string | null;
 }
 
 export interface ChartCollaboratorType {
@@ -630,22 +605,29 @@ export interface UserType {
   lastLoginAt?: string;
 }
 
-// Collaboration input types
+// Collaboration input types. The author is never sent; the backend takes it from the token.
 export interface CreateAnnotationInput {
-  user_id: string;
-  series_id: string;
-  annotation_date: string;
-  annotation_value?: number;
+  seriesId: string;
+  /** `YYYY-MM-DD`. */
+  annotationDate: string;
   title: string;
   content: string;
-  annotation_type: string;
+  annotationType: string;
   color?: string;
-  is_public?: boolean;
+  /** False (the default) keeps the annotation private to its author. */
+  isPublic: boolean;
+}
+
+/** Fields left out are unchanged. The date can't be changed. */
+export interface UpdateAnnotationInput {
+  annotationId: string;
+  title?: string;
+  content?: string;
+  isPublic?: boolean;
 }
 
 export interface AddCommentInput {
-  user_id: string;
-  annotation_id: string;
+  annotationId: string;
   content: string;
 }
 
@@ -657,8 +639,7 @@ export interface ShareChartInput {
 }
 
 export interface DeleteAnnotationInput {
-  user_id: string;
-  annotation_id: string;
+  annotationId: string;
 }
 
 // Response types
@@ -668,6 +649,22 @@ export interface AnnotationsForSeriesResponse {
 
 export interface CommentsForAnnotationResponse {
   commentsForAnnotation: AnnotationCommentType[];
+}
+
+export interface CreateAnnotationResponse {
+  createAnnotation: ChartAnnotationType;
+}
+
+export interface UpdateAnnotationResponse {
+  updateAnnotation: ChartAnnotationType;
+}
+
+export interface DeleteAnnotationResponse {
+  deleteAnnotation: boolean;
+}
+
+export interface AddCommentResponse {
+  addComment: AnnotationCommentType;
 }
 
 export interface ChartCollaboratorsResponse {

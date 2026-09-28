@@ -263,24 +263,20 @@ impl Query {
             .collect())
     }
 
-    /// Get annotations for a specific series
+    /// Get annotations for a specific series: public ones, plus the caller's own private ones.
     async fn annotations_for_series(
         &self,
         ctx: &Context<'_>,
         series_id: String,
-        user_id: Option<ID>,
+        #[graphql(deprecation = "Ignored: the viewer is the signed-in caller")] user_id: Option<ID>,
     ) -> Result<Vec<ChartAnnotationType>> {
+        let _ = user_id;
+        let viewer = current_user_id_opt(ctx)?;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
-        let user_uuid = if let Some(uid) = user_id {
-            Some(uuid::Uuid::parse_str(&uid)?)
-        } else {
-            None
-        };
-
         let annotations = collaboration_service
-            .get_annotations_for_series(&series_id, user_uuid)
+            .get_annotations_for_series(&series_id, viewer)
             .await?;
         Ok(annotations
             .into_iter()
@@ -288,18 +284,19 @@ impl Query {
             .collect())
     }
 
-    /// Get comments for a specific annotation
+    /// Get comments for an annotation the caller can see (public, or their own)
     async fn comments_for_annotation(
         &self,
         ctx: &Context<'_>,
         annotation_id: ID,
     ) -> Result<Vec<AnnotationCommentType>> {
+        let viewer = current_user_id_opt(ctx)?;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let annotation_uuid = uuid::Uuid::parse_str(&annotation_id)?;
         let comments = collaboration_service
-            .get_comments_for_annotation(annotation_uuid)
+            .get_comments_for_annotation(annotation_uuid, viewer)
             .await?;
         Ok(comments
             .into_iter()
@@ -307,31 +304,36 @@ impl Query {
             .collect())
     }
 
-    /// Get collaborators for a specific chart
+    /// Get collaborators for a specific chart. Requires sign-in; only the chart's own
+    /// collaborators see the list, everyone else gets an empty one.
     async fn chart_collaborators(
         &self,
         ctx: &Context<'_>,
         chart_id: ID,
     ) -> Result<Vec<ChartCollaboratorType>> {
+        let viewer = current_user(ctx)?.id;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let chart_uuid = uuid::Uuid::parse_str(&chart_id)?;
-        let collaborators = collaboration_service.get_collaborators(chart_uuid).await?;
+        let collaborators = collaboration_service
+            .get_collaborators(chart_uuid, viewer)
+            .await?;
         Ok(collaborators
             .into_iter()
             .map(|(collaborator, _user)| ChartCollaboratorType::from(collaborator))
             .collect())
     }
 
-    /// Get user information by ID. Callers may read only their own record unless they are an admin.
+    /// Get user information by ID. Callers may read their own record; reading anyone else's
+    /// requires `admin.users:read`.
     async fn user(&self, ctx: &Context<'_>, user_id: ID) -> Result<Option<UserType>> {
         // Authenticate before parsing, so anonymous callers never see input validation errors.
         let caller_id = current_user(ctx)?.id;
         let user_uuid = uuid::Uuid::parse_str(&user_id)?;
 
         if caller_id != user_uuid {
-            require_admin(ctx)?;
+            require_role(ctx, Role::AdminUsersRead)?;
         }
 
         let pool = ctx.data::<DatabasePool>()?;
@@ -354,15 +356,14 @@ impl Query {
 
     // Admin Queries
 
-    /// Get all users (admin only)
+    /// Get all users (requires `admin.users:read`)
     async fn users(
         &self,
         ctx: &Context<'_>,
         filter: Option<UserFilterInput>,
         pagination: Option<PaginationInput>,
     ) -> Result<UserConnection> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
+        require_role(ctx, Role::AdminUsersRead)?;
         let pool = ctx.data::<DatabasePool>()?;
 
         use diesel::prelude::*;
@@ -470,14 +471,13 @@ impl Query {
         })
     }
 
-    /// Get user sessions (admin only)
+    /// Get user sessions (requires `admin.sessions:read`)
     async fn user_sessions(
         &self,
         ctx: &Context<'_>,
         user_id: Option<ID>,
     ) -> Result<Vec<UserSessionType>> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
+        require_role(ctx, Role::AdminSessionsRead)?;
         let pool = ctx.data::<DatabasePool>()?;
 
         use diesel::prelude::*;
@@ -514,10 +514,9 @@ impl Query {
             .collect())
     }
 
-    /// Get active user sessions (admin only)
+    /// Get active user sessions (requires `admin.sessions:read`)
     async fn active_sessions(&self, ctx: &Context<'_>) -> Result<Vec<UserSessionType>> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
+        require_role(ctx, Role::AdminSessionsRead)?;
         let pool = ctx.data::<DatabasePool>()?;
 
         use diesel::prelude::*;
@@ -548,10 +547,9 @@ impl Query {
             .collect())
     }
 
-    /// Get system health metrics (admin only)
+    /// Get system health metrics (requires `admin.system:read`)
     async fn system_health(&self, ctx: &Context<'_>) -> Result<SystemHealthType> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
+        require_role(ctx, Role::AdminSystemRead)?;
         let pool = ctx.data::<DatabasePool>()?;
 
         use diesel::prelude::*;
@@ -598,31 +596,29 @@ impl Query {
         })
     }
 
-    /// Get security events (admin only)
+    /// Get security events (requires `admin.security:read`)
     async fn security_events(
         &self,
         ctx: &Context<'_>,
         _limit: Option<i32>,
     ) -> Result<Vec<SecurityEventType>> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
-        let _context = ctx.data::<crate::graphql::schema::GraphQLContext>()?;
+        require_role(ctx, Role::AdminSecurityRead)?;
+        let _context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
 
         // Get security events logic would go here
         // For now, return empty vector
         Ok(vec![])
     }
 
-    /// Get audit logs (admin only)
+    /// Get audit logs (requires `admin.audit:read`)
     async fn audit_logs(
         &self,
         ctx: &Context<'_>,
         _filter: Option<AuditLogFilterInput>,
         _pagination: Option<PaginationInput>,
     ) -> Result<AuditLogConnection> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
-        let _context = ctx.data::<crate::graphql::schema::GraphQLContext>()?;
+        require_role(ctx, Role::AdminAuditRead)?;
+        let _context = ctx.data::<crate::graphql::schema::SchemaResources>()?;
 
         // Get audit logs logic would go here
         // For now, return empty connection
@@ -888,7 +884,7 @@ mod tests {
             let role = u.as_ref().map(|u| u.role.clone());
             let schema = crate::graphql::schema::create_schema_with_data(
                 unreachable_pool(),
-                std::sync::Arc::new(crate::graphql::context::GraphQLContext::new(u)),
+                std::sync::Arc::new(crate::graphql::context::GraphQLContext::for_test_user(u)),
             );
             let resp = schema.execute(query.as_str()).await;
             assert_eq!(resp.errors.len(), 1, "{role:?}: {:?}", resp.errors);
@@ -909,7 +905,7 @@ mod tests {
     async fn test_user_query_requires_authentication_before_parsing_the_id() {
         let schema = crate::graphql::schema::create_schema_with_data(
             unreachable_pool(),
-            std::sync::Arc::new(crate::graphql::context::GraphQLContext::new(None)),
+            std::sync::Arc::new(crate::graphql::context::GraphQLContext::anonymous()),
         );
         let resp = schema
             .execute(r#"{ user(userId: "not-a-uuid") { id } }"#)
@@ -934,7 +930,9 @@ mod tests {
             let role = u.role.clone();
             let schema = crate::graphql::schema::create_schema_with_data(
                 unreachable_pool(),
-                std::sync::Arc::new(crate::graphql::context::GraphQLContext::new(Some(u))),
+                std::sync::Arc::new(crate::graphql::context::GraphQLContext::for_test_user(
+                    Some(u),
+                )),
             );
             let query = format!(r#"{{ user(userId: "{target}") {{ id }} }}"#);
             let resp = schema.execute(query.as_str()).await;

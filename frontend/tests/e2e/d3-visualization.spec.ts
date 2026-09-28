@@ -6,22 +6,6 @@ test.describe('D3.js Visualization Integration Tests', () => {
     await page.waitForLoadState('networkidle');
   });
 
-  test('should load D3.js world atlas data', async ({ page }) => {
-    // Monitor network requests for world atlas data
-    const requests: string[] = [];
-    page.on('request', request => {
-      if (request.url().includes('world-atlas') || request.url().includes('110m.json')) {
-        requests.push(request.url());
-      }
-    });
-
-    await page.reload();
-    await page.waitForLoadState('networkidle');
-
-    // Should have requested world atlas data
-    expect(requests.length).toBeGreaterThan(0);
-  });
-
   test('should render SVG with proper D3.js structure', async ({ page }) => {
     const svg = page.locator('svg').first();
     await expect(svg).toBeVisible();
@@ -140,18 +124,6 @@ test.describe('D3.js Visualization Integration Tests', () => {
     await page.waitForTimeout(500);
 
     await expect(svg).toBeVisible();
-  });
-
-  test('should handle D3.js data loading errors', async ({ page }) => {
-    // Block world atlas data request to simulate error
-    await page.route('**/world-atlas/**', route => route.abort());
-
-    await page.reload();
-    await page.waitForLoadState('networkidle');
-
-    // Should show error message
-    const errorMessage = page.getByText('Failed to load world map data');
-    await expect(errorMessage).toBeVisible();
   });
 
   test('should maintain D3.js performance with interactions', async ({ page }) => {

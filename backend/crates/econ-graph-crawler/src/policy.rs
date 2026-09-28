@@ -83,6 +83,7 @@ impl SourcePolicy {
             },
             SourceId::Census => SourcePolicy {
                 requests_per_second: 40.0 / 60.0,
+                needs_api_key: true,
                 ..base
             },
             SourceId::Sec => SourcePolicy {
@@ -180,6 +181,8 @@ mod tests {
     fn api_key_requirements() {
         assert!(SourcePolicy::default_for(SourceId::Fred).needs_api_key);
         assert!(SourcePolicy::default_for(SourceId::Bea).needs_api_key);
+        assert!(SourcePolicy::default_for(SourceId::Census).needs_api_key);
+        assert!(!SourcePolicy::default_for(SourceId::Bls).needs_api_key);
     }
 
     #[test]

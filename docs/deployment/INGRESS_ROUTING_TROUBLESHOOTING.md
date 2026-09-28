@@ -211,11 +211,11 @@ annotations:
 ```
 
 **B. Check CORS Configuration:**
-```yaml
-annotations:
-  nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
-  nginx.ingress.kubernetes.io/enable-cors: "true"
-```
+
+The backend decides CORS, from `CORS_ALLOWED_ORIGINS` (set from `CORS_ORIGIN` in
+`k8s/manifests/configmap.yaml`). Add the frontend's origin there. Don't add ingress
+`cors-*` or `enable-cors` annotations: the ingress would add a second
+`Access-Control-Allow-Origin` header, and browsers reject responses with two.
 
 ### Issue 4: Ingress Controller Not Reloading Configuration
 

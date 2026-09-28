@@ -370,7 +370,7 @@ resource "kubernetes_ingress_v1" "econgraph" {
         more_set_headers "X-Content-Type-Options: nosniff";
         more_set_headers "X-XSS-Protection: 1; mode=block";
         more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
-        more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' wss:";
+        more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://lh3.googleusercontent.com; font-src 'self'; connect-src 'self' wss:";
       EOT
 
       # Rate limiting
@@ -453,19 +453,19 @@ resource "kubernetes_ingress_v1" "production_ssl" {
         if ($uri ~ "^/\.well-known/acme-challenge/") {
           return 200;
         }
-        # Security headers for all other requests
-        more_set_headers "X-Frame-Options: DENY";
+        # Security headers for all other requests. Only the Keycloak silent sign-in page may be
+        # framed, and only by this origin.
+        set $frame_options "DENY";
+        if ($uri = "/silent-callback.html") {
+          set $frame_options "SAMEORIGIN";
+        }
+        more_set_headers "X-Frame-Options: $frame_options";
         more_set_headers "X-Content-Type-Options: nosniff";
         more_set_headers "X-XSS-Protection: 1; mode=block";
         more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
         more_set_headers "Permissions-Policy: geolocation=(), microphone=(), camera=()";
         more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload";
       EOT
-      "nginx.ingress.kubernetes.io/cors-allow-credentials" = "true"
-      "nginx.ingress.kubernetes.io/cors-allow-headers"     = "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,Accept,Origin,X-CSRF-Token"
-      "nginx.ingress.kubernetes.io/cors-allow-methods"     = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-      "nginx.ingress.kubernetes.io/cors-allow-origin"      = "https://${var.domain},https://*.${var.domain}"
-      "nginx.ingress.kubernetes.io/cors-max-age"           = "86400"
       "nginx.ingress.kubernetes.io/proxy-body-size"        = "10m"
       "nginx.ingress.kubernetes.io/proxy-buffer-size"      = "16k"
       "nginx.ingress.kubernetes.io/proxy-buffers-number"   = "8"
@@ -536,6 +536,19 @@ resource "kubernetes_ingress_v1" "production_ssl" {
               name = "econ-graph-backend-service"
               port {
                 number = 9876
+              }
+            }
+          }
+        }
+        # The OIDC sign-in callback is a frontend route; Exact wins over the /auth prefix below.
+        path {
+          path      = "/auth/callback"
+          path_type = "Exact"
+          backend {
+            service {
+              name = "econ-graph-frontend-service"
+              port {
+                number = 3000
               }
             }
           }

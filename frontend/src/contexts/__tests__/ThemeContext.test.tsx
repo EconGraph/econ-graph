@@ -9,21 +9,6 @@ import { render, screen, act, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 import { ThemeProvider, useTheme } from '../ThemeContext';
 
-// Mock the AuthContext
-vi.mock('../AuthContext', async () => {
-  const actual = await vi.importActual('../AuthContext');
-  return {
-    ...actual,
-    useAuth: () => ({
-      user: null, // No user in tests to avoid user preference interference
-      isAuthenticated: false,
-      login: vi.fn(),
-      logout: vi.fn(),
-    }),
-    AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  };
-});
-
 // localStorage mock is now handled globally in setupTests.vitest.ts
 
 // Test component that uses the theme context
