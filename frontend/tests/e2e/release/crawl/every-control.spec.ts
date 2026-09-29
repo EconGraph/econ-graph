@@ -54,19 +54,21 @@ const ROUTE_URLS: Record<string, (request: APIRequestContext) => Promise<string[
   '/series/:id': async request => [`/series/${await seededSeriesId(request, SEEDED.fhfaHpi)}`],
   '/sources': async () => ['/sources'],
   '/about': async () => ['/about'],
-  '/analysis/:id?': async request => [
-    '/analysis',
-    `/analysis/${await seededSeriesId(request, SEEDED.fhfaHpi)}`,
-  ],
   '/global': async () => ['/global'],
   '/privacy': async () => ['/privacy'],
   // Keycloak's redirect target. Opened directly, with no authorization response to finish, it
   // shows its error and a way home.
   CALLBACK_PATH: async () => [PATH_CONSTANTS.CALLBACK_PATH],
+  // The catch-all: any URL none of the routes above serves.
+  '*': async () => ['/this-page-does-not-exist'],
 };
 
-/** The header and sidebar, which every route shares; crawled once, from the dashboard. */
-const LAYOUT = '*';
+/**
+ * The header and sidebar, which every route shares; crawled once, from the dashboard. Distinct
+ * from the `'*'` route path (App.tsx's catch-all, rendering NotFound) so an allowlist entry for
+ * one is never mistaken for the other.
+ */
+const LAYOUT = 'layout';
 
 const routes = appRoutes();
 
@@ -88,9 +90,16 @@ const pathPattern = (path: string) =>
     )
     .join('');
 
-/** Matches the pathnames the routes in App.tsx serve, with or without a trailing slash. */
+/**
+ * Matches the pathnames a specific route in App.tsx serves, with or without a trailing slash. The
+ * catch-all ('*') is excluded: it isn't a page of its own, so a navigation only it would serve
+ * still counts as broken.
+ */
 const APP_PATH = new RegExp(
-  `^(?:${routes.map(r => pathPattern(PATH_CONSTANTS[r] ?? r)).join('|')})/?$`
+  `^(?:${routes
+    .filter(r => r !== '*')
+    .map(r => pathPattern(PATH_CONSTANTS[r] ?? r))
+    .join('|')})/?$`
 );
 const isAppPath = (pathname: string) => APP_PATH.test(pathname);
 

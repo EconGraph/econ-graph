@@ -17,12 +17,10 @@ on:
           - analysis
           - comprehensive
           - global-analysis
-          - professional-analysis
           - mobile-core
           - mobile-analysis
           - mobile-comprehensive
           - mobile-global-analysis
-          - mobile-professional-analysis
 
 jobs:
   e2e-container-build:
@@ -353,152 +351,6 @@ jobs:
           playwright-report/
         retention-days: 7
 
-  e2e-professional-analysis-tests:
-    name: E2E Professional Analysis Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    needs: [e2e-container-build]
-    if: ${{ github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == 'professional-analysis' || github.event.inputs.test_suite == '' }}
-
-    services:
-      postgres:
-        image: *postgres_image
-        env:
-          POSTGRES_PASSWORD: password
-          POSTGRES_USER: postgres
-          POSTGRES_DB: econ_graph_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Load CI port configuration
-      run: |
-        echo "Loading CI port configuration from ci-ports.env..."
-        set -a  # automatically export all variables
-        source ci-ports.env
-        set +a  # stop automatically exporting
-        echo "Backend port: $BACKEND_PORT"
-        echo "Frontend port: $FRONTEND_PORT"
-        echo "Backend URL: $BACKEND_URL"
-        echo "Frontend URL: $FRONTEND_URL"
-        echo "REACT_APP_GRAPHQL_ENDPOINT: $REACT_APP_GRAPHQL_ENDPOINT"
-        echo "REACT_APP_GRAPHQL_URL: $REACT_APP_GRAPHQL_URL"
-        echo "REACT_APP_BACKEND_PORT: $REACT_APP_BACKEND_PORT"
-        echo "CORS_ALLOWED_ORIGINS: $CORS_ALLOWED_ORIGINS"
-        # Export variables for subsequent steps
-        echo "BACKEND_PORT=$BACKEND_PORT" >> $GITHUB_ENV
-        echo "FRONTEND_PORT=$FRONTEND_PORT" >> $GITHUB_ENV
-        echo "BACKEND_URL=$BACKEND_URL" >> $GITHUB_ENV
-        echo "FRONTEND_URL=$FRONTEND_URL" >> $GITHUB_ENV
-        echo "REACT_APP_GRAPHQL_ENDPOINT=$REACT_APP_GRAPHQL_ENDPOINT" >> $GITHUB_ENV
-        echo "REACT_APP_GRAPHQL_URL=$REACT_APP_GRAPHQL_URL" >> $GITHUB_ENV
-        echo "REACT_APP_BACKEND_PORT=$REACT_APP_BACKEND_PORT" >> $GITHUB_ENV
-        echo "CORS_ALLOWED_ORIGINS=$CORS_ALLOWED_ORIGINS" >> $GITHUB_ENV
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
-
-    - name: Cache cargo registry
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          ~/.cargo/bin
-          backend/target
-        key: ${{ runner.os }}-shared-cargo-v2
-        restore-keys: |
-          ${{ runner.os }}-shared-cargo-
-
-    - name: Install diesel CLI
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
-      working-directory: backend
-
-    - name: Setup database
-      run: |
-        echo "Setting up database for E2E tests..."
-        export DATABASE_URL="postgres://postgres:password@localhost:5432/econ_graph_test"
-        cd backend
-        diesel migration run
-
-    - name: Download optimized E2E containers
-      uses: actions/download-artifact@v4
-      with:
-        name: e2e-containers-optimized-nightly
-
-    - name: Load optimized E2E containers
-      run: |
-        docker load < e2e-container-optimized.tar.gz
-        docker load < e2e-mobile-container-optimized.tar.gz
-
-    - name: Start services with health checks
-      run: |
-        echo "Starting backend and frontend services..."
-        # Start backend
-        docker run -d --name backend-server \
-          --network host \
-          -e DATABASE_URL="postgres://postgres:password@localhost:5432/econ_graph_test" \
-          -e BACKEND_PORT=$BACKEND_PORT \
-          -e FRONTEND_PORT=$FRONTEND_PORT \
-          -e CORS_ALLOWED_ORIGINS="$CORS_ALLOWED_ORIGINS" \
-          econ-graph-e2e-optimized:latest \
-          npm run start:backend
-
-        # Start frontend
-        docker run -d --name frontend-server \
-          --network host \
-          -e REACT_APP_GRAPHQL_ENDPOINT="$REACT_APP_GRAPHQL_ENDPOINT" \
-          -e REACT_APP_GRAPHQL_URL="$REACT_APP_GRAPHQL_URL" \
-          -e REACT_APP_BACKEND_PORT="$REACT_APP_BACKEND_PORT" \
-          econ-graph-e2e-optimized:latest \
-          npm run start:frontend
-
-        # Wait for services to be ready
-        echo "Waiting for services to start..."
-        timeout 120 bash -c 'until curl -f http://localhost:$BACKEND_PORT/health; do sleep 2; done'
-        timeout 120 bash -c 'until curl -f http://localhost:$FRONTEND_PORT; do sleep 2; done'
-
-    - name: Run Professional Analysis E2E Tests
-      run: |
-        # Verify frontend connectivity and capture both backend and frontend logs during test execution
-        chmod +x scripts/verify-frontend-connectivity.sh
-        chmod +x scripts/run-e2e-with-backend-logs.sh
-        chmod +x scripts/run-e2e-with-frontend-logs.sh
-        # Execute E2E tests with proper exit code propagation
-        set -e  # Exit on any command failure
-        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
-          --network host \
-          -w /app/frontend \
-          -e BASE_URL=http://localhost:$FRONTEND_PORT \
-          econ-graph-e2e-optimized:latest \
-          npm run test:e2e:professional-analysis
-
-    - name: Stop services
-      if: always()
-      run: |
-        docker stop backend-server || true
-        docker stop frontend-server || true
-
-    - name: Upload Playwright Report
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: playwright-report-e2e-professional-analysis-nightly
-        path: |
-          test-results/
-          playwright-report/
-        retention-days: 7
-
   e2e-comprehensive-tests:
     name: E2E Comprehensive Tests
     runs-on: ubuntu-latest
@@ -650,7 +502,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [e2e-container-build]
-    if: ${{ github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == 'mobile-core' || github.event.inputs.test_suite == 'mobile-analysis' || github.event.inputs.test_suite == 'mobile-comprehensive' || github.event.inputs.test_suite == 'mobile-global-analysis' || github.event.inputs.test_suite == 'mobile-professional-analysis' || github.event.inputs.test_suite == '' }}
+    if: ${{ github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == 'mobile-core' || github.event.inputs.test_suite == 'mobile-analysis' || github.event.inputs.test_suite == 'mobile-comprehensive' || github.event.inputs.test_suite == 'mobile-global-analysis' || github.event.inputs.test_suite == '' }}
 
     services:
       postgres:
@@ -776,9 +628,6 @@ jobs:
             ;;
           "mobile-global-analysis")
             MOBILE_TEST_CMD="npm run test:e2e:mobile:global-analysis"
-            ;;
-          "mobile-professional-analysis")
-            MOBILE_TEST_CMD="npm run test:e2e:mobile:professional-analysis"
             ;;
           *)
             # Run all mobile tests if no specific suite is selected

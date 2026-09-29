@@ -27,7 +27,6 @@ The CI pipeline includes multiple specialized test suites that run in parallel:
 #### **Test Suite Descriptions**
 - **Core Tests**: Basic functionality (navigation, authentication, dashboard)
 - **Global Analysis Tests**: World map, country selection, economic indicators (162 tests)
-- **Professional Analysis Tests**: Advanced charting, technical indicators (39 tests)
 - **Mobile Tests**: Mobile versions of all test suites
 - **Comprehensive Tests**: Integration/workflow tests (excludes specialized suites)
 
@@ -76,7 +75,6 @@ test('grafana dashboard with mock', async () => {
 ### CI Pipeline Jobs
 - `e2e-core-tests`: Basic functionality tests
 - `e2e-global-analysis-tests`: Global analysis features
-- `e2e-professional-analysis-tests`: Professional analysis features
 - `e2e-comprehensive-tests`: Integration tests
 - `mobile-e2e-*`: Mobile versions of all test suites
 
@@ -86,13 +84,11 @@ test('grafana dashboard with mock', async () => {
 # Run specific test suites
 npm run test:e2e:core
 npm run test:e2e:global-analysis
-npm run test:e2e:professional-analysis
 npm run test:e2e:comprehensive
 
 # Run mobile test suites
 npm run test:e2e:mobile:core
 npm run test:e2e:mobile:global-analysis
-npm run test:e2e:mobile:professional-analysis
 npm run test:e2e:mobile:comprehensive
 ```
 

@@ -25,7 +25,6 @@ import {
   Person as PersonIcon,
   Settings as SettingsIcon,
   ExitToApp as ExitToAppIcon,
-  Analytics as AnalyticsIcon,
   PrivacyTip as PrivacyTipIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
@@ -200,15 +199,6 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
           <Box sx={{ flexGrow: 0, display: 'flex', alignItems: 'center', gap: 1 }}>
             {isAuthenticated ? (
               <>
-                <Button
-                  color='inherit'
-                  startIcon={<AnalyticsIcon />}
-                  onClick={() => navigate('/analysis')}
-                  sx={{ display: { xs: 'none', md: 'flex' } }}
-                >
-                  Professional Analysis
-                </Button>
-
                 <IconButton onClick={handleUserMenuOpen} sx={{ p: 0 }} aria-label='user menu'>
                   <Avatar src={user?.avatar} alt={user?.name} sx={{ width: 32, height: 32 }}>
                     {user?.name?.[0]}
@@ -245,12 +235,6 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                       <ListItemText>Manage account</ListItemText>
                     </MenuItem>
                   )}
-                  <MenuItem onClick={() => (window.location.href = '/analysis')}>
-                    <ListItemIcon>
-                      <AnalyticsIcon fontSize='small' />
-                    </ListItemIcon>
-                    <ListItemText>Professional Analysis</ListItemText>
-                  </MenuItem>
                   <MenuItem onClick={() => navigate('/privacy')}>
                     <ListItemIcon>
                       <PrivacyTipIcon fontSize='small' />

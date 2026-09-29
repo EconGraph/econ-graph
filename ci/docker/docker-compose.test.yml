@@ -48,7 +48,7 @@ services:
     networks:
       - test-network
 
-  # Analysis tests - professional and global analysis
+  # Analysis tests - global analysis
   test-analysis:
     build:
       context: ../../frontend
