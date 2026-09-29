@@ -42,6 +42,10 @@ COPY crates ./crates
 # Needed at compile time by embed_migrations!() in econ-graph-core.
 COPY migrations ./migrations
 
+# Extra cargo features, empty for release images. A development image can pass
+# --build-arg CARGO_FEATURES=econ-graph-crawler-worker/static-catalogs.
+ARG CARGO_FEATURES=""
+
 # Build by binary name (not crate path): the crawler-worker binary may move between crates.
 # --locked fails the build instead of silently re-resolving deps if Cargo.lock drifts from Cargo.toml.
 # The target dir is a cache mount, so copy the binaries out within the same RUN.
@@ -49,6 +53,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
     cargo build --release --locked --bin econ-graph-backend --bin crawler-worker \
+        ${CARGO_FEATURES:+--features $CARGO_FEATURES} \
     && mkdir -p /out \
     && cp target/release/econ-graph-backend target/release/crawler-worker /out/
 
