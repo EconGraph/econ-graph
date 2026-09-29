@@ -557,9 +557,21 @@ type Query {
 	"""
 	dataSources: [DataSourceType!]!
 	"""
-	Get data points for a specific series with filtering and transformation
+	Get data points for a specific series with filtering and transformation, one page at a
+	time in date order. `totalCount` counts every matching point; read the next page with
+	`after: pageInfo.endCursor` until `pageInfo.hasNextPage` is false. A transformed page
+	has the values it would have in the whole series.
 	"""
-	seriesData(seriesId: ID!, filter: DataFilter, transformation: DataTransformation, first: Int, after: String): DataPointConnection!
+	seriesData(		seriesId: ID!,		filter: DataFilter,		transformation: DataTransformation,
+		"""
+		Page size. Defaults to and is capped at 10000; must not be negative.
+		"""
+		first: Int,
+		"""
+		Start after this cursor (a previous page's endCursor). A cursor is the number of points up to and including the one it names.
+		"""
+		after: String
+	): DataPointConnection!
 	"""
 	Crawler status, derived from the crawl queue (workers keep no other state).
 	"""
