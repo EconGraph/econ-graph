@@ -52,10 +52,10 @@ ARG CARGO_FEATURES=""
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    cargo build --release --locked --bin econ-graph-backend --bin crawler-worker \
+    cargo build --release --locked --bin econ-graph-backend --bin crawler-worker --bin crawler \
         ${CARGO_FEATURES:+--features $CARGO_FEATURES} \
     && mkdir -p /out \
-    && cp target/release/econ-graph-backend target/release/crawler-worker /out/
+    && cp target/release/econ-graph-backend target/release/crawler-worker target/release/crawler /out/
 
 ############################
 # Shared runtime base
@@ -79,6 +79,9 @@ WORKDIR /app
 FROM runtime-base AS crawler-worker
 
 COPY --from=builder --chown=econuser:econuser /out/crawler-worker /app/crawler-worker
+# The operator CLI (`kubectl exec deploy/crawler-worker -- /app/crawler coverage`); it reads the
+# pod's DATABASE_URL and API keys.
+COPY --from=builder --chown=econuser:econuser /out/crawler /app/crawler
 # Reference data read at runtime (not compiled in), e.g. the U.S. states table.
 COPY --chown=econuser:econuser crates/econ-graph-crawler/data /app/data
 ENV CRAWLER_DATA_DIR=/app/data

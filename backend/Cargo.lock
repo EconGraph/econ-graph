@@ -1443,6 +1443,7 @@ dependencies = [
 name = "econ-graph-crawler-worker"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "clap",
  "diesel",
  "diesel-async",
