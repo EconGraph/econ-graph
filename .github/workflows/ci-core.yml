@@ -560,6 +560,7 @@ jobs:
     # limiter-conformance tests run here.
     - name: Run crawler and queue tests (required)
       run: |
+        set -euo pipefail
         export PATH="$HOME/.cargo/bin:$PATH"
         cargo test -p econ-graph-crawler --all-features -- --test-threads=1
         cargo test -p econ-graph-crawler-worker -- --test-threads=1
@@ -569,6 +570,28 @@ jobs:
         cargo test -p econ-graph-core --features financial-ratios --lib financial_ratios -- --test-threads=1
         cargo test -p econ-graph-core crawl_queue -- --test-threads=1
         cargo test -p econ-graph-services queue_service -- --test-threads=1
+      working-directory: backend
+
+    # A plain `cargo test` (dev profile) still carries the dev-only static catalogs via
+    # debug_assertions, so only a real --release build proves a release image leaves them out.
+    - name: Crawler CLI in release mode registers only the live sources
+      run: |
+        set -euo pipefail
+        cargo build --release -p econ-graph-crawler --bin crawler
+        release_sources="$(target/release/crawler sources)"
+        echo "$release_sources"
+        for live in FRED BLS BEA CENSUS WORLD_BANK FHFA; do
+          if ! echo "$release_sources" | grep -qE "^$live\b.*\byes\b"; then
+            echo "::error::$live has no adapter in a release build"
+            exit 1
+          fi
+        done
+        for gone in IMF ECB OECD BOE BOJ BOC RBA SNB UN_STATS ILO WTO; do
+          if echo "$release_sources" | grep -qE "^$gone\b.*\byes\b"; then
+            echo "::error::$gone has an adapter in a release build"
+            exit 1
+          fi
+        done
       working-directory: backend
 
     # Allowed to fail (owner decision): the full workspace run still has known

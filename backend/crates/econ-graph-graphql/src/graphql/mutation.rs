@@ -333,10 +333,19 @@ fn plan_trigger_crawl(
             "priority must be between 1 and 10 (got {priority})"
         ));
     }
+    // Sources with no adapter in this build (release leaves out the static catalogs; IMF has
+    // none at all) would otherwise queue a job the worker can only fail with "no adapter".
+    // SEC has no adapter in the registry either: it's fetched via `fetch_filing`, not `plan_trigger_crawl`.
+    let registry = econ_graph_crawler::sources::default_registry();
     let parse = |s: &str| {
-        s.trim()
+        let trimmed = s.trim();
+        let id = trimmed
             .parse::<SourceId>()
-            .map_err(|_| format!("unknown source {:?}", s.trim()))
+            .map_err(|_| format!("unknown source {trimmed:?}"))?;
+        if id != SourceId::Sec && registry.get(id).is_none() {
+            return Err(format!("source {trimmed:?} is not available in this build"));
+        }
+        Ok(id)
     };
     let mut sources: Vec<SourceId> = Vec::new();
     for s in input
@@ -529,6 +538,11 @@ mod tests {
         assert!(err(input(&["FRED", "BLS"], &["GDP"], None, None)).contains("ambiguous"));
         assert!(err(input(&["NOPE"], &[], None, None)).contains("unknown source"));
         assert!(err(input(&[], &["GDP"], Some("NOPE"), None)).contains("unknown source"));
+        // IMF has no adapter in any build (its series ids were made up). The static catalogs
+        // (ECB and friends) can't be asserted against here: they register in this same test
+        // binary's dev-profile build via `debug_assertions`, so only a --release build excludes
+        // them (see the crawler crate's own `default_registry_holds_exactly_the_live_sources`).
+        assert!(err(input(&["IMF"], &[], None, None)).contains("not available in this build"));
         assert!(err(input(&["FRED"], &[], None, Some(0))).contains("priority"));
         assert!(err(input(&["FRED"], &[], None, Some(11))).contains("priority"));
         assert!(err(input(&[], &[], None, None)).contains("nothing to crawl"));
