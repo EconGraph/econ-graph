@@ -456,9 +456,35 @@ type EconomicSeriesType {
 	"""
 	dataPointCount: Int!
 	"""
+	The series' newest observation: its latest date, at the newest revision of that date.
+	
+	Returns null when the series has no data points. The value itself can be null when the
+	source published the date without a number. Batched with a dataloader, so a list of
+	series costs one query per batch of up to 200 series.
+	"""
+	latestObservation: LatestObservation
+	"""
 	Fetch data points with filters using a custom DataLoader
 	"""
 	dataPoints(filter: DataFilter, transformation: DataTransformation): [DataPoint!]!
+}
+
+"""
+The newest observation of a series: its latest date, at the newest revision of that date
+"""
+type LatestObservation {
+	"""
+	Observation date
+	"""
+	date: NaiveDate!
+	"""
+	Value at the newest revision; null when the source published the date without a number
+	"""
+	value: BigDecimal
+	"""
+	Publication date of the revision the value comes from
+	"""
+	revisionDate: NaiveDate!
 }
 
 type Mutation {
@@ -544,6 +570,14 @@ type Query {
 	Get a specific economic series by ID
 	"""
 	series(id: ID!): EconomicSeriesType
+	"""
+	Get an economic series by its source's name and the source's own id for it
+	
+	`sourceName` is the data source's `name` exactly as `dataSources` returns it (for
+	example "Federal Reserve Economic Data (FRED)"), and `externalId` is the source's series
+	id (for example "GDP"). Returns null when no such series exists.
+	"""
+	seriesByExternalId(sourceName: String!, externalId: String!): EconomicSeriesType
 	"""
 	List economic series with filtering and pagination
 	"""
