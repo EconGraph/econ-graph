@@ -216,11 +216,6 @@ type ChartAnnotationType {
 	Last update timestamp
 	"""
 	updatedAt: DateTime
-	"""
-	Deprecated alias for `visibility`: true when public. Kept so existing clients
-	(frontend queries not yet migrated to `visibility`) keep working.
-	"""
-	isVisible: Boolean! @deprecated(reason: "use visibility")
 }
 
 """
@@ -348,10 +343,6 @@ input CreateAnnotationInput {
 	Whether the annotation is public (visible to others)
 	"""
 	isPublic: Boolean
-	"""
-	Deprecated alias for `isPublic`. If both are given, `isPublic` wins.
-	"""
-	isVisible: Boolean @deprecated(reason: "use isPublic")
 }
 
 input DataFilter {
@@ -566,9 +557,21 @@ type Query {
 	"""
 	dataSources: [DataSourceType!]!
 	"""
-	Get data points for a specific series with filtering and transformation
+	Get data points for a specific series with filtering and transformation, one page at a
+	time in date order. `totalCount` counts every matching point; read the next page with
+	`after: pageInfo.endCursor` until `pageInfo.hasNextPage` is false. A transformed page
+	has the values it would have in the whole series.
 	"""
-	seriesData(seriesId: ID!, filter: DataFilter, transformation: DataTransformation, first: Int, after: String): DataPointConnection!
+	seriesData(		seriesId: ID!,		filter: DataFilter,		transformation: DataTransformation,
+		"""
+		Page size. Defaults to and is capped at 10000; must not be negative.
+		"""
+		first: Int,
+		"""
+		Start after this cursor (a previous page's endCursor). A cursor is the number of points up to and including the one it names.
+		"""
+		after: String
+	): DataPointConnection!
 	"""
 	Crawler status, derived from the crawl queue (workers keep no other state).
 	"""
@@ -873,10 +876,6 @@ input UpdateAnnotationInput {
 	New public/private visibility, if changing
 	"""
 	isPublic: Boolean
-	"""
-	Deprecated alias for `isPublic`. If both are given, `isPublic` wins.
-	"""
-	isVisible: Boolean @deprecated(reason: "use isPublic")
 }
 
 """
@@ -1027,10 +1026,6 @@ type UserType {
 	lastLoginAt: DateTime
 }
 
-"""
-Marks an element of a GraphQL schema as no longer supported.
-"""
-directive @deprecated(reason: String = "No longer supported") on FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE
 """
 Directs the executor to include this field or fragment only when the `if` argument is true.
 """

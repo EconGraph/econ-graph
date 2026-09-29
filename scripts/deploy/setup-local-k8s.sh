@@ -43,6 +43,14 @@ kubectl wait --for=condition=ready pod -l app=postgresql -n econ-graph --timeout
 
 echo "✅ PostgreSQL is ready in Kubernetes cluster"
 
+echo ""
+echo "📋 Step 2b: Setting up PostgreSQL backups..."
+kubectl apply -f k8s/manifests/postgres-backup-pvc.yaml
+kubectl apply -f k8s/manifests/postgres-backup-configmap.yaml
+kubectl apply -f k8s/manifests/postgres-backup-cronjob.yaml
+"$PROJECT_ROOT/scripts/deploy/protect-postgres-pv.sh"
+echo "✅ Nightly backups configured (see docs/deployment/POSTGRES_BACKUP_RESTORE.md)"
+
 # Step 3: Build Docker images
 echo ""
 echo "📋 Step 3: Building Docker images..."

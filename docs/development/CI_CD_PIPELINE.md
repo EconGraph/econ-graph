@@ -6,17 +6,7 @@ This document provides a comprehensive overview of the entire CI/CD pipeline for
 
 The EconGraph CI/CD pipeline consists of 5 main phases with 20+ individual jobs that run in parallel where possible to maximize efficiency and provide fast feedback.
 
-## Complete CI/CD Pipeline
-
-![Complete CI Pipeline](charts/complete-ci-pipeline.svg)
-
-*Figure 1: Complete CI/CD pipeline showing all jobs and their relationships*
-
 ## Pipeline Phases
-
-![CI Job Dependencies](charts/ci-job-dependencies.svg)
-
-*Figure 2: CI job dependencies organized by phases*
 
 ### Phase 1: Setup & Quality Checks
 **Purpose**: Initial setup, code quality validation, and security scanning
@@ -91,10 +81,6 @@ The EconGraph CI/CD pipeline consists of 5 main phases with 20+ individual jobs 
 
 ## E2E Test Architecture
 
-![Test Architecture](charts/test-architecture.svg)
-
-*Figure 3: E2E test group architecture showing all test categories and infrastructure*
-
 ### E2E Test Service Health Verification
 
 The E2E test pipeline now includes comprehensive service health verification to ensure tests run against properly functioning services:
@@ -119,18 +105,6 @@ The E2E test pipeline now includes comprehensive service health verification to 
 - **Static File Serving Problems**: Frontend unable to serve JavaScript bundles
 - **Docker Networking Issues**: Services unable to communicate
 - **Exit Code Masking**: Test failures not propagating to CI job status
-
-## Docker Architecture
-
-![Docker Architecture](charts/docker-architecture.svg)
-
-*Figure 4: Docker service architecture and relationships for E2E testing*
-
-## Performance Comparison
-
-![Performance Comparison](charts/performance-comparison.svg)
-
-*Figure 5: Performance improvement from sequential to parallel execution*
 
 ## Current CI Performance Issues
 

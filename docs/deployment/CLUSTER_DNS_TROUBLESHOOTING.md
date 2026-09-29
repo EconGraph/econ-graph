@@ -109,8 +109,8 @@ kubectl rollout restart deployment/cert-manager -n cert-manager
 # Test external DNS resolution
 dig NS econgraph.com
 # Should show Cloudflare nameservers:
-# econgraph.com.		86381	IN	NS	leia.ns.cloudflare.com.
-# econgraph.com.		86381	IN	NS	seth.ns.cloudflare.com.
+# econgraph.com.    86381  IN  NS  leia.ns.cloudflare.com.
+# econgraph.com.    86381  IN  NS  seth.ns.cloudflare.com.
 
 # Test ACME challenge records
 dig TXT _acme-challenge.econgraph.com
@@ -260,7 +260,6 @@ kubectl logs -n cert-manager deployment/cert-manager | grep -i "error\|failed"
 
 - [Let's Encrypt Cloudflare DNS-01 Integration](./LETSENCRYPT_CLOUDFLARE_DNS01_INTEGRATION.md)
 - [Kubernetes Deployment Guide](./KUBERNETES_DEPLOYMENT.md)
-- [cert-manager Configuration](./CERT_MANAGER_CONFIGURATION.md)
 
 ## Conclusion
 

@@ -81,10 +81,10 @@ async fn test_complete_sec_crawler_xbrl_pipeline() {
 
 ```bash
 # Run all XBRL financial integration tests
-cargo test --package econ-graph-sec-crawler --test "xbrl_financial_integration_tests"
+cargo test --package econ-graph-sec-crawler --features xbrl-parser --test "xbrl_financial_integration_tests"
 
 # Run with verbose output
-cargo test --package econ-graph-sec-crawler --test "xbrl_financial_integration_tests" -- --nocapture
+cargo test --package econ-graph-sec-crawler --features xbrl-parser --test "xbrl_financial_integration_tests" -- --nocapture
 
 # Run using the optimized test runner
 ./scripts/run-tests-optimized.sh
@@ -223,10 +223,10 @@ Each test is completely isolated:
 ### Backend Debugging
 ```bash
 # Run with verbose output
-RUST_LOG=debug cargo test --test xbrl_financial_integration_tests -- --nocapture
+RUST_LOG=debug cargo test --features xbrl-parser --test xbrl_financial_integration_tests -- --nocapture
 
 # Run specific test
-cargo test --test xbrl_financial_integration_tests test_xbrl_taxonomy_schema_storage -- --nocapture
+cargo test --features xbrl-parser --test xbrl_financial_integration_tests test_xbrl_taxonomy_schema_storage -- --nocapture
 ```
 
 ### Frontend Debugging

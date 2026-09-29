@@ -834,7 +834,6 @@ impl From<AnnotationVisibility> for AnnotationVisibilityEnum {
 
 /// GraphQL representation of a chart annotation
 #[derive(Clone, SimpleObject)]
-#[graphql(complex)]
 pub struct ChartAnnotationType {
     /// Annotation ID
     pub id: ID,
@@ -887,16 +886,6 @@ impl From<ChartAnnotation> for ChartAnnotationType {
             created_at: annotation.created_at,
             updated_at: annotation.updated_at,
         }
-    }
-}
-
-#[ComplexObject]
-impl ChartAnnotationType {
-    /// Deprecated alias for `visibility`: true when public. Kept so existing clients
-    /// (frontend queries not yet migrated to `visibility`) keep working.
-    #[graphql(deprecation = "use visibility")]
-    async fn is_visible(&self) -> bool {
-        self.visibility == AnnotationVisibilityEnum::Public
     }
 }
 
@@ -1044,9 +1033,6 @@ pub struct CreateAnnotationInput {
     pub color: Option<String>,
     /// Whether the annotation is public (visible to others)
     pub is_public: Option<bool>,
-    /// Deprecated alias for `isPublic`. If both are given, `isPublic` wins.
-    #[graphql(deprecation = "use isPublic")]
-    pub is_visible: Option<bool>,
 }
 
 /// Input for adding a comment to an annotation
@@ -1084,9 +1070,6 @@ pub struct UpdateAnnotationInput {
     pub annotation_type: Option<String>,
     /// New public/private visibility, if changing
     pub is_public: Option<bool>,
-    /// Deprecated alias for `isPublic`. If both are given, `isPublic` wins.
-    #[graphql(deprecation = "use isPublic")]
-    pub is_visible: Option<bool>,
 }
 
 /// Input for deleting an annotation

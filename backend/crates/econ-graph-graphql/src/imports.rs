@@ -76,8 +76,8 @@ pub use econ_graph_services::services::{
 
 // GraphQL framework imports
 pub use async_graphql::{
-    ComplexObject, Context, EmptyMutation, EmptySubscription, Enum, Error as GraphQLError,
-    InputObject, Object, Result, Schema, SimpleObject, ID,
+    Context, EmptyMutation, EmptySubscription, Enum, Error as GraphQLError, InputObject, Object,
+    Result, Schema, SimpleObject, ID,
 };
 
 // Standard library and external crate imports

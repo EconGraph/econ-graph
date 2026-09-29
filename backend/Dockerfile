@@ -16,9 +16,9 @@
 # (many crates, several [[bin]] paths). Requires BuildKit (default since Docker 23;
 # docker/build-push-action always uses it).
 #
-# Cargo.lock: /backend/Cargo.lock is gitignored, so CI/clean checkouts resolve
-# dependencies fresh (exact `=` pins in the workspace Cargo.toml keep the risky ones
-# stable). If a local Cargo.lock exists it IS copied in and honoured.
+# Cargo.lock: backend/Cargo.lock is committed and required. The build uses
+# `--locked`, so a lockfile out of sync with Cargo.toml fails the build instead
+# of silently re-resolving.
 
 # Keep in sync with rust-toolchain.toml at the repository root (channel = "1.98.1").
 # Bookworm to match the runtime image's glibc/OpenSSL/libpq.
@@ -37,18 +37,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Cargo.lock* is optional; pairing it with Cargo.toml keeps COPY valid when it's absent.
-COPY Cargo.toml Cargo.lock* ./
+COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 # Needed at compile time by embed_migrations!() in econ-graph-core.
 COPY migrations ./migrations
 
 # Build by binary name (not crate path): the crawler-worker binary may move between crates.
+# --locked fails the build instead of silently re-resolving deps if Cargo.lock drifts from Cargo.toml.
 # The target dir is a cache mount, so copy the binaries out within the same RUN.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    cargo build --release --bin econ-graph-backend --bin crawler-worker \
+    cargo build --release --locked --bin econ-graph-backend --bin crawler-worker \
     && mkdir -p /out \
     && cp target/release/econ-graph-backend target/release/crawler-worker /out/
 

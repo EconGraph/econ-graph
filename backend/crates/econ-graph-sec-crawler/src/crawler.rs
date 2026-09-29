@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::models::{CrawlConfig, CrawlResult, DtsReference, FilingInfo, SecCompany};
+#[cfg(feature = "xbrl-parser")]
+use crate::models::DtsReference;
+use crate::models::{CrawlConfig, CrawlResult, FilingInfo, SecCompany};
 use crate::storage::{XbrlFileTooLarge, XbrlStorage, XbrlStorageConfig};
 use crate::submissions::EdgarSubmissions;
 use crate::utils::{
@@ -499,7 +501,9 @@ impl SecEdgarCrawler {
             accession_number, file_size, stored_doc.compressed_size
         );
 
-        // Discover and download DTS components
+        // Discover and download DTS components. Only the XBRL parser uses them, so the live crawl
+        // skips this unless the parser is compiled in.
+        #[cfg(feature = "xbrl-parser")]
         if let Err(e) = self
             .download_dts_components(content.as_bytes(), &xbrl_url, &stored_doc.id)
             .await
@@ -515,6 +519,7 @@ impl SecEdgarCrawler {
     }
 
     /// Download DTS (Discoverable Taxonomy Set) components for an XBRL instance
+    #[cfg(feature = "xbrl-parser")]
     async fn download_dts_components(
         &self,
         xbrl_content: &[u8],
@@ -546,6 +551,7 @@ impl SecEdgarCrawler {
     }
 
     /// Discover DTS references in XBRL content
+    #[cfg(feature = "xbrl-parser")]
     fn discover_dts_references(&self, xbrl_content: &[u8]) -> Result<Vec<DtsReference>> {
         use quick_xml::events::Event;
         use quick_xml::Reader;
@@ -612,6 +618,7 @@ impl SecEdgarCrawler {
     }
 
     /// Download a single taxonomy component
+    #[cfg(feature = "xbrl-parser")]
     async fn download_taxonomy_component(
         &self,
         reference: &DtsReference,
@@ -720,6 +727,7 @@ impl SecEdgarCrawler {
     }
 
     /// Parse and store XBRL data after downloading
+    #[cfg(feature = "xbrl-parser")]
     pub async fn parse_and_store_xbrl(&self, accession_number: &str) -> Result<()> {
         info!("Parsing and storing XBRL data for: {}", accession_number);
 
