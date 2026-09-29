@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+# models::financial_ratios (FinancialRatios, FinancialRatioCalculator). Unused by default builds;
+# the SEC crawler's `xbrl-parser` feature enables it.
+financial-ratios = []
+
 [dependencies]
 # Database
 diesel.workspace = true
@@ -24,6 +30,9 @@ uuid.workspace = true
 # Decimal handling
 bigdecimal.workspace = true
 rust_decimal.workspace = true
+
+# URL parsing (for redacting credentials before logging)
+url.workspace = true
 
 # Error handling
 anyhow.workspace = true
@@ -53,10 +62,6 @@ warp.workspace = true
 
 # GraphQL (needed for error types)
 async-graphql.workspace = true
-
-# Authentication (needed for user model)
-bcrypt.workspace = true
-jsonwebtoken.workspace = true
 
 # Test dependencies
 [dev-dependencies]

@@ -30,10 +30,6 @@ fn user() -> User {
         email: "caller@example.test".into(),
         name: "caller".into(),
         avatar_url: None,
-        provider: "email".into(),
-        provider_id: None,
-        password_hash: None,
-        role: "viewer".into(),
         organization: None,
         theme: "light".into(),
         default_chart_type: "line".into(),
@@ -77,11 +73,6 @@ fn protected() -> Vec<(&'static str, Role, String)> {
             r#"mutation { triggerCrawl(input: { sources: ["FRED"], seriesIds: ["GDP"] }) { __typename } }"#.into(),
         ),
         (
-            "createUser",
-            Role::AdminUsersCreate,
-            r#"mutation { createUser(input: { email: "a@example.test", name: "a" }) { __typename } }"#.into(),
-        ),
-        (
             "updateUser",
             Role::AdminUsersUpdate,
             format!(r#"mutation {{ updateUser(id: "{id}", input: {{ name: "a" }}) {{ __typename }} }}"#),
@@ -100,11 +91,6 @@ fn protected() -> Vec<(&'static str, Role, String)> {
             "activateUser",
             Role::AdminUsersSuspend,
             format!(r#"mutation {{ activateUser(id: "{id}") }}"#),
-        ),
-        (
-            "forceLogoutUser",
-            Role::AdminSessionsRevoke,
-            format!(r#"mutation {{ forceLogoutUser(id: "{id}") }}"#),
         ),
         (
             "createAnnotation",
@@ -136,16 +122,6 @@ fn protected() -> Vec<(&'static str, Role, String)> {
             "user (another user)",
             Role::AdminUsersRead,
             format!(r#"{{ user(userId: "{id}") {{ __typename }} }}"#),
-        ),
-        (
-            "userSessions",
-            Role::AdminSessionsRead,
-            "{ userSessions { __typename } }".into(),
-        ),
-        (
-            "activeSessions",
-            Role::AdminSessionsRead,
-            "{ activeSessions { __typename } }".into(),
         ),
         (
             "systemHealth",
@@ -242,19 +218,17 @@ fn all_but(missing: Role) -> Vec<Role> {
         .collect()
 }
 
-/// Roles are assigned in the identity provider: the user mutations no longer take one.
+/// Roles are assigned in the identity provider: updateUser no longer takes one.
 #[tokio::test]
-async fn user_mutations_no_longer_take_a_role() {
+async fn update_user_no_longer_takes_a_role() {
     let id = Uuid::new_v4();
-    for query in [
-        r#"mutation { createUser(input: { email: "a@example.test", name: "a", role: "admin" }) { __typename } }"#.to_string(),
-        format!(r#"mutation {{ updateUser(id: "{id}", input: {{ role: "super_admin" }}) {{ __typename }} }}"#),
-    ] {
-        let errs = errors(caller_with(user(), Role::all().iter().copied()), &query).await;
-        assert_eq!(errs.len(), 1, "{query}: {errs:?}");
-        assert!(errs[0].contains("role"), "{query}: {errs:?}");
-        assert!(!is_auth_error(&errs[0]), "{query}: {errs:?}");
-    }
+    let query = format!(
+        r#"mutation {{ updateUser(id: "{id}", input: {{ role: "super_admin" }}) {{ __typename }} }}"#
+    );
+    let errs = errors(caller_with(user(), Role::all().iter().copied()), &query).await;
+    assert_eq!(errs.len(), 1, "{query}: {errs:?}");
+    assert!(errs[0].contains("role"), "{query}: {errs:?}");
+    assert!(!is_auth_error(&errs[0]), "{query}: {errs:?}");
 }
 
 #[tokio::test]
@@ -279,7 +253,7 @@ async fn changing_is_active_needs_the_suspend_role() {
     assert!(!errs.iter().any(|e| is_auth_error(e)), "{errs:?}");
 }
 
-/// Needs `DATABASE_URL` (skipped otherwise): the target check runs after the target is read.
+/// DB-backed user administration checks skip when `DATABASE_URL` is unavailable.
 async fn insert_user(pool: &DatabasePool) -> User {
     use diesel::prelude::*;
     use diesel_async::RunQueryDsl;
@@ -288,9 +262,6 @@ async fn insert_user(pool: &DatabasePool) -> User {
         email: format!("{}@example.test", Uuid::new_v4()),
         name: "target".into(),
         avatar_url: None,
-        provider: "email".into(),
-        provider_id: None,
-        password_hash: None,
         organization: None,
         theme: "light".into(),
         default_chart_type: "line".into(),
@@ -307,25 +278,38 @@ async fn insert_user(pool: &DatabasePool) -> User {
         .unwrap()
 }
 
-/// The row of `id` as the test left it: (email, is_active), or `None` once deleted.
-async fn email_and_status(pool: &DatabasePool, id: Uuid) -> Option<(String, bool)> {
+async fn read_user(pool: &DatabasePool, id: Uuid) -> Option<User> {
     use diesel::prelude::*;
     use diesel_async::RunQueryDsl;
     use econ_graph_core::schema::users;
     let mut conn = pool.get().await.unwrap();
     users::table
-        .filter(users::id.eq(id))
-        .select((users::email, users::is_active))
+        .find(id)
+        .select(User::as_select())
         .first(&mut conn)
         .await
         .optional()
         .unwrap()
 }
 
+async fn run_user_mutation(pool: &DatabasePool, roles: &[Role], query: &str) -> Vec<String> {
+    let schema = create_schema_with_data(
+        pool.clone(),
+        Arc::new(caller_with(user(), roles.iter().copied())),
+    );
+    schema
+        .execute(query)
+        .await
+        .errors
+        .into_iter()
+        .map(|error| error.message)
+        .collect()
+}
+
 #[tokio::test]
-async fn acting_on_another_user_needs_every_staff_role() {
+async fn named_user_admin_roles_can_act_on_another_user() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("DATABASE_URL not set; skipping DB-backed target check test");
+        eprintln!("DATABASE_URL not set; skipping user administration test");
         return;
     };
     let _guard = crate::graphql::TEST_DB_LOCK.lock().await;
@@ -335,66 +319,70 @@ async fn acting_on_another_user_needs_every_staff_role() {
     let pool = econ_graph_core::database::create_pool(&url)
         .await
         .expect("pool");
-    let run = |caller: User, roles: Vec<Role>, query: String| {
-        let pool = pool.clone();
-        async move {
-            let schema = create_schema_with_data(pool, Arc::new(caller_with(caller, roles)));
-            let resp = schema.execute(query.as_str()).await;
-            resp.errors
-                .into_iter()
-                .map(|e| e.message)
-                .collect::<Vec<_>>()
-        }
-    };
-    // Suspend before activate and delete last, so each one finds the row.
-    let mutations = |id: Uuid| {
-        vec![
-            format!(
-                r#"mutation {{ updateUser(id: "{id}", input: {{ email: "{}@example.test" }}) {{ __typename }} }}"#,
-                Uuid::new_v4()
-            ),
-            format!(r#"mutation {{ suspendUser(id: "{id}") }}"#),
-            format!(r#"mutation {{ activateUser(id: "{id}") }}"#),
-            format!(r#"mutation {{ forceLogoutUser(id: "{id}") }}"#),
-            format!(r#"mutation {{ deleteUser(id: "{id}") }}"#),
-        ]
-    };
-    // Every role but one staff role.
-    let narrow = all_but(Role::AdminAuditRead);
-
     let target = insert_user(&pool).await;
-    let before = email_and_status(&pool, target.id).await;
-    for query in mutations(target.id) {
-        let errs = run(user(), narrow.clone(), query.clone()).await;
-        assert_eq!(errs.len(), 1, "{query}: {errs:?}");
-        assert!(
-            errs[0].contains("Insufficient permissions"),
-            "{query}: {errs:?}"
-        );
+    let id = target.id;
+
+    for (roles, query) in [
+        (
+            vec![Role::AdminUsersUpdate],
+            format!(
+                r#"mutation {{ updateUser(id: "{id}", input: {{ name: "Updated" }}) {{ __typename }} }}"#
+            ),
+        ),
+        (
+            vec![Role::AdminUsersSuspend],
+            format!(r#"mutation {{ suspendUser(id: "{id}") }}"#),
+        ),
+        (
+            vec![Role::AdminUsersSuspend],
+            format!(r#"mutation {{ activateUser(id: "{id}") }}"#),
+        ),
+        (
+            vec![Role::AdminUsersDelete],
+            format!(r#"mutation {{ deleteUser(id: "{id}") }}"#),
+        ),
+    ] {
+        let errs = run_user_mutation(&pool, &roles, &query).await;
+        assert!(errs.is_empty(), "{query}: {errs:?}");
     }
-    assert_eq!(
-        email_and_status(&pool, target.id).await,
-        before,
-        "the target was changed"
+    assert!(read_user(&pool, id).await.is_none());
+}
+
+#[tokio::test]
+async fn update_user_email_conflict_leaves_other_fields_unchanged() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("DATABASE_URL not set; skipping user update test");
+        return;
+    };
+    let _guard = crate::graphql::TEST_DB_LOCK.lock().await;
+    econ_graph_core::database::run_migrations(&url)
+        .await
+        .expect("migrations");
+    let pool = econ_graph_core::database::create_pool(&url)
+        .await
+        .expect("pool");
+    let target = insert_user(&pool).await;
+    let other = insert_user(&pool).await;
+    let query = format!(
+        r#"mutation {{ updateUser(id: "{}", input: {{ name: "Should not persist", theme: "dark", email: "{}" }}) {{ __typename }} }}"#,
+        target.id, other.email
     );
+    let errs = run_user_mutation(&pool, &[Role::AdminUsersUpdate], &query).await;
+    assert_eq!(errs, ["User with this email already exists"]);
+    let unchanged = read_user(&pool, target.id).await.unwrap();
+    assert_eq!(unchanged.name, target.name);
+    assert_eq!(unchanged.theme, target.theme);
+    assert_eq!(unchanged.email, target.email);
 
-    // The same narrow caller may act on their own account.
-    let me = insert_user(&pool).await;
-    for query in mutations(me.id) {
-        let errs = run(me.clone(), narrow.clone(), query.clone()).await;
-        assert!(errs.is_empty(), "{query}: {errs:?}");
-    }
-    assert_eq!(email_and_status(&pool, me.id).await, None);
-
-    // Holding every staff role, a caller may act on anyone.
-    let staff: Vec<Role> = Role::all()
-        .iter()
-        .copied()
-        .filter(|r| r.is_staff())
-        .collect();
-    for query in mutations(target.id) {
-        let errs = run(user(), staff.clone(), query.clone()).await;
-        assert!(errs.is_empty(), "{query}: {errs:?}");
-    }
-    assert_eq!(email_and_status(&pool, target.id).await, None);
+    // Fields absent from the input, including login metadata, are not rewritten.
+    let query = format!(
+        r#"mutation {{ updateUser(id: "{}", input: {{ name: "Updated" }}) {{ __typename }} }}"#,
+        target.id
+    );
+    let errs = run_user_mutation(&pool, &[Role::AdminUsersUpdate], &query).await;
+    assert!(errs.is_empty(), "{errs:?}");
+    let changed = read_user(&pool, target.id).await.unwrap();
+    assert_eq!(changed.name, "Updated");
+    assert_eq!(changed.email, target.email);
+    assert_eq!(changed.last_login_at, target.last_login_at);
 }

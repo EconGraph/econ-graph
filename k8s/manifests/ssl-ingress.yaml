@@ -34,7 +34,7 @@ metadata:
       # Sign-in needs the Keycloak issuer (VITE_OIDC_ISSUER) reachable: 'self' covers it when
       # Keycloak is served on this host; a separate Keycloak origin must be added to
       # connect-src and to a frame-src directive before that issuer is used.
-      more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.econ-graph.com wss:; frame-ancestors $frame_ancestors;";
+      more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.econ-graph.com wss:; frame-ancestors $frame_ancestors;";
     
     # Rate Limiting
     nginx.ingress.kubernetes.io/rate-limit: "100"

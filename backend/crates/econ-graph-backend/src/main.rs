@@ -13,9 +13,10 @@ use tracing::{info, Instrument};
 use warp::{Filter, Reply as _};
 
 // Import from our new crates
-use econ_graph_auth::auth::{routes::auth_routes, services::AuthService};
 use econ_graph_auth::{authenticate, BearerError, Caller, OidcConfig, OidcVerifier, Role};
-use econ_graph_core::{create_pool, AppError, AppResult, Config, DatabasePool};
+use econ_graph_core::{
+    create_pool, redact_database_url, AppError, AppResult, Config, DatabasePool,
+};
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
 use econ_graph_mcp::mcp_server::{mcp_handler, EconGraphMcpServer};
 
@@ -61,6 +62,16 @@ async fn graphql_handler(
     Ok(GraphQLResponse::from(response))
 }
 
+/// Whether `/playground` is served: only when `ENABLE_GRAPHQL_PLAYGROUND` is `true` or `1`.
+///
+/// Deployed builds leave it unset, so the playground (and its schema explorer) is not public.
+fn playground_enabled(setting: Option<String>) -> bool {
+    setting
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+}
+
 async fn graphql_playground() -> Result<impl warp::Reply, Infallible> {
     Ok(warp::reply::html(playground_source(
         GraphQLPlaygroundConfig::new("/graphql"),
@@ -78,7 +89,17 @@ async fn health_check() -> Result<impl warp::Reply, Infallible> {
     })))
 }
 
-async fn root_handler() -> Result<impl warp::Reply, Infallible> {
+/// Landing-page entry for `/playground`, shown only when the playground is served.
+const PLAYGROUND_ENDPOINT_HTML: &str = r#"        <div class="endpoint">
+            <div><span class="method">GET</span> <code>/playground</code></div>
+            <p><a href="/playground">Interactive GraphQL Playground</a> - Test queries and explore the schema</p>
+        </div>"#;
+
+/// Landing-page quick start pointing at the playground, shown only when it is served.
+const PLAYGROUND_QUICK_START_HTML: &str = r#"        <p>Visit the <a href="/playground">GraphQL Playground</a> to start exploring economic data!</p>"#;
+
+/// The landing page at `/`. It lists `/playground` only when the playground is served.
+async fn root_handler(playground: bool) -> Result<impl warp::Reply, Infallible> {
     // Record root endpoint metrics
     metrics::record_http_request("GET", "/", 200, 0.0);
 
@@ -110,10 +131,7 @@ async fn root_handler() -> Result<impl warp::Reply, Infallible> {
             <p>GraphQL endpoint for economic data queries and mutations</p>
         </div>
 
-        <div class="endpoint">
-            <div><span class="method">GET</span> <code>/playground</code></div>
-            <p><a href="/playground">Interactive GraphQL Playground</a> - Test queries and explore the schema</p>
-        </div>
+<!--PLAYGROUND_ENDPOINT-->
 
         <div class="endpoint">
             <div><span class="method">GET</span> <code>/health</code></div>
@@ -131,7 +149,7 @@ async fn root_handler() -> Result<impl warp::Reply, Infallible> {
         </div>
 
         <h2>🚀 Quick Start</h2>
-        <p>Visit the <a href="/playground">GraphQL Playground</a> to start exploring economic data!</p>
+<!--PLAYGROUND_QUICK_START-->
 
         <h2>📈 Features</h2>
         <ul>
@@ -148,8 +166,15 @@ async fn root_handler() -> Result<impl warp::Reply, Infallible> {
 </html>
     "#;
 
+    let (endpoint, quick_start) = if playground {
+        (PLAYGROUND_ENDPOINT_HTML, PLAYGROUND_QUICK_START_HTML)
+    } else {
+        ("", "<p>Send GraphQL queries to <code>/graphql</code>.</p>")
+    };
     Ok(warp::reply::html(
-        html.replace("{}", env!("CARGO_PKG_VERSION")),
+        html.replace("{}", env!("CARGO_PKG_VERSION"))
+            .replace("<!--PLAYGROUND_ENDPOINT-->", endpoint)
+            .replace("<!--PLAYGROUND_QUICK_START-->", quick_start),
     ))
 }
 
@@ -483,160 +508,28 @@ fn mcp_route(
         .unify()
 }
 
-#[tokio::main]
-async fn main() -> AppResult<()> {
-    // Initialize tracing with more detailed output
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_target(false)
-        .with_thread_ids(true)
-        .with_thread_names(true)
-        .init();
-
-    info!(
-        "🚀 Starting EconGraph Backend Server v{}",
-        env!("CARGO_PKG_VERSION")
-    );
-
-    // Log environment variables (non-sensitive ones)
-    info!("🔧 Environment Configuration:");
-    info!(
-        "  - RUST_LOG: {:?}",
-        std::env::var("RUST_LOG").unwrap_or_else(|_| "not set".to_string())
-    );
-    info!(
-        "  - BACKEND_PORT: {:?}",
-        std::env::var("BACKEND_PORT").unwrap_or_else(|_| "not set".to_string())
-    );
-    info!(
-        "  - FRONTEND_PORT: {:?}",
-        std::env::var("FRONTEND_PORT").unwrap_or_else(|_| "not set".to_string())
-    );
-    info!(
-        "  - DATABASE_URL: {:?}",
-        if std::env::var("DATABASE_URL").is_ok() {
-            "set"
-        } else {
-            "not set"
-        }
-    );
-    info!(
-        "  - JWT_SECRET: {:?}",
-        if std::env::var("JWT_SECRET").is_ok() {
-            "set"
-        } else {
-            "not set"
-        }
-    );
-
-    // Load configuration
-    info!("📋 Loading configuration from environment...");
-    let config = Config::from_env().map_err(|e| {
-        let error = AppError::ConfigError(format!("Failed to load configuration: {}", e));
-        error.log_with_context("Application startup configuration loading");
-        eprintln!("❌ Failed to load configuration: {}", e);
-        error
-    })?;
-
-    // Refuse to start without a JWT signing secret rather than sign tokens with a known key.
-    econ_graph_auth::auth::services::jwt_secret().map_err(|e| {
-        e.log_with_context("Application startup JWT secret check");
-        eprintln!("❌ {}", e);
-        e
-    })?;
-
-    // Validate CORS origins (CORS_ALLOWED_ORIGINS, comma-separated; defaults to the local
-    // frontend) before touching the database, so bad config fails fast without side effects.
-    let cors_origins = validate_cors_origins(&config.cors.allowed_origins).map_err(|e| {
-        e.log_with_context("Application startup CORS configuration");
-        eprintln!("❌ {}", e);
-        e
-    })?;
-
-    // Sign-in through the identity provider: OIDC_ISSUER unset disables it (every caller is
-    // anonymous); a malformed setting, or OIDC_REQUIRED=true without an issuer, stops startup.
-    // Nothing is fetched from the provider here, so it may be down while the API starts.
-    let oidc = OidcConfig::from_env().map_err(|e| {
-        let error = AppError::ConfigError(e.to_string());
-        error.log_with_context("Application startup OIDC configuration");
-        eprintln!("❌ {}", e);
-        error
-    })?;
-    match &oidc {
-        Some(oidc) => info!(
-            "🔐 Sign-in: tokens from {} for audience {}",
-            oidc.issuer, oidc.audience
-        ),
-        None => info!("🔓 Sign-in disabled (OIDC_ISSUER unset): every caller is anonymous"),
-    }
-    let verifier = oidc.map(|config| Arc::new(OidcVerifier::new(config)));
-
-    info!("📊 Configuration loaded successfully:");
-    info!("  - Server host: {}", config.server.host);
-    info!("  - Server port: {}", config.server.port);
-    info!("  - CORS origins: {:?}", cors_origins);
-    info!("  - Database URL: {}", config.database_url);
-
-    // Create database connection pool
-    info!("🗄️  Creating database connection pool...");
-    info!("  - Database URL: {}", config.database_url);
-
-    let pool = create_pool(&config.database_url).await.map_err(|e| {
-        let error = AppError::DatabaseError(format!("Failed to create database pool: {}", e));
-        error.log_with_context("Application startup database pool creation");
-        eprintln!("❌ Failed to create database pool: {}", e);
-        error
-    })?;
-
-    info!("✅ Database connection pool created successfully");
-
-    // Run migrations
-    info!("🔄 Running database migrations...");
-    econ_graph_core::run_migrations(&config.database_url)
-        .await
-        .map_err(|e| {
-            let error = AppError::DatabaseError(format!("Failed to run migrations: {}", e));
-            error.log_with_context("Application startup database migrations");
-            eprintln!("❌ Failed to run migrations: {}", e);
-            error
-        })?;
-
-    info!("✅ Database migrations completed successfully");
-
-    // Create GraphQL schema
-    let schema = create_schema_with_data(pool.clone(), ());
-    info!("🎯 GraphQL schema created");
-
-    // Create authentication service
-    let auth_service = AuthService::new(pool.clone());
-    info!("🔐 Authentication service created");
-
-    // Initialize metrics
-    info!("📊 Initializing Prometheus metrics...");
-    let _metrics = &metrics::METRICS; // Initialize metrics
-    info!("✅ Prometheus metrics initialized");
-
-    // Start uptime counter task
-    let uptime_task = tokio::spawn(async {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
-        loop {
-            interval.tick().await;
-            metrics::increment_uptime(60);
-        }
-    });
-
-    // Crawling does not run in this process: the API only enqueues crawl_queue jobs, and the
-    // separate `crawler-worker` binary (econ-graph-crawler) processes them.
-
-    // Create Warp filters. Browsers may call the API only from the configured frontend origins.
-    let cors = cors_filter(&cors_origins);
+/// Every route this server answers on. There is no in-house sign-in: `/auth/*` answers nowhere
+/// on this backend (the frontend's own `/auth/callback` is a separate ingress rule that serves
+/// the frontend, not this process).
+fn build_routes(
+    pool: DatabasePool,
+    schema: async_graphql::Schema<
+        econ_graph_graphql::graphql::query::Query,
+        econ_graph_graphql::graphql::mutation::Mutation,
+        async_graphql::EmptySubscription,
+    >,
+    verifier: Option<Arc<OidcVerifier>>,
+    cors_origins: &[String],
+    playground_enabled: bool,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let cors = cors_filter(cors_origins);
 
     // GraphQL endpoint: anonymous without a token, the token's caller with a valid one.
     let pool_for_graphql = pool.clone();
     let verifier_for_graphql = verifier.clone();
     let graphql_filter = warp::path("graphql")
         .and(warp::header::headers_cloned())
-        .and(async_graphql_warp::graphql(schema.clone()))
+        .and(async_graphql_warp::graphql(schema))
         .and_then(
             move |headers: warp::http::HeaderMap<warp::http::HeaderValue>,
                   (_schema, request): (
@@ -674,10 +567,17 @@ async fn main() -> AppResult<()> {
             },
         );
 
-    // GraphQL Playground
-    let playground_filter = warp::path("playground")
-        .and(warp::get())
-        .and_then(graphql_playground);
+    // GraphQL Playground: off unless ENABLE_GRAPHQL_PLAYGROUND=true (local development).
+    let playground_filter =
+        warp::path("playground")
+            .and(warp::get())
+            .and_then(move || async move {
+                if playground_enabled {
+                    graphql_playground().await.map_err(|never| match never {})
+                } else {
+                    Err(warp::reject::not_found())
+                }
+            });
 
     // Health check
     let health_filter = warp::path("health").and(warp::get()).and_then(health_check);
@@ -688,28 +588,166 @@ async fn main() -> AppResult<()> {
         .and_then(metrics::metrics_handler);
 
     // Root endpoint
-    let root_filter = warp::path::end().and(warp::get()).and_then(root_handler);
+    let root_filter = warp::path::end()
+        .and(warp::get())
+        .and_then(move || root_handler(playground_enabled));
 
-    // Authentication routes
-    let auth_filter = auth_routes(auth_service);
-
-    // MCP Server routes
-    let mcp_server = Arc::new(EconGraphMcpServer::new(Arc::new(pool.clone())));
-
-    // MCP requires a signed-in user's bearer token holding `api:mcp`.
+    // MCP Server routes. MCP requires a signed-in user's bearer token holding `api:mcp`.
     // MCP OAuth (auth roadmap phase 6) will replace this.
-    let mcp_filter = mcp_route(pool.clone(), verifier.clone(), mcp_server.clone());
+    let mcp_server = Arc::new(EconGraphMcpServer::new(Arc::new(pool.clone())));
+    let mcp_filter = mcp_route(pool, verifier, mcp_server);
 
-    // Combine all routes
-    let routes = root_filter
+    root_filter
         .or(graphql_filter)
         .or(playground_filter)
         .or(health_filter)
         .or(metrics_filter)
-        .or(auth_filter)
         .or(mcp_filter)
         .with(cors)
-        .with(warp::trace::request());
+        .with(warp::trace::request())
+}
+
+#[tokio::main]
+async fn main() -> AppResult<()> {
+    // Initialize tracing with more detailed output
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_target(false)
+        .with_thread_ids(true)
+        .with_thread_names(true)
+        .init();
+
+    info!(
+        "🚀 Starting EconGraph Backend Server v{}",
+        env!("CARGO_PKG_VERSION")
+    );
+
+    // Log environment variables (non-sensitive ones)
+    info!("🔧 Environment Configuration:");
+    info!(
+        "  - RUST_LOG: {:?}",
+        std::env::var("RUST_LOG").unwrap_or_else(|_| "not set".to_string())
+    );
+    info!(
+        "  - BACKEND_PORT: {:?}",
+        std::env::var("BACKEND_PORT").unwrap_or_else(|_| "not set".to_string())
+    );
+    info!(
+        "  - FRONTEND_PORT: {:?}",
+        std::env::var("FRONTEND_PORT").unwrap_or_else(|_| "not set".to_string())
+    );
+    info!(
+        "  - DATABASE_URL: {:?}",
+        if std::env::var("DATABASE_URL").is_ok() {
+            "set"
+        } else {
+            "not set"
+        }
+    );
+
+    // Load configuration
+    info!("📋 Loading configuration from environment...");
+    let config = Config::from_env().map_err(|e| {
+        let error = AppError::ConfigError(format!("Failed to load configuration: {}", e));
+        error.log_with_context("Application startup configuration loading");
+        eprintln!("❌ Failed to load configuration: {}", e);
+        error
+    })?;
+
+    // Validate CORS origins (CORS_ALLOWED_ORIGINS, comma-separated; defaults to the local
+    // frontend) before touching the database, so bad config fails fast without side effects.
+    let cors_origins = validate_cors_origins(&config.cors.allowed_origins).map_err(|e| {
+        e.log_with_context("Application startup CORS configuration");
+        eprintln!("❌ {}", e);
+        e
+    })?;
+
+    // Sign-in through the identity provider: OIDC_ISSUER unset disables it (every caller is
+    // anonymous); a malformed setting, or OIDC_REQUIRED=true without an issuer, stops startup.
+    // Nothing is fetched from the provider here, so it may be down while the API starts.
+    let oidc = OidcConfig::from_env().map_err(|e| {
+        let error = AppError::ConfigError(e.to_string());
+        error.log_with_context("Application startup OIDC configuration");
+        eprintln!("❌ {}", e);
+        error
+    })?;
+    match &oidc {
+        Some(oidc) => info!(
+            "🔐 Sign-in: tokens from {} for audience {}",
+            oidc.issuer, oidc.audience
+        ),
+        None => info!("🔓 Sign-in disabled (OIDC_ISSUER unset): every caller is anonymous"),
+    }
+    let verifier = oidc.map(|config| Arc::new(OidcVerifier::new(config)));
+
+    info!("📊 Configuration loaded successfully:");
+    info!("  - Server host: {}", config.server.host);
+    info!("  - Server port: {}", config.server.port);
+    info!("  - CORS origins: {:?}", cors_origins);
+    info!(
+        "  - Database URL: {}",
+        redact_database_url(&config.database_url)
+    );
+
+    // Create database connection pool
+    info!("🗄️  Creating database connection pool...");
+    info!(
+        "  - Database URL: {}",
+        redact_database_url(&config.database_url)
+    );
+
+    let pool = create_pool(&config.database_url).await.map_err(|e| {
+        let error = AppError::DatabaseError(format!("Failed to create database pool: {}", e));
+        error.log_with_context("Application startup database pool creation");
+        eprintln!("❌ Failed to create database pool: {}", e);
+        error
+    })?;
+
+    info!("✅ Database connection pool created successfully");
+
+    // Run migrations
+    info!("🔄 Running database migrations...");
+    econ_graph_core::run_migrations(&config.database_url)
+        .await
+        .map_err(|e| {
+            let error = AppError::DatabaseError(format!("Failed to run migrations: {}", e));
+            error.log_with_context("Application startup database migrations");
+            eprintln!("❌ Failed to run migrations: {}", e);
+            error
+        })?;
+
+    info!("✅ Database migrations completed successfully");
+
+    // Create GraphQL schema
+    let schema = create_schema_with_data(pool.clone(), ());
+    info!("🎯 GraphQL schema created");
+
+    // Initialize metrics
+    info!("📊 Initializing Prometheus metrics...");
+    let _metrics = &metrics::METRICS; // Initialize metrics
+    info!("✅ Prometheus metrics initialized");
+
+    // Start uptime counter task
+    let uptime_task = tokio::spawn(async {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            metrics::increment_uptime(60);
+        }
+    });
+
+    // Crawling does not run in this process: the API only enqueues crawl_queue jobs, and the
+    // separate `crawler-worker` binary (econ-graph-crawler) processes them.
+
+    // GraphQL Playground: off unless ENABLE_GRAPHQL_PLAYGROUND=true (local development).
+    let playground_enabled = playground_enabled(std::env::var("ENABLE_GRAPHQL_PLAYGROUND").ok());
+    let routes = build_routes(
+        pool.clone(),
+        schema.clone(),
+        verifier.clone(),
+        &cors_origins,
+        playground_enabled,
+    );
 
     // Initialize metrics
     info!("📊 Initializing Prometheus metrics...");
@@ -718,10 +756,12 @@ async fn main() -> AppResult<()> {
 
     let port = config.server.port;
     info!("🌐 Server starting on http://0.0.0.0:{}", port);
-    info!(
-        "🎮 GraphQL Playground available at http://localhost:{}/playground",
-        port
-    );
+    if playground_enabled {
+        info!(
+            "🎮 GraphQL Playground available at http://localhost:{}/playground",
+            port
+        );
+    }
     info!(
         "❤️  Health check available at http://localhost:{}/health",
         port
@@ -732,7 +772,9 @@ async fn main() -> AppResult<()> {
     );
     info!("🔗 API endpoints:");
     info!("  - POST/GET /graphql - GraphQL API");
-    info!("  - GET /playground - GraphQL Playground");
+    if playground_enabled {
+        info!("  - GET /playground - GraphQL Playground");
+    }
     info!("  - GET /health - Health check");
     info!("  - GET /metrics - Prometheus metrics");
     info!("  - GET / - API documentation");
@@ -762,10 +804,7 @@ async fn main() -> AppResult<()> {
         .map_err(|e| AppError::InternalError(format!("Failed to bind port {port}: {e}")))?
         .http1_only(true)
         .serve(make_svc)
-        .with_graceful_shutdown(async {
-            signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
-            info!("🛑 Received shutdown signal, gracefully shutting down...");
-        });
+        .with_graceful_shutdown(shutdown_signal());
 
     info!("✅ Server is now running and accepting connections!");
     server
@@ -774,6 +813,35 @@ async fn main() -> AppResult<()> {
 
     info!("✅ Server shutdown complete");
     Ok(())
+}
+
+/// Resolves on SIGINT (Ctrl-C) or SIGTERM, so orchestrators that stop a container with SIGTERM
+/// (Kubernetes, `docker stop`) get the same graceful drain as a local Ctrl-C.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(e) = signal::ctrl_c().await {
+            tracing::error!(error = %e, "listening for Ctrl-C failed");
+            std::future::pending::<()>().await;
+        }
+    };
+    #[cfg(unix)]
+    let term = async {
+        match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "listening for SIGTERM failed");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let term = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => info!("🛑 Received SIGINT, gracefully shutting down..."),
+        () = term => info!("🛑 Received SIGTERM, gracefully shutting down..."),
+    }
 }
 
 #[cfg(test)]
@@ -1051,7 +1119,6 @@ mod request_auth_tests {
             );
             assert!(caller.user.is_active);
             assert_eq!(caller.user.email, format!("{sub}@example.test"));
-            assert_eq!(caller.user.provider, "keycloak");
         }
 
         set_active(&pool, sub, false).await;
@@ -1209,7 +1276,6 @@ mod request_auth_tests {
             (user.id, user.email.as_str(), user.name.as_str()),
             (id, email.as_str(), "Ada")
         );
-        assert_eq!(user.provider, "keycloak");
         assert!(user.email_verified && user.is_active);
         // Seen again, with other claims: the row is returned unchanged.
         let again = User::get_or_create_for_subject(&pool, id, Some("x@example.test"), true, None)
@@ -1278,5 +1344,136 @@ mod request_auth_tests {
             rejection.find::<McpRejection>(),
             Some(McpRejection::BodyTooLarge)
         ));
+    }
+}
+
+#[cfg(test)]
+mod playground_tests {
+    use super::{playground_enabled, root_handler};
+    use warp::Reply;
+
+    /// The landing page body, as served with the playground on or off.
+    async fn landing_page(playground: bool) -> String {
+        let response = root_handler(playground).await.unwrap().into_response();
+        let body = warp::hyper::body::to_bytes(response.into_body())
+            .await
+            .unwrap();
+        String::from_utf8(body.to_vec()).unwrap()
+    }
+
+    /// The landing page links to `/playground` only when it is served.
+    #[tokio::test]
+    async fn landing_page_mentions_playground_only_when_enabled() {
+        assert!(landing_page(true).await.contains("href=\"/playground\""));
+        assert!(!landing_page(false).await.contains("/playground"));
+    }
+
+    /// The playground is served only when explicitly turned on.
+    #[test]
+    fn playground_is_off_unless_explicitly_enabled() {
+        for on in ["true", "TRUE", "tRuE", "1", " true "] {
+            assert!(playground_enabled(Some(on.to_string())), "{on:?}");
+        }
+        for off in ["", "false", "0", "yes", "on"] {
+            assert!(!playground_enabled(Some(off.to_string())), "{off:?}");
+        }
+        assert!(!playground_enabled(None));
+    }
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::build_routes;
+    use econ_graph_core::DatabasePool;
+    use econ_graph_graphql::graphql::schema::create_schema_with_data;
+
+    /// A pool that never connects: routes that answer without touching the database don't need it.
+    fn unreachable_pool() -> DatabasePool {
+        let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
+            diesel_async::AsyncPgConnection,
+        >::new("postgres://nobody@127.0.0.1:1/none");
+        DatabasePool::builder()
+            .connection_timeout(std::time::Duration::from_secs(1))
+            .build_unchecked(manager)
+    }
+
+    fn routes(
+        playground_enabled: bool,
+    ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+        let pool = unreachable_pool();
+        let schema = create_schema_with_data(pool.clone(), ());
+        build_routes(
+            pool,
+            schema,
+            None,
+            &["http://localhost:3000".to_string()],
+            playground_enabled,
+        )
+    }
+
+    /// There is no in-house sign-in: no route under `/auth/` answers on the backend, for any
+    /// method. (The frontend's own `/auth/callback` is a separate ingress rule that serves the
+    /// frontend, not this process, so it isn't covered here.)
+    #[tokio::test]
+    async fn no_route_under_auth_answers() {
+        for path in [
+            "/auth/login",
+            "/auth/register",
+            "/auth/logout",
+            "/auth/refresh",
+            "/auth/google",
+            "/auth/facebook",
+            "/auth/facebook/data-deletion",
+            "/auth/callback",
+            "/auth/",
+            "/auth",
+        ] {
+            for method in ["GET", "POST", "DELETE"] {
+                let res = warp::test::request()
+                    .method(method)
+                    .path(path)
+                    .reply(&routes(false))
+                    .await;
+                assert_eq!(
+                    res.status(),
+                    404,
+                    "{method} {path} should not be answered by the backend"
+                );
+            }
+        }
+    }
+
+    /// Sanity check that the test harness's route set is wired up correctly: real routes still
+    /// answer, so the 404s above are `/auth/*` being genuinely absent, not a broken filter.
+    #[tokio::test]
+    async fn other_routes_still_answer() {
+        let res = warp::test::request()
+            .method("GET")
+            .path("/health")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 200);
+    }
+
+    /// `GET /playground` answers 200 through the full route set when enabled.
+    #[tokio::test]
+    async fn playground_route_answers_when_enabled() {
+        let res = warp::test::request()
+            .method("GET")
+            .path("/playground")
+            .reply(&routes(true))
+            .await;
+        assert_eq!(res.status(), 200);
+    }
+
+    /// `GET /playground` answers 404 through the full route set when disabled.
+    #[tokio::test]
+    async fn playground_route_answers_404_when_disabled() {
+        let res = warp::test::request()
+            .method("GET")
+            .path("/playground")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 404);
     }
 }

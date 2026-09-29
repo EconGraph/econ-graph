@@ -126,18 +126,42 @@ impl Query {
         Ok(sources.into_iter().map(DataSourceType::from).collect())
     }
 
-    /// Get data points for a specific series with filtering and transformation
+    /// Get data points for a specific series with filtering and transformation, one page at a
+    /// time in date order. `totalCount` counts every matching point; read the next page with
+    /// `after: pageInfo.endCursor` until `pageInfo.hasNextPage` is false. A transformed page
+    /// has the values it would have in the whole series.
     async fn series_data(
         &self,
         ctx: &Context<'_>,
         series_id: ID,
         filter: Option<DataFilterInput>,
         transformation: Option<DataTransformationType>,
+        #[graphql(desc = "Page size. Defaults to and is capped at 10000; must not be negative.")]
         first: Option<i32>,
+        #[graphql(
+            desc = "Start after this cursor (a previous page's endCursor). A cursor is the number of points up to and including the one it names."
+        )]
         after: Option<String>,
     ) -> Result<DataPointConnection> {
         let pool = ctx.data::<DatabasePool>()?;
         let series_uuid = Uuid::parse_str(&series_id)?;
+
+        if first.is_some_and(|first| first < 0) {
+            return Err(async_graphql::Error::new("first must not be negative"));
+        }
+        // A cursor is the number of matching points up to and including the one it names, so
+        // `after: endCursor` continues where the last page stopped.
+        let offset = match after {
+            Some(cursor) => match cursor.parse::<i64>() {
+                Ok(offset) if offset >= 0 => offset,
+                _ => {
+                    return Err(async_graphql::Error::new(format!(
+                        "Invalid cursor: {cursor}"
+                    )))
+                }
+            },
+            None => 0,
+        };
 
         // Convert GraphQL inputs to service parameters
         let query_params = models::DataQueryParams {
@@ -147,33 +171,47 @@ impl Query {
             original_only: filter.as_ref().and_then(|f| f.original_only),
             latest_revision_only: filter.as_ref().and_then(|f| f.latest_revision_only),
             as_of: filter.as_ref().and_then(|f| f.as_of),
-            limit: first.map(|f| f as i64),
-            offset: after.and_then(|cursor| cursor.parse::<i64>().ok()),
+            limit: first.map(i64::from),
+            offset: Some(offset),
         };
 
-        let data_points = series_service::get_series_data(&pool, query_params).await?;
-        let total_count = data_points.len();
+        let transformation =
+            transformation.filter(|&transformation| transformation != DataTransformationType::None);
+        let context = transformation.and_then(transformation_context);
+        let page = series_service::get_series_data(pool, query_params, context).await?;
+        let has_next_page = page.has_next_page();
+        let page_len = page.points.len() as i64;
 
-        // Apply transformation if requested
-        let result_points = if let Some(transformation) = transformation {
-            // Apply the requested transformation to the data points
-            apply_data_transformation(data_points, transformation)
-                .await?
-                .into_iter()
-                .map(DataPointType::from)
-                .collect()
-        } else {
-            data_points.into_iter().map(DataPointType::from).collect()
+        let points = match transformation {
+            Some(transformation) => {
+                // A page after the first transforms with the earlier points it compares against,
+                // so each point gets the value it would have in the whole series.
+                let context_len = page.context.len();
+                let mut points = page.context;
+                points.extend(page.points);
+                apply_data_transformation(points, transformation)
+                    .await?
+                    .into_iter()
+                    .skip(context_len)
+                    .collect()
+            }
+            None => page.points,
         };
 
+        let cursor = |position: i64| Some(position.to_string());
         Ok(DataPointConnection {
-            nodes: result_points,
-            total_count: total_count as i32,
+            nodes: points.into_iter().map(DataPointType::from).collect(),
+            total_count: i32::try_from(page.total_count).unwrap_or(i32::MAX),
             page_info: PageInfo {
-                has_next_page: false, // Simplified - implement proper pagination
-                has_previous_page: false,
-                start_cursor: None,
-                end_cursor: None,
+                has_next_page,
+                has_previous_page: page.offset > 0,
+                start_cursor: if page_len > 0 {
+                    cursor(page.offset + 1)
+                } else {
+                    None
+                },
+                // Set even on an empty page, so `after: endCursor` never moves backwards.
+                end_cursor: cursor(page.offset + page_len),
             },
         })
     }
@@ -376,9 +414,6 @@ impl Query {
         let mut query = users::table.into_boxed();
 
         if let Some(filter) = &filter {
-            if let Some(role) = &filter.role {
-                query = query.filter(users::role.eq(role));
-            }
             if let Some(organization) = &filter.organization {
                 query = query.filter(users::organization.eq(organization));
             }
@@ -402,9 +437,6 @@ impl Query {
         // Get total count (rebuild query to avoid move)
         let mut count_query = users::table.into_boxed();
         if let Some(filter) = &filter {
-            if let Some(role) = &filter.role {
-                count_query = count_query.filter(users::role.eq(role));
-            }
             if let Some(organization) = &filter.organization {
                 count_query = count_query.filter(users::organization.eq(organization));
             }
@@ -471,82 +503,6 @@ impl Query {
         })
     }
 
-    /// Get user sessions (requires `admin.sessions:read`)
-    async fn user_sessions(
-        &self,
-        ctx: &Context<'_>,
-        user_id: Option<ID>,
-    ) -> Result<Vec<UserSessionType>> {
-        require_role(ctx, Role::AdminSessionsRead)?;
-        let pool = ctx.data::<DatabasePool>()?;
-
-        use diesel::prelude::*;
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::user_sessions;
-
-        let mut conn = pool.get().await?;
-
-        let mut query = user_sessions::table.into_boxed();
-
-        if let Some(user_id_str) = user_id {
-            let user_uuid = uuid::Uuid::parse_str(&user_id_str)?;
-            query = query.filter(user_sessions::user_id.eq(user_uuid));
-        }
-
-        let sessions: Vec<models::UserSession> = query
-            .select(models::UserSession::as_select())
-            .order(user_sessions::created_at.desc())
-            .load(&mut conn)
-            .await?;
-
-        Ok(sessions
-            .into_iter()
-            .map(|session| UserSessionType {
-                id: ID::from(session.id),
-                user_id: ID::from(session.user_id),
-                created_at: session.created_at,
-                last_activity: session.last_used_at,
-                expires_at: session.expires_at,
-                user_agent: session.user_agent,
-                ip_address: session.ip_address,
-                is_active: session.expires_at > Utc::now(),
-            })
-            .collect())
-    }
-
-    /// Get active user sessions (requires `admin.sessions:read`)
-    async fn active_sessions(&self, ctx: &Context<'_>) -> Result<Vec<UserSessionType>> {
-        require_role(ctx, Role::AdminSessionsRead)?;
-        let pool = ctx.data::<DatabasePool>()?;
-
-        use diesel::prelude::*;
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::user_sessions;
-
-        let mut conn = pool.get().await?;
-
-        let sessions: Vec<models::UserSession> = user_sessions::table
-            .filter(user_sessions::expires_at.gt(Utc::now()))
-            .select(models::UserSession::as_select())
-            .order(user_sessions::last_used_at.desc())
-            .load(&mut conn)
-            .await?;
-
-        Ok(sessions
-            .into_iter()
-            .map(|session| UserSessionType {
-                id: ID::from(session.id),
-                user_id: ID::from(session.user_id),
-                created_at: session.created_at,
-                last_activity: session.last_used_at,
-                expires_at: session.expires_at,
-                user_agent: session.user_agent,
-                ip_address: session.ip_address,
-                is_active: true, // All sessions here are active by definition
-            })
-            .collect())
-    }
-
     /// Get system health metrics (requires `admin.system:read`)
     async fn system_health(&self, ctx: &Context<'_>) -> Result<SystemHealthType> {
         require_role(ctx, Role::AdminSystemRead)?;
@@ -554,7 +510,7 @@ impl Query {
 
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::{crawl_queue, user_sessions, users};
+        use econ_graph_core::schema::{crawl_queue, users};
 
         let mut conn = pool.get().await?;
 
@@ -563,15 +519,6 @@ impl Query {
 
         let active_users: i64 = users::table
             .filter(users::last_login_at.gt(Utc::now() - chrono::Duration::hours(24)))
-            .count()
-            .get_result(&mut conn)
-            .await?;
-
-        // Get session counts
-        let total_sessions: i64 = user_sessions::table.count().get_result(&mut conn).await?;
-
-        let active_sessions: i64 = user_sessions::table
-            .filter(user_sessions::expires_at.gt(Utc::now()))
             .count()
             .get_result(&mut conn)
             .await?;
@@ -585,8 +532,6 @@ impl Query {
             metrics: SystemMetricsType {
                 total_users: total_users as i32,
                 active_users: active_users as i32,
-                total_sessions: total_sessions as i32,
-                active_sessions: active_sessions as i32,
                 database_size_mb: 0.0, // Would need special query for this
                 queue_items: queue_items as i32,
                 api_requests_per_minute: 0.0, // Would need metrics collection
@@ -707,14 +652,10 @@ pub async fn apply_data_transformation(
         DataTransformation::YearOverYear => {
             // For YoY, we need to find the value from exactly one year ago
             for (_i, point) in sorted_points.iter().enumerate() {
-                let previous_year_value = sorted_points
-                    .iter()
-                    .find(|p| {
-                        // Look for a point approximately one year earlier
-                        let days_diff = (point.date - p.date).num_days();
-                        days_diff >= 360 && days_diff <= 370 // Allow some flexibility for exact dates
-                    })
-                    .and_then(|p| p.value.as_ref().cloned());
+                // A point approximately one year earlier (some flexibility for exact dates)
+                let previous_year_value =
+                    earliest_in_window(&sorted_points, point.date, YOY_WINDOW.0, YOY_WINDOW.1)
+                        .and_then(|p| p.value.as_ref().cloned());
 
                 let transformed_value = point.calculate_yoy_change(previous_year_value);
 
@@ -728,13 +669,10 @@ pub async fn apply_data_transformation(
         DataTransformation::QuarterOverQuarter => {
             // For QoQ, compare with previous quarter (approximately 3 months)
             for (_i, point) in sorted_points.iter().enumerate() {
-                let previous_quarter_value = sorted_points
-                    .iter()
-                    .find(|p| {
-                        let days_diff = (point.date - p.date).num_days();
-                        days_diff >= 85 && days_diff <= 95 // ~3 months with flexibility
-                    })
-                    .and_then(|p| p.value.as_ref());
+                // ~3 months with flexibility
+                let previous_quarter_value =
+                    earliest_in_window(&sorted_points, point.date, QOQ_WINDOW.0, QOQ_WINDOW.1)
+                        .and_then(|p| p.value.as_ref());
 
                 let transformed_value = point.calculate_qoq_change(previous_quarter_value);
 
@@ -747,13 +685,10 @@ pub async fn apply_data_transformation(
         DataTransformation::MonthOverMonth => {
             // For MoM, compare with previous month
             for (_i, point) in sorted_points.iter().enumerate() {
-                let previous_month_value = sorted_points
-                    .iter()
-                    .find(|p| {
-                        let days_diff = (point.date - p.date).num_days();
-                        days_diff >= 28 && days_diff <= 32 // ~1 month with flexibility
-                    })
-                    .and_then(|p| p.value.as_ref());
+                // ~1 month with flexibility
+                let previous_month_value =
+                    earliest_in_window(&sorted_points, point.date, MOM_WINDOW.0, MOM_WINDOW.1)
+                        .and_then(|p| p.value.as_ref());
 
                 let transformed_value = point.calculate_mom_change(previous_month_value);
 
@@ -764,28 +699,23 @@ pub async fn apply_data_transformation(
         }
 
         DataTransformation::PercentChange => {
-            // For percent change, compare each point with the first point
-            if let Some(base_point) = sorted_points.first() {
-                if let Some(base_value) = &base_point.value {
-                    for point in &sorted_points {
-                        let transformed_value = if let Some(current_value) = &point.value {
-                            if !base_value.is_zero() {
-                                Some(
-                                    ((current_value - base_value) / base_value)
-                                        * BigDecimal::from(100),
-                                )
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-
-                        let mut transformed_point = point.clone();
-                        transformed_point.value = transformed_value;
-                        transformed_points.push(transformed_point);
+            // For percent change, compare each point with the first point. Without a usable
+            // base every point is empty, but still returned.
+            let base_value = sorted_points
+                .first()
+                .and_then(|p| p.value.clone())
+                .filter(|base| !base.is_zero());
+            for point in &sorted_points {
+                let transformed_value = match (&point.value, &base_value) {
+                    (Some(current_value), Some(base_value)) => {
+                        Some(((current_value - base_value) / base_value) * BigDecimal::from(100))
                     }
-                }
+                    _ => None,
+                };
+
+                let mut transformed_point = point.clone();
+                transformed_point.value = transformed_value;
+                transformed_points.push(transformed_point);
             }
         }
 
@@ -795,16 +725,7 @@ pub async fn apply_data_transformation(
                 let transformed_value = if i > 0 {
                     let prev_point = &sorted_points[i - 1];
                     match (&point.value, &prev_point.value) {
-                        (Some(current), Some(previous)) => {
-                            if *current > 0 && *previous > 0 {
-                                // Approximate natural log using decimal operations
-                                // This is a simplified implementation - in production you might want a more accurate log
-                                let ratio = current / previous;
-                                Some(ratio - BigDecimal::from(1)) // Simplified log approximation
-                            } else {
-                                None
-                            }
-                        }
+                        (Some(current), Some(previous)) => log_difference(current, previous),
                         _ => None,
                     }
                 } else {
@@ -826,6 +747,65 @@ pub async fn apply_data_transformation(
     Ok(transformed_points)
 }
 
+/// The first point in `sorted` (ordered by date) dated `min_days` to `max_days` days before
+/// `date`. A binary search, so a transform of a full page stays linear-logarithmic.
+fn earliest_in_window(
+    sorted: &[econ_graph_core::models::DataPoint],
+    date: chrono::NaiveDate,
+    min_days: i64,
+    max_days: i64,
+) -> Option<&econ_graph_core::models::DataPoint> {
+    let days_before = |days| {
+        date.checked_sub_signed(chrono::Duration::days(days))
+            .unwrap_or(chrono::NaiveDate::MIN)
+    };
+    let (from, to) = (days_before(max_days), days_before(min_days));
+    let first = sorted.partition_point(|p| p.date < from);
+    sorted.get(first).filter(|p| p.date <= to)
+}
+
+/// Look-back window (min, max days before), shared by [`apply_data_transformation`]'s lookup and
+/// [`transformation_context`]'s page context, so a page always sees enough history to match.
+const YOY_WINDOW: (i64, i64) = (360, 370);
+const QOQ_WINDOW: (i64, i64) = (85, 95);
+const MOM_WINDOW: (i64, i64) = (28, 32);
+
+/// The earlier points `transformation` compares a point with, if any. The windows cover the
+/// look-back ranges in [`apply_data_transformation`].
+fn transformation_context(
+    transformation: DataTransformationType,
+) -> Option<series_service::PageContext> {
+    use series_service::PageContext;
+    match transformation {
+        DataTransformationType::None => None,
+        DataTransformationType::YearOverYear => Some(PageContext::Days(YOY_WINDOW.1)),
+        DataTransformationType::QuarterOverQuarter => Some(PageContext::Days(QOQ_WINDOW.1)),
+        DataTransformationType::MonthOverMonth => Some(PageContext::Days(MOM_WINDOW.1)),
+        DataTransformationType::LogDifference => Some(PageContext::PreviousPoint),
+        DataTransformationType::PercentChange => Some(PageContext::FirstPoint),
+    }
+}
+
+/// `ln(current) - ln(previous)`, or `None` unless both values are positive. Computed in `f64`,
+/// which is plenty for a displayed growth rate (a positive value too small for `f64` counts as
+/// zero).
+fn log_difference(
+    current: &bigdecimal::BigDecimal,
+    previous: &bigdecimal::BigDecimal,
+) -> Option<bigdecimal::BigDecimal> {
+    use bigdecimal::ToPrimitive;
+    let (current, previous) = (current.to_f64()?, previous.to_f64()?);
+    if !(current > 0.0 && previous > 0.0) {
+        return None;
+    }
+    let diff = current.ln() - previous.ln();
+    if !diff.is_finite() {
+        return None;
+    }
+    // f64's Display is the shortest string that round-trips, so no binary noise digits.
+    diff.to_string().parse().ok()
+}
+
 impl Default for Query {
     fn default() -> Self {
         Self
@@ -833,20 +813,19 @@ impl Default for Query {
 }
 
 #[cfg(test)]
+mod series_data_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
-    fn test_user(role: &str) -> models::User {
+    fn test_user(label: &str) -> models::User {
         let now = chrono::Utc::now();
         models::User {
             id: uuid::Uuid::new_v4(),
-            email: format!("{role}@example.test"),
-            name: role.into(),
+            email: format!("{label}@example.test"),
+            name: label.into(),
             avatar_url: None,
-            provider: "email".into(),
-            provider_id: None,
-            password_hash: None,
-            role: role.into(),
             organization: None,
             theme: "light".into(),
             default_chart_type: "line".into(),
@@ -881,22 +860,24 @@ mod tests {
             Some(test_user("viewer")),
             Some(test_user("analyst")),
         ] {
-            let role = u.as_ref().map(|u| u.role.clone());
+            let label = u.as_ref().map(|u| u.name.clone());
             let schema = crate::graphql::schema::create_schema_with_data(
                 unreachable_pool(),
-                std::sync::Arc::new(crate::graphql::context::GraphQLContext::for_test_user(u)),
+                std::sync::Arc::new(crate::graphql::context::GraphQLContext::for_test_user(
+                    u, false,
+                )),
             );
             let resp = schema.execute(query.as_str()).await;
-            assert_eq!(resp.errors.len(), 1, "{role:?}: {:?}", resp.errors);
+            assert_eq!(resp.errors.len(), 1, "{label:?}: {:?}", resp.errors);
             let msg = &resp.errors[0].message;
-            let expected = if role.is_some() {
+            let expected = if label.is_some() {
                 "Insufficient permissions"
             } else {
                 "Authentication required"
             };
             assert!(
                 msg.contains(expected),
-                "{role:?}: expected {expected}, got {msg}"
+                "{label:?}: expected {expected}, got {msg}"
             );
         }
     }
@@ -923,24 +904,25 @@ mod tests {
         // Both reach the database lookup, which fails here because the pool never connects.
         let viewer = test_user("viewer");
         let viewer_id = viewer.id;
-        for (u, target) in [
-            (viewer, viewer_id),
-            (test_user("admin"), uuid::Uuid::new_v4()),
+        for (u, target, staff) in [
+            (viewer, viewer_id, false),
+            (test_user("admin"), uuid::Uuid::new_v4(), true),
         ] {
-            let role = u.role.clone();
+            let label = u.name.clone();
             let schema = crate::graphql::schema::create_schema_with_data(
                 unreachable_pool(),
                 std::sync::Arc::new(crate::graphql::context::GraphQLContext::for_test_user(
                     Some(u),
+                    staff,
                 )),
             );
             let query = format!(r#"{{ user(userId: "{target}") {{ id }} }}"#);
             let resp = schema.execute(query.as_str()).await;
-            assert_eq!(resp.errors.len(), 1, "{role}: {:?}", resp.errors);
+            assert_eq!(resp.errors.len(), 1, "{label}: {:?}", resp.errors);
             let msg = &resp.errors[0].message;
             assert!(
                 !msg.contains("permissions") && !msg.contains("Authentication"),
-                "{role}: should pass the authorization check, got {msg}"
+                "{label}: should pass the authorization check, got {msg}"
             );
         }
     }

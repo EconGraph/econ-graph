@@ -479,6 +479,20 @@ describe('DataSources', () => {
       expect(screen.getByText(/could not load data sources: backend down/i)).toBeInTheDocument();
     });
 
+    test('Browse Series links to the explorer filtered by the source id, and View Details is gone', () => {
+      renderDataSources();
+
+      const browseLinks = screen.getAllByRole('link', { name: /browse series/i });
+      expect(browseLinks.map(link => link.getAttribute('href'))).toEqual([
+        '/explore?source=fred',
+        '/explore?source=bls',
+        '/explore?source=census',
+        '/explore?source=worldbank',
+      ]);
+
+      expect(screen.queryByRole('button', { name: /view details/i })).not.toBeInTheDocument();
+    });
+
     test('keeps the cached sources visible when a later refresh fails', () => {
       dataSourcesHook.mockReturnValueOnce({
         data: mockDataSources,

@@ -73,7 +73,9 @@ echo "📋 Applying Kubernetes manifests..."
 # Apply in order
 kubectl apply -f k8s/manifests/namespace.yaml
 kubectl apply -f k8s/manifests/configmap.yaml
-kubectl apply -f k8s/manifests/secret.yaml
+# Credentials live in Secrets created out of band (never committed). The script
+# keeps existing values and generates missing internal passwords; see k8s/README.md.
+./scripts/deploy/create-secrets.sh
 
 # Deploy PostgreSQL
 echo "🗄️  Deploying PostgreSQL..."
@@ -84,6 +86,13 @@ kubectl apply -f k8s/manifests/postgres.yaml
 # Wait for PostgreSQL to be ready
 echo "⏳ Waiting for PostgreSQL to be ready..."
 kubectl wait --for=condition=ready pod -l app=postgresql -n econ-graph --timeout=300s
+
+# Deploy PostgreSQL backups
+echo "🗄️  Deploying PostgreSQL backup CronJob..."
+kubectl apply -f k8s/manifests/postgres-backup-pvc.yaml
+kubectl apply -f k8s/manifests/postgres-backup-configmap.yaml
+kubectl apply -f k8s/manifests/postgres-backup-cronjob.yaml
+"$PROJECT_ROOT/scripts/deploy/protect-postgres-pv.sh"
 
 # Deploy Keycloak (its own Postgres, then Keycloak with the econ-graph realm).
 # Its credentials are in the Secret econ-graph-keycloak, written by
@@ -113,8 +122,8 @@ fi
 # Deploy application
 kubectl apply -f k8s/manifests/backend-deployment.yaml
 kubectl apply -f k8s/manifests/backend-service.yaml
-# Queue worker (no Service). API keys come from the optional Secret crawler-api-keys;
-# see the header of k8s/manifests/crawler-worker.yaml for how to create it.
+# Queue worker (no Service). API keys come from the optional Secret crawler-api-keys,
+# written by create-secrets.sh from FRED_API_KEY, BLS_API_KEY, BEA_API_KEY, CENSUS_API_KEY.
 kubectl apply -f k8s/manifests/crawler-worker.yaml
 kubectl apply -f k8s/manifests/frontend-deployment.yaml
 kubectl apply -f k8s/manifests/frontend-service.yaml
@@ -129,6 +138,9 @@ kubectl delete -f k8s/manifests/admin-frontend-service.yaml --ignore-not-found
 # rule at a nonexistent Service.
 yq 'del(.spec.rules[].http.paths[] | select(.backend.service.name == "econ-graph-admin-frontend-service"))' \
   k8s/manifests/ingress.yaml | kubectl apply -f -
+# graphql-ingress.yaml rate-limits /graphql; ingress.yaml no longer routes it
+# (see the comment in ingress.yaml), so both manifests must be applied together.
+kubectl apply -f k8s/manifests/graphql-ingress.yaml
 
 # Deploy chart API service (internal only)
 echo "📊 Deploying chart API service..."
@@ -314,8 +326,9 @@ echo "  Frontend: http://admin.econ-graph.local (add '127.0.0.1 admin.econ-graph
 # Admin UI: not deployed here (re-enabled by ECO-242, train 2).
 echo "  Backend:  http://admin.econ-graph.local/api"
 echo "  GraphQL:  http://admin.econ-graph.local/graphql"
-echo "  Playground: http://admin.econ-graph.local/playground"
-echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT} (admin/admin123)"
+echo "  Playground: off (set ENABLE_GRAPHQL_PLAYGROUND=true on the backend to serve /playground)"
+echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT}"
+echo "            (admin / password: kubectl -n econ-graph get secret grafana-admin -o jsonpath={.data.admin-password} | base64 -d)"
 echo ""
 echo "📊 Useful commands:"
 echo "  kubectl get pods -n econ-graph"

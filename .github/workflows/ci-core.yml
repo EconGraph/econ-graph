@@ -2,7 +2,7 @@ name: Core CI Tests
 
 on:
   push:
-    branches: [ main, develop, optimize/ci-core-primary ]
+    branches: [ main, develop, optimize/ci-core-primary, 'release/**' ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -10,8 +10,11 @@ on:
       - 'LICENSE'
       - '.gitignore'
       - '.github/workflows/README.md'
+  # Every PR, whatever its base: stacked PRs get CI before they are retargeted.
+  # Retargeting a PR to main after its parent merges is an `edited` event, which
+  # does not run here (and `types: [edited]` would let title edits cancel runs),
+  # so the child's next push after retarget is its first run against main.
   pull_request:
-    branches: [ main, develop ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -47,6 +50,13 @@ on:
         default: ''
         type: string
 
+# One run per PR: a push cancels the run the previous push started, so review
+# rounds and rebases stop stacking up in the queue. Runs on main and develop
+# get a group of their own (the run id), so they are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
   # Line numbers in backtraces without full debuginfo: faster compiles and
@@ -65,9 +75,15 @@ jobs:
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
-    if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop'
+    if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' && !startsWith(github.ref, 'refs/heads/release/')
     outputs:
-      frontend_only: ${{ steps.filter.outputs.frontend == 'true' && steps.filter.outputs.backend == 'false' }}
+      # A change to neither side (or to a shared path) runs everything
+      frontend_only: ${{ steps.filter.outputs.frontend == 'true' && steps.filter.outputs.backend == 'false' && steps.filter.outputs.shared == 'false' }}
+      backend_only: ${{ steps.filter.outputs.backend == 'true' && steps.filter.outputs.frontend == 'false' && steps.filter.outputs.shared == 'false' }}
+      # Jobs that only check one kind of file run when that kind changed
+      deps: ${{ steps.filter.outputs.deps }}
+      docker: ${{ steps.filter.outputs.docker }}
+      migrations: ${{ steps.filter.outputs.migrations }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -82,21 +98,72 @@ jobs:
           backend:
             - 'backend/**'
             - 'chart-api-service/**'
+          # Paths both sides depend on: CI itself, scripts, the dev stack, and
+          # infra manifests, which deploy the frontend as well as the backend
+          shared:
             - 'ci/**'
             - '.github/**'
-            - 'k8s/**'
-            - 'terraform/**'
             - 'scripts/**'
             - 'config/keycloak/**'
             - 'docker-compose.yml'
             - 'package.json'
+            - 'k8s/**'
+            - 'terraform/**'
+            # Frontend Tests checks every frontend GraphQL operation against
+            # this file; a backend-only PR that regenerates it must still run
+            # Frontend Tests, not just the backend side.
+            - 'backend/crates/econ-graph-graphql/schema.graphql'
+            # Docker Build Test needs the backend build, so a change to either
+            # image it actually builds runs both. Only backend/ and frontend/
+            # have a Dockerfile that job builds; the ci/, admin-frontend/ and
+            # chart-api-service/ Dockerfiles are unrelated to it.
+            - 'backend/Dockerfile'
+            - 'backend/.dockerignore'
+            - 'frontend/Dockerfile'
+            - 'frontend/.dockerignore'
+            - 'frontend/nginx.conf'
+          # Each gated job also runs when this workflow changes, so a broken
+          # job definition shows up on the PR rather than on main.
+          deps:
+            - '.github/workflows/ci-core.yml'
+            - 'backend/Cargo.toml'
+            - 'backend/**/Cargo.toml'
+            - 'backend/Cargo.lock'
+            - 'backend/deny.toml'
+            - 'backend/.cargo/audit.toml'
+            - 'rust-toolchain.toml'
+            - 'frontend/package.json'
+            - 'frontend/package-lock.json'
+            - 'frontend/.license-checker.json'
+            - 'admin-frontend/package.json'
+            - 'admin-frontend/package-lock.json'
+          # Docker Build Test builds the whole backend and frontend inside the
+          # image, so a dependency or toolchain bump can break it with no
+          # Dockerfile touched (a new -sys crate needing a system library, an
+          # npm package with a native build step, an MSRV bump).
+          docker:
+            - '.github/workflows/ci-core.yml'
+            - 'backend/Dockerfile'
+            - 'backend/.dockerignore'
+            - 'frontend/Dockerfile'
+            - 'frontend/.dockerignore'
+            - 'frontend/nginx.conf'
+            - 'backend/**/Cargo.toml'
+            - 'backend/Cargo.lock'
+            - 'rust-toolchain.toml'
+            - 'frontend/package.json'
+            - 'frontend/package-lock.json'
+          migrations:
+            - '.github/workflows/ci-core.yml'
+            - 'backend/migrations/**'
+            - 'backend/scripts/check_migration_order.py'
   backend-build-cache:
     name: Backend Build Cache
     runs-on: ubuntu-latest
     needs: [changes]
-    # `changes` is skipped on main/develop; !cancelled() keeps that skip from
-    # skipping this job and every backend test job that needs it.
-    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || needs.changes.outputs.frontend_only != 'true') }}
+    # `changes` is skipped on main/develop/release/**; !cancelled() keeps that
+    # skip from skipping this job and every backend test job that needs it.
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/release/') || needs.changes.outputs.frontend_only != 'true') }}
     timeout-minutes: 90
 
     steps:
@@ -130,6 +197,10 @@ jobs:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: [changes]
+    # Only when migrations changed; every push to main and manual run still gets
+    # it. !cancelled(): `changes` is skipped on main.
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.migrations == 'true') }}
 
     steps:
     - name: Checkout code
@@ -201,6 +272,8 @@ jobs:
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         cargo clippy --all-targets --all-features -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
+        # The SEC crawler's XBRL parser is off by default; also lint its default build.
+        cargo clippy -p econ-graph-sec-crawler --all-targets -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
       working-directory: backend
 
     - name: Check Rust documentation
@@ -217,7 +290,7 @@ jobs:
     - name: Run fast unit tests (no database)
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --lib -- --test-threads=4 --nocapture config auth::integration_tests::test_user_response_serialization auth::integration_tests::test_request_validation auth::integration_tests::test_password_hashing auth::integration_tests::test_model_deserialization auth::comprehensive_integration_tests::test_password_security metrics mcp_server::tests::test_get_available_tools mcp_server::tests::test_get_available_resources
+        cargo test --lib -- --test-threads=4 --nocapture config metrics mcp_server::tests::test_get_available_tools mcp_server::tests::test_get_available_resources
       working-directory: backend
       env:
         RUST_LOG: warn
@@ -389,8 +462,6 @@ jobs:
         DATABASE_URL: postgres://postgres:postgres@localhost:5445/econ_graph_test
         BACKEND_PORT: 9877
         CHART_API_SERVICE_URL: http://localhost:3001/api/chart
-        # The backend refuses to start without one; this job never issues real tokens
-        JWT_SECRET: ci-only-jwt-secret
 
     - name: Run MCP server integration tests
       working-directory: backend
@@ -482,7 +553,8 @@ jobs:
       working-directory: backend
 
     # Required: the crawler crate, crawler worker, all SEC crawler lib tests (no database
-    # needed) and the crawl_queue, dataset model and queue service tests. These must pass for the job
+    # needed; default build and with the xbrl-parser feature), the core financial ratio
+    # tests and the crawl_queue, dataset model and queue service tests. These must pass for the job
     # (and the PR) to go green.
     # The long soak test (tests/soak.rs) is #[ignore]d and runs manually only; its fast
     # limiter-conformance tests run here.
@@ -492,6 +564,9 @@ jobs:
         cargo test -p econ-graph-crawler --all-features -- --test-threads=1
         cargo test -p econ-graph-crawler-worker -- --test-threads=1
         cargo test -p econ-graph-sec-crawler --lib -- --test-threads=1
+        # The XBRL parser is compiled out by default (feature xbrl-parser); test it here too.
+        cargo test -p econ-graph-sec-crawler --features xbrl-parser --lib -- --test-threads=1
+        cargo test -p econ-graph-core --features financial-ratios --lib financial_ratios -- --test-threads=1
         cargo test -p econ-graph-core crawl_queue -- --test-threads=1
         cargo test -p econ-graph-core --lib models::dataset -- --test-threads=1
         cargo test -p econ-graph-services queue_service -- --test-threads=1
@@ -505,7 +580,11 @@ jobs:
       continue-on-error: true
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --workspace --no-fail-fast --lib --bins --tests -- --test-threads=1
+        status=0
+        cargo test --workspace --no-fail-fast --lib --bins --tests -- --test-threads=1 || status=$?
+        # The XBRL integration tests need the xbrl-parser feature (required-features).
+        cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --tests -- --test-threads=1 || status=$?
+        exit $status
       working-directory: backend
 
     # TODO: ~45 doctests across the workspace do not compile (stale examples).
@@ -515,7 +594,11 @@ jobs:
       continue-on-error: true
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo test --workspace --no-fail-fast --doc
+        status=0
+        cargo test --workspace --no-fail-fast --doc || status=$?
+        # Doctests in the SEC crawler's feature-gated XBRL parser code.
+        cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --doc || status=$?
+        exit $status
       working-directory: backend
 
   backend-db-tests:
@@ -665,7 +748,10 @@ jobs:
     name: Admin Frontend Tests
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    needs: [changes]
+    # Skipped on backend-only PRs; a manual run always gets it. See
+    # backend-build-cache for the !cancelled() pattern
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changes.outputs.backend_only != 'true')) }}
 
     steps:
     - name: Checkout code
@@ -707,6 +793,11 @@ jobs:
     name: Frontend Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20 # Increased for resource-constrained CI
+    needs: [changes]
+    # Skipped on backend-only PRs (and frontend-integration-tests with it);
+    # pushes and manual runs always get it, so a manual E2E run is never
+    # skipped. See backend-build-cache for the !cancelled() pattern
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.backend_only != 'true') }}
 
     steps:
     - name: Checkout code
@@ -810,6 +901,11 @@ jobs:
     name: Security Audit
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    needs: [changes]
+    # Only when dependency manifests or lockfiles changed; every push to main and
+    # manual run still gets it (security.yml also audits daily). !cancelled():
+    # `changes` is skipped on main.
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.deps == 'true') }}
 
     steps:
     - name: Checkout code
@@ -866,6 +962,10 @@ jobs:
     name: License Compliance Check
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    needs: [changes]
+    # Only when dependency manifests or lockfiles changed; every push to main and
+    # manual run still gets it. !cancelled(): `changes` is skipped on main.
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.deps == 'true') }}
 
     steps:
     - name: Checkout code
@@ -2485,7 +2585,27 @@ jobs:
     name: Docker Build Test
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    needs: [backend-smoke-tests]
+    needs: [changes, backend-smoke-tests]
+    # Only when a Dockerfile or .dockerignore changed; every push to main and
+    # manual run still gets it. Smoke tests must have passed if they ran; a
+    # frontend-only PR skips backend-build-cache and backend-smoke-tests
+    # entirely (frontend_only), which this job doesn't need in that case.
+    if: ${{ !cancelled() && (needs.backend-smoke-tests.result == 'success' || (needs.backend-smoke-tests.result == 'skipped' && needs.changes.outputs.frontend_only == 'true')) && (github.event_name != 'pull_request' || needs.changes.outputs.docker == 'true') }}
+
+    services:
+      postgres:
+        image: *postgres_image
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: econ_graph_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
 
     steps:
     - name: Checkout code
@@ -2501,6 +2621,7 @@ jobs:
       with:
         context: ./backend
         push: false
+        load: true
         tags: econ-graph-backend:test
         cache-from: type=gha
         cache-to: type=gha,mode=max
@@ -2510,6 +2631,7 @@ jobs:
       with:
         context: ./frontend
         push: false
+        load: true
         tags: econ-graph-frontend:test
         # Keycloak issuer for sign-in, from the repository variable when set; unset hides Sign in.
         build-args: |
@@ -2520,11 +2642,58 @@ jobs:
 
     - name: Test Docker images
       run: |
+        trap 'docker rm -f backend-smoke-test frontend-smoke-test >/dev/null 2>&1 || true' EXIT
+
         echo "Testing backend Docker image..."
-        docker run --rm econ-graph-backend:test --version || echo "Backend image test completed"
+        docker run -d --name backend-smoke-test \
+          --network host \
+          -e DATABASE_URL="postgresql://postgres:password@localhost:5432/econ_graph_test" \
+          -e BACKEND_PORT=19876 \
+          -e JWT_SECRET=ci-only-jwt-secret \
+          econ-graph-backend:test
+        backend_ok=""
+        for i in $(seq 1 30); do
+          if ! docker ps --format '{{.Names}}' | grep -q '^backend-smoke-test$'; then
+            echo "Backend container exited unexpectedly" >&2
+            break
+          fi
+          if curl -fsS "http://localhost:19876/health" > /dev/null; then
+            echo "Backend image is healthy"
+            backend_ok=1
+            break
+          fi
+          sleep 2
+        done
+        if [ -z "$backend_ok" ]; then
+          echo "Backend image failed its health check" >&2
+          docker logs backend-smoke-test || true
+          docker rm -f backend-smoke-test || true
+          exit 1
+        fi
+        docker rm -f backend-smoke-test
 
         echo "Testing frontend Docker image..."
-        docker run --rm econ-graph-frontend:test --version || echo "Frontend image test completed"
+        docker run -d --name frontend-smoke-test -p 18080:3000 econ-graph-frontend:test
+        frontend_ok=""
+        for i in $(seq 1 15); do
+          if ! docker ps --format '{{.Names}}' | grep -q '^frontend-smoke-test$'; then
+            echo "Frontend container exited unexpectedly" >&2
+            break
+          fi
+          if curl -fsS "http://localhost:18080/" > /dev/null; then
+            echo "Frontend image is serving"
+            frontend_ok=1
+            break
+          fi
+          sleep 1
+        done
+        if [ -z "$frontend_ok" ]; then
+          echo "Frontend image failed to serve" >&2
+          docker logs frontend-smoke-test || true
+          docker rm -f frontend-smoke-test || true
+          exit 1
+        fi
+        docker rm -f frontend-smoke-test
 # Updated Wed Sep 17 08:11:38 PDT 2025
 
 # Workflow cache refresh: 2025-09-17 08:25:07 PDT

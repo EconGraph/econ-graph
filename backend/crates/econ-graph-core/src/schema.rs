@@ -728,20 +728,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    user_sessions (id) {
-        id -> Uuid,
-        user_id -> Uuid,
-        #[max_length = 255]
-        token_hash -> Varchar,
-        expires_at -> Timestamptz,
-        created_at -> Timestamptz,
-        last_used_at -> Timestamptz,
-        user_agent -> Nullable<Text>,
-        ip_address -> Nullable<Text>,
-    }
-}
-
-diesel::table! {
     users (id) {
         id -> Uuid,
         #[max_length = 255]
@@ -749,14 +735,6 @@ diesel::table! {
         #[max_length = 255]
         name -> Varchar,
         avatar_url -> Nullable<Text>,
-        #[max_length = 50]
-        provider -> Varchar,
-        #[max_length = 255]
-        provider_id -> Nullable<Varchar>,
-        #[max_length = 255]
-        password_hash -> Nullable<Varchar>,
-        #[max_length = 50]
-        role -> Varchar,
         #[max_length = 255]
         organization -> Nullable<Varchar>,
         #[max_length = 20]
@@ -936,7 +914,6 @@ diesel::joinable!(series_metadata -> data_sources (source_id));
 diesel::joinable!(series_metadata -> datasets (dataset_id));
 diesel::joinable!(user_data_source_preferences -> data_sources (data_source_id));
 diesel::joinable!(user_data_source_preferences -> users (user_id));
-diesel::joinable!(user_sessions -> users (user_id));
 diesel::joinable!(xbrl_processing_logs -> financial_statements (statement_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -970,7 +947,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     series_metadata,
     trade_relationships,
     user_data_source_preferences,
-    user_sessions,
     users,
     xbrl_processing_logs,
     xbrl_taxonomy_concepts,

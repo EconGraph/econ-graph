@@ -22,7 +22,6 @@
 
 // Core crate imports
 pub use econ_graph_core::{
-    auth_models::{AuthProvider, User as AuthUser, UserRole},
     database::DatabasePool,
     error::{AppError, AppResult},
     // Additional imports for missing modules
@@ -77,8 +76,8 @@ pub use econ_graph_services::services::{
 
 // GraphQL framework imports
 pub use async_graphql::{
-    ComplexObject, Context, EmptyMutation, EmptySubscription, Enum, Error as GraphQLError,
-    InputObject, Object, Result, Schema, SimpleObject, ID,
+    Context, EmptyMutation, EmptySubscription, Enum, Error as GraphQLError, InputObject, Object,
+    Result, Schema, SimpleObject, ID,
 };
 
 // Standard library and external crate imports
