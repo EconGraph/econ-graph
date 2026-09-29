@@ -188,7 +188,5 @@ The Storybook configuration includes Vite customization to handle:
 
 ## Related Documentation
 
-- [Frontend Testing Strategy](../testing/frontend-testing-strategy.md)
-- [MSW Integration Guide](../testing/msw-integration.md)
-- [CI/CD Pipeline](../ci/ci-pipeline.md)
-- [Component Architecture](../technical/component-architecture.md)
+- [Frontend Summary](../../docs/technical/FRONTEND_SUMMARY.md)
+- [CI/CD Pipeline](../../docs/development/CI_CD_PIPELINE.md)

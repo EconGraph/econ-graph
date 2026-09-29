@@ -2,7 +2,7 @@
 // PURPOSE: Provide comprehensive search capabilities with spelling correction and synonyms
 // This module handles advanced search functionality for economic time series data
 
-use chrono::NaiveDateTime;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
@@ -16,10 +16,10 @@ pub struct SeriesSearchResult {
     pub external_id: String,
     pub source_id: Uuid,
     pub frequency: String,
-    pub units: String,
-    pub start_date: chrono::NaiveDate,
+    pub units: Option<String>,
+    pub start_date: Option<chrono::NaiveDate>,
     pub end_date: Option<chrono::NaiveDate>,
-    pub last_updated: NaiveDateTime,
+    pub last_updated: Option<DateTime<Utc>>,
     pub is_active: bool,
     /// Full-text search ranking score (higher is better)
     pub rank: f32,
@@ -333,10 +333,10 @@ mod _inline_tests {
             external_id: "GDP_REAL".to_string(),
             source_id: Uuid::new_v4(), // Use a test UUID
             frequency: "Quarterly".to_string(),
-            units: "Billions USD".to_string(),
-            start_date: chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+            units: Some("Billions USD".to_string()),
+            start_date: chrono::NaiveDate::from_ymd_opt(2000, 1, 1),
             end_date: None,
-            last_updated: chrono::Utc::now().naive_utc(),
+            last_updated: Some(chrono::Utc::now()),
             is_active: true,
             rank: 0.85,
             similarity_score: 0.92,

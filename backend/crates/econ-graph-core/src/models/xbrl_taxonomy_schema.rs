@@ -16,7 +16,7 @@ use crate::schema::xbrl_taxonomy_schemas;
 /// - Storing downloaded XBRL taxonomy schema files
 /// - Tracking schema processing status and metadata
 /// - Supporting DTS dependency resolution
-/// - Enabling Arelle integration with local taxonomy files
+/// - Resolving taxonomy references to local cached files
 ///
 /// # Example
 /// ```rust

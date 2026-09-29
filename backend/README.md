@@ -88,8 +88,8 @@ Specialized SEC EDGAR XBRL crawler for financial data acquisition with advanced 
 
 **Key Features:**
 - SEC EDGAR filing crawling and XBRL data extraction
-- Advanced XBRL document parsing and financial data extraction
-- Automated financial ratio calculation and analysis
+- Advanced XBRL document parsing and financial data extraction (behind the `xbrl-parser` cargo feature)
+- Automated financial ratio calculation and analysis (behind the `xbrl-parser` cargo feature)
 - Intelligent rate limiting respecting SEC policies
 - Comprehensive data validation and quality assurance
 
@@ -155,10 +155,10 @@ cp .env.example .env
 # Configure database connection
 DATABASE_URL=postgresql://username:password@localhost/econ_graph
 
-# Configure authentication
-JWT_SECRET=your-secret-key
-GOOGLE_CLIENT_ID=your-google-client-id
-GOOGLE_CLIENT_SECRET=your-google-client-secret
+# Configure authentication: the backend verifies Keycloak access tokens, it doesn't issue its own
+OIDC_ISSUER=http://localhost/idp/realms/econ-graph
+OIDC_AUDIENCE=econ-graph-api
+OIDC_JWKS_URL=http://localhost/idp/realms/econ-graph/protocol/openid-connect/certs
 ```
 
 ## Testing Strategy

@@ -11,7 +11,13 @@ This directory contains the CI/CD workflows for the EconGraph project, cleaned u
 - Frontend tests, quality checks, security audits, and E2E tests
 - All essential functionality validation
 
-**Triggers**: Push to main/develop, PRs, manual dispatch
+**Triggers**: Push to main/develop/`release/**` (REL-6: a release branch gets CI on every merge into it, same as main), every PR whatever its base branch (so stacked PRs are tested before they are retargeted), manual dispatch. Changes only to top-level Markdown files, `docs/**`, `LICENSE` or `.gitignore` don't run it.
+
+**Concurrency**: one run per PR. A push cancels the run the previous push started, so review rounds don't pile up in the queue. Runs on main and develop are never cancelled.
+
+**Path filters** (`changes` job): a PR that touches only `frontend/` or `admin-frontend/` skips the backend build and the test jobs that depend on it (Quality Checks still runs); one that touches only `backend/` or `chart-api-service/` skips the frontend test jobs. Shared paths (`.github/`, `ci/`, `scripts/`, `config/keycloak/`, `docker-compose.yml`, `package.json`, `k8s/`, `terraform/`, the committed GraphQL `schema.graphql`, since Frontend Tests checks every frontend operation against it, and the backend and frontend Dockerfiles and `.dockerignore` files) run both sides, and pushes to main run every job that isn't gated to a manual run (Admin Frontend Tests and the E2E jobs).
+
+Four more jobs run on a PR only when the files they check changed (or when `ci-core.yml` itself changed), and always on a push to main or a manual run: Security Audit and License Compliance Check (Cargo manifests, npm manifests and lockfiles, `deny.toml`, the audit and license-checker config), Docker Build Test (the backend and frontend Dockerfiles, `.dockerignore` and `nginx.conf` files, which also count as shared paths so the backend build it needs runs too, plus the Cargo/npm manifests and `rust-toolchain.toml` it builds against, since a dependency or toolchain bump can break the image with no Dockerfile touched) and Backend Migration Validation Tests (`backend/migrations/`, the check script).
 
 ### Security (`security.yml`)
 **Purpose**: Daily security vulnerability scanning

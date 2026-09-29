@@ -22,7 +22,7 @@ Defaults from `SourcePolicy::default_for` (`src/policy.rs`); an adapter may over
 | FRED | 120/min | 4 | 4 | required |
 | BLS | 25/min | 1 | 1 | optional (higher limits) |
 | BEA | 30/min | 1 | 1 | required |
-| Census | 40/min | 1 | 2 | optional |
+| Census | 40/min | 1 | 2 | required |
 | SEC | 8/s (SEC allows 10/s) | 8 | 4 | none |
 | all others | 1/s | 1 | 2 | none |
 

@@ -64,7 +64,7 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onClose }) => {
       text: 'Global Analysis',
       path: '/global',
       icon: <GlobalIcon />,
-      description: 'Cross-country correlations & network analysis',
+      description: 'World Bank indicators on a world map',
     },
     {
       text: 'Data Sources',

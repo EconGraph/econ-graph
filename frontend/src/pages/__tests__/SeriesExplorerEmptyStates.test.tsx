@@ -48,6 +48,19 @@ vi.mock('../../utils/graphql', async () => {
   };
 });
 
+// The global test setup mocks these hooks with sample results; this file needs an empty
+// backend, so the hooks return no sources and no series.
+vi.mock('../../hooks/useSeriesData', () => ({
+  useDataSources: vi.fn(() => ({ data: [], isLoading: false, error: null })),
+  useSeriesSearch: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    isFetching: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
+}));
+
 function renderSeriesExplorer() {
   return render(<SeriesExplorer />);
 }
@@ -109,7 +122,7 @@ describe('SeriesExplorer Empty State Scenarios', () => {
 
       // Should provide actionable guidance
       expect(screen.getByText(/try adjusting your search criteria/i)).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /browse all series/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /clear search and filters/i })).toBeInTheDocument();
     });
   });
 
@@ -353,7 +366,7 @@ describe('SeriesExplorer Empty State Scenarios', () => {
       }, { timeout: 5000 });
 
       // Should offer alternative actions
-      expect(screen.getByRole('button', { name: /browse all series/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /clear search and filters/i })).toBeInTheDocument();
       expect(screen.getByText(/try adjusting your search criteria/i)).toBeInTheDocument();
     });
   });
@@ -384,7 +397,7 @@ describe('SeriesExplorer Empty State Scenarios', () => {
       }, { timeout: 5000 });
 
       // Should have accessible action buttons
-      expect(screen.getByRole('button', { name: /browse all series/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /clear search and filters/i })).toBeInTheDocument();
     });
   });
 });

@@ -2,14 +2,14 @@
 
 > **Project**: EconGraph Platform Security Implementation  
 > **Date**: December 2024  
-> **Related Documents**: [Security Findings Report](SECURITY_FINDINGS_REPORT.md)  
+> **Related Documents**: [Security Assessment Report](../security/FINAL_COMPREHENSIVE_SECURITY_ASSESSMENT_REPORT.md)  
 > **Scope**: Implementation plan to address identified security vulnerabilities
 
 ## Executive Summary
 
 This implementation plan addresses **4 critical vulnerabilities** and **1 high severity issue** identified during the comprehensive security assessment of the EconGraph platform. The plan prioritizes immediate fixes for critical vulnerabilities while establishing a robust security foundation for long-term platform security.
 
-> **Note**: For detailed vulnerability descriptions and evidence, see [Security Findings Report](SECURITY_FINDINGS_REPORT.md).
+> **Note**: For detailed vulnerability descriptions and evidence, see the [Security Assessment Report](../security/FINAL_COMPREHENSIVE_SECURITY_ASSESSMENT_REPORT.md).
 
 ### Risk Assessment Summary
 - **Critical Issues**: 4 (Immediate action required)
@@ -121,14 +121,9 @@ let cors = warp::cors()
 ```
 
 #### Configuration:
-```yaml
-# k8s/manifests/ingress.yaml
-metadata:
-  annotations:
-    nginx.ingress.kubernetes.io/cors-allow-origin: "https://econgraph.com,https://admin.econgraph.com"
-    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
-    nginx.ingress.kubernetes.io/cors-allow-headers: "Content-Type, Authorization"
-```
+Done differently: the backend enforces CORS from `CORS_ALLOWED_ORIGINS` (#182), and the
+ingress manifests set no CORS annotations, so responses never carry two
+`Access-Control-Allow-Origin` headers.
 
 ### 1.3 PostgreSQL Credentials Security
 **Priority**: CRITICAL (CVSS 9.1)
