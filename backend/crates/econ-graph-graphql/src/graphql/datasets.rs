@@ -27,7 +27,7 @@ use econ_graph_core::models::{
 use econ_graph_core::reference::{self, Area, Areas};
 use econ_graph_crawler::reference::{self as crawler_reference, UsState};
 
-use crate::graphql::schema::GraphQLContext;
+use crate::graphql::schema::SchemaResources;
 use crate::types::DataSourceType;
 
 /// Value type of a dataset component.
@@ -235,7 +235,7 @@ impl DatasetType {
 
     /// The data source that publishes this dataset.
     async fn source(&self, ctx: &Context<'_>) -> Result<Option<DataSourceType>> {
-        let loaders = &ctx.data::<GraphQLContext>()?.data_loaders;
+        let loaders = &ctx.data::<SchemaResources>()?.data_loaders;
         let source = loaders
             .dataset_source_loader
             .try_load(self.0.source_id)
@@ -471,7 +471,7 @@ impl BatchFn<Uuid, Option<SeriesDatasetFields>> for SeriesDatasetFieldsBatcher {
 
 /// Loads a dataset through the context's loader. Errors if the batch query failed.
 pub async fn load_dataset(ctx: &Context<'_>, id: Uuid) -> Result<Option<Dataset>> {
-    let loaders = &ctx.data::<GraphQLContext>()?.data_loaders;
+    let loaders = &ctx.data::<SchemaResources>()?.data_loaders;
     loaders
         .dataset_loader
         .try_load(id)
@@ -485,7 +485,7 @@ pub async fn load_series_dataset_fields(
     ctx: &Context<'_>,
     series_id: Uuid,
 ) -> Result<Option<SeriesDatasetFields>> {
-    let loaders = &ctx.data::<GraphQLContext>()?.data_loaders;
+    let loaders = &ctx.data::<SchemaResources>()?.data_loaders;
     loaders
         .series_dataset_fields_loader
         .try_load(series_id)

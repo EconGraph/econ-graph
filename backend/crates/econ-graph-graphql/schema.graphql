@@ -411,6 +411,85 @@ enum DataTransformation {
 	LOG_DIFFERENCE
 }
 
+type Dataset {
+	id: ID!
+	sourceId: ID!
+	"""
+	The data source that publishes this dataset.
+	"""
+	source: DataSourceType
+	"""
+	Code unique within the source, e.g. `BDS`.
+	"""
+	code: String!
+	name: String!
+	description: String
+	"""
+	Dimensions in key order. Together their values identify a series in the dataset.
+	"""
+	dimensions: [DatasetComponent!]!
+	"""
+	Observed values. In train 1 every dataset has the single measure `value`.
+	"""
+	measures: [DatasetComponent!]!
+	"""
+	Per-observation attributes, e.g. an observation status flag.
+	"""
+	attributes: [DatasetComponent!]!
+	"""
+	The measure a chart plots when the user has not picked one.
+	"""
+	defaultMeasure: String!
+	createdAt: DateTime!
+	updatedAt: DateTime!
+}
+
+type DatasetComponent {
+	"""
+	Machine name, e.g. `state`. Series dimension values are keyed by it.
+	"""
+	name: String!
+	"""
+	Human-readable label, e.g. `State`.
+	"""
+	label: String!
+	"""
+	Value type.
+	"""
+	type: DatasetComponentValueType!
+	"""
+	Unit of a measure, e.g. `Percent`.
+	"""
+	unit: String
+	"""
+	The values this component takes, with labels. Inline codes come in declared order and
+	shared code lists (such as `countries`) in file order. Empty when the component is not
+	coded.
+	
+	A code list that cannot be resolved (an unknown name, or an unreadable reference file) is
+	logged and yields an empty list, so one misconfigured dataset doesn't fail the query. A
+	client that cares about the difference checks `codelist`: non-null with empty `codes` is
+	a degraded code list, not a component with none.
+	"""
+	codes: [DimensionCode!]!
+	"""
+	Name of the shared code list the codes come from, e.g. `countries`. Null for inline or
+	no codes. Clients use it to recognise a dimension, e.g. the map's country dimension.
+	"""
+	codelist: String
+}
+
+"""
+Value type of a dataset component.
+"""
+enum DatasetComponentValueType {
+	STRING
+	INTEGER
+	DECIMAL
+	DATE
+	BOOLEAN
+}
+
 """
 Implement the DateTime<Utc> scalar
 
@@ -428,6 +507,22 @@ input DeleteAnnotationInput {
 	annotationId: ID!
 }
 
+"""
+A coded value of a dimension, e.g. `06` / `California`.
+"""
+type DimensionCode {
+	"""
+	The value as stored in series dimensions.
+	"""
+	code: String!
+	label: String!
+	"""
+	Unit of series with this value, e.g. `current US$` for a WDI indicator.
+	"""
+	unit: String
+	description: String
+}
+
 type EconomicSeriesType {
 	id: ID!
 	sourceId: ID!
@@ -443,6 +538,21 @@ type EconomicSeriesType {
 	isActive: Boolean!
 	createdAt: DateTime!
 	updatedAt: DateTime!
+	"""
+	The dataset this series belongs to. Null until its adapter declares one.
+	"""
+	dataset: Dataset
+	"""
+	The series' dimension values within its dataset, in the dataset's dimension order,
+	with dimension and code labels. Keys the dataset does not declare follow in key order
+	with null labels. Empty for a series without dimensions.
+	"""
+	dimensions: [SeriesDimension!]!
+	"""
+	The measure a chart plots by default: the series' own override, else its dataset's.
+	Null when neither the series nor its dataset sets one.
+	"""
+	defaultMeasure: String
 	"""
 	Fetch the data source using direct database query
 	"""
@@ -556,6 +666,16 @@ type Query {
 	List all data sources
 	"""
 	dataSources: [DataSourceType!]!
+	"""
+	List datasets, optionally only one source's, grouped by source id (in no particular
+	order across sources) and by code within a source. Unpaginated: sources publish a
+	handful of datasets each.
+	"""
+	datasets(sourceId: ID): [Dataset!]!
+	"""
+	Get a dataset by ID
+	"""
+	dataset(id: ID!): Dataset
 	"""
 	Get data points for a specific series with filtering and transformation, one page at a
 	time in date order. `totalCount` counts every matching point; read the next page with
@@ -719,6 +839,33 @@ type SeriesConnection {
 	nodes: [EconomicSeriesType!]!
 	totalCount: Int!
 	pageInfo: PageInfo!
+}
+
+"""
+A series' value for one dimension of its dataset, with labels resolved.
+"""
+type SeriesDimension {
+	"""
+	Dimension name, e.g. `state`.
+	"""
+	name: String!
+	"""
+	Dimension label, e.g. `State`. Null when the dataset does not declare the dimension.
+	"""
+	label: String
+	"""
+	Coded value, e.g. `06`.
+	"""
+	value: String!
+	"""
+	Label of the value, e.g. `California`. Null when the dimension has no label for it.
+	"""
+	valueLabel: String
+	"""
+	Unit of series with this value, e.g. `current US$` for a WDI indicator. Null when the
+	code carries none; the series' own `units` then applies.
+	"""
+	valueUnit: String
 }
 
 """

@@ -6,7 +6,7 @@
 
 use crate::graphql::dataloaders::DataLoaders;
 use crate::graphql::datasets::{DatasetBatcher, SeriesDatasetFields, SeriesDatasetFieldsBatcher};
-use crate::graphql::schema::{create_schema, GraphQLContext};
+use crate::graphql::schema::{create_schema, SchemaResources};
 use crate::security::{SecurityConfig, SecurityMiddleware};
 use crate::types::EconomicSeriesType;
 use async_graphql::{EmptyMutation, EmptySubscription, Request, Schema};
@@ -462,17 +462,17 @@ async fn search_results_load_dataset_fields_by_series_id() {
             external_id: series.external_id,
             source_id: series.source_id,
             frequency: series.frequency,
-            units: String::new(),
-            start_date: chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+            units: None,
+            start_date: Some(chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap()),
             end_date: None,
-            last_updated: chrono::Utc::now().naive_utc(),
+            last_updated: Some(chrono::Utc::now()),
             is_active: true,
             rank: 1.0,
             similarity_score: 1.0,
         });
     }
 
-    let context = GraphQLContext {
+    let context = SchemaResources {
         pool: Arc::new(pool.clone()),
         data_loaders: Arc::new(DataLoaders::new(pool.clone())),
         security: Arc::new(SecurityMiddleware::new(SecurityConfig::default())),
