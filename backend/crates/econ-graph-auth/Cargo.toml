@@ -9,38 +9,29 @@ license.workspace = true
 econ-graph-core = { path = "../econ-graph-core" }
 
 # Authentication and security
-bcrypt.workspace = true
 jsonwebtoken.workspace = true
-
-# OAuth clients
-oauth2.workspace = true
 
 # Async runtime
 tokio.workspace = true
-async-trait.workspace = true
 
 # Serialization
 serde.workspace = true
 serde_json.workspace = true
 
 # Error handling
-anyhow.workspace = true
 thiserror.workspace = true
 
 # Logging
 tracing.workspace = true
 
-# Web framework
-warp.workspace = true
+# Web framework (the `testkit` feature's local OIDC provider)
+warp = { workspace = true, optional = true }
 
 # Date/Time
 chrono.workspace = true
 
 # UUID
 uuid.workspace = true
-
-# Validation
-validator.workspace = true
 
 # HTTP client
 reqwest.workspace = true
@@ -51,12 +42,13 @@ base64 = { version = "0.22", optional = true }
 
 [features]
 # `econ_graph_auth::testkit`: a local OIDC provider that serves a JWKS and mints tokens.
-testkit = ["dep:aws-lc-rs", "dep:base64"]
+testkit = ["dep:aws-lc-rs", "dep:base64", "dep:warp"]
 
 # Test dependencies
 [dev-dependencies]
 aws-lc-rs = "1.15"
 base64 = "0.22"
+warp.workspace = true
 diesel-async.workspace = true
 serial_test.workspace = true
 tokio-test.workspace = true

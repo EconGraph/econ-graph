@@ -25,15 +25,22 @@ import {
   ArrowBack as ArrowBackIcon,
   Info as InfoIcon,
   TrendingUp as TrendingUpIcon,
+  Download as DownloadIcon,
 } from '@mui/icons-material';
 
 import SeriesChart, { SeriesChartAnnotation } from '../components/charts/SeriesChart';
 import SeriesAnnotationsPanel from '../components/charts/SeriesAnnotationsPanel';
+import {
+  EMPTY_DATE_RANGE,
+  selectShownPoints,
+  type SeriesChartDateRange,
+} from '../components/charts/seriesChartData';
 import { useSeriesData, useSeriesDetail, SeriesDataPoint } from '../hooks/useSeriesData';
 import { useSeriesAnnotations } from '../hooks/useSeriesAnnotations';
 import { useSeriesAnnotationEditor } from '../components/annotations/useSeriesAnnotationEditor';
 import { DataTransformation, describeTransformation } from '../utils/transformations';
 import { formatIsoDate } from '../utils/dates';
+import { buildSeriesCsv, downloadCsv, seriesCsvFileName } from '../utils/seriesCsv';
 
 /**
  * Series page: one economic series' metadata, chart and latest observations, read from
@@ -85,6 +92,11 @@ const todayIso = () => {
 const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
   const navigate = useNavigate();
   const [transformation, setTransformation] = React.useState<DataTransformation>('NONE');
+  // Owned here (rather than inside SeriesChart) so the CSV download writes exactly the
+  // range the chart shows. This also means the range now survives a chart remount (an
+  // observations error, or "not enough data" for a transformation); only a series change
+  // (the `key={id}` below) resets it.
+  const [dateRange, setDateRange] = React.useState<SeriesChartDateRange>(EMPTY_DATE_RANGE);
 
   const detail = useSeriesDetail(seriesId);
   const series = detail.data;
@@ -189,9 +201,31 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
       </Alert>
     );
   } else if (hasValues(points)) {
+    const downloadShownPoints = () => {
+      const csv = buildSeriesCsv({
+        title: series.title,
+        source: series.source?.name ?? '',
+        // Transformed values are percent changes, as the chart's axis says.
+        units: shownTransformation === 'NONE' ? units : '%',
+        transformation: transformationLabel,
+        retrievedAt: data.dataUpdatedAt ? new Date(data.dataUpdatedAt) : null,
+        points: selectShownPoints(points, dateRange),
+      });
+      downloadCsv(seriesCsvFileName(series.externalId, shownTransformation), csv);
+    };
     chart = (
       <Box>
         {data.isPreviousData && <LinearProgress aria-label='Loading transformation' />}
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+          <Button
+            size='small'
+            startIcon={<DownloadIcon />}
+            onClick={downloadShownPoints}
+            disabled={data.isPreviousData}
+          >
+            Download CSV
+          </Button>
+        </Box>
         <SeriesChart
           data={points}
           title={series.title}
@@ -200,6 +234,8 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
           transformation={shownTransformation}
           selectedTransformation={transformation}
           onTransformationChange={setTransformation}
+          dateRange={dateRange}
+          onDateRangeChange={setDateRange}
           annotations={chartAnnotations}
           onAnnotationClick={setSelectedAnnotationId}
           onPointClick={editor.onPointClick}

@@ -107,7 +107,7 @@ describe('End-to-End User Workflows', () => {
   });
 
   describe('Authentication Workflow', () => {
-    test('should complete authentication workflow: Login → Dashboard → Analysis', async () => {
+    test('should complete authentication workflow: Login → Dashboard', async () => {
       renderApp();
 
       // Should show the app with authentication
@@ -115,8 +115,9 @@ describe('End-to-End User Workflows', () => {
         expect(screen.getByRole('banner')).toBeInTheDocument();
       });
 
-      // Verify user is authenticated (Professional Analysis button should be visible)
-      expect(screen.getByText('Professional Analysis')).toBeInTheDocument();
+      // Verify user is authenticated (the user menu replaces the Sign In button)
+      expect(screen.getByRole('button', { name: 'user menu' })).toBeInTheDocument();
+      expect(screen.queryByText('Sign In')).not.toBeInTheDocument();
 
       console.log('✅ Authentication workflow test passed');
     });

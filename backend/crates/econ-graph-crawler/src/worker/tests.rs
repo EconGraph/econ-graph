@@ -757,7 +757,7 @@ async fn unknown_source_and_missing_adapter_fail() {
     let bogus = enqueue(&db.pool, "NOT_A_SOURCE", "t5_x", JobKind::FetchSeries, 9).await;
     let unregistered = enqueue(
         &db.pool,
-        SourceId::Oecd.as_str(),
+        SourceId::Imf.as_str(),
         "t5_y",
         JobKind::FetchSeries,
         5,

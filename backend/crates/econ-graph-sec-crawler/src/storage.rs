@@ -300,7 +300,12 @@ impl XbrlStorage {
 
         Ok(())
     }
+}
 
+/// DTS (taxonomy) storage. Only the XBRL parser's DTS download uses it, so it is compiled out with
+/// that path.
+#[cfg(feature = "xbrl-parser")]
+impl XbrlStorage {
     /// Store a taxonomy component (schema or linkbase) in the database
     pub async fn store_taxonomy_component(
         &self,

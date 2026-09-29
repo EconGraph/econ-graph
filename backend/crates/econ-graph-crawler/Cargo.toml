@@ -71,6 +71,10 @@ wiremock = { workspace = true, optional = true }
 # Adapter contract test kit: mock upstream server, test CrawlCtx, contract assertions.
 # In-crate tests get it automatically via cfg(test); other crates enable it as a dev-dependency feature.
 testkit = ["dep:wiremock"]
+# Registers the ten static-catalog adapters (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS,
+# WTO) in `default_registry()`. Development only: their series lists are hardcoded and they
+# can't fetch data, so release builds leave this off. See `src/sources/static_catalogs.rs`.
+static-catalogs = []
 
 [dev-dependencies]
 wiremock.workspace = true

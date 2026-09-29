@@ -44,24 +44,25 @@ async fn db() -> Option<(DatabasePool, tokio::sync::MutexGuard<'static, ()>)> {
     Some((pool, guard))
 }
 
-/// Creates (or fetches) a real `users` row for `name`, e.g. "alice" or "bob".
+/// Creates a real `users` row for `name`, e.g. "alice" or "bob".
 async fn make_user(pool: &DatabasePool, name: &str) -> User {
-    User::create_or_get_oauth(
+    User::get_or_create_for_subject(
         pool,
-        "email".to_string(),
-        format!("{name}-auth8"),
-        format!("{name}@auth8.test"),
-        name.to_string(),
-        None,
+        uuid::Uuid::new_v4(),
+        Some(&format!("{name}@auth8.test")),
+        true,
+        Some(name),
     )
     .await
     .expect("create test user")
 }
 
-/// Runs `query` against the real schema, as `user` (or anonymous when `None`).
+/// Runs `query` against the real schema, as `user` (or anonymous when `None`); never staff.
 async fn run_as(pool: &DatabasePool, user: Option<User>, query: &str) -> async_graphql::Response {
-    let schema =
-        create_schema_with_data(pool.clone(), Arc::new(GraphQLContext::for_test_user(user)));
+    let schema = create_schema_with_data(
+        pool.clone(),
+        Arc::new(GraphQLContext::for_test_user(user, false)),
+    );
     schema.execute(query).await
 }
 
@@ -359,49 +360,4 @@ async fn comments_on_a_private_annotation_are_hidden_from_others() {
     let resp = run_as(&pool, None, &query).await;
     assert_eq!(resp.errors.len(), 1, "{:?}", resp.errors);
     assert!(resp.errors[0].message.to_lowercase().contains("not found"));
-}
-
-/// The deprecated `isVisible` alias maps to `visibility` both ways: as a create/update input
-/// it drives the same enum `isPublic` would, and as an output field it reflects `visibility`
-/// back as a boolean, for clients (like the current frontend) not yet migrated to `visibility`.
-#[tokio::test]
-async fn is_visible_alias_maps_both_ways() {
-    let Some((pool, _guard)) = db().await else {
-        return;
-    };
-    let alice = make_user(&pool, "alice").await;
-    let series_id = uuid::Uuid::new_v4().to_string();
-
-    // Input side: `isVisible: true` with no `isPublic` still creates a public annotation,
-    // and the output `isVisible` field reflects it back as `true`.
-    let resp = run_as(
-        &pool,
-        Some(alice.clone()),
-        &format!(
-            r#"mutation {{ createAnnotation(input: {{ seriesId: "{series_id}", annotationDate: "2024-01-01", title: "aliased", content: "c", annotationType: "note", isVisible: true }}) {{ id isVisible visibility }} }}"#
-        ),
-    )
-    .await;
-    assert!(resp.errors.is_empty(), "{:?}", resp.errors);
-    let created = resp.data.into_json().unwrap();
-    assert_eq!(created["createAnnotation"]["isVisible"], true);
-    assert_eq!(created["createAnnotation"]["visibility"], "PUBLIC");
-    let id = created["createAnnotation"]["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    // When both are given, `isPublic` wins over the deprecated `isVisible`.
-    let resp = run_as(
-        &pool,
-        Some(alice),
-        &format!(
-            r#"mutation {{ updateAnnotation(input: {{ annotationId: "{id}", isPublic: false, isVisible: true }}) {{ isVisible visibility }} }}"#
-        ),
-    )
-    .await;
-    assert!(resp.errors.is_empty(), "{:?}", resp.errors);
-    let updated = resp.data.into_json().unwrap();
-    assert_eq!(updated["updateAnnotation"]["isVisible"], false);
-    assert_eq!(updated["updateAnnotation"]["visibility"], "PRIVATE");
 }

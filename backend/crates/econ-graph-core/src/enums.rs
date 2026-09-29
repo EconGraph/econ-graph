@@ -352,7 +352,7 @@ impl diesel::Queryable<sql_types::AnnotationVisibility, Pg> for AnnotationVisibi
 }
 
 impl AnnotationVisibility {
-    /// Maps the legacy `isPublic`/`isVisible` boolean onto the enum.
+    /// Maps the `isPublic` boolean onto the enum.
     pub fn from_is_public(is_public: bool) -> Self {
         if is_public {
             AnnotationVisibility::Public

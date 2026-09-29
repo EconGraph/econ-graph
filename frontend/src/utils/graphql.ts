@@ -311,8 +311,6 @@ export const QUERIES = {
         email
         name
         avatarUrl
-        provider
-        role
         organization
         theme
         defaultChartType

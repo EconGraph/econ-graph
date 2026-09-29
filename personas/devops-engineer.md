@@ -31,10 +31,10 @@ This document outlines the standards and best practices for DevOps Engineers, en
 ## DevOps-Specific Responsibilities
 
 ### Cursor-native commands
-- Use `/k8s-context`, `/k8s-deploy`, `/k8s-restart`, `/k8s-logs` to manage and inspect Kubernetes rollouts and logs
-- Use `/workflow-audit` to validate GitHub Actions workflows (triggers/steps/names) and enforce hygiene
-- Use `/deploy` to run the standard deployment script when available; use `/docker-logs` for local container debugging
-- Use `/debug-k8s` to drive a disciplined k8s debugging loop (survey components → bisect → one targeted change)
+* Use `/k8s-context`, `/k8s-deploy`, `/k8s-restart`, `/k8s-logs` to manage and inspect Kubernetes rollouts and logs
+* Use `/workflow-audit` to validate GitHub Actions workflows (triggers/steps/names) and enforce hygiene
+* Use `/deploy` to run the standard deployment script when available; use `/docker-logs` for local container debugging
+* Use `/debug-k8s` to drive a disciplined k8s debugging loop (survey components → bisect → one targeted change)
 
 ### Infrastructure as Code (IaC)
 * **Terraform best practices**:

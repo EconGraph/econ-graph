@@ -714,6 +714,7 @@ pub struct XbrlStorageStats {
 ///     reference_arcrole: Some("http://www.w3.org/1999/xlink/properties/linkbase".to_string()),
 /// };
 /// ```
+#[cfg(feature = "xbrl-parser")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DtsReference {
     /// Type of reference: "schemaRef" or "linkbaseRef"

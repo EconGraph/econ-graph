@@ -13,14 +13,19 @@ use tracing::{info, Instrument};
 use warp::{Filter, Reply as _};
 
 // Import from our new crates
-use econ_graph_auth::auth::{routes::auth_routes, services::AuthService};
 use econ_graph_auth::{authenticate, BearerError, Caller, OidcConfig, OidcVerifier, Role};
-use econ_graph_core::{create_pool, AppError, AppResult, Config, DatabasePool};
+use econ_graph_core::{
+    create_pool, redact_database_url, AppError, AppResult, Config, DatabasePool,
+};
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
-use econ_graph_mcp::mcp_server::{mcp_handler, EconGraphMcpServer};
 
 mod integration_tests;
+#[cfg(flag_mcp)]
+mod mcp_routes;
 mod metrics;
+
+#[cfg(flag_mcp)]
+use mcp_routes::mcp_filter;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -61,6 +66,16 @@ async fn graphql_handler(
     Ok(GraphQLResponse::from(response))
 }
 
+/// Whether `/playground` is served: only when `ENABLE_GRAPHQL_PLAYGROUND` is `true` or `1`.
+///
+/// Deployed builds leave it unset, so the playground (and its schema explorer) is not public.
+fn playground_enabled(setting: Option<String>) -> bool {
+    setting
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+}
+
 async fn graphql_playground() -> Result<impl warp::Reply, Infallible> {
     Ok(warp::reply::html(playground_source(
         GraphQLPlaygroundConfig::new("/graphql"),
@@ -78,7 +93,25 @@ async fn health_check() -> Result<impl warp::Reply, Infallible> {
     })))
 }
 
-async fn root_handler() -> Result<impl warp::Reply, Infallible> {
+/// Landing-page entry for `/playground`, shown only when the playground is served.
+const PLAYGROUND_ENDPOINT_HTML: &str = r#"        <div class="endpoint">
+            <div><span class="method">GET</span> <code>/playground</code></div>
+            <p><a href="/playground">Interactive GraphQL Playground</a> - Test queries and explore the schema</p>
+        </div>"#;
+
+/// Landing-page quick start pointing at the playground, shown only when it is served.
+const PLAYGROUND_QUICK_START_HTML: &str = r#"        <p>Visit the <a href="/playground">GraphQL Playground</a> to start exploring economic data!</p>"#;
+
+/// The `/mcp` entry on the API index page, shown only when this build routes it.
+const MCP_ENDPOINT_HTML: &str = r#"        <div class="endpoint">
+            <div><span class="method">POST</span> <code>/mcp</code></div>
+            <p>MCP (Model Context Protocol) server endpoint - AI model integration for economic data access</p>
+        </div>
+
+"#;
+
+/// The landing page at `/`. It lists `/playground` only when the playground is served.
+async fn root_handler(playground: bool) -> Result<impl warp::Reply, Infallible> {
     // Record root endpoint metrics
     metrics::record_http_request("GET", "/", 200, 0.0);
 
@@ -110,10 +143,7 @@ async fn root_handler() -> Result<impl warp::Reply, Infallible> {
             <p>GraphQL endpoint for economic data queries and mutations</p>
         </div>
 
-        <div class="endpoint">
-            <div><span class="method">GET</span> <code>/playground</code></div>
-            <p><a href="/playground">Interactive GraphQL Playground</a> - Test queries and explore the schema</p>
-        </div>
+<!--PLAYGROUND_ENDPOINT-->
 
         <div class="endpoint">
             <div><span class="method">GET</span> <code>/health</code></div>
@@ -125,13 +155,9 @@ async fn root_handler() -> Result<impl warp::Reply, Infallible> {
             <p><a href="/metrics">Prometheus metrics endpoint</a> - Application metrics for monitoring</p>
         </div>
 
-        <div class="endpoint">
-            <div><span class="method">POST</span> <code>/mcp</code></div>
-            <p>MCP (Model Context Protocol) server endpoint - AI model integration for economic data access</p>
-        </div>
-
+<!--MCP_ENDPOINT-->
         <h2>🚀 Quick Start</h2>
-        <p>Visit the <a href="/playground">GraphQL Playground</a> to start exploring economic data!</p>
+<!--PLAYGROUND_QUICK_START-->
 
         <h2>📈 Features</h2>
         <ul>
@@ -148,8 +174,21 @@ async fn root_handler() -> Result<impl warp::Reply, Infallible> {
 </html>
     "#;
 
+    let (endpoint, quick_start) = if playground {
+        (PLAYGROUND_ENDPOINT_HTML, PLAYGROUND_QUICK_START_HTML)
+    } else {
+        ("", "<p>Send GraphQL queries to <code>/graphql</code>.</p>")
+    };
+    let mcp = if cfg!(flag_mcp) {
+        MCP_ENDPOINT_HTML
+    } else {
+        ""
+    };
     Ok(warp::reply::html(
-        html.replace("{}", env!("CARGO_PKG_VERSION")),
+        html.replace("{}", env!("CARGO_PKG_VERSION"))
+            .replace("<!--PLAYGROUND_ENDPOINT-->", endpoint)
+            .replace("<!--PLAYGROUND_QUICK_START-->", quick_start)
+            .replace("<!--MCP_ENDPOINT-->", mcp),
     ))
 }
 
@@ -284,203 +323,115 @@ async fn graphql_caller(
     }
 }
 
-/// Check that a request may use `/mcp`: an active, signed-in caller holding `api:mcp`.
-async fn mcp_access(
-    pool: &DatabasePool,
-    verifier: Option<&OidcVerifier>,
-    authorization: Option<&str>,
-) -> Result<(), McpRejection> {
-    match authenticate(pool, verifier, authorization).await {
-        Ok(Some(caller)) if caller.principal.has_role(Role::ApiMcp) => Ok(()),
-        Ok(Some(_)) => Err(McpRejection::MissingRole),
-        Ok(None) => Err(McpRejection::Unauthorized),
-        Err(BearerError::InvalidToken(why)) => {
-            tracing::debug!("refused an MCP request: {why}");
-            Err(McpRejection::InvalidToken)
-        }
-        Err(BearerError::Inactive(id)) => {
-            tracing::info!("refused an MCP request from suspended account {id}");
-            Err(McpRejection::Suspended)
-        }
-        Err(BearerError::Unavailable(why)) => {
-            tracing::warn!("refused an MCP request whose token could not be checked: {why}");
-            Err(McpRejection::AuthUnavailable)
-        }
-        Err(BearerError::Database(why)) => {
-            tracing::error!("could not load the MCP caller's account: {why}");
-            Err(McpRejection::AccountUnavailable)
-        }
-    }
+/// Stands in for `/mcp` when the `mcp` build flag is off: nothing answers there, so it
+/// gets a 404, and none of the MCP route's code is compiled into this binary.
+#[cfg(not(flag_mcp))]
+fn mcp_filter(
+    _pool: DatabasePool,
+    _verifier: Option<Arc<OidcVerifier>>,
+) -> warp::filters::BoxedFilter<(warp::reply::Response,)> {
+    warp::any()
+        .and_then(|| async { Err::<warp::reply::Response, _>(warp::reject::not_found()) })
+        .boxed()
 }
 
-/// JSON-RPC error for an MCP request without a valid bearer token.
-fn mcp_unauthorized() -> warp::reply::Response {
-    let reply = mcp_error(
-        warp::http::StatusCode::UNAUTHORIZED,
-        -32001,
-        "Authentication required",
-    );
-    warp::reply::with_header(reply, "WWW-Authenticate", "Bearer").into_response()
-}
-
-/// Why `mcp_route` refused a request; its `recover` turns each into a JSON-RPC error reply.
-#[derive(Debug, PartialEq, Eq)]
-enum McpRejection {
-    /// No bearer token (or sign-in is disabled): 401 with a `WWW-Authenticate: Bearer`
-    /// challenge.
-    Unauthorized,
-    /// A bearer token that is not acceptable: 401, `Bearer error="invalid_token"`.
-    InvalidToken,
-    /// A valid token without `api:mcp`: 403, `Bearer error="insufficient_scope"`.
-    MissingRole,
-    /// The account is suspended: 403.
-    Suspended,
-    /// The token could not be checked because the identity provider is unreachable: 503.
-    AuthUnavailable,
-    /// The caller's account could not be loaded: 500.
-    AccountUnavailable,
-    /// More than [`MCP_BODY_LIMIT`] bytes of body: 413.
-    BodyTooLarge,
-    /// The body could not be read: 400.
-    BodyUnreadable,
-}
-
-impl warp::reject::Reject for McpRejection {}
-
-/// Largest MCP request body accepted, in bytes. JSON-RPC requests are small.
-const MCP_BODY_LIMIT: usize = 1024 * 1024;
-
-/// Collect a request body, giving up as soon as more than `limit` bytes have arrived.
-///
-/// This counts the bytes actually received rather than trusting `Content-Length`, which a
-/// chunked request can carry alongside a much larger body.
-async fn read_body_limited<S, B>(
-    body: S,
-    limit: usize,
-) -> Result<warp::hyper::body::Bytes, warp::Rejection>
-where
-    S: tokio_stream::Stream<Item = Result<B, warp::Error>>,
-    B: warp::hyper::body::Buf,
-{
-    use tokio_stream::StreamExt as _;
-    use warp::hyper::body::Buf as _;
-
-    let mut body = std::pin::pin!(body);
-    let mut collected = Vec::new();
-    while let Some(chunk) = body.next().await {
-        let mut chunk = chunk.map_err(|_| warp::reject::custom(McpRejection::BodyUnreadable))?;
-        if collected.len() + chunk.remaining() > limit {
-            return Err(warp::reject::custom(McpRejection::BodyTooLarge));
-        }
-        while chunk.has_remaining() {
-            let bytes = chunk.chunk();
-            collected.extend_from_slice(bytes);
-            let read = bytes.len();
-            chunk.advance(read);
-        }
-    }
-    Ok(collected.into())
-}
-
-/// JSON-RPC error reply with the given HTTP status, for requests `mcp_route` refuses.
-fn mcp_error(status: warp::http::StatusCode, code: i32, message: &str) -> warp::reply::Response {
-    let body = warp::reply::json(&json!({
-        "jsonrpc": "2.0",
-        "id": null,
-        "error": { "code": code, "message": message }
-    }));
-    warp::reply::with_status(body, status).into_response()
-}
-
-/// `POST /mcp`, open only to an active user whose bearer token grants `api:mcp`.
-///
-/// The token is checked before the body is read, so unauthenticated clients cannot make the
-/// server buffer a body, and bodies over [`MCP_BODY_LIMIT`] are refused as they stream in.
-fn mcp_route(
+/// Every route this server answers on. There is no in-house sign-in: `/auth/*` answers nowhere
+/// on this backend (the frontend's own `/auth/callback` is a separate ingress rule that serves
+/// the frontend, not this process).
+fn build_routes(
     pool: DatabasePool,
+    schema: async_graphql::Schema<
+        econ_graph_graphql::graphql::query::Query,
+        econ_graph_graphql::graphql::mutation::Mutation,
+        async_graphql::EmptySubscription,
+    >,
     verifier: Option<Arc<OidcVerifier>>,
-    server: Arc<EconGraphMcpServer>,
-) -> impl Filter<Extract = (warp::reply::Response,), Error = warp::Rejection> + Clone {
-    let authenticate = warp::header::headers_cloned()
-        .and_then(move |headers: warp::http::HeaderMap| {
-            let pool = pool.clone();
-            let verifier = verifier.clone();
-            async move {
-                // A header that is not UTF-8 counts as missing, so it still gets the 401.
-                let authorization = authorization_header(&headers);
-                mcp_access(&pool, verifier.as_deref(), authorization)
-                    .await
-                    .map_err(warp::reject::custom)
-            }
-        })
-        .untuple_one();
+    cors_origins: &[String],
+    playground_enabled: bool,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let cors = cors_filter(cors_origins);
 
-    warp::path("mcp")
-        .and(warp::post())
-        .and(authenticate)
-        .and(warp::body::stream())
-        .and_then(move |body| {
-            let server = server.clone();
-            async move {
-                let body = read_body_limited(body, MCP_BODY_LIMIT).await?;
-                mcp_handler(body, server)
+    // GraphQL endpoint: anonymous without a token, the token's caller with a valid one.
+    let pool_for_graphql = pool.clone();
+    let verifier_for_graphql = verifier.clone();
+    let graphql_filter = warp::path("graphql")
+        .and(warp::header::headers_cloned())
+        .and(async_graphql_warp::graphql(schema))
+        .and_then(
+            move |headers: warp::http::HeaderMap<warp::http::HeaderValue>,
+                  (_schema, request): (
+                async_graphql::Schema<
+                    econ_graph_graphql::graphql::query::Query,
+                    econ_graph_graphql::graphql::mutation::Mutation,
+                    async_graphql::EmptySubscription,
+                >,
+                async_graphql::Request,
+            )| {
+                let pool_for_graphql = pool_for_graphql.clone();
+                let verifier = verifier_for_graphql.clone();
+                async move {
+                    let caller = match graphql_caller(
+                        &pool_for_graphql,
+                        verifier.as_deref(),
+                        authorization_header(&headers),
+                    )
                     .await
-                    .map(warp::Reply::into_response)
-            }
-        })
-        .recover(|rejection: warp::Rejection| async move {
-            use warp::http::StatusCode;
-            match rejection.find::<McpRejection>() {
-                Some(McpRejection::Unauthorized) => Ok(mcp_unauthorized()),
-                Some(McpRejection::InvalidToken) => Ok(warp::reply::with_header(
-                    mcp_error(
-                        StatusCode::UNAUTHORIZED,
-                        -32001,
-                        "Invalid or expired access token",
-                    ),
-                    "WWW-Authenticate",
-                    r#"Bearer error="invalid_token""#,
-                )
-                .into_response()),
-                Some(McpRejection::MissingRole) => Ok(warp::reply::with_header(
-                    mcp_error(
-                        StatusCode::FORBIDDEN,
-                        -32003,
-                        "The api:mcp role is required",
-                    ),
-                    "WWW-Authenticate",
-                    r#"Bearer error="insufficient_scope""#,
-                )
-                .into_response()),
-                Some(McpRejection::Suspended) => Ok(mcp_error(
-                    StatusCode::FORBIDDEN,
-                    -32003,
-                    "This account is suspended",
-                )),
-                Some(McpRejection::AuthUnavailable) => Ok(mcp_error(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    -32002,
-                    "Sign-in is temporarily unavailable",
-                )),
-                Some(McpRejection::AccountUnavailable) => Ok(mcp_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    -32603,
-                    "Could not load the signed-in account",
-                )),
-                Some(McpRejection::BodyTooLarge) => Ok(mcp_error(
-                    StatusCode::PAYLOAD_TOO_LARGE,
-                    -32600,
-                    "Request body too large",
-                )),
-                Some(McpRejection::BodyUnreadable) => Ok(mcp_error(
-                    StatusCode::BAD_REQUEST,
-                    -32700,
-                    "Could not read request body",
-                )),
-                None => Err(rejection),
-            }
-        })
-        .unify()
+                    {
+                        Ok(caller) => caller,
+                        Err(refusal) => return Ok::<_, Infallible>(refusal.into_response()),
+                    };
+
+                    let auth_context = std::sync::Arc::new(
+                        econ_graph_graphql::graphql::context::GraphQLContext::new(caller),
+                    );
+                    let auth_schema = econ_graph_graphql::graphql::schema::create_schema_with_data(
+                        pool_for_graphql.clone(),
+                        auth_context,
+                    );
+
+                    Ok(GraphQLResponse::from(auth_schema.execute(request).await).into_response())
+                }
+            },
+        );
+
+    // GraphQL Playground: off unless ENABLE_GRAPHQL_PLAYGROUND=true (local development).
+    let playground_filter =
+        warp::path("playground")
+            .and(warp::get())
+            .and_then(move || async move {
+                if playground_enabled {
+                    graphql_playground().await.map_err(|never| match never {})
+                } else {
+                    Err(warp::reject::not_found())
+                }
+            });
+
+    // Health check
+    let health_filter = warp::path("health").and(warp::get()).and_then(health_check);
+
+    // Metrics endpoint for Prometheus
+    let metrics_filter = warp::path("metrics")
+        .and(warp::get())
+        .and_then(metrics::metrics_handler);
+
+    // Root endpoint
+    let root_filter = warp::path::end()
+        .and(warp::get())
+        .and_then(move || root_handler(playground_enabled));
+
+    // MCP route, compiled in only with the `mcp` build flag (see mcp_routes.rs). It requires
+    // a signed-in user's bearer token holding `api:mcp`; MCP OAuth (auth roadmap phase 6)
+    // will replace this.
+    let mcp_filter = mcp_filter(pool, verifier);
+
+    root_filter
+        .or(graphql_filter)
+        .or(playground_filter)
+        .or(health_filter)
+        .or(metrics_filter)
+        .or(mcp_filter)
+        .with(cors)
+        .with(warp::trace::request())
 }
 
 #[tokio::main]
@@ -520,14 +471,6 @@ async fn main() -> AppResult<()> {
             "not set"
         }
     );
-    info!(
-        "  - JWT_SECRET: {:?}",
-        if std::env::var("JWT_SECRET").is_ok() {
-            "set"
-        } else {
-            "not set"
-        }
-    );
 
     // Load configuration
     info!("📋 Loading configuration from environment...");
@@ -536,13 +479,6 @@ async fn main() -> AppResult<()> {
         error.log_with_context("Application startup configuration loading");
         eprintln!("❌ Failed to load configuration: {}", e);
         error
-    })?;
-
-    // Refuse to start without a JWT signing secret rather than sign tokens with a known key.
-    econ_graph_auth::auth::services::jwt_secret().map_err(|e| {
-        e.log_with_context("Application startup JWT secret check");
-        eprintln!("❌ {}", e);
-        e
     })?;
 
     // Validate CORS origins (CORS_ALLOWED_ORIGINS, comma-separated; defaults to the local
@@ -575,11 +511,17 @@ async fn main() -> AppResult<()> {
     info!("  - Server host: {}", config.server.host);
     info!("  - Server port: {}", config.server.port);
     info!("  - CORS origins: {:?}", cors_origins);
-    info!("  - Database URL: {}", config.database_url);
+    info!(
+        "  - Database URL: {}",
+        redact_database_url(&config.database_url)
+    );
 
     // Create database connection pool
     info!("🗄️  Creating database connection pool...");
-    info!("  - Database URL: {}", config.database_url);
+    info!(
+        "  - Database URL: {}",
+        redact_database_url(&config.database_url)
+    );
 
     let pool = create_pool(&config.database_url).await.map_err(|e| {
         let error = AppError::DatabaseError(format!("Failed to create database pool: {}", e));
@@ -607,10 +549,6 @@ async fn main() -> AppResult<()> {
     let schema = create_schema_with_data(pool.clone(), ());
     info!("🎯 GraphQL schema created");
 
-    // Create authentication service
-    let auth_service = AuthService::new(pool.clone());
-    info!("🔐 Authentication service created");
-
     // Initialize metrics
     info!("📊 Initializing Prometheus metrics...");
     let _metrics = &metrics::METRICS; // Initialize metrics
@@ -628,88 +566,15 @@ async fn main() -> AppResult<()> {
     // Crawling does not run in this process: the API only enqueues crawl_queue jobs, and the
     // separate `crawler-worker` binary (econ-graph-crawler) processes them.
 
-    // Create Warp filters. Browsers may call the API only from the configured frontend origins.
-    let cors = cors_filter(&cors_origins);
-
-    // GraphQL endpoint: anonymous without a token, the token's caller with a valid one.
-    let pool_for_graphql = pool.clone();
-    let verifier_for_graphql = verifier.clone();
-    let graphql_filter = warp::path("graphql")
-        .and(warp::header::headers_cloned())
-        .and(async_graphql_warp::graphql(schema.clone()))
-        .and_then(
-            move |headers: warp::http::HeaderMap<warp::http::HeaderValue>,
-                  (_schema, request): (
-                async_graphql::Schema<
-                    econ_graph_graphql::graphql::query::Query,
-                    econ_graph_graphql::graphql::mutation::Mutation,
-                    async_graphql::EmptySubscription,
-                >,
-                async_graphql::Request,
-            )| {
-                let pool_for_graphql = pool_for_graphql.clone();
-                let verifier = verifier_for_graphql.clone();
-                async move {
-                    let caller = match graphql_caller(
-                        &pool_for_graphql,
-                        verifier.as_deref(),
-                        authorization_header(&headers),
-                    )
-                    .await
-                    {
-                        Ok(caller) => caller,
-                        Err(refusal) => return Ok::<_, Infallible>(refusal.into_response()),
-                    };
-
-                    let auth_context = std::sync::Arc::new(
-                        econ_graph_graphql::graphql::context::GraphQLContext::new(caller),
-                    );
-                    let auth_schema = econ_graph_graphql::graphql::schema::create_schema_with_data(
-                        pool_for_graphql.clone(),
-                        auth_context,
-                    );
-
-                    Ok(GraphQLResponse::from(auth_schema.execute(request).await).into_response())
-                }
-            },
-        );
-
-    // GraphQL Playground
-    let playground_filter = warp::path("playground")
-        .and(warp::get())
-        .and_then(graphql_playground);
-
-    // Health check
-    let health_filter = warp::path("health").and(warp::get()).and_then(health_check);
-
-    // Metrics endpoint for Prometheus
-    let metrics_filter = warp::path("metrics")
-        .and(warp::get())
-        .and_then(metrics::metrics_handler);
-
-    // Root endpoint
-    let root_filter = warp::path::end().and(warp::get()).and_then(root_handler);
-
-    // Authentication routes
-    let auth_filter = auth_routes(auth_service);
-
-    // MCP Server routes
-    let mcp_server = Arc::new(EconGraphMcpServer::new(Arc::new(pool.clone())));
-
-    // MCP requires a signed-in user's bearer token holding `api:mcp`.
-    // MCP OAuth (auth roadmap phase 6) will replace this.
-    let mcp_filter = mcp_route(pool.clone(), verifier.clone(), mcp_server.clone());
-
-    // Combine all routes
-    let routes = root_filter
-        .or(graphql_filter)
-        .or(playground_filter)
-        .or(health_filter)
-        .or(metrics_filter)
-        .or(auth_filter)
-        .or(mcp_filter)
-        .with(cors)
-        .with(warp::trace::request());
+    // GraphQL Playground: off unless ENABLE_GRAPHQL_PLAYGROUND=true (local development).
+    let playground_enabled = playground_enabled(std::env::var("ENABLE_GRAPHQL_PLAYGROUND").ok());
+    let routes = build_routes(
+        pool.clone(),
+        schema.clone(),
+        verifier.clone(),
+        &cors_origins,
+        playground_enabled,
+    );
 
     // Initialize metrics
     info!("📊 Initializing Prometheus metrics...");
@@ -718,10 +583,12 @@ async fn main() -> AppResult<()> {
 
     let port = config.server.port;
     info!("🌐 Server starting on http://0.0.0.0:{}", port);
-    info!(
-        "🎮 GraphQL Playground available at http://localhost:{}/playground",
-        port
-    );
+    if playground_enabled {
+        info!(
+            "🎮 GraphQL Playground available at http://localhost:{}/playground",
+            port
+        );
+    }
     info!(
         "❤️  Health check available at http://localhost:{}/health",
         port
@@ -732,7 +599,9 @@ async fn main() -> AppResult<()> {
     );
     info!("🔗 API endpoints:");
     info!("  - POST/GET /graphql - GraphQL API");
-    info!("  - GET /playground - GraphQL Playground");
+    if playground_enabled {
+        info!("  - GET /playground - GraphQL Playground");
+    }
     info!("  - GET /health - Health check");
     info!("  - GET /metrics - Prometheus metrics");
     info!("  - GET / - API documentation");
@@ -762,10 +631,7 @@ async fn main() -> AppResult<()> {
         .map_err(|e| AppError::InternalError(format!("Failed to bind port {port}: {e}")))?
         .http1_only(true)
         .serve(make_svc)
-        .with_graceful_shutdown(async {
-            signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
-            info!("🛑 Received shutdown signal, gracefully shutting down...");
-        });
+        .with_graceful_shutdown(shutdown_signal());
 
     info!("✅ Server is now running and accepting connections!");
     server
@@ -774,6 +640,35 @@ async fn main() -> AppResult<()> {
 
     info!("✅ Server shutdown complete");
     Ok(())
+}
+
+/// Resolves on SIGINT (Ctrl-C) or SIGTERM, so orchestrators that stop a container with SIGTERM
+/// (Kubernetes, `docker stop`) get the same graceful drain as a local Ctrl-C.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(e) = signal::ctrl_c().await {
+            tracing::error!(error = %e, "listening for Ctrl-C failed");
+            std::future::pending::<()>().await;
+        }
+    };
+    #[cfg(unix)]
+    let term = async {
+        match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "listening for SIGTERM failed");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let term = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => info!("🛑 Received SIGINT, gracefully shutting down..."),
+        () = term => info!("🛑 Received SIGTERM, gracefully shutting down..."),
+    }
 }
 
 #[cfg(test)]
@@ -891,15 +786,10 @@ mod cors_tests {
 
 #[cfg(test)]
 mod request_auth_tests {
-    use super::{
-        graphql_caller, mcp_access, mcp_route, mcp_unauthorized, read_body_limited, GraphqlRefusal,
-        McpRejection,
-    };
+    use super::{graphql_caller, GraphqlRefusal};
     use econ_graph_auth::testkit::{now, sign_hs256, TestIssuer};
     use econ_graph_auth::{OidcConfig, OidcVerifier, Role};
     use econ_graph_core::DatabasePool;
-    use econ_graph_mcp::mcp_server::EconGraphMcpServer;
-    use std::sync::Arc;
     use uuid::Uuid;
     use warp::http::StatusCode;
 
@@ -1051,7 +941,6 @@ mod request_auth_tests {
             );
             assert!(caller.user.is_active);
             assert_eq!(caller.user.email, format!("{sub}@example.test"));
-            assert_eq!(caller.user.provider, "keycloak");
         }
 
         set_active(&pool, sub, false).await;
@@ -1072,116 +961,6 @@ mod request_auth_tests {
             .execute(&mut conn)
             .await
             .unwrap();
-    }
-
-    /// The rejection is an HTTP 401 carrying a `WWW-Authenticate: Bearer` challenge.
-    #[test]
-    fn mcp_unauthorized_is_a_401_with_a_bearer_challenge() {
-        let response = mcp_unauthorized();
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(response.headers()["WWW-Authenticate"], "Bearer");
-    }
-
-    /// POSTs to the mounted `/mcp` route without an acceptable token all get a 401 challenge,
-    /// even with a body over the size limit: no token or any token while sign-in is disabled
-    /// (plain `Bearer`), and a bad or non-UTF-8 token (`invalid_token`). An identity provider
-    /// outage is a 503.
-    #[tokio::test]
-    async fn mcp_route_refuses_unauthenticated_requests() {
-        let issuer = TestIssuer::start().await;
-        let token = issuer.mint_token(Uuid::new_v4(), &["api:mcp"]);
-        let pool = unreachable_pool();
-        let server = Arc::new(EconGraphMcpServer::new(Arc::new(pool.clone())));
-        let too_big = vec![b' '; super::MCP_BODY_LIMIT + 1];
-        let invalid = r#"Bearer error="invalid_token""#;
-        let header = |v: &str| Some(warp::http::HeaderValue::from_str(v).unwrap());
-        for (verifier, authorization, status, challenge) in [
-            (
-                Some(issuer.verifier()),
-                None,
-                StatusCode::UNAUTHORIZED,
-                Some("Bearer"),
-            ),
-            (
-                Some(issuer.verifier()),
-                header("Bearer not.a.jwt"),
-                StatusCode::UNAUTHORIZED,
-                Some(invalid),
-            ),
-            (
-                Some(issuer.verifier()),
-                Some(warp::http::HeaderValue::from_bytes(b"Bearer \xff\xfe").unwrap()),
-                StatusCode::UNAUTHORIZED,
-                Some("Bearer"),
-            ),
-            (
-                None,
-                header(&bearer(&token)),
-                StatusCode::UNAUTHORIZED,
-                Some("Bearer"),
-            ),
-            (
-                Some(unreachable_verifier()),
-                header(&bearer(&token)),
-                StatusCode::SERVICE_UNAVAILABLE,
-                None,
-            ),
-        ] {
-            let route = mcp_route(pool.clone(), verifier.map(Arc::new), server.clone());
-            let mut request = warp::test::request()
-                .method("POST")
-                .path("/mcp")
-                .body(too_big.clone());
-            if let Some(value) = authorization.clone() {
-                request = request.header("authorization", value);
-            }
-            let response = request.reply(&route).await;
-            assert_eq!(response.status(), status, "{authorization:?}");
-            assert_eq!(
-                response
-                    .headers()
-                    .get("WWW-Authenticate")
-                    .map(|v| v.to_str().unwrap()),
-                challenge,
-                "{authorization:?}"
-            );
-        }
-    }
-
-    /// `/mcp` needs an active account whose token grants `api:mcp`.
-    // Shares the database with `integration_tests`, which drop the schema.
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn mcp_needs_the_api_mcp_role_and_an_active_account() {
-        let Some(pool) = database().await else {
-            return;
-        };
-        let issuer = TestIssuer::start().await;
-        let verifier = issuer.verifier();
-
-        let sub = Uuid::new_v4();
-        let with_role = bearer(&issuer.mint_token(sub, &["api:mcp"]));
-        let without_role = bearer(&issuer.mint_token(sub, &["annotation:create"]));
-        let access = |verifier, header: &str| {
-            let pool = pool.clone();
-            let header = header.to_string();
-            async move { mcp_access(&pool, verifier, Some(&header)).await }
-        };
-        assert_eq!(access(Some(&verifier), &with_role).await, Ok(()));
-        assert_eq!(
-            access(Some(&verifier), &without_role).await,
-            Err(McpRejection::MissingRole)
-        );
-        assert_eq!(
-            access(None, &with_role).await,
-            Err(McpRejection::Unauthorized)
-        );
-
-        set_active(&pool, sub, false).await;
-        assert_eq!(
-            access(Some(&verifier), &with_role).await,
-            Err(McpRejection::Suspended)
-        );
     }
 
     /// The `users` row for a new subject: created once, with the token's email only when it
@@ -1209,7 +988,6 @@ mod request_auth_tests {
             (user.id, user.email.as_str(), user.name.as_str()),
             (id, email.as_str(), "Ada")
         );
-        assert_eq!(user.provider, "keycloak");
         assert!(user.email_verified && user.is_active);
         // Seen again, with other claims: the row is returned unchanged.
         let again = User::get_or_create_for_subject(&pool, id, Some("x@example.test"), true, None)
@@ -1255,28 +1033,191 @@ mod request_auth_tests {
         assert_eq!((a.id, &a.email), (b.id, &b.email));
         assert_eq!(a.email, email);
     }
+}
 
-    /// Chunks that together exceed the limit are refused, however they are split; this is
-    /// what caps chunked bodies whose `Content-Length` understates their size.
+#[cfg(test)]
+mod playground_tests {
+    use super::{playground_enabled, root_handler};
+    use warp::Reply;
+
+    /// The landing page body, as served with the playground on or off.
+    async fn landing_page(playground: bool) -> String {
+        let response = root_handler(playground).await.unwrap().into_response();
+        let body = warp::hyper::body::to_bytes(response.into_body())
+            .await
+            .unwrap();
+        String::from_utf8(body.to_vec()).unwrap()
+    }
+
+    /// The landing page links to `/playground` only when it is served.
     #[tokio::test]
-    async fn read_body_limited_counts_received_bytes() {
-        use warp::hyper::body::Bytes;
-        let chunks = |sizes: &[usize]| {
-            tokio_stream::iter(
-                sizes
-                    .iter()
-                    .map(|&n| Ok::<_, warp::Error>(Bytes::from(vec![b'x'; n])))
-                    .collect::<Vec<_>>(),
-            )
-        };
+    async fn landing_page_mentions_playground_only_when_enabled() {
+        assert!(landing_page(true).await.contains("href=\"/playground\""));
+        assert!(!landing_page(false).await.contains("/playground"));
+    }
 
-        let body = read_body_limited(chunks(&[4, 6]), 10).await.unwrap();
-        assert_eq!(body.len(), 10);
+    /// The playground is served only when explicitly turned on.
+    #[test]
+    fn playground_is_off_unless_explicitly_enabled() {
+        for on in ["true", "TRUE", "tRuE", "1", " true "] {
+            assert!(playground_enabled(Some(on.to_string())), "{on:?}");
+        }
+        for off in ["", "false", "0", "yes", "on"] {
+            assert!(!playground_enabled(Some(off.to_string())), "{off:?}");
+        }
+        assert!(!playground_enabled(None));
+    }
+}
 
-        let rejection = read_body_limited(chunks(&[4, 4, 4]), 10).await.unwrap_err();
-        assert!(matches!(
-            rejection.find::<McpRejection>(),
-            Some(McpRejection::BodyTooLarge)
-        ));
+/// Only compiled when the `mcp` build flag is off, so these assert the actual behavior of a
+/// release build rather than a stand-in checked by hand.
+#[cfg(all(test, not(flag_mcp)))]
+mod mcp_flag_off_tests {
+    use super::build_routes;
+    use econ_graph_core::DatabasePool;
+    use econ_graph_graphql::graphql::schema::create_schema_with_data;
+
+    fn unreachable_pool() -> DatabasePool {
+        let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
+            diesel_async::AsyncPgConnection,
+        >::new("postgres://nobody@127.0.0.1:1/none");
+        DatabasePool::builder()
+            .connection_timeout(std::time::Duration::from_secs(1))
+            .build_unchecked(manager)
+    }
+
+    /// With the `mcp` flag off, nothing is routed at `/mcp`: the full route set 404s on it,
+    /// and no MCP-specific code is compiled into this binary.
+    #[tokio::test]
+    async fn mcp_answers_404() {
+        let pool = unreachable_pool();
+        let schema = create_schema_with_data(pool.clone(), ());
+        let routes = build_routes(
+            pool,
+            schema,
+            None,
+            &["http://localhost:3000".to_string()],
+            false,
+        );
+        let res = warp::test::request()
+            .method("POST")
+            .path("/mcp")
+            .reply(&routes)
+            .await;
+        assert_eq!(res.status(), 404);
+    }
+
+    mod root_page_tests {
+        use super::super::root_handler;
+        use warp::Reply as _;
+
+        /// The landing page lists `/mcp` only when this build routes it; with the flag off it
+        /// does not.
+        #[tokio::test]
+        async fn lists_mcp_only_when_routed() {
+            let response = root_handler(false).await.unwrap().into_response();
+            let body = warp::hyper::body::to_bytes(response.into_body())
+                .await
+                .unwrap();
+            let body = String::from_utf8(body.to_vec()).unwrap();
+            assert!(!body.contains("/mcp"), "{body}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::build_routes;
+    use econ_graph_core::DatabasePool;
+    use econ_graph_graphql::graphql::schema::create_schema_with_data;
+
+    /// A pool that never connects: routes that answer without touching the database don't need it.
+    fn unreachable_pool() -> DatabasePool {
+        let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
+            diesel_async::AsyncPgConnection,
+        >::new("postgres://nobody@127.0.0.1:1/none");
+        DatabasePool::builder()
+            .connection_timeout(std::time::Duration::from_secs(1))
+            .build_unchecked(manager)
+    }
+
+    fn routes(
+        playground_enabled: bool,
+    ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+        let pool = unreachable_pool();
+        let schema = create_schema_with_data(pool.clone(), ());
+        build_routes(
+            pool,
+            schema,
+            None,
+            &["http://localhost:3000".to_string()],
+            playground_enabled,
+        )
+    }
+
+    /// There is no in-house sign-in: no route under `/auth/` answers on the backend, for any
+    /// method. (The frontend's own `/auth/callback` is a separate ingress rule that serves the
+    /// frontend, not this process, so it isn't covered here.)
+    #[tokio::test]
+    async fn no_route_under_auth_answers() {
+        for path in [
+            "/auth/login",
+            "/auth/register",
+            "/auth/logout",
+            "/auth/refresh",
+            "/auth/google",
+            "/auth/facebook",
+            "/auth/facebook/data-deletion",
+            "/auth/callback",
+            "/auth/",
+            "/auth",
+        ] {
+            for method in ["GET", "POST", "DELETE"] {
+                let res = warp::test::request()
+                    .method(method)
+                    .path(path)
+                    .reply(&routes(false))
+                    .await;
+                assert_eq!(
+                    res.status(),
+                    404,
+                    "{method} {path} should not be answered by the backend"
+                );
+            }
+        }
+    }
+
+    /// Sanity check that the test harness's route set is wired up correctly: real routes still
+    /// answer, so the 404s above are `/auth/*` being genuinely absent, not a broken filter.
+    #[tokio::test]
+    async fn other_routes_still_answer() {
+        let res = warp::test::request()
+            .method("GET")
+            .path("/health")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 200);
+    }
+
+    /// `GET /playground` answers 200 through the full route set when enabled.
+    #[tokio::test]
+    async fn playground_route_answers_when_enabled() {
+        let res = warp::test::request()
+            .method("GET")
+            .path("/playground")
+            .reply(&routes(true))
+            .await;
+        assert_eq!(res.status(), 200);
+    }
+
+    /// `GET /playground` answers 404 through the full route set when disabled.
+    #[tokio::test]
+    async fn playground_route_answers_404_when_disabled() {
+        let res = warp::test::request()
+            .method("GET")
+            .path("/playground")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 404);
     }
 }
