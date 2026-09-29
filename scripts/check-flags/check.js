@@ -8,7 +8,9 @@ const KINDS = ['build', 'preview', 'ops', 'experiment'];
 const STAGES = ['alpha', 'beta'];
 // Flag keys become __FLAGS__.world_map in the frontend and cfg(flag_world_map) in the backend
 const KEY = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
-const OWNER = /^docs\/roadmap\/[a-z0-9-]+\.md$/;
+// The Linear issue or project that owns the flag: ECO-123, or
+// https://linear.app/econgraph/project/feature-flags-bc727011a0f7
+const OWNER = /^(ECO-[1-9][0-9]*|https:\/\/linear\.app\/econgraph\/project\/[a-z0-9-]+)$/;
 const REMOVE_BY = /^(train ([1-9][0-9]*)|unscheduled)$/;
 const METADATA_KEYS = ['kind', 'owner', 'stage', 'remove_by'];
 // A dev override only changes which variant is served
@@ -49,7 +51,7 @@ function checkDefaultVariant(label, name, flag, errors) {
   }
 }
 
-function checkReleaseFlag(name, flag, { docExists, tags }, errors) {
+function checkReleaseFlag(name, flag, { tags }, errors) {
   const at = `release: flag "${name}"`;
   if (!KEY.test(name)) errors.push(`${at}: key must be snake_case: lowercase letters, digits and single underscores`);
   checkDefaultVariant('release', name, flag, errors);
@@ -62,9 +64,7 @@ function checkReleaseFlag(name, flag, { docExists, tags }, errors) {
   if (!KINDS.includes(kind)) errors.push(`${at}: metadata.kind must be one of ${KINDS.join(', ')}`);
 
   if (typeof owner !== 'string' || !OWNER.test(owner)) {
-    errors.push(`${at}: metadata.owner must be the roadmap doc that owns the flag, like docs/roadmap/feature-flags.md`);
-  } else if (!docExists(owner)) {
-    errors.push(`${at}: metadata.owner ${owner} does not exist`);
+    errors.push(`${at}: metadata.owner must be the Linear issue (ECO-123) or project URL that owns the flag`);
   }
 
   if (kind === 'preview') {
@@ -117,9 +117,9 @@ function checkDevFlag(name, flag, release, errors) {
 }
 
 // releasePath, devPath: the flag files. schemaPath: the vendored flagd flags.json.
-// tags: the repository's git tags. docExists(path): whether a repo path exists.
+// tags: the repository's git tags.
 // Returns a list of error strings, empty when everything passes.
-export function checkFlags({ releasePath, devPath, schemaPath, tags, docExists }) {
+export function checkFlags({ releasePath, devPath, schemaPath, tags }) {
   const errors = [];
   const validator = new SchemaValidator(schemaPath);
   const files = { release: readJson(releasePath, 'release', errors), dev: readJson(devPath, 'dev', errors) };
@@ -134,7 +134,7 @@ export function checkFlags({ releasePath, devPath, schemaPath, tags, docExists }
 
   const release = files.release.flags;
   for (const [name, flag] of Object.entries(release)) {
-    checkReleaseFlag(name, flag, { docExists, tags }, errors);
+    checkReleaseFlag(name, flag, { tags }, errors);
   }
   if (files.dev) {
     for (const [name, flag] of Object.entries(files.dev.flags)) checkDevFlag(name, flag, release, errors);

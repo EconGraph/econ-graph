@@ -1,21 +1,25 @@
 name: Feature Flags
 
 # Its own workflow, without ci-core's paths-ignore, because the check depends
-# on things outside config/flags: roadmap docs (a flag's owner) and release
-# tags (a flag whose remove_by train has shipped). So it also runs when a tag
-# is pushed and weekly, rather than failing the next unrelated PR.
+# on release tags outside config/flags (a flag whose remove_by train has
+# shipped). So it also runs when a tag is pushed and weekly, rather than
+# failing the next unrelated PR.
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, 'release/**' ]
     tags: [ 'train-*' ]
+  # Every PR, whatever its base, so stacked PRs get the check too
   pull_request:
-    branches: [ main, develop ]
   schedule:
     - cron: '17 6 * * 1'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   flags-check:

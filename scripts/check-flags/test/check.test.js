@@ -8,7 +8,6 @@ import { checkFlags } from '../check.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = join(here, 'fixtures');
 const schemaPath = join(here, '..', '..', '..', 'config', 'flags', 'schema', 'flags.json');
-const docs = new Set(['docs/roadmap/feature-flags.md']);
 
 function run(fixture, tags = []) {
   return checkFlags({
@@ -16,7 +15,6 @@ function run(fixture, tags = []) {
     devPath: join(fixtures, fixture, 'dev.flagd.json'),
     schemaPath,
     tags,
-    docExists: (path) => docs.has(path),
   });
 }
 
@@ -30,9 +28,9 @@ const failures = {
   'missing-metadata': 'flag "mcp": metadata.kind must be one of',
   'missing-kind': 'flag "mcp": metadata.kind must be one of',
   'unknown-kind': 'flag "mcp": metadata.kind must be one of',
-  'missing-owner': 'flag "mcp": metadata.owner must be the roadmap doc',
-  'owner-not-a-roadmap-doc': 'flag "mcp": metadata.owner must be the roadmap doc',
-  'owner-doc-missing': 'flag "mcp": metadata.owner docs/roadmap/no-such-doc.md does not exist',
+  'missing-owner': 'flag "mcp": metadata.owner must be the Linear issue',
+  'owner-not-linear': 'flag "mcp": metadata.owner must be the Linear issue',
+  'owner-roadmap-doc': 'flag "mcp": metadata.owner must be the Linear issue',
   'preview-missing-stage': 'flag "world_map": preview flags need metadata.stage',
   'preview-unknown-stage': 'flag "world_map": preview flags need metadata.stage',
   'stage-on-build-flag': 'flag "build_canary": metadata.stage is only for preview flags',
@@ -105,7 +103,6 @@ test('the repository flag files pass', () => {
     devPath: join(flagsDir, 'dev.flagd.json'),
     schemaPath,
     tags: [],
-    docExists: () => true,
   });
   assert.deepEqual(errors, []);
 });

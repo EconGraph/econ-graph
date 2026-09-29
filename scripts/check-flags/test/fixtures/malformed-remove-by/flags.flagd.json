@@ -9,7 +9,7 @@
       "defaultVariant": "off",
       "metadata": {
         "kind": "build",
-        "owner": "docs/roadmap/feature-flags.md",
+        "owner": "ECO-27",
         "remove_by": "v0.3.0"
       }
     },
@@ -22,7 +22,7 @@
       "defaultVariant": "on",
       "metadata": {
         "kind": "ops",
-        "owner": "docs/roadmap/feature-flags.md"
+        "owner": "ECO-27"
       }
     },
     "world_map": {
@@ -48,7 +48,7 @@
       },
       "metadata": {
         "kind": "preview",
-        "owner": "docs/roadmap/feature-flags.md",
+        "owner": "ECO-27",
         "stage": "beta",
         "remove_by": "train 3"
       }

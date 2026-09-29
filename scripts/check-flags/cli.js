@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 // Checks config/flags: flagd schema (vendored, no network), flag metadata,
 // dev overrides, and flags whose remove_by train has shipped.
-// Usage: node scripts/check-flags [--tags train-1,train-2]
+// Usage: node scripts/check-flags [--tags train-1,train-2] [--shipped-train N]
 // Without --tags it reads the repository's tags from git, so CI needs them
 // fetched (actions/checkout with fetch-depth: 0).
 
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkFlags } from './check.js';
@@ -36,18 +35,27 @@ function gitTags() {
   return tags;
 }
 
+// --shipped-train N checks as if train N's tag already existed, so a release can
+// find the flags it must delete before it pushes train-N
+const usage = 'usage: node scripts/check-flags [--tags train-1,train-2] [--shipped-train N]';
+const opts = {};
 const args = process.argv.slice(2);
-if (!(args.length === 0 || (args.length === 2 && args[0] === '--tags' && !args[1].startsWith('--')))) {
-  fail('usage: node scripts/check-flags [--tags train-1,train-2]');
+for (let i = 0; i < args.length; i += 2) {
+  const [flag, value] = [args[i], args[i + 1]];
+  if (!['--tags', '--shipped-train'].includes(flag) || value === undefined || value.startsWith('--') || flag in opts) {
+    fail(usage);
+  }
+  opts[flag] = value;
 }
-const tags = args.length ? args[1].split(',').filter(Boolean) : gitTags();
+if ('--shipped-train' in opts && !/^[1-9][0-9]*$/.test(opts['--shipped-train'])) fail(usage);
+const tags = '--tags' in opts ? opts['--tags'].split(',').filter(Boolean) : gitTags();
+if ('--shipped-train' in opts) tags.push(`train-${opts['--shipped-train']}`);
 
 const errors = checkFlags({
   releasePath: join(flagsDir, 'flags.flagd.json'),
   devPath: join(flagsDir, 'dev.flagd.json'),
   schemaPath: join(flagsDir, 'schema', 'flags.json'),
   tags,
-  docExists: (path) => existsSync(join(root, path)),
 });
 
 if (errors.length) {

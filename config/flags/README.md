@@ -2,7 +2,8 @@
 
 The flag files for EconGraph, in [flagd](https://flagd.dev)'s flag format. The
 design, including which kinds of flag exist and when not to use one, is in
-[docs/roadmap/feature-flags.md](../../docs/roadmap/feature-flags.md).
+the Linear [Feature flags](https://linear.app/econgraph/project/feature-flags-bc727011a0f7)
+project.
 
 | File | What it holds |
 |---|---|
@@ -47,7 +48,7 @@ the frontend and `cfg(flag_world_map)` in the backend.
    | Key | Required for | Value |
    |---|---|---|
    | `kind` | every flag | `build` (unfinished code compiled out of release builds), `preview` (works end to end, shown to some people first), `ops` (kill switch), or `experiment` |
-   | `owner` | every flag | The roadmap doc that owns it, such as `docs/roadmap/feature-flags.md` |
+   | `owner` | every flag | The Linear issue that owns it, such as `ECO-123`, or for a flag the roadmap itself owns, the Linear project URL |
    | `stage` | `preview` only | `alpha` or `beta` |
    | `remove_by` | `build` and `preview` | `"train N"` or `"unscheduled"`. CI fails once tag `train-N` (or a later train's) exists and the flag is still here |
 
@@ -75,7 +76,7 @@ Example:
   "defaultVariant": "off",
   "metadata": {
     "kind": "build",
-    "owner": "docs/roadmap/global-analysis.md",
+    "owner": "ECO-123",
     "remove_by": "train 1"
   }
 }
@@ -84,6 +85,8 @@ Example:
 When train N ships, its release pushes the marker tag with the version tag:
 `git tag train-N <release commit> && git push origin train-N`. From then on the
 check fails for every flag still marked `remove_by: "train N"` or earlier.
+Before pushing the tag, `node scripts/check-flags --shipped-train N` lists
+the flags that release has to delete first.
 
 ## Removing a flag
 

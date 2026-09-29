@@ -7,7 +7,7 @@
       "defaultVariant": "off",
       "metadata": {
         "kind": "build",
-        "owner": "docs/roadmap/feature-flags.md",
+        "owner": "https://linear.app/econgraph/project/feature-flags-bc727011a0f7",
         "remove_by": "unscheduled"
       }
     },
@@ -17,7 +17,7 @@
       "defaultVariant": "off",
       "metadata": {
         "kind": "build",
-        "owner": "docs/roadmap/feature-flags.md",
+        "owner": "ECO-123",
         "remove_by": "train 2"
       }
     }
