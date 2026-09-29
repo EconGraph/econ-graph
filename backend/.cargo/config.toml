@@ -11,3 +11,8 @@ RUST_TEST_THREADS = "12"
 # Optimize for faster test execution
 RUST_BACKTRACE = "0"  # Disable backtraces for faster execution
 RUST_LOG = "warn"     # Reduce logging verbosity during tests
+
+# Build-time feature flags (config/flags/README.md): local builds and tests use the dev
+# profile. An exported FLAGS_PROFILE wins, so `FLAGS_PROFILE=release cargo build` builds
+# what ships; backend/Dockerfile sets it, and never copies this file.
+FLAGS_PROFILE = "dev"
