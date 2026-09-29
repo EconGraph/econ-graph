@@ -374,6 +374,9 @@ pub async fn persist_discovered(
             data_url: clip_opt(d.data_url.as_deref(), usize::MAX),
             api_endpoint: None,
             is_active: true,
+            dataset_id: None,
+            dimensions: Default::default(),
+            default_measure: None,
         })
         .collect();
 
