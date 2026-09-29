@@ -8,7 +8,7 @@ const KINDS = ['build', 'preview', 'ops', 'experiment'];
 const STAGES = ['alpha', 'beta'];
 // Flag keys become __FLAGS__.world_map in the frontend and cfg(flag_world_map) in the backend
 const KEY = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
-// The Linear issue or project that owns the flag: ECO-123, or
+// The Linear issue or project that owns the flag: ECO-NNN (a real issue number), or
 // https://linear.app/econgraph/project/feature-flags-bc727011a0f7
 const OWNER = /^(ECO-[1-9][0-9]*|https:\/\/linear\.app\/econgraph\/project\/[a-z0-9-]+)$/;
 const REMOVE_BY = /^(train ([1-9][0-9]*)|unscheduled)$/;
@@ -64,7 +64,7 @@ function checkReleaseFlag(name, flag, { tags }, errors) {
   if (!KINDS.includes(kind)) errors.push(`${at}: metadata.kind must be one of ${KINDS.join(', ')}`);
 
   if (typeof owner !== 'string' || !OWNER.test(owner)) {
-    errors.push(`${at}: metadata.owner must be the Linear issue (ECO-123) or project URL that owns the flag`);
+    errors.push(`${at}: metadata.owner must be the Linear issue (ECO-NNN) or project URL that owns the flag`);
   }
 
   if (kind === 'preview') {

@@ -48,7 +48,7 @@ the frontend and `cfg(flag_world_map)` in the backend.
    | Key | Required for | Value |
    |---|---|---|
    | `kind` | every flag | `build` (unfinished code compiled out of release builds), `preview` (works end to end, shown to some people first), `ops` (kill switch), or `experiment` |
-   | `owner` | every flag | The Linear issue that owns it, such as `ECO-123`, or for a flag the roadmap itself owns, the Linear project URL |
+   | `owner` | every flag | The Linear issue that owns it, such as `ECO-NNN`, or for a flag the roadmap itself owns, the Linear project URL |
    | `stage` | `preview` only | `alpha` or `beta` |
    | `remove_by` | `build` and `preview` | `"train N"` or `"unscheduled"`. CI fails once tag `train-N` (or a later train's) exists and the flag is still here |
 
@@ -76,7 +76,7 @@ Example:
   "defaultVariant": "off",
   "metadata": {
     "kind": "build",
-    "owner": "ECO-123",
+    "owner": "ECO-NNN",
     "remove_by": "train 1"
   }
 }
@@ -98,8 +98,9 @@ run `node scripts/flags-merge`, and remove the code paths for its other value.
 - `build_canary` (build, off in release, on in dev, `remove_by: unscheduled`)
   guards a module with a unique marker string, so CI can prove a release bundle
   leaves flagged-off code out. It is the one permanent build flag.
-- `mcp` (build, off in release, on in dev, `remove_by: train 2`) compiles `/mcp`
-  out of release builds while MCP is unfinished. It becomes an ops flag when
+- `mcp` (build, off in release, on in dev, `remove_by: train 2`, owner ECO-123,
+  the issue that gates `/mcp` behind the flag) compiles `/mcp` out of release
+  builds while MCP is unfinished. It becomes an ops flag when
   MCP ships.
 
 ## Updating the vendored schema
