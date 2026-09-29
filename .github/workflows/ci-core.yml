@@ -848,6 +848,10 @@ jobs:
         CI: true
         NODE_OPTIONS: --max-old-space-size=4096
 
+    - name: Check build flags compile code out
+      working-directory: frontend
+      run: npm run check:flag-bundle
+
 
   quality-checks:
     name: Quality Checks
