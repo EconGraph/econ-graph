@@ -31,6 +31,9 @@ cd "$PROJECT_ROOT"
 # Step 2: Deploy PostgreSQL in Kubernetes
 echo ""
 echo "📋 Step 2: Deploying PostgreSQL in Kubernetes..."
+kubectl apply -f k8s/manifests/namespace.yaml
+# PostgreSQL reads its passwords from the econ-graph-postgres Secret.
+./scripts/deploy/create-secrets.sh
 kubectl apply -f k8s/manifests/postgres-init.yaml
 kubectl apply -f k8s/manifests/postgres-deployment.yaml
 kubectl apply -f k8s/manifests/postgres.yaml
@@ -39,6 +42,14 @@ echo "⏳ Waiting for PostgreSQL pod to be ready..."
 kubectl wait --for=condition=ready pod -l app=postgresql -n econ-graph --timeout=300s
 
 echo "✅ PostgreSQL is ready in Kubernetes cluster"
+
+echo ""
+echo "📋 Step 2b: Setting up PostgreSQL backups..."
+kubectl apply -f k8s/manifests/postgres-backup-pvc.yaml
+kubectl apply -f k8s/manifests/postgres-backup-configmap.yaml
+kubectl apply -f k8s/manifests/postgres-backup-cronjob.yaml
+"$PROJECT_ROOT/scripts/deploy/protect-postgres-pv.sh"
+echo "✅ Nightly backups configured (see docs/deployment/POSTGRES_BACKUP_RESTORE.md)"
 
 # Step 3: Build Docker images
 echo ""
@@ -58,7 +69,7 @@ echo "🌐 Your EconGraph application is now running at:"
 echo "  Frontend: http://localhost/"
 echo "  Backend:  http://localhost:9876"
 echo "  GraphQL:  http://localhost/graphql"
-echo "  Playground: http://localhost/playground"
+echo "  Playground: off (set ENABLE_GRAPHQL_PLAYGROUND=true on the backend to serve /playground)"
 echo ""
 echo "📊 Monitor your deployment:"
 echo "  kubectl get pods -n econ-graph"

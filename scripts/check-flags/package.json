@@ -1,0 +1,9 @@
+{
+  "name": "check-flags",
+  "private": true,
+  "type": "module",
+  "main": "cli.js",
+  "scripts": {
+    "test": "node --test"
+  }
+}

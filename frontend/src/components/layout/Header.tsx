@@ -15,6 +15,8 @@ import {
   ListItemIcon,
   ListItemText,
   Divider,
+  Snackbar,
+  Alert,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -23,13 +25,10 @@ import {
   Person as PersonIcon,
   Settings as SettingsIcon,
   ExitToApp as ExitToAppIcon,
-  Analytics as AnalyticsIcon,
   PrivacyTip as PrivacyTipIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import LoginDialog from '../auth/LoginDialog';
-import UserProfile from '../auth/UserProfile';
 
 const Search = styled('div')(({ theme }) => ({
   position: 'relative',
@@ -82,11 +81,19 @@ interface HeaderProps {
  * @returns JSX element representing the application header.
  */
 const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
-  const { user, isAuthenticated, signOut } = useAuth();
+  const {
+    user,
+    isAuthenticated,
+    isLoading,
+    isConfigured,
+    accountUrl,
+    error: authError,
+    signIn,
+    signOut,
+    clearError,
+  } = useAuth();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
-  const [loginOpen, setLoginOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
   const [userMenuAnchor, setUserMenuAnchor] = useState<null | HTMLElement>(null);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -114,14 +121,9 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
     setUserMenuAnchor(null);
   };
 
-  const handleProfileClick = () => {
-    setProfileOpen(true);
-    handleUserMenuClose();
-  };
-
   const handleSignOut = async () => {
-    await signOut();
     handleUserMenuClose();
+    await signOut();
   };
 
   return (
@@ -197,16 +199,7 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
           <Box sx={{ flexGrow: 0, display: 'flex', alignItems: 'center', gap: 1 }}>
             {isAuthenticated ? (
               <>
-                <Button
-                  color='inherit'
-                  startIcon={<AnalyticsIcon />}
-                  onClick={() => navigate('/analysis')}
-                  sx={{ display: { xs: 'none', md: 'flex' } }}
-                >
-                  Professional Analysis
-                </Button>
-
-                <IconButton onClick={handleUserMenuOpen} sx={{ p: 0 }}>
+                <IconButton onClick={handleUserMenuOpen} sx={{ p: 0 }} aria-label='user menu'>
                   <Avatar src={user?.avatar} alt={user?.name} sx={{ width: 32, height: 32 }}>
                     {user?.name?.[0]}
                   </Avatar>
@@ -228,18 +221,20 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                     </Box>
                   </MenuItem>
                   <Divider />
-                  <MenuItem onClick={handleProfileClick}>
-                    <ListItemIcon>
-                      <SettingsIcon fontSize='small' />
-                    </ListItemIcon>
-                    <ListItemText>Profile & Settings</ListItemText>
-                  </MenuItem>
-                  <MenuItem onClick={() => (window.location.href = '/analysis')}>
-                    <ListItemIcon>
-                      <AnalyticsIcon fontSize='small' />
-                    </ListItemIcon>
-                    <ListItemText>Professional Analysis</ListItemText>
-                  </MenuItem>
+                  {accountUrl && (
+                    <MenuItem
+                      component='a'
+                      href={accountUrl}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      onClick={handleUserMenuClose}
+                    >
+                      <ListItemIcon>
+                        <SettingsIcon fontSize='small' />
+                      </ListItemIcon>
+                      <ListItemText>Manage account</ListItemText>
+                    </MenuItem>
+                  )}
                   <MenuItem onClick={() => navigate('/privacy')}>
                     <ListItemIcon>
                       <PrivacyTipIcon fontSize='small' />
@@ -251,7 +246,7 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                     <ListItemIcon>
                       <ExitToAppIcon fontSize='small' />
                     </ListItemIcon>
-                    <ListItemText>Sign Out</ListItemText>
+                    <ListItemText>Sign out</ListItemText>
                   </MenuItem>
                 </Menu>
               </>
@@ -265,36 +260,43 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                 >
                   Privacy
                 </Button>
-                <Button
-                  color='inherit'
-                  variant='outlined'
-                  startIcon={<PersonIcon />}
-                  onClick={() => setLoginOpen(true)}
-                  sx={{
-                    borderColor: 'rgba(255, 255, 255, 0.5)',
-                    '&:hover': {
-                      borderColor: 'white',
-                      backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                    },
-                  }}
-                >
-                  Sign In
-                </Button>
+                {/* Hidden while the session is restored, so it does not flash before the avatar */}
+                {isConfigured && !isLoading && (
+                  <Button
+                    color='inherit'
+                    variant='outlined'
+                    startIcon={<PersonIcon />}
+                    onClick={() => void signIn()}
+                    sx={{
+                      borderColor: 'rgba(255, 255, 255, 0.5)',
+                      '&:hover': {
+                        borderColor: 'white',
+                        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                      },
+                    }}
+                  >
+                    Sign in
+                  </Button>
+                )}
               </>
             )}
           </Box>
         </Toolbar>
       </AppBar>
 
-      {/* Login Dialog */}
-      <LoginDialog
-        open={loginOpen}
-        onClose={() => setLoginOpen(false)}
-        onSuccess={() => setLoginOpen(false)}
-      />
-
-      {/* User Profile Dialog */}
-      {user && <UserProfile open={profileOpen} onClose={() => setProfileOpen(false)} />}
+      {/* Sign-in problems, e.g. Keycloak unreachable when Sign in is pressed */}
+      <Snackbar
+        open={Boolean(authError)}
+        autoHideDuration={8000}
+        onClose={(_event, reason) => {
+          if (reason !== 'clickaway') clearError();
+        }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity='error' onClose={clearError} sx={{ width: '100%' }}>
+          {authError}
+        </Alert>
+      </Snackbar>
     </>
   );
 };

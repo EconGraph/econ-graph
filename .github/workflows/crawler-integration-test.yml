@@ -4,7 +4,7 @@ name: Crawler Integration Test
 # runs `crawler-worker` until that job finishes, and checks the job completed and its data points
 # were stored. Needs network access to the chosen source. API keys come from the dispatch inputs
 # or, when those are empty, the FRED_API_KEY / BLS_API_KEY / CENSUS_API_KEY repository secrets;
-# FRED needs one.
+# FRED and Census need one.
 on:
   workflow_dispatch:
     inputs:
@@ -29,7 +29,7 @@ on:
         type: string
         default: ''
       api_key_census:
-        description: 'Census API key (optional; defaults to the CENSUS_API_KEY secret)'
+        description: 'Census API key (defaults to the CENSUS_API_KEY secret; required for CENSUS)'
         required: false
         type: string
         default: ''
@@ -107,6 +107,10 @@ jobs:
         set -euo pipefail
         if [ "${SOURCE^^}" = "FRED" ] && [ -z "$FRED_API_KEY" ]; then
           echo "::error::FRED needs an API key: pass api_key_fred or set the FRED_API_KEY secret"
+          exit 1
+        fi
+        if [ "${SOURCE^^}" = "CENSUS" ] && [ -z "$CENSUS_API_KEY" ]; then
+          echo "::error::Census needs an API key: pass api_key_census or set the CENSUS_API_KEY secret"
           exit 1
         fi
         CRAWLER=target/release/crawler

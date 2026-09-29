@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 /**
  * Analysis E2E Tests Configuration
- * Tests analysis features: professional analysis, global analysis, series explorer
+ * Tests analysis features: global analysis, series explorer
  */
 export default defineConfig({
   testDir: '../../tests/e2e',
