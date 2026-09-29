@@ -21,6 +21,9 @@ ARG VITE_OIDC_ISSUER
 ARG VITE_OIDC_CLIENT_ID
 ARG NODE_ENV
 
+# Build-time feature flags profile, `release` or `dev` (see docs/build-flags.md)
+ARG FLAGS_PROFILE=release
+
 # Set environment variables for build
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_GRAPHQL_URL=$VITE_GRAPHQL_URL
@@ -28,6 +31,7 @@ ENV VITE_WS_URL=$VITE_WS_URL
 ENV VITE_OIDC_ISSUER=$VITE_OIDC_ISSUER
 ENV VITE_OIDC_CLIENT_ID=$VITE_OIDC_CLIENT_ID
 ENV NODE_ENV=$NODE_ENV
+ENV FLAGS_PROFILE=$FLAGS_PROFILE
 
 # Build the application (Vite)
 RUN npm run build

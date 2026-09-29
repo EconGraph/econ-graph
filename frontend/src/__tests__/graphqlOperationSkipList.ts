@@ -48,19 +48,10 @@ export const GRAPHQL_OPERATION_SKIP_LIST: Readonly<Record<string, string>> = {
   'utils/graphql.ts#GetCorrelationNetwork': 'world-map: replaced by crossSection',
   'utils/graphql.ts#GetGlobalEventsWithImpacts': 'world-map: replaced by crossSection',
 
-  // Unused: nothing in src/ sends these. useCollaboration.ts, the only caller
-  // of GetAnnotationsForSeries, is imported by nothing. Fix or delete them
-  // (series-ui UI-8 rewrites the annotation query; series search is #165).
-  'utils/graphql.ts#GetAnnotationsForSeries': 'series-ui: unused, UI-8 rewrites it',
+  // Unused: nothing in src/ sends these. Their only caller, useCollaboration.ts,
+  // was deleted by UI-8 (UI-5 deleted the other one, ChartCollaborationConnectedQuery,
+  // and the now-uncalled GetAnnotations with it). Fix or delete them (series search
+  // is #165).
+  'utils/graphql.ts#GetChartCollaborators': 'series-ui: unused, UI-5 removed its other caller',
   'utils/graphql.ts#SearchSeriesFulltext': 'series-ui: unused, fix or delete with series search',
-
-  // Reachable today. Must be gone before v4.0.0 (train 1).
-  // The dashboard sends SearchSeries through useSeriesSearch.
-  'utils/graphql.ts#SearchSeries': 'series-ui: reachable, UI-9 fixes it',
-  // /series/:id renders InteractiveChartWithCollaboration, which mounts
-  // ChartCollaborationConnectedQuery: it sends the first two on load and the
-  // third when an annotation is selected. UI-5 deletes that component.
-  'utils/graphql.ts#GetChartCollaborators': 'series-ui: reachable, UI-5 removes its caller',
-  'utils/graphql.ts#GetAnnotations': 'series-ui: reachable, UI-5 removes its caller',
-  'utils/graphql.ts#GetCommentsForAnnotation': 'series-ui: reachable, UI-5 removes its caller',
 };

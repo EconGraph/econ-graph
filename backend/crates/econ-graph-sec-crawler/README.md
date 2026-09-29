@@ -5,11 +5,18 @@ SEC EDGAR XBRL crawler for the EconGraph system, providing comprehensive functio
 ## Features
 
 - **SEC EDGAR Crawling**: Comprehensive crawling of SEC EDGAR filings and XBRL data
-- **XBRL Parsing**: Advanced XBRL document parsing and financial data extraction
+- **XBRL Parsing** (requires `xbrl-parser`): Advanced XBRL document parsing and financial data extraction
 - **Rate Limiting**: Intelligent rate limiting to respect SEC policies
 - **Retry Logic**: Robust retry mechanisms with exponential backoff
-- **Financial Analysis**: Automated financial ratio calculation and analysis
+- **Financial Analysis** (requires `xbrl-parser`): Automated financial ratio calculation and analysis
 - **Data Validation**: Comprehensive data validation and quality checks
+
+## Cargo features
+
+- `xbrl-parser` (off by default): the XBRL parser, DTS (taxonomy) download, financial ratio
+  calculator, their `config/*.json` loading, and the `parse` and `validate` CLI subcommands.
+  This code is unfinished, so the default build (and the crawler-worker) leaves it out and the
+  live crawl only stores filings. It enables `econ-graph-core/financial-ratios`.
 
 ## Testing
 
@@ -40,13 +47,16 @@ The crate includes comprehensive tests to ensure SEC crawling functionality, XBR
 ### Running Tests
 
 ```bash
-# Run all tests
+# Run the default tests (live crawl path only)
 cargo test
 
-# Run specific test modules
-cargo test xbrl_parser
-cargo test financial_ratio_calculator
-cargo test integration
+# Also run the XBRL parser and financial ratio tests
+cargo test --all-features
+
+# Run specific test modules (the XBRL parser is behind the xbrl-parser feature)
+cargo test --features xbrl-parser xbrl_parser
+cargo test --features xbrl-parser financial_ratio_calculator
+cargo test --features xbrl-parser --test xbrl_financial_integration_tests
 
 # Run with SEC EDGAR testing
 SEC_EDGAR_TESTING=true cargo test

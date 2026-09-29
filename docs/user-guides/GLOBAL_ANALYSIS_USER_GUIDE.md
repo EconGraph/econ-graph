@@ -414,4 +414,4 @@ A: Yes, you can save your analysis as a workspace and return to it later. You ca
 
 ---
 
-*This user guide provides comprehensive information for using the Global Analysis feature effectively. For technical details, see the [Global Analysis Architecture](./technical/GLOBAL_ANALYSIS_ARCHITECTURE.md) documentation.*
+*This user guide provides comprehensive information for using the Global Analysis feature effectively. For technical details, see the [Global Analysis Architecture](../technical/GLOBAL_ANALYSIS_ARCHITECTURE.md) documentation.*

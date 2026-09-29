@@ -31,13 +31,13 @@ k8s/
 ├── manifests/           # Kubernetes deployment manifests
 │   ├── namespace.yaml   # Namespace definition
 │   ├── configmap.yaml   # Configuration
-│   ├── secret.yaml      # Secrets (base64 encoded)
 │   ├── postgres.yaml    # PostgreSQL service
 │   ├── backend-deployment.yaml  # Backend deployment
 │   ├── frontend-deployment.yaml # Frontend deployment
 │   ├── admin-frontend-deployment.yaml # Admin UI deployment
 │   ├── admin-frontend-service.yaml    # Admin UI service
-│   └── ingress.yaml     # Ingress configuration
+│   ├── ingress.yaml     # Ingress configuration
+│   └── graphql-ingress.yaml # /graphql, rate-limited per client IP
 └── README.md           # This file
 
 terraform/k8s/          # Terraform configuration
@@ -48,6 +48,7 @@ terraform/k8s/          # Terraform configuration
 scripts/deploy/         # Deployment scripts
 ├── setup-local-k8s.sh # Complete setup script
 ├── build-images.sh    # Build Docker images
+├── create-secrets.sh  # Create the Secrets (run by deploy.sh)
 ├── deploy.sh          # Deploy to K8s
 └── teardown.sh        # Cleanup
 ```
@@ -162,20 +163,77 @@ kubectl scale deployment econ-graph-frontend --replicas=2 -n econ-graph
 The application is configured via ConfigMap and Secrets:
 
 - **ConfigMap**: Contains non-sensitive configuration
-- **Secrets**: Contains sensitive data (base64 encoded)
+- **Secrets**: Store credentials outside the manifests. Current manifests contain no credentials; Google and Facebook credentials committed before #227 remain in Git history and must be rotated. See [Secrets](#secrets)
 
 ### Database Connection
 
-The deployment assumes PostgreSQL is running on the host machine. Update the `DATABASE_URL` in `configmap.yaml` if your database is elsewhere.
+PostgreSQL runs in the cluster (`postgres-deployment.yaml`). The backend and crawler-worker connect as the
+`econgraph` user through `DATABASE_URL`, which `create-secrets.sh` builds and stores in the
+`econ-graph-secrets` Secret.
 
 ### Secrets
 
-Update the secrets in `secret.yaml` with your actual values:
+Current manifests contain no credentials. Google and Facebook credentials committed before #227 remain in Git history and must be rotated. `scripts/deploy/create-secrets.sh` creates the Secrets below in the
+`econ-graph` namespace from environment variables; `deploy.sh` runs it on every deploy. It is
+idempotent: internal passwords are generated with `openssl rand` on the first run and kept on
+later runs, optional keys that are unset keep their current value (or are omitted), and obvious
+placeholders such as `password` or `your-...` are refused. A variable set to the empty string
+counts as unset.
 
 ```bash
-# Encode secrets
-echo -n "your-secret" | base64
+GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... FRED_API_KEY=... ./scripts/deploy/create-secrets.sh
+kubectl -n econ-graph rollout restart deployment/econ-graph-backend deployment/crawler-worker
 ```
+
+| Secret | Keys (environment variable) | Used by |
+| --- | --- | --- |
+| `econ-graph-secrets` | `jwt-secret` (`JWT_SECRET`, generated), `database-url` (built from `app-password`), optional `google-client-id`, `google-client-secret`, `facebook-app-id`, `facebook-app-secret`, `facebook-access-token` (same names in upper case) | backend, crawler-worker (`database-url`) |
+| `econ-graph-postgres` | `postgres-password` (`POSTGRES_PASSWORD`, generated), `app-password` (`APP_DB_PASSWORD`, generated) | postgres, its init script |
+| `crawler-api-keys` | optional `fred-api-key`, `bls-api-key`, `bea-api-key`, `census-api-key` (`FRED_API_KEY`, ...) | crawler-worker |
+| `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`); the passwords are generated on the first run, the username defaults to `admin` | Keycloak (manifests arrive with the Keycloak deploy PR) |
+| `grafana-admin` | `admin-password` (`GRAFANA_ADMIN_PASSWORD`, generated) | Grafana (user `admin`) |
+| `monitoring-auth` | `auth`, one htpasswd line (`MONITORING_BASIC_AUTH`, e.g. `htpasswd -nB admin`, which prompts); only written when set | `ingress-cloudflare-dns01.yaml` basic auth |
+
+Read a value back with, for example:
+
+```bash
+kubectl -n econ-graph get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d
+```
+
+Postgres and Grafana read their passwords only when their data volume is first initialised.
+Changing `POSTGRES_PASSWORD`, `APP_DB_PASSWORD` or `GRAFANA_ADMIN_PASSWORD` later updates the
+Secret but not the running service; also change the password there (for example
+`ALTER ROLE econgraph PASSWORD ...` in psql). A Postgres volume created before these Secrets
+existed has tables owned by `postgres` and an `econgraph` password that no longer matches: for a
+local cluster, recreate it (`./scripts/deploy/teardown.sh`, then deploy again); to keep the data,
+dump it with `pg_dump --no-owner` and restore it as `econgraph` into a fresh volume.
+`create-secrets.sh` stops when it finds such a volume (a `postgresql-data-postgresql-*` PVC) but no
+`econ-graph-postgres` Secret; set `ALLOW_EXISTING_DB_VOLUME=1` to continue anyway. It also stops,
+without writing anything, when it cannot query the cluster.
+
+#### Upgrading a cluster deployed before these Secrets
+
+Older deploys used committed credentials for Grafana and for the monitoring basic auth, and both
+survive a redeploy: Grafana keeps its admin password on its volume, and the old `monitoring-auth`
+Secret is never deleted by `kubectl apply`. Replace both; `create-secrets.sh` stops until you do.
+
+```bash
+# Grafana: choose a password, store it in grafana-admin, and set it in Grafana.
+export GRAFANA_ADMIN_PASSWORD="$(openssl rand -hex 32)"
+printf '%s' "$GRAFANA_ADMIN_PASSWORD" |
+  kubectl -n econ-graph exec -i grafana-0 -- grafana cli admin reset-admin-password --password-from-stdin
+# Monitoring basic auth: a new htpasswd line replaces the committed one.
+export MONITORING_BASIC_AUTH="$(htpasswd -nB admin)"  # prompts for the password
+./scripts/deploy/create-secrets.sh
+```
+
+If you already replaced them another way, run the script once with
+`ALLOW_EXISTING_GRAFANA_VOLUME=1` or `ALLOW_MANIFEST_MONITORING_AUTH=1` to skip the check;
+later runs don't need them.
+
+Without `monitoring-auth`, the monitoring host in `ingress-cloudflare-dns01.yaml` returns 503
+until the Secret exists; `create-secrets.sh` warns when `MONITORING_BASIC_AUTH` is unset and the
+Secret is missing.
 
 ## 🗑️ Cleanup
 

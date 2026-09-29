@@ -53,7 +53,7 @@ function looksLikeGraphQL(text: string): boolean {
 }
 
 /** Number of operations the scan finds today; see the count test below. */
-const MIN_OPERATIONS = 44;
+const MIN_OPERATIONS = 43;
 
 interface FoundOperation {
   /** `<path under src/>#<OperationName>`, the skip list key. */

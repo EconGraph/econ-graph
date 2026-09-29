@@ -13,50 +13,6 @@ import { TestProviders } from '../test-utils/test-providers';
 import App from '../App';
 
 
-// Mock the InteractiveChartWithCollaboration component
-vi.mock('../components/charts/InteractiveChartWithCollaboration', () => ({
-  default: function MockInteractiveChartWithCollaboration({ seriesData, onDataTransform }: any) {
-    return (
-      <div data-testid="interactive-chart">
-        <div data-testid="chart-title">{seriesData?.title}</div>
-        <div data-testid="chart-data-points">{seriesData?.dataPoints?.length || 0} data points</div>
-        <button
-          data-testid="transform-yoy"
-          onClick={() => onDataTransform?.('yoy')}
-        >
-          Year-over-Year
-        </button>
-        <button
-          data-testid="add-annotation"
-          onClick={() => {
-            // Simulate adding annotation
-            const annotation = {
-              id: 'test-annotation-1',
-              title: 'Test Annotation',
-              content: 'This is a test annotation',
-              date: '2024-01-15',
-              value: 100.5
-            };
-            // In real app, this would trigger annotation creation
-            console.log('Annotation added:', annotation);
-          }}
-        >
-          Add Annotation
-        </button>
-        <button
-          data-testid="share-chart"
-          onClick={() => {
-            // Simulate sharing chart
-            console.log('Chart shared');
-          }}
-        >
-          Share Chart
-        </button>
-      </div>
-    );
-  }
-}));
-
 // Mock authentication context
 const mockAuthContext = {
   user: {
@@ -151,7 +107,7 @@ describe('End-to-End User Workflows', () => {
   });
 
   describe('Authentication Workflow', () => {
-    test('should complete authentication workflow: Login → Dashboard → Analysis', async () => {
+    test('should complete authentication workflow: Login → Dashboard', async () => {
       renderApp();
 
       // Should show the app with authentication
@@ -159,8 +115,9 @@ describe('End-to-End User Workflows', () => {
         expect(screen.getByRole('banner')).toBeInTheDocument();
       });
 
-      // Verify user is authenticated (Professional Analysis button should be visible)
-      expect(screen.getByText('Professional Analysis')).toBeInTheDocument();
+      // Verify user is authenticated (the user menu replaces the Sign In button)
+      expect(screen.getByRole('button', { name: 'user menu' })).toBeInTheDocument();
+      expect(screen.queryByText('Sign In')).not.toBeInTheDocument();
 
       console.log('✅ Authentication workflow test passed');
     });

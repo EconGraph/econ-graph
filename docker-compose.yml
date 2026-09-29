@@ -25,6 +25,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:password@postgres:5432/econ_graph
       RUST_LOG: info
+      ENABLE_GRAPHQL_PLAYGROUND: "true"
       # Sign-in with the dev Keycloak realm (the `keycloak` service). Tokens name the
       # browser-facing URL as issuer; the API fetches signing keys from the service directly.
       # Set OIDC_ISSUER to an empty value to run with sign-in off (every caller anonymous).

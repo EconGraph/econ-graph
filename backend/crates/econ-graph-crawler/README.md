@@ -16,7 +16,7 @@ Data collection for EconGraph. All crawling goes through the Postgres `crawl_que
    never crawled or `last_crawled_at` is older than its frequency's interval: daily 1 day, weekly and
    monthly 7 days, quarterly 14 days, annual/semiannual 30 days, anything else 7 days. Series with
    `crawl_status = 'failed'` wait twice as long (from their last attempt). Skipped: static catalogs,
-   sources whose `fetch_series` isn't implemented (WORLD_BANK, IMF, BEA), SEC, and disabled `data_sources`.
+   sources whose `fetch_series` isn't implemented (WORLD_BANK, BEA), SEC, and disabled `data_sources`.
    Duplicates of active jobs are rejected by the queue's unique index, so no leader election is needed.
 
 Job kinds: `fetch_series` (download one series), `discover_catalog` (write a source's series metadata),
@@ -37,6 +37,17 @@ crawler fetch    --source FRED --series GDP [--full]                   # one fet
 
 From the repo: `cargo run -p econ-graph-crawler --bin crawler -- <command>`; the worker:
 `cargo run -p econ-graph-crawler-worker --bin crawler-worker`.
+
+## Development-only static catalogs
+
+Ten hardcoded catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO) register
+automatically in a dev build (`cargo run`, `cargo test`, anything without `--release`), and
+never in a `--release` build (the Dockerfile, every deployment). A `--release` build that still
+wants them (a `--release` test run, for instance) can turn them on explicitly with the
+`static-catalogs` feature: `cargo build --release -p econ-graph-crawler-worker --features
+static-catalogs`, or `--build-arg CARGO_FEATURES=econ-graph-crawler-worker/static-catalogs` to
+`backend/Dockerfile`. Their discovery writes a fixed series list with no HTTP and they can't
+fetch data.
 
 ## Tests
 

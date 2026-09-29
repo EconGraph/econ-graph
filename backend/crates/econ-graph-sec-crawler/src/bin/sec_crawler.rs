@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use econ_graph_core::database::DatabasePool;
 use econ_graph_sec_crawler::{CrawlConfig, SecEdgarCrawler};
+#[cfg(feature = "xbrl-parser")]
 use std::path::PathBuf;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -70,14 +71,16 @@ enum Commands {
     /// Get storage statistics
     Stats,
 
-    /// Validate XBRL file
+    /// Validate XBRL file (needs the `xbrl-parser` feature)
+    #[cfg(feature = "xbrl-parser")]
     Validate {
         /// Path to XBRL file
         #[arg(short, long)]
         file: PathBuf,
     },
 
-    /// Parse XBRL file
+    /// Parse XBRL file (needs the `xbrl-parser` feature)
+    #[cfg(feature = "xbrl-parser")]
     Parse {
         /// Path to XBRL file
         #[arg(short, long)]
@@ -151,10 +154,12 @@ async fn main() -> Result<()> {
             stats_command(crawler).await?;
         }
 
+        #[cfg(feature = "xbrl-parser")]
         Commands::Validate { file } => {
             validate_command(file).await?;
         }
 
+        #[cfg(feature = "xbrl-parser")]
         Commands::Parse { file, format } => {
             parse_command(file, format).await?;
         }
@@ -264,6 +269,7 @@ async fn stats_command(crawler: SecEdgarCrawler) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "xbrl-parser")]
 async fn validate_command(file: PathBuf) -> Result<()> {
     info!("Validating XBRL file: {:?}", file);
 
@@ -292,6 +298,7 @@ async fn validate_command(file: PathBuf) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "xbrl-parser")]
 async fn parse_command(file: PathBuf, format: String) -> Result<()> {
     info!("Parsing XBRL file: {:?}", file);
 

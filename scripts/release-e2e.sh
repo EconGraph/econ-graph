@@ -3,17 +3,23 @@
 #   1. Postgres 18: a fresh docker-compose.release-e2e.yml container, unless
 #      RELEASE_E2E_DATABASE_URL is set (CI sets it to its service container). A DATABASE_URL
 #      you export for development is ignored, so the seed never writes to your dev database.
-#   2. Builds the backend and the seed tool in one cargo invocation.
-#   3. Seeds the database from recorded fixtures through the crawler adapters (no network).
-#   4. Runs Playwright, which starts the backend and a release build of the frontend.
+#   2. Keycloak, with the dev realm from config/keycloak/, always via docker-compose.release-e2e.yml
+#      (CI has no equivalent service container for it: the realm and users files must be mounted
+#      from the checkout under test).
+#   3. Builds the backend and the seed tool in one cargo invocation.
+#   4. Seeds the database from recorded fixtures through the crawler adapters (no network).
+#   5. Runs Playwright, which starts the backend and a release build of the frontend.
 # Extra arguments go to `playwright test`, e.g. `scripts/release-e2e.sh smoke.spec.ts --headed`.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Recreated every run, so each run starts from an empty realm.
+docker compose -f "$repo/docker-compose.release-e2e.yml" up -d --wait --force-recreate keycloak
+
 if [[ -z "${RELEASE_E2E_DATABASE_URL:-}" ]]; then
   # Recreated every run, so each run starts from an empty database.
-  docker compose -f "$repo/docker-compose.release-e2e.yml" up -d --wait --force-recreate
+  docker compose -f "$repo/docker-compose.release-e2e.yml" up -d --wait --force-recreate postgres
   export RELEASE_E2E_DATABASE_URL=postgres://postgres:password@localhost:5439/econ_graph_e2e
 fi
 

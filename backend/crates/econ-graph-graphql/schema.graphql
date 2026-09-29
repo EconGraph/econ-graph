@@ -216,11 +216,6 @@ type ChartAnnotationType {
 	Last update timestamp
 	"""
 	updatedAt: DateTime
-	"""
-	Deprecated alias for `visibility`: true when public. Kept so existing clients
-	(frontend queries not yet migrated to `visibility`) keep working.
-	"""
-	isVisible: Boolean! @deprecated(reason: "use visibility")
 }
 
 """
@@ -348,40 +343,6 @@ input CreateAnnotationInput {
 	Whether the annotation is public (visible to others)
 	"""
 	isPublic: Boolean
-	"""
-	Deprecated alias for `isPublic`. If both are given, `isPublic` wins.
-	"""
-	isVisible: Boolean @deprecated(reason: "use isPublic")
-}
-
-"""
-Input for creating a new user (admin only)
-"""
-input CreateUserInput {
-	"""
-	Email address
-	"""
-	email: String!
-	"""
-	Display name
-	"""
-	name: String!
-	"""
-	Password (for email-based users)
-	"""
-	password: String
-	"""
-	Organization (optional)
-	"""
-	organization: String
-	"""
-	Whether account is active
-	"""
-	isActive: Boolean
-	"""
-	Whether to send welcome email
-	"""
-	sendWelcomeEmail: Boolean
 }
 
 input DataFilter {
@@ -558,11 +519,6 @@ type Mutation {
 	"""
 	deleteAnnotation(input: DeleteAnnotationInput!): Boolean!
 	"""
-	Create a new user (requires `admin.users:create`). The new user's roles are assigned in
-	the identity provider, not here.
-	"""
-	createUser(input: CreateUserInput!): UserType!
-	"""
 	Update user information (requires `admin.users:update`; changing `isActive` also
 	requires `admin.users:suspend`). Roles are assigned in the identity provider.
 	"""
@@ -579,10 +535,6 @@ type Mutation {
 	Activate a user account (requires `admin.users:suspend`)
 	"""
 	activateUser(id: ID!): Boolean!
-	"""
-	Force logout a user (requires `admin.sessions:revoke`)
-	"""
-	forceLogoutUser(id: ID!): Boolean!
 }
 
 """
@@ -639,9 +591,21 @@ type Query {
 	"""
 	dataSources: [DataSourceType!]!
 	"""
-	Get data points for a specific series with filtering and transformation
+	Get data points for a specific series with filtering and transformation, one page at a
+	time in date order. `totalCount` counts every matching point; read the next page with
+	`after: pageInfo.endCursor` until `pageInfo.hasNextPage` is false. A transformed page
+	has the values it would have in the whole series.
 	"""
-	seriesData(seriesId: ID!, filter: DataFilter, transformation: DataTransformation, first: Int, after: String): DataPointConnection!
+	seriesData(		seriesId: ID!,		filter: DataFilter,		transformation: DataTransformation,
+		"""
+		Page size. Defaults to and is capped at 10000; must not be negative.
+		"""
+		first: Int,
+		"""
+		Start after this cursor (a previous page's endCursor). A cursor is the number of points up to and including the one it names.
+		"""
+		after: String
+	): DataPointConnection!
 	"""
 	Crawler status, derived from the crawl queue (workers keep no other state).
 	"""
@@ -680,14 +644,6 @@ type Query {
 	Get all users (requires `admin.users:read`)
 	"""
 	users(filter: UserFilterInput, pagination: PaginationInput): UserConnection!
-	"""
-	Get user sessions (requires `admin.sessions:read`)
-	"""
-	userSessions(userId: ID): [UserSessionType!]!
-	"""
-	Get active user sessions (requires `admin.sessions:read`)
-	"""
-	activeSessions: [UserSessionType!]!
 	"""
 	Get system health metrics (requires `admin.system:read`)
 	"""
@@ -888,14 +844,6 @@ type SystemMetricsType {
 	"""
 	activeUsers: Int!
 	"""
-	Total number of sessions
-	"""
-	totalSessions: Int!
-	"""
-	Number of active sessions
-	"""
-	activeSessions: Int!
-	"""
 	Database size in MB
 	"""
 	databaseSizeMb: Float!
@@ -962,10 +910,6 @@ input UpdateAnnotationInput {
 	New public/private visibility, if changing
 	"""
 	isPublic: Boolean
-	"""
-	Deprecated alias for `isPublic`. If both are given, `isPublic` wins.
-	"""
-	isVisible: Boolean @deprecated(reason: "use isPublic")
 }
 
 """
@@ -1037,10 +981,6 @@ Input for filtering users (admin only)
 """
 input UserFilterInput {
 	"""
-	Filter by the legacy `users.role` column
-	"""
-	role: String @deprecated(reason: "Roles come from the identity provider's token; this legacy column is no longer written and will be removed")
-	"""
 	Filter by organization
 	"""
 	organization: String
@@ -1056,44 +996,6 @@ input UserFilterInput {
 	Search term for name or email
 	"""
 	searchQuery: String
-}
-
-"""
-GraphQL representation of a user session
-"""
-type UserSessionType {
-	"""
-	Session ID
-	"""
-	id: ID!
-	"""
-	User ID
-	"""
-	userId: ID!
-	"""
-	Session creation time
-	"""
-	createdAt: DateTime!
-	"""
-	Last activity time
-	"""
-	lastActivity: DateTime!
-	"""
-	Session expiration time
-	"""
-	expiresAt: DateTime!
-	"""
-	User agent string
-	"""
-	userAgent: String
-	"""
-	IP address
-	"""
-	ipAddress: String
-	"""
-	Whether session is active
-	"""
-	isActive: Boolean!
 }
 
 """
@@ -1116,14 +1018,6 @@ type UserType {
 	Avatar URL
 	"""
 	avatarUrl: String
-	"""
-	Authentication provider
-	"""
-	provider: String!
-	"""
-	Legacy `users.role` column, no longer written or used for authorization
-	"""
-	role: String! @deprecated(reason: "Roles come from the identity provider's token; this legacy column is no longer written and will be removed")
 	"""
 	Organization
 	"""
@@ -1166,10 +1060,6 @@ type UserType {
 	lastLoginAt: DateTime
 }
 
-"""
-Marks an element of a GraphQL schema as no longer supported.
-"""
-directive @deprecated(reason: String = "No longer supported") on FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE
 """
 Directs the executor to include this field or fragment only when the `if` argument is true.
 """
