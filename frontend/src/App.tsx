@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { Container, Box } from '@mui/material';
 
@@ -17,6 +17,10 @@ import NotFound from './pages/NotFound';
 import AuthCallback from './pages/AuthCallback';
 import { CALLBACK_PATH } from './auth/oidcConfig';
 import ResetQueriesOnUserChange from './auth/ResetQueriesOnUserChange';
+
+// Build-time flag pattern (docs/build-flags.md): read `__FLAGS__.<name>` in the condition
+// and import the page lazily, so a release build without the flag contains none of its code.
+const FlagCanary = __FLAGS__.build_canary ? lazy(() => import('./pages/FlagCanary')) : null;
 
 // Sidebar width constant - must match Sidebar.tsx
 const SIDEBAR_WIDTH = 240;
@@ -65,6 +69,16 @@ function App() {
                 <Route path='/global' element={<GlobalAnalysis />} />
                 <Route path='/privacy' element={<PrivacyPolicy />} />
                 <Route path={CALLBACK_PATH} element={<AuthCallback />} />
+                {FlagCanary && (
+                  <Route
+                    path='/flags/canary'
+                    element={
+                      <Suspense fallback={null}>
+                        <FlagCanary />
+                      </Suspense>
+                    }
+                  />
+                )}
                 <Route path='*' element={<NotFound />} />
               </Routes>
             </Container>
