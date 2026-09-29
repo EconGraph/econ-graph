@@ -52,18 +52,7 @@ async fn series(pool: &DatabasePool, source_id: Uuid, external_id: &str) -> Econ
             source_id,
             external_id: external_id.into(),
             title: format!("Series {external_id}"),
-            description: None,
-            units: None,
-            frequency: "Monthly".into(),
-            seasonal_adjustment: None,
-            start_date: None,
-            end_date: None,
-            is_active: true,
-            first_discovered_at: None,
-            last_crawled_at: None,
-            first_missing_date: None,
-            crawl_status: None,
-            crawl_error_message: None,
+            ..Default::default()
         },
     )
     .await
