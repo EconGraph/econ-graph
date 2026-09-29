@@ -1356,6 +1356,7 @@ dependencies = [
  "econ-graph-auth",
  "econ-graph-core",
  "econ-graph-crawler",
+ "econ-graph-flags-build",
  "econ-graph-graphql",
  "econ-graph-mcp",
  "econ-graph-services",
@@ -1455,6 +1456,15 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "warp",
+]
+
+[[package]]
+name = "econ-graph-flags-build"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

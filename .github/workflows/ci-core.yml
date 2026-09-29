@@ -294,6 +294,22 @@ jobs:
       env:
         RUST_LOG: warn
 
+    # Deployed images build with FLAGS_PROFILE=release (config/flags/README.md), which
+    # compiles /mcp out of econ-graph-backend; backend/.cargo/config.toml defaults local
+    # builds and the step above to the dev profile instead. Lint and test the release
+    # profile too, so a flagged-off route isn't only ever compiled in CI.
+    - name: Check the release flag profile
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        set -o pipefail
+        cargo clippy -p econ-graph-backend --all-targets -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
+        cargo test -p econ-graph-backend --bin econ-graph-backend -- --test-threads=4 --nocapture mcp_flag_off_tests:: root_page_tests:: | tee /tmp/release-flag-tests.log
+        grep -q "test result: ok. 2 passed" /tmp/release-flag-tests.log
+      working-directory: backend
+      env:
+        RUST_LOG: warn
+        FLAGS_PROFILE: release
+
     # The frontend validates its GraphQL operations against the committed
     # schema.graphql, so the file must match what the backend serves. To
     # regenerate it: UPDATE_SCHEMA=1 cargo test -p econ-graph-graphql --test schema_snapshot
