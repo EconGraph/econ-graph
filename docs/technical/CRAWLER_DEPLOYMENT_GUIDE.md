@@ -52,7 +52,7 @@ Configuration (flags or environment):
 | `CRAWLER_PAUSE_AFTER` / `CRAWLER_PAUSE_SECS` | 5 / 300 | pause a source after N consecutive rate-limit/auth errors |
 | `CRAWLER_HTTP_TIMEOUT_SECS` | 30 | per-request timeout |
 | `CRAWLER_DATA_DIR` | `/app/data` in the image | reference data read at runtime (`us_states.csv`, used by FHFA and Census; `bls_series.csv`, the BLS series list); the worker exits at startup if it is missing |
-| `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY`, `CENSUS_API_KEY` | unset | from Secret `crawler-api-keys` (all optional) |
+| `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY`, `CENSUS_API_KEY` | unset | from Secret `crawler-api-keys`; the worker starts without them, but FRED, BEA and Census jobs fail with an auth error when their key is missing |
 
 ## Retries
 

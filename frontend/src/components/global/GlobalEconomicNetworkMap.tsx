@@ -20,6 +20,7 @@ import {
 import { Info, ZoomIn, ZoomOut, RestartAlt } from '@mui/icons-material';
 import * as d3 from 'd3';
 import * as topojson from 'topojson-client';
+import { loadWorldAtlas } from './worldAtlas';
 
 // Types for the component
 interface CountryData {
@@ -317,8 +318,8 @@ const GlobalEconomicNetworkMap: React.FC = () => {
       .attr('stroke-width', '2');
 
     // Load and render world map
-    d3.json('https://cdn.jsdelivr.net/npm/world-atlas@3/world/110m.json')
-      .then((world: any) => {
+    loadWorldAtlas()
+      .then(world => {
         // Draw world countries
         const worldFeatures = topojson.feature(world, world.objects.countries) as any;
         g.selectAll('.world-country')
@@ -437,6 +438,7 @@ const GlobalEconomicNetworkMap: React.FC = () => {
       <Typography variant='h4' gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         🌍 Interactive Global Economic Network Map
         <Tooltip title='Explore economic correlations between countries through an interactive network visualization'>
+          {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
           <IconButton size='small'>
             <Info />
           </IconButton>
@@ -536,16 +538,19 @@ const GlobalEconomicNetworkMap: React.FC = () => {
           <Grid item xs={12} md={4}>
             <Box sx={{ display: 'flex', gap: 1 }}>
               <Tooltip title='Zoom In'>
+                {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
                 <IconButton>
                   <ZoomIn />
                 </IconButton>
               </Tooltip>
               <Tooltip title='Zoom Out'>
+                {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
                 <IconButton>
                   <ZoomOut />
                 </IconButton>
               </Tooltip>
               <Tooltip title='Reset View'>
+                {/* eslint-disable-next-line local/no-dead-button -- ECO-248: unrouted in release 1, no handler yet */}
                 <IconButton>
                   <RestartAlt />
                 </IconButton>

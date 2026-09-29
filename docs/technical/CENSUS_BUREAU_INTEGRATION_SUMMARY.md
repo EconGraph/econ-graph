@@ -11,7 +11,10 @@
 
 - **Data source**: U.S. Census Bureau Business Dynamics Statistics (BDS)
 - **API root**: `https://api.census.gov/data` (`census::DEFAULT_BASE_URL`), dataset path `/timeseries/bds`
-- **Authentication**: optional. `CENSUS_API_KEY` (`ctx.keys.census`) is sent as `key=` only when set.
+- **Authentication**: required. The Census Data API rejects requests without a key, so
+  `CENSUS_API_KEY` (`ctx.keys.census`) is sent as `key=` on every request. Without it, discovery
+  and fetching fail with `Auth` before any request. Keys are free at
+  <https://api.census.gov/data/key_signup.html>.
 - **Data type**: annual establishment, firm and job creation/destruction statistics (units "Count")
 - **Rate policy**: `SourcePolicy::default_for(SourceId::Census)` in
   `backend/crates/econ-graph-crawler/src/policy.rs` (40 requests/min); enforced by the shared
@@ -41,7 +44,7 @@ Finer levels (county, metro area) have thousands of areas and are skipped.
 **Fetching** (`fetch_series`) is supported for both kinds of id. Any other id (including the bare
 `CENSUS_BDS_{VARIABLE}_state` ids older discovery runs recorded) is a `Permanent` error, and the
 refresh scheduler never enqueues it. The request is
-`GET {base}/timeseries/bds?get={VARIABLE},YEAR&for={us:*|state:FIPS}[&key=KEY]` (all years; the
+`GET {base}/timeseries/bds?get={VARIABLE},YEAR&for={us:*|state:FIPS}&key=KEY` (all years; the
 old comma-separated `YEAR=` list hit the API's "204 No Content" limitation for multi-year queries).
 `since` is applied client-side by year. Each row becomes a point dated January 1 of its `YEAR`.
 Rows of the wrong width or with an unparseable year are skipped; empty or non-numeric values are
@@ -59,10 +62,10 @@ missing observations.
 
 ## Database
 
-The data source row ("U.S. Census Bureau") was made keyless, visible and enabled by migration
-`2025-09-13-185806-0000_update_census_data_source_config` (now archived under
-`backend/migrations_backup/`). Discovered series are written as `EconomicSeries` rows keyed by the
-external IDs above when `crawler-worker` runs the discovery job.
+The data source row ("U.S. Census Bureau") is visible and enabled. Migration
+`2026-09-28-000001_census_api_key_required` marks it as requiring `CENSUS_API_KEY`. Discovered
+series are written as `EconomicSeries` rows keyed by the external IDs above when `crawler-worker`
+runs the discovery job.
 
 ## Testing
 

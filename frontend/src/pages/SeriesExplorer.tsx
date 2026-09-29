@@ -19,9 +19,6 @@ import {
   Skeleton,
   Collapse,
   Divider,
-  Slider,
-  FormControlLabel,
-  Switch,
   Menu,
   Alert,
   CircularProgress,
@@ -29,13 +26,11 @@ import {
 } from '@mui/material';
 import {
   Search as SearchIcon,
-  Bookmark as BookmarkIcon,
   TrendingUp as TrendingUpIcon,
   AccessTime as AccessTimeIcon,
   FileDownload as ExportIcon,
   Tune as AdvancedIcon,
   Clear as ClearIcon,
-  Info as InfoIcon,
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSeriesSearch, useDataSources } from '../hooks/useSeriesData';
@@ -44,14 +39,98 @@ interface EconomicSeries {
   id: string;
   title: string;
   description: string;
+  sourceId: string;
   source: string;
   frequency: string;
   units: string;
-  lastUpdated: string;
-  startDate: string;
-  endDate: string;
-  relevanceScore?: number;
+  lastUpdated?: string;
+  startDate?: string;
+  endDate?: string;
 }
+
+/** Most results the page asks the backend for in one search. */
+const SEARCH_LIMIT = 100;
+
+/** How long typing must pause before the search is sent. */
+const SEARCH_DEBOUNCE_MS = 250;
+
+export interface DataSourceOption {
+  id: string;
+  name: string;
+}
+
+/**
+ * Formats an ISO date or timestamp as YYYY-MM-DD, or returns undefined when the backend
+ * didn't send one. Missing dates are shown as missing, never replaced with made-up values.
+ * @param value - ISO date or timestamp from the API, if any.
+ * @returns The date part, or undefined.
+ */
+const toDateOnly = (value?: string | null): string | undefined => toTimestamp(value)?.split('T')[0];
+
+/**
+ * Normalizes an ISO date or timestamp to a full ISO timestamp, or undefined when missing.
+ * @param value - ISO date or timestamp from the API, if any.
+ * @returns The ISO timestamp, or undefined.
+ */
+const toTimestamp = (value?: string | null): string | undefined => {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+};
+
+/**
+ * Quotes a value for a CSV cell when it contains a comma, quote or newline. A leading
+ * =, +, -, @, tab or CR is prefixed with a quote first, so a spreadsheet app never runs
+ * a cell pulled from search results (title, description, source, units) as a formula.
+ * @param value - Cell value.
+ * @returns The escaped cell.
+ */
+const toCsvCell = (value: string | undefined): string => {
+  const raw = value ?? '';
+  const text = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+/** The backend's SeriesFrequency GraphQL enum, keyed by the frequency string series carry. */
+const BACKEND_FREQUENCIES = new Set([
+  'Daily',
+  'Weekly',
+  'Monthly',
+  'Quarterly',
+  'Annual',
+  'Irregular',
+]);
+
+/**
+ * Resolves a `source` URL parameter to a listed source's id. The parameter is normally
+ * already an id, but older links (the sidebar, the data sources page) put the source's
+ * display name in the URL instead, and that name doesn't always match exactly (it may
+ * be missing a "(FRED)"-style suffix) — so a name match falls back to a prefix match.
+ * @param param - The raw `source` URL parameter, if any.
+ * @param sources - The sources the backend lists.
+ * @returns The matching source's id, or undefined when nothing matches.
+ */
+export const resolveSourceId = (param: string, sources: DataSourceOption[]): string | undefined => {
+  if (!param) return undefined;
+  const byId = sources.find(source => source.id === param);
+  if (byId) return byId.id;
+  const lowerParam = param.toLowerCase();
+  const byName = sources.find(source => source.name.toLowerCase() === lowerParam);
+  if (byName) return byName.id;
+  const prefixMatches = sources.filter(source => source.name.toLowerCase().startsWith(lowerParam));
+  return prefixMatches.length === 1 ? prefixMatches[0].id : undefined;
+};
+
+/**
+ * The frequency as the backend's SeriesFrequency enum names it (its variants, upper-cased),
+ * or undefined when it isn't one of the backend's known frequencies. An unrecognized value
+ * (crawler data doesn't guarantee it matches) is left to the page's own client-side filter
+ * instead of being sent as an invalid enum value.
+ * @param frequency - The frequency as shown on a result.
+ * @returns The GraphQL enum value, or undefined.
+ */
+const toBackendFrequency = (frequency: string): string | undefined =>
+  BACKEND_FREQUENCIES.has(frequency) ? frequency.toUpperCase() : undefined;
 
 /**
  * REQUIREMENT: Browse and search functionality similar to FRED but more modern
@@ -69,24 +148,11 @@ const SeriesExplorer: React.FC = () => {
   const [selectedFrequency, setSelectedFrequency] = React.useState(
     searchParams.get('frequency') || ''
   );
-  const [selectedCategory, setSelectedCategory] = React.useState(
-    searchParams.get('category') || ''
-  );
   const [currentPage, setCurrentPage] = React.useState(1);
-  const [isLoading, setIsLoading] = React.useState(false);
 
   // Advanced search state
   const [showAdvancedSearch, setShowAdvancedSearch] = React.useState(false);
-  const [similarityThreshold, setSimilarityThreshold] = React.useState(0.7);
-  const [includeInactiveSeries, setIncludeInactiveSeries] = React.useState(false);
   const [sortBy, setSortBy] = React.useState('relevance');
-
-  // Search statistics
-  const [searchStats, setSearchStats] = React.useState<{
-    resultCount: number;
-    searchTime: number;
-    hasSpellingSuggestion?: string;
-  } | null>(null);
 
   // Export and UI state
   const [exportMenuAnchor, setExportMenuAnchor] = React.useState<null | HTMLElement>(null);
@@ -96,131 +162,109 @@ const SeriesExplorer: React.FC = () => {
   // Search input ref for keyboard shortcuts
   const searchInputRef = React.useRef<HTMLInputElement>(null);
 
-  // Fetch real data sources for filtering
+  // Data sources for the source filter, as the backend lists them
   const dataSourcesResult = useDataSources();
-  const { data: dataSources } = dataSourcesResult || {};
-
-  // Use real search functionality
-  const searchResult = useSeriesSearch(
-    searchQuery,
-    {
-      sourceId: selectedSource && selectedSource !== 'All Sources' ? selectedSource : undefined,
-      frequency:
-        selectedFrequency && selectedFrequency !== 'All Frequencies'
-          ? selectedFrequency
-          : undefined,
-    },
-    true
+  const dataSources: DataSourceOption[] = React.useMemo(
+    () => dataSourcesResult?.data ?? [],
+    [dataSourcesResult?.data]
   );
-  const { data: searchResults, isLoading: isSearchLoading } = searchResult || {};
 
-  // Transform search results to match the expected format
-  const allMockSeries: EconomicSeries[] = React.useMemo(() => {
+  // Only a source the backend listed is used, so an old link that put the source name in
+  // the URL (the sidebar, the data sources page) resolves to that source's id instead of
+  // matching nothing. While the list is loading, the source from the URL is held and the
+  // search waits for it.
+  const resolvedSourceId = resolveSourceId(selectedSource, dataSources);
+  const sourceListed = resolvedSourceId !== undefined;
+  const waitingForSources = Boolean(selectedSource) && Boolean(dataSourcesResult?.isLoading);
+  const activeSource = sourceListed ? resolvedSourceId : waitingForSources ? selectedSource : '';
+
+  // Send the search once typing pauses, not on every keystroke
+  const [debouncedQuery, setDebouncedQuery] = React.useState(searchQuery.trim());
+  React.useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Search runs on the backend; the source filter is applied there too
+  const searchResult = useSeriesSearch(
+    debouncedQuery,
+    {
+      sourceId: activeSource || undefined,
+      frequency: selectedFrequency ? toBackendFrequency(selectedFrequency) : undefined,
+      limit: SEARCH_LIMIT,
+    },
+    !waitingForSources
+  );
+  const {
+    data: searchResults,
+    isInitialLoading: isSearchLoading,
+    isFetching: isSearchFetching,
+    error: searchError,
+  } = searchResult || {};
+  const showLoading = isSearchLoading || (waitingForSources && debouncedQuery.length >= 2);
+
+  // Transform search results to the card format. Missing fields stay missing.
+  const allSeries: EconomicSeries[] = React.useMemo(() => {
     if (!searchResults) return [];
 
     return searchResults.map((result: any) => ({
       id: result.id,
       title: result.title,
-      description: result.description || 'Economic time series data',
-      source: result.sourceId
-        ? dataSources?.find((ds: any) => ds.id === result.sourceId)?.name || 'Unknown Source'
-        : 'Unknown Source',
+      description: result.description || '',
+      sourceId: result.sourceId,
+      source:
+        result.source?.name ||
+        dataSources.find(ds => ds.id === result.sourceId)?.name ||
+        'Unknown Source',
       frequency: result.frequency,
-      units: result.units,
-      lastUpdated: result.lastUpdated
-        ? new Date(result.lastUpdated).toISOString().split('T')[0]
-        : '2024-12-15',
-      startDate: result.startDate
-        ? new Date(result.startDate).toISOString().split('T')[0]
-        : '2000-01-01',
-      endDate: result.endDate ? new Date(result.endDate).toISOString().split('T')[0] : '2024-12-01',
-      relevanceScore: result.similarityScore ? Math.round(result.similarityScore * 100) : undefined,
+      units: result.units || '',
+      lastUpdated: toTimestamp(result.lastUpdated),
+      startDate: toDateOnly(result.startDate),
+      endDate: toDateOnly(result.endDate),
     }));
   }, [searchResults, dataSources]);
 
-  // Filter series based on search criteria
+  // Apply the frequency filter (the backend filters by source), and sort
   const filteredSeries = React.useMemo(() => {
-    let filtered = allMockSeries;
+    let filtered = allSeries;
 
-    // Apply search query filter and calculate relevance scores
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered
-        .filter(
-          series =>
-            series.title.toLowerCase().includes(query) ||
-            series.description.toLowerCase().includes(query) ||
-            series.source.toLowerCase().includes(query)
-        )
-        .map(series => {
-          // Calculate relevance score based on how well the query matches
-          let score = 0;
-          const title = series.title.toLowerCase();
-          const description = series.description.toLowerCase();
-
-          if (title.includes(query)) {
-            score += title === query ? 100 : 95; // Perfect match vs partial match
-          } else if (description.includes(query)) {
-            score += 88; // Description match
-          } else if (series.source.toLowerCase().includes(query)) {
-            score += 75; // Source match
-          }
-
-          // Add some randomness for different queries
-          if (query === 'gdp') {
-            if (series.id === 'test-series-1') score = 95;
-            else if (series.id === 'gdp-nominal') score = 88;
-            else score = 75;
-          }
-
-          return { ...series, relevanceScore: score };
-        });
-    }
-
-    // Apply source filter
-    if (selectedSource && selectedSource !== 'All Sources') {
-      filtered = filtered.filter(series => series.source === selectedSource);
-    }
-
-    // Apply frequency filter
-    if (selectedFrequency && selectedFrequency !== 'All Frequencies') {
+    if (selectedFrequency) {
       filtered = filtered.filter(series => series.frequency === selectedFrequency);
     }
 
-    // Sort results
-    filtered.sort((a, b) => {
-      if (sortBy === 'relevance' && a.relevanceScore && b.relevanceScore) {
-        return b.relevanceScore - a.relevanceScore; // Always desc for relevance
-      }
-      if (sortBy === 'title') {
-        return a.title.localeCompare(b.title); // Always asc for title
-      }
-      if (sortBy === 'lastUpdated') {
-        return new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime(); // Always desc for date
-      }
-      return 0;
-    });
+    // Relevance keeps the backend's order
+    if (sortBy === 'title') {
+      filtered = [...filtered].sort((a, b) => a.title.localeCompare(b.title));
+    } else if (sortBy === 'lastUpdated') {
+      // Newest first; series without a date go last
+      filtered = [...filtered].sort((a, b) =>
+        (b.lastUpdated ?? '').localeCompare(a.lastUpdated ?? '')
+      );
+    }
 
     return filtered;
-  }, [searchQuery, selectedSource, selectedFrequency, sortBy, allMockSeries]);
+  }, [selectedFrequency, sortBy, allSeries]);
 
   // Pagination
   const itemsPerPage = 20;
   const totalPages = Math.ceil(filteredSeries.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
+  // A refetch can return fewer results, so never stay past the last page
+  const page = Math.min(currentPage, Math.max(totalPages, 1));
+  const startIndex = (page - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const paginatedSeries = filteredSeries.slice(startIndex, endIndex);
 
-  // Update URL parameters when filters change
+  // Update URL parameters when filters change. `source` is written back as `selectedSource`,
+  // not the resolved id: a link that arrived with a source name (the sidebar's, say) keeps
+  // that same name in the URL rather than having it silently rewritten to the id it resolved
+  // to — a same-site navigation is expected to keep every query parameter it arrived with.
   React.useEffect(() => {
     const params = new URLSearchParams();
     if (searchQuery) params.set('q', searchQuery);
-    if (selectedSource && selectedSource !== 'All Sources') params.set('source', selectedSource);
-    if (selectedFrequency && selectedFrequency !== 'All Frequencies')
-      params.set('frequency', selectedFrequency);
-    if (selectedCategory) params.set('category', selectedCategory);
-    setSearchParams(params);
-  }, [searchQuery, selectedSource, selectedFrequency, selectedCategory, setSearchParams]);
+    if (selectedSource) params.set('source', selectedSource);
+    if (selectedFrequency) params.set('frequency', selectedFrequency);
+    setSearchParams(params, { replace: true });
+  }, [searchQuery, selectedSource, selectedFrequency, setSearchParams]);
 
   // Keyboard shortcuts
   React.useEffect(() => {
@@ -243,18 +287,14 @@ const SeriesExplorer: React.FC = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Handle search
+  // Results are fetched as the query changes; the button and Enter send it right away
   const handleSearch = () => {
-    if (searchQuery.trim()) {
-      setIsLoading(true);
-      // Simulate search delay
-      setTimeout(() => {
-        setIsLoading(false);
-        setSearchStats({
-          resultCount: filteredSeries.length,
-          searchTime: Math.random() * 100 + 50, // Mock search time
-        });
-      }, 500);
+    const query = searchQuery.trim();
+    if (query.length < 2 || waitingForSources) return;
+    if (query === debouncedQuery) {
+      searchResult?.refetch?.();
+    } else {
+      setDebouncedQuery(query);
     }
   };
 
@@ -263,14 +303,12 @@ const SeriesExplorer: React.FC = () => {
     setSearchQuery('');
     setSelectedSource('');
     setSelectedFrequency('');
-    setSelectedCategory('');
     setCurrentPage(1);
-    setSearchStats(null);
   };
 
   // Export functionality
   const handleExport = (format: string) => {
-    const data = paginatedSeries.map(series => ({
+    const data = filteredSeries.map(series => ({
       id: series.id,
       title: series.title,
       description: series.description,
@@ -285,7 +323,7 @@ const SeriesExplorer: React.FC = () => {
     if (format === 'csv') {
       const csv = [
         Object.keys(data[0] || {}).join(','),
-        ...data.map(row => Object.values(row).join(',')),
+        ...data.map(row => Object.values(row).map(toCsvCell).join(',')),
       ].join('\n');
 
       const blob = new Blob([csv], { type: 'text/csv' });
@@ -310,16 +348,19 @@ const SeriesExplorer: React.FC = () => {
     setSnackbarOpen(true);
   };
 
-  // Get unique sources and frequencies for filters
-  const uniqueSources = React.useMemo(() => {
-    const sources = new Set(allMockSeries.map(s => s.source));
-    return Array.from(sources).sort();
-  }, [allMockSeries]);
-
+  // Frequencies present in the current results
   const uniqueFrequencies = React.useMemo(() => {
-    const frequencies = new Set(allMockSeries.map(s => s.frequency));
+    const frequencies = new Set(allSeries.map(s => s.frequency).filter(Boolean));
+    if (selectedFrequency) frequencies.add(selectedFrequency);
     return Array.from(frequencies).sort();
-  }, [allMockSeries]);
+  }, [allSeries, selectedFrequency]);
+
+  const dateRange = (series: EconomicSeries): string | undefined => {
+    if (series.startDate && series.endDate) return `${series.startDate} - ${series.endDate}`;
+    if (series.startDate) return `From ${series.startDate}`;
+    if (series.endDate) return `Until ${series.endDate}`;
+    return undefined;
+  };
 
   const renderSeriesCard = (series: EconomicSeries) => (
     <Card
@@ -363,43 +404,17 @@ const SeriesExplorer: React.FC = () => {
             title={`Data Source: ${series.source}`}
           />
           <Chip label={series.frequency} size='small' variant='outlined' />
-          <Chip label={series.units} size='small' variant='outlined' />
-          {series.relevanceScore && (
-            <Chip
-              label={`${series.relevanceScore}%`}
-              size='small'
-              color='secondary'
-              variant='outlined'
-              title={`Relevance Score: ${series.relevanceScore}%`}
-            />
-          )}
+          {series.units && <Chip label={series.units} size='small' variant='outlined' />}
         </Box>
 
-        {/* Show Federal Reserve Economic Data info when applicable */}
-        {series.source === 'Federal Reserve Economic Data' && (
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-            <InfoIcon fontSize='small' color='action' sx={{ mr: 0.5 }} />
+        {dateRange(series) && (
+          <Box sx={{ display: 'flex', alignItems: 'center', mt: 'auto' }}>
+            <AccessTimeIcon fontSize='small' color='action' sx={{ mr: 0.5 }} />
             <Typography variant='caption' color='text.secondary'>
-              FRED
+              {dateRange(series)}
             </Typography>
           </Box>
         )}
-
-        <Box
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            mt: 'auto',
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <AccessTimeIcon fontSize='small' color='action' sx={{ mr: 0.5 }} />
-            <Typography variant='caption' color='text.secondary'>
-              {series.startDate} - {series.endDate}
-            </Typography>
-          </Box>
-        </Box>
       </CardContent>
 
       <CardActions sx={{ pt: 0 }}>
@@ -412,15 +427,6 @@ const SeriesExplorer: React.FC = () => {
         >
           View Details
         </Button>
-        <IconButton
-          size='small'
-          onClick={e => {
-            e.stopPropagation();
-            // TODO: Implement bookmark functionality
-          }}
-        >
-          <BookmarkIcon />
-        </IconButton>
       </CardActions>
     </Card>
   );
@@ -433,7 +439,7 @@ const SeriesExplorer: React.FC = () => {
           Series Explorer
         </Typography>
         <Typography variant='body1' color='text.secondary'>
-          Search and explore economic time series data from FRED, BLS, and other sources
+          Search and explore economic time series data from the available sources
         </Typography>
       </Box>
 
@@ -446,13 +452,23 @@ const SeriesExplorer: React.FC = () => {
               fullWidth
               placeholder='Search economic series (e.g., GDP, unemployment, inflation)'
               value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+              onChange={e => {
+                setSearchQuery(e.target.value);
+                setCurrentPage(1);
+              }}
               onKeyPress={e => e.key === 'Enter' && handleSearch()}
               inputRef={searchInputRef}
               InputProps={{
                 startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />,
                 endAdornment: searchQuery && (
-                  <IconButton size='small' onClick={handleClearSearch}>
+                  <IconButton
+                    size='small'
+                    aria-label='Clear search text'
+                    onClick={() => {
+                      setSearchQuery('');
+                      setCurrentPage(1);
+                    }}
+                  >
                     <ClearIcon />
                   </IconButton>
                 ),
@@ -463,16 +479,20 @@ const SeriesExplorer: React.FC = () => {
           {/* Source filter */}
           <Grid item xs={12} sm={6} md={2}>
             <FormControl fullWidth>
-              <InputLabel>Source</InputLabel>
+              <InputLabel id='source-filter-label'>Source</InputLabel>
               <Select
-                value={selectedSource}
-                onChange={e => setSelectedSource(e.target.value)}
+                labelId='source-filter-label'
+                value={sourceListed ? resolvedSourceId : ''}
+                onChange={e => {
+                  setSelectedSource(e.target.value);
+                  setCurrentPage(1);
+                }}
                 label='Source'
               >
                 <MenuItem value=''>All Sources</MenuItem>
-                {uniqueSources.map(source => (
-                  <MenuItem key={source} value={source}>
-                    {source}
+                {dataSources.map(source => (
+                  <MenuItem key={source.id} value={source.id}>
+                    {source.name}
                   </MenuItem>
                 ))}
               </Select>
@@ -482,10 +502,14 @@ const SeriesExplorer: React.FC = () => {
           {/* Frequency filter */}
           <Grid item xs={12} sm={6} md={2}>
             <FormControl fullWidth>
-              <InputLabel>Frequency</InputLabel>
+              <InputLabel id='frequency-filter-label'>Frequency</InputLabel>
               <Select
+                labelId='frequency-filter-label'
                 value={selectedFrequency}
-                onChange={e => setSelectedFrequency(e.target.value)}
+                onChange={e => {
+                  setSelectedFrequency(e.target.value);
+                  setCurrentPage(1);
+                }}
                 label='Frequency'
               >
                 <MenuItem value=''>All Frequencies</MenuItem>
@@ -504,10 +528,10 @@ const SeriesExplorer: React.FC = () => {
               fullWidth
               variant='contained'
               onClick={handleSearch}
-              disabled={!searchQuery.trim() || isLoading}
-              startIcon={isLoading ? <CircularProgress size={20} /> : <SearchIcon />}
+              disabled={searchQuery.trim().length < 2 || isSearchFetching || waitingForSources}
+              startIcon={isSearchFetching ? <CircularProgress size={20} /> : <SearchIcon />}
             >
-              {isLoading ? 'Searching...' : 'Search'}
+              {isSearchFetching ? 'Searching...' : 'Search'}
             </Button>
           </Grid>
         </Grid>
@@ -536,32 +560,17 @@ const SeriesExplorer: React.FC = () => {
           <Divider sx={{ my: 2 }} />
           <Grid container spacing={3}>
             <Grid item xs={12} md={4}>
-              <Typography gutterBottom>Similarity Threshold</Typography>
-              <Slider
-                value={similarityThreshold}
-                onChange={(_, value) => setSimilarityThreshold(value as number)}
-                min={0}
-                max={1}
-                step={0.1}
-                marks
-                valueLabelDisplay='auto'
-              />
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={includeInactiveSeries}
-                    onChange={e => setIncludeInactiveSeries(e.target.checked)}
-                  />
-                }
-                label='Include Inactive Series'
-              />
-            </Grid>
-            <Grid item xs={12} md={4}>
               <FormControl fullWidth>
-                <InputLabel>Sort By</InputLabel>
-                <Select value={sortBy} onChange={e => setSortBy(e.target.value)} label='Sort By'>
+                <InputLabel id='sort-by-label'>Sort By</InputLabel>
+                <Select
+                  labelId='sort-by-label'
+                  value={sortBy}
+                  onChange={e => {
+                    setSortBy(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  label='Sort By'
+                >
                   <MenuItem value='relevance'>Relevance</MenuItem>
                   <MenuItem value='title'>Title</MenuItem>
                   <MenuItem value='lastUpdated'>Last Updated</MenuItem>
@@ -572,22 +581,33 @@ const SeriesExplorer: React.FC = () => {
         </Collapse>
       </Paper>
 
-      {/* Search statistics */}
-      {searchStats && (
+      {/* Source list error */}
+      {dataSourcesResult?.error && (
+        <Alert severity='warning' sx={{ mb: 3 }}>
+          Could not load the list of sources, so results can't be narrowed by source.
+        </Alert>
+      )}
+
+      {/* Search error */}
+      {searchError && (
+        <Alert severity='error' sx={{ mb: 3 }}>
+          Search failed: {searchError instanceof Error ? searchError.message : 'unknown error'}
+        </Alert>
+      )}
+
+      {/* Result count */}
+      {searchResults && debouncedQuery.length >= 2 && !showLoading && !searchError && (
         <Alert severity='info' sx={{ mb: 3 }}>
-          Found {searchStats.resultCount.toLocaleString()} results in{' '}
-          {searchStats.searchTime.toFixed(0)}ms
-          {searchStats.hasSpellingSuggestion && (
-            <span>
-              {' '}
-              • Did you mean: <strong>{searchStats.hasSpellingSuggestion}</strong>?
-            </span>
-          )}
+          {searchResults.length >= SEARCH_LIMIT
+            ? `Showing matches among the first ${SEARCH_LIMIT} results. Refine the search to narrow them.`
+            : `Found ${filteredSeries.length.toLocaleString()} ${
+                filteredSeries.length === 1 ? 'result' : 'results'
+              }`}
         </Alert>
       )}
 
       {/* Results */}
-      {isSearchLoading ? (
+      {showLoading ? (
         <Grid container spacing={3}>
           {Array.from({ length: 8 }).map((_, index) => (
             <Grid item xs={12} sm={6} md={4} key={index}>
@@ -595,16 +615,25 @@ const SeriesExplorer: React.FC = () => {
             </Grid>
           ))}
         </Grid>
+      ) : searchError ? null : debouncedQuery.length < 2 ? (
+        <Paper sx={{ p: 6, textAlign: 'center' }}>
+          <Typography variant='h6' gutterBottom>
+            Search for a series
+          </Typography>
+          <Typography variant='body2' color='text.secondary'>
+            Type at least 2 characters, such as GDP, unemployment or inflation
+          </Typography>
+        </Paper>
       ) : filteredSeries.length === 0 ? (
         <Paper sx={{ p: 6, textAlign: 'center' }}>
           <Typography variant='h6' gutterBottom>
             No series found
           </Typography>
           <Typography variant='body2' color='text.secondary' sx={{ mb: 3 }}>
-            Try adjusting your search criteria or browse all available series
+            Try adjusting your search criteria
           </Typography>
-          <Button variant='contained' onClick={() => navigate('/explore')}>
-            Browse All Series
+          <Button variant='contained' onClick={handleClearSearch}>
+            Clear search and filters
           </Button>
         </Paper>
       ) : (
@@ -619,7 +648,7 @@ const SeriesExplorer: React.FC = () => {
             <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
               <Pagination
                 count={totalPages}
-                page={currentPage}
+                page={page}
                 onChange={(_, page) => setCurrentPage(page)}
                 color='primary'
                 size='large'

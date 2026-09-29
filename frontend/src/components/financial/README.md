@@ -442,19 +442,6 @@ Visit `/financial-components-demo` to see all components in action with:
 
 ## 📚 Resources
 
-### Documentation
-
-- [Component API Reference](./API.md)
-- [Design Guidelines](./DESIGN.md)
-- [Performance Guide](./PERFORMANCE.md)
-- [Accessibility Guide](./ACCESSIBILITY.md)
-
-### Examples
-
-- [Basic Usage Examples](./examples/)
-- [Advanced Patterns](./examples/advanced/)
-- [Integration Guides](./examples/integration/)
-
 ### Support
 
 - [GitHub Issues](https://github.com/jmalicki/econ-graph/issues)

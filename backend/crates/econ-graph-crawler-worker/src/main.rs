@@ -10,7 +10,8 @@
 //! because `econ-graph-crawler` must not depend on the SEC crate.
 //!
 //! Environment: `DATABASE_URL` (required), `FRED_API_KEY` / `BLS_API_KEY` / `BEA_API_KEY` /
-//! `CENSUS_API_KEY` (optional), `RUST_LOG` (default `info`), `CRAWLER_DATA_DIR` (reference data
+//! `CENSUS_API_KEY` (the worker starts without them; FRED, BEA and Census jobs fail with `Auth`
+//! when their key is missing), `RUST_LOG` (default `info`), `CRAWLER_DATA_DIR` (reference data
 //! files such as `us_states.csv`; defaults to the crawler crate's `data/` directory in the source
 //! tree, and the image sets `/app/data`). Every flag can also be set through the `CRAWLER_*`
 //! variable shown in `--help`.

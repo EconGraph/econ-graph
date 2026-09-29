@@ -42,9 +42,6 @@ chrono.workspace = true
 # UUID
 uuid.workspace = true
 
-# Authentication
-bcrypt.workspace = true
-
 # Decimal handling
 bigdecimal.workspace = true
 rust_decimal.workspace = true
