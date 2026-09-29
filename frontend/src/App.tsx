@@ -22,6 +22,14 @@ import ResetQueriesOnUserChange from './auth/ResetQueriesOnUserChange';
 // and import the page lazily, so a release build without the flag contains none of its code.
 const FlagCanary = __FLAGS__.build_canary ? lazy(() => import('./pages/FlagCanary')) : null;
 
+// The financial statement viewer/dashboard demo (components/financial) is unfinished; ECO-144
+// keeps it out of release builds until it ships.
+const FinancialComponentsDemo = __FLAGS__.financial_components
+  ? lazy(() =>
+      import('./pages/FinancialComponentsDemo').then(m => ({ default: m.FinancialComponentsDemo }))
+    )
+  : null;
+
 // Sidebar width constant - must match Sidebar.tsx
 const SIDEBAR_WIDTH = 240;
 
@@ -75,6 +83,16 @@ function App() {
                     element={
                       <Suspense fallback={null}>
                         <FlagCanary />
+                      </Suspense>
+                    }
+                  />
+                )}
+                {FinancialComponentsDemo && (
+                  <Route
+                    path='/financial-components-demo'
+                    element={
+                      <Suspense fallback={null}>
+                        <FinancialComponentsDemo />
                       </Suspense>
                     }
                   />

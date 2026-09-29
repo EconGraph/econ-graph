@@ -6,6 +6,10 @@
       "kind": "build",
       "value": true
     },
+    "financial_components": {
+      "kind": "build",
+      "value": false
+    },
     "mcp": {
       "kind": "build",
       "value": true
