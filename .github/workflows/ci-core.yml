@@ -103,6 +103,7 @@ jobs:
             - '.github/**'
             - 'scripts/**'
             - 'config/keycloak/**'
+            - 'config/flags/**'
             - 'docker-compose.yml'
             - 'package.json'
             - 'k8s/**'
