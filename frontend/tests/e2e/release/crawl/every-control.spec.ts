@@ -60,6 +60,9 @@ const ROUTE_URLS: Record<string, (request: APIRequestContext) => Promise<string[
   // rendered, so this crawls whatever the app shows instead (the catch-all), which is the
   // point — a flagged-off route should 404 cleanly, not break.
   '/flags/canary': async () => ['/flags/canary'],
+  // Behind the financial_components flag (ECO-144), off in release and dev alike: same
+  // reasoning as /flags/canary above.
+  '/financial-components-demo': async () => ['/financial-components-demo'],
   // Keycloak's redirect target. Opened directly, with no authorization response to finish, it
   // shows its error and a way home.
   CALLBACK_PATH: async () => [PATH_CONSTANTS.CALLBACK_PATH],
