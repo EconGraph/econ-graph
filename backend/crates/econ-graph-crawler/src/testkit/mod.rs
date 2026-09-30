@@ -76,7 +76,7 @@
 pub mod contract;
 
 #[cfg(test)]
-mod echo;
+pub(crate) mod echo;
 
 use std::collections::HashMap;
 use std::time::Duration;

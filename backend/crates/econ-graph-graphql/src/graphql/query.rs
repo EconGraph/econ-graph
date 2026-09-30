@@ -20,6 +20,8 @@
 use crate::imports::*;
 use crate::types::*;
 
+use crate::graphql::cross_section::{self, CrossSectionEntry, DimensionFilterInput};
+
 /// Root query object
 pub struct Query;
 
@@ -31,9 +33,41 @@ impl Query {
         let series_uuid = Uuid::parse_str(&id)?;
 
         match series_service::get_series_by_id(&pool, series_uuid).await? {
-            Some(series) => Ok(Some(series.into())),
-            None => Ok(None),
+            // A series with no data points (e.g. a discovered series whose source adapter was
+            // removed) is treated as not found, the same as an unknown id.
+            Some(series) if series.end_date.is_some() => Ok(Some(series.into())),
+            _ => Ok(None),
         }
+    }
+
+    /// Get an economic series by its source's name and the source's own id for it
+    ///
+    /// `sourceName` is the data source's `name` exactly as `dataSources` returns it (for
+    /// example "Federal Reserve Economic Data (FRED)"), and `externalId` is the source's series
+    /// id (for example "GDP"). Returns null when no such series exists.
+    async fn series_by_external_id(
+        &self,
+        ctx: &Context<'_>,
+        source_name: String,
+        external_id: String,
+    ) -> Result<Option<EconomicSeriesType>> {
+        let pool = ctx.data::<DatabasePool>()?;
+
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+        use econ_graph_core::schema::{data_sources, economic_series};
+
+        let mut conn = pool.get().await?;
+        let series = economic_series::table
+            .inner_join(data_sources::table)
+            .filter(data_sources::name.eq(&source_name))
+            .filter(economic_series::external_id.eq(&external_id))
+            .select(EconomicSeries::as_select())
+            .first::<EconomicSeries>(&mut conn)
+            .await
+            .optional()?;
+
+        Ok(series.map(EconomicSeriesType::from))
     }
 
     /// List economic series with filtering and pagination
@@ -108,16 +142,48 @@ impl Query {
         Ok(source.map(|s| s.into()))
     }
 
+    /// One measure of one dataset, for every value of one dimension, at one date.
+    ///
+    /// `filter` pins every dataset dimension except `across`, e.g.
+    /// `crossSection(datasetId: $wdi, filter: [{dimension: "indicator", value:
+    /// "NY.GDP.PCAP.CD"}], across: "area", latest: true)`. Give exactly one of `date` and
+    /// `latest: true`; `latest` returns each key's most recent non-null value with its own
+    /// date. `measure` defaults to the dataset's default measure. Every active matching series
+    /// is returned, ordered by key, with a null value where it has none.
+    #[allow(clippy::too_many_arguments)]
+    async fn cross_section(
+        &self,
+        ctx: &Context<'_>,
+        dataset_id: ID,
+        measure: Option<String>,
+        #[graphql(default)] filter: Vec<DimensionFilterInput>,
+        across: String,
+        date: Option<chrono::NaiveDate>,
+        latest: Option<bool>,
+    ) -> Result<Vec<CrossSectionEntry>> {
+        cross_section::resolve(ctx, dataset_id, measure, filter, across, date, latest).await
+    }
+
     /// List all data sources
     async fn data_sources(&self, ctx: &Context<'_>) -> Result<Vec<DataSourceType>> {
         let pool = ctx.data::<DatabasePool>()?;
 
+        use diesel::dsl::exists;
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::data_sources;
+        use econ_graph_core::schema::{data_sources, economic_series};
 
         let mut conn = pool.get().await?;
+        // Excludes sources with no series that has data (e.g. a source whose crawler adapter
+        // was removed before any series it discovered ever got data points).
         let sources = data_sources::table
+            .filter(exists(
+                economic_series::table.filter(
+                    economic_series::source_id
+                        .eq(data_sources::id)
+                        .and(economic_series::end_date.is_not_null()),
+                ),
+            ))
             .order_by(data_sources::name.asc())
             .select(DataSource::as_select())
             .load::<econ_graph_core::models::DataSource>(&mut *conn)
@@ -974,5 +1040,278 @@ mod tests {
             pagination.after, None,
             "Default pagination should start from beginning"
         );
+    }
+}
+
+/// DB-backed tests for hiding series (and their sources) that have no data points, e.g. a
+/// series discovered by a since-removed source adapter that was never crawled.
+#[cfg(test)]
+mod empty_series_tests {
+    use crate::graphql::schema::create_schema;
+    use async_graphql::Request;
+    use econ_graph_core::models::{DataSource, EconomicSeries, NewDataSource, NewEconomicSeries};
+    use econ_graph_core::test_utils::get_test_db;
+    use serial_test::serial;
+    use uuid::Uuid;
+
+    /// Creates a data source and, under it, two series sharing `word` in their title: one with
+    /// an `end_date` (has data) and one without (discovered but never crawled).
+    async fn seed(
+        pool: &econ_graph_core::database::DatabasePool,
+        word: &str,
+    ) -> (DataSource, EconomicSeries, EconomicSeries) {
+        let unique = Uuid::new_v4();
+        let source = DataSource::create(
+            pool,
+            NewDataSource {
+                name: format!("empty-series-test-{unique}"),
+                description: None,
+                base_url: "https://example.test".to_string(),
+                api_key_required: false,
+                rate_limit_per_minute: 60,
+                is_visible: true,
+                is_enabled: true,
+                requires_admin_approval: false,
+                crawl_frequency_hours: 24,
+                api_documentation_url: None,
+                api_key_name: None,
+            },
+        )
+        .await
+        .expect("create data source");
+
+        let with_data = EconomicSeries::create(
+            pool,
+            &NewEconomicSeries {
+                source_id: source.id,
+                external_id: format!("{word}_with_data_{unique}"),
+                title: format!("{word} With Data {unique}"),
+                description: None,
+                units: None,
+                frequency: "Monthly".to_string(),
+                seasonal_adjustment: None,
+                start_date: chrono::NaiveDate::from_ymd_opt(2020, 1, 1),
+                end_date: chrono::NaiveDate::from_ymd_opt(2020, 12, 1),
+                is_active: true,
+                first_discovered_at: None,
+                last_crawled_at: None,
+                first_missing_date: None,
+                crawl_status: None,
+                crawl_error_message: None,
+                dataset_id: None,
+                dimensions: Default::default(),
+                default_measure: None,
+            },
+        )
+        .await
+        .expect("create series with data");
+
+        let without_data = EconomicSeries::create(
+            pool,
+            &NewEconomicSeries {
+                source_id: source.id,
+                external_id: format!("{word}_no_data_{unique}"),
+                title: format!("{word} No Data {unique}"),
+                description: None,
+                units: None,
+                frequency: "Monthly".to_string(),
+                seasonal_adjustment: None,
+                start_date: None,
+                end_date: None,
+                is_active: true,
+                first_discovered_at: None,
+                last_crawled_at: None,
+                first_missing_date: None,
+                crawl_status: None,
+                crawl_error_message: None,
+                dataset_id: None,
+                dimensions: Default::default(),
+                default_measure: None,
+            },
+        )
+        .await
+        .expect("create series without data");
+
+        (source, with_data, without_data)
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn search_series_excludes_series_with_no_data() {
+        let container = get_test_db().await;
+        let pool = container.pool().clone();
+        let schema = create_schema(pool.clone());
+
+        let (_source, with_data, without_data) = seed(&pool, "Zyxquartile").await;
+
+        let query = r#"{ searchSeries(query: "Zyxquartile") { series { id } } }"#;
+        let resp = schema.execute(Request::new(query)).await;
+        assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+
+        let ids: Vec<String> = resp.data.into_json().unwrap()["searchSeries"]["series"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap().to_string())
+            .collect();
+
+        assert!(ids.contains(&with_data.id.to_string()));
+        assert!(!ids.contains(&without_data.id.to_string()));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn series_list_excludes_series_with_no_data() {
+        let container = get_test_db().await;
+        let pool = container.pool().clone();
+        let schema = create_schema(pool.clone());
+
+        let (source, with_data, without_data) = seed(&pool, "Wavequotient").await;
+
+        let query = format!(
+            r#"{{ seriesList(filter: {{ sourceId: "{}" }}) {{ nodes {{ id }} }} }}"#,
+            source.id
+        );
+        let resp = schema.execute(Request::new(query.as_str())).await;
+        assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+
+        let ids: Vec<String> = resp.data.into_json().unwrap()["seriesList"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap().to_string())
+            .collect();
+
+        assert!(ids.contains(&with_data.id.to_string()));
+        assert!(!ids.contains(&without_data.id.to_string()));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn data_sources_excludes_source_with_no_series_that_has_data() {
+        let container = get_test_db().await;
+        let pool = container.pool().clone();
+        let schema = create_schema(pool.clone());
+
+        // A source whose only series has data.
+        let (source_with_data, _with_data, _without_data) = seed(&pool, "Rhoultimeter").await;
+
+        // A second source whose only series has no data.
+        let unique = Uuid::new_v4();
+        let empty_source = DataSource::create(
+            &pool,
+            NewDataSource {
+                name: format!("empty-series-test-empty-source-{unique}"),
+                description: None,
+                base_url: "https://example.test".to_string(),
+                api_key_required: false,
+                rate_limit_per_minute: 60,
+                is_visible: true,
+                is_enabled: true,
+                requires_admin_approval: false,
+                crawl_frequency_hours: 24,
+                api_documentation_url: None,
+                api_key_name: None,
+            },
+        )
+        .await
+        .expect("create empty data source");
+        EconomicSeries::create(
+            &pool,
+            &NewEconomicSeries {
+                source_id: empty_source.id,
+                external_id: format!("empty_source_series_{unique}"),
+                title: format!("Empty Source Series {unique}"),
+                description: None,
+                units: None,
+                frequency: "Monthly".to_string(),
+                seasonal_adjustment: None,
+                start_date: None,
+                end_date: None,
+                is_active: true,
+                first_discovered_at: None,
+                last_crawled_at: None,
+                first_missing_date: None,
+                crawl_status: None,
+                crawl_error_message: None,
+                dataset_id: None,
+                dimensions: Default::default(),
+                default_measure: None,
+            },
+        )
+        .await
+        .expect("create series for empty source");
+
+        let query = r#"{ dataSources { id } }"#;
+        let resp = schema.execute(Request::new(query)).await;
+        assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+
+        let ids: Vec<String> = resp.data.into_json().unwrap()["dataSources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap().to_string())
+            .collect();
+
+        assert!(ids.contains(&source_with_data.id.to_string()));
+        assert!(!ids.contains(&empty_source.id.to_string()));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn data_source_series_and_series_count_exclude_series_with_no_data() {
+        let container = get_test_db().await;
+        let pool = container.pool().clone();
+        let schema = create_schema(pool.clone());
+
+        // One source with a populated series and an empty one, mirroring a source whose
+        // adapter was removed after discovering (but never crawling) some of its series.
+        let (source, with_data, without_data) = seed(&pool, "Deltamixture").await;
+
+        let query = r#"{ dataSources { id seriesCount series { nodes { id } } } }"#;
+        let resp = schema.execute(Request::new(query)).await;
+        assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+
+        let json = resp.data.into_json().unwrap();
+        let entry = json["dataSources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"].as_str().unwrap() == source.id.to_string())
+            .expect("seeded source present in dataSources");
+
+        assert_eq!(entry["seriesCount"].as_i64().unwrap(), 1);
+
+        let ids: Vec<String> = entry["series"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap().to_string())
+            .collect();
+        assert!(ids.contains(&with_data.id.to_string()));
+        assert!(!ids.contains(&without_data.id.to_string()));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn series_returns_a_clean_404_for_a_series_with_no_data() {
+        let container = get_test_db().await;
+        let pool = container.pool().clone();
+        let schema = create_schema(pool.clone());
+
+        let (_source, with_data, without_data) = seed(&pool, "Sigmajitter").await;
+
+        for (id, should_exist) in [(with_data.id, true), (without_data.id, false)] {
+            let query = format!(r#"{{ series(id: "{id}") {{ id }} }}"#);
+            let resp = schema.execute(Request::new(query.as_str())).await;
+            assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+            let json = resp.data.into_json().unwrap();
+            assert_eq!(
+                json["series"].is_null(),
+                !should_exist,
+                "series({id}) should{} be found",
+                if should_exist { "" } else { " not" }
+            );
+        }
     }
 }

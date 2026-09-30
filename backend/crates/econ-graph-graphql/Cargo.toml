@@ -48,3 +48,8 @@ rust_decimal.workspace = true
 
 # Security dependencies
 regex.workspace = true
+
+[dev-dependencies]
+# DB-backed tests share one connection pool (`get_test_db`'s static OnceCell); running them
+# concurrently as separate #[tokio::test]s tears down others' connections mid-query.
+serial_test.workspace = true

@@ -18,7 +18,7 @@
     },
     {
       "source": "CENSUS",
-      "external_id": "CENSUS_BDS_ESTAB_us",
+      "external_id": "bds/national..ESTAB",
       "routes": [
         { "method": "GET", "path": "/timeseries/bds", "fixture": "census/bds_estab_us.json" }
       ]

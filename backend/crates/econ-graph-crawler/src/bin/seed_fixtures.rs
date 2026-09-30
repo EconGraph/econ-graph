@@ -12,9 +12,10 @@
 //! a 404), when it returns no observations, or when a listed fixture was never requested, so a
 //! stale fixture or a changed adapter shows up here instead of as an empty page.
 //!
-//! Runs the database migrations first, so it works on an empty database, and syncs every
-//! adapter's dataset definitions before seeding (a series with a dataset needs its row synced
-//! first, same as `crawler-worker`). Re-running it is safe: persistence upserts.
+//! Runs the database migrations first, so it works on an empty database, then syncs every
+//! adapter's dataset declarations ([`DatasetCatalog::load`] and [`persist::sync_datasets`]) before
+//! persisting any series, the same order the crawler worker starts up in. Re-running it is safe:
+//! persistence upserts.
 //!
 //! ```bash
 //! DATABASE_URL=postgres://... cargo run -p econ-graph-crawler --features testkit --bin seed-fixtures
@@ -27,7 +28,7 @@ use anyhow::{anyhow, bail, Context};
 use clap::Parser;
 use econ_graph_crawler::persist;
 use econ_graph_crawler::source::SourceId;
-use econ_graph_crawler::sources::{default_registry, registry_at};
+use econ_graph_crawler::sources::registry_at;
 use econ_graph_crawler::testkit::{test_ctx, MockSource, Reply, Route};
 use econ_graph_crawler::DatasetCatalog;
 use serde::Deserialize;
@@ -135,9 +136,10 @@ async fn run(args: Args) -> anyhow::Result<()> {
     let pool = econ_graph_core::create_pool(&args.database_url)
         .await
         .context("connecting to the database")?;
-    // A series with a dataset (see `persist::persist_series`) needs its dataset synced first, the
-    // same as `crawler-worker` does at startup.
-    let datasets = DatasetCatalog::load(&default_registry()).context("loading dataset catalog")?;
+    // The base URL here is unused: dataset declarations don't depend on it, only on the
+    // adapter's id and its `datasets()` list.
+    let datasets = DatasetCatalog::load(&registry_at("http://unused"))
+        .context("loading dataset declarations")?;
     persist::sync_datasets(&pool, &datasets)
         .await
         .context("syncing datasets")?;
