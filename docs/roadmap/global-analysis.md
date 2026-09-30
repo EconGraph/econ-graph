@@ -66,7 +66,7 @@ Each decision lists the options and a recommendation. Joe decides.
 
 The global tables are a second time series store beside `economic_series` and
 `data_points`, with their own indicator catalog and their own observation table. The
-[federation roadmap](./federation.md) models data as **datasets** with SDMX-style
+[federation roadmap](https://linear.app/econgraph/document/federation-roadmap-design-record-from-pr-178-a1ebb66c538d) models data as **datasets** with SDMX-style
 dimensions, and the World Bank, IMF and OECD all publish in that shape: a GDP value is one
 cell of a dataset keyed by indicator and country.
 

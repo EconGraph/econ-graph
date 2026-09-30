@@ -208,6 +208,21 @@ impl HttpFetcher {
         self.execute(&target).await
     }
 
+    /// Records `err` in `CRAWLER_METRICS`, for a caller that fetched a successful (HTTP 200)
+    /// response with [`get_text`](Self::get_text) and then classified it as an error itself
+    /// (e.g. a 200 page whose body means the request was rejected). `get_json`'s [`decode`]
+    /// records this on the caller's behalf; a caller reading the raw text to decide the
+    /// [`CrawlError`] kind must call this itself so the failure isn't silently uncounted.
+    /// `crawler_type` and `host` are derived the same way [`Target::new`] derives them.
+    pub fn record_response_error(&self, source: SourceId, url: &str, err: &CrawlError) {
+        let crawler_type = source.as_str().to_ascii_lowercase();
+        let host = Url::parse(url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_owned))
+            .unwrap_or_else(|| "unknown".to_owned());
+        CRAWLER_METRICS.record_error(&crawler_type, &host, err.kind());
+    }
+
     /// GET `url` with `query` appended and deserialize the JSON body.
     pub async fn get_json<T: DeserializeOwned>(
         &self,
@@ -698,6 +713,30 @@ mod tests {
 
     async fn hits(server: &MockServer) -> usize {
         server.received_requests().await.unwrap().len()
+    }
+
+    /// A caller that fetched a 200 response with `get_text` and classified it as an error
+    /// itself (like Census's "Invalid Key" page) must still get it counted, exactly as
+    /// `get_json`'s `decode` counts a parse failure. A unique host avoids colliding with any
+    /// other test's crawler-error counters, since `CRAWLER_METRICS` is process-global.
+    #[test]
+    fn record_response_error_counts_it() {
+        let host = "record-response-error-test.example";
+        let url = format!("https://{host}/x");
+        let before = CRAWLER_METRICS
+            .crawler_errors_total
+            .with_label_values(&["census", host, "auth"])
+            .get();
+        fetcher().record_response_error(
+            SourceId::Census,
+            &url,
+            &CrawlError::Auth("Invalid Key".into()),
+        );
+        let after = CRAWLER_METRICS
+            .crawler_errors_total
+            .with_label_values(&["census", host, "auth"])
+            .get();
+        assert_eq!(after - before, 1);
     }
 
     #[derive(Debug, serde::Deserialize, PartialEq)]

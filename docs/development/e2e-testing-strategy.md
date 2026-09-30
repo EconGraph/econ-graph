@@ -1,200 +1,38 @@
 # E2E Testing Strategy
 
-## Overview
+E2E tests exercise browser workflows against running application services. The suites have different scopes; requiring live third-party data sources for every test would make ordinary release validation depend on those services.
 
-This document outlines the E2E (End-to-End) testing strategy for the EconGraph project, including the separation of E2E tests from core CI and the implementation of nightly E2E test runs.
+## Suites and triggers
 
-## E2E Test Philosophy
+| Suite | Trigger | Environment |
+| --- | --- | --- |
+| [Release E2E](../../.github/workflows/release-e2e.yml) | Matching application/stack/workflow PR changes; manual dispatch | Release frontend build, real Rust backend and PostgreSQL 18, seeded recorded fixtures; no source API keys |
+| [Core CI optional E2E](../../.github/workflows/ci-core.yml) | Manual dispatch with run_e2e_tests=true | Container-based desktop/mobile suites |
+| [Nightly E2E](../../.github/workflows/e2e-tests-nightly.yml) | Daily 02:00 UTC; manual dispatch | Container build followed by selected desktop/mobile suites |
+| [Deployed Playwright](../../.github/workflows/playwright-tests-deployed.yml) | Manual dispatch | Explicit deployed base URL |
+| [Legacy Playwright](../../.github/workflows/playwright-tests.yml) and [comprehensive suite](../../.github/workflows/playwright-tests-comprehensive.yml) | Manual dispatch | Older setups; review workflow comments before use |
 
-**🎯 Core E2E Testing Philosophy**: E2E tests are designed to test the **ENTIRE system end-to-end, including real network calls to external services. NOT mocking external services is their fundamental purpose.**
+Release E2E is independent of Core CI's disabled-by-default E2E jobs. Recorded fixtures keep upstream data reproducible while still exercising the real frontend/backend/database boundary. Real source networking is tested separately by the [manual crawler integration workflow](../../.github/workflows/crawler-integration-test.yml).
 
-### What E2E Tests Do
-- **Make real HTTP requests** to backend APIs
-- **Connect to real databases** (test databases, not production)
-- **Test complete user workflows** from frontend to backend
-- **Verify actual network communication** between services
-- **Test with real data flows** and transformations
-- **Validate actual authentication flows** and security
+## Run the maintained release suite
 
-### What E2E Tests Don't Do
-- **Don't mock external services** - this defeats the purpose of E2E testing
-- **Don't skip network calls** - real network communication is the point
-- **Don't use fake data** - use real test data when possible
+Follow the [release suite README](../../frontend/tests/e2e/release/README.md) for local prerequisites, fixture seeding and test scope. For GitHub runs:
 
-## Test Suite Organization
-
-The E2E tests are organized into specialized test suites that run in parallel:
-
-### Desktop Test Suites
-- **Core Tests**: Basic functionality (navigation, authentication, dashboard)
-- **Global Analysis Tests**: World map, country selection, economic indicators (162 tests)
-- **Professional Analysis Tests**: Advanced charting, technical indicators (39 tests)
-- **Comprehensive Tests**: Integration/workflow tests (excludes specialized suites)
-
-### Mobile Test Suites
-- **Mobile Core Tests**: Mobile versions of basic functionality
-- **Mobile Global Analysis Tests**: Mobile versions of global analysis features
-- **Mobile Professional Analysis Tests**: Mobile versions of professional analysis features
-- **Mobile Comprehensive Tests**: Mobile versions of comprehensive tests
-
-## CI/CD Strategy
-
-### Core CI (Disabled E2E Tests by Default)
-
-The main CI pipeline (`ci-core.yml`) now has E2E tests **disabled by default** to prevent CI noise and improve development velocity. E2E tests can be manually triggered when needed.
-
-#### Manual E2E Test Execution
-
-To run E2E tests in the core CI:
-
-1. Go to the GitHub Actions tab
-2. Select "Core CI Tests" workflow
-3. Click "Run workflow"
-4. Check "Run E2E tests (disabled by default)"
-5. Select the specific test suite to run:
-   - `all` - Run all E2E test suites
-   - `core` - Basic functionality tests
-   - `global-analysis` - Global analysis features
-   - `professional-analysis` - Professional analysis features
-   - `comprehensive` - Integration tests
-   - `mobile-core` - Mobile basic functionality
-   - `mobile-global-analysis` - Mobile global analysis
-   - `mobile-professional-analysis` - Mobile professional analysis
-   - `mobile-comprehensive` - Mobile comprehensive tests
-
-### Nightly E2E Tests
-
-A dedicated nightly E2E test workflow (`e2e-tests-nightly.yml`) runs all E2E tests every night at 2 AM UTC. This ensures comprehensive E2E testing without blocking development.
-
-#### Nightly Workflow Features
-
-- **Scheduled Execution**: Runs automatically every night at 2 AM UTC
-- **Manual Triggering**: Can be triggered manually with specific test suite selection
-- **Comprehensive Coverage**: Tests all E2E test suites including mobile variants
-- **Optimized Containers**: Uses pre-built Docker containers for faster execution
-- **Artifact Retention**: Keeps test results and reports for 7 days
-- **Parallel Execution**: Runs test suites in parallel for efficiency
-
-#### Nightly Workflow Dependencies
-
-The nightly E2E tests include all necessary dependencies:
-
-1. **Backend Services**: PostgreSQL, Rust backend with migrations
-2. **Frontend Services**: React frontend with build
-3. **E2E Test Containers**: Pre-built containers with Playwright browsers
-4. **Test Configurations**: Multiple test suites (core, analysis, comprehensive, global-analysis, professional-analysis)
-
-## Running Tests Locally
-
-### Desktop Tests
 ```bash
-# Run specific test suites
-npm run test:e2e:core
-npm run test:e2e:global-analysis
-npm run test:e2e:professional-analysis
-npm run test:e2e:comprehensive
+gh workflow run release-e2e.yml --repo EconGraph/econ-graph --ref BRANCH
+gh workflow run ci-core.yml --repo EconGraph/econ-graph --ref BRANCH -f run_e2e_tests=true -f e2e_test_suite=core
+gh workflow run e2e-tests-nightly.yml --repo EconGraph/econ-graph --ref BRANCH -f test_suite=core
+gh workflow run playwright-tests-deployed.yml --repo EconGraph/econ-graph -f base_url=https://YOUR_DEPLOYED_TARGET
 ```
 
-### Mobile Tests
-```bash
-# Run mobile test suites
-npm run test:e2e:mobile:core
-npm run test:e2e:mobile:global-analysis
-npm run test:e2e:mobile:professional-analysis
-npm run test:e2e:mobile:comprehensive
-```
+The optional Core and nightly workflows expose different suite choices. Use each workflow's declared inputs; do not assume all legacy suite labels map to an active job.
 
-## Test Environment Strategy
+## Interpret results
 
-### Local Development
-- **All external services running** (Grafana, monitoring, etc.)
-- **Full E2E test execution** with real network calls
-- **Complete test coverage** including external service integration
+Distinguish image build failures, service readiness failures, browser startup failures and failed application assertions. If a container build fails, dependent suites may never execute. Scheduled runs can be delayed, and a schedule does not imply successful coverage.
 
-### CI Environment
-- **Core services only** (backend, frontend, database)
-- **External services may not be available** (expected behavior)
-- **Tests may skip when external services unavailable** (acceptable)
+Keep browser assertions meaningful. Do not skip required application behavior because a service is unavailable or replace failures with successful shell output. For a suite that explicitly covers an optional external integration, document its prerequisites and scope separately.
 
-### Staging Environment
-- **Full external service integration**
-- **Complete E2E validation**
-- **Production-like testing**
+Inspect Playwright reports and service logs, using the workflow's own ports and URLs. Vite builds emit dist assets; legacy CRA build/static paths are not interchangeable.
 
-### Production
-- **Full end-to-end validation**
-- **Real user workflow testing**
-- **Complete system integration**
-
-## Handling External Service Dependencies
-
-### ✅ Good Practices
-```typescript
-// Test the actual network call when possible
-test('grafana dashboard access', async () => {
-  // This test WILL make a real HTTP request to Grafana
-  const response = await page.goto('http://localhost:30001/health');
-  expect(response?.status()).toBe(200);
-});
-```
-
-### ⚠️ Acceptable Practices
-```typescript
-// Skip tests when external services unavailable
-test.skip('grafana dashboard integration', async () => {
-  // Only run when Grafana is actually running
-  // Skip in CI if Grafana not available
-});
-```
-
-### ❌ Wrong Practices
-```typescript
-// Don't mock external services in E2E tests
-test('grafana dashboard with mock', async () => {
-  // This defeats the purpose of E2E testing!
-  // Use integration tests instead if you need to mock
-});
-```
-
-## Benefits of This Strategy
-
-### Development Velocity
-- **Faster CI runs** - E2E tests don't block development
-- **Reduced CI noise** - Failed E2E tests don't block merges
-- **Focused testing** - Core functionality tested quickly
-
-### Comprehensive Testing
-- **Nightly E2E coverage** - All E2E tests run every night
-- **Manual E2E execution** - E2E tests available when needed
-- **Complete test coverage** - Both fast and comprehensive testing
-
-### Resource Efficiency
-- **Optimized containers** - Pre-built containers for faster execution
-- **Parallel execution** - Test suites run in parallel
-- **Smart scheduling** - E2E tests run during off-peak hours
-
-## Troubleshooting
-
-### E2E Test Failures
-- Check the nightly E2E test results for comprehensive failure analysis
-- Use manual E2E test execution for debugging specific issues
-- Review test logs and artifacts for detailed failure information
-
-### CI Issues
-- Core CI should now run faster without E2E test dependencies
-- Use manual E2E test execution when E2E testing is needed
-- Check nightly E2E test results for overall system health
-
-## Future Improvements
-
-- **Test result analysis** - Automated analysis of E2E test trends
-- **Performance monitoring** - Track E2E test execution times
-- **Failure prediction** - Identify patterns in E2E test failures
-- **Test optimization** - Further optimize E2E test execution
-
-## Related Documentation
-
-- [CI/CD Documentation](../../ci/docs/README.md) - Comprehensive CI/CD documentation
-- [E2E Test Failure Analysis](../archive/ci/docs/E2E_TEST_FAILURE_ANALYSIS.md) - E2E test troubleshooting
-- [RelEng Persona](../../personas/releng-engineer.md) - Release engineering practices
-- [AI Developer Standards](../../personas/ai-developer-standards.md) - Development guidelines
+See the [CI pipeline guide](CI_CD_PIPELINE.md) for job-selection limitations and [troubleshooting guide](../../ci/docs/CI_FAILURE_TROUBLESHOOTING.md) for diagnosis.

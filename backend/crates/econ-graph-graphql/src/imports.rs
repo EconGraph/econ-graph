@@ -22,7 +22,6 @@
 
 // Core crate imports
 pub use econ_graph_core::{
-    auth_models::{AuthProvider, User as AuthUser, UserRole},
     database::DatabasePool,
     error::{AppError, AppResult},
     // Additional imports for missing modules
@@ -32,11 +31,8 @@ pub use econ_graph_core::{
         // Chart annotations
         ChartAnnotation,
         ChartCollaborator,
-        CorrelationConnection,
-        CorrelationNetworkNode,
         // Global analysis
         Country,
-        CountryCorrelation,
         CountryImpactDetail,
         CountryWithEconomicData,
         DataPoint,
@@ -98,5 +94,7 @@ pub use uuid::Uuid;
 
 // Re-export GraphQL context utilities
 pub use crate::graphql::context::{
-    current_user, current_user_id_opt, require_admin, GraphQLContext,
+    current_user, current_user_id_opt, require_role, GraphQLContext,
 };
+pub use econ_graph_auth::{Principal, Role};
+pub use econ_graph_core::enums::AnnotationVisibility;

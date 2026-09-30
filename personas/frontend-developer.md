@@ -1,7 +1,7 @@
 # 🎨 Frontend Developer Persona
 
 > **AI Developer Standards for Frontend Development**  
-> **Based on**: [AI Developer Standards](../ai-developer-standards.md)  
+> **Based on**: [AI Developer Standards](./ai-developer-standards.md)  
 > **Focus**: React, TypeScript, Material-UI, D3.js, Data Visualization
 
 ## ⚡ Cursor-native commands

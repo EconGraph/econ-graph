@@ -5,12 +5,15 @@
 //! The worker's HTTP metrics endpoint and the queue-gauge poller.
 //!
 //! - `GET /metrics`: Prometheus text exposition of `econ_graph_metrics::DEFAULT_REGISTRY`, the
-//!   registry `CRAWLER_METRICS` (HTTP-level `econgraph_crawler_*`) and `CRAWLER_QUEUE_METRICS`
-//!   (`crawler_jobs_total`, `crawler_queue_*`, `crawler_last_success_timestamp_seconds`) use.
+//!   registry `CRAWLER_METRICS` (HTTP-level `econgraph_crawler_*`), `CRAWLER_QUEUE_METRICS`
+//!   (`crawler_jobs_total`, `crawler_queue_*`, `crawler_last_{success,failure}_timestamp_seconds`)
+//!   and `CRAWLER_COVERAGE_METRICS` (`crawler_coverage_*`) use.
 //! - `GET /healthz`: 200 while the worker loop runs, 503 before it starts and once it stops.
 //!
-//! [`queue_gauge_loop`] refreshes the `crawler_queue_*` gauges from
-//! [`econ_graph_crawler::status::crawler_status`] every interval.
+//! [`queue_gauge_loop`] refreshes the queue gauges from
+//! [`econ_graph_crawler::status::crawler_status`] every interval, and [`coverage_gauge_loop`] the
+//! coverage gauges from [`econ_graph_crawler::coverage::crawl_coverage`] (a heavier query, so on a
+//! longer interval).
 
 use std::collections::HashSet;
 use std::future::Future;
@@ -21,8 +24,13 @@ use std::time::Duration;
 
 use econ_graph_core::error::AppResult;
 use econ_graph_core::DatabasePool;
+use econ_graph_crawler::coverage::{crawl_coverage, SourceCoverage};
 use econ_graph_crawler::status::{crawler_status, CrawlerStatusSnapshot};
-use econ_graph_metrics::crawler::{CrawlerQueueMetrics, CRAWLER_METRICS, CRAWLER_QUEUE_METRICS};
+use econ_graph_crawler::SourceId;
+use econ_graph_metrics::crawler::{
+    CrawlerCoverageMetrics, CrawlerQueueMetrics, CRAWLER_COVERAGE_METRICS, CRAWLER_METRICS,
+    CRAWLER_QUEUE_METRICS,
+};
 use econ_graph_metrics::prometheus::{Encoder, TextEncoder};
 use econ_graph_metrics::DEFAULT_REGISTRY;
 use tokio::sync::watch;
@@ -47,6 +55,28 @@ pub fn parse_metrics_addr(s: &str) -> Result<Option<SocketAddr>, String> {
 pub fn init_metrics() {
     let _ = &*CRAWLER_METRICS;
     let _ = &*CRAWLER_QUEUE_METRICS;
+    let _ = &*CRAWLER_COVERAGE_METRICS;
+}
+
+/// Unix seconds of `t`, as a gauge value.
+fn unix_secs(t: chrono::DateTime<chrono::Utc>) -> f64 {
+    #[allow(clippy::cast_precision_loss)]
+    let secs = t.timestamp_millis() as f64 / 1000.0;
+    secs
+}
+
+/// Sets `gauge{source}` to `t`, or removes the series when `t` is `None`.
+fn set_or_remove(
+    gauge: &econ_graph_metrics::prometheus::GaugeVec,
+    source: &str,
+    t: Option<chrono::DateTime<chrono::Utc>>,
+) {
+    match t {
+        Some(t) => gauge.with_label_values(&[source]).set(unix_secs(t)),
+        None => {
+            let _ = gauge.remove_label_values(&[source]);
+        }
+    }
 }
 
 /// The text exposition of the shared registry.
@@ -116,6 +146,9 @@ pub fn apply_snapshot(
         let _ = m
             .last_success_timestamp_seconds
             .remove_label_values(&[gone]);
+        let _ = m
+            .last_failure_timestamp_seconds
+            .remove_label_values(&[gone]);
     }
     for s in &snapshot.per_source {
         let src = s.source.as_str();
@@ -129,20 +162,57 @@ pub fn apply_snapshot(
         m.queue_failed_24h
             .with_label_values(&[src])
             .set(s.failed_24h);
-        match s.last_success {
-            Some(t) => {
-                #[allow(clippy::cast_precision_loss)]
-                let secs = t.timestamp_millis() as f64 / 1000.0;
-                m.last_success_timestamp_seconds
-                    .with_label_values(&[src])
-                    .set(secs);
-            }
-            None => {
-                let _ = m.last_success_timestamp_seconds.remove_label_values(&[src]);
-            }
-        }
+        set_or_remove(&m.last_success_timestamp_seconds, src, s.last_success);
+        set_or_remove(&m.last_failure_timestamp_seconds, src, s.last_failure);
     }
     *known = current;
+}
+
+/// Sets the coverage gauges in `m` from `rows`. `known` holds the sources set by the previous
+/// call; sources no longer present (e.g. disabled) have their series removed.
+pub fn apply_coverage(
+    m: &CrawlerCoverageMetrics,
+    rows: &[SourceCoverage],
+    known: &mut HashSet<String>,
+) {
+    let current: HashSet<String> = rows.iter().map(|c| c.source.clone()).collect();
+    for gone in known.difference(&current) {
+        let src = [gone.as_str()];
+        let _ = m.series_discovered.remove_label_values(&src);
+        let _ = m.series_with_data.remove_label_values(&src);
+        let _ = m.ratio.remove_label_values(&src);
+        let _ = m.series_overdue.remove_label_values(&src);
+        let _ = m.oldest_success_timestamp_seconds.remove_label_values(&src);
+    }
+    for c in rows {
+        let src = c.source.as_str();
+        m.series_discovered
+            .with_label_values(&[src])
+            .set(c.discovered);
+        m.series_with_data
+            .with_label_values(&[src])
+            .set(c.with_data);
+        m.ratio.with_label_values(&[src]).set(c.ratio());
+        m.series_overdue.with_label_values(&[src]).set(c.overdue);
+        set_or_remove(&m.oldest_success_timestamp_seconds, src, c.oldest_success);
+    }
+    *known = current;
+}
+
+/// Reads coverage for `sources` and updates the gauges in `m`, then records the refresh time.
+/// On error the gauges keep their previous values; the unchanged refresh time shows they're
+/// stale.
+pub async fn update_coverage_gauges(
+    pool: &DatabasePool,
+    sources: &[SourceId],
+    m: &CrawlerCoverageMetrics,
+    known: &mut HashSet<String>,
+) -> AppResult<()> {
+    let rows = crawl_coverage(pool, sources).await?;
+    apply_coverage(m, &rows, known);
+    m.last_refresh_timestamp_seconds
+        .set(unix_secs(chrono::Utc::now()));
+    Ok(())
 }
 
 /// Reads `crawl_queue` and updates the gauges in `m`.
@@ -169,6 +239,31 @@ pub async fn queue_gauge_loop(
         }
         if let Err(e) = update_queue_gauges(&pool, &CRAWLER_QUEUE_METRICS, &mut known).await {
             tracing::warn!(error = %e, "updating crawl_queue gauges failed");
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(interval) => {}
+            changed = stop.changed() => if changed.is_err() { return; },
+        }
+    }
+}
+
+/// Refreshes the global coverage gauges for `sources` every `interval` until `stop` becomes
+/// true.
+pub async fn coverage_gauge_loop(
+    pool: DatabasePool,
+    sources: Vec<SourceId>,
+    interval: Duration,
+    mut stop: watch::Receiver<bool>,
+) {
+    let mut known = HashSet::new();
+    loop {
+        if *stop.borrow() {
+            return;
+        }
+        if let Err(e) =
+            update_coverage_gauges(&pool, &sources, &CRAWLER_COVERAGE_METRICS, &mut known).await
+        {
+            tracing::warn!(error = %e, "updating coverage gauges failed");
         }
         tokio::select! {
             _ = tokio::time::sleep(interval) => {}
@@ -354,6 +449,10 @@ mod tests {
         assert_eq!(items("BLS", "pending"), 0);
         assert_eq!(m.queue_failed_24h.with_label_values(&["FRED"]).get(), 0);
         assert_eq!(m.queue_failed_24h.with_label_values(&["BLS"]).get(), 1);
+        let bls_failed = m
+            .last_failure_timestamp_seconds
+            .with_label_values(&["BLS"])
+            .get();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -365,6 +464,10 @@ mod tests {
         assert!(
             (now - 3600.0 - fred_last).abs() < 60.0,
             "{fred_last} vs {now}"
+        );
+        assert!(
+            (now - 2.0 * 3600.0 - bls_failed).abs() < 60.0,
+            "{bls_failed} vs {now}"
         );
         assert_eq!(
             known,
@@ -389,5 +492,98 @@ mod tests {
             .collect();
         assert_eq!(sources, HashSet::from(["FRED".to_string()]));
         assert_eq!(known, HashSet::from(["FRED".to_string()]));
+    }
+
+    fn coverage_row(source: &str, discovered: i64, with_data: i64) -> SourceCoverage {
+        #[allow(clippy::cast_precision_loss)]
+        let percent = (discovered > 0).then(|| 100.0 * with_data as f64 / discovered as f64);
+        SourceCoverage {
+            source: source.into(),
+            discovered,
+            with_data,
+            percent,
+            overdue: 1,
+            oldest_success: Some(chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
+        }
+    }
+
+    #[test]
+    fn coverage_gauges_set_and_removed() {
+        let registry = Registry::new();
+        let m = CrawlerCoverageMetrics::new(&registry).unwrap();
+        let mut known = HashSet::new();
+        apply_coverage(
+            &m,
+            &[coverage_row("FRED", 200, 190), coverage_row("BLS", 0, 0)],
+            &mut known,
+        );
+        assert_eq!(m.series_discovered.with_label_values(&["FRED"]).get(), 200);
+        assert_eq!(m.series_with_data.with_label_values(&["FRED"]).get(), 190);
+        assert!((m.ratio.with_label_values(&["FRED"]).get() - 0.95).abs() < 1e-9);
+        assert_eq!(m.ratio.with_label_values(&["BLS"]).get(), 0.0);
+        assert_eq!(m.series_overdue.with_label_values(&["FRED"]).get(), 1);
+        assert_eq!(
+            m.oldest_success_timestamp_seconds
+                .with_label_values(&["FRED"])
+                .get(),
+            1_700_000_000.0
+        );
+
+        // BLS drops out (disabled): its series go away.
+        apply_coverage(&m, &[coverage_row("FRED", 200, 195)], &mut known);
+        let sources: HashSet<String> = registry
+            .gather()
+            .iter()
+            .flat_map(|f| f.get_metric().iter())
+            .flat_map(|mm| mm.get_label().iter())
+            .filter(|l| l.name() == "source")
+            .map(|l| l.value().to_string())
+            .collect();
+        assert_eq!(sources, HashSet::from(["FRED".to_string()]));
+    }
+
+    /// Coverage from the database lands on /metrics for every covered source.
+    #[tokio::test]
+    async fn metrics_contains_coverage_gauges() {
+        let Some((pool, _guard)) = db().await else {
+            return;
+        };
+        init_metrics();
+        let sources = econ_graph_crawler::coverage::covered_sources(
+            &econ_graph_crawler::sources::default_registry().ids(),
+        );
+        assert!(!sources.is_empty());
+        let mut known = HashSet::new();
+        update_coverage_gauges(&pool, &sources, &CRAWLER_COVERAGE_METRICS, &mut known)
+            .await
+            .unwrap();
+        let (addr, stop) = start_server(Arc::new(AtomicBool::new(true)));
+        let (status, body) = get(addr, "/metrics").await;
+        assert_eq!(status, 200);
+        for name in [
+            "crawler_coverage_series_discovered",
+            "crawler_coverage_series_with_data",
+            "crawler_coverage_ratio",
+            "crawler_coverage_series_overdue",
+        ] {
+            for source in &known {
+                let prefix = format!("{name}{{source=\"{source}\"}} ");
+                assert!(
+                    body.lines().any(|l| l.starts_with(&prefix)),
+                    "{prefix} missing:\n{body}"
+                );
+            }
+        }
+        assert!(!known.is_empty(), "no enabled covered source reported");
+        let refreshed = CRAWLER_COVERAGE_METRICS
+            .last_refresh_timestamp_seconds
+            .get();
+        let now = unix_secs(chrono::Utc::now());
+        assert!((now - refreshed).abs() < 60.0, "{refreshed} vs {now}");
+        assert!(
+            body.contains("crawler_coverage_last_refresh_timestamp_seconds "),
+            "{body}"
+        );
+        let _ = stop.send(());
     }
 }

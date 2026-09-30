@@ -62,7 +62,6 @@ The CI pipeline includes multiple specialized test suites that run in parallel:
 
 - **Core Tests**: Basic functionality (navigation, authentication, dashboard)
 - **Global Analysis Tests**: World map, country selection, economic indicators (162 tests)
-- **Professional Analysis Tests**: Advanced charting, technical indicators (39 tests)
 - **Mobile Tests**: Mobile versions of all test suites
 - **Comprehensive Tests**: Integration/workflow tests (excludes specialized suites)
 

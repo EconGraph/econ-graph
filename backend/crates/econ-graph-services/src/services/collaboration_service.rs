@@ -7,12 +7,13 @@ use chrono::NaiveDate;
  */
 use diesel::prelude::*;
 use diesel::SelectableHelper;
-use diesel_async::RunQueryDsl;
+use diesel_async::{AsyncConnection, RunQueryDsl};
 use std::fmt;
 use uuid::Uuid;
 
 use econ_graph_core::{
     database::DatabasePool,
+    enums::AnnotationVisibility,
     error::{AppError, AppResult},
     models::user::{
         AnnotationComment, ChartAnnotation, ChartCollaborator, NewAnnotationComment,
@@ -87,7 +88,7 @@ pub fn visible_collaborators<T>(
 /// Whether `viewer` may see `annotation`: public annotations are visible to everyone,
 /// private ones only to their author.
 pub fn can_view_annotation(annotation: &ChartAnnotation, viewer: Option<Uuid>) -> bool {
-    annotation.is_visible == Some(true) || viewer == Some(annotation.user_id)
+    annotation.visibility == AnnotationVisibility::Public || viewer == Some(annotation.user_id)
 }
 
 /// Whether a user's `chart_collaborators.role` lookup grants admin on the chart.
@@ -143,7 +144,7 @@ impl CollaborationService {
             description: Some(content),
             color,
             annotation_type: Some(annotation_type),
-            is_visible: Some(is_public),
+            visibility: AnnotationVisibility::from_is_public(is_public),
             is_pinned: Some(false),
             tags: None,
         };
@@ -175,8 +176,8 @@ impl CollaborationService {
             chart_annotations::table
                 .filter(chart_annotations::series_id.eq(series_id))
                 .filter(
-                    chart_annotations::is_visible
-                        .eq(true)
+                    chart_annotations::visibility
+                        .eq(AnnotationVisibility::Public)
                         .or(chart_annotations::user_id.eq(uid)),
                 )
                 .order_by(chart_annotations::created_at.desc())
@@ -185,7 +186,7 @@ impl CollaborationService {
         } else {
             chart_annotations::table
                 .filter(chart_annotations::series_id.eq(series_id))
-                .filter(chart_annotations::is_visible.eq(true))
+                .filter(chart_annotations::visibility.eq(AnnotationVisibility::Public))
                 .order_by(chart_annotations::created_at.desc())
                 .select(ChartAnnotation::as_select())
                 .load::<ChartAnnotation>(&mut conn)
@@ -210,44 +211,57 @@ impl CollaborationService {
             ))
         })?;
 
-        // Check if annotation exists and user has permission to comment
-        let annotation = chart_annotations::table
-            .filter(chart_annotations::id.eq(annotation_id))
-            .select(ChartAnnotation::as_select())
-            .first::<ChartAnnotation>(&mut conn)
-            .await
-            .optional()
-            .map_err(|e| AppError::DatabaseError(e.to_string()))?
-            .filter(|annotation| can_view_annotation(annotation, Some(user_id)))
-            .ok_or_else(|| AppError::NotFound("Annotation not found".to_string()))?;
+        // A read-committed transaction alone is insufficient: hold shared row locks
+        // through the insert so visibility edits and role revocations cannot interleave.
+        // All queries use this connection, including the chart permission lookup.
+        conn.transaction::<AppResult<AnnotationComment>, diesel::result::Error, _>(
+            async move |conn| {
+                let annotation = chart_annotations::table
+                    .filter(chart_annotations::id.eq(annotation_id))
+                    .select(ChartAnnotation::as_select())
+                    .for_share()
+                    .first::<ChartAnnotation>(conn)
+                    .await
+                    .optional()?
+                    .filter(|annotation| can_view_annotation(annotation, Some(user_id)));
+                let Some(annotation) = annotation else {
+                    return Ok(Err(AppError::NotFound("Annotation not found".to_string())));
+                };
 
-        // Check permission to comment on this series
-        if let Some(series_id) = &annotation.series_id {
-            if !self.check_comment_permission(user_id, series_id).await? {
-                return Err(AppError::Unauthorized("Unauthorized".to_string()));
-            }
-        } else if let Some(chart_id) = annotation.chart_id {
-            if !self.check_admin_permission(user_id, chart_id).await? {
-                return Err(AppError::Unauthorized("Unauthorized".to_string()));
-            }
-        } else {
-            return Err(AppError::Unauthorized("Unauthorized".to_string()));
-        }
+                // Series annotations retain the existing authenticated-user policy.
+                // Chart annotations require an explicit admin role, even for the author.
+                if annotation.series_id.is_none() {
+                    let Some(chart_id) = annotation.chart_id else {
+                        return Ok(Err(AppError::Unauthorized("Unauthorized".to_string())));
+                    };
+                    let role = chart_collaborators::table
+                        .filter(chart_collaborators::chart_id.eq(chart_id))
+                        .filter(chart_collaborators::user_id.eq(user_id))
+                        .select(chart_collaborators::role)
+                        .for_share()
+                        .first::<Option<String>>(conn)
+                        .await
+                        .optional()?;
+                    if !role_grants_admin(role) {
+                        return Ok(Err(AppError::Unauthorized("Unauthorized".to_string())));
+                    }
+                }
 
-        let new_comment = NewAnnotationComment {
-            annotation_id,
-            user_id,
-            content,
-        };
-
-        let comment = diesel::insert_into(annotation_comments::table)
-            .values(&new_comment)
-            .returning(AnnotationComment::as_select())
-            .get_result::<AnnotationComment>(&mut conn)
-            .await
-            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-
-        Ok(comment)
+                let new_comment = NewAnnotationComment {
+                    annotation_id,
+                    user_id,
+                    content,
+                };
+                let comment = diesel::insert_into(annotation_comments::table)
+                    .values(&new_comment)
+                    .returning(AnnotationComment::as_select())
+                    .get_result::<AnnotationComment>(conn)
+                    .await?;
+                Ok(Ok(comment))
+            },
+        )
+        .await
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?
     }
 
     /// Get comments for an annotation, if `viewer` may see that annotation.
@@ -266,25 +280,32 @@ impl CollaborationService {
             ))
         })?;
 
-        let annotation = chart_annotations::table
+        // The left join includes visible annotations without comments. Filtering
+        // visibility in the same statement as the comment read removes the check/use
+        // race while retaining NotFound for both private and missing annotations.
+        let rows = chart_annotations::table
+            .left_join(annotation_comments::table)
             .filter(chart_annotations::id.eq(annotation_id))
-            .select(ChartAnnotation::as_select())
-            .first::<ChartAnnotation>(&mut conn)
-            .await
-            .optional()
-            .map_err(|e| AppError::DatabaseError(e.to_string()))?
-            .filter(|annotation| can_view_annotation(annotation, viewer))
-            .ok_or_else(|| AppError::NotFound("Annotation not found".to_string()))?;
-
-        let comments = annotation_comments::table
-            .filter(annotation_comments::annotation_id.eq(annotation.id))
+            .filter(
+                chart_annotations::visibility
+                    .eq(AnnotationVisibility::Public)
+                    .or(chart_annotations::user_id.nullable().eq(viewer)),
+            )
             .order_by(annotation_comments::created_at.asc())
-            .select(AnnotationComment::as_select())
-            .load::<AnnotationComment>(&mut conn)
+            .select((
+                chart_annotations::id,
+                Option::<AnnotationComment>::as_select(),
+            ))
+            .load::<(Uuid, Option<AnnotationComment>)>(&mut conn)
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-
-        Ok(comments)
+        if rows.is_empty() {
+            return Err(AppError::NotFound("Annotation not found".to_string()));
+        }
+        Ok(rows
+            .into_iter()
+            .filter_map(|(_, comment)| comment)
+            .collect())
     }
 
     /// Share a chart with a user
@@ -302,52 +323,48 @@ impl CollaborationService {
             ))
         })?;
 
-        // Check if the owner has admin permission on this chart
-        if !self.check_admin_permission(owner_user_id, chart_id).await? {
-            return Err(AppError::Unauthorized("Unauthorized".to_string()));
-        }
+        conn.transaction::<ChartCollaborator, AppError, _>(async move |conn| {
+            // Lock the caller's grant until the write commits. A concurrent revocation
+            // either commits first (and is observed here), or waits for this share.
+            // Lock both existing rows in a stable order to avoid reciprocal-share deadlocks.
+            let grants = chart_collaborators::table
+                .filter(chart_collaborators::chart_id.eq(chart_id))
+                .filter(chart_collaborators::user_id.eq_any([owner_user_id, target_user_id]))
+                .order(chart_collaborators::user_id.asc())
+                .for_update()
+                .select(ChartCollaborator::as_select())
+                .load::<ChartCollaborator>(conn)
+                .await
+                .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
-        // Check if collaboration already exists
-        let existing = chart_collaborators::table
-            .filter(chart_collaborators::chart_id.eq(chart_id))
-            .filter(chart_collaborators::user_id.eq(target_user_id))
-            .select(ChartCollaborator::as_select())
-            .first::<ChartCollaborator>(&mut conn)
-            .await
-            .optional()
-            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+            let role = grants
+                .iter()
+                .find(|grant| grant.user_id == owner_user_id)
+                .map(|grant| grant.role.clone());
+            if !role_grants_admin(role) {
+                return Err(AppError::Unauthorized("Unauthorized".to_string()));
+            }
 
-        if let Some(existing_collab) = existing {
-            // Update existing permission
-            let updated = diesel::update(
-                chart_collaborators::table.filter(chart_collaborators::id.eq(existing_collab.id)),
-            )
-            .set(chart_collaborators::role.eq(permission_level.to_string()))
-            .returning(ChartCollaborator::as_select())
-            .get_result::<ChartCollaborator>(&mut conn)
-            .await
-            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+            let role = permission_level.to_string();
+            let new_collaborator = NewChartCollaborator {
+                chart_id,
+                user_id: target_user_id,
+                invited_by: Some(owner_user_id),
+                role: Some(role.clone()),
+                permissions: None,
+            };
 
-            return Ok(updated);
-        }
-
-        // Create new collaboration
-        let new_collaborator = NewChartCollaborator {
-            chart_id,
-            user_id: target_user_id,
-            invited_by: Some(owner_user_id),
-            role: Some(permission_level.to_string()),
-            permissions: None,
-        };
-
-        let collaborator = diesel::insert_into(chart_collaborators::table)
-            .values(&new_collaborator)
-            .returning(ChartCollaborator::as_select())
-            .get_result::<ChartCollaborator>(&mut conn)
-            .await
-            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-
-        Ok(collaborator)
+            diesel::insert_into(chart_collaborators::table)
+                .values(&new_collaborator)
+                .on_conflict((chart_collaborators::chart_id, chart_collaborators::user_id))
+                .do_update()
+                .set(chart_collaborators::role.eq(role))
+                .returning(ChartCollaborator::as_select())
+                .get_result::<ChartCollaborator>(conn)
+                .await
+                .map_err(|e| AppError::DatabaseError(e.to_string()))
+        })
+        .await
     }
 
     /// Get a chart's collaborators, as seen by `viewer`.
@@ -388,13 +405,6 @@ impl CollaborationService {
         Ok(true)
     }
 
-    /// Check if user has permission to comment on a series
-    async fn check_comment_permission(&self, _user_id: Uuid, _series_id: &str) -> AppResult<bool> {
-        // For now, allow any authenticated user to comment
-        // In the future, this could check collaboration permissions
-        Ok(true)
-    }
-
     /// Check if user has admin permission on a chart
     async fn check_admin_permission(&self, user_id: Uuid, chart_id: Uuid) -> AppResult<bool> {
         let mut conn = self.pool.get().await.map_err(|e| {
@@ -416,8 +426,23 @@ impl CollaborationService {
         Ok(role_grants_admin(permission))
     }
 
-    /// Delete an annotation (only by owner or admin)
-    pub async fn delete_annotation(&self, annotation_id: Uuid, user_id: Uuid) -> AppResult<bool> {
+    /// Update an annotation's own fields (only by its author).
+    ///
+    /// A private annotation the caller cannot see is reported as not found, as in
+    /// [`Self::delete_annotation`]; a caller who can see it but isn't its author gets
+    /// `Unauthorized` rather than a silent no-op, since the field arguments are `Some` only
+    /// when the caller actually asked to change them.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_annotation(
+        &self,
+        annotation_id: Uuid,
+        user_id: Uuid,
+        title: Option<String>,
+        content: Option<String>,
+        color: Option<String>,
+        annotation_type: Option<String>,
+        is_public: Option<bool>,
+    ) -> AppResult<ChartAnnotation> {
         let mut conn = self.pool.get().await.map_err(|e| {
             econ_graph_core::error::AppError::DatabaseError(format!(
                 "Failed to get database connection: {}",
@@ -425,7 +450,6 @@ impl CollaborationService {
             ))
         })?;
 
-        // Get the annotation to check ownership
         let annotation = chart_annotations::table
             .filter(chart_annotations::id.eq(annotation_id))
             .select(ChartAnnotation::as_select())
@@ -435,42 +459,106 @@ impl CollaborationService {
             .map_err(|e| AppError::DatabaseError(e.to_string()))?
             .ok_or_else(|| AppError::NotFound("Annotation not found".to_string()))?;
 
-        // A private annotation the caller cannot see is reported as not found, as in
-        // add_comment and get_comments_for_annotation, even to a chart admin: its
-        // existence stays hidden and nobody but its author can delete it.
         if !can_view_annotation(&annotation, Some(user_id)) {
             return Err(AppError::NotFound("Annotation not found".to_string()));
         }
 
-        // Check if user owns the annotation or has admin permission
         if annotation.user_id != user_id {
-            // If not owner, check admin permission
-            if let Some(chart_id) = annotation.chart_id {
-                if !self.check_admin_permission(user_id, chart_id).await? {
-                    return Err(AppError::Unauthorized("Unauthorized".to_string()));
-                }
-            } else {
-                return Err(AppError::Unauthorized("Unauthorized".to_string()));
-            }
+            return Err(AppError::Unauthorized("Unauthorized".to_string()));
         }
 
-        // Delete associated comments first
-        diesel::delete(
-            annotation_comments::table.filter(annotation_comments::annotation_id.eq(annotation_id)),
-        )
-        .execute(&mut conn)
-        .await
-        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-
-        // Delete the annotation
-        let deleted = diesel::delete(
+        let updated = diesel::update(
             chart_annotations::table.filter(chart_annotations::id.eq(annotation_id)),
         )
-        .execute(&mut conn)
+        .set((
+            title.map(|t| chart_annotations::title.eq(t)),
+            content.map(|c| chart_annotations::description.eq(Some(c))),
+            color.map(|c| chart_annotations::color.eq(Some(c))),
+            annotation_type.map(|t| chart_annotations::annotation_type.eq(Some(t))),
+            is_public
+                .map(|p| chart_annotations::visibility.eq(AnnotationVisibility::from_is_public(p))),
+            chart_annotations::updated_at.eq(chrono::Utc::now()),
+        ))
+        .returning(ChartAnnotation::as_select())
+        .get_result::<ChartAnnotation>(&mut conn)
         .await
-        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+        .map_err(|e| match e {
+            // The annotation was deleted between the lookup above and this update.
+            diesel::result::Error::NotFound => {
+                AppError::NotFound("Annotation not found".to_string())
+            }
+            e => AppError::DatabaseError(e.to_string()),
+        })?;
 
-        Ok(deleted > 0)
+        Ok(updated)
+    }
+
+    /// Delete an annotation (only by owner or admin)
+    pub async fn delete_annotation(&self, annotation_id: Uuid, user_id: Uuid) -> AppResult<bool> {
+        let mut conn = self.pool.get().await.map_err(|e| {
+            econ_graph_core::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
+
+        // Keep the annotation and any admin grant stable through authorization and deletion.
+        conn.transaction::<bool, AppError, _>(async move |conn| {
+            // Get the annotation to check ownership
+            let annotation = chart_annotations::table
+                .filter(chart_annotations::id.eq(annotation_id))
+                .select(ChartAnnotation::as_select())
+                .for_update()
+                .first::<ChartAnnotation>(conn)
+                .await
+                .optional()
+                .map_err(|e| AppError::DatabaseError(e.to_string()))?
+                .ok_or_else(|| AppError::NotFound("Annotation not found".to_string()))?;
+
+            // A private annotation the caller cannot see is reported as not found, as in
+            // add_comment and get_comments_for_annotation, even to a chart admin: its
+            // existence stays hidden and nobody but its author can delete it.
+            if !can_view_annotation(&annotation, Some(user_id)) {
+                return Err(AppError::NotFound("Annotation not found".to_string()));
+            }
+
+            // Check if user owns the annotation or has admin permission
+            if annotation.user_id != user_id {
+                // If not owner, check admin permission
+                if let Some(chart_id) = annotation.chart_id {
+                    let role = chart_collaborators::table
+                        .filter(chart_collaborators::chart_id.eq(chart_id))
+                        .filter(chart_collaborators::user_id.eq(user_id))
+                        .select(chart_collaborators::role)
+                        .for_share()
+                        .first::<Option<String>>(conn)
+                        .await
+                        .optional()
+                        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+                    if !role_grants_admin(role) {
+                        return Err(AppError::Unauthorized("Unauthorized".to_string()));
+                    }
+                } else {
+                    return Err(AppError::Unauthorized("Unauthorized".to_string()));
+                }
+            }
+
+            // The foreign key cascades comments in the same statement. If deletion fails,
+            // PostgreSQL preserves both the annotation and its comments.
+            let deleted = diesel::delete(
+                chart_annotations::table.filter(chart_annotations::id.eq(annotation_id)),
+            )
+            .execute(conn)
+            .await
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+
+            Ok(deleted > 0)
+        })
+        .await
+        .map_err(|e| match e {
+            AppError::Database(e) => AppError::DatabaseError(e.to_string()),
+            e => e,
+        })
     }
 }
 
@@ -479,6 +567,220 @@ mod tests {
     use super::*;
     use econ_graph_core::test_utils::TestContainer;
     use serial_test::serial;
+
+    // Give every test a private schema on DATABASE_URL, including every pooled
+    // connection used by the service. Only the collaboration schema is needed.
+    async fn sharing_fixture() -> (DatabasePool, Uuid, Uuid, Uuid) {
+        use diesel_async::SimpleAsyncConnection;
+        let database_url = std::env::var("DATABASE_URL")
+            .expect("DATABASE_URL must point to the test PostgreSQL database");
+        let base_pool = econ_graph_core::database::create_pool(&database_url)
+            .await
+            .unwrap();
+        let schema = format!("sharing_{}", Uuid::new_v4().simple());
+        let mut base_conn = base_pool.get().await.unwrap();
+        base_conn
+            .batch_execute(&format!("CREATE SCHEMA {schema}"))
+            .await
+            .unwrap();
+        let separator = if database_url.contains('?') { '&' } else { '?' };
+        let pool = econ_graph_core::database::create_pool(&format!(
+            "{database_url}{separator}options=-csearch_path%3D{schema}"
+        ))
+        .await
+        .unwrap();
+        let mut conn = pool.get().await.unwrap();
+        conn.batch_execute(
+            "CREATE TABLE chart_collaborators (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            chart_id uuid NOT NULL, user_id uuid NOT NULL, invited_by uuid,
+            role varchar(20), permissions jsonb, created_at timestamptz DEFAULT now(),
+            last_accessed_at timestamptz);",
+        )
+        .await
+        .unwrap();
+        let (chart, admin, target) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        diesel::insert_into(chart_collaborators::table)
+            .values(NewChartCollaborator {
+                chart_id: chart,
+                user_id: admin,
+                invited_by: None,
+                role: Some("admin".into()),
+                permissions: None,
+            })
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        drop(conn);
+        (pool, chart, admin, target)
+    }
+
+    async fn migrate_sharing(pool: &DatabasePool) {
+        use diesel_async::SimpleAsyncConnection;
+        let mut conn = pool.get().await.unwrap();
+        conn.transaction::<(), diesel::result::Error, _>(async |conn| {
+            conn.batch_execute(include_str!(
+                "../../../../migrations/2026-09-30-000100_unique_chart_collaborators/up.sql"
+            ))
+            .await
+        })
+        .await
+        .unwrap();
+    }
+
+    async fn cleanup_sharing(pool: &DatabasePool) {
+        use diesel_async::SimpleAsyncConnection;
+        let mut conn = pool.get().await.unwrap();
+        let schema: String = diesel::select(diesel::dsl::sql::<diesel::sql_types::Text>(
+            "current_schema()",
+        ))
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+        assert!(schema.starts_with("sharing_"));
+        conn.batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn concurrent_shares_keep_one_grant_and_identity() {
+        let (pool, chart, admin, target) = sharing_fixture().await;
+        migrate_sharing(&pool).await;
+        let second_admin = Uuid::new_v4();
+        let mut conn = pool.get().await.unwrap();
+        diesel::insert_into(chart_collaborators::table)
+            .values(NewChartCollaborator {
+                chart_id: chart,
+                user_id: second_admin,
+                invited_by: None,
+                role: Some("admin".into()),
+                permissions: None,
+            })
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        drop(conn);
+        let service = CollaborationService::new(pool.clone());
+        let (first, second) = tokio::join!(
+            service.share_chart(chart, admin, target, PermissionLevel::View),
+            service.share_chart(chart, second_admin, target, PermissionLevel::Edit)
+        );
+        let (first, second) = (first.unwrap(), second.unwrap());
+        assert_eq!(first.id, second.id);
+        let mut conn = pool.get().await.unwrap();
+        let grants = chart_collaborators::table
+            .filter(chart_collaborators::chart_id.eq(chart))
+            .filter(chart_collaborators::user_id.eq(target))
+            .load::<ChartCollaborator>(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(grants.len(), 1);
+        assert!(matches!(grants[0].role.as_deref(), Some("view" | "edit")));
+        drop(conn);
+        cleanup_sharing(&pool).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn share_waits_for_revocation_and_rechecks_locked_grant() {
+        let (pool, chart, admin, target) = sharing_fixture().await;
+        migrate_sharing(&pool).await;
+        let service = CollaborationService::new(pool.clone());
+        let mut revoker = pool.get().await.unwrap();
+        use diesel_async::SimpleAsyncConnection;
+        revoker.batch_execute("BEGIN").await.unwrap();
+        diesel::update(chart_collaborators::table.filter(chart_collaborators::user_id.eq(admin)))
+            .set(chart_collaborators::role.eq("view"))
+            .execute(&mut revoker)
+            .await
+            .unwrap();
+        let mut share = tokio::spawn(async move {
+            service
+                .share_chart(chart, admin, target, PermissionLevel::Admin)
+                .await
+        });
+        // Revocation owns the grant lock before the share begins. Keep it open
+        // while the competing request reaches its locking read.
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), &mut share)
+                .await
+                .is_err(),
+            "sharing must wait for the locked grant"
+        );
+        revoker.batch_execute("COMMIT").await.unwrap();
+        assert!(matches!(
+            share.await.unwrap(),
+            Err(AppError::Unauthorized(_))
+        ));
+        let count: i64 = chart_collaborators::table
+            .filter(chart_collaborators::user_id.eq(target))
+            .count()
+            .get_result(&mut revoker)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+        drop(revoker);
+        cleanup_sharing(&pool).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn migration_reconciles_duplicates_without_promoting_grants() {
+        let (pool, chart, admin, _) = sharing_fixture().await;
+        let mut conn = pool.get().await.unwrap();
+        let original: ChartCollaborator =
+            chart_collaborators::table.first(&mut conn).await.unwrap();
+        diesel::update(chart_collaborators::table.find(original.id))
+            .set(chart_collaborators::created_at.eq(chrono::Utc::now() - chrono::Duration::days(1)))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        for role in [Some("edit"), None, Some("unknown")] {
+            diesel::insert_into(chart_collaborators::table)
+                .values(NewChartCollaborator {
+                    chart_id: chart,
+                    user_id: admin,
+                    invited_by: None,
+                    role: role.map(str::to_owned),
+                    permissions: Some(serde_json::json!({"edit": true})),
+                })
+                .execute(&mut conn)
+                .await
+                .unwrap();
+        }
+        drop(conn);
+        migrate_sharing(&pool).await;
+        let mut conn = pool.get().await.unwrap();
+        let grants = chart_collaborators::table
+            .load::<ChartCollaborator>(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].id, original.id);
+        assert_eq!(grants[0].role.as_deref(), Some("view"));
+        assert_eq!(grants[0].permissions, None);
+        let duplicate = diesel::insert_into(chart_collaborators::table)
+            .values(NewChartCollaborator {
+                chart_id: chart,
+                user_id: admin,
+                invited_by: None,
+                role: Some("admin".into()),
+                permissions: None,
+            })
+            .execute(&mut conn)
+            .await;
+        assert!(matches!(
+            duplicate,
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _
+            ))
+        ));
+        drop(conn);
+        cleanup_sharing(&pool).await;
+    }
 
     #[tokio::test]
     #[serial]
@@ -510,7 +812,112 @@ mod tests {
         assert!(admin.can_admin());
     }
 
-    fn annotation(owner: Uuid, is_visible: Option<bool>) -> ChartAnnotation {
+    #[tokio::test]
+    #[serial]
+    async fn test_delete_annotation_cascades_and_preserves_comments_on_failure() {
+        let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
+        let service = CollaborationService::new(container.pool().clone());
+        let mut conn = container.pool().get().await.unwrap();
+        let owner = Uuid::new_v4();
+        let outsider = Uuid::new_v4();
+        let annotation_id = Uuid::new_v4();
+        diesel::sql_query(
+            "INSERT INTO users (id, email, name) VALUES ($1, 'delete-test@example.com', 'Owner')",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(owner)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        diesel::sql_query("INSERT INTO chart_annotations (id, user_id, annotation_date, title, visibility) VALUES ($1, $2, CURRENT_DATE, 'Delete test', 'public')")
+            .bind::<diesel::sql_types::Uuid, _>(annotation_id)
+            .bind::<diesel::sql_types::Uuid, _>(owner)
+            .execute(&mut conn).await.unwrap();
+        diesel::insert_into(annotation_comments::table)
+            .values(NewAnnotationComment {
+                annotation_id,
+                user_id: owner,
+                content: "Keep until deletion succeeds".into(),
+            })
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            service.delete_annotation(annotation_id, outsider).await,
+            Err(AppError::Unauthorized(_))
+        ));
+        diesel::update(chart_annotations::table.find(annotation_id))
+            .set(chart_annotations::visibility.eq(AnnotationVisibility::Private))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        assert!(matches!(
+            service.delete_annotation(annotation_id, outsider).await,
+            Err(AppError::NotFound(_))
+        ));
+
+        // Fail the parent DELETE after authorization, reproducing the partial-delete risk.
+        diesel::sql_query("CREATE FUNCTION reject_annotation_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced delete failure'; END $$")
+            .execute(&mut conn).await.unwrap();
+        diesel::sql_query("CREATE TRIGGER reject_annotation_delete BEFORE DELETE ON chart_annotations FOR EACH ROW EXECUTE FUNCTION reject_annotation_delete()")
+            .execute(&mut conn).await.unwrap();
+        assert!(matches!(
+            service.delete_annotation(annotation_id, owner).await,
+            Err(AppError::DatabaseError(_))
+        ));
+        assert_eq!(
+            chart_annotations::table
+                .find(annotation_id)
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            annotation_comments::table
+                .filter(annotation_comments::annotation_id.eq(annotation_id))
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .unwrap(),
+            1
+        );
+
+        diesel::sql_query("DROP TRIGGER reject_annotation_delete ON chart_annotations")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        assert!(service
+            .delete_annotation(annotation_id, owner)
+            .await
+            .unwrap());
+        assert_eq!(
+            chart_annotations::table
+                .find(annotation_id)
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            annotation_comments::table
+                .filter(annotation_comments::annotation_id.eq(annotation_id))
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(matches!(
+            service.delete_annotation(annotation_id, owner).await,
+            Err(AppError::NotFound(_))
+        ));
+    }
+
+    fn annotation(owner: Uuid, visibility: AnnotationVisibility) -> ChartAnnotation {
         ChartAnnotation {
             id: Uuid::new_v4(),
             user_id: owner,
@@ -522,7 +929,7 @@ mod tests {
             description: None,
             color: None,
             annotation_type: None,
-            is_visible,
+            visibility,
             is_pinned: None,
             tags: None,
             created_at: None,
@@ -563,15 +970,14 @@ mod tests {
         let owner = Uuid::new_v4();
         let other = Uuid::new_v4();
 
-        let public = annotation(owner, Some(true));
+        let public = annotation(owner, AnnotationVisibility::Public);
         assert!(can_view_annotation(&public, None));
         assert!(can_view_annotation(&public, Some(other)));
 
-        for private in [annotation(owner, Some(false)), annotation(owner, None)] {
-            assert!(can_view_annotation(&private, Some(owner)));
-            assert!(!can_view_annotation(&private, Some(other)));
-            assert!(!can_view_annotation(&private, None));
-        }
+        let private = annotation(owner, AnnotationVisibility::Private);
+        assert!(can_view_annotation(&private, Some(owner)));
+        assert!(!can_view_annotation(&private, Some(other)));
+        assert!(!can_view_annotation(&private, None));
     }
 
     /// Only an explicit admin role grants admin; a missing row or role grants nothing.
@@ -581,5 +987,186 @@ mod tests {
         assert!(!role_grants_admin(Some(Some("edit".to_string()))));
         assert!(!role_grants_admin(Some(None)));
         assert!(!role_grants_admin(None));
+    }
+
+    // Run against the same migrated external Postgres database as TestContainer.
+    // A one-connection pool catches accidental nested permission pool acquisition.
+    #[tokio::test]
+    #[serial]
+    async fn test_atomic_comment_privacy_and_revocation() {
+        use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+        use std::time::Duration;
+
+        let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
+        let url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+        let single = DatabasePool::builder()
+            .max_size(1)
+            .connection_timeout(Duration::from_secs(1))
+            .build(AsyncDieselConnectionManager::new(url))
+            .await
+            .unwrap();
+        let service = CollaborationService::new(single.clone());
+        let owner = Uuid::new_v4();
+        let admin = Uuid::new_v4();
+        let chart = Uuid::new_v4();
+        let mut conn = container.pool().get().await.unwrap();
+        for id in [owner, admin] {
+            diesel::insert_into(users::table)
+                .values((
+                    users::id.eq(id),
+                    users::email.eq(format!("{id}@test.invalid")),
+                    users::name.eq("test"),
+                ))
+                .execute(&mut conn)
+                .await
+                .unwrap();
+        }
+        let mut record = annotation(owner, AnnotationVisibility::Public);
+        record.series_id = None;
+        record.chart_id = Some(chart);
+        let new = NewChartAnnotation {
+            user_id: owner,
+            chart_id: Some(chart),
+            series_id: None,
+            annotation_date: record.annotation_date,
+            annotation_value: None,
+            title: "test".into(),
+            description: None,
+            color: None,
+            annotation_type: None,
+            visibility: record.visibility,
+            is_pinned: None,
+            tags: None,
+        };
+        record = diesel::insert_into(chart_annotations::table)
+            .values(&new)
+            .returning(ChartAnnotation::as_select())
+            .get_result(&mut conn)
+            .await
+            .unwrap();
+        diesel::insert_into(chart_collaborators::table)
+            .values(&NewChartCollaborator {
+                chart_id: chart,
+                user_id: admin,
+                invited_by: None,
+                role: Some("ADMIN".into()),
+                permissions: None,
+            })
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        assert!(service
+            .get_comments_for_annotation(record.id, None)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(matches!(
+            service.add_comment(owner, record.id, "denied".into()).await,
+            Err(AppError::Unauthorized(_))
+        ));
+        service
+            .add_comment(admin, record.id, "visible".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            service
+                .get_comments_for_annotation(record.id, None)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // The comment attempt waits for a visibility edit's row lock; after the
+        // edit commits, SELECT FOR SHARE sees the new private value and denies.
+        let attempt = conn
+            .transaction::<_, diesel::result::Error, _>(async |conn| {
+                diesel::update(chart_annotations::table.find(record.id))
+                    .set(chart_annotations::visibility.eq(AnnotationVisibility::Private))
+                    .execute(conn)
+                    .await?;
+                let blocked_service = CollaborationService::new(single.clone());
+                let annotation_id = record.id;
+                let mut attempt = tokio::spawn(async move {
+                    blocked_service
+                        .add_comment(admin, annotation_id, "private".into())
+                        .await
+                });
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(100), &mut attempt)
+                        .await
+                        .is_err()
+                );
+                Ok(attempt)
+            })
+            .await
+            .unwrap();
+        assert!(matches!(attempt.await.unwrap(), Err(AppError::NotFound(_))));
+        assert!(matches!(
+            service
+                .get_comments_for_annotation(record.id, Some(admin))
+                .await,
+            Err(AppError::NotFound(_))
+        ));
+        assert_eq!(
+            service
+                .get_comments_for_annotation(record.id, Some(owner))
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        diesel::update(chart_annotations::table.find(record.id))
+            .set(chart_annotations::visibility.eq(AnnotationVisibility::Public))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        let attempt = conn
+            .transaction::<_, diesel::result::Error, _>(async |conn| {
+                diesel::update(
+                    chart_collaborators::table
+                        .filter(chart_collaborators::chart_id.eq(chart))
+                        .filter(chart_collaborators::user_id.eq(admin)),
+                )
+                .set(chart_collaborators::role.eq("view"))
+                .execute(conn)
+                .await?;
+                let blocked_service = CollaborationService::new(single.clone());
+                let annotation_id = record.id;
+                let mut attempt = tokio::spawn(async move {
+                    blocked_service
+                        .add_comment(admin, annotation_id, "revoked".into())
+                        .await
+                });
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(100), &mut attempt)
+                        .await
+                        .is_err()
+                );
+                Ok(attempt)
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            attempt.await.unwrap(),
+            Err(AppError::Unauthorized(_))
+        ));
+        assert_eq!(
+            service
+                .get_comments_for_annotation(record.id, None)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(matches!(
+            service
+                .get_comments_for_annotation(Uuid::new_v4(), None)
+                .await,
+            Err(AppError::NotFound(_))
+        ));
     }
 }

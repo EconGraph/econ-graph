@@ -42,7 +42,7 @@ The Terraform configuration deploys a complete production-ready environment incl
    ```hcl
    # terraform.tfvars
    domain            = "econgraph.yourdomain.com"
-   database_password = "your-secure-password"
+   # database_password: set it with export TF_VAR_database_password="$(openssl rand -base64 24)"
    fred_api_key     = "your-fred-api-key"
    bls_api_key      = "your-bls-api-key"
    environment      = "prod"
@@ -76,7 +76,7 @@ The Terraform configuration deploys a complete production-ready environment incl
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `domain` | Domain name for the application | `"econgraph.example.com"` |
-| `database_password` | PostgreSQL password | `"secure-password-123"` |
+| `database_password` | PostgreSQL password, at least 16 characters (or `""` to generate one) | generate with `openssl rand -base64 24` |
 
 ### Optional Variables
 
@@ -87,6 +87,16 @@ The Terraform configuration deploys a complete production-ready environment incl
 | `kubeconfig_path` | Path to kubeconfig | `"~/.kube/config"` |
 | `fred_api_key` | FRED API key | `""` |
 | `bls_api_key` | BLS API key | `""` |
+| `monitoring_basic_auth` | htpasswd line (`user:bcrypt-hash`) for basic auth in front of Grafana; generate with `htpasswd -nB admin` (prompts for the password). The bcrypt hash contains `$`, so single-quote it when setting `TF_VAR_monitoring_basic_auth`. Empty means no basic auth (Grafana's own login still applies). Sensitive. | `""` |
+
+Credentials have no committed defaults. Pass them through an untracked
+`terraform.tfvars` or `TF_VAR_*` environment variables (for example
+`export TF_VAR_database_password=...`), never through files in git.
+
+`postgres-only.tf` (PostgreSQL alone) requires `database_password` of at least
+16 characters. The full deploy (`main.tf`) applies the same rule, except that
+setting it to `""` generates a random password. Both reject the
+placeholder from `terraform.tfvars.example`.
 
 ## Architecture
 
@@ -193,6 +203,8 @@ by `scripts/deploy/deploy.sh` (see `docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md`)
 - **Grafana**: `https://grafana.yourdomain.com`
   - Username: `admin`
   - Password: (generated, see terraform output)
+  - If `monitoring_basic_auth` is set, the ingress asks for that basic-auth
+    login first.
 - **Prometheus**: Internal cluster access only
 
 ## SSL/TLS Configuration
@@ -317,7 +329,7 @@ kubectl exec -it -n econgraph deployment/econgraph-backend -- /bin/bash
 ### Security Headers
 - CSP, HSTS, and other security headers configured
 - Rate limiting on API endpoints
-- Basic auth on monitoring endpoints
+- Optional basic auth on Grafana (set `monitoring_basic_auth`)
 
 ## Maintenance
 

@@ -208,6 +208,13 @@ fi
 
 # Apply updated manifests
 echo "📋 Applying updated Kubernetes manifests..."
+kubectl apply -f k8s/manifests/namespace.yaml
+# Credentials are not in the manifests; create or refresh the Secrets first.
+./scripts/deploy/create-secrets.sh
+# ingress.yaml first: on clusters deployed before graphql-ingress.yaml existed it
+# still routes /graphql, and the admission webhook rejects a second Ingress for
+# the same host and path (kubectl applies the directory alphabetically).
+kubectl apply -f k8s/manifests/ingress.yaml
 kubectl apply -f k8s/manifests/
 
 # Apply security configurations
@@ -257,11 +264,24 @@ kubectl apply -f k8s/monitoring/loki-config.yaml
 kubectl apply -f k8s/monitoring/loki-deployment.yaml
 kubectl apply -f k8s/monitoring/loki-service.yaml
 
+# Prometheus reads its config and rules only at start, and a ConfigMap-only change doesn't roll
+# the pod. Restart it only when they changed: its storage is an emptyDir, so a restart drops
+# its history and resets every alert's `for` clock. (`kubectl diff` exits 1 on differences.)
+PROMETHEUS_CONFIG_CHANGED=false
+for f in k8s/monitoring/prometheus-config.yaml k8s/monitoring/prometheus-rules-crawler.yaml; do
+    if ! kubectl diff -f "$f" >/dev/null 2>&1; then
+        PROMETHEUS_CONFIG_CHANGED=true
+    fi
+done
 kubectl apply -f k8s/monitoring/prometheus-config.yaml
+kubectl apply -f k8s/monitoring/prometheus-rules-crawler.yaml
 kubectl apply -f k8s/monitoring/prometheus-deployment.yaml
 kubectl apply -f k8s/monitoring/prometheus-service.yaml
 kubectl apply -f k8s/monitoring/prometheus-clusterrole.yaml
 kubectl apply -f k8s/monitoring/prometheus-clusterrolebinding.yaml
+if [ "$PROMETHEUS_CONFIG_CHANGED" = true ]; then
+    kubectl rollout restart deployment/prometheus -n econ-graph
+fi
 
 kubectl apply -f k8s/monitoring/promtail-config.yaml
 kubectl apply -f k8s/monitoring/promtail-clusterrole.yaml
@@ -366,9 +386,9 @@ echo "  🏠 Local Development:"
 echo "    Frontend: http://localhost:${FRONTEND_NODEPORT}"
 echo "    Backend:  http://localhost:${BACKEND_NODEPORT}"
 echo "    GraphQL:  http://localhost:${FRONTEND_NODEPORT}/graphql"
-echo "    Playground: http://localhost:${FRONTEND_NODEPORT}/playground"
+echo "    Playground: off (set ENABLE_GRAPHQL_PLAYGROUND=true on the backend to serve /playground)"
 echo "    Health:   http://localhost:${BACKEND_NODEPORT}/health"
-echo "    Grafana:  http://localhost:${GRAFANA_NODEPORT} (admin/admin123)"
+echo "    Grafana:  http://localhost:${GRAFANA_NODEPORT} (user admin, password in Secret grafana-admin)"
 echo ""
 echo "🎯 Version deployed: v3.7.4"
 echo "   ✅ Integration tests fixed: All auth tests passing (11/11)"
@@ -392,7 +412,8 @@ echo "✅ Services are accessible via NodePort:"
 echo "  Frontend: http://localhost:${FRONTEND_NODEPORT}"
 echo "  Admin UI: http://admin.econ-graph.local/admin (add '127.0.0.1 admin.econ-graph.local' to /etc/hosts)"
 echo "  Backend:  http://localhost:${BACKEND_NODEPORT}"
-echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT} (admin/admin123)"
+echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT}"
+echo "            (admin / password: kubectl -n econ-graph get secret grafana-admin -o jsonpath={.data.admin-password} | base64 -d)"
 echo ""
 echo "🔒 Internal Services (not exposed externally):"
 echo "  Chart API Service: chart-api-service.econ-graph.svc.cluster.local:3001"

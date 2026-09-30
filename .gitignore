@@ -1,6 +1,5 @@
 # Rust
 /backend/target/
-/backend/Cargo.lock
 **/*.rs.bk
 *.pdb
 *.profraw
@@ -87,6 +86,8 @@ temp/
 # Playwright
 /frontend/test-results/
 /frontend/playwright-report/
+/frontend/test-results-release/
+/frontend/playwright-report-release/
 /frontend/playwright/.cache/
 /frontend/debug-*.png
 /frontend/debug-*.jpg

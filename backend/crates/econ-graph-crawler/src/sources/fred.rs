@@ -27,6 +27,9 @@
 //! every other 400 stays [`CrawlError::Permanent`]. Recognising the message requires the
 //! [`HttpFetcher`](crate::HttpFetcher) error to quote the (redacted) response body; see
 //! [`classify_fred_error`].
+//!
+//! Every series belongs to the one dimensionless dataset [`DATASET`] (defined in
+//! `data/datasets/fred.toml`) and keeps its FRED series id as its external id.
 
 use std::str::FromStr;
 
@@ -38,6 +41,7 @@ use serde::Deserialize;
 use crate::adapter::{
     CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, NewSeriesMetadataLite, SourceAdapter,
 };
+use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
 use crate::reference::fred_series;
 use crate::source::SourceId;
@@ -47,6 +51,10 @@ pub const DEFAULT_BASE_URL: &str = "https://api.stlouisfed.org/fred";
 
 /// Human-facing series page, used for [`DiscoveredSeries::data_url`] (never requested).
 const FRED_WEB_SERIES_URL: &str = "https://fred.stlouisfed.org/series";
+
+/// Code of the dataset every FRED series belongs to. It has no dimensions: a FRED series id is
+/// an opaque key, not a combination of dimension values.
+pub const DATASET: &str = "FRED";
 
 /// FRED's marker for a missing observation.
 const MISSING_VALUE: &str = ".";
@@ -213,6 +221,7 @@ impl FredAdapter {
                         units: meta.units,
                         frequency: meta.frequency,
                         data_url: Some(format!("{FRED_WEB_SERIES_URL}/{id}")),
+                        dataset: Some(fred_dataset()),
                     });
                 }
                 Err(e) => {
@@ -249,6 +258,10 @@ impl SourceAdapter for FredAdapter {
         SourceId::Fred
     }
 
+    fn datasets(&self) -> &[&str] {
+        &[DATASET]
+    }
+
     /// Looks up the curated list from [`crate::reference::fred_series`]. See the module docs.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         let api_key = self.api_key(ctx)?;
@@ -271,6 +284,7 @@ impl SourceAdapter for FredAdapter {
         Ok(FetchedSeries {
             metadata: Some(metadata),
             points,
+            dataset: Some(fred_dataset()),
         })
     }
 }
@@ -343,6 +357,15 @@ fn parse_observation(
         is_original_release,
     })
 }
+
+/// The dataset of every FRED series: [`DATASET`], with no dimension values.
+fn fred_dataset() -> SeriesDataset {
+    SeriesDataset {
+        code: DATASET.into(),
+        ..SeriesDataset::default()
+    }
+}
+
 
 // ---- Wire formats (only the fields we use; FRED sends many more) ----
 
@@ -433,6 +456,7 @@ mod tests {
             Some("Seasonally Adjusted Annual Rate")
         );
         assert!(m.description.unwrap().starts_with("BEA Account Code"));
+        assert_eq!(s.dataset, Some(fred_dataset()));
 
         assert_eq!(s.points.len(), 5);
         let p0 = &s.points[0];
@@ -684,6 +708,11 @@ mod tests {
             found[0].data_url.as_deref(),
             Some("https://fred.stlouisfed.org/series/GDP")
         );
+        for s in &found {
+            let ds = s.dataset.as_ref().expect("every FRED series has a dataset");
+            assert_eq!(ds.code, DATASET, "{}", s.external_id);
+            assert!(ds.dimensions.0.is_empty(), "{}", s.external_id);
+        }
         mock.server().verify().await;
     }
 

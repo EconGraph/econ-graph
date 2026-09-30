@@ -54,6 +54,9 @@ mod simple_tests {
             first_missing_date: None,
             crawl_status: None,
             crawl_error_message: None,
+            dataset_id: None,
+            dimensions: Default::default(),
+            default_measure: None,
         };
 
         assert_eq!(series.external_id, "TEST_001");
