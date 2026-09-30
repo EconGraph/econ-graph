@@ -33,44 +33,6 @@ EconGraph is a **production-ready economic data intelligence platform** that tra
 - **Business Intelligence Teams** - Strategic planning and market analysis
 
 
-## 💰 **DEVELOPMENT COST TRANSPARENCY**
-
-> **AI-Assisted Development with Cursor - Comprehensive Cost Analysis**
-
-### 📊 **Cursor AI Usage Statistics (historical CSV export)**
-- **Total AI Interactions**: 6,768 CSV records
-- **Total Tokens Processed**: **4,285,966,700 tokens** (reported usage, including cached and unsuccessful requests)
-- **Usage Scope**: Includes Included, Errored, Not Charged, and Aborted, Not Charged events
-- **Average Request Size**: 633,269 tokens
-- **Usage Source**: `data/usage-events-2025-09-26.csv` (historical export)
-- **Development Period**: 28 days of active AI-assisted coding
-
-### 💵 **Actual Development Costs**
-- **Cursor Pro Subscription**: ~$20/month
-- **Actual Token Costs**: $1,288.55 reported CSV estimate (not a verified bill)
-- **Staff Engineer Time**: 28 days × 8 hours × $150/hour = $33,600
-- **Total AI-Assisted Cost**: $34,908.55 (fixed staffing and subscription assumptions)
-- **Daily Average**: $1,246.73 over the assumed 28 days
-- **Cost per Major Feature**: $2,327.24 assuming 15 features
-
-### ⚡ **ROI & Efficiency Analysis**
-- **🏗️ Features Delivered**: 15+ major components (React frontend, Rust backend, GraphQL API, collaboration features, global analysis, CI/CD pipelines)
-- **📝 Lines of Code**: 207,286 total (89,802 production code, 17,713 test code, 46,959 configuration/scripts, 52,812 documentation)
-- **⏰ Time Saved**: Estimated 200+ hours vs traditional solo development
-- **🚀 Development Speed**: 10-20x faster iteration cycles
-- **✅ Quality Achieved**: Professional-grade testing, documentation, security scanning
-
-### 🎯 **Major Achievements with AI Assistance**
-- **Frontend**: Complete React/TypeScript app with Material-UI, Chart.js, routing
-- **Backend**: Rust/Axum server with GraphQL, PostgreSQL, Diesel ORM, Docker
-- **Testing**: 157+ passing tests (unit, integration, e2e) with testcontainers
-- **CI/CD**: GitHub Actions workflows with security scanning, formatting, linting
-- **Documentation**: Google-style comments, comprehensive README, investor pitch
-- **Features**: Real-time collaboration, economic data visualization, transformations
-
-> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The $34,908.55 estimated investment produced a full-stack application with a line-based traditional development estimate of $583,124.94 and 6-12 months with a traditional team.
-> **📊 DETAILED COST ANALYSIS**: For comprehensive cost assumptions, productivity metrics, and industry benchmarks with cited sources, see [Cost Assumptions and Productivity Analysis](docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md).
-
 ---
 
 ## ✨ **Actually Implemented Features:**
@@ -276,44 +238,6 @@ EconGraph maintains the highest standards of quality and reliability expected by
 
 ---
 
-## 💰 **DEVELOPMENT COST TRANSPARENCY**
-
-> **AI-Assisted Development with Cursor - Comprehensive Cost Analysis**
-
-### 📊 **Cursor AI Usage Statistics (historical CSV export)**
-- **Total AI Interactions**: 6,768 CSV records
-- **Total Tokens Processed**: **4,285,966,700 tokens** (reported usage, including cached and unsuccessful requests)
-- **Usage Scope**: Includes Included, Errored, Not Charged, and Aborted, Not Charged events
-- **Average Request Size**: 633,269 tokens
-- **Usage Source**: `data/usage-events-2025-09-26.csv` (historical export)
-- **Development Period**: 28 days of active AI-assisted coding
-
-### 💵 **Actual Development Costs**
-- **Cursor Pro Subscription**: ~$20/month
-- **Actual Token Costs**: $1,288.55 reported CSV estimate (not a verified bill)
-- **Staff Engineer Time**: 28 days × 8 hours × $150/hour = $33,600
-- **Total AI-Assisted Cost**: $34,908.55 (fixed staffing and subscription assumptions)
-- **Daily Average**: $1,246.73 over the assumed 28 days
-- **Cost per Major Feature**: $2,327.24 assuming 15 features
-
-### ⚡ **ROI & Efficiency Analysis**
-- **🏗️ Features Delivered**: 15+ major components (React frontend, Rust backend, GraphQL API, collaboration features, global analysis, CI/CD pipelines)
-- **📝 Lines of Code**: 207,286 total (89,802 production code, 17,713 test code, 46,959 configuration/scripts, 52,812 documentation)
-- **⏰ Time Saved**: Estimated 200+ hours vs traditional solo development
-- **🚀 Development Speed**: 10-20x faster iteration cycles
-- **✅ Quality Achieved**: Professional-grade testing, documentation, security scanning
-
-### 🎯 **Major Achievements with AI Assistance**
-- **Frontend**: Complete React/TypeScript app with Material-UI, Chart.js, routing
-- **Backend**: Rust/Axum server with GraphQL, PostgreSQL, Diesel ORM, Docker
-- **Testing**: 157+ passing tests (unit, integration, e2e) with testcontainers
-- **CI/CD**: GitHub Actions workflows with security scanning, formatting, linting
-- **Documentation**: Google-style comments, comprehensive README, investor pitch
-- **Features**: Real-time collaboration, economic data visualization, transformations
-
-> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The $34,908.55 estimated investment produced a full-stack application with a line-based traditional development estimate of $583,124.94 and 6-12 months with a traditional team.
-> **📊 DETAILED COST ANALYSIS**: For comprehensive cost assumptions, productivity metrics, and industry benchmarks with cited sources, see [Cost Assumptions and Productivity Analysis](docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md).
-
 ---
 
 ## 📁 **Project Structure**
@@ -463,3 +387,4 @@ This project is licensed under the Microsoft Reference Source License (MS-RSL) -
 # Trigger CI test
 # Package-lock.json sync fix
 # CI Trigger
+

@@ -41,7 +41,6 @@ Welcome to the comprehensive documentation for EconGraph - the economic data vis
 
 ### 💻 [Development Documentation](./development/)
 - **[Pre-commit Setup](./development/PRECOMMIT_SETUP.md)** - Pre-commit hooks configuration
-- **[Vibe Coding](./development/VIBE_CODING.md)** - Development workflow and standards
 - **[CI/CD Pipeline](./development/CI_CD_PIPELINE.md)** - Continuous integration and deployment
 - **[CI Optimization Notes](./development/CI_OPTIMIZATION_NOTES.md)** - CI performance optimization
 - **[Global Analysis Roadmap](./development/GLOBAL_ANALYSIS_ROADMAP.md)** - Comprehensive global analysis feature roadmap
@@ -122,3 +121,4 @@ When adding new documentation:
 ---
 
 *This documentation structure provides organized access to all EconGraph documentation. Each category contains relevant documents for different audiences and use cases.*
+

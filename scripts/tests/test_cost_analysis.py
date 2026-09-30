@@ -2,6 +2,8 @@
 import csv
 from decimal import Decimal
 import io
+import importlib.util
+import os
 import json
 from pathlib import Path
 import subprocess
@@ -39,6 +41,13 @@ class CostTests(unittest.TestCase):
         self.assertEqual(result['cost_analysis']['savings'], dict(dollar_amount=-31908.6, percentage=-1851.1))
         self.assertEqual(result['codebase_stats']['infrastructure'], 50)
         self.assertEqual(result['ai_usage']['total_cost'], 12.345)
+
+    def test_archive_table_has_separate_category_rows(self):
+        rendered = cost.cost_section(cost.calculate(stats(), usage()))
+        rows = [line for line in rendered.splitlines() if line.startswith('|')]
+        for category in ['Production', 'Tests', 'Configuration and shell scripts', 'Documentation']:
+            self.assertEqual(sum(line.startswith(f'| {category} |') for line in rows), 1)
+        self.assertNotIn(chr(92) + 'n', rendered)
 
     def test_invalid_statistics(self):
         cases = []
@@ -98,6 +107,14 @@ class CostTests(unittest.TestCase):
             target = root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes((ROOT / name).read_bytes())
+        # Product docs are sentinels: no anchors are required or rewritten.
+        for name in ['README.md', 'docs/business/INVESTOR_PITCH.md',
+                     'docs/business/PRODUCT_SUMMARY_2025.md',
+                     'docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md',
+                     'demo-tools/PROFESSIONAL_DEMO_SUMMARY.md']:
+            target = root / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text('Product documentation sentinel\n')
         csv_path = self.csv_file(directory)
         stats_path = root / 'stats.json'
         stats_path.write_text(json.dumps(stats()))
@@ -116,21 +133,19 @@ class CostTests(unittest.TestCase):
             self.assertEqual(updated['codebase_stats']['total_lines'], 630)
             for name in cost.DOCUMENTS:
                 self.assertIn('630', (root / name).read_text())
+            for name in ['README.md', 'docs/business/INVESTOR_PITCH.md',
+                         'docs/business/PRODUCT_SUMMARY_2025.md',
+                         'docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md',
+                         'demo-tools/PROFESSIONAL_DEMO_SUMMARY.md']:
+                self.assertEqual((root / name).read_text(), 'Product documentation sentinel\n')
             self.assertFalse(list(root.rglob('*.bak')))
 
     def test_initial_migration_converges_and_second_run_is_byte_identical(self):
         with tempfile.TemporaryDirectory() as directory, patch('sys.stdout', new=io.StringIO()):
             root, _, csv_path = self.fixture(directory)
-            # Include the legacy zero-total/corrupt-percentage document and old
-            # literal replacement targets, then track them for real statistics.
-            document = root / 'docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md'
-            document.write_text('## EconGraph Project Cost Analysis\n\n'
-                                '**Total Codebase**: 0 lines\n'
-                                '#### Production Code (72610 lines - %)\n\n'
-                                '## Productivity Multipliers\n\n'
-                                '## Conclusion\n(92.4% cost reduction)\n'
-                                '1. **Traditional Development**: $455142.18\n'
-                                '2. **AI-Assisted Development**: ~$34557.836\n')
+            # Replace an old generated report, then track it for real statistics.
+            document = root / cost.DOCUMENTS[0]
+            document.write_text('Legacy report contents\n')
             subprocess.run(['git', 'init', '-q', directory], check=True)
             subprocess.run(['git', '-C', directory, 'add', '.'], check=True)
             actual_output = subprocess.check_output
@@ -155,11 +170,37 @@ class CostTests(unittest.TestCase):
                 with self.assertRaises(ArithmeticError):
                     cost.update(root, stats_path, csv_path)
             self.assertEqual(originals, {p: p.read_bytes() for p in originals})
-            (root / cost.DOCUMENTS[-1]).write_text('missing anchor')
-            originals = {p: p.read_bytes() for p in root.rglob('*') if p.is_file()}
-            with self.assertRaises(ValueError):
-                cost.update(root, stats_path, csv_path)
-            self.assertEqual(originals, {p: p.read_bytes() for p in originals})
+
+    def test_missing_archive_report_is_created_without_product_docs(self):
+        with tempfile.TemporaryDirectory() as directory, patch('sys.stdout', new=io.StringIO()):
+            root, stats_path, csv_path = self.fixture(directory)
+            report = root / cost.DOCUMENTS[0]
+            report.unlink()
+            (root / 'README.md').unlink()
+            cost.update(root, stats_path, csv_path)
+            self.assertTrue(report.is_file())
+            self.assertFalse((root / 'README.md').exists())
+            self.assertEqual((root / 'docs/business/INVESTOR_PITCH.md').read_text(),
+                             'Product documentation sentinel\n')
+
+    def test_webhook_does_not_publish_a_second_summary(self):
+        spec = importlib.util.spec_from_file_location('cost_webhook', ROOT / 'scripts/webhook-cost-update.py')
+        webhook = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(webhook)
+        with tempfile.TemporaryDirectory() as directory, patch('sys.stdout', new=io.StringIO()):
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(directory)
+                with patch.object(webhook, 'update_cost_analysis', return_value=True) as update:
+                    webhook.main()
+                    update.assert_called_once_with()
+                self.assertFalse(list(Path(directory).rglob('*')))
+                with patch.object(webhook, 'update_cost_analysis', return_value=False):
+                    with self.assertRaises(SystemExit) as raised:
+                        webhook.main()
+                self.assertEqual(raised.exception.code, 1)
+            finally:
+                os.chdir(original_cwd)
 
     def test_invalid_and_zero_inputs_fail_shell_command_without_writes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -200,3 +241,4 @@ class CostTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

@@ -12,9 +12,7 @@ on:
       - 'data/cost-analysis.json'
       - 'data/usage-events-2025-09-26.csv'
       - '.github/workflows/update-cost-analysis.yml'
-      - 'README.md'
-      - 'docs/business/**'
-      - 'demo-tools/PROFESSIONAL_DEMO_SUMMARY.md'
+      - 'docs/archive/generated/development-costs/analysis.md'
 
 permissions:
   contents: read
@@ -45,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/update-cost-analysis.sh
-          files=(data/cost-analysis.json README.md docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md docs/business/PRODUCT_SUMMARY_2025.md docs/business/INVESTOR_PITCH.md demo-tools/PROFESSIONAL_DEMO_SUMMARY.md)
+          files=(data/cost-analysis.json docs/archive/generated/development-costs/analysis.md)
           before=$(sha256sum "${files[@]}")
           ./scripts/update-cost-analysis.sh
           test "$before" = "$(sha256sum "${files[@]}")"
@@ -61,11 +59,7 @@ jobs:
           if-no-files-found: error
           path: |
             data/cost-analysis.json
-            README.md
-            docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md
-            docs/business/PRODUCT_SUMMARY_2025.md
-            docs/business/INVESTOR_PITCH.md
-            demo-tools/PROFESSIONAL_DEMO_SUMMARY.md
+            docs/archive/generated/development-costs/analysis.md
 
   publish:
     needs: validate
@@ -101,13 +95,11 @@ jobs:
             repeatability checks passed before these outputs were published.
 
             Reported CSV costs are estimates, not verified bills. Fixed staff hours
-            and historical usage remain assumptions; see the cost analysis document.
+            and historical usage remain assumptions. Outputs are limited to the standalone
+            archival report and structured data; no product documents are changed.
 
             Generated with GITHUB_TOKEN: downstream PR CI may require a manual run.
           add-paths: |
             data/cost-analysis.json
-            README.md
-            docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md
-            docs/business/PRODUCT_SUMMARY_2025.md
-            docs/business/INVESTOR_PITCH.md
-            demo-tools/PROFESSIONAL_DEMO_SUMMARY.md
+            docs/archive/generated/development-costs/analysis.md
+

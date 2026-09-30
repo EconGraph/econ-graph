@@ -345,7 +345,7 @@ useful but out of date.
 
 | Doc | Verdict | Why |
 |---|---|---|
-| `docs/business/PRODUCT_SUMMARY_2025.md` | Update | Claims OECD data and real-time features that don't exist. Its bad metrics ("0 lines", "99.9%") are rewritten daily by `scripts/update-cost-analysis.sh`, so fix or drop that script step before archiving it |
+| `docs/business/PRODUCT_SUMMARY_2025.md` | Update | Claims OECD data and real-time features that don't exist. Historical code counts and quality claims need review before archiving it |
 | `docs/business/INVESTOR_PITCH.md` | Update | Its roadmap and pricing belong in ROADMAP and the plans doc. Its customer quotes have no source and should be removed before it is shared |
 | [`docs/technical/GLOBAL_ANALYSIS_SUMMARY.md`](../archive/technical/GLOBAL_ANALYSIS_SUMMARY.md) | Archived | A third copy of the global roadmap. Its Jest references are stale |
 | `docs/technical/GLOBAL_ANALYSIS_FEATURES.md` | Update | Cut it down to what is actually built |
@@ -377,10 +377,11 @@ useful but out of date.
 
 ### Other docs with stale roadmap sections
 
-- **`README.md` (root).** Its project structure still shows `backend/src` and calls the backend Axum (it is warp). The "Development Cost Transparency" block appears twice, and the file ends with trailing "CI trigger" lines.
+- **`README.md` (root).** Its project structure still shows `backend/src` and calls the backend Axum (it is warp). The file ends with trailing "CI trigger" lines.
 - **`personas/frontend-developer.md`.** Its "Current Project Focus" section repeats the global roadmap, and its testing guidance still uses Jest.
 - **`personas/backend-engineer.md`.** Its crate list is out of date, and "Future Considerations" appears twice.
 - **`personas/security-engineer.md`.** It cites `backend/src/auth/services.rs`.
 
 Guides not listed here, such as deployment, testing and API reference docs, are not
 roadmaps and were left alone.
+
