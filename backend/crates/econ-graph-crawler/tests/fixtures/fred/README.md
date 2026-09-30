@@ -10,3 +10,10 @@ effect on 2026-04-28 clamped to that `realtime_start` and a later revision to an
 QA must check against the live API that FRED clamps `realtime_start` to the requested window
 start for rows already in effect on it, as these fixtures assume. The adapter drops rows starting
 before the known vintage either way.
+
+`observations_gdp_e2e.json` is `observations_gdp.json` plus one appended vintage row for a new
+quarter (2026-04-01). It backs the release end-to-end stack's single-shot seed
+(`tests/fixtures/e2e-seed.json`, run by `seed-fixtures`), which only ever calls `fetch_series`
+once and so never exercises the incremental path — it needs a fixture that already has every
+vintage in one response. It's kept separate from `observations_gdp.json` so the adapter's own
+full-fetch unit tests keep their original, smaller fixture.

@@ -6,7 +6,7 @@
       "external_id": "GDP",
       "routes": [
         { "method": "GET", "path": "/series", "fixture": "fred/series_gdp.json" },
-        { "method": "GET", "path": "/series/observations", "fixture": "fred/observations_gdp.json" }
+        { "method": "GET", "path": "/series/observations", "fixture": "fred/observations_gdp_e2e.json" }
       ]
     },
     {
