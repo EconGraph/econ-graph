@@ -9,7 +9,7 @@ use crate::models::data_source::{DataSource, NewDataSource};
 use crate::models::economic_series::{EconomicSeries, NewEconomicSeries};
 use crate::models::series_metadata::{NewSeriesMetadata, SeriesMetadata};
 use crate::schema::{economic_series, series_metadata};
-use diesel::result::{DatabaseErrorKind, Error as DieselError};
+use diesel::result::Error as DieselError;
 
 static MIGRATED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
 
@@ -65,10 +65,10 @@ async fn new_source(pool: &DatabasePool) -> DataSource {
 
 fn bds_dataset(source_id: Uuid) -> NewDataset {
     let mut state = DatasetComponent::new("state", "State", ComponentType::String);
-    state.codes = Some(BTreeMap::from([
-        ("06".to_string(), "California".to_string()),
-        ("36".to_string(), "New York".to_string()),
-    ]));
+    state.codes = Some(vec![
+        Code::new("06", "California"),
+        Code::new("36", "New York"),
+    ]);
     let mut new_dataset = NewDataset::long(
         source_id,
         "BDS",
@@ -127,14 +127,21 @@ fn new_metadata(source_id: Uuid, external_id: &str) -> NewSeriesMetadata {
     }
 }
 
-fn assert_db_error(result: AppResult<impl std::fmt::Debug>, kind: DatabaseErrorKind) {
+/// The constraint a failed write violated.
+fn violated<T: std::fmt::Debug>(result: Result<T, DieselError>) -> String {
     match result {
-        Err(AppError::Database(DieselError::DatabaseError(actual, info))) => assert!(
-            std::mem::discriminant(&actual) == std::mem::discriminant(&kind),
-            "expected {kind:?}, got {actual:?}: {}",
-            info.message()
-        ),
-        other => panic!("expected a {kind:?} database error, got {other:?}"),
+        Err(DieselError::DatabaseError(_, info)) => info
+            .constraint_name()
+            .unwrap_or_else(|| panic!("no constraint named: {}", info.message()))
+            .to_string(),
+        other => panic!("expected a constraint violation, got {other:?}"),
+    }
+}
+
+fn violated_app<T: std::fmt::Debug>(result: AppResult<T>) -> String {
+    match result {
+        Err(AppError::Database(e)) => violated::<T>(Err(e)),
+        other => panic!("expected a database error, got {other:?}"),
     }
 }
 
@@ -173,13 +180,13 @@ async fn dataset_round_trips_components() {
         .collect();
     assert_eq!(names, ["geo_level", "state", "variable"]);
     assert_eq!(
-        created.dimensions.0[1].codes.as_ref().unwrap()["06"],
-        "California"
+        created.dimensions.0[1].codes.as_ref().unwrap()[0],
+        Code::new("06", "California")
     );
 
-    assert_db_error(
-        Dataset::create(&pool, &new_dataset).await,
-        DatabaseErrorKind::UniqueViolation,
+    assert_eq!(
+        violated_app(Dataset::create(&pool, &new_dataset).await),
+        "datasets_source_code_key"
     );
 }
 
@@ -196,16 +203,7 @@ async fn database_rejects_undeclared_default_measure() {
         .values(&new_dataset)
         .execute(&mut conn)
         .await;
-    assert!(
-        matches!(
-            result,
-            Err(DieselError::DatabaseError(
-                DatabaseErrorKind::CheckViolation,
-                _
-            ))
-        ),
-        "{result:?}"
-    );
+    assert_eq!(violated(result), "datasets_default_measure_declared");
 }
 
 #[tokio::test]
@@ -254,6 +252,39 @@ async fn dimensioned_series_round_trips_and_filters() {
         .expect("create metadata");
     assert_eq!(meta.dataset_id, Some(dataset.id));
     assert_eq!(meta.dimensions, state_dims("06"));
+
+    // get_or_create on an existing row updates the dataset columns too.
+    let mut rediscovered = new_metadata(source.id, "BDS/state.06.ESTAB");
+    rediscovered.dataset_id = Some(dataset.id);
+    rediscovered.dimensions = [
+        ("geo_level", "state"),
+        ("state", "06"),
+        ("variable", "FIRM"),
+    ]
+    .into_iter()
+    .collect();
+    rediscovered.default_measure = Some(VALUE_MEASURE.to_string());
+    let updated =
+        SeriesMetadata::get_or_create(&pool, source.id, "BDS/state.06.ESTAB", &rediscovered)
+            .await
+            .expect("update metadata");
+    assert_eq!(updated.id, meta.id);
+    assert_eq!(updated.dataset_id, Some(dataset.id));
+    assert_eq!(updated.dimensions, rediscovered.dimensions);
+    assert_eq!(updated.default_measure.as_deref(), Some(VALUE_MEASURE));
+
+    // A rediscovery with no dataset clears all three.
+    let cleared = SeriesMetadata::get_or_create(
+        &pool,
+        source.id,
+        "BDS/state.06.ESTAB",
+        &new_metadata(source.id, "BDS/state.06.ESTAB"),
+    )
+    .await
+    .expect("clear dataset columns");
+    assert_eq!(cleared.dataset_id, None);
+    assert!(cleared.dimensions.0.is_empty());
+    assert_eq!(cleared.default_measure, None);
 }
 
 #[tokio::test]
@@ -263,6 +294,9 @@ async fn unique_index_rejects_duplicate_dimension_key() {
     let dataset = Dataset::create(&pool, &bds_dataset(source.id))
         .await
         .unwrap();
+    let mut other = bds_dataset(source.id);
+    other.code = "BDS_OTHER".to_string();
+    let other = Dataset::create(&pool, &other).await.unwrap();
 
     let mut first = new_series(source.id, "BDS/state.06.ESTAB");
     first.dataset_id = Some(dataset.id);
@@ -272,36 +306,31 @@ async fn unique_index_rejects_duplicate_dimension_key() {
     let mut duplicate = new_series(source.id, "CENSUS_BDS_ESTAB_state_06");
     duplicate.dataset_id = Some(dataset.id);
     duplicate.dimensions = state_dims("06");
-    assert_db_error(
-        EconomicSeries::create(&pool, &duplicate).await,
-        DatabaseErrorKind::UniqueViolation,
+    assert_eq!(
+        violated_app(EconomicSeries::create(&pool, &duplicate).await),
+        "uq_economic_series_dataset_dimensions"
     );
+
+    // The same key in another dataset is a different series.
+    duplicate.dataset_id = Some(other.id);
+    EconomicSeries::create(&pool, &duplicate).await.unwrap();
 
     // series_metadata has the same index.
     let mut conn = pool.get().await.unwrap();
-    for external_id in ["BDS/state.06.ESTAB", "CENSUS_BDS_ESTAB_state_06"] {
-        let mut meta = new_metadata(source.id, external_id);
-        meta.dataset_id = Some(dataset.id);
-        meta.dimensions = state_dims("06");
-        let result = diesel::insert_into(series_metadata::table)
-            .values(&meta)
-            .execute(&mut conn)
-            .await;
-        if external_id.starts_with("BDS/") {
-            result.expect("first metadata row");
-        } else {
-            assert!(
-                matches!(
-                    result,
-                    Err(DieselError::DatabaseError(
-                        DatabaseErrorKind::UniqueViolation,
-                        _
-                    ))
-                ),
-                "{result:?}"
-            );
-        }
-    }
+    let mut meta = new_metadata(source.id, "BDS/state.06.ESTAB");
+    meta.dataset_id = Some(dataset.id);
+    meta.dimensions = state_dims("06");
+    diesel::insert_into(series_metadata::table)
+        .values(&meta)
+        .execute(&mut conn)
+        .await
+        .expect("first metadata row");
+    meta.external_id = "CENSUS_BDS_ESTAB_state_06".to_string();
+    let result = diesel::insert_into(series_metadata::table)
+        .values(&meta)
+        .execute(&mut conn)
+        .await;
+    assert_eq!(violated(result), "uq_series_metadata_dataset_dimensions");
 }
 
 #[tokio::test]
@@ -332,38 +361,220 @@ async fn series_dataset_must_belong_to_its_source() {
     let mut series = new_series(source.id, "BDS/state.06.ESTAB");
     series.dataset_id = Some(dataset.id);
     series.dimensions = state_dims("06");
-    assert_db_error(
-        EconomicSeries::create(&pool, &series).await,
-        DatabaseErrorKind::ForeignKeyViolation,
+    assert_eq!(
+        violated_app(EconomicSeries::create(&pool, &series).await),
+        "economic_series_dataset_source_fkey"
     );
+
+    let mut meta = new_metadata(source.id, "BDS/state.06.ESTAB");
+    meta.dataset_id = Some(dataset.id);
+    meta.dimensions = state_dims("06");
+    let mut conn = pool.get().await.unwrap();
+    let result = diesel::insert_into(series_metadata::table)
+        .values(&meta)
+        .execute(&mut conn)
+        .await;
+    assert_eq!(violated(result), "series_metadata_dataset_source_fkey");
 }
 
 #[tokio::test]
-async fn database_rejects_non_string_dimension_values() {
+async fn database_rejects_malformed_dimensions() {
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let dataset = Dataset::create(&pool, &bds_dataset(source.id))
+        .await
+        .unwrap();
+    let mut conn = pool.get().await.unwrap();
+
+    for table in ["economic_series", "series_metadata"] {
+        let cases = [
+            (
+                Some(dataset.id),
+                r#"{"state": 6}"#,
+                "dimensions_is_string_object",
+            ),
+            (
+                Some(dataset.id),
+                r#"{"state": ["06"]}"#,
+                "dimensions_is_string_object",
+            ),
+            (
+                Some(dataset.id),
+                r#"{"state": []}"#,
+                "dimensions_is_string_object",
+            ),
+            (
+                Some(dataset.id),
+                r#"{"state": null}"#,
+                "dimensions_is_string_object",
+            ),
+            (Some(dataset.id), r#"["06"]"#, "dimensions_is_string_object"),
+            (None, r#"{"state": "06"}"#, "dimensions_need_dataset"),
+        ];
+        for (dataset_id, dimensions, constraint) in cases {
+            let result = diesel::sql_query(format!(
+                "INSERT INTO {table} (source_id, external_id, title, frequency, dataset_id, \
+                 dimensions) VALUES ($1, $2, 'Bad', 'Annual', $3, $4::jsonb)"
+            ))
+            .bind::<diesel::sql_types::Uuid, _>(source.id)
+            .bind::<diesel::sql_types::Text, _>(format!("BAD_{}", Uuid::new_v4()))
+            .bind::<diesel::sql_types::Nullable<diesel::sql_types::Uuid>, _>(dataset_id)
+            .bind::<diesel::sql_types::Text, _>(dimensions)
+            .execute(&mut conn)
+            .await;
+            assert_eq!(
+                violated(result),
+                format!("{table}_{constraint}"),
+                "{table} {dimensions}"
+            );
+        }
+
+        let result = diesel::sql_query(format!(
+            "INSERT INTO {table} (source_id, external_id, title, frequency, default_measure) \
+             VALUES ($1, $2, 'Bad', 'Annual', 'value')"
+        ))
+        .bind::<diesel::sql_types::Uuid, _>(source.id)
+        .bind::<diesel::sql_types::Text, _>(format!("BAD_{}", Uuid::new_v4()))
+        .execute(&mut conn)
+        .await;
+        assert_eq!(
+            violated(result),
+            format!("{table}_default_measure_needs_dataset")
+        );
+    }
+}
+
+#[tokio::test]
+async fn database_rejects_components_rust_cannot_read() {
     let pool = test_pool().await;
     let source = new_source(&pool).await;
     let mut conn = pool.get().await.unwrap();
 
-    for bad in [r#"{"state": 6}"#, r#"["06"]"#] {
+    let cases = [
+        ("dimensions", r#"{}"#),
+        ("dimensions", r#"[5]"#),
+        ("dimensions", r#"[{"name": "state", "type": "string"}]"#),
+        (
+            "attributes",
+            r#"[{"name": "f", "label": "F", "type": "time"}]"#,
+        ),
+        (
+            "attributes",
+            r#"[{"name": 1, "label": "F", "type": "string"}]"#,
+        ),
+        (
+            "measures",
+            r#"[{"name": "value", "label": "Value", "type": "decimal"}, 5]"#,
+        ),
+        (
+            "dimensions",
+            r#"[{"name": "a", "label": "A", "type": "string", "unit": 5}]"#,
+        ),
+        (
+            "dimensions",
+            r#"[{"name": "a", "label": "A", "type": "string", "codes": "x"}]"#,
+        ),
+        (
+            "dimensions",
+            r#"[{"name": "a", "label": "A", "type": "string", "codes": [{"code": 1, "label": "One"}]}]"#,
+        ),
+        (
+            "dimensions",
+            r#"[{"name": "a", "label": "A", "type": "string", "codes": [{"code": "x"}]}]"#,
+        ),
+        (
+            "dimensions",
+            r#"[{"name": "a", "label": "A", "type": "string", "codes": [{"code": "x", "label": "X", "unit": []}]}]"#,
+        ),
+        (
+            "dimensions",
+            r#"[{"name": "a", "label": "A", "type": "string", "codelist": {}}]"#,
+        ),
+    ];
+    for (column, components) in cases {
+        let result = diesel::sql_query(format!(
+            "INSERT INTO datasets (source_id, code, name, {column}) VALUES ($1, $2, 'Bad', $3::jsonb)"
+        ))
+        .bind::<diesel::sql_types::Uuid, _>(source.id)
+        .bind::<diesel::sql_types::Text, _>(format!("BAD_{}", Uuid::new_v4()))
+        .bind::<diesel::sql_types::Text, _>(components)
+        .execute(&mut conn)
+        .await;
+        assert_eq!(
+            violated(result),
+            format!("datasets_{column}_valid"),
+            "{components}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn database_rejects_empty_or_non_array_measures_with_a_check() {
+    // Each value must fail a named check constraint, never raise a runtime
+    // error such as "cannot get array length of a non-array".
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let mut conn = pool.get().await.unwrap();
+
+    for measures in [r#"[]"#, r#"{}"#, r#""value""#, r#"5"#] {
         let result = diesel::sql_query(
-            "INSERT INTO economic_series (source_id, external_id, title, frequency, dimensions) \
-             VALUES ($1, $2, 'Bad', 'Annual', $3::jsonb)",
+            "INSERT INTO datasets (source_id, code, name, measures) VALUES ($1, $2, 'Bad', $3::jsonb)",
         )
         .bind::<diesel::sql_types::Uuid, _>(source.id)
         .bind::<diesel::sql_types::Text, _>(format!("BAD_{}", Uuid::new_v4()))
-        .bind::<diesel::sql_types::Text, _>(bad)
+        .bind::<diesel::sql_types::Text, _>(measures)
         .execute(&mut conn)
         .await;
+        let constraint = violated(result);
         assert!(
-            matches!(
-                result,
-                Err(DieselError::DatabaseError(
-                    DatabaseErrorKind::CheckViolation,
-                    _
-                ))
-            ),
-            "{bad}: {result:?}"
+            constraint == "datasets_measures_valid"
+                || constraint == "datasets_default_measure_declared",
+            "{measures}: {constraint}"
         );
+    }
+}
+
+#[tokio::test]
+async fn used_dataset_cannot_be_deleted_but_its_source_can() {
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let dataset = Dataset::create(&pool, &bds_dataset(source.id))
+        .await
+        .unwrap();
+    let mut series = new_series(source.id, "BDS/state.06.ESTAB");
+    series.dataset_id = Some(dataset.id);
+    series.dimensions = state_dims("06");
+    let series = EconomicSeries::create(&pool, &series).await.unwrap();
+
+    let mut conn = pool.get().await.unwrap();
+    let result = diesel::delete(datasets::table.find(dataset.id))
+        .execute(&mut conn)
+        .await;
+    assert_eq!(violated(result), "economic_series_dataset_source_fkey");
+
+    diesel::delete(crate::schema::data_sources::table.find(source.id))
+        .execute(&mut conn)
+        .await
+        .expect("deleting the source cascades");
+    assert_eq!(Dataset::find_by_id(&pool, dataset.id).await.unwrap(), None);
+    let left: i64 = economic_series::table
+        .find(series.id)
+        .count()
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}
+
+fn assert_invalid(dataset: &NewDataset, expected: &str) {
+    match dataset.validate_components() {
+        Err(AppError::ValidationError(msg)) => {
+            assert!(
+                msg.contains(expected),
+                "{msg:?} does not mention {expected:?}"
+            )
+        }
+        other => panic!("expected a validation error mentioning {expected:?}, got {other:?}"),
     }
 }
 
@@ -378,38 +589,103 @@ fn validate_components_catches_what_the_database_cannot() {
         "State again",
         ComponentType::String,
     ));
-    assert!(duplicate.validate_components().is_err());
+    assert_invalid(&duplicate, "more than once");
 
     let mut undeclared = bds_dataset(source_id);
     undeclared.default_measure = "firms".to_string();
-    assert!(undeclared.validate_components().is_err());
+    assert_invalid(&undeclared, "is not one of its measures");
 
     let mut no_measures = bds_dataset(source_id);
     no_measures.measures.0.clear();
-    assert!(no_measures.validate_components().is_err());
+    assert_invalid(&no_measures, "declares no measures");
+
+    let mut both = wdi_dataset(source_id);
+    both.dimensions.0[1].codes = Some(vec![Code::new("USA", "United States")]);
+    assert_invalid(&both, "both codes and codelist");
+
+    let mut repeated_code = bds_dataset(source_id);
+    repeated_code.dimensions.0[1]
+        .codes
+        .as_mut()
+        .unwrap()
+        .push(Code::new("06", "California again"));
+    assert_invalid(&repeated_code, "lists code \"06\" more than once");
+
+    let mut unknown_codelist = wdi_dataset(source_id);
+    unknown_codelist.dimensions.0[1].codelist = Some("planets".to_string());
+    assert_invalid(&unknown_codelist, "unknown codelist \"planets\"");
+
+    assert!(wdi_dataset(source_id).validate_components().is_ok());
 
     let mut blank = bds_dataset(source_id);
     blank.dimensions.0[0].name = " ".to_string();
-    assert!(blank.validate_components().is_err());
+    assert_invalid(&blank, "no name");
+}
+
+/// The WDI shape: `indicator` has an inline code list with a unit per code, `area` names the
+/// shared `countries` code list.
+fn wdi_dataset(source_id: Uuid) -> NewDataset {
+    let mut indicator = DatasetComponent::new("indicator", "Indicator", ComponentType::String);
+    indicator.codes = Some(vec![Code {
+        code: "NY.GDP.PCAP.CD".to_string(),
+        label: "GDP per capita".to_string(),
+        unit: Some("current US$".to_string()),
+        description: Some("Gross domestic product divided by midyear population".to_string()),
+    }]);
+    let mut area = DatasetComponent::new("area", "Country or area", ComponentType::String);
+    area.codelist = Some(COUNTRIES_CODELIST.to_string());
+    NewDataset::long(
+        source_id,
+        "WDI",
+        "World Development Indicators",
+        vec![indicator, area],
+    )
+}
+
+#[tokio::test]
+async fn dataset_round_trips_both_code_list_forms() {
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let new_dataset = wdi_dataset(source.id);
+
+    let created = Dataset::create(&pool, &new_dataset).await.expect("create");
+    assert_eq!(created.dimensions, new_dataset.dimensions);
+    let [indicator, area] = created.dimensions.0.as_slice() else {
+        panic!("expected two dimensions");
+    };
+    assert_eq!(
+        indicator.codes.as_ref().unwrap()[0].unit.as_deref(),
+        Some("current US$")
+    );
+    assert_eq!(indicator.codelist, None);
+    assert_eq!(area.codelist.as_deref(), Some("countries"));
+    assert_eq!(area.codes, None);
 }
 
 #[test]
 fn components_serialize_to_the_documented_json_shape() {
-    let mut state = DatasetComponent::new("state", "State", ComponentType::String);
-    state.codes = Some(BTreeMap::from([(
-        "06".to_string(),
-        "California".to_string(),
-    )]));
-    let json = serde_json::to_value(DatasetComponents(vec![
-        state,
-        DatasetComponent::value_measure(),
-    ]))
-    .unwrap();
+    let json = serde_json::to_value(&wdi_dataset(Uuid::nil()).dimensions).unwrap();
+    let expected = serde_json::json!([
+        {
+            "name": "indicator",
+            "label": "Indicator",
+            "type": "string",
+            "codes": [{
+                "code": "NY.GDP.PCAP.CD",
+                "label": "GDP per capita",
+                "unit": "current US$",
+                "description": "Gross domestic product divided by midyear population",
+            }],
+        },
+        {"name": "area", "label": "Country or area", "type": "string", "codelist": "countries"},
+    ]);
+    assert_eq!(json, expected);
     assert_eq!(
-        json,
-        serde_json::json!([
-            {"name": "state", "label": "State", "type": "string", "codes": {"06": "California"}},
-            {"name": "value", "label": "Value", "type": "decimal"},
-        ])
+        serde_json::to_value(DatasetComponents(vec![DatasetComponent::value_measure()])).unwrap(),
+        serde_json::json!([{"name": "value", "label": "Value", "type": "decimal"}])
     );
+
+    // Hand-written definitions (optional keys left out) parse back to the same value.
+    let parsed: DatasetComponents = serde_json::from_value(expected).unwrap();
+    assert_eq!(parsed, wdi_dataset(Uuid::nil()).dimensions);
 }

@@ -47,9 +47,14 @@ thiserror.workspace = true
 # Lazy static initialization
 once_cell.workspace = true
 
+[build-dependencies]
+econ-graph-flags-build = { path = "../econ-graph-flags-build" }
+
 # Test dependencies
 [dev-dependencies]
+econ-graph-auth = { path = "../econ-graph-auth", features = ["testkit"] }
 econ-graph-crawler = { path = "../econ-graph-crawler" }
+reqwest.workspace = true
 serial_test.workspace = true
 tokio-test.workspace = true
 testcontainers.workspace = true

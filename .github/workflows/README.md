@@ -1,167 +1,36 @@
 # CI/CD Workflows
 
-This directory contains the CI/CD workflows for the EconGraph project, cleaned up and optimized for better maintainability and reduced costs.
+The workflow YAML files in this directory define what runs. See the [CI pipeline guide](../../docs/development/CI_CD_PIPELINE.md) for job dependencies, selection rules, commands and limitations.
 
-## Active Workflow Files
+## Workflow inventory
 
-### Core Tests (`ci-core.yml`) - **PRIMARY WORKFLOW**
-**Purpose**: Comprehensive testing that runs on every commit
-- 20+ parallel backend test jobs covering all service layers
-- Admin Frontend tests (runs in parallel, doesn't gate other tests)
-- Frontend tests, quality checks, security audits, and E2E tests
-- All essential functionality validation
+| File | Automatic triggers | Purpose |
+| --- | --- | --- |
+| [ci-core.yml](ci-core.yml) | Push to main, develop, optimize/ci-core-primary and release/**; PRs into any branch, subject to paths-ignore | Backend build and tests, frontend tests, quality, audit, licenses and Docker validation |
+| [docs-checks.yml](docs-checks.yml) | Push to main/develop; all PRs, including docs-only and stacked PRs | Markdown lint and offline relative-link checks |
+| [feature-flags.yml](feature-flags.yml) | Push to main/develop/release/**; train-* tags; all PRs; Monday 06:17 UTC | Flag validation and generated-file consistency |
+| [release-e2e.yml](release-e2e.yml) | PRs touching its listed application, Keycloak, release-stack or workflow paths | Chromium against a release frontend, real backend and PostgreSQL 18 with recorded fixtures |
+| [e2e-tests-nightly.yml](e2e-tests-nightly.yml) | Daily 02:00 UTC | Container-based desktop and mobile E2E suites |
+| [security.yml](security.yml) | Daily 02:00 UTC | Dependency audits, Trivy, CodeQL, licenses and Dockerfile scanning |
+| [accessibility-tests.yml](accessibility-tests.yml) | Monday 09:00 UTC | Accessibility static/runtime checks and manual-testing guidance |
+| [update-cost-analysis.yml](update-cost-analysis.yml) | Daily 06:00 UTC | Recalculate cost documentation and attempt to publish changes |
+| [crawler-integration-test.yml](crawler-integration-test.yml) | None | Enqueue and execute a real source crawl; needs network access and source credentials where required |
+| [playwright-tests.yml](playwright-tests.yml) | None | Legacy Playwright and Grafana checks |
+| [playwright-tests-comprehensive.yml](playwright-tests-comprehensive.yml) | None | Legacy comprehensive Playwright suite |
+| [playwright-tests-deployed.yml](playwright-tests-deployed.yml) | None | Playwright against an explicitly deployed target |
+| [ci-experimental.yml](ci-experimental.yml) | None | Optional RAM-disk experiment |
+| [ramdisk-build-cache.yml](ramdisk-build-cache.yml) | None | Manual build-cache experiment |
 
-**Triggers**: Push to main/develop, PRs, manual dispatch
+All listed workflows support manual dispatch. Scheduled times are UTC; GitHub may delay scheduled runs. The Playwright workflows do not run automatically on version tags. Admin Frontend Tests is a job in Core CI, not a separate workflow file.
 
-### Security (`security.yml`)
-**Purpose**: Daily security vulnerability scanning
-- Rust and NPM security audits
-- License compliance checking
+## Operational notes
 
-**Triggers**: Daily at 2 AM UTC, manual dispatch
+A green workflow does not imply every suite ran or every step passed. Inspect job conclusions and any continue-on-error steps. The [pipeline guide](../../docs/development/CI_CD_PIPELINE.md#known-coverage-limitations) records current coverage limitations.
 
-### Crawler Integration Test (`crawler-integration-test.yml`)
-**Purpose**: Manual testing of data crawler functionality
-- Tests specific data source crawling
-- Validates migration generation
+Core CI builds and smoke-tests Docker images; it does not publish or deploy them. Release E2E is independent of the optional Core CI E2E jobs.
 
-**Triggers**: Manual dispatch only
+## Validation
 
-### Admin Frontend Tests (`admin-frontend-tests.yml`)
-**Purpose**: Comprehensive testing of the admin frontend interface
-- Unit tests, integration tests, and E2E tests for admin UI
-- Build verification and quality checks
-- Runs independently and doesn't gate other workflows
+Run Markdown lint and relative-link checks as defined in [docs-checks.yml](docs-checks.yml). The repository's [workflow validation script](../../ci/scripts/validate-ci-workflows.sh) checks YAML and basic job structure; it does not prove job-selection semantics. Its trigger check uses PyYAML's default loader, which can interpret the key on as boolean true, so trigger warnings require verification against the YAML.
 
-**Triggers**: Push/PR to admin-frontend, manual dispatch
-
-### Playwright Tests (`playwright-tests*.yml`)
-**Purpose**: End-to-end testing on version releases
-- Comprehensive E2E testing
-- Mobile and desktop browser testing
-
-**Triggers**: Version tags (v*)
-
-## Manual-Only Workflows
-
-### Experimental (`ci-experimental.yml`)
-**Purpose**: Performance testing and experimental features
-**Status**: Manual dispatch only
-
-### RAM Disk Build Cache (`ramdisk-build-cache.yml`)
-**Purpose**: Build performance optimization testing
-**Status**: Manual dispatch only
-
-## Workflow Dependencies
-
-```
-Core Tests (ci-core.yml)
-├── backend-smoke-tests
-├── admin-frontend-tests (parallel, non-gating)
-├── backend-database-tests (needs: backend-smoke-tests)
-├── backend-service-tests (needs: backend-smoke-tests)
-├── frontend-tests
-└── quality-checks
-```
-
-## Environment Variables
-
-All workflows share these environment variables:
-- `CARGO_TERM_COLOR: always` - Colored Rust output
-- `DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test` - Test database connection
-
-## Database Configuration
-
-All CI workflows now use **PostgreSQL 18** with the following benefits:
-- **UUIDv7 Support**: Native UUIDv7 generation with `uuidv7()` function
-- **Performance**: Better performance for UUID-based primary keys
-- **Future-Proof**: Latest PostgreSQL features and optimizations
-- **Consistency**: All test environments use the same PostgreSQL version
-
-## Benefits of This Structure
-
-1. **Easier to Understand**: Each workflow has a clear, focused purpose
-2. **Faster Feedback**: Core tests run independently and provide quick feedback
-3. **Better Debugging**: Issues are isolated to specific workflow files
-4. **Selective Running**: You can run specific types of tests manually
-5. **Maintainable**: Smaller files are easier to modify and review
-
-## Running Workflows
-
-### Automatic Triggers
-- **Push to main/develop**: All workflows run automatically
-- **Pull Requests**: All workflows run automatically
-
-### Manual Triggers
-- **Core Tests**: `gh workflow run ci-core.yml`
-- **Admin Frontend Tests**: `gh workflow run admin-frontend-tests.yml`
-- **Security Checks**: `gh workflow run security.yml`
-- **Crawler Integration**: `gh workflow run crawler-integration-test.yml`
-- **Experimental**: `gh workflow run ci-experimental.yml --field experiment=ramdisk`
-- **RAM Disk Cache**: `gh workflow run ramdisk-build-cache.yml`
-
-## Cleanup Summary
-
-- **Removed broken workflows** (ci-build.yml, ci-integration.yml, ci-security.yml) that had no active triggers
-- **Removed 9 experimental test workflows** that were disabled and causing confusion
-- **Removed backup and disabled workflow files** that were no longer needed
-- **Cleaned up excessive CI infrastructure** including unused scripts and documentation
-- **Consolidated to essential workflows** with clear purposes and triggers
-- **Maintained full test coverage** through the primary ci-core.yml workflow
-
-## Cost Optimization
-
-This cleanup eliminates:
-- Dead workflows that could trigger accidentally
-- Redundant CI infrastructure and documentation
-- Confusion about which workflows are active
-- Potential costs from unused or experimental workflows
-
-The remaining workflows provide comprehensive testing while being clearly organized and cost-effective.
-
-## Workflow Validation
-
-### Automated Validation Script
-
-Use the `ci/scripts/validate-ci-workflows.sh` script to validate all GitHub Actions CI/CD workflows before committing changes:
-
-```bash
-# Run CI/CD workflow validation
-./ci/scripts/validate-ci-workflows.sh
-```
-
-### Validation Checks
-
-The script performs the following checks:
-
-1. **YAML Syntax Validation**: Ensures all workflow files have valid YAML syntax
-2. **Job Structure Validation**: Verifies all jobs have proper `steps` sections
-3. **Orphaned Workflow Detection**: Identifies workflows with no active triggers
-4. **Naming Consistency**: Ensures workflows have descriptive names
-
-### Integration
-
-- **Pre-commit**: Run validation before committing workflow changes
-- **CI Pipeline**: Validation is integrated into the main CI pipeline
-- **Error Reporting**: Provides clear, actionable error messages with color-coded output
-
-### Common Issues Detected
-
-- **Invalid Job Definitions**: Jobs without `steps` sections (causes 0s duration failures)
-- **Orphaned Workflows**: Workflows from deleted branches showing as active in GitHub
-- **Malformed YAML**: Syntax errors that prevent workflow parsing
-- **Missing Triggers**: Workflows that can't be executed
-- **Poor Naming**: Workflows without descriptive names
-
-### Example Output
-
-```bash
-🔍 Validating GitHub Actions CI/CD workflows...
-📋 Checking YAML syntax...
-✅ ci-core.yml - Valid YAML syntax
-❌ ci-core.yml - Job structure issues found
-⚠️  experimental.yml - No active triggers (may be orphaned)
-📊 Validation Summary:
-❌ Found 1 validation errors
-💡 Fix the errors above before committing workflow changes
-```
+When changing workflow conditions, check actual jobs on both a PR and a push to main. A passing PR alone does not validate main-specific conditions.

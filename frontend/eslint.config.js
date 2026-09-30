@@ -8,6 +8,7 @@ import jsxA11y from 'eslint-plugin-jsx-a11y';
 import testingLibrary from 'eslint-plugin-testing-library';
 import jsdoc from 'eslint-plugin-jsdoc';
 import importPlugin from 'eslint-plugin-import';
+import noDeadButton from './eslint-rules/no-dead-button.js';
 
 export default [
   js.configs.recommended,
@@ -66,6 +67,7 @@ export default [
 
         // Vite globals
         import: 'readonly',
+        __FLAGS__: 'readonly', // build-time flags, see src/flags.ts
         importMeta: 'readonly',
 
         // Vitest globals
@@ -329,6 +331,52 @@ export default [
       '@typescript-eslint/no-unused-vars': 'off',
     },
   },
+  // Build-time flags (src/flags.ts): the flag files are read only by the Vite config at
+  // build time (src/flags.ts imports only their type), and `__FLAGS__` is only ever read as
+  // `__FLAGS__.<name>`, which the build replaces with a constant so flagged-off code is
+  // dropped.
+  {
+    files: ['src/**/*.{ts,tsx,js,jsx}'],
+    // flags.test.ts holds the probe strings that test these rules.
+    ignores: ['src/flags.ts', 'src/__tests__/flags.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/config/flags',
+                '**/config/flags/**',
+                '**/*.flagd.json',
+                '**/flags/release.json',
+                '**/flags/dev.json',
+              ],
+              message:
+                'Flag files are read at build time only. Use __FLAGS__.<name> (src/flags.ts).',
+            },
+          ],
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Literal[value=/config\\/flags|\\.flagd\\.json|flags\\/(release|dev)\\.json/]',
+          message: 'Flag files are read at build time only. Use __FLAGS__.<name> (src/flags.ts).',
+        },
+        {
+          selector:
+            'TemplateElement[value.raw=/config\\/flags|\\.flagd\\.json|flags\\/(release|dev)\\.json/]',
+          message: 'Flag files are read at build time only. Use __FLAGS__.<name> (src/flags.ts).',
+        },
+        {
+          selector: "Identifier[name='__FLAGS__']:not(MemberExpression[computed=false] > .object)",
+          message:
+            'Read build flags as __FLAGS__.<name>; __FLAGS__ itself does not exist in a build.',
+        },
+      ],
+    },
+  },
   // Enhanced import validation
   {
     files: ['**/*.{ts,tsx}'],
@@ -338,5 +386,12 @@ export default [
       // Warn about unused imports (handled by no-unused-vars)
       '@typescript-eslint/no-unused-vars': 'warn',
     },
+  },
+  // Buttons that do nothing when clicked (ECO-247). Tests and stories render bare buttons.
+  {
+    files: ['src/**/*.tsx'],
+    ignores: ['**/*.test.tsx', '**/__tests__/**', '**/__mocks__/**', '**/*.stories.tsx'],
+    plugins: { local: { rules: { 'no-dead-button': noDeadButton } } },
+    rules: { 'local/no-dead-button': 'error' },
   },
 ];

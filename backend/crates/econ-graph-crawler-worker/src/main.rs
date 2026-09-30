@@ -10,7 +10,8 @@
 //! because `econ-graph-crawler` must not depend on the SEC crate.
 //!
 //! Environment: `DATABASE_URL` (required), `FRED_API_KEY` / `BLS_API_KEY` / `BEA_API_KEY` /
-//! `CENSUS_API_KEY` (optional), `RUST_LOG` (default `info`), `CRAWLER_DATA_DIR` (reference data
+//! `CENSUS_API_KEY` (the worker starts without them; FRED, BEA and Census jobs fail with `Auth`
+//! when their key is missing), `RUST_LOG` (default `info`), `CRAWLER_DATA_DIR` (reference data
 //! files such as `us_states.csv`; defaults to the crawler crate's `data/` directory in the source
 //! tree, and the image sets `/app/data`), `REFERENCE_DATA_DIR` (shared reference data such as
 //! `countries.csv`; defaults to econ-graph-core's `data/` directory, and the image sets
@@ -21,8 +22,10 @@
 //!
 //! Metrics: unless `--metrics-addr` / `CRAWLER_METRICS_ADDR` is empty or `off`, an HTTP server on
 //! that address (default `0.0.0.0:9102`) serves `GET /metrics` (Prometheus text format) and
-//! `GET /healthz` (200 while the worker loop runs), and a background task refreshes the
-//! `crawler_queue_*` gauges from `crawl_queue` every `--queue-metrics-interval-secs`.
+//! `GET /healthz` (200 while the worker loop runs). Background tasks refresh the `crawler_queue_*`
+//! gauges from `crawl_queue` every `--queue-metrics-interval-secs`, and the `crawler_coverage_*`
+//! gauges (per-source coverage and freshness, as `crawler coverage` prints) every
+//! `--coverage-metrics-interval-secs`.
 //!
 //! Scheduler: unless `--scheduler false` / `CRAWLER_SCHEDULER=false`, a background
 //! `econ_graph_crawler::scheduler::RefreshScheduler` enqueues `fetch_series` jobs for due series
@@ -96,6 +99,16 @@ struct Args {
         default_value_t = 30
     )]
     queue_metrics_interval_secs: u64,
+
+    /// Seconds between coverage gauge refreshes (only with the metrics server). Keep it well under
+    /// 900: the gauges count as stale after 15 minutes without a refresh, and CrawlerCoverageStale
+    /// fires 30 minutes after that.
+    #[arg(
+        long,
+        env = "CRAWLER_COVERAGE_METRICS_INTERVAL_SECS",
+        default_value_t = 300
+    )]
+    coverage_metrics_interval_secs: u64,
 
     /// Run the refresh scheduler (enqueues due series refreshes and weekly catalog discovery).
     #[arg(
@@ -229,6 +242,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         background.push(tokio::spawn(metrics::queue_gauge_loop(
             ctx.pool.clone(),
             Duration::from_secs(args.queue_metrics_interval_secs.max(1)),
+            stop_rx.clone(),
+        )));
+        // Coverage covers every refreshable source, whatever `--sources` this worker processes.
+        background.push(tokio::spawn(metrics::coverage_gauge_loop(
+            ctx.pool.clone(),
+            econ_graph_crawler::coverage::covered_sources(&registry.ids()),
+            Duration::from_secs(args.coverage_metrics_interval_secs.max(1)),
             stop_rx,
         )));
     } else {

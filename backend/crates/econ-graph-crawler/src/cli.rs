@@ -11,6 +11,7 @@
 //! crawler enqueue  --source FRED --series GDP,UNRATE [--priority N]
 //! crawler discover --source FRED [--priority N]
 //! crawler status   [--json]
+//! crawler coverage [--json] [--fail-under PCT]   # per-source coverage and freshness
 //! crawler sources
 //! crawler fetch    --source FRED --series GDP [--full]   # one fetch + persist, in-process (debugging)
 //! ```
@@ -27,6 +28,7 @@ use econ_graph_core::models::{CrawlQueueItem, JobKind, NewCrawlQueueItem};
 use econ_graph_core::DatabasePool;
 
 use crate::adapter::{AdapterRegistry, ApiKeys, CrawlCtx};
+use crate::coverage::{covered_sources, crawl_coverage, SourceCoverage};
 use crate::dataset::DatasetCatalog;
 use crate::http::{HttpConfig, HttpFetcher};
 use crate::persist;
@@ -88,6 +90,16 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Print, per enabled source the refresh scheduler refreshes, series discovered, series with
+    /// data, coverage percent, series overdue for refresh and the oldest successful crawl.
+    Coverage {
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+        /// Exit with an error when any source's coverage is below this percentage (e.g. 95).
+        #[arg(long, value_name = "PCT", value_parser = parse_percent)]
+        fail_under: Option<f64>,
+    },
     /// List known sources, their policy and whether their API key is configured.
     Sources,
     /// Fetch ONE series now, in this process, through the adapter and the worker's persistence
@@ -103,6 +115,20 @@ pub enum Command {
         #[arg(long)]
         full: bool,
     },
+}
+
+/// Parses a percentage in `[0, 100]`.
+fn parse_percent(s: &str) -> Result<f64, String> {
+    let p: f64 = s
+        .trim()
+        .trim_end_matches('%')
+        .parse()
+        .map_err(|e| format!("{s:?} is not a number: {e}"))?;
+    if (0.0..=100.0).contains(&p) {
+        Ok(p)
+    } else {
+        Err(format!("{p} is not between 0 and 100"))
+    }
 }
 
 /// Environment variable holding `source`'s API key, if the source uses one.
@@ -224,6 +250,24 @@ impl Cli {
                     Ok(format_status(&snapshot))
                 }
             }
+            Command::Coverage { json, fail_under } => {
+                let sources = covered_sources(&default_registry().ids());
+                let coverage = crawl_coverage(&pool, &sources).await?;
+                let out = if json {
+                    format!("{}\n", serde_json::to_string_pretty(&coverage)?)
+                } else {
+                    format_coverage(&coverage)
+                };
+                if let Some(target) = fail_under {
+                    let below = sources_below(&coverage, target);
+                    if !below.is_empty() {
+                        // Print the report first, so the failure comes with the numbers.
+                        print!("{out}");
+                        bail!("coverage below {target}% for {}", below.join(", "));
+                    }
+                }
+                Ok(out)
+            }
             Command::Fetch {
                 source,
                 series,
@@ -332,6 +376,40 @@ pub fn format_status(s: &CrawlerStatusSnapshot) -> String {
                 fmt_time(p.last_success)
             );
         }
+    }
+    out
+}
+
+/// Sources in `rows` below `target_percent` (including those with nothing discovered).
+pub fn sources_below(rows: &[SourceCoverage], target_percent: f64) -> Vec<&str> {
+    rows.iter()
+        .filter(|c| !c.meets(target_percent))
+        .map(|c| c.source.as_str())
+        .collect()
+}
+
+/// Text rendering of [`crawl_coverage`]'s result.
+pub fn format_coverage(rows: &[SourceCoverage]) -> String {
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "{:<12} {:>10} {:>9} {:>8} {:>7}  oldest success",
+        "SOURCE", "DISCOVERED", "WITH DATA", "COVERAGE", "OVERDUE"
+    );
+    for c in rows {
+        let percent = c
+            .percent
+            .map_or_else(|| "-".to_string(), |p| format!("{p:.1}%"));
+        let _ = writeln!(
+            out,
+            "{:<12} {:>10} {:>9} {:>8} {:>7}  {}",
+            c.source,
+            c.discovered,
+            c.with_data,
+            percent,
+            c.overdue,
+            fmt_time(c.oldest_success)
+        );
     }
     out
 }
@@ -480,6 +558,25 @@ mod tests {
         );
         assert_eq!(parse(&["sources"]).unwrap().command, Command::Sources);
         assert_eq!(
+            parse(&["coverage"]).unwrap().command,
+            Command::Coverage {
+                json: false,
+                fail_under: None
+            }
+        );
+        assert_eq!(
+            parse(&["coverage", "--json", "--fail-under", "95%"])
+                .unwrap()
+                .command,
+            Command::Coverage {
+                json: true,
+                fail_under: Some(95.0)
+            }
+        );
+        for bad in ["x", "-1", "101"] {
+            assert!(parse(&["coverage", "--fail-under", bad]).is_err(), "{bad}");
+        }
+        assert_eq!(
             parse(&["fetch", "--source", "FRED", "--series", "GDP"])
                 .unwrap()
                 .command,
@@ -529,6 +626,7 @@ mod tests {
         }
         assert!(out.contains("FRED_API_KEY set (required)"), "{out}");
         assert!(out.contains("BEA_API_KEY NOT SET (required)"), "{out}");
+        assert!(out.contains("CENSUS_API_KEY NOT SET (required)"), "{out}");
         assert!(!out.contains("secret-value"), "never print key values");
     }
 
@@ -546,6 +644,7 @@ mod tests {
                 retrying: 0,
                 failed_24h: 4,
                 last_success: None,
+                last_failure: None,
             }],
         };
         let out = format_status(&s);
@@ -553,6 +652,128 @@ mod tests {
         assert!(out
             .lines()
             .any(|l| l.starts_with("FRED") && l.contains(" 3 ") && l.contains(" 4 ")));
+    }
+
+    #[test]
+    fn cli_coverage_text_rendering() {
+        let rows = vec![
+            SourceCoverage {
+                source: "FRED".into(),
+                discovered: 200,
+                with_data: 191,
+                percent: Some(95.5),
+                overdue: 2,
+                oldest_success: None,
+            },
+            SourceCoverage {
+                source: "BLS".into(),
+                discovered: 0,
+                with_data: 0,
+                percent: None,
+                overdue: 0,
+                oldest_success: None,
+            },
+        ];
+        let out = format_coverage(&rows);
+        let fred = out.lines().find(|l| l.starts_with("FRED")).unwrap();
+        assert!(fred.contains(" 200 ") && fred.contains(" 191 ") && fred.contains("95.5%"));
+        let bls = out.lines().find(|l| l.starts_with("BLS")).unwrap();
+        assert!(bls.contains(" - "), "{bls}");
+        assert_eq!(sources_below(&rows, 95.0), vec!["BLS"]);
+        assert_eq!(sources_below(&rows, 96.0), vec!["FRED", "BLS"]);
+    }
+
+    #[tokio::test]
+    async fn cli_coverage_against_db() {
+        // DB-backed; skipped without DATABASE_URL. Other tests leave FRED series behind, so this
+        // only checks what its own seeded series guarantees.
+        let Some((url, _guard)) = crate::testkit::lock_test_db("cli coverage").await else {
+            return;
+        };
+        let pool = econ_graph_core::create_pool(&url).await.unwrap();
+        let fred = persist::data_source_id(&pool, SourceId::Fred)
+            .await
+            .unwrap();
+        #[derive(diesel::QueryableByName)]
+        struct WasEnabled {
+            #[diesel(sql_type = diesel::sql_types::Bool)]
+            was_enabled: bool,
+        }
+        let was_enabled = {
+            use diesel::sql_types::Uuid as SqlUuid;
+            use diesel_async::RunQueryDsl;
+            let mut conn = pool.get().await.unwrap();
+            let prev: WasEnabled = diesel::sql_query(
+                "WITH prev AS (SELECT is_enabled FROM data_sources WHERE id = $1) \
+                 UPDATE data_sources SET is_enabled = TRUE WHERE id = $1 \
+                 RETURNING (SELECT is_enabled FROM prev) AS was_enabled",
+            )
+            .bind::<SqlUuid, _>(fred)
+            .get_result(&mut conn)
+            .await
+            .unwrap();
+            diesel::sql_query(
+                "INSERT INTO economic_series \
+                   (source_id, external_id, title, frequency, end_date, last_crawled_at) \
+                 VALUES ($1, 't_covcli_1', 't', 'Monthly', DATE '2026-01-01', NOW()) \
+                 ON CONFLICT (source_id, external_id) DO UPDATE SET end_date = DATE '2026-01-01', \
+                     is_active = TRUE, last_crawled_at = NOW()",
+            )
+            .bind::<SqlUuid, _>(fred)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+            prev.was_enabled
+        };
+        // Catch a mid-assertion panic so the shared FRED row and t_covcli_1 series are always
+        // restored/cleaned up below, instead of leaking into other tests.
+        let assertions = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(async {
+            let run = |args: &[&str]| {
+                let mut full = vec!["crawler", "--database-url", url.as_str()];
+                full.extend_from_slice(args);
+                Cli::try_parse_from(full).unwrap().execute()
+            };
+
+            let out = run(&["coverage", "--json"]).await.unwrap();
+            let rows: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+            let expected: Vec<String> = covered_sources(&default_registry().ids())
+                .iter()
+                .map(|s| s.as_str().to_string())
+                .collect();
+            for r in &rows {
+                let source = r["source"].as_str().unwrap();
+                assert!(expected.iter().any(|e| e == source), "{source} not covered");
+            }
+            let fred_row = rows
+                .iter()
+                .find(|r| r["source"] == "FRED")
+                .expect("FRED row");
+            assert!(fred_row["discovered"].as_i64().unwrap() >= 1);
+            assert!(fred_row["with_data"].as_i64().unwrap() >= 1);
+            assert!(fred_row["oldest_success"].is_string());
+
+            let text = run(&["coverage"]).await.unwrap();
+            assert!(text.starts_with("SOURCE"), "{text}");
+            assert!(text.lines().any(|l| l.starts_with("FRED ")), "{text}");
+        }))
+        .await;
+
+        use diesel_async::RunQueryDsl;
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query("DELETE FROM economic_series WHERE external_id = 't_covcli_1'")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        diesel::sql_query("UPDATE data_sources SET is_enabled = $2 WHERE id = $1")
+            .bind::<diesel::sql_types::Uuid, _>(fred)
+            .bind::<diesel::sql_types::Bool, _>(was_enabled)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        if let Err(panic) = assertions {
+            std::panic::resume_unwind(panic);
+        }
     }
 
     #[tokio::test]

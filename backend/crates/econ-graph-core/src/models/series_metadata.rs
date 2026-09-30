@@ -111,10 +111,20 @@ pub struct UpdateSeriesMetadata {
     pub last_discovered_at: Option<DateTime<Utc>>,
     /// Whether this series is currently active
     pub is_active: bool,
+    /// Dataset this series belongs to; `None` leaves it unchanged, `Some(None)` clears it
+    pub dataset_id: Option<Option<Uuid>>,
+    /// Dimension values within the dataset; `None` leaves them unchanged
+    pub dimensions: Option<SeriesDimensions>,
+    /// Overrides the dataset's default measure; `None` leaves it unchanged, `Some(None)`
+    /// clears it
+    pub default_measure: Option<Option<String>>,
 }
 
 impl SeriesMetadata {
     /// Get or create series metadata
+    ///
+    /// Uses a generated id. Crawled series get stable ids from `econ_graph_crawler::persist`;
+    /// don't use this for them.
     pub async fn get_or_create(
         pool: &DatabasePool,
         source_id: Uuid,
@@ -150,6 +160,9 @@ impl SeriesMetadata {
                 api_endpoint: new_metadata.api_endpoint.clone(),
                 last_discovered_at: Some(Utc::now()),
                 is_active: new_metadata.is_active,
+                dataset_id: Some(new_metadata.dataset_id),
+                dimensions: Some(new_metadata.dimensions.clone()),
+                default_measure: Some(new_metadata.default_measure.clone()),
             };
 
             let updated = diesel::update(dsl::series_metadata.filter(dsl::id.eq(existing.id)))

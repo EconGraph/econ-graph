@@ -276,12 +276,45 @@ test_grafana_dashboard() {
 authenticate_grafana() {
     print_status "INFO" "Authenticating with Grafana..."
 
-    # Create a session by logging in
-    local login_response=$(curl -s -c /tmp/grafana_cookies.txt -X POST "$GRAFANA_URL/login" \
-        -H "Content-Type: application/json" \
-        -d '{"user":"admin","password":"admin123"}' 2>/dev/null)
+    # Password: GRAFANA_ADMIN_PASSWORD, else the grafana-admin Secret written by
+    # scripts/deploy/create-secrets.sh.
+    local grafana_password="${GRAFANA_ADMIN_PASSWORD:-}"
+    if [ -z "$grafana_password" ]; then
+        local encoded_password
+        if ! encoded_password=$(kubectl -n econ-graph get secret grafana-admin \
+            -o jsonpath='{.data.admin-password}' 2>/dev/null); then
+            print_status "ERROR" "Could not read Grafana admin password from Secret grafana-admin"
+            return 1
+        fi
+        if [ -z "$encoded_password" ]; then
+            print_status "ERROR" "Grafana admin password is missing from Secret grafana-admin"
+            return 1
+        fi
+        if ! grafana_password=$(printf '%s' "$encoded_password" | base64 -d 2>/dev/null) ||
+            [ -z "$grafana_password" ]; then
+            print_status "ERROR" "Could not decode Grafana admin password from Secret grafana-admin"
+            return 1
+        fi
+    fi
 
-    if [ -n "$login_response" ]; then
+    # Build the login body without putting the password on any command line
+    # (printf is a builtin; jq/python3 and curl read it from stdin), using a
+    # real JSON serializer rather than manual shell escaping.
+    local login_body
+    if command -v jq >/dev/null 2>&1; then
+        login_body=$(printf '%s' "$grafana_password" | jq -Rsc '{user: "admin", password: .}')
+    else
+        login_body=$(GRAFANA_PASSWORD="$grafana_password" python3 -c \
+            'import json, os; print(json.dumps({"user": "admin", "password": os.environ["GRAFANA_PASSWORD"]}))')
+    fi
+
+    # Create a session by logging in. -f makes curl fail (nonzero exit) on an
+    # HTTP error response, so success is judged from the exit status rather
+    # than from the response body being nonempty.
+    if printf '%s' "$login_body" |
+        curl -sSf -c /tmp/grafana_cookies.txt -X POST "$GRAFANA_URL/login" \
+            -H "Content-Type: application/json" \
+            -d @- >/dev/null 2>&1; then
         print_status "SUCCESS" "Grafana authentication successful"
         return 0
     else
@@ -594,7 +627,7 @@ test_grafana_dashboard_data() {
             test_prometheus_metrics "$prometheus_id"
 
             print_status "SUCCESS" "Grafana dashboards should now show real data!"
-            print_status "INFO" "Access Grafana at: $GRAFANA_URL (admin/admin123)"
+            print_status "INFO" "Access Grafana at: $GRAFANA_URL (user admin, password in Secret grafana-admin)"
             print_status "INFO" "Available dashboards:"
             print_status "INFO" "  - EconGraph Platform Overview: $GRAFANA_URL/d/econgraph-overview/econgraph-platform-overview"
             print_status "INFO" "  - EconGraph Logs & Debugging: $GRAFANA_URL/d/econgraph-logging/econgraph-logs-and-debugging"

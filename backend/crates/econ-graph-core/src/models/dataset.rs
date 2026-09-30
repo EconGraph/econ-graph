@@ -27,6 +27,13 @@ use crate::schema::datasets;
 /// Name of the single measure every train 1 dataset has.
 pub const VALUE_MEASURE: &str = "value";
 
+/// Shared code list of countries and areas (ISO 3166 alpha-3 plus World Bank aggregate codes).
+pub const COUNTRIES_CODELIST: &str = "countries";
+/// Shared code list of US states and DC by FIPS code.
+pub const US_STATES_CODELIST: &str = "us_states";
+/// Code lists a component may name in `codelist`; each is a reference data file loaded at runtime.
+pub const KNOWN_CODELISTS: &[&str] = &[COUNTRIES_CODELIST, US_STATES_CODELIST];
+
 /// Implements Diesel `Jsonb` conversion for a serde newtype.
 macro_rules! jsonb_newtype {
     ($ty:ty) => {
@@ -69,13 +76,43 @@ pub struct DatasetComponent {
     /// Unit of a measure, e.g. `Percent`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
-    /// Labels for coded values, e.g. `{"06": "California"}` for a FIPS `state` dimension.
+    /// Inline code list: labels (and, for indicator-like dimensions, units) of the values
+    /// this component takes. At most one of `codes` and `codelist` is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub codes: Option<BTreeMap<String, String>>,
+    pub codes: Option<Vec<Code>>,
+    /// Name of a shared code list loaded at runtime from reference data, e.g. `countries`, so
+    /// labels are not copied into every dataset that uses them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codelist: Option<String>,
+}
+
+/// One entry of an inline code list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Code {
+    /// The value as stored in series dimensions, e.g. `06` or `NY.GDP.PCAP.CD`.
+    pub code: String,
+    pub label: String,
+    /// Unit of series with this value, e.g. `current US$` for a WDI indicator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+impl Code {
+    /// A code with a label only.
+    pub fn new(code: &str, label: &str) -> Self {
+        Self {
+            code: code.to_string(),
+            label: label.to_string(),
+            unit: None,
+            description: None,
+        }
+    }
 }
 
 impl DatasetComponent {
-    /// A component with no unit and no code labels.
+    /// A component with no unit and no code list.
     pub fn new(name: &str, label: &str, component_type: ComponentType) -> Self {
         Self {
             name: name.to_string(),
@@ -83,6 +120,7 @@ impl DatasetComponent {
             component_type,
             unit: None,
             codes: None,
+            codelist: None,
         }
     }
 
@@ -188,8 +226,9 @@ impl NewDataset {
     }
 
     /// Checks what the database cannot: component names are non-empty and unique across
-    /// dimensions, measures and attributes, and there is at least one measure, including the
-    /// default one.
+    /// dimensions, measures and attributes; a component has at most one of `codes` and
+    /// `codelist`, no repeated codes and only a [`KNOWN_CODELISTS`] name; and there is at least
+    /// one measure, including the default one.
     pub fn validate_components(&self) -> AppResult<()> {
         let invalid = |msg: String| Err(AppError::ValidationError(msg));
         if self.code.trim().is_empty() {
@@ -223,6 +262,29 @@ impl NewDataset {
                     "dataset {} declares component {:?} more than once",
                     self.code, component.name
                 ));
+            }
+            if component.codes.is_some() && component.codelist.is_some() {
+                return invalid(format!(
+                    "dataset {} component {:?} sets both codes and codelist",
+                    self.code, component.name
+                ));
+            }
+            if let Some(codelist) = &component.codelist {
+                if !KNOWN_CODELISTS.contains(&codelist.as_str()) {
+                    return invalid(format!(
+                        "dataset {} component {:?} names unknown codelist {:?}",
+                        self.code, component.name, codelist
+                    ));
+                }
+            }
+            let mut codes = HashSet::new();
+            for code in component.codes.iter().flatten() {
+                if !codes.insert(code.code.as_str()) {
+                    return invalid(format!(
+                        "dataset {} component {:?} lists code {:?} more than once",
+                        self.code, component.name, code.code
+                    ));
+                }
             }
         }
         Ok(())

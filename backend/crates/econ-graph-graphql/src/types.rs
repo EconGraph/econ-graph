@@ -116,7 +116,7 @@ impl EconomicSeriesType {
         Ok(source.map(|s| s.into()))
     }
 
-    /// Fetch recent data points using direct database query
+    /// Fetch the most recent observations, latest revision of each
     async fn recent_data_points(
         &self,
         ctx: &Context<'_>,
@@ -132,6 +132,7 @@ impl EconomicSeriesType {
         let mut conn = pool.get().await?;
         let data_points = dsl::data_points
             .filter(dsl::series_id.eq(series_uuid))
+            .filter(models::revision_filter(None, false))
             .order(dsl::date.desc())
             .limit(limit as i64)
             .load::<models::DataPoint>(&mut conn)
@@ -159,6 +160,23 @@ impl EconomicSeriesType {
             .await?;
 
         Ok(count as i32)
+    }
+
+    /// The series' newest observation: its latest date, at the newest revision of that date.
+    ///
+    /// Returns null when the series has no data points. The value itself can be null when the
+    /// source published the date without a number. Batched with a dataloader, so a list of
+    /// series costs one query per batch of up to 200 series.
+    async fn latest_observation(&self, ctx: &Context<'_>) -> Result<Option<LatestObservationType>> {
+        let series_uuid = Uuid::parse_str(&self.id)?;
+        let loaders = &ctx
+            .data::<crate::graphql::schema::SchemaResources>()?
+            .data_loaders;
+        loaders
+            .latest_observation_loader
+            .try_load(series_uuid)
+            .await
+            .map_err(|_| GraphQLError::new("Failed to load the latest observation"))
     }
 
     /// Fetch data points with filters using a custom DataLoader
@@ -195,6 +213,13 @@ impl EconomicSeriesType {
 
         if filter.original_only.unwrap_or(false) {
             query = query.filter(dsl::is_original_release.eq(true));
+        }
+
+        if filter.as_of.is_some() || filter.latest_revision_only.unwrap_or(false) {
+            query = query.filter(models::revision_filter(
+                filter.as_of,
+                filter.original_only.unwrap_or(false),
+            ));
         }
 
         let data_points = query
@@ -239,6 +264,7 @@ impl From<EconomicSeries> for EconomicSeriesType {
 }
 
 impl From<search::SeriesSearchResult> for EconomicSeriesType {
+    /// Exposes a search hit as a series; search results carry no creation or update timestamps.
     fn from(result: search::SeriesSearchResult) -> Self {
         Self {
             id: ID::from(result.id.to_string()),
@@ -246,11 +272,11 @@ impl From<search::SeriesSearchResult> for EconomicSeriesType {
             external_id: result.external_id,
             title: result.title,
             description: result.description,
-            units: Some(result.units),
+            units: result.units,
             frequency: result.frequency,
             seasonal_adjustment: None,
-            last_updated: Some(result.last_updated.and_utc()),
-            start_date: Some(result.start_date),
+            last_updated: result.last_updated,
+            start_date: result.start_date,
             end_date: result.end_date,
             is_active: result.is_active,
             created_at: chrono::Utc::now(), // Not available in search result
@@ -286,6 +312,18 @@ impl From<DataPoint> for DataPointType {
             updated_at: data_point.updated_at,
         }
     }
+}
+
+/// The newest observation of a series: its latest date, at the newest revision of that date
+#[derive(SimpleObject, Clone, Debug, PartialEq)]
+#[graphql(name = "LatestObservation")]
+pub struct LatestObservationType {
+    /// Observation date
+    pub date: NaiveDate,
+    /// Value at the newest revision; null when the source published the date without a number
+    pub value: Option<BigDecimal>,
+    /// Publication date of the revision the value comes from
+    pub revision_date: NaiveDate,
 }
 
 /// GraphQL representation of a data source
@@ -353,6 +391,7 @@ impl DataSourceType {
         let all_series = dsl::economic_series
             .filter(dsl::source_id.eq(source_uuid))
             .filter(dsl::is_active.eq(true))
+            .filter(dsl::end_date.is_not_null())
             .select(models::EconomicSeries::as_select())
             .load::<models::EconomicSeries>(&mut conn)
             .await?;
@@ -404,6 +443,7 @@ impl DataSourceType {
         let count = dsl::economic_series
             .filter(dsl::source_id.eq(source_uuid))
             .filter(dsl::is_active.eq(true))
+            .filter(dsl::end_date.is_not_null())
             .count()
             .get_result::<i64>(&mut conn)
             .await?;
@@ -622,6 +662,9 @@ pub struct DataFilterInput {
     pub end_date: Option<NaiveDate>,
     pub original_only: Option<bool>,
     pub latest_revision_only: Option<bool>,
+    /// Return each observation as it was known on this day (its newest revision published on or
+    /// before it). Takes precedence over `latestRevisionOnly`.
+    pub as_of: Option<NaiveDate>,
 }
 
 impl Default for DataFilterInput {
@@ -631,6 +674,7 @@ impl Default for DataFilterInput {
             end_date: None,
             original_only: Some(false),
             latest_revision_only: Some(false),
+            as_of: None,
         }
     }
 }
@@ -675,13 +719,13 @@ pub struct SeriesSearchResultType {
     /// Data frequency (Monthly, Quarterly, etc.)
     pub frequency: String,
     /// Data units
-    pub units: String,
+    pub units: Option<String>,
     /// Series start date
-    pub start_date: NaiveDate,
+    pub start_date: Option<NaiveDate>,
     /// Series end date (if applicable)
     pub end_date: Option<NaiveDate>,
     /// Last update timestamp
-    pub last_updated: DateTime<Utc>,
+    pub last_updated: Option<DateTime<Utc>>,
     /// Whether the series is active
     pub is_active: bool,
     /// Search relevance ranking score
@@ -691,6 +735,7 @@ pub struct SeriesSearchResultType {
 }
 
 impl From<SeriesSearchResult> for SeriesSearchResultType {
+    /// Converts a service search result, ids as GraphQL `ID`s.
     fn from(result: SeriesSearchResult) -> Self {
         Self {
             id: ID::from(result.id),
@@ -702,7 +747,7 @@ impl From<SeriesSearchResult> for SeriesSearchResultType {
             units: result.units,
             start_date: result.start_date,
             end_date: result.end_date,
-            last_updated: DateTime::from_naive_utc_and_offset(result.last_updated, Utc),
+            last_updated: result.last_updated,
             is_active: result.is_active,
             rank: result.rank,
             similarity_score: result.similarity_score,
@@ -800,6 +845,24 @@ pub struct SearchParamsInput {
     pub sort_by: Option<SearchSortOrderEnum>,
 }
 
+/// GraphQL enum for a chart annotation's visibility
+#[derive(Clone, Copy, Enum, Eq, PartialEq)]
+pub enum AnnotationVisibilityEnum {
+    /// Visible only to its author
+    Private,
+    /// Visible to everyone
+    Public,
+}
+
+impl From<AnnotationVisibility> for AnnotationVisibilityEnum {
+    fn from(visibility: AnnotationVisibility) -> Self {
+        match visibility {
+            AnnotationVisibility::Private => AnnotationVisibilityEnum::Private,
+            AnnotationVisibility::Public => AnnotationVisibilityEnum::Public,
+        }
+    }
+}
+
 /// GraphQL representation of a chart annotation
 #[derive(Clone, SimpleObject)]
 pub struct ChartAnnotationType {
@@ -823,8 +886,8 @@ pub struct ChartAnnotationType {
     pub color: Option<String>,
     /// Type of annotation (note, highlight, warning, etc.)
     pub annotation_type: Option<String>,
-    /// Whether the annotation is visible to others
-    pub is_visible: Option<bool>,
+    /// Who can see the annotation (private: author only; public: everyone)
+    pub visibility: AnnotationVisibilityEnum,
     /// Whether the annotation is pinned
     pub is_pinned: Option<bool>,
     /// Tags associated with the annotation
@@ -848,7 +911,7 @@ impl From<ChartAnnotation> for ChartAnnotationType {
             description: annotation.description,
             color: annotation.color,
             annotation_type: annotation.annotation_type,
-            is_visible: annotation.is_visible,
+            visibility: annotation.visibility.into(),
             is_pinned: annotation.is_pinned,
             tags: annotation.tags,
             created_at: annotation.created_at,
@@ -939,10 +1002,6 @@ pub struct UserType {
     pub name: String,
     /// Avatar URL
     pub avatar_url: Option<String>,
-    /// Authentication provider
-    pub provider: String,
-    /// User role
-    pub role: String,
     /// Organization
     pub organization: Option<String>,
     /// UI theme preference
@@ -972,8 +1031,6 @@ impl From<User> for UserType {
             email: user.email,
             name: user.name,
             avatar_url: user.avatar_url,
-            provider: user.provider,
-            role: user.role,
             organization: user.organization,
             theme: user.theme,
             default_chart_type: user.default_chart_type,
@@ -991,8 +1048,6 @@ impl From<User> for UserType {
 /// Input for creating a new annotation
 #[derive(InputObject)]
 pub struct CreateAnnotationInput {
-    /// User ID creating the annotation
-    pub user_id: ID,
     /// Series ID the annotation is for
     pub series_id: ID,
     /// Date the annotation refers to
@@ -1014,8 +1069,6 @@ pub struct CreateAnnotationInput {
 /// Input for adding a comment to an annotation
 #[derive(InputObject)]
 pub struct AddCommentInput {
-    /// User ID adding the comment
-    pub user_id: ID,
     /// Annotation ID to comment on
     pub annotation_id: ID,
     /// Comment content
@@ -1025,8 +1078,6 @@ pub struct AddCommentInput {
 /// Input for sharing a chart with another user
 #[derive(InputObject)]
 pub struct ShareChartInput {
-    /// Owner user ID (who is sharing)
-    pub owner_user_id: ID,
     /// Target user ID (who to share with)
     pub target_user_id: ID,
     /// Chart ID to share
@@ -1035,35 +1086,31 @@ pub struct ShareChartInput {
     pub permission_level: String,
 }
 
+/// Input for updating an annotation (only its author may update it)
+#[derive(InputObject)]
+pub struct UpdateAnnotationInput {
+    /// Annotation ID to update
+    pub annotation_id: ID,
+    /// New title, if changing
+    pub title: Option<String>,
+    /// New content/description, if changing
+    pub content: Option<String>,
+    /// New color, if changing
+    pub color: Option<String>,
+    /// New annotation type, if changing
+    pub annotation_type: Option<String>,
+    /// New public/private visibility, if changing
+    pub is_public: Option<bool>,
+}
+
 /// Input for deleting an annotation
 #[derive(InputObject)]
 pub struct DeleteAnnotationInput {
-    /// User ID requesting deletion
-    pub user_id: ID,
     /// Annotation ID to delete
     pub annotation_id: ID,
 }
 
 // Admin GraphQL Types
-
-/// Input for creating a new user (admin only)
-#[derive(InputObject)]
-pub struct CreateUserInput {
-    /// Email address
-    pub email: String,
-    /// Display name
-    pub name: String,
-    /// Password (for email-based users)
-    pub password: Option<String>,
-    /// User role
-    pub role: String,
-    /// Organization (optional)
-    pub organization: Option<String>,
-    /// Whether account is active
-    pub is_active: Option<bool>,
-    /// Whether to send welcome email
-    pub send_welcome_email: Option<bool>,
-}
 
 /// Input for updating a user (admin only)
 #[derive(InputObject)]
@@ -1074,8 +1121,6 @@ pub struct UpdateUserInput {
     pub name: Option<String>,
     /// Avatar URL (optional)
     pub avatar_url: Option<String>,
-    /// User role (optional)
-    pub role: Option<String>,
     /// Organization (optional)
     pub organization: Option<String>,
     /// UI theme preference
@@ -1095,8 +1140,6 @@ pub struct UpdateUserInput {
 /// Input for filtering users (admin only)
 #[derive(InputObject)]
 pub struct UserFilterInput {
-    /// Filter by role
-    pub role: Option<String>,
     /// Filter by organization
     pub organization: Option<String>,
     /// Filter by active status
@@ -1133,27 +1176,6 @@ pub struct UserConnection {
     pub page_info: PageInfo,
 }
 
-/// GraphQL representation of a user session
-#[derive(Clone, SimpleObject)]
-pub struct UserSessionType {
-    /// Session ID
-    pub id: ID,
-    /// User ID
-    pub user_id: ID,
-    /// Session creation time
-    pub created_at: DateTime<Utc>,
-    /// Last activity time
-    pub last_activity: DateTime<Utc>,
-    /// Session expiration time
-    pub expires_at: DateTime<Utc>,
-    /// User agent string
-    pub user_agent: Option<String>,
-    /// IP address
-    pub ip_address: Option<String>,
-    /// Whether session is active
-    pub is_active: bool,
-}
-
 /// GraphQL representation of system health
 #[derive(Clone, SimpleObject)]
 pub struct SystemHealthType {
@@ -1172,10 +1194,6 @@ pub struct SystemMetricsType {
     pub total_users: i32,
     /// Number of active users
     pub active_users: i32,
-    /// Total number of sessions
-    pub total_sessions: i32,
-    /// Number of active sessions
-    pub active_sessions: i32,
     /// Database size in MB
     pub database_size_mb: f64,
     /// Number of queue items

@@ -5,18 +5,23 @@ name: Release E2E
 # any data source and no API keys. See frontend/tests/e2e/release/README.md.
 
 on:
+  # No branch filter: pull requests into another feature branch (stacked PRs)
+  # run this suite too.
   pull_request:
-    branches: [ main ]
     paths:
       - 'frontend/**'
       - 'backend/**'
+      - 'config/keycloak/**'
+      - 'docker-compose.release-e2e.yml'
       - 'scripts/release-e2e.sh'
       - '.github/workflows/release-e2e.yml'
   workflow_dispatch:
 
+# One run per pull request: a new push cancels the run for the previous head.
+# Manual runs are keyed by commit and never cancelled. Same shape as ci-core.yml.
 concurrency:
-  group: release-e2e-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

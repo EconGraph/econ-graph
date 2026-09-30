@@ -25,10 +25,11 @@ type = "string"              # string (default), integer, decimal, date or boole
 [[dataset.dimensions]]
 name = "area"
 label = "Country or area"
-codelist = "countries"       # values from a shared reference list: countries or us_states
+codelist = "countries"       # a shared reference list (countries or us_states),
+                             # resolved by the API, not the crawler
 
-# Or label the codes inline (not a closed list), instead of codelist:
-# codes = { national = "United States", state = "State" }
+# Or list the codes inline (not a closed list), instead of codelist:
+# codes = [{ code = "national", label = "United States" }, { code = "state", label = "State" }]
 
 # Optional attributes (observation or series flags).
 [[dataset.attributes]]
@@ -36,12 +37,18 @@ name = "obs_status"
 label = "Observation status"
 ```
 
+A dataset's code and its dimensions' names and declared order are part of every canonical
+external id built from them (see below): never rename or reorder them once series exist under
+that dataset, add a new dataset instead. `sync_datasets` never deletes a `datasets` row for a
+code a definitions file drops; remove the row by hand if a dataset is retired.
+
 In train 1 every dataset is stored long, because `data_points` holds one value per
 observation. A dataset therefore has the single measure `value`, which is also its
 `default_measure`. Both are the defaults, so leave them out. A source with several
 measures publishes each one as its own series, with the measure as a dimension (for
 example Census BDS `variable`).
 
-A dataset with no dimensions, such as FRED, keeps the source's own series ids. A
-dataset with dimensions builds ids with `DatasetDef::external_id`, which formats the
-canonical id `{code}/{v1}.{v2}` and never needs to be written by hand.
+A source with its own series key (FRED, BLS, SDMX) keeps it as the external id and
+parses the dimension values from it. A source without one (Census BDS, WDI) builds ids
+with `DatasetDef::external_id`, which formats the canonical id `{code}/{v1}.{v2}` in
+declared dimension order and never needs to be written by hand.

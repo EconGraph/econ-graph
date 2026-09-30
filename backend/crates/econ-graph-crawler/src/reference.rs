@@ -180,7 +180,7 @@ pub fn dataset(source: SourceId, code: &str) -> Result<&'static DatasetDef, Craw
         })
 }
 
-fn load_datasets(path: &Path) -> Result<Vec<DatasetDef>, String> {
+pub(crate) fn load_datasets(path: &Path) -> Result<Vec<DatasetDef>, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| format!("reading {}: {e} (set {DATA_DIR_ENV})", path.display()))?;
     parse_dataset_file(&text).map_err(|e| format!("{}: {e}", path.display()))

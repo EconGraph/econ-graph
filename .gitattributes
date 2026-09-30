@@ -1,0 +1,2 @@
+# The schema snapshot test compares byte for byte (after CRLF normalization).
+backend/crates/econ-graph-graphql/schema.graphql text eol=lf

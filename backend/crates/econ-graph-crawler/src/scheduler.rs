@@ -58,7 +58,7 @@ use crate::sources::static_catalogs::is_static_catalog_source;
 /// `CrawlError::Permanent("... not implemented yet")`. Enqueuing refreshes for them would only
 /// produce failed jobs, so the scheduler skips them. Remove a source here once its adapter
 /// implements `fetch_series`.
-pub const FETCH_UNIMPLEMENTED: &[SourceId] = &[SourceId::Imf, SourceId::Bea];
+pub const FETCH_UNIMPLEMENTED: &[SourceId] = &[SourceId::Bea];
 
 /// How often each source's catalog is re-discovered.
 pub const DISCOVERY_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -133,7 +133,7 @@ pub fn refresh_interval(frequency: &str) -> Duration {
 }
 
 /// `CASE` expression over `f` (lower-cased, trimmed frequency) returning the interval in days.
-fn frequency_days_sql(f: &str) -> String {
+pub(crate) fn frequency_days_sql(f: &str) -> String {
     let mut sql = String::from("CASE");
     for rule in FREQUENCY_RULES {
         let mut conds: Vec<String> = Vec::new();
@@ -653,7 +653,6 @@ mod tests {
             assert!(supports_fetch(s), "{s}");
         }
         for s in [
-            SourceId::Imf,
             SourceId::Bea,
             SourceId::Sec,
             SourceId::Ecb,
@@ -721,16 +720,24 @@ mod tests {
         let Some(db) = db().await else { return };
         let p = &db.pool;
         let ids = [
+            "bds/national..T15CX",
+            "bds/state.06.T15CX",
+            "bds/state.03.T15CX",
+            "bds/state..T15CX",
+            "bds/county.001.T15CX",
+            "bds/national.06.T15CX",
+            "bdsx/national..T15CX",
+            "bds/national..T15CX.A",
+            "bds/state.06.T15CX&x=1",
+            "bds/state.6.T15CX",
             "CENSUS_BDS_T15CX_us",
             "CENSUS_BDS_T15CX_state_06",
-            "CENSUS_BDS_T15CX_state_03",
-            "CENSUS_BDS_T15CX_state",
-            "CENSUS_BDS_T15CX_county",
-            "CENSUS_BDS_T15CX_Alabama",
         ];
-        let cleanup =
-            "DELETE FROM economic_series WHERE external_id LIKE 'CENSUS\\_BDS\\_T15CX\\_%'";
-        exec(p, cleanup).await;
+        let census = persist::data_source_id(p, SourceId::Census).await.unwrap();
+        let cleanup = format!(
+            "DELETE FROM economic_series WHERE source_id = '{census}' AND external_id LIKE '%T15CX%'"
+        );
+        exec(p, &cleanup).await;
         for id in ids {
             seed(p, SourceId::Census, id, "Annual", None, None).await;
         }
@@ -747,11 +754,8 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
-        assert_eq!(
-            queued,
-            vec!["CENSUS_BDS_T15CX_state_06", "CENSUS_BDS_T15CX_us"]
-        );
-        exec(p, cleanup).await;
+        assert_eq!(queued, vec!["bds/national..T15CX", "bds/state.06.T15CX"]);
+        exec(p, &cleanup).await;
     }
 
     #[tokio::test]
@@ -837,7 +841,6 @@ mod tests {
         for (source, id) in [
             (SourceId::Ecb, "t15c_ecb"),
             (SourceId::Oecd, "t15c_oecd"),
-            (SourceId::Imf, "t15c_imf"),
             (SourceId::Bea, "t15c_bea"),
             (SourceId::Sec, "t15c_sec"),
             (SourceId::Fred, "t15c_fred"),
@@ -849,7 +852,6 @@ mod tests {
             &[
                 SourceId::Ecb,
                 SourceId::Oecd,
-                SourceId::Imf,
                 SourceId::Bea,
                 SourceId::Sec,
                 SourceId::Fred,

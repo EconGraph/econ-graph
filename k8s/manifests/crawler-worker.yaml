@@ -8,13 +8,9 @@
 #
 # API keys come from the optional Secret `crawler-api-keys`. Every key is optional:
 # the worker starts without them, and jobs for a source that requires a missing key
-# fail with an auth error (the source is then paused, see CRAWLER_PAUSE_AFTER). Never commit real values; create the Secret out of band, e.g.:
-#
-#   kubectl -n econ-graph create secret generic crawler-api-keys \
-#     --from-literal=fred-api-key="$FRED_API_KEY" \
-#     --from-literal=bls-api-key="$BLS_API_KEY" \
-#     --from-literal=bea-api-key="$BEA_API_KEY" \
-#     --from-literal=census-api-key="$CENSUS_API_KEY"
+# fail with an auth error (the source is then paused, see CRAWLER_PAUSE_AFTER). Never commit real values; create the Secret out of band
+# with scripts/deploy/create-secrets.sh, which reads FRED_API_KEY, BLS_API_KEY, BEA_API_KEY
+# and CENSUS_API_KEY from the environment and stores whichever are set.
 #
 # Afterwards: kubectl -n econ-graph rollout restart deployment/crawler-worker
 apiVersion: apps/v1
@@ -98,12 +94,13 @@ spec:
           name: metrics
           protocol: TCP
         env:
-        # Same source as the backend (ConfigMap econ-graph-config).
+        # Same source as the backend (Secret econ-graph-secrets, created by
+        # scripts/deploy/create-secrets.sh).
         - name: DATABASE_URL
           valueFrom:
-            configMapKeyRef:
-              name: econ-graph-config
-              key: DATABASE_URL
+            secretKeyRef:
+              name: econ-graph-secrets
+              key: database-url
         - name: RUST_LOG
           valueFrom:
             configMapKeyRef:
