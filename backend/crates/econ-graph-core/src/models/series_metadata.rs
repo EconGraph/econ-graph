@@ -122,6 +122,9 @@ pub struct UpdateSeriesMetadata {
 
 impl SeriesMetadata {
     /// Get or create series metadata
+    ///
+    /// Uses a generated id. Crawled series get stable ids from `econ_graph_crawler::persist`;
+    /// don't use this for them.
     pub async fn get_or_create(
         pool: &DatabasePool,
         source_id: Uuid,
