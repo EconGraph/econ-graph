@@ -336,6 +336,13 @@ fn scrub_error(e: CrawlError, key: Option<&str>) -> CrawlError {
         CrawlError::Auth(m) => CrawlError::Auth(scrub(&m, key)),
         CrawlError::Parse(m) => CrawlError::Parse(scrub(&m, key)),
         CrawlError::Permanent(m) => CrawlError::Permanent(scrub(&m, key)),
+        CrawlError::Busy {
+            retry_after,
+            message,
+        } => CrawlError::Busy {
+            retry_after,
+            message: scrub(&message, key),
+        },
         e @ CrawlError::RateLimited { .. } => e,
     }
 }

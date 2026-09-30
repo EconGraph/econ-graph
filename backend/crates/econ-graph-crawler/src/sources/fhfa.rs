@@ -46,6 +46,19 @@
 //! has no vintage column, so a fetch returns every observation (ignoring `since`) and each refresh
 //! overwrites the stored values with the latest estimate.
 //!
+//! # Concurrency
+//!
+//! Discovery and every fetch batch download the same master file, so two workers can end up
+//! downloading it at once even though [`MAX_BATCH`] normally covers the whole catalog in one
+//! fetch. A process-local in-flight reservation, keyed by the master URL, makes the second
+//! download a no-op instead: it makes no request and fails with a retryable [`CrawlError::Busy`]
+//! (exponential backoff with jitter), which the worker reschedules without counting a failed
+//! attempt (see [`worker`](crate::worker)). The reservation is one process's in-memory state: it
+//! does nothing for two separate `crawler-worker` processes downloading at once. Recovering a
+//! reservation left behind by a crawler crash is
+//! [ECO-257](https://linear.app/econgraph/issue/ECO-257/recover-shared-download-reservations-after-crawler-crashes);
+//! today a crash simply loses the in-memory reservation along with the rest of the process.
+//!
 //! # Errors
 //!
 //! - Ids outside the dataset are `NotFound` without a request; ids not in the file are `NotFound`.
@@ -59,12 +72,15 @@
 //! - A dataset definition whose dimensions don't match the adapter's fails the whole batch
 //!   (`Permanent`).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::str::FromStr;
+use std::sync::{LazyLock, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use chrono::NaiveDate;
+use rand::RngExt;
 
 use crate::adapter::{
     BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, NewSeriesMetadataLite,
@@ -361,6 +377,59 @@ fn parse_master(text: &str, def: &DatasetDef) -> Result<BTreeMap<String, HpiSeri
     Ok(series.into_values().flatten().flatten().collect())
 }
 
+/// First contention backoff; doubles per contender waiting on the same download, ±25% jitter,
+/// capped at [`CONTENTION_MAX_BACKOFF`]. Mirrors [`crate::http`]'s in-process retry backoff.
+const CONTENTION_BASE_BACKOFF: Duration = Duration::from_millis(250);
+const CONTENTION_MAX_BACKOFF: Duration = Duration::from_secs(30);
+
+/// Downloads in flight, by URL, with how many callers have found each one busy (see the module
+/// docs, "Concurrency"). One process only.
+static IN_FLIGHT: LazyLock<Mutex<HashMap<String, u32>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Holds a URL's in-flight reservation until dropped, which releases it whether `master` finishes
+/// normally, fails, or its future is cancelled (an `async fn`'s locals, this one included, drop on
+/// every exit path).
+struct DownloadGuard(String);
+
+impl DownloadGuard {
+    /// Reserves `url`, or fails with a retryable [`CrawlError::Busy`] if another crawl already
+    /// holds it. Never blocks and never makes a request.
+    fn try_acquire(url: &str) -> Result<Self, CrawlError> {
+        let mut in_flight = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
+        match in_flight.get_mut(url) {
+            None => {
+                in_flight.insert(url.to_string(), 0);
+                Ok(Self(url.to_string()))
+            }
+            Some(contenders) => {
+                *contenders += 1;
+                Err(busy(url, *contenders))
+            }
+        }
+    }
+}
+
+impl Drop for DownloadGuard {
+    fn drop(&mut self) {
+        IN_FLIGHT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
+    }
+}
+
+/// `CrawlError::Busy` for the `n`th contender waiting on `url`: `CONTENTION_BASE_BACKOFF * 2^(n
+/// - 1)`, jittered, capped at `CONTENTION_MAX_BACKOFF`.
+fn busy(url: &str, n: u32) -> CrawlError {
+    let base = CONTENTION_BASE_BACKOFF.saturating_mul(1u32.checked_shl(n - 1).unwrap_or(u32::MAX));
+    let jittered = base.mul_f64(rand::rng().random_range(0.75..=1.25));
+    CrawlError::Busy {
+        retry_after: jittered.min(CONTENTION_MAX_BACKOFF),
+        message: format!("FHFA: another crawl is already downloading {url}"),
+    }
+}
+
 /// FHFA adapter. See the module docs.
 #[derive(Debug, Clone)]
 pub struct FhfaAdapter {
@@ -381,11 +450,10 @@ impl FhfaAdapter {
 
     /// Downloads and parses the master file.
     async fn master(&self, ctx: &CrawlCtx) -> Result<BTreeMap<String, HpiSeries>, CrawlError> {
+        let url = self.master_url();
+        let _reservation = DownloadGuard::try_acquire(&url)?;
         let def = crate::reference::dataset(SourceId::Fhfa, DATASET)?;
-        let text = ctx
-            .http
-            .get_text(SourceId::Fhfa, &self.master_url(), &[])
-            .await?;
+        let text = ctx.http.get_text(SourceId::Fhfa, &url, &[]).await?;
         parse_master(&text, def)
     }
 }
@@ -857,6 +925,83 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(e.kind(), "rate_limited");
+    }
+
+    fn contention_delay(n: u32) -> Duration {
+        match busy("u", n) {
+            CrawlError::Busy { retry_after, .. } => retry_after,
+            e => panic!("expected Busy, got {e:?}"),
+        }
+    }
+
+    #[test]
+    fn contention_backoff_is_jittered_exponential_and_capped() {
+        for _ in 0..50 {
+            let d1 = contention_delay(1);
+            let d2 = contention_delay(2);
+            assert!(
+                d1 >= Duration::from_millis(187) && d1 <= Duration::from_millis(313),
+                "{d1:?}"
+            );
+            assert!(
+                d2 >= Duration::from_millis(375) && d2 <= Duration::from_millis(625),
+                "{d2:?}"
+            );
+        }
+        assert_eq!(contention_delay(u32::MAX), CONTENTION_MAX_BACKOFF);
+    }
+
+    /// Discovery and a fetch batch share one reservation keyed by the master URL: a second caller
+    /// while the first is still downloading makes no request and fails with a retryable `Busy`,
+    /// and a caller after the first finishes makes its own request normally.
+    #[tokio::test]
+    async fn concurrent_downloads_are_deduped() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get(MASTER_CSV_PATH),
+            Reply::text(MASTER).delay(Duration::from_millis(200)),
+        )
+        .await;
+        let adapter = FhfaAdapter::new(mock.base_url());
+
+        let first = tokio::spawn({
+            let adapter = adapter.clone();
+            async move { adapter.discover(&test_ctx()).await }
+        });
+        // Wait for the first request to reach the mock: the reservation is acquired before it,
+        // so this means the guard is held. Polls rather than a fixed sleep, so this isn't flaky
+        // under CPU contention from other tests running in parallel.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while mock.received_requests().await.is_empty() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "first request never reached the mock"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        let busy = adapter
+            .fetch_series(&test_ctx(), US_PO_MONTHLY_SA, None)
+            .await
+            .unwrap_err();
+        assert_eq!(busy.kind(), "busy");
+        assert!(busy.is_retryable());
+        assert_eq!(
+            mock.received_requests().await.len(),
+            1,
+            "no second request while the first is in flight"
+        );
+
+        let discovered = first.await.unwrap().unwrap();
+        assert!(!discovered.is_empty());
+
+        // Released: a normal fetch now makes its own request.
+        let ok = adapter
+            .fetch_series(&test_ctx(), US_PO_MONTHLY_SA, None)
+            .await
+            .unwrap();
+        assert!(!ok.points.is_empty());
+        assert_eq!(mock.received_requests().await.len(), 2);
     }
 }
 
