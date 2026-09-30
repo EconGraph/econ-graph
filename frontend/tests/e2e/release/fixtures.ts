@@ -69,8 +69,8 @@ export const SEEDED = {
   censusEstablishments: {
     source: 'CENSUS',
     sourceName: 'U.S. Census Bureau',
-    externalId: 'CENSUS_BDS_ESTAB_us',
-    title: 'CENSUS_BDS_ESTAB_us',
+    externalId: 'bds/national..ESTAB',
+    title: 'bds/national..ESTAB',
   },
   fhfaHpi: {
     source: 'FHFA',

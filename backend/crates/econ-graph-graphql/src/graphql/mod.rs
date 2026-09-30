@@ -5,6 +5,7 @@
 //! models with the external API consumers.
 
 pub mod context;
+pub mod cross_section;
 pub mod dataloaders;
 pub mod global_analysis;
 pub mod mutation;

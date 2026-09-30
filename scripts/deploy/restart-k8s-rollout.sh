@@ -264,11 +264,24 @@ kubectl apply -f k8s/monitoring/loki-config.yaml
 kubectl apply -f k8s/monitoring/loki-deployment.yaml
 kubectl apply -f k8s/monitoring/loki-service.yaml
 
+# Prometheus reads its config and rules only at start, and a ConfigMap-only change doesn't roll
+# the pod. Restart it only when they changed: its storage is an emptyDir, so a restart drops
+# its history and resets every alert's `for` clock. (`kubectl diff` exits 1 on differences.)
+PROMETHEUS_CONFIG_CHANGED=false
+for f in k8s/monitoring/prometheus-config.yaml k8s/monitoring/prometheus-rules-crawler.yaml; do
+    if ! kubectl diff -f "$f" >/dev/null 2>&1; then
+        PROMETHEUS_CONFIG_CHANGED=true
+    fi
+done
 kubectl apply -f k8s/monitoring/prometheus-config.yaml
+kubectl apply -f k8s/monitoring/prometheus-rules-crawler.yaml
 kubectl apply -f k8s/monitoring/prometheus-deployment.yaml
 kubectl apply -f k8s/monitoring/prometheus-service.yaml
 kubectl apply -f k8s/monitoring/prometheus-clusterrole.yaml
 kubectl apply -f k8s/monitoring/prometheus-clusterrolebinding.yaml
+if [ "$PROMETHEUS_CONFIG_CHANGED" = true ]; then
+    kubectl rollout restart deployment/prometheus -n econ-graph
+fi
 
 kubectl apply -f k8s/monitoring/promtail-config.yaml
 kubectl apply -f k8s/monitoring/promtail-clusterrole.yaml
