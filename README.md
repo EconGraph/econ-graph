@@ -37,25 +37,25 @@ EconGraph is a **production-ready economic data intelligence platform** that tra
 
 > **AI-Assisted Development with Cursor - Comprehensive Cost Analysis**
 
-### 📊 **Cursor AI Usage Statistics (Aug 12 - Sep 9, 2025)**
-- **Total AI Interactions**: 347 requests
-- **Total Tokens Processed**: **3.25B tokens** (actual usage data)
-- **Success Rate**: 77.5% (269 successful, 78 errored)
-- **Average Request Size**: 9.4M tokens
-- **Peak Development Day**: Sep 5, 2025 (155.8M tokens)
+### 📊 **Cursor AI Usage Statistics (historical CSV export)**
+- **Total AI Interactions**: 6,768 CSV records
+- **Total Tokens Processed**: **4,285,966,700 tokens** (reported usage, including cached and unsuccessful requests)
+- **Usage Scope**: Includes Included, Errored, Not Charged, and Aborted, Not Charged events
+- **Average Request Size**: 633,269 tokens
+- **Usage Source**: `data/usage-events-2025-09-26.csv` (historical export)
 - **Development Period**: 28 days of active AI-assisted coding
 
 ### 💵 **Actual Development Costs**
 - **Cursor Pro Subscription**: ~$20/month
-- **Actual Token Costs**: $937.84 (from usage CSV)
+- **Actual Token Costs**: $1,288.55 reported CSV estimate (not a verified bill)
 - **Staff Engineer Time**: 28 days × 8 hours × $150/hour = $33,600
-- **Total AI-Assisted Cost**: ~$34557.836
-- **Daily Average**: $1,233
-- **Cost per Major Feature**: ~$2,300
+- **Total AI-Assisted Cost**: $34,908.55 (fixed staffing and subscription assumptions)
+- **Daily Average**: $1,246.73 over the assumed 28 days
+- **Cost per Major Feature**: $2,327.24 assuming 15 features
 
 ### ⚡ **ROI & Efficiency Analysis**
 - **🏗️ Features Delivered**: 15+ major components (React frontend, Rust backend, GraphQL API, collaboration features, global analysis, CI/CD pipelines)
-- **📝 Lines of Code**: 159,335 total (72,610 production code, 7,457 test code, 79,268 infrastructure)
+- **📝 Lines of Code**: 208,898 total (89,802 production code, 17,713 test code, 46,957 configuration/scripts, 54,426 documentation)
 - **⏰ Time Saved**: Estimated 200+ hours vs traditional solo development
 - **🚀 Development Speed**: 10-20x faster iteration cycles
 - **✅ Quality Achieved**: Professional-grade testing, documentation, security scanning
@@ -68,7 +68,7 @@ EconGraph is a **production-ready economic data intelligence platform** that tra
 - **Documentation**: Google-style comments, comprehensive README, investor pitch
 - **Features**: Real-time collaboration, economic data visualization, transformations
 
-> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The ~$34557.836 total investment produced a full-stack application that would typically require $455142.18 in development costs and 6-12 months with a traditional team.  
+> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The $34,908.55 estimated investment produced a full-stack application with a line-based traditional development estimate of $585,239.81 and 6-12 months with a traditional team.
 > **📊 DETAILED COST ANALYSIS**: For comprehensive cost assumptions, productivity metrics, and industry benchmarks with cited sources, see [Cost Assumptions and Productivity Analysis](docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md).
 
 ---
@@ -280,25 +280,25 @@ EconGraph maintains the highest standards of quality and reliability expected by
 
 > **AI-Assisted Development with Cursor - Comprehensive Cost Analysis**
 
-### 📊 **Cursor AI Usage Statistics (Aug 12 - Sep 9, 2025)**
-- **Total AI Interactions**: 347 requests
-- **Total Tokens Processed**: **3.25B tokens** (actual usage data)
-- **Success Rate**: 77.5% (269 successful, 78 errored)
-- **Average Request Size**: 9.4M tokens
-- **Peak Development Day**: Sep 5, 2025 (155.8M tokens)
+### 📊 **Cursor AI Usage Statistics (historical CSV export)**
+- **Total AI Interactions**: 6,768 CSV records
+- **Total Tokens Processed**: **4,285,966,700 tokens** (reported usage, including cached and unsuccessful requests)
+- **Usage Scope**: Includes Included, Errored, Not Charged, and Aborted, Not Charged events
+- **Average Request Size**: 633,269 tokens
+- **Usage Source**: `data/usage-events-2025-09-26.csv` (historical export)
 - **Development Period**: 28 days of active AI-assisted coding
 
 ### 💵 **Actual Development Costs**
 - **Cursor Pro Subscription**: ~$20/month
-- **Actual Token Costs**: $937.84 (from usage CSV)
+- **Actual Token Costs**: $1,288.55 reported CSV estimate (not a verified bill)
 - **Staff Engineer Time**: 28 days × 8 hours × $150/hour = $33,600
-- **Total AI-Assisted Cost**: ~$34557.836
-- **Daily Average**: $1,233
-- **Cost per Major Feature**: ~$2,300
+- **Total AI-Assisted Cost**: $34,908.55 (fixed staffing and subscription assumptions)
+- **Daily Average**: $1,246.73 over the assumed 28 days
+- **Cost per Major Feature**: $2,327.24 assuming 15 features
 
 ### ⚡ **ROI & Efficiency Analysis**
 - **🏗️ Features Delivered**: 15+ major components (React frontend, Rust backend, GraphQL API, collaboration features, global analysis, CI/CD pipelines)
-- **📝 Lines of Code**: 159,335 total (72,610 production code, 7,457 test code, 79,268 infrastructure)
+- **📝 Lines of Code**: 208,898 total (89,802 production code, 17,713 test code, 46,957 configuration/scripts, 54,426 documentation)
 - **⏰ Time Saved**: Estimated 200+ hours vs traditional solo development
 - **🚀 Development Speed**: 10-20x faster iteration cycles
 - **✅ Quality Achieved**: Professional-grade testing, documentation, security scanning
@@ -311,7 +311,7 @@ EconGraph maintains the highest standards of quality and reliability expected by
 - **Documentation**: Google-style comments, comprehensive README, investor pitch
 - **Features**: Real-time collaboration, economic data visualization, transformations
 
-> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The ~$34557.836 total investment produced a full-stack application that would typically require $455142.18 in development costs and 6-12 months with a traditional team.  
+> **💡 TRANSPARENCY INSIGHT**: This project demonstrates that AI-assisted development can deliver enterprise-quality results at a fraction of traditional costs. The $34,908.55 estimated investment produced a full-stack application with a line-based traditional development estimate of $585,239.81 and 6-12 months with a traditional team.
 > **📊 DETAILED COST ANALYSIS**: For comprehensive cost assumptions, productivity metrics, and industry benchmarks with cited sources, see [Cost Assumptions and Productivity Analysis](docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md).
 
 ---

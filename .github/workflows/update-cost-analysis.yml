@@ -2,74 +2,112 @@ name: Update Cost Analysis
 
 on:
   schedule:
-    # Run daily at 6 AM UTC
     - cron: '0 6 * * *'
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/*cost*'
+      - 'scripts/codebase*'
+      - 'scripts/tests/test_cost_analysis.py'
+      - 'data/cost-analysis.json'
+      - 'data/usage-events-2025-09-26.csv'
+      - '.github/workflows/update-cost-analysis.yml'
+      - 'README.md'
+      - 'docs/business/**'
+      - 'demo-tools/PROFESSIONAL_DEMO_SUMMARY.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cost-analysis-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  update-costs:
+  validate:
     runs-on: ubuntu-latest
-
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Record validated source
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Test calculations and failure handling
+        run: python3 -m unittest discover -s scripts/tests -p 'test_cost_analysis.py' -v
+      - name: Generate and verify repeatability
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/update-cost-analysis.sh
+          files=(data/cost-analysis.json README.md docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md docs/business/PRODUCT_SUMMARY_2025.md docs/business/INVESTOR_PITCH.md demo-tools/PROFESSIONAL_DEMO_SUMMARY.md)
+          before=$(sha256sum "${files[@]}")
+          ./scripts/update-cost-analysis.sh
+          test "$before" = "$(sha256sum "${files[@]}")"
+          python3 -m json.tool data/cost-analysis.json > /dev/null
+          git diff --check
+          git diff --stat >> "$GITHUB_STEP_SUMMARY"
+      - name: Save validated outputs
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cost-analysis
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            data/cost-analysis.json
+            README.md
+            docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md
+            docs/business/PRODUCT_SUMMARY_2025.md
+            docs/business/INVESTOR_PITCH.md
+            demo-tools/PROFESSIONAL_DEMO_SUMMARY.md
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '24'
+  publish:
+    needs: validate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Reject stale generated output
+        env:
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - uses: actions/download-artifact@v4
+        with:
+          name: cost-analysis
+          path: .
+      - name: Create or update cost analysis PR
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: automation/update-cost-analysis
+          base: main
+          title: 'Update generated cost analysis'
+          commit-message: 'Update generated cost analysis from validated source inputs'
+          body: |
+            Recalculates the existing USD/line model from validated Git statistics
+            and the historical usage CSV. Regression tests, JSON validation, and
+            repeatability checks passed before these outputs were published.
 
-    - name: Setup Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        components: rustfmt, clippy
+            Reported CSV costs are estimates, not verified bills. Fixed staff hours
+            and historical usage remain assumptions; see the cost analysis document.
 
-    - name: Install dependencies
-      run: |
-        # Install any required dependencies
-        sudo apt-get update
-        sudo apt-get install -y bc
-
-    - name: Update cost analysis
-      run: |
-        chmod +x scripts/update-cost-analysis.sh
-        ./scripts/update-cost-analysis.sh
-
-    - name: Check for changes
-      id: changes
-      run: |
-        if [ -n "$(git status --porcelain)" ]; then
-          echo "changes=true" >> $GITHUB_OUTPUT
-        else
-          echo "changes=false" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Commit and push changes
-      if: steps.changes.outputs.changes == 'true'
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add -A
-        git commit -m "🤖 Auto-update cost analysis from source data
-
-        - Updated cost figures from latest codebase statistics
-        - Updated AI usage costs from CSV data
-        - Recalculated ROI and savings percentages
-        - Updated all business documentation with latest figures"
-        git push
-
-    - name: Create summary
-      if: steps.changes.outputs.changes == 'true'
-      run: |
-        echo "## 📊 Cost Analysis Updated" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "✅ Successfully updated cost analysis with latest data:" >> $GITHUB_STEP_SUMMARY
-        echo "- Codebase statistics" >> $GITHUB_STEP_SUMMARY
-        echo "- AI usage costs" >> $GITHUB_STEP_SUMMARY
-        echo "- ROI calculations" >> $GITHUB_STEP_SUMMARY
-        echo "- All business documentation" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "📁 Updated files:" >> $GITHUB_STEP_SUMMARY
-        git diff --name-only HEAD~1 HEAD >> $GITHUB_STEP_SUMMARY
+            Generated with GITHUB_TOKEN: downstream PR CI may require a manual run.
+          add-paths: |
+            data/cost-analysis.json
+            README.md
+            docs/business/COST_ASSUMPTIONS_AND_PRODUCTIVITY_ANALYSIS.md
+            docs/business/PRODUCT_SUMMARY_2025.md
+            docs/business/INVESTOR_PITCH.md
+            demo-tools/PROFESSIONAL_DEMO_SUMMARY.md

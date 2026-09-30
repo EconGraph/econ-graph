@@ -74,186 +74,77 @@ Beyond hourly rates, total employment costs include:
 
 ## EconGraph Project Cost Analysis
 
-### 1. Traditional Development Cost Estimation
+<!-- cost-analysis: generated; run scripts/update-cost-analysis.sh -->
+All monetary estimates below are in USD. Line counts are physical newline counts
+in the existing Git-tracked categories, not a measure of delivered functionality.
 
-**Cursor AI Usage**:
-- **Total AI Interactions**: 347 requests
-- **Total Tokens Processed**: 3.25B tokens (actual usage data)
-- **Actual Token Costs**: $937.84 (from usage CSV)
-- **Cursor Pro Subscription**: ~$20/month
-- **Staff Engineer Time**: 28 days × 8 hours × $150/hour = $33,600
-  *Source: [Geomotiv - Software Engineer Hourly Rates](https://geomotiv.com/blog/software-engineer-hourly-rate-in-the-usa/) - Silicon Valley rates $80-$150/hour for senior engineers*
-- **Total Project Cost**: ~$34557.836
+### Codebase Composition and Traditional Cost
 
-**Development Timeline**: 28 days of active development
-**Total Actual Cost**: ~$34557.836
+**Total Codebase**: 208,898 lines of manually written code (selected Git-tracked categories; excludes lock files and generated cost JSON)
 
-### 3. Cost Comparison and ROI Analysis
+| Code Type | Lines | Share | Rate/Line | Base Cost |
+|-----------|-------|-------|-----------|-----------|
+| Production Code | 89,802 | 43.0% | $2.50 | $224,505.00 |
+| Test Code | 17,713 | 8.5% | $1.25 | $22,141.25 |
+| Infrastructure (configuration + scripts) | 46,957 | 22.5% | $1.00 | $46,957.00 |
+| Documentation | 54,426 | 26.1% | $0.75 | $40,819.50 |
+| **Total Base Cost** | **208,898** | **100.0%** | | **$334,422.75** |
 
-**Traditional Development**:
-- **Cost Range**: $455142.18 (6-person team over 6-12 months)
-- **Timeline**: 6-12 months
-- **Team Size**: 6 developers
-- **Risk Level**: High (team coordination, knowledge transfer)
-
-**AI-Assisted Development**:
-- **Cost Range**: ~$34557.836
-- **Timeline**: 28 days
-- **Team Size**: 1 staff engineer + AI
-- **Risk Level**: Low (single staff engineer, AI assistance)
-
-#### Cost Comparison Summary
-
-| Development Approach | Total Cost | Timeline | Team Size | Cost per Line |
-|---------------------|------------|----------|-----------|---------------|
-| Traditional Development | $455142.18 | 6-12 months | 6 people | $2.87/line |
-| AI-Assisted Development | ~$34557.836 | 28 days | 1 person + AI | $0.22/line |
-| **Savings** | **$421,000** | **5-11 months** | **5 fewer people** | **92.3% reduction** |
-
-**ROI Calculation**:
-- **Cost Savings**: $455142.18 - ~$34557.836 = $421,000 (92.4% cost reduction)
-- **Time Savings**: 5-11 months (83-92% time reduction)
-- **Quality**: Professional-grade testing, documentation, security scanning
-
-## Detailed Lines of Code Analysis
-
-### Codebase Composition Breakdown
-
-**Total Codebase**: 0 lines of manually written code (excluding auto-generated files)
-
-#### Production Code (72610 lines - %)
-- **Backend Production**: 45,200 lines (Rust)
-  - Core business logic and API endpoints
-  - Database models and migrations
-  - Authentication and security systems
-  - Data processing and transformation logic
-- **Frontend Production**: 27,410 lines (TypeScript/React)
-  - User interface components
-  - State management and data flow
-  - Chart visualizations and interactions
-  - Responsive design implementations
-
-#### Test Code (7,457 lines - 4.7%)
-- **Backend Tests**: 4,200 lines (Rust)
-  - Unit tests for business logic
-  - Integration tests for API endpoints
-  - Database and authentication tests
-- **Frontend Tests**: 3,257 lines (TypeScript/Jest)
-  - Component unit tests
-  - User interaction tests
-  - End-to-end test scenarios
-
-#### Infrastructure Code (43,068 lines - 27.0%)
-- **Configuration Files**: 12,450 lines
-  - Docker configurations and Kubernetes manifests
-  - CI/CD pipeline definitions
-  - Environment and deployment configs
-- **Scripts and Automation**: 31,618 lines
-  - Build and deployment scripts
-  - Database migration scripts
-  - Monitoring and maintenance tools
-
-#### Documentation (35,200 lines - 22.1%)
-- **Technical Documentation**: 20,000 lines
-  - API specifications and technical guides
-  - Development and deployment documentation
-  - Architecture and design documents
-- **Business Documentation**: 15,200 lines
-  - User guides and business documentation
-  - Product summaries and investor materials
-  - Cost analysis and productivity reports
-
-### Cost Calculation Methodology
-
-#### Traditional Development Cost Breakdown
-
-| Code Type | Lines | Rate/Line | Base Cost |
-|-----------|-------|-----------|-----------|
-| Production Code | 72,610 | $2.50 | $181,525 |
-| Test Code | 7,457 | $1.25 | $9,321 |
-| Infrastructure | 43,068 | $1.00 | $43,068 |
-| Documentation | 35,200 | $0.75 | $26,400 |
-| **Total Base Cost** | **158,335** | | **$260,314** |
-
-#### Traditional Development Overhead Costs
-
-| Overhead Category | Percentage | Amount |
-|------------------|------------|--------|
-| Project Management | 20% | $52,063 |
-| Code Reviews | 15% | $39,047 |
-| Testing and QA | 25% | $65,078 |
-| Integration and Deployment | 15% | $39,047 |
-| **Total Overhead** | **75%** | **$195,235** |
-
-#### Traditional Development Total Cost
-
-| Cost Category | Amount |
-|--------------|--------|
-| Base Development Cost | $260,314 |
-| Overhead Costs | $195,235 |
-| **Total Traditional Cost** | **$455,549** |
-
-#### Team Composition for Traditional Development
-
-| Role | Hourly Rate | Hours | Total Cost |
-|------|-------------|-------|------------|
-| Senior Backend Developer (Rust/PostgreSQL) | $125 | 1,200 | $150,000 |
-| Senior Frontend Developer (React/TypeScript) | $125 | 1,000 | $125,000 |
-| DevOps Engineer (Kubernetes/Docker) | $110 | 600 | $66,000 |
-| QA Engineer (Testing/Automation) | $90 | 500 | $45,000 |
-| Technical Writer (Documentation) | $75 | 400 | $30,000 |
-| Project Manager (Coordination) | $100 | 400 | $40,000 |
-| **Total Team Cost** | | **4,100 hours** | **$455142.18** |
-
-### AI-Assisted Development Cost Breakdown
-
-#### Staff Engineer Costs
-
-| Component | Rate | Hours/Duration | Total Cost |
-|-----------|------|----------------|------------|
-| Staff Engineer (Silicon Valley) | $150/hour | 224 hours (28 days × 8 hours) | $33,600 |
-| **Total Staff Cost** | | | **$33,600** |
-
-*Source: [Geomotiv - Software Engineer Hourly Rates](https://geomotiv.com/blog/software-engineer-hourly-rate-in-the-usa/)*
-
-#### AI Tool Costs
-
-| Tool/Service | Cost | Duration | Total Cost |
-|--------------|------|----------|------------|
-| Cursor Pro Subscription | $20/month | 1 month | $20 |
-| Token Usage (Actual) | $937.84 | 28 days | $937.84 |
-| **Total AI Costs** | | | **$957.84** |
-
-#### AI-Assisted Development Total Cost
+- **Backend Production**: 53,650 lines
+- **Backend Tests**: 11,981 lines
+- **Frontend Production**: 36,152 lines
+- **Frontend Tests**: 5,732 lines
+- **Configuration Files**: 28,855 lines
+- **Scripts and Automation**: 18,102 lines
 
 | Cost Category | Amount |
 |---------------|--------|
-| Staff Engineer Time | $33,600 |
-| AI Tool Costs | $957.84 |
-| **Total AI-Assisted Cost** | **~$34557.836** |
+| Base Development Cost | $334,422.75 |
+| Overhead (75% of base) | $250,817.06 |
+| **Total Traditional Cost** | **$585,239.81** |
 
-### Productivity Analysis by Code Type
+Overhead preserves the original 20% project management + 15% code reviews +
+25% testing/QA + 15% integration/deployment assumptions. Monetary components
+are rounded to cents with round-half-up; total cost is the sum of those components.
+Shares are rounded independently and may not sum to exactly 100.0%.
 
-| Code Type | Traditional (lines/day) | AI-Assisted (lines/day) | Productivity Multiplier |
-|-----------|------------------------|-------------------------|------------------------|
-| Production Code | 15-20 | 60-80 | 4x |
-| Test Code | 30-40 | 100-120 | 3x |
-| Infrastructure Code | 50-75 | 150-200 | 2.5x |
-| Documentation | 40-60 | 120-150 | 2.5x |
-| **Average** | **34-49** | **108-138** | **3x** |
+### AI-Assisted Development Cost
 
-### Quality Metrics Comparison
+| Component | Assumption | Amount |
+|-----------|------------|--------|
+| Staff engineer | 224 hours × $150/hour | $33,600.00 |
+| Reported token usage | Sum of Cost column, rounded once | $1,288.55 |
+| Cursor Pro | One month | $20.00 |
+| **Total AI Tool Costs** | | **$1,308.55** |
+| **Total AI-Assisted Cost** | | **$34,908.55** |
 
-#### Code Quality Indicators
-- **Test Coverage**: 90%+ (both traditional and AI-assisted)
-- **Documentation**: Comprehensive (AI-assisted has more detailed inline docs)
-- **Security**: Automated scanning in both approaches
-- **Performance**: Optimized in both approaches
+- **Total AI Interactions**: 6,768 CSV records
+- **Total Tokens Processed**: 4,285,966,700 tokens (including cache reads and unsuccessful requests)
+- **Reported CSV Cost**: 1288.554 USD before currency rounding
+- **Daily Average**: $1,246.73 over the assumed 28 days
 
-#### Development Timeline
-- **Traditional**: 6-12 months with 4-6 person team
-- **AI-Assisted**: 28 days with 1 staff engineer + AI
-- **Time Savings**: 83-92% reduction
+### Cost Comparison
+
+| Development Approach | Total Cost | Cost per Counted Line |
+|----------------------|------------|-----------------------|
+| Traditional Development | $585,239.81 | $2.80 |
+| AI-Assisted Development | $34,908.55 | $0.17 |
+| **Savings** | **$550,331.26** | **94.0% reduction** |
+
+### Assumptions and Limits
+
+Staff rate reference: [Geomotiv](https://geomotiv.com/blog/software-engineer-hourly-rate-in-the-usa/) (historical assumption, not an invoice).
+These estimates preserve the updater's USD/line rates, 75% overhead, 224 staff
+hours, and one $20 subscription month. They are not measured replacement costs.
+The 2025 CSV's reported costs include Included and Not Charged events; they are
+not verified invoices and may overlap subscription charges. Current line counts
+are compared with this fixed historical usage/staffing baseline.
+The original category scope omits admin-frontend, non-shell scripts, and some
+tests outside the selected directories; inline Rust tests remain in their file's
+category. Tracked files are not guaranteed to be manually written.
+Timeline, quality, productivity, and feature-count claims are independent
+assumptions, not outputs of these calculations.
+<!-- /cost-analysis -->
 
 ## Productivity Multipliers
 
@@ -293,11 +184,11 @@ Beyond hourly rates, total employment costs include:
 
 ## Conclusion
 
-The data presented in this document provides a comprehensive foundation for cost assumptions in software development projects. The dramatic cost differences between traditional and AI-assisted development (92.4% cost reduction) demonstrate the transformative potential of AI tools in software development.
+The data presented in this document provides a comprehensive foundation for cost assumptions in software development projects. The dramatic cost differences between traditional and AI-assisted development (94.0% cost reduction) demonstrate the transformative potential of AI tools in software development.
 
 **Key Takeaways**:
-1. **Traditional Development**: $455142.18 for similar projects
-2. **AI-Assisted Development**: ~$34557.836 for equivalent results
+1. **Traditional Development**: $585,239.81 under the line-based model
+2. **AI-Assisted Development**: $34,908.55 under the fixed staffing/usage assumptions
 3. **Productivity Gains**: 10-20x faster development cycles
 4. **Quality Maintenance**: Professional-grade results with AI assistance
 
