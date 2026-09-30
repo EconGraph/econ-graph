@@ -196,7 +196,7 @@ currently defines these alerts:
 | `EconGraphBackendDown` | Backend scrape target reports `up == 0` | 5 minutes |
 | `EconGraphHighResponseTime` | HTTP 95th percentile latency exceeds 1 second | 10 minutes |
 | `EconGraphQueueBacklog` | Older `econgraph_queue_items{status="pending"}` metric exceeds 1000 | 15 minutes |
-| `EconGraphDatabaseConnectionsHigh` | Active database connections exceed 80 | 5 minutes |
+| `EconGraphDatabaseConnectionsHigh` | Total connections to `econ_graph` exceed 80 | 5 minutes |
 
 It does not define `EconGraphDatabaseDown`, `EconGraphQueueStuck`,
 `EconGraphHighErrorRate`, or `EconGraphDataStale`. Other deployment paths may
