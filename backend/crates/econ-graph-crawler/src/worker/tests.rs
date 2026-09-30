@@ -2146,7 +2146,11 @@ async fn expired_discovery_cannot_overwrite_or_insert_stale_metadata() {
             metadata,
             vec![
                 ("t5_lease_catalog".into(), "Newer catalog".into(), true),
-                ("t5_lease_catalog_newer_only".into(), "Newer only".into(), true),
+                (
+                    "t5_lease_catalog_newer_only".into(),
+                    "Newer only".into(),
+                    true
+                ),
             ]
         );
         let active: Vec<(String, bool)> = economic_series::table
