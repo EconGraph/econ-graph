@@ -484,7 +484,11 @@ impl DataLoaders {
         let series_dataset_fields_loader =
             NonCachedLoader::new(SeriesDatasetFieldsBatcher { pool: pool.clone() })
                 .with_max_batch_size(2000);
-        let dataset_source_loader = NonCachedLoader::new(DataSourceBatcher { pool: pool.clone() });
+        // Sources publish only a handful of datasets each, so a page of `datasets { source }`
+        // won't approach the default batch size; raised anyway for consistency with the loaders
+        // above.
+        let dataset_source_loader = NonCachedLoader::new(DataSourceBatcher { pool: pool.clone() })
+            .with_max_batch_size(2000);
         let latest_observation_loader =
             dataloader::non_cached::Loader::new(LatestObservationBatcher { pool: pool.clone() });
 
