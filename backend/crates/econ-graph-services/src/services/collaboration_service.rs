@@ -489,52 +489,63 @@ impl CollaborationService {
             ))
         })?;
 
-        // Get the annotation to check ownership
-        let annotation = chart_annotations::table
-            .filter(chart_annotations::id.eq(annotation_id))
-            .select(ChartAnnotation::as_select())
-            .first::<ChartAnnotation>(&mut conn)
-            .await
-            .optional()
-            .map_err(|e| AppError::DatabaseError(e.to_string()))?
-            .ok_or_else(|| AppError::NotFound("Annotation not found".to_string()))?;
+        // Keep the annotation and any admin grant stable through authorization and deletion.
+        conn.transaction::<bool, AppError, _>(async move |conn| {
+            // Get the annotation to check ownership
+            let annotation = chart_annotations::table
+                .filter(chart_annotations::id.eq(annotation_id))
+                .select(ChartAnnotation::as_select())
+                .for_update()
+                .first::<ChartAnnotation>(conn)
+                .await
+                .optional()
+                .map_err(|e| AppError::DatabaseError(e.to_string()))?
+                .ok_or_else(|| AppError::NotFound("Annotation not found".to_string()))?;
 
-        // A private annotation the caller cannot see is reported as not found, as in
-        // add_comment and get_comments_for_annotation, even to a chart admin: its
-        // existence stays hidden and nobody but its author can delete it.
-        if !can_view_annotation(&annotation, Some(user_id)) {
-            return Err(AppError::NotFound("Annotation not found".to_string()));
-        }
+            // A private annotation the caller cannot see is reported as not found, as in
+            // add_comment and get_comments_for_annotation, even to a chart admin: its
+            // existence stays hidden and nobody but its author can delete it.
+            if !can_view_annotation(&annotation, Some(user_id)) {
+                return Err(AppError::NotFound("Annotation not found".to_string()));
+            }
 
-        // Check if user owns the annotation or has admin permission
-        if annotation.user_id != user_id {
-            // If not owner, check admin permission
-            if let Some(chart_id) = annotation.chart_id {
-                if !self.check_admin_permission(user_id, chart_id).await? {
+            // Check if user owns the annotation or has admin permission
+            if annotation.user_id != user_id {
+                // If not owner, check admin permission
+                if let Some(chart_id) = annotation.chart_id {
+                    let role = chart_collaborators::table
+                        .filter(chart_collaborators::chart_id.eq(chart_id))
+                        .filter(chart_collaborators::user_id.eq(user_id))
+                        .select(chart_collaborators::role)
+                        .for_share()
+                        .first::<Option<String>>(conn)
+                        .await
+                        .optional()
+                        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+                    if !role_grants_admin(role) {
+                        return Err(AppError::Unauthorized("Unauthorized".to_string()));
+                    }
+                } else {
                     return Err(AppError::Unauthorized("Unauthorized".to_string()));
                 }
-            } else {
-                return Err(AppError::Unauthorized("Unauthorized".to_string()));
             }
-        }
 
-        // Delete associated comments first
-        diesel::delete(
-            annotation_comments::table.filter(annotation_comments::annotation_id.eq(annotation_id)),
-        )
-        .execute(&mut conn)
+            // The foreign key cascades comments in the same statement. If deletion fails,
+            // PostgreSQL preserves both the annotation and its comments.
+            let deleted = diesel::delete(
+                chart_annotations::table.filter(chart_annotations::id.eq(annotation_id)),
+            )
+            .execute(conn)
+            .await
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+
+            Ok(deleted > 0)
+        })
         .await
-        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-
-        // Delete the annotation
-        let deleted = diesel::delete(
-            chart_annotations::table.filter(chart_annotations::id.eq(annotation_id)),
-        )
-        .execute(&mut conn)
-        .await
-        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-
-        Ok(deleted > 0)
+        .map_err(|e| match e {
+            AppError::Database(e) => AppError::DatabaseError(e.to_string()),
+            e => e,
+        })
     }
 }
 
@@ -786,6 +797,111 @@ mod tests {
         assert!(admin.can_comment());
         assert!(admin.can_edit());
         assert!(admin.can_admin());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_delete_annotation_cascades_and_preserves_comments_on_failure() {
+        let container = TestContainer::new().await;
+        container.clean_database().await.unwrap();
+        let service = CollaborationService::new(container.pool().clone());
+        let mut conn = container.pool().get().await.unwrap();
+        let owner = Uuid::new_v4();
+        let outsider = Uuid::new_v4();
+        let annotation_id = Uuid::new_v4();
+        diesel::sql_query(
+            "INSERT INTO users (id, email, name) VALUES ($1, 'delete-test@example.com', 'Owner')",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(owner)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        diesel::sql_query("INSERT INTO chart_annotations (id, user_id, annotation_date, title, visibility) VALUES ($1, $2, CURRENT_DATE, 'Delete test', 'public')")
+            .bind::<diesel::sql_types::Uuid, _>(annotation_id)
+            .bind::<diesel::sql_types::Uuid, _>(owner)
+            .execute(&mut conn).await.unwrap();
+        diesel::insert_into(annotation_comments::table)
+            .values(NewAnnotationComment {
+                annotation_id,
+                user_id: owner,
+                content: "Keep until deletion succeeds".into(),
+            })
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            service.delete_annotation(annotation_id, outsider).await,
+            Err(AppError::Unauthorized(_))
+        ));
+        diesel::update(chart_annotations::table.find(annotation_id))
+            .set(chart_annotations::visibility.eq(AnnotationVisibility::Private))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        assert!(matches!(
+            service.delete_annotation(annotation_id, outsider).await,
+            Err(AppError::NotFound(_))
+        ));
+
+        // Fail the parent DELETE after authorization, reproducing the partial-delete risk.
+        diesel::sql_query("CREATE FUNCTION reject_annotation_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced delete failure'; END $$")
+            .execute(&mut conn).await.unwrap();
+        diesel::sql_query("CREATE TRIGGER reject_annotation_delete BEFORE DELETE ON chart_annotations FOR EACH ROW EXECUTE FUNCTION reject_annotation_delete()")
+            .execute(&mut conn).await.unwrap();
+        assert!(matches!(
+            service.delete_annotation(annotation_id, owner).await,
+            Err(AppError::DatabaseError(_))
+        ));
+        assert_eq!(
+            chart_annotations::table
+                .find(annotation_id)
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            annotation_comments::table
+                .filter(annotation_comments::annotation_id.eq(annotation_id))
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .unwrap(),
+            1
+        );
+
+        diesel::sql_query("DROP TRIGGER reject_annotation_delete ON chart_annotations")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        assert!(service
+            .delete_annotation(annotation_id, owner)
+            .await
+            .unwrap());
+        assert_eq!(
+            chart_annotations::table
+                .find(annotation_id)
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            annotation_comments::table
+                .filter(annotation_comments::annotation_id.eq(annotation_id))
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(matches!(
+            service.delete_annotation(annotation_id, owner).await,
+            Err(AppError::NotFound(_))
+        ));
     }
 
     fn annotation(owner: Uuid, visibility: AnnotationVisibility) -> ChartAnnotation {
