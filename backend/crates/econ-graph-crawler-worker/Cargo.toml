@@ -20,6 +20,7 @@ econ-graph-crawler = { path = "../econ-graph-crawler" }
 econ-graph-sec-crawler = { path = "../econ-graph-sec-crawler" }
 
 tokio.workspace = true
+chrono.workspace = true
 # `env` lets the binary read CRAWLER_* variables
 clap = { workspace = true, features = ["env"] }
 tracing.workspace = true

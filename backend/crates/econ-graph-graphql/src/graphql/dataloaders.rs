@@ -19,6 +19,7 @@
 
 use crate::graphql::datasets::{DatasetBatcher, SeriesDatasetFields, SeriesDatasetFieldsBatcher};
 use crate::imports::*;
+use crate::types::LatestObservationType;
 use dataloader::cached::Loader;
 use dataloader::non_cached::Loader as NonCachedLoader;
 use dataloader::BatchFn;
@@ -352,6 +353,88 @@ impl BatchFn<Uuid, Option<User>> for UserBatcher {
     }
 }
 
+/// One row of the latest-observation query
+#[derive(diesel::QueryableByName)]
+struct LatestObservationRow {
+    #[diesel(sql_type = diesel::sql_types::Uuid)]
+    series_id: Uuid,
+    #[diesel(sql_type = diesel::sql_types::Date)]
+    date: NaiveDate,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Numeric>)]
+    value: Option<BigDecimal>,
+    #[diesel(sql_type = diesel::sql_types::Date)]
+    revision_date: NaiveDate,
+}
+
+/// DataLoader batcher for each series' newest observation (latest date, newest revision)
+pub struct LatestObservationBatcher {
+    pub pool: DatabasePool,
+}
+
+impl BatchFn<Uuid, Option<LatestObservationType>> for LatestObservationBatcher {
+    fn load(
+        &mut self,
+        keys: &[Uuid],
+    ) -> impl std::future::Future<Output = HashMap<Uuid, Option<LatestObservationType>>> {
+        let pool = self.pool.clone();
+        let keys = keys.to_vec();
+        async move {
+            use diesel_async::RunQueryDsl;
+
+            // On failure the map stays empty, so `try_load` reports an error for every key
+            // instead of answering "no data".
+            let mut conn = match pool.get().await {
+                Ok(conn) => conn,
+                Err(e) => {
+                    tracing::error!("Failed to get database connection: {}", e);
+                    return HashMap::new();
+                }
+            };
+
+            // One row per series: newest date, then newest revision of it. On a same-day tie
+            // between an original release and a revision, the revision wins. A LATERAL
+            // `LIMIT 1` per key walks the unique index backwards and reads only the newest
+            // (date, revision_date) group, at most two rows sorted to put the revision first;
+            // DISTINCT ON would read and sort every row of every requested series.
+            let rows = match diesel::sql_query(
+                "SELECT k.id AS series_id, dp.date, dp.value, dp.revision_date \
+                 FROM unnest($1::uuid[]) AS k(id) \
+                 CROSS JOIN LATERAL ( \
+                     SELECT date, value, revision_date FROM data_points \
+                     WHERE series_id = k.id \
+                     ORDER BY date DESC, revision_date DESC, is_original_release ASC \
+                     LIMIT 1 \
+                 ) dp",
+            )
+            .bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(&keys)
+            .load::<LatestObservationRow>(&mut conn)
+            .await
+            {
+                Ok(rows) => rows,
+                Err(e) => {
+                    tracing::error!("Failed to load latest observations: {}", e);
+                    return HashMap::new();
+                }
+            };
+
+            let mut result: HashMap<Uuid, Option<LatestObservationType>> =
+                keys.into_iter().map(|key| (key, None)).collect();
+            for row in rows {
+                result.insert(
+                    row.series_id,
+                    Some(LatestObservationType {
+                        date: row.date,
+                        value: row.value,
+                        revision_date: row.revision_date,
+                    }),
+                );
+            }
+
+            result
+        }
+    }
+}
+
 /// Comprehensive DataLoaders struct with all specialized loaders
 #[derive(Clone)]
 pub struct DataLoaders {
@@ -371,6 +454,15 @@ pub struct DataLoaders {
     /// resolver uses this one to keep faith with the "next request sees the edit" promise the
     /// other two loaders make.
     pub dataset_source_loader: NonCachedLoader<Uuid, Option<DataSource>, DataSourceBatcher>,
+    /// Not cached: some callers (the MCP server, the security server) keep one schema, and so
+    /// one `DataLoaders`, for the life of the process, and the latest observation changes
+    /// whenever a crawl lands. The /graphql route builds a schema per request. It still
+    /// batches within a request.
+    pub latest_observation_loader: dataloader::non_cached::Loader<
+        Uuid,
+        Option<LatestObservationType>,
+        LatestObservationBatcher,
+    >,
 }
 
 impl DataLoaders {
@@ -393,6 +485,8 @@ impl DataLoaders {
             NonCachedLoader::new(SeriesDatasetFieldsBatcher { pool: pool.clone() })
                 .with_max_batch_size(2000);
         let dataset_source_loader = NonCachedLoader::new(DataSourceBatcher { pool: pool.clone() });
+        let latest_observation_loader =
+            dataloader::non_cached::Loader::new(LatestObservationBatcher { pool: pool.clone() });
 
         Self {
             data_source_loader,
@@ -404,6 +498,7 @@ impl DataLoaders {
             dataset_loader,
             series_dataset_fields_loader,
             dataset_source_loader,
+            latest_observation_loader,
         }
     }
 }

@@ -19,7 +19,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  IconButton,
   Tooltip,
 } from '@mui/material';
 import { TrendingUp, TrendingDown, Compare, Assessment, Public, Info } from '@mui/icons-material';
@@ -204,13 +203,22 @@ const MultiCountryDashboard: React.FC = () => {
 
   return (
     <Box sx={{ p: 3 }}>
+      {/* Behind the global_analysis_tabs flag (ECO-105); scripts/check-flag-bundle.mjs looks
+          for this marker to prove the release bundle leaves this component out. */}
+      <span hidden>econgraph-flag-global-analysis-tabs-compare-7c2f4a</span>
       <Typography variant='h4' gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         📊 Multi-Country Economic Dashboard
         <Tooltip title='Compare economic indicators across multiple countries with interactive charts and analysis'>
-          {/* eslint-disable-next-line local/no-dead-button -- ECO-246: no handler yet */}
-          <IconButton size='small'>
-            <Info />
-          </IconButton>
+          {/* titleAccess gives the icon a permanent accessible name (role="img") instead of
+              SvgIcon's default aria-hidden, and tabIndex makes it reachable so the tooltip
+              is still keyboard-accessible now that it isn't a button. */}
+          <Info
+            fontSize='small'
+            color='action'
+            titleAccess='Compare economic indicators across multiple countries with interactive charts and analysis'
+            tabIndex={0}
+            sx={{ cursor: 'help' }}
+          />
         </Tooltip>
       </Typography>
 
