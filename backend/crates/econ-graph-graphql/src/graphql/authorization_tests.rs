@@ -306,8 +306,61 @@ async fn run_user_mutation(pool: &DatabasePool, roles: &[Role], query: &str) -> 
         .collect()
 }
 
+/// Regression test for the #260 gap: a caller holding only the one role a mutation checks
+/// could act on any other user, including a super_admin, because the backend cannot see
+/// another user's roles and stopped requiring the full staff set before this test was added.
 #[tokio::test]
-async fn named_user_admin_roles_can_act_on_another_user() {
+async fn narrow_role_cannot_act_on_another_user() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("DATABASE_URL not set; skipping user administration test");
+        return;
+    };
+    let _guard = crate::graphql::TEST_DB_LOCK.lock().await;
+    econ_graph_core::database::run_migrations(&url)
+        .await
+        .expect("migrations");
+    let pool = econ_graph_core::database::create_pool(&url)
+        .await
+        .expect("pool");
+    // Stands in for a super_admin: the backend has no record of another user's roles, so the
+    // gate treats every other user the same way regardless of how privileged they are.
+    let target = insert_user(&pool).await;
+    let id = target.id;
+
+    for (roles, query) in [
+        (
+            vec![Role::AdminUsersUpdate],
+            format!(
+                r#"mutation {{ updateUser(id: "{id}", input: {{ name: "Updated" }}) {{ __typename }} }}"#
+            ),
+        ),
+        (
+            vec![Role::AdminUsersDelete],
+            format!(r#"mutation {{ deleteUser(id: "{id}") }}"#),
+        ),
+        (
+            vec![Role::AdminUsersSuspend],
+            format!(r#"mutation {{ suspendUser(id: "{id}") }}"#),
+        ),
+        (
+            vec![Role::AdminUsersSuspend],
+            format!(r#"mutation {{ activateUser(id: "{id}") }}"#),
+        ),
+    ] {
+        let errs = run_user_mutation(&pool, &roles, &query).await;
+        assert_eq!(errs.len(), 1, "{query}: {errs:?}");
+        assert!(
+            errs[0].contains("Insufficient permissions"),
+            "{query}: {errs:?}"
+        );
+    }
+    let unchanged = read_user(&pool, id).await.unwrap();
+    assert_eq!(unchanged.name, target.name);
+    assert!(unchanged.is_active);
+}
+
+#[tokio::test]
+async fn full_staff_set_can_act_on_another_user() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
         eprintln!("DATABASE_URL not set; skipping user administration test");
         return;
@@ -321,24 +374,29 @@ async fn named_user_admin_roles_can_act_on_another_user() {
         .expect("pool");
     let target = insert_user(&pool).await;
     let id = target.id;
+    let staff: Vec<Role> = Role::all()
+        .iter()
+        .copied()
+        .filter(|r| r.is_staff())
+        .collect();
 
     for (roles, query) in [
         (
-            vec![Role::AdminUsersUpdate],
+            staff.clone(),
             format!(
                 r#"mutation {{ updateUser(id: "{id}", input: {{ name: "Updated" }}) {{ __typename }} }}"#
             ),
         ),
         (
-            vec![Role::AdminUsersSuspend],
+            staff.clone(),
             format!(r#"mutation {{ suspendUser(id: "{id}") }}"#),
         ),
         (
-            vec![Role::AdminUsersSuspend],
+            staff.clone(),
             format!(r#"mutation {{ activateUser(id: "{id}") }}"#),
         ),
         (
-            vec![Role::AdminUsersDelete],
+            staff.clone(),
             format!(r#"mutation {{ deleteUser(id: "{id}") }}"#),
         ),
     ] {
@@ -346,6 +404,110 @@ async fn named_user_admin_roles_can_act_on_another_user() {
         assert!(errs.is_empty(), "{query}: {errs:?}");
     }
     assert!(read_user(&pool, id).await.is_none());
+}
+
+/// A narrow role still works on the caller's own account (unaffected by the gate). Each
+/// mutation needs its own account: delete removes the row, so it runs last.
+#[tokio::test]
+async fn narrow_role_can_act_on_self() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("DATABASE_URL not set; skipping user administration test");
+        return;
+    };
+    let _guard = crate::graphql::TEST_DB_LOCK.lock().await;
+    econ_graph_core::database::run_migrations(&url)
+        .await
+        .expect("migrations");
+    let pool = econ_graph_core::database::create_pool(&url)
+        .await
+        .expect("pool");
+
+    let update_target = insert_user(&pool).await;
+    let suspend_target = insert_user(&pool).await;
+    let activate_target = insert_user(&pool).await;
+    let delete_target = insert_user(&pool).await;
+
+    for (me, roles, query) in [
+        (
+            update_target.clone(),
+            vec![Role::AdminUsersUpdate],
+            format!(
+                r#"mutation {{ updateUser(id: "{}", input: {{ name: "Updated" }}) {{ __typename }} }}"#,
+                update_target.id
+            ),
+        ),
+        (
+            suspend_target.clone(),
+            vec![Role::AdminUsersSuspend],
+            format!(r#"mutation {{ suspendUser(id: "{}") }}"#, suspend_target.id),
+        ),
+        (
+            activate_target.clone(),
+            vec![Role::AdminUsersSuspend],
+            format!(
+                r#"mutation {{ activateUser(id: "{}") }}"#,
+                activate_target.id
+            ),
+        ),
+        (
+            delete_target.clone(),
+            vec![Role::AdminUsersDelete],
+            format!(r#"mutation {{ deleteUser(id: "{}") }}"#, delete_target.id),
+        ),
+    ] {
+        let schema = create_schema_with_data(pool.clone(), Arc::new(caller_with(me, roles)));
+        let errs: Vec<String> = schema
+            .execute(query.as_str())
+            .await
+            .errors
+            .into_iter()
+            .map(|e| e.message)
+            .collect();
+        assert!(errs.is_empty(), "{query}: {errs:?}");
+    }
+    assert!(read_user(&pool, delete_target.id).await.is_none());
+}
+
+/// A narrow role denied on another user gets refused before the mutation can tell whether
+/// that target even exists: the gate must not leak "User not found" for a nonexistent id.
+#[tokio::test]
+async fn narrow_role_denial_does_not_leak_whether_the_target_exists() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("DATABASE_URL not set; skipping user administration test");
+        return;
+    };
+    let _guard = crate::graphql::TEST_DB_LOCK.lock().await;
+    econ_graph_core::database::run_migrations(&url)
+        .await
+        .expect("migrations");
+    let pool = econ_graph_core::database::create_pool(&url)
+        .await
+        .expect("pool");
+    let nonexistent_id = Uuid::new_v4();
+
+    for (roles, query) in [
+        (
+            vec![Role::AdminUsersUpdate],
+            format!(
+                r#"mutation {{ updateUser(id: "{nonexistent_id}", input: {{ name: "Updated" }}) {{ __typename }} }}"#
+            ),
+        ),
+        (
+            vec![Role::AdminUsersDelete],
+            format!(r#"mutation {{ deleteUser(id: "{nonexistent_id}") }}"#),
+        ),
+        (
+            vec![Role::AdminUsersSuspend],
+            format!(r#"mutation {{ suspendUser(id: "{nonexistent_id}") }}"#),
+        ),
+        (
+            vec![Role::AdminUsersSuspend],
+            format!(r#"mutation {{ activateUser(id: "{nonexistent_id}") }}"#),
+        ),
+    ] {
+        let errs = run_user_mutation(&pool, &roles, &query).await;
+        assert_eq!(errs, ["Insufficient permissions"], "{query}: {errs:?}");
+    }
 }
 
 #[tokio::test]
@@ -363,11 +525,17 @@ async fn update_user_email_conflict_leaves_other_fields_unchanged() {
         .expect("pool");
     let target = insert_user(&pool).await;
     let other = insert_user(&pool).await;
+    // Acting on another user (not the caller's own account) needs the full staff set.
+    let staff: Vec<Role> = Role::all()
+        .iter()
+        .copied()
+        .filter(|r| r.is_staff())
+        .collect();
     let query = format!(
         r#"mutation {{ updateUser(id: "{}", input: {{ name: "Should not persist", theme: "dark", email: "{}" }}) {{ __typename }} }}"#,
         target.id, other.email
     );
-    let errs = run_user_mutation(&pool, &[Role::AdminUsersUpdate], &query).await;
+    let errs = run_user_mutation(&pool, &staff, &query).await;
     assert_eq!(errs, ["User with this email already exists"]);
     let unchanged = read_user(&pool, target.id).await.unwrap();
     assert_eq!(unchanged.name, target.name);
@@ -379,7 +547,7 @@ async fn update_user_email_conflict_leaves_other_fields_unchanged() {
         r#"mutation {{ updateUser(id: "{}", input: {{ name: "Updated" }}) {{ __typename }} }}"#,
         target.id
     );
-    let errs = run_user_mutation(&pool, &[Role::AdminUsersUpdate], &query).await;
+    let errs = run_user_mutation(&pool, &staff, &query).await;
     assert!(errs.is_empty(), "{errs:?}");
     let changed = read_user(&pool, target.id).await.unwrap();
     assert_eq!(changed.name, "Updated");
