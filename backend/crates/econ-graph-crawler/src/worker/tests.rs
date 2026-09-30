@@ -1677,3 +1677,208 @@ async fn breaker_counts_one_result_per_batch_call() {
     assert_eq!(w.paused_sources(), vec![SRC]);
     assert_eq!(adapter.batch_calls().len(), 2);
 }
+
+// ---------------------------------------------------------------------------
+// Expired fetches must not mutate data owned by a newer claim.
+// These regressions deliberately fail until persistence is fenced by the lease.
+// ---------------------------------------------------------------------------
+
+/// Both workers stop inside fetch, before any result reaches worker persistence.
+/// Separate gates let the test step through A -> expiry -> B -> A without sleeps.
+struct LeaseGateAdapter {
+    entered: tokio::sync::Barrier,
+    resume: tokio::sync::Barrier,
+    result: Result<FetchedSeries, CrawlError>,
+}
+
+impl LeaseGateAdapter {
+    fn new(result: Result<FetchedSeries, CrawlError>) -> Arc<Self> {
+        Arc::new(Self {
+            entered: tokio::sync::Barrier::new(2),
+            resume: tokio::sync::Barrier::new(2),
+            result,
+        })
+    }
+}
+
+#[async_trait]
+impl SourceAdapter for LeaseGateAdapter {
+    fn id(&self) -> SourceId {
+        SRC
+    }
+
+    async fn discover(&self, _: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
+        panic!("lease regression only enqueues fetch_series")
+    }
+
+    async fn fetch_series(
+        &self,
+        _: &CrawlCtx,
+        _: &str,
+        _: Option<NaiveDate>,
+    ) -> Result<FetchedSeries, CrawlError> {
+        self.entered.wait().await;
+        self.resume.wait().await;
+        self.result.clone()
+    }
+}
+
+fn lease_response(title: &str, value: i32) -> FetchedSeries {
+    FetchedSeries {
+        metadata: Some(NewSeriesMetadataLite {
+            title: title.into(),
+            ..Default::default()
+        }),
+        // Identical upsert keys make an older response overwrite the same observation.
+        points: vec![FetchedPoint {
+            date: d("2024-01-01"),
+            value: Some(BigDecimal::from(value)),
+            revision_date: d("2024-06-01"),
+            is_original_release: true,
+        }],
+    }
+}
+
+fn lease_worker(pool: &DatabasePool, adapter: &Arc<LeaseGateAdapter>, id: &str) -> Worker {
+    let mut registry = AdapterRegistry::new();
+    registry.register(adapter.clone());
+    Worker::new(ctx(pool), registry, config(id))
+}
+
+async fn expired_fetch_preserves_newer_result(
+    pool: &DatabasePool,
+    external_id: &str,
+    stale_result: Result<FetchedSeries, CrawlError>,
+) {
+    let stale_error = stale_result.as_ref().err().map(ToString::to_string);
+    let old = LeaseGateAdapter::new(stale_result);
+    let newer = LeaseGateAdapter::new(Ok(lease_response("Newer response", 222)));
+    let a = lease_worker(pool, &old, "t5-lease-a");
+    let b = lease_worker(pool, &newer, "t5-lease-b");
+    let id = enqueue(pool, SRC.as_str(), external_id, JobKind::FetchSeries, 5).await;
+
+    // A owns the initial claim and is suspended before returning its fetched result.
+    let a_task = tokio::spawn(async move { a.run_once().await });
+    old.entered.wait().await;
+    let a_claim = item(pool, id).await;
+    assert_eq!(a_claim.status, "processing");
+    assert_eq!(a_claim.locked_by.as_deref(), Some("t5-lease-a"));
+    let a_token = a_claim.claim_token.expect("A claim token");
+
+    // Only age this claim; release_stuck performs the real maintenance transition.
+    {
+        let mut conn = pool.get().await.unwrap();
+        let changed = diesel::sql_query(
+            "UPDATE crawl_queue SET locked_at = NOW() - INTERVAL '2 hours' WHERE id = $1",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(id)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        assert_eq!(changed, 1);
+    }
+    assert_eq!(
+        CrawlQueueItem::release_stuck(pool, Duration::from_secs(3600))
+            .await
+            .unwrap(),
+        1
+    );
+    let released = item(pool, id).await;
+    assert_eq!(released.status, "pending");
+    assert!(released.claim_token.is_none());
+    assert_eq!(released.retry_count, 1);
+
+    // B reclaims the same queue row, with a fresh token, while A remains suspended.
+    let b_task = tokio::spawn(async move { b.run_once().await });
+    newer.entered.wait().await;
+    let b_claim = item(pool, id).await;
+    assert_eq!(b_claim.id, a_claim.id);
+    assert_eq!(b_claim.locked_by.as_deref(), Some("t5-lease-b"));
+    assert_eq!(b_claim.status, "processing");
+    assert_ne!(a_token, b_claim.claim_token.expect("B claim token"));
+
+    newer.resume.wait().await;
+    let b_outcome = b_task.await.expect("B task").expect("B claimed");
+    assert!(matches!(b_outcome, JobOutcome::Completed(_)), "{b_outcome:?}");
+    let completed = item(pool, id).await;
+    assert_eq!(completed.status, "completed");
+    let (series_id, ..) = series_row(pool, external_id).await.expect("B persisted series");
+    let baseline = series_row(pool, external_id).await.unwrap();
+    assert_eq!(baseline.2, "Newer response");
+    assert_eq!(baseline.6.as_deref(), Some("success"));
+    {
+        let mut conn = pool.get().await.unwrap();
+        let values: Vec<Option<BigDecimal>> = data_points::table
+            .filter(data_points::series_id.eq(series_id))
+            .select(data_points::value)
+            .load(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(values, vec![Some(BigDecimal::from(222))]);
+    }
+
+    // A now returns its older value or error. Queue fencing reports LeaseLost;
+    // the regression additionally requires fencing all associated data writes.
+    old.resume.wait().await;
+    let a_outcome = a_task.await.expect("A task").expect("A claimed");
+    assert_eq!(a_outcome, JobOutcome::LeaseLost { error: stale_error });
+    let after = item(pool, id).await;
+    assert_eq!(after.status, "completed");
+    assert_eq!(after.finished_at, completed.finished_at);
+    assert_eq!(after.retry_count, completed.retry_count);
+    assert_eq!(after.error_message, completed.error_message);
+    assert!(after.locked_by.is_none() && after.claim_token.is_none());
+
+    let mut conn = pool.get().await.unwrap();
+    let values: Vec<Option<BigDecimal>> = data_points::table
+        .filter(data_points::series_id.eq(series_id))
+        .select(data_points::value)
+        .load(&mut conn)
+        .await
+        .unwrap();
+    let (title, status, error): (String, Option<String>, Option<String>) =
+        economic_series::table
+            .find(series_id)
+            .select((
+                economic_series::title,
+                economic_series::crawl_status,
+                economic_series::crawl_error_message,
+            ))
+            .first(&mut conn)
+            .await
+            .unwrap();
+    assert_eq!(values, vec![Some(BigDecimal::from(222))], "A overwrote B's observation");
+    assert_eq!(title, "Newer response", "A overwrote B's metadata");
+    assert_eq!(status.as_deref(), Some("success"), "A replaced B's success status");
+    assert!(error.is_none(), "A attached a stale error to B's successful series: {error:?}");
+}
+
+#[tokio::test]
+async fn expired_fetch_success_cannot_overwrite_newer_claims_observation() {
+    let Some(db) = db().await else { return };
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        expired_fetch_preserves_newer_result(
+            &db.pool,
+            "t5_lease_stale_success",
+            Ok(lease_response("Older response", 111)),
+        ),
+    )
+    .await
+    .expect("lease interleaving did not finish");
+}
+
+#[tokio::test]
+async fn expired_fetch_failure_cannot_replace_newer_claims_success_status() {
+    let Some(db) = db().await else { return };
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        expired_fetch_preserves_newer_result(
+            &db.pool,
+            "t5_lease_stale_failure",
+            Err(CrawlError::Permanent("older fetch failed".into())),
+        ),
+    )
+    .await
+    .expect("lease interleaving did not finish");
+}
