@@ -302,7 +302,10 @@ impl CollaborationService {
         if rows.is_empty() {
             return Err(AppError::NotFound("Annotation not found".to_string()));
         }
-        Ok(rows.into_iter().filter_map(|(_, comment)| comment).collect())
+        Ok(rows
+            .into_iter()
+            .filter_map(|(_, comment)| comment)
+            .collect())
     }
 
     /// Share a chart with a user
@@ -685,68 +688,159 @@ mod tests {
         let mut conn = container.pool().get().await.unwrap();
         for id in [owner, admin] {
             diesel::insert_into(users::table)
-                .values((users::id.eq(id), users::email.eq(format!("{id}@test.invalid")), users::name.eq("test")))
-                .execute(&mut conn).await.unwrap();
+                .values((
+                    users::id.eq(id),
+                    users::email.eq(format!("{id}@test.invalid")),
+                    users::name.eq("test"),
+                ))
+                .execute(&mut conn)
+                .await
+                .unwrap();
         }
         let mut record = annotation(owner, AnnotationVisibility::Public);
         record.series_id = None;
         record.chart_id = Some(chart);
         let new = NewChartAnnotation {
-            user_id: owner, chart_id: Some(chart), series_id: None,
-            annotation_date: record.annotation_date, annotation_value: None,
-            title: "test".into(), description: None, color: None,
-            annotation_type: None, visibility: record.visibility,
-            is_pinned: None, tags: None,
+            user_id: owner,
+            chart_id: Some(chart),
+            series_id: None,
+            annotation_date: record.annotation_date,
+            annotation_value: None,
+            title: "test".into(),
+            description: None,
+            color: None,
+            annotation_type: None,
+            visibility: record.visibility,
+            is_pinned: None,
+            tags: None,
         };
-        record = diesel::insert_into(chart_annotations::table).values(&new)
-            .returning(ChartAnnotation::as_select()).get_result(&mut conn).await.unwrap();
-        diesel::insert_into(chart_collaborators::table).values(&NewChartCollaborator {
-            chart_id: chart, user_id: admin, invited_by: None,
-            role: Some("ADMIN".into()), permissions: None,
-        }).execute(&mut conn).await.unwrap();
-        assert!(service.get_comments_for_annotation(record.id, None).await.unwrap().is_empty());
-        assert!(matches!(service.add_comment(owner, record.id, "denied".into()).await, Err(AppError::Unauthorized(_))));
-        service.add_comment(admin, record.id, "visible".into()).await.unwrap();
-        assert_eq!(service.get_comments_for_annotation(record.id, None).await.unwrap().len(), 1);
+        record = diesel::insert_into(chart_annotations::table)
+            .values(&new)
+            .returning(ChartAnnotation::as_select())
+            .get_result(&mut conn)
+            .await
+            .unwrap();
+        diesel::insert_into(chart_collaborators::table)
+            .values(&NewChartCollaborator {
+                chart_id: chart,
+                user_id: admin,
+                invited_by: None,
+                role: Some("ADMIN".into()),
+                permissions: None,
+            })
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        assert!(service
+            .get_comments_for_annotation(record.id, None)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(matches!(
+            service.add_comment(owner, record.id, "denied".into()).await,
+            Err(AppError::Unauthorized(_))
+        ));
+        service
+            .add_comment(admin, record.id, "visible".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            service
+                .get_comments_for_annotation(record.id, None)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
 
         // The comment attempt waits for a visibility edit's row lock; after the
         // edit commits, SELECT FOR SHARE sees the new private value and denies.
-        let attempt = conn.transaction::<_, diesel::result::Error, _>(async |conn| {
-            diesel::update(chart_annotations::table.find(record.id))
-                .set(chart_annotations::visibility.eq(AnnotationVisibility::Private))
-                .execute(conn).await?;
-            let blocked_service = CollaborationService::new(single.clone());
-            let annotation_id = record.id;
-            let mut attempt = tokio::spawn(async move {
-                blocked_service.add_comment(admin, annotation_id, "private".into()).await
-            });
-            assert!(tokio::time::timeout(Duration::from_millis(100), &mut attempt).await.is_err());
-            Ok(attempt)
-        }).await.unwrap();
+        let attempt = conn
+            .transaction::<_, diesel::result::Error, _>(async |conn| {
+                diesel::update(chart_annotations::table.find(record.id))
+                    .set(chart_annotations::visibility.eq(AnnotationVisibility::Private))
+                    .execute(conn)
+                    .await?;
+                let blocked_service = CollaborationService::new(single.clone());
+                let annotation_id = record.id;
+                let mut attempt = tokio::spawn(async move {
+                    blocked_service
+                        .add_comment(admin, annotation_id, "private".into())
+                        .await
+                });
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(100), &mut attempt)
+                        .await
+                        .is_err()
+                );
+                Ok(attempt)
+            })
+            .await
+            .unwrap();
         assert!(matches!(attempt.await.unwrap(), Err(AppError::NotFound(_))));
-        assert!(matches!(service.get_comments_for_annotation(record.id, Some(admin)).await, Err(AppError::NotFound(_))));
-        assert_eq!(service.get_comments_for_annotation(record.id, Some(owner)).await.unwrap().len(), 1);
+        assert!(matches!(
+            service
+                .get_comments_for_annotation(record.id, Some(admin))
+                .await,
+            Err(AppError::NotFound(_))
+        ));
+        assert_eq!(
+            service
+                .get_comments_for_annotation(record.id, Some(owner))
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
         diesel::update(chart_annotations::table.find(record.id))
             .set(chart_annotations::visibility.eq(AnnotationVisibility::Public))
-            .execute(&mut conn).await.unwrap();
+            .execute(&mut conn)
+            .await
+            .unwrap();
 
-        let attempt = conn.transaction::<_, diesel::result::Error, _>(async |conn| {
-            diesel::update(chart_collaborators::table
-                .filter(chart_collaborators::chart_id.eq(chart))
-                .filter(chart_collaborators::user_id.eq(admin)))
+        let attempt = conn
+            .transaction::<_, diesel::result::Error, _>(async |conn| {
+                diesel::update(
+                    chart_collaborators::table
+                        .filter(chart_collaborators::chart_id.eq(chart))
+                        .filter(chart_collaborators::user_id.eq(admin)),
+                )
                 .set(chart_collaborators::role.eq("view"))
-                .execute(conn).await?;
-            let blocked_service = CollaborationService::new(single.clone());
-            let annotation_id = record.id;
-            let mut attempt = tokio::spawn(async move {
-                blocked_service.add_comment(admin, annotation_id, "revoked".into()).await
-            });
-            assert!(tokio::time::timeout(Duration::from_millis(100), &mut attempt).await.is_err());
-            Ok(attempt)
-        }).await.unwrap();
-        assert!(matches!(attempt.await.unwrap(), Err(AppError::Unauthorized(_))));
-        assert_eq!(service.get_comments_for_annotation(record.id, None).await.unwrap().len(), 1);
-        assert!(matches!(service.get_comments_for_annotation(Uuid::new_v4(), None).await, Err(AppError::NotFound(_))));
+                .execute(conn)
+                .await?;
+                let blocked_service = CollaborationService::new(single.clone());
+                let annotation_id = record.id;
+                let mut attempt = tokio::spawn(async move {
+                    blocked_service
+                        .add_comment(admin, annotation_id, "revoked".into())
+                        .await
+                });
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(100), &mut attempt)
+                        .await
+                        .is_err()
+                );
+                Ok(attempt)
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            attempt.await.unwrap(),
+            Err(AppError::Unauthorized(_))
+        ));
+        assert_eq!(
+            service
+                .get_comments_for_annotation(record.id, None)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(matches!(
+            service
+                .get_comments_for_annotation(Uuid::new_v4(), None)
+                .await,
+            Err(AppError::NotFound(_))
+        ));
     }
-
 }
