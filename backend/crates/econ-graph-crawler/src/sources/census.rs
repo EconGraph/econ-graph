@@ -442,13 +442,20 @@ fn parse_variables(body: &Value) -> Result<Vec<BdsVariable>, CrawlError> {
             let obj = v.as_object().ok_or_else(|| {
                 CrawlError::Parse(format!("Census variables.json: {name:?} is not an object"))
             })?;
+            let label = obj
+                .get("label")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    CrawlError::Parse(format!(
+                        "Census variables.json: {name:?} has no non-blank string 'label'"
+                    ))
+                })?
+                .to_string();
             Ok(BdsVariable {
                 name: name.clone(),
-                label: obj
-                    .get("label")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
+                label,
             })
         })
         .collect()
@@ -557,6 +564,33 @@ mod tests {
     #[test]
     fn parse_variables_rejects_missing_variables_object() {
         let body = serde_json::json!({"nope": {}});
+        let err = parse_variables(&body).unwrap_err();
+        assert!(matches!(err, CrawlError::Parse(_)), "{err:?}");
+    }
+
+    /// Regression for the CodeRabbit finding on #219: a missing, non-string or blank `label`
+    /// used to become `""` via `unwrap_or_default`, so `is_economic_variable` silently dropped
+    /// the entry (its `label.is_empty()` check) instead of failing discovery — the same
+    /// malformed-catalog class as `parse_variables_rejects_non_object_entry`, since a variable
+    /// like `ESTAB` disappearing from an otherwise "complete" catalog would let
+    /// `retire_unlisted` deactivate its existing rows.
+    #[test]
+    fn parse_variables_rejects_missing_label() {
+        let body = serde_json::json!({"variables": {"ESTAB": {}}});
+        let err = parse_variables(&body).unwrap_err();
+        assert!(matches!(err, CrawlError::Parse(_)), "{err:?}");
+    }
+
+    #[test]
+    fn parse_variables_rejects_non_string_label() {
+        let body = serde_json::json!({"variables": {"ESTAB": {"label": 123}}});
+        let err = parse_variables(&body).unwrap_err();
+        assert!(matches!(err, CrawlError::Parse(_)), "{err:?}");
+    }
+
+    #[test]
+    fn parse_variables_rejects_blank_label() {
+        let body = serde_json::json!({"variables": {"ESTAB": {"label": "   "}}});
         let err = parse_variables(&body).unwrap_err();
         assert!(matches!(err, CrawlError::Parse(_)), "{err:?}");
     }
