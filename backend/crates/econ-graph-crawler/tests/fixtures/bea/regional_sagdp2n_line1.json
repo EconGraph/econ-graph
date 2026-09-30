@@ -1,0 +1,60 @@
+{
+ "BEAAPI": {
+  "Request": {
+   "RequestParam": [
+    {"ParameterName": "USERID", "ParameterValue": "REDACTED"},
+    {"ParameterName": "METHOD", "ParameterValue": "GETDATA"},
+    {"ParameterName": "DATASETNAME", "ParameterValue": "REGIONAL"},
+    {"ParameterName": "TABLENAME", "ParameterValue": "SAGDP2N"},
+    {"ParameterName": "LINECODE", "ParameterValue": "1"},
+    {"ParameterName": "GEOFIPS", "ParameterValue": "00000,01000,06000,36000,56000"},
+    {"ParameterName": "YEAR", "ParameterValue": "ALL"},
+    {"ParameterName": "RESULTFORMAT", "ParameterValue": "JSON"}
+   ]
+  },
+  "Results": {
+   "Statistic": "Gross domestic product (GDP) by state",
+   "UnitOfMeasure": "Millions of current dollars",
+   "PublicTable": "SAGDP2N Gross domestic product (GDP) by state 1/",
+   "UTCProductionTime": "2024-09-27T12:30:00.000",
+   "NoteRef": "1/",
+   "Dimensions": [
+    {
+     "Name": "Code",
+     "DataType": "string",
+     "IsValue": "0"
+    },
+    {
+     "Name": "GeoFips",
+     "DataType": "string",
+     "IsValue": "0"
+    }
+   ],
+   "Data": [
+    {"Code": "SAGDP2N-1", "GeoFips": "00000", "GeoName": "United States", "TimePeriod": "2021", "CL_UNIT": "Millions of current dollars", "UNIT_MULT": "6", "DataValue": "23,315,081"},
+    {"Code": "SAGDP2N-1", "GeoFips": "00000", "GeoName": "United States", "TimePeriod": "2022", "CL_UNIT": "Millions of current dollars", "UNIT_MULT": "6", "DataValue": "24,480,835"},
+    {"Code": "SAGDP2N-1", "GeoFips": "00000", "GeoName": "United States", "TimePeriod": "2023", "CL_UNIT": "Millions of current dollars", "UNIT_MULT": "6", "DataValue": "25,646,589"},
+    {"Code": "SAGDP2N-1", "GeoFips": "01000", "GeoName": "Alabama", "TimePeriod": "2021", "CL_UNIT": "Millions of current dollars", "UNIT_MULT": "6", "DataValue": "264,660"},
+    {"Code": "SAGDP2N-1", "GeoFips": "01000", "GeoName": "Alabama", "TimePeriod": "2022", "CL_UNIT": "Millions of current dollars", "UNIT_MULT": "6", "DataValue": "277,893"},
+    {"Code": "SAGDP2N-1", "GeoFips": "01000", "GeoName": "Alabama", "TimePeriod": "2023", "CL_UNIT": "Millions of current dollars", "UNIT_MULT": "6", "DataValue": "291,126"},
+    {"Code": "SAGDP2N-1", "GeoFips": "06000", "GeoName": "California", "TimePeriod": "2021", "CL_UNIT": "Millions of current dollars", "UNIT_MULT": "6", "DataValue": "3,598,103"},
+    {"Code": "SAGDP2N-1", "GeoFips": "06000", "GeoName": "California", "TimePeriod": "2022", "CL_UNIT": "Millions of current dollars", "UNIT_MULT": "6", "DataValue": "3,778,008"},
+    {"Code": "SAGDP2N-1", "GeoFips": "06000", "GeoName": "California", "TimePeriod": "2023", "CL_UNIT": "Millions of current dollars", "UNIT_MULT": "6", "DataValue": "3,957,913"},
+    {"Code": "SAGDP2N-1", "GeoFips": "36000", "GeoName": "New York", "TimePeriod": "2021", "CL_UNIT": "Millions of current dollars", "UNIT_MULT": "6", "DataValue": "2,048,403"},
+    {"Code": "SAGDP2N-1", "GeoFips": "36000", "GeoName": "New York", "TimePeriod": "2022", "CL_UNIT": "Millions of current dollars", "UNIT_MULT": "6", "DataValue": "2,150,823"},
+    {"Code": "SAGDP2N-1", "GeoFips": "36000", "GeoName": "New York", "TimePeriod": "2023", "CL_UNIT": "Millions of current dollars", "UNIT_MULT": "6", "DataValue": "2,253,243"},
+    {"Code": "SAGDP2N-1", "GeoFips": "56000", "GeoName": "Wyoming", "TimePeriod": "2023", "CL_UNIT": "Millions of current dollars", "UNIT_MULT": "6", "DataValue": "(D)", "NoteRef": "(D)"}
+   ],
+   "Notes": [
+    {
+     "NoteRef": "1/",
+     "NoteText": "Last updated: September 27, 2024."
+    },
+    {
+     "NoteRef": "(D)",
+     "NoteText": "Not shown to avoid disclosure of confidential information."
+    }
+   ]
+  }
+ }
+}
