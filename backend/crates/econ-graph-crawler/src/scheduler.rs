@@ -68,7 +68,7 @@ use crate::sources::static_catalogs::is_static_catalog_source;
 /// `CrawlError::Permanent("... not implemented yet")`. Enqueuing refreshes for them would only
 /// produce failed jobs, so the scheduler skips them. Remove a source here once its adapter
 /// implements `fetch_series`.
-pub const FETCH_UNIMPLEMENTED: &[SourceId] = &[SourceId::Bea];
+pub const FETCH_UNIMPLEMENTED: &[SourceId] = &[];
 
 /// How often each source's catalog is re-discovered.
 pub const DISCOVERY_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -753,6 +753,7 @@ mod tests {
         for s in [
             SourceId::Fred,
             SourceId::Bls,
+            SourceId::Bea,
             SourceId::Census,
             SourceId::Fhfa,
             SourceId::WorldBank,
@@ -760,7 +761,6 @@ mod tests {
             assert!(supports_fetch(s), "{s}");
         }
         for s in [
-            SourceId::Bea,
             SourceId::Sec,
             SourceId::Ecb,
             SourceId::Oecd,
@@ -778,6 +778,7 @@ mod tests {
             vec![
                 SourceId::Fred,
                 SourceId::Bls,
+                SourceId::Bea,
                 SourceId::Census,
                 SourceId::WorldBank,
                 SourceId::Fhfa
@@ -976,7 +977,7 @@ mod tests {
         for (source, id) in [
             (SourceId::Ecb, "t15c_ecb"),
             (SourceId::Oecd, "t15c_oecd"),
-            (SourceId::Bea, "t15c_bea"),
+            (SourceId::WorldBank, "t15c_wb"),
             (SourceId::Sec, "t15c_sec"),
             (SourceId::Fred, "t15c_fred"),
         ] {
@@ -987,7 +988,7 @@ mod tests {
             &[
                 SourceId::Ecb,
                 SourceId::Oecd,
-                SourceId::Bea,
+                SourceId::WorldBank,
                 SourceId::Sec,
                 SourceId::Fred,
             ],

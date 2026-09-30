@@ -141,12 +141,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = econ_graph_core::create_pool(&database_url).await?;
 
     let registry = default_registry();
-    // Reference data the FHFA and Census adapters read at runtime ($CRAWLER_DATA_DIR): fail at
-    // startup rather than on their first job.
+    // Reference data adapters read at runtime ($CRAWLER_DATA_DIR): fail at startup rather than on
+    // their first job (FHFA and Census read `us_states`; FRED reads `fred_series`).
     let states = econ_graph_crawler::reference::us_states()?;
+    let fred_series = econ_graph_crawler::reference::fred_series()?;
     tracing::info!(
         data_dir = %econ_graph_crawler::reference::data_dir().display(),
         states = states.len(),
+        fred_series = fred_series.len(),
         "reference data loaded"
     );
     // Shared reference data ($REFERENCE_DATA_DIR), e.g. the country table.

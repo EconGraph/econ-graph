@@ -1,0 +1,87 @@
+{
+ "BEAAPI": {
+  "Request": {
+   "RequestParam": [
+    {"ParameterName": "USERID", "ParameterValue": "REDACTED"},
+    {"ParameterName": "METHOD", "ParameterValue": "GETDATA"},
+    {"ParameterName": "DATASETNAME", "ParameterValue": "NIPA"},
+    {"ParameterName": "TABLENAME", "ParameterValue": "T10101"},
+    {"ParameterName": "FREQUENCY", "ParameterValue": "A"},
+    {"ParameterName": "YEAR", "ParameterValue": "2023,2024"},
+    {"ParameterName": "RESULTFORMAT", "ParameterValue": "JSON"}
+   ]
+  },
+  "Results": {
+   "Statistic": "NIPA Table",
+   "UTCProductionTime": "2025-01-30T13:30:12.087",
+   "Dimensions": [
+    {
+     "Ordinal": "1",
+     "Name": "TableName",
+     "DataType": "string",
+     "IsValue": "0"
+    }
+   ],
+   "Data": [
+    {"TableName": "T10101", "SeriesCode": "A191RL", "LineNumber": "1", "LineDescription": "Gross domestic product", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "-2.0", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A191RL", "LineNumber": "1", "LineDescription": "Gross domestic product", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "-1.7", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "DPCERL", "LineNumber": "2", "LineDescription": "Personal consumption expenditures", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "-1.3", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "DPCERL", "LineNumber": "2", "LineDescription": "Personal consumption expenditures", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "-1.0", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "DGDSRL", "LineNumber": "3", "LineDescription": "Goods", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "-0.6", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "DGDSRL", "LineNumber": "3", "LineDescription": "Goods", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "-0.3", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "DDURRL", "LineNumber": "4", "LineDescription": "Durable goods", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "0.1", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "DDURRL", "LineNumber": "4", "LineDescription": "Durable goods", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "0.4", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "DNDGRL", "LineNumber": "5", "LineDescription": "Nondurable goods", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "0.8", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "DNDGRL", "LineNumber": "5", "LineDescription": "Nondurable goods", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "1.1", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "DSERRL", "LineNumber": "6", "LineDescription": "Services", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "1.5", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "DSERRL", "LineNumber": "6", "LineDescription": "Services", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "1.8", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A006RL", "LineNumber": "7", "LineDescription": "Gross private domestic investment", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "2.2", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A006RL", "LineNumber": "7", "LineDescription": "Gross private domestic investment", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "2.5", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A007RL", "LineNumber": "8", "LineDescription": "Fixed investment", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "2.9", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A007RL", "LineNumber": "8", "LineDescription": "Fixed investment", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "3.2", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A008RL", "LineNumber": "9", "LineDescription": "Nonresidential", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "3.6", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A008RL", "LineNumber": "9", "LineDescription": "Nonresidential", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "3.9", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "B009RL", "LineNumber": "10", "LineDescription": "Structures", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "4.3", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "B009RL", "LineNumber": "10", "LineDescription": "Structures", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "4.6", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "Y033RL", "LineNumber": "11", "LineDescription": "Equipment", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "5.0", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "Y033RL", "LineNumber": "11", "LineDescription": "Equipment", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "5.3", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "Y001RL", "LineNumber": "12", "LineDescription": "Intellectual property products", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "5.7", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "Y001RL", "LineNumber": "12", "LineDescription": "Intellectual property products", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "6.0", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A011RL", "LineNumber": "13", "LineDescription": "Residential", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "6.4", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A011RL", "LineNumber": "13", "LineDescription": "Residential", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "6.7", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A014RL", "LineNumber": "14", "LineDescription": "Change in private inventories", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "-1.9", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A014RL", "LineNumber": "14", "LineDescription": "Change in private inventories", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "-1.6", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A019RL", "LineNumber": "15", "LineDescription": "Net exports of goods and services", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "-1.2", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A019RL", "LineNumber": "15", "LineDescription": "Net exports of goods and services", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "-0.9", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "B020RL", "LineNumber": "16", "LineDescription": "Exports", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "-0.5", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "B020RL", "LineNumber": "16", "LineDescription": "Exports", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "-0.2", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A253RL", "LineNumber": "17", "LineDescription": "Goods", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "0.2", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A253RL", "LineNumber": "17", "LineDescription": "Goods", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "0.5", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A646RL", "LineNumber": "18", "LineDescription": "Services", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "0.9", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A646RL", "LineNumber": "18", "LineDescription": "Services", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "1.2", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "B021RL", "LineNumber": "19", "LineDescription": "Imports", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "1.6", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "B021RL", "LineNumber": "19", "LineDescription": "Imports", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "1.9", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A255RL", "LineNumber": "20", "LineDescription": "Goods", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "2.3", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A255RL", "LineNumber": "20", "LineDescription": "Goods", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "2.6", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "B656RL", "LineNumber": "21", "LineDescription": "Services", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "3.0", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "B656RL", "LineNumber": "21", "LineDescription": "Services", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "3.3", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A822RL", "LineNumber": "22", "LineDescription": "Government consumption expenditures and gross investment", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "3.7", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A822RL", "LineNumber": "22", "LineDescription": "Government consumption expenditures and gross investment", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "4.0", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A823RL", "LineNumber": "23", "LineDescription": "Federal", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "4.4", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A823RL", "LineNumber": "23", "LineDescription": "Federal", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "4.7", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A824RL", "LineNumber": "24", "LineDescription": "National defense", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "5.1", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A824RL", "LineNumber": "24", "LineDescription": "National defense", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "5.4", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A825RL", "LineNumber": "25", "LineDescription": "Nondefense", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "5.8", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A825RL", "LineNumber": "25", "LineDescription": "Nondefense", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "6.1", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A829RL", "LineNumber": "26", "LineDescription": "State and local", "TimePeriod": "2023", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "6.5", "NoteRef": "T10101"},
+    {"TableName": "T10101", "SeriesCode": "A829RL", "LineNumber": "26", "LineDescription": "State and local", "TimePeriod": "2024", "METRIC_NAME": "Fisher Quantity Index", "CL_UNIT": "Percent change, annual rate", "UNIT_MULT": "0", "DataValue": "6.8", "NoteRef": "T10101"}
+   ],
+   "Notes": [
+    {
+     "NoteRef": "T10101",
+     "NoteText": "Table 1.1.1. Percent Change From Preceding Period in Real Gross Domestic Product"
+    }
+   ]
+  }
+ }
+}

@@ -40,6 +40,18 @@
       ]
     },
     {
+      "source": "BEA",
+      "external_id": "bea_nipa/T10105.1.Q",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/",
+          "query": { "method": "GetData", "DatasetName": "NIPA", "TableName": "T10105", "Frequency": "Q" },
+          "fixture": "bea/nipa_t10105_q.json"
+        }
+      ]
+    },
+    {
       "source": "FHFA",
       "external_id": "USHPI",
       "routes": [
