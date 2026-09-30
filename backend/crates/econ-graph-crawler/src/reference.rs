@@ -30,6 +30,9 @@ pub const DATA_DIR_ENV: &str = "CRAWLER_DATA_DIR";
 /// File name of the U.S. states table in the data directory.
 pub const US_STATES_FILE: &str = "us_states.csv";
 
+/// File name of the World Development Indicators list in the data directory.
+pub const WDI_INDICATORS_FILE: &str = "wdi_indicators.csv";
+
 /// Directory under [`data_dir`] holding one `<source>.toml` of dataset definitions per source.
 pub const DATASETS_DIR: &str = "datasets";
 
@@ -74,6 +77,73 @@ pub fn data_dir() -> PathBuf {
             || Path::new(env!("CARGO_MANIFEST_DIR")).join("data"),
             PathBuf::from,
         )
+}
+
+/// One World Development Indicator the World Bank adapter crawls.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WdiIndicator {
+    /// Indicator code, e.g. `NY.GDP.PCAP.CD`.
+    pub id: String,
+    /// Name, e.g. `GDP per capita (current US$)`.
+    pub name: String,
+    /// Unit stored as each series' units, e.g. `current US$`.
+    pub unit: String,
+}
+
+/// The indicators from `wdi_indicators.csv` in [`data_dir`], read on first use and cached.
+///
+/// A missing, malformed or empty file, a duplicate id, or an id that could not be part of a
+/// canonical series id (empty, or containing `/` or whitespace) is a `Permanent` error, with the
+/// path in the message.
+pub fn wdi_indicators() -> Result<&'static [WdiIndicator], CrawlError> {
+    static INDICATORS: OnceLock<Result<Vec<WdiIndicator>, String>> = OnceLock::new();
+    INDICATORS
+        .get_or_init(|| load_wdi_indicators(&data_dir().join(WDI_INDICATORS_FILE)))
+        .as_deref()
+        .map_err(|e| CrawlError::Permanent(e.clone()))
+}
+
+fn load_wdi_indicators(path: &Path) -> Result<Vec<WdiIndicator>, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("reading {}: {e} (set {DATA_DIR_ENV})", path.display()))?;
+    parse_wdi_indicators(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Parses `id,name,unit` rows after a header line (`#` comment lines skipped; fields may be
+/// quoted) and checks them.
+fn parse_wdi_indicators(text: &str) -> Result<Vec<WdiIndicator>, String> {
+    let mut reader = csv::ReaderBuilder::new()
+        .comment(Some(b'#'))
+        .trim(csv::Trim::All)
+        .from_reader(text.as_bytes());
+    let header = reader.headers().map_err(|e| e.to_string())?.clone();
+    if header.iter().ne(["id", "name", "unit"]) {
+        return Err(format!(
+            "expected header id,name,unit, got {}",
+            header.iter().collect::<Vec<_>>().join(",")
+        ));
+    }
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for record in reader.deserialize::<WdiIndicator>() {
+        let row = record.map_err(|e| e.to_string())?;
+        let id = &row.id;
+        if id.is_empty() || id.contains('/') || id.contains(char::is_whitespace) {
+            return Err(format!("indicator id {id:?} is empty or has '/' or spaces"));
+        }
+        if row.name.is_empty() || row.unit.is_empty() {
+            return Err(format!("indicator {id}: empty name or unit"));
+        }
+        if !seen.insert(id.clone()) {
+            return Err(format!("indicator {id} is listed twice"));
+        }
+        out.push(row);
+    }
+    if out.is_empty() {
+        return Err("no indicators".into());
+    }
+    Ok(out)
 }
 
 /// The states and DC from `us_states.csv` in [`data_dir`], read on first use and cached.
@@ -360,6 +430,47 @@ mod tests {
         let ca = states.iter().find(|s| s.postal == "CA").unwrap();
         assert_eq!((ca.fips.as_str(), ca.name.as_str()), ("06", "California"));
         assert!(states.iter().any(|s| s.fips == "11" && s.postal == "DC"));
+    }
+
+    /// The shipped indicator list parses and holds the curated set (about 50).
+    #[test]
+    fn shipped_wdi_indicators_file_is_valid() {
+        let list = load_wdi_indicators(
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("data")
+                .join(WDI_INDICATORS_FILE),
+        )
+        .unwrap();
+        assert!((45..=60).contains(&list.len()), "{}", list.len());
+        let gdp = list.iter().find(|i| i.id == "NY.GDP.PCAP.CD").unwrap();
+        assert_eq!(gdp.name, "GDP per capita (current US$)");
+        assert_eq!(gdp.unit, "current US$");
+        // Quoted names keep their commas.
+        assert!(list.iter().any(|i| i.name == "Population, total"));
+    }
+
+    #[test]
+    fn rejects_malformed_wdi_indicators() {
+        for (text, needle) in [
+            ("code,name,unit\n", "expected header"),
+            ("id,name,unit\n", "no indicators"),
+            ("id,name,unit\na/b,X,u\n", "'/'"),
+            ("id,name,unit\nA,X,\n", "empty name or unit"),
+            ("id,name,unit\nA,X,u\nA,Y,u\n", "twice"),
+            ("id,name,unit\nA,X\n", "found record with 2 fields"),
+        ] {
+            let e = parse_wdi_indicators(text).unwrap_err();
+            assert!(e.contains(needle), "{text:?}: {e}");
+        }
+        let ok = parse_wdi_indicators("# c\nid,name,unit\n A ,\"B, c\", u \n").unwrap();
+        assert_eq!(
+            ok,
+            [WdiIndicator {
+                id: "A".into(),
+                name: "B, c".into(),
+                unit: "u".into(),
+            }]
+        );
     }
 
     /// Comments and blank lines are skipped; names may contain spaces.

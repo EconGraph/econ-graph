@@ -183,6 +183,9 @@ async fn run(args: Args) -> anyhow::Result<()> {
                 );
             }
         }
+        datasets
+            .check(entry.source, &entry.external_id, fetched.dataset.as_ref())
+            .with_context(|| format!("{label}: dataset"))?;
         let write = persist::persist_series(&pool, entry.source, &entry.external_id, &fetched)
             .await
             .with_context(|| format!("{label}: persisting"))?;
