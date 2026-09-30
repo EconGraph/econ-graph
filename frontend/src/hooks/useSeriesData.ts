@@ -43,13 +43,8 @@ export interface SeriesDetail {
   isActive: boolean;
 }
 
-/**
- * The `first` sent to `seriesData`, which is also the backend's cap. The backend applies it
- * to raw rows (all revisions, oldest first) before keeping the latest revision of each
- * date, so a series with more rows than this loses its newest observations. Fixing that
- * is backend work (paging or a latest-revision query); see the series UI PR map.
- */
-export const MAX_SERIES_POINTS = 10000;
+/** Points requested per `seriesData` page; the backend caps a page at this size. */
+export const SERIES_PAGE_SIZE = 10000;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -147,30 +142,86 @@ export interface SeriesDataOptions {
   enabled?: boolean;
 }
 
-// Hook for fetching a series' observations (latest revision of each date), transformed
-// on the backend. `points` is empty when the series has no observations. While another
-// transformation loads, the previous result stays (isPreviousData), labeled with its own
-// transformation.
+interface RawSeriesDataPage {
+  nodes: RawDataPoint[];
+  totalCount: number;
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+}
+
+/** The `seriesData` variables shared by every page of one read. */
+export interface SeriesDataVariables {
+  seriesId: string;
+  filter: { startDate?: string; endDate?: string; latestRevisionOnly: boolean };
+  transformation: DataTransformation;
+}
+
+/**
+ * Fetch every observation of a series by following `seriesData` pages to the end.
+ *
+ * The backend returns at most SERIES_PAGE_SIZE points per call, ordered by date, revision
+ * date and id, with a cursor that is the count of points read so far. A transformed page
+ * carries the values it has in the whole series, so pages concatenate as they are. A
+ * missing or stalled page is an error: a partial series must never look complete.
+ * @param variables - The query variables of the first page (no `after`).
+ * @param signal - Aborts the remaining page requests.
+ * @returns Every point, oldest first.
+ */
+export async function fetchAllSeriesData(
+  variables: SeriesDataVariables,
+  signal?: AbortSignal
+): Promise<SeriesDataPoint[]> {
+  const points: SeriesDataPoint[] = [];
+  let after: string | undefined;
+  for (;;) {
+    // fetch rejects an already-aborted signal too; this keeps a cancelled read from starting
+    // another page when the transport doesn't honor the signal.
+    if (signal?.aborted) throw new DOMException('seriesData read was cancelled', 'AbortError');
+    const result = await executeGraphQL<{ seriesData: RawSeriesDataPage | null }>(
+      {
+        query: QUERIES.GET_SERIES_DATA,
+        variables:
+          after === undefined
+            ? { ...variables, first: SERIES_PAGE_SIZE }
+            : { ...variables, first: SERIES_PAGE_SIZE, after },
+      },
+      signal
+    );
+    const page = result.data?.seriesData;
+    if (!page) throw new Error(`seriesData returned no page after ${points.length} points`);
+    for (const raw of page.nodes) points.push(toDataPoint(raw));
+    if (!page.pageInfo.hasNextPage) break;
+    // Guard against a server that keeps promising a next page without advancing, or past
+    // the count it reported.
+    const next = page.pageInfo.endCursor;
+    if (page.nodes.length === 0 || !next || next === after || points.length >= page.totalCount) {
+      throw new Error(`seriesData paging stalled after ${points.length} points`);
+    }
+    after = next;
+  }
+  return points;
+}
+
+/**
+ * Fetch all of a series' observations (latest revision of each date), transformed on the
+ * backend and read page by page. `points` is empty when the series has no observations.
+ * While another transformation loads, the previous result stays (isPreviousData), labeled
+ * with its own transformation.
+ * @param seriesId - The series id, or null while it isn't known yet.
+ * @param options - Transformation, date range and enabled flag.
+ * @returns The React Query result of `{ transformation, points }`.
+ */
 export const useSeriesData = (seriesId: string | null, options: SeriesDataOptions = {}) => {
   const { transformation = 'NONE', startDate, endDate, enabled = true } = options;
   return useQuery(
     ['seriesData', seriesId, transformation, startDate, endDate],
-    async (): Promise<SeriesObservations> => {
+    async ({ signal }): Promise<SeriesObservations> => {
       if (!seriesId || !isSeriesId(seriesId)) return { transformation, points: [] };
 
-      const result = await executeGraphQL<{ seriesData: { nodes: RawDataPoint[] } | null }>({
-        query: QUERIES.GET_SERIES_DATA,
-        variables: {
-          seriesId,
-          filter: { startDate, endDate, latestRevisionOnly: true },
-          transformation,
-          first: MAX_SERIES_POINTS,
-        },
-      });
-      return {
-        transformation,
-        points: (result.data?.seriesData?.nodes ?? []).map(toDataPoint),
-      };
+      const points = await fetchAllSeriesData(
+        { seriesId, filter: { startDate, endDate, latestRevisionOnly: true }, transformation },
+        signal
+      );
+      return { transformation, points };
     },
     {
       enabled: enabled && !!seriesId,

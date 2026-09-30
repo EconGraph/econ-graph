@@ -201,8 +201,52 @@ describe('SeriesChart', () => {
     expect(lastLineProps().options.scales.y.title.text).toBe('Percent Change');
 
     await userEvent.click(screen.getByRole('combobox'));
-    await userEvent.click(screen.getByRole('option', { name: 'Month-over-Month' }));
-    expect(onTransformationChange).toHaveBeenCalledWith('MONTH_OVER_MONTH');
+    const options = screen.getAllByRole('option').map(option => option.textContent);
+    expect(options).toEqual([
+      'None',
+      'Year-over-Year',
+      'Quarter-over-Quarter',
+      'Month-over-Month',
+      'Change since first observation',
+      'Log difference',
+    ]);
+    await userEvent.click(screen.getByRole('option', { name: 'Log difference' }));
+    expect(onTransformationChange).toHaveBeenCalledWith('LOG_DIFFERENCE');
+  });
+
+  test('labels a percent change with % and levels with the series units', () => {
+    renderChart({ transformation: 'YEAR_OVER_YEAR' });
+    const { label } = lastLineProps().options.plugins.tooltip.callbacks;
+    const raw = lastLineProps().data.datasets[0].data[1];
+    expect(label({ raw, parsed: { y: 5.4 }, dataset: { label: 'Test Series' } })).toEqual([
+      'Test Series: 5.40 %',
+      'Revised: Mar 15, 2024',
+    ]);
+
+    renderChart({ transformation: 'NONE' });
+    expect(lastLineProps().options.scales.y.title.text).toBe('Index');
+    const levels = lastLineProps().data.datasets[0].data[1];
+    expect(
+      lastLineProps().options.plugins.tooltip.callbacks.label({
+        raw: levels,
+        parsed: { y: 101.5 },
+        dataset: { label: 'Test Series' },
+      })
+    ).toEqual(['Test Series: 101.50 Index', 'Revised: Mar 15, 2024']);
+  });
+
+  test('labels log difference without a percent unit', () => {
+    renderChart({ transformation: 'LOG_DIFFERENCE' });
+
+    expect(lastLineProps().options.plugins.title.text).toBe('Test Series (Log Difference)');
+    expect(lastLineProps().options.scales.y.title.text).toBe('Log Difference');
+
+    const { label } = lastLineProps().options.plugins.tooltip.callbacks;
+    const raw = lastLineProps().data.datasets[0].data[1];
+    expect(label({ raw, parsed: { y: 0.0526 }, dataset: { label: 'Test Series' } })).toEqual([
+      'Test Series: 0.05',
+      'Revised: Mar 15, 2024',
+    ]);
   });
 
   describe('onPointClick', () => {
