@@ -229,14 +229,6 @@ pub async fn sync_datasets(pool: &DatabasePool, catalog: &DatasetCatalog) -> App
     .await
 }
 
-#[derive(QueryableByName)]
-struct DatasetRow {
-    #[diesel(sql_type = Text)]
-    code: String,
-    #[diesel(sql_type = SqlUuid)]
-    id: Uuid,
-}
-
 /// `datasets.id` of each of `source_id`'s datasets named in `codes`. A code without a row means
 /// the catalog was not synced ([`sync_datasets`]): an error, not a silent `NULL`.
 async fn dataset_ids(
@@ -245,16 +237,17 @@ async fn dataset_ids(
     source_id: Uuid,
     codes: &[&str],
 ) -> AppResult<BTreeMap<String, Uuid>> {
+    use econ_graph_core::schema::datasets::dsl as ds;
     if codes.is_empty() {
         return Ok(BTreeMap::new());
     }
-    let rows: Vec<DatasetRow> =
-        diesel::sql_query("SELECT code, id FROM datasets WHERE source_id = $1 AND code = ANY($2)")
-            .bind::<SqlUuid, _>(source_id)
-            .bind::<Array<Text>, _>(codes)
-            .load(conn)
-            .await?;
-    let found: BTreeMap<String, Uuid> = rows.into_iter().map(|r| (r.code, r.id)).collect();
+    let rows: Vec<(String, Uuid)> = ds::datasets
+        .filter(ds::source_id.eq(source_id))
+        .filter(ds::code.eq_any(codes))
+        .select((ds::code, ds::id))
+        .load(conn)
+        .await?;
+    let found: BTreeMap<String, Uuid> = rows.into_iter().collect();
     if let Some(code) = codes.iter().find(|c| !found.contains_key(**c)) {
         return Err(AppError::ValidationError(format!(
             "{source} dataset {code} is not in the datasets table (run sync_datasets at startup)"
