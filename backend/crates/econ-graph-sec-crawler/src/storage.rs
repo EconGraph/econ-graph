@@ -322,7 +322,8 @@ impl XbrlStorage {
         // Calculate file hash
         let mut hasher = Sha256::new();
         hasher.update(content);
-        let file_hash = format!("sha256:{}", hex::encode(hasher.finalize()));
+        // The database hash column holds the 64 hex digits, without an algorithm prefix.
+        let file_hash = hex::encode(hasher.finalize());
 
         // Determine file type and source type
         let file_type = if reference.reference_type == "schemaRef" {
@@ -622,11 +623,16 @@ mod tests {
             .unwrap();
 
             let mut conn = pool.get().await.unwrap();
-            let schema_id: Uuid = xbrl_taxonomy_schemas::table
-                .select(xbrl_taxonomy_schemas::id)
+            let (schema_id, file_hash): (Uuid, String) = xbrl_taxonomy_schemas::table
+                .select((
+                    xbrl_taxonomy_schemas::id,
+                    xbrl_taxonomy_schemas::file_hash,
+                ))
                 .get_result(&mut conn)
                 .await
                 .unwrap();
+            assert_eq!(file_hash.len(), 64);
+            assert_eq!(file_hash, hex::encode(Sha256::digest(b"<schema/>")));
             let resolved: (Option<Uuid>, bool) = xbrl_instance_dts_references::table
                 .filter(xbrl_instance_dts_references::statement_id.eq(statement.id))
                 .select((
