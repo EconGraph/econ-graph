@@ -299,8 +299,8 @@ impl SourceAdapter for WorldBankAdapter {
                 let Some(id) = ids.get(area.key.as_str()) else {
                     continue;
                 };
-                let series = series_id(def, &indicator.id, &area.key).map(|(_, dataset)| {
-                    FetchedSeries {
+                let series =
+                    series_id(def, &indicator.id, &area.key).map(|(_, dataset)| FetchedSeries {
                         metadata: Some(metadata(indicator, area, &rows)),
                         points: rows
                             .iter()
@@ -312,8 +312,7 @@ impl SourceAdapter for WorldBankAdapter {
                             })
                             .collect(),
                         dataset: Some(dataset),
-                    }
-                });
+                    });
                 out.insert((*id).to_string(), series);
             }
         }
@@ -545,9 +544,8 @@ fn parse_rows(what: &str, items: Vec<Value>) -> Result<Vec<Row>, CrawlError> {
         let (date, frequency) = parse_period(&r.date).ok_or_else(|| {
             CrawlError::Parse(format!("World Bank {what}: bad date {:?}", r.date))
         })?;
-        let value = BigDecimal::from_str(&value.to_string()).map_err(|e| {
-            CrawlError::Parse(format!("World Bank {what}: bad value {value}: {e}"))
-        })?;
+        let value = BigDecimal::from_str(&value.to_string())
+            .map_err(|e| CrawlError::Parse(format!("World Bank {what}: bad value {value}: {e}")))?;
         rows.push(Row {
             iso3: r.iso3.unwrap_or_default().trim().to_string(),
             wb_id: r.country.id.unwrap_or_default().trim().to_string(),
@@ -595,7 +593,10 @@ impl IndicatorData {
     /// logged once and dropped. Two raw codes can resolve to the same area (a country whose
     /// `countryiso3code` is empty on some rows and set on others), so rows are merged rather than
     /// keeping only the first-seen code, with a repeated date keeping its last-merged row.
-    fn resolve<'a>(&self, areas: &'a econ_graph_core::reference::Areas) -> Vec<(&'a Area, Vec<Row>)> {
+    fn resolve<'a>(
+        &self,
+        areas: &'a econ_graph_core::reference::Areas,
+    ) -> Vec<(&'a Area, Vec<Row>)> {
         let mut out: BTreeMap<&str, (&Area, Vec<Row>)> = BTreeMap::new();
         let mut unknown = BTreeSet::new();
         let mut merged = BTreeSet::new();

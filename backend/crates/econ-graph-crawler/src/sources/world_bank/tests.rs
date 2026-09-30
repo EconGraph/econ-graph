@@ -66,7 +66,14 @@ fn ids_and_batch_keys() {
         parse_id("wdi/NY.GDP.PCAP.CD.USA"),
         Some(("NY.GDP.PCAP.CD", "USA"))
     );
-    for bad in ["NY.GDP.PCAP.CD", "wdi/USA", "wdi/.USA", "wdi/X.", "other/X.USA", "wdiX/A.B"] {
+    for bad in [
+        "NY.GDP.PCAP.CD",
+        "wdi/USA",
+        "wdi/.USA",
+        "wdi/X.",
+        "other/X.USA",
+        "wdiX/A.B",
+    ] {
         assert_eq!(parse_id(bad), None, "{bad}");
     }
     let a = WorldBankAdapter::default();
@@ -84,7 +91,10 @@ fn ids_and_batch_keys() {
 
 #[test]
 fn periods() {
-    assert_eq!(parse_period("2023"), Some((date(2023, 1), Frequency::Annual)));
+    assert_eq!(
+        parse_period("2023"),
+        Some((date(2023, 1), Frequency::Annual))
+    );
     assert_eq!(
         parse_period("2023Q2"),
         Some((date(2023, 4), Frequency::Quarterly))
@@ -171,7 +181,10 @@ fn resolve_merges_rows_that_reach_the_same_area_by_two_raw_codes() {
     let (area, points) = &resolved[0];
     assert_eq!(area.key, "USA");
     assert_eq!(
-        points.iter().map(|r| (r.date, &r.value)).collect::<Vec<_>>(),
+        points
+            .iter()
+            .map(|r| (r.date, &r.value))
+            .collect::<Vec<_>>(),
         [
             (date(2021, 1), &BigDecimal::from(99)),
             (date(2022, 1), &BigDecimal::from(2)),
@@ -230,7 +243,10 @@ async fn fetch_batch_one_request_for_every_area() {
     );
 
     let wld = out["wdi/NY.GDP.PCAP.CD.WLD"].as_ref().unwrap();
-    assert_eq!(wld.metadata.as_ref().unwrap().title, "GDP per capita (current US$): World");
+    assert_eq!(
+        wld.metadata.as_ref().unwrap().title,
+        "GDP per capita (current US$): World"
+    );
     assert!(out["wdi/NY.GDP.PCAP.CD.DEU"].is_ok());
     // No values, or an area outside the table: left out, so the worker fails them as NotFound.
     assert!(!out.contains_key("wdi/NY.GDP.PCAP.CD.ASM"));
@@ -346,10 +362,7 @@ async fn page_count_is_bounded() {
         .fetch_series(&test_ctx(), "wdi/NY.GDP.PCAP.CD.USA", None)
         .await
         .unwrap();
-    assert_eq!(
-        mock.received_requests().await.len() as u64,
-        MAX_PAGES
-    );
+    assert_eq!(mock.received_requests().await.len() as u64, MAX_PAGES);
 }
 
 #[test]
@@ -365,14 +378,21 @@ fn response_shapes() {
     assert_eq!(items.len(), 39);
     // `null` rows are an empty page; a missing `lastupdated` is only an error once needed.
     let (meta, items) = parse_list("x", serde_json::json!([{"pages": "3"}, null])).unwrap();
-    assert_eq!((meta.pages, meta.last_updated, items.len()), (Some(3), None, 0));
+    assert_eq!(
+        (meta.pages, meta.last_updated, items.len()),
+        (Some(3), None, 0)
+    );
     for bad in [
         serde_json::json!({"a": 1}),
         serde_json::json!([{"pages": 1}]),
         serde_json::json!([{"pages": 1}, {"a": 1}]),
         serde_json::json!([{"lastupdated": "July"}, []]),
     ] {
-        assert_eq!(parse_list("x", bad.clone()).unwrap_err().kind(), "parse", "{bad}");
+        assert_eq!(
+            parse_list("x", bad.clone()).unwrap_err().kind(),
+            "parse",
+            "{bad}"
+        );
     }
     let e = parse_list("x", serde_json::from_str(INVALID).unwrap()).unwrap_err();
     assert_eq!(e.kind(), "not_found", "{e}");
