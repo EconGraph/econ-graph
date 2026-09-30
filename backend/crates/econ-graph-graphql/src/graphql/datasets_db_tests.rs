@@ -118,6 +118,9 @@ async fn new_series(
             frequency: "Annual".to_string(),
             dataset_id,
             dimensions: dimensions.unwrap_or_default(),
+            // The `series` query treats a series with no end_date as having no data and hides
+            // it (main's "hide series without data" change), so give these a date.
+            end_date: Some(chrono::Utc::now().date_naive()),
             ..Default::default()
         },
     )
