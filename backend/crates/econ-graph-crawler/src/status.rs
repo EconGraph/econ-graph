@@ -7,7 +7,9 @@
 //! Workers keep no state outside the queue, so the queue *is* the crawler status: a job being
 //! processed means a worker is alive, `finished_at` records when work last finished, and
 //! `scheduled_for` says when the next job becomes due. [`crawler_status`] reads all of it in two
-//! aggregate queries, using the database clock throughout.
+//! aggregate queries, using the database clock throughout. The two queries run inside one
+//! read-only `REPEATABLE READ` transaction, so a job transitioning between them can't make the
+//! global and per-source halves of the snapshot describe different queue states.
 
 use chrono::{DateTime, Utc};
 use diesel::sql_types::{BigInt, Bool, Nullable, Text, Timestamptz};
@@ -52,6 +54,8 @@ pub struct SourceQueueStatus {
     pub failed_24h: i64,
     /// Latest completion time of a `completed` row.
     pub last_success: Option<DateTime<Utc>>,
+    /// Latest time a row became `failed` (by `finished_at`, else `updated_at`).
+    pub last_failure: Option<DateTime<Utc>>,
 }
 
 #[derive(QueryableByName)]
@@ -80,6 +84,8 @@ struct SourceRow {
     failed_24h: i64,
     #[diesel(sql_type = Nullable<Timestamptz>)]
     last_success: Option<DateTime<Utc>>,
+    #[diesel(sql_type = Nullable<Timestamptz>)]
+    last_failure: Option<DateTime<Utc>>,
 }
 
 const GLOBAL_SQL: &str = "\
@@ -105,40 +111,60 @@ SELECT
     COUNT(*) FILTER (WHERE status = 'retrying') AS retrying,
     COUNT(*) FILTER (WHERE status = 'failed'
                      AND COALESCE(finished_at, updated_at) >= NOW() - INTERVAL '24 hours') AS failed_24h,
-    MAX(COALESCE(finished_at, updated_at)) FILTER (WHERE status = 'completed') AS last_success
+    MAX(COALESCE(finished_at, updated_at)) FILTER (WHERE status = 'completed') AS last_success,
+    MAX(COALESCE(finished_at, updated_at)) FILTER (WHERE status = 'failed') AS last_failure
 FROM crawl_queue
 GROUP BY source
 ORDER BY source";
 
 /// Computes the [`CrawlerStatusSnapshot`] from `crawl_queue`.
+///
+/// `GLOBAL_SQL` and `PER_SOURCE_SQL` run inside one read-only `REPEATABLE READ` transaction on
+/// the same connection, so both see the same snapshot of the queue: an ordinary autocommit
+/// (READ COMMITTED) pair of statements would let a job finish between the two reads, leaving the
+/// global fields and the per-source counts describing different queue states.
 pub async fn crawler_status(pool: &DatabasePool) -> AppResult<CrawlerStatusSnapshot> {
     let mut conn = pool
         .get()
         .await
         .map_err(|e| AppError::DatabaseError(format!("failed to get database connection: {e}")))?;
-    let global: GlobalRow = diesel::sql_query(GLOBAL_SQL)
-        .bind::<diesel::sql_types::Integer, _>(RECENT_ACTIVITY_MINUTES as i32)
-        .get_result(&mut conn)
-        .await?;
-    let per_source = diesel::sql_query(PER_SOURCE_SQL)
-        .load::<SourceRow>(&mut conn)
-        .await?
-        .into_iter()
-        .map(|r| SourceQueueStatus {
-            source: r.source,
-            pending: r.pending,
-            processing: r.processing,
-            retrying: r.retrying,
-            failed_24h: r.failed_24h,
-            last_success: r.last_success,
+
+    // Use Diesel's transaction manager so cancellation marks the connection as holding an
+    // unfinished transaction. The pool discards it instead of lending READ ONLY and an old
+    // snapshot to the next caller.
+    let (global, per_source) = conn
+        .build_transaction()
+        .repeatable_read()
+        .read_only()
+        .run(async |conn| {
+            let global: GlobalRow = diesel::sql_query(GLOBAL_SQL)
+                .bind::<diesel::sql_types::Integer, _>(RECENT_ACTIVITY_MINUTES as i32)
+                .get_result(&mut *conn)
+                .await?;
+            let per_source = diesel::sql_query(PER_SOURCE_SQL)
+                .load::<SourceRow>(&mut *conn)
+                .await?;
+            Ok::<_, AppError>((global, per_source))
         })
-        .collect();
+        .await?;
+
     Ok(CrawlerStatusSnapshot {
         active_workers: global.active_workers,
         is_running: global.is_running,
         last_crawl: global.last_crawl,
         next_scheduled_crawl: global.next_scheduled_crawl,
-        per_source,
+        per_source: per_source
+            .into_iter()
+            .map(|r| SourceQueueStatus {
+                source: r.source,
+                pending: r.pending,
+                processing: r.processing,
+                retrying: r.retrying,
+                failed_24h: r.failed_24h,
+                last_success: r.last_success,
+                last_failure: r.last_failure,
+            })
+            .collect(),
     })
 }
 
@@ -281,6 +307,7 @@ mod tests {
             (0, 1, 1, 1)
         );
         assert!(close(bls.last_success, done_recent));
+        assert!(close(bls.last_failure, now - Duration::hours(2)));
         let fred = &s.per_source[1];
         assert_eq!(fred.source, "FRED");
         assert_eq!(
@@ -293,6 +320,7 @@ mod tests {
             (1, 2, 0, 0)
         );
         assert!(close(fred.last_success, done_old));
+        assert_eq!(fred.last_failure, None);
     }
 
     #[tokio::test]
@@ -345,5 +373,157 @@ mod tests {
         assert_eq!(s.active_workers, 0);
         assert_eq!(s.last_crawl, None, "failed rows don't count as a crawl");
         assert_eq!(s.next_scheduled_crawl, None);
+    }
+
+    /// Two connections: one holds `crawler_status`'s `REPEATABLE READ` transaction open between
+    /// its global and per-source reads, the other commits a job transition in between. The
+    /// snapshot must describe one consistent point in time, not a mix of before/after states.
+    #[tokio::test]
+    async fn status_snapshot_is_consistent_across_reads() {
+        let Some((pool, _guard)) = pool().await else {
+            return;
+        };
+        seed(&pool, "FRED", "A", "processing", Some("w1"), None, None).await;
+
+        let mut conn_a = pool.get().await.unwrap();
+        diesel::sql_query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            .execute(&mut conn_a)
+            .await
+            .unwrap();
+        let global: GlobalRow = diesel::sql_query(GLOBAL_SQL)
+            .bind::<diesel::sql_types::Integer, _>(RECENT_ACTIVITY_MINUTES as i32)
+            .get_result(&mut conn_a)
+            .await
+            .unwrap();
+
+        // Committed on a second connection while conn_a's transaction is still open. Under plain
+        // autocommit statements (the bug this guards against) this would already be visible to
+        // the per-source read below; under REPEATABLE READ it must not be.
+        let mut conn_b = pool.get().await.unwrap();
+        diesel::sql_query(
+            "UPDATE crawl_queue SET status = 'completed', locked_by = NULL, locked_at = NULL, \
+             finished_at = NOW() WHERE source = 'FRED' AND series_id = 'A'",
+        )
+        .execute(&mut conn_b)
+        .await
+        .unwrap();
+        drop(conn_b);
+
+        let per_source: Vec<SourceRow> = diesel::sql_query(PER_SOURCE_SQL)
+            .load(&mut conn_a)
+            .await
+            .unwrap();
+        diesel::sql_query("COMMIT")
+            .execute(&mut conn_a)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            global.active_workers, 1,
+            "global read's own snapshot: the row was still processing"
+        );
+        let fred = per_source.iter().find(|r| r.source == "FRED").unwrap();
+        assert_eq!(
+            (fred.processing, fred.pending, fred.retrying),
+            (1, 0, 0),
+            "per-source read must agree with the global read's snapshot, not the concurrent \
+             completion committed by conn_b between the two reads"
+        );
+        assert_eq!(
+            fred.last_success, None,
+            "the concurrent completion must not leak into this snapshot"
+        );
+    }
+    /// Cancel the real status query after its transaction starts, then reuse the only pooled
+    /// connection. A raw SQL BEGIN is invisible to Diesel's pool cleanup and leaks READ ONLY
+    /// into the next borrow; a tracked transaction must discard that connection on cancellation.
+    #[tokio::test]
+    async fn cancelled_status_does_not_leak_transaction_to_pool() {
+        use diesel::sql_types::Integer;
+        use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
+        use diesel_async::AsyncPgConnection;
+        use std::time::Duration as StdDuration;
+
+        let Some((pool, _guard)) = pool().await else {
+            return;
+        };
+        let url = std::env::var("DATABASE_URL").unwrap();
+        let singleton = Pool::builder()
+            .max_size(1)
+            .connection_timeout(StdDuration::from_secs(10))
+            .build(AsyncDieselConnectionManager::<AsyncPgConnection>::new(url))
+            .await
+            .unwrap();
+        let mut status_conn = singleton.get().await.unwrap();
+        let pid = diesel::select(diesel::dsl::sql::<Integer>("pg_backend_pid()"))
+            .get_result::<i32>(&mut status_conn)
+            .await
+            .unwrap();
+        drop(status_conn);
+
+        // This lock blocks GLOBAL_SQL, so observing that query waiting proves that the real
+        // crawler_status has finished BEGIN and is still inside its transaction.
+        let mut locker = pool.get().await.unwrap();
+        diesel::sql_query("BEGIN")
+            .execute(&mut locker)
+            .await
+            .unwrap();
+        diesel::sql_query("LOCK TABLE crawl_queue IN ACCESS EXCLUSIVE MODE")
+            .execute(&mut locker)
+            .await
+            .unwrap();
+        let mut observer = pool.get().await.unwrap();
+        let query_pool = singleton.clone();
+        let task = tokio::spawn(async move { crawler_status(&query_pool).await });
+        let blocked_sql = format!(
+            "EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = {pid} \
+             AND state = 'active' AND wait_event_type = 'Lock' \
+             AND xact_start IS NOT NULL AND query LIKE '%FROM crawl_queue%')"
+        );
+        let blocked = tokio::time::timeout(StdDuration::from_secs(10), async {
+            loop {
+                let waiting = diesel::select(diesel::dsl::sql::<Bool>(&blocked_sql))
+                    .get_result::<bool>(&mut observer)
+                    .await
+                    .unwrap();
+                if waiting {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+
+        task.abort();
+        let cancelled = tokio::time::timeout(StdDuration::from_secs(10), task)
+            .await
+            .expect("status task must stop after abort");
+        // Release the table lock before any assertions or pool validation: a driver may finish
+        // sending the cancelled SELECT, and the next SELECT 1 must not queue behind this lock.
+        diesel::sql_query("ROLLBACK")
+            .execute(&mut locker)
+            .await
+            .unwrap();
+        blocked.expect("the production status query must reach the locked table");
+        assert!(cancelled.unwrap_err().is_cancelled());
+
+        let mut reused = tokio::time::timeout(StdDuration::from_secs(10), singleton.get())
+            .await
+            .expect("the singleton pool must remain usable")
+            .unwrap();
+        let read_only = diesel::select(diesel::dsl::sql::<Bool>(
+            "current_setting('transaction_read_only')::boolean",
+        ))
+        .get_result::<bool>(&mut reused)
+        .await
+        .unwrap();
+        let write = diesel::sql_query("UPDATE crawl_queue SET priority = priority WHERE FALSE")
+            .execute(&mut reused)
+            .await;
+        assert!(
+            !read_only,
+            "cancelled crawler_status leaked its read-only transaction into the next pool borrow"
+        );
+        write.expect("a writer borrowing after cancelled crawler_status must succeed");
     }
 }

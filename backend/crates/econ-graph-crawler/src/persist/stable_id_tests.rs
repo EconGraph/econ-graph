@@ -266,6 +266,7 @@ fn listed(ids: &[&str]) -> Vec<DiscoveredSeries> {
             units: None,
             frequency: None,
             data_url: None,
+            dataset: None,
         })
         .collect()
 }

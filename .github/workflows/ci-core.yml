@@ -68,6 +68,10 @@ env:
   # From the release's diesel_cli-x86_64-unknown-linux-gnu.tar.xz.sha256
   DIESEL_SHA256: cecfdb4f840e48ad230f77719fedc9720df351ab217de32bd1dd75cfe906b957
   DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
+  # promtool for the Prometheus rule checks, from the release tarball
+  PROMETHEUS_VERSION: 3.5.0
+  # From the release's sha256sums.txt (prometheus-3.5.0.linux-amd64.tar.gz)
+  PROMETHEUS_SHA256: e811827af26d822afb09a4f28314f61b618b12cff5369835a67f674d8b46f39a
 
 jobs:
   changes:
@@ -194,6 +198,28 @@ jobs:
         # jobs reuse it instead of recompiling deps under a second feature set
         cargo build --verbose --all-targets
       working-directory: backend
+
+  prometheus-rules:
+    name: Prometheus Rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install promtool
+      run: |
+        tarball="prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+        curl -sSfL -o "$tarball" "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/${tarball}"
+        echo "${PROMETHEUS_SHA256}  ${tarball}" | sha256sum -c -
+        tar xzf "$tarball" --strip-components=1 "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+        sudo install promtool /usr/local/bin/promtool
+
+    - name: Check rules and run rule tests
+      run: |
+        python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+        k8s/monitoring/check-prometheus-rules.sh
 
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
@@ -595,8 +621,8 @@ jobs:
 
     # Required: the crawler crate, crawler worker, all SEC crawler lib tests (no database
     # needed; default build and with the xbrl-parser feature), the core financial ratio
-    # tests and the crawl_queue, dataset model and queue service tests. These must pass for the job
-    # (and the PR) to go green.
+    # tests and the crawl_queue, dataset model, queue service and cross-section tests.
+    # These must pass for the job (and the PR) to go green.
     # The long soak test (tests/soak.rs) is #[ignore]d and runs manually only; its fast
     # limiter-conformance tests run here.
     - name: Run crawler and queue tests (required)
@@ -606,12 +632,19 @@ jobs:
         cargo test -p econ-graph-crawler --all-features -- --test-threads=1
         cargo test -p econ-graph-crawler-worker -- --test-threads=1
         cargo test -p econ-graph-sec-crawler --lib -- --test-threads=1
+        # Keep this database regression opt-in locally, but require it against this job's Postgres.
+        # --exact plus the result check prevents a renamed/missing test from silently passing.
+        cargo test -p econ-graph-sec-crawler --lib storage::tests::storage_stats_handle_empty_mixed_and_large_totals -- --exact --ignored --test-threads=1 | tee /tmp/xbrl-storage-stats-test.log
+        grep -Fq "test storage::tests::storage_stats_handle_empty_mixed_and_large_totals ... ok" /tmp/xbrl-storage-stats-test.log
+        grep -Fq "test result: ok. 1 passed; 0 failed; 0 ignored;" /tmp/xbrl-storage-stats-test.log
         # The XBRL parser is compiled out by default (feature xbrl-parser); test it here too.
         cargo test -p econ-graph-sec-crawler --features xbrl-parser --lib -- --test-threads=1
         cargo test -p econ-graph-core --features financial-ratios --lib financial_ratios -- --test-threads=1
         cargo test -p econ-graph-core crawl_queue -- --test-threads=1
         cargo test -p econ-graph-core --lib models::dataset -- --test-threads=1
         cargo test -p econ-graph-services queue_service -- --test-threads=1
+        cargo test -p econ-graph-services cross_section -- --test-threads=1
+        cargo test -p econ-graph-graphql --lib cross_section -- --test-threads=1
       working-directory: backend
 
     # A plain `cargo test` (dev profile) still carries the dev-only static catalogs via
@@ -2356,3 +2389,4 @@ jobs:
 # Updated Wed Sep 17 08:11:38 PDT 2025
 
 # Workflow cache refresh: 2025-09-17 08:25:07 PDT
+

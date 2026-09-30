@@ -22,8 +22,10 @@
 //!
 //! Metrics: unless `--metrics-addr` / `CRAWLER_METRICS_ADDR` is empty or `off`, an HTTP server on
 //! that address (default `0.0.0.0:9102`) serves `GET /metrics` (Prometheus text format) and
-//! `GET /healthz` (200 while the worker loop runs), and a background task refreshes the
-//! `crawler_queue_*` gauges from `crawl_queue` every `--queue-metrics-interval-secs`.
+//! `GET /healthz` (200 while the worker loop runs). Background tasks refresh the `crawler_queue_*`
+//! gauges from `crawl_queue` every `--queue-metrics-interval-secs`, and the `crawler_coverage_*`
+//! gauges (per-source coverage and freshness, as `crawler coverage` prints) every
+//! `--coverage-metrics-interval-secs`.
 //!
 //! Scheduler: unless `--scheduler false` / `CRAWLER_SCHEDULER=false`, a background
 //! `econ_graph_crawler::scheduler::RefreshScheduler` enqueues `fetch_series` jobs for due series
@@ -98,6 +100,16 @@ struct Args {
     )]
     queue_metrics_interval_secs: u64,
 
+    /// Seconds between coverage gauge refreshes (only with the metrics server). Keep it well under
+    /// 900: the gauges count as stale after 15 minutes without a refresh, and CrawlerCoverageStale
+    /// fires 30 minutes after that.
+    #[arg(
+        long,
+        env = "CRAWLER_COVERAGE_METRICS_INTERVAL_SECS",
+        default_value_t = 300
+    )]
+    coverage_metrics_interval_secs: u64,
+
     /// Run the refresh scheduler (enqueues due series refreshes and weekly catalog discovery).
     #[arg(
         long,
@@ -144,6 +156,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         areas = areas.all().len(),
         "shared reference data loaded"
     );
+    // Dataset definitions for every adapter: a declared code without a definition (or the
+    // reverse) stops the worker here, and the rows are upserted before any job writes a series.
+    let datasets = econ_graph_crawler::DatasetCatalog::load(&registry)?;
+    let synced = econ_graph_crawler::persist::sync_datasets(&pool, &datasets).await?;
+    tracing::info!(datasets = synced, "datasets synced");
     // Built-in policies, overridden by whatever each registered adapter declares.
     let policies: HashMap<SourceId, SourcePolicy> = SourceId::ALL
         .into_iter()
@@ -225,17 +242,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         background.push(tokio::spawn(metrics::queue_gauge_loop(
             ctx.pool.clone(),
             Duration::from_secs(args.queue_metrics_interval_secs.max(1)),
+            stop_rx.clone(),
+        )));
+        // Coverage covers every refreshable source, whatever `--sources` this worker processes.
+        background.push(tokio::spawn(metrics::coverage_gauge_loop(
+            ctx.pool.clone(),
+            econ_graph_crawler::coverage::covered_sources(&registry.ids()),
+            Duration::from_secs(args.coverage_metrics_interval_secs.max(1)),
             stop_rx,
         )));
     } else {
         tracing::info!("metrics server disabled");
     }
 
-    let worker = Worker::new(ctx, registry, config).with_handler(
-        SourceId::Sec,
-        JobKind::FetchFiling,
-        Arc::new(SecFilingHandler::new()),
-    );
+    let worker = Worker::new(ctx, registry, config)
+        .with_datasets(datasets)
+        .with_handler(
+            SourceId::Sec,
+            JobKind::FetchFiling,
+            Arc::new(SecFilingHandler::new()),
+        );
     alive.store(true, Ordering::SeqCst);
     worker.run(shutdown_signal()).await;
     alive.store(false, Ordering::SeqCst);

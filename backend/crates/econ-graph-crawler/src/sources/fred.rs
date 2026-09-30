@@ -292,6 +292,7 @@ impl SourceAdapter for FredAdapter {
         Ok(FetchedSeries {
             metadata: Some(metadata),
             points,
+            dataset: None,
         })
     }
 }
@@ -373,6 +374,7 @@ fn to_discovered(info: FredSeriesInfo) -> DiscoveredSeries {
         description: non_empty(info.notes),
         units: non_empty(info.units),
         frequency: non_empty(info.frequency),
+        dataset: None,
     }
 }
 

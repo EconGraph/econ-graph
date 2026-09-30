@@ -76,6 +76,7 @@ use tokio::sync::watch;
 use uuid::Uuid;
 
 use crate::adapter::{AdapterRegistry, CrawlCtx, DiscoveredSeries, FetchedSeries, SourceAdapter};
+use crate::dataset::DatasetCatalog;
 use crate::error::CrawlError;
 use crate::persist::{self, AttemptRecord};
 use crate::source::SourceId;
@@ -252,6 +253,9 @@ pub struct Worker {
     pub registry: AdapterRegistry,
     /// Settings.
     pub config: WorkerConfig,
+    /// Dataset definitions the adapters' series are checked against before they are written.
+    /// Empty unless set with [`with_datasets`](Self::with_datasets).
+    pub datasets: DatasetCatalog,
     handlers: HashMap<(SourceId, JobKind), Arc<dyn JobHandler>>,
     breaker: Mutex<Breaker>,
 }
@@ -279,6 +283,7 @@ impl Worker {
             ctx,
             registry,
             config,
+            datasets: DatasetCatalog::empty(),
             handlers: HashMap::new(),
             breaker: Mutex::new(Breaker::default()),
         }
@@ -304,6 +309,15 @@ impl Worker {
         handler: Arc<dyn JobHandler>,
     ) -> Self {
         self.register_handler(source, kind, handler);
+        self
+    }
+
+    /// Sets the dataset definitions, already synced into `datasets` with
+    /// [`persist::sync_datasets`]. A series naming a dataset that is not in `datasets` fails its
+    /// job, so a worker whose adapters declare datasets needs this.
+    #[must_use]
+    pub fn with_datasets(mut self, datasets: DatasetCatalog) -> Self {
+        self.datasets = datasets;
         self
     }
 
@@ -628,7 +642,10 @@ impl Worker {
                 None => match &mut fetched {
                     Err(e) => Err(e.clone()),
                     Ok(map) => match map.remove(&item.series_id) {
-                        Some(Ok(series)) => Ok(JobWrite::Series(series)),
+                        Some(Ok(series)) => self
+                            .datasets
+                            .check(source, &item.series_id, series.dataset.as_ref())
+                            .map(|_| JobWrite::Series(series)),
                         Some(Err(e)) => Err(e),
                         None => Err(CrawlError::NotFound(format!(
                             "{} missing from the batch response",
@@ -678,6 +695,8 @@ impl Worker {
         let ctx = self.ctx.clone();
         let id = external_id.to_string();
         let fetched = guarded(async move { adapter.fetch_series(&ctx, &id, since).await }).await?;
+        self.datasets
+            .check(source, external_id, fetched.dataset.as_ref())?;
         Ok(JobWrite::Series(fetched))
     }
 
@@ -690,6 +709,12 @@ impl Worker {
         let scope_prefix = adapter.retirement_scope_prefix().map(str::to_string);
         let ctx = self.ctx.clone();
         let found = guarded(async move { adapter.discover(&ctx).await }).await?;
+        self.datasets.check_all(
+            source,
+            found
+                .iter()
+                .map(|d| (d.external_id.as_str(), d.dataset.as_ref())),
+        )?;
         Ok(JobWrite::Discovery {
             found,
             complete,
@@ -985,9 +1010,27 @@ pub(crate) fn incremental_since(
     latest.checked_sub_signed(lookback)
 }
 
-/// Database failures while reading/persisting are infrastructure problems: retry later.
+/// Database failures while reading/persisting are infrastructure problems: retry later. The
+/// exceptions fail at once, because a retry would fail the same way: a dataset missing from
+/// `datasets` (not synced), and two series claiming the same dataset and dimension values.
 fn db_error(e: econ_graph_core::AppError) -> CrawlError {
-    CrawlError::Transient(format!("database: {e}"))
+    use diesel::result::{DatabaseErrorKind, Error as DieselError};
+    use econ_graph_core::AppError;
+    match &e {
+        AppError::ValidationError(msg) => CrawlError::Permanent(msg.clone()),
+        AppError::Database(DieselError::DatabaseError(
+            DatabaseErrorKind::UniqueViolation,
+            info,
+        )) if info
+            .constraint_name()
+            .is_some_and(|c| c.ends_with("_dataset_dimensions")) =>
+        {
+            CrawlError::Permanent(format!(
+                "another series already has this dataset and dimension values: {e}"
+            ))
+        }
+        _ => CrawlError::Transient(format!("database: {e}")),
+    }
 }
 
 /// Runs `fut` in its own task so a panic becomes `CrawlError::Transient`.

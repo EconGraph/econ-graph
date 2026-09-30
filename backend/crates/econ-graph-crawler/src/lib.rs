@@ -32,11 +32,13 @@
 //! - [`http`]: [`HttpFetcher`], the one shared, rate-limited, retrying HTTP client
 //! - [`rate_limit`]: [`SourceRateLimiter`], per-source token bucket + concurrency limit
 //! - [`adapter`]: the [`SourceAdapter`] trait and [`AdapterRegistry`]
+//! - [`dataset`]: dataset definitions, the adapter dataset contract and canonical external ids
 //! - [`persist`]: shared database writes (series, data points, catalog metadata, crawl attempts)
 //! - [`worker`]: the [`Worker`] that drains `crawl_queue`, and the [`JobHandler`] extension point
 //! - [`scheduler`]: [`RefreshScheduler`], enqueues due series refreshes and weekly catalog discovery
 //! - [`status`]: crawler status derived from `crawl_queue` ([`status::crawler_status`])
-//! - [`cli`]: the `crawler` operator CLI (enqueue, discover, status, sources, fetch)
+//! - [`coverage`]: per-source data coverage and freshness ([`coverage::crawl_coverage`])
+//! - [`cli`]: the `crawler` operator CLI (enqueue, discover, status, coverage, sources, fetch)
 //! - `testkit` (feature `testkit`, always on in this crate's tests): mock upstream + adapter contract tests
 //!
 //! ## Usage
@@ -62,6 +64,8 @@
 
 pub mod adapter;
 pub mod cli;
+pub mod coverage;
+pub mod dataset;
 pub mod error;
 pub mod http;
 pub mod persist;
@@ -81,6 +85,7 @@ pub use adapter::{
     AdapterRegistry, ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
     NewSeriesMetadataLite, SourceAdapter,
 };
+pub use dataset::{DatasetCatalog, DatasetDef, SeriesDataset};
 pub use error::CrawlError;
 pub use http::{HttpConfig, HttpFetcher};
 pub use policy::SourcePolicy;
