@@ -10,8 +10,8 @@
 //! `CRAWLER_DATA_DIR` to it.
 //!
 //! Each file is read once per process and cached, including a failure to read it, so the
-//! worker checks each one at startup ([`us_states`], [`fred_series`]) rather than on its first
-//! job.
+//! worker checks them at startup ([`us_states`], [`bls_series`], [`fred_series`]) rather than on
+//! its first job.
 //!
 //! Dataset definitions ([`datasets`]) are cached the same way; the worker loads them at startup
 //! through [`DatasetCatalog::load`](crate::dataset::DatasetCatalog::load).
@@ -39,6 +39,9 @@ pub const DATASETS_DIR: &str = "datasets";
 /// Rows the states table must hold: the 50 states and DC.
 pub const US_STATE_COUNT: usize = 51;
 
+/// File name of the BLS series list in the data directory.
+pub const BLS_SERIES_FILE: &str = "bls_series.csv";
+
 /// File name of the curated FRED series list in the data directory.
 pub const FRED_SERIES_FILE: &str = "fred_series.csv";
 
@@ -51,6 +54,19 @@ pub struct UsState {
     pub postal: String,
     /// Name, e.g. `California`.
     pub name: String,
+}
+
+/// A BLS series the crawler discovers and fetches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlsSeries {
+    /// BLS series id, e.g. `CUUR0000SA0`.
+    pub id: String,
+    /// Frequency, e.g. `Monthly`.
+    pub frequency: String,
+    /// Units, e.g. `Percent`.
+    pub units: String,
+    /// Title.
+    pub title: String,
 }
 
 /// The reference data directory: `$CRAWLER_DATA_DIR`, or this crate's `data/` directory.
@@ -197,6 +213,80 @@ fn load_us_states(path: &Path) -> Result<Vec<UsState>, String> {
     parse_us_states(&text)
         .and_then(check_complete)
         .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The BLS series from `bls_series.csv` in [`data_dir`], read on first use and cached.
+///
+/// A missing or malformed file is a `Permanent` error, with the path in the message.
+pub fn bls_series() -> Result<&'static [BlsSeries], CrawlError> {
+    static SERIES: OnceLock<Result<Vec<BlsSeries>, String>> = OnceLock::new();
+    SERIES
+        .get_or_init(|| load_bls_series(&data_dir().join(BLS_SERIES_FILE)))
+        .as_deref()
+        .map_err(|e| CrawlError::Permanent(e.clone()))
+}
+
+/// Reads and parses a BLS series list.
+fn load_bls_series(path: &Path) -> Result<Vec<BlsSeries>, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("reading {}: {e} (set {DATA_DIR_ENV})", path.display()))?;
+    parse_bls_series(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Parses `series_id,frequency,units,title` rows after a header line; blank lines and `#`
+/// comments are skipped. The title is the last column and may contain commas.
+fn parse_bls_series(text: &str) -> Result<Vec<BlsSeries>, String> {
+    let mut lines = text
+        .lines()
+        .enumerate()
+        .map(|(i, l)| (i + 1, l.trim()))
+        .filter(|(_, l)| !l.is_empty() && !l.starts_with('#'));
+    match lines.next() {
+        Some((_, "series_id,frequency,units,title")) => {}
+        Some((n, other)) => {
+            return Err(format!(
+                "line {n}: expected header series_id,frequency,units,title, got {other:?}"
+            ))
+        }
+        None => return Err("no header line".into()),
+    }
+    let mut series = Vec::new();
+    let mut seen = HashSet::new();
+    for (n, line) in lines {
+        let mut cols = line.splitn(4, ',').map(str::trim);
+        let (Some(id), Some(frequency), Some(units), Some(title)) =
+            (cols.next(), cols.next(), cols.next(), cols.next())
+        else {
+            return Err(format!(
+                "line {n}: expected series_id,frequency,units,title, got {line:?}"
+            ));
+        };
+        if id.is_empty()
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+        {
+            return Err(format!(
+                "line {n}: series id {id:?} is not capital letters and digits"
+            ));
+        }
+        if frequency.is_empty() || units.is_empty() || title.is_empty() {
+            return Err(format!("line {n}: empty frequency, units or title"));
+        }
+        if !seen.insert(id.to_string()) {
+            return Err(format!("line {n}: duplicate series id {id}"));
+        }
+        series.push(BlsSeries {
+            id: id.into(),
+            frequency: frequency.into(),
+            units: units.into(),
+            title: title.into(),
+        });
+    }
+    if series.is_empty() {
+        return Err("no series".into());
+    }
+    Ok(series)
 }
 
 /// Rejects a table without exactly [`US_STATE_COUNT`] rows, so a truncated file cannot silently
@@ -423,7 +513,37 @@ mod tests {
         assert!(e.contains("expected 51 rows") && e.contains("got 1"), "{e}");
     }
 
-    /// Every shipped dataset file parses and validates.
+    /// The shipped BLS list parses, covers every survey the adapter promises, and has a LAUS
+    /// unemployment rate for every state in the shipped states table.
+    #[test]
+    fn shipped_bls_series_file_is_valid() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+        let series = load_bls_series(&dir.join(BLS_SERIES_FILE)).unwrap();
+        assert!(series.len() >= 250, "{} series", series.len());
+        for prefix in ["CUSR", "CUUR", "CES", "CEU", "LNS", "LNU", "LASST", "LAUST"] {
+            assert!(
+                series.iter().any(|s| s.id.starts_with(prefix)),
+                "no {prefix} series"
+            );
+        }
+        let states = load_us_states(&dir.join(US_STATES_FILE)).unwrap();
+        for st in &states {
+            for id in [
+                format!("LASST{}0000000000003", st.fips),
+                format!("LAUST{}0000000000003", st.fips),
+            ] {
+                let row = series.iter().find(|s| s.id == id);
+                assert!(
+                    row.is_some_and(|r| r.title.contains(&st.name)),
+                    "{id} ({})",
+                    st.name
+                );
+            }
+        }
+    }
+
+    /// Every shipped dataset file parses and validates: today `fred.toml` and `bls.toml`
+    /// (DS-4); Census BDS (DS-5) adds more.
     #[test]
     fn shipped_dataset_files_are_valid() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -446,6 +566,53 @@ mod tests {
                 load_datasets(&path).unwrap();
             }
         }
+    }
+
+    /// Titles keep their commas; comments and blank lines are skipped.
+    #[test]
+    fn parses_bls_rows() {
+        let s = parse_bls_series(
+            "# c\n\nseries_id,frequency,units,title\nCES4000000001,Monthly,Thousands,All Employees, Trade\n",
+        )
+        .unwrap();
+        assert_eq!(
+            s,
+            [BlsSeries {
+                id: "CES4000000001".into(),
+                frequency: "Monthly".into(),
+                units: "Thousands".into(),
+                title: "All Employees, Trade".into(),
+            }]
+        );
+    }
+
+    /// Malformed BLS lists are rejected with the offending line.
+    #[test]
+    fn rejects_malformed_bls_files() {
+        const H: &str = "series_id,frequency,units,title\n";
+        for (text, needle) in [
+            (String::new(), "no header"),
+            ("id,title\n".to_string(), "expected header"),
+            (H.to_string(), "no series"),
+            (format!("{H}CUUR0000SA0,Monthly,Index\n"), "line 2"),
+            (
+                format!("{H}cuur0000sa0,Monthly,Index,T\n"),
+                "capital letters",
+            ),
+            (format!("{H}CUUR0000SA0,,Index,T\n"), "empty"),
+            (
+                format!("{H}CUUR0000SA0,Monthly,Index,T\nCUUR0000SA0,Monthly,Index,U\n"),
+                "duplicate",
+            ),
+        ] {
+            let e = parse_bls_series(&text).unwrap_err();
+            assert!(e.contains(needle), "{text:?}: {e}");
+        }
+        let e = load_bls_series(Path::new("/nonexistent/bls_series.csv")).unwrap_err();
+        assert!(
+            e.contains("/nonexistent/bls_series.csv") && e.contains(DATA_DIR_ENV),
+            "{e}"
+        );
     }
 
     #[test]
