@@ -14,60 +14,61 @@ description = "World Bank development indicators, one series per indicator and c
 name = "indicator"
 label = "Indicator"
 
-[dataset.dimensions.codes]
-"NY.GDP.MKTP.CD" = "GDP (current US$)"
-"NY.GDP.MKTP.KD" = "GDP (constant 2015 US$)"
-"NY.GDP.MKTP.KD.ZG" = "GDP growth (annual %)"
-"NY.GDP.MKTP.PP.CD" = "GDP, PPP (current international $)"
-"NY.GDP.PCAP.CD" = "GDP per capita (current US$)"
-"NY.GDP.PCAP.KD" = "GDP per capita (constant 2015 US$)"
-"NY.GDP.PCAP.KD.ZG" = "GDP per capita growth (annual %)"
-"NY.GDP.PCAP.PP.CD" = "GDP per capita, PPP (current international $)"
-"NY.GNP.PCAP.CD" = "GNI per capita, Atlas method (current US$)"
-"NY.GDP.DEFL.KD.ZG" = "Inflation, GDP deflator (annual %)"
-"NE.CON.PRVT.ZS" = "Households and NPISHs final consumption expenditure (% of GDP)"
-"NE.CON.GOVT.ZS" = "General government final consumption expenditure (% of GDP)"
-"NE.GDI.TOTL.ZS" = "Gross capital formation (% of GDP)"
-"NY.GNS.ICTR.ZS" = "Gross savings (% of GDP)"
-"NV.AGR.TOTL.ZS" = "Agriculture, forestry, and fishing, value added (% of GDP)"
-"NV.IND.TOTL.ZS" = "Industry (including construction), value added (% of GDP)"
-"NV.IND.MANF.ZS" = "Manufacturing, value added (% of GDP)"
-"NV.SRV.TOTL.ZS" = "Services, value added (% of GDP)"
-"FP.CPI.TOTL" = "Consumer price index (2010 = 100)"
-"FP.CPI.TOTL.ZG" = "Inflation, consumer prices (annual %)"
-"PA.NUS.FCRF" = "Official exchange rate (LCU per US$, period average)"
-"PA.NUS.PPP" = "PPP conversion factor, GDP (LCU per international $)"
-"SL.UEM.TOTL.ZS" = "Unemployment, total (% of total labor force) (modeled ILO estimate)"
-"SL.UEM.1524.ZS" = "Unemployment, youth total (% of total labor force ages 15-24) (modeled ILO estimate)"
-"SL.TLF.CACT.ZS" = "Labor force participation rate, total (% of total population ages 15+) (modeled ILO estimate)"
-"SL.EMP.TOTL.SP.ZS" = "Employment to population ratio, 15+, total (%) (modeled ILO estimate)"
-"SL.TLF.TOTL.IN" = "Labor force, total"
-"SP.POP.TOTL" = "Population, total"
-"SP.POP.GROW" = "Population growth (annual %)"
-"SP.URB.TOTL.IN.ZS" = "Urban population (% of total population)"
-"SP.POP.65UP.TO.ZS" = "Population ages 65 and above (% of total population)"
-"SP.DYN.LE00.IN" = "Life expectancy at birth, total (years)"
-"SP.DYN.TFRT.IN" = "Fertility rate, total (births per woman)"
-"GC.DOD.TOTL.GD.ZS" = "Central government debt, total (% of GDP)"
-"GC.REV.XGRT.GD.ZS" = "Revenue, excluding grants (% of GDP)"
-"GC.XPN.TOTL.GD.ZS" = "Expense (% of GDP)"
-"GC.NLD.TOTL.GD.ZS" = "Net lending (+) / net borrowing (-) (% of GDP)"
-"GC.TAX.TOTL.GD.ZS" = "Tax revenue (% of GDP)"
-"DT.DOD.DECT.CD" = "External debt stocks, total (DOD, current US$)"
-"BN.CAB.XOKA.CD" = "Current account balance (BoP, current US$)"
-"BN.CAB.XOKA.GD.ZS" = "Current account balance (% of GDP)"
-"NE.TRD.GNFS.ZS" = "Trade (% of GDP)"
-"NE.EXP.GNFS.ZS" = "Exports of goods and services (% of GDP)"
-"NE.IMP.GNFS.ZS" = "Imports of goods and services (% of GDP)"
-"BX.KLT.DINV.WD.GD.ZS" = "Foreign direct investment, net inflows (% of GDP)"
-"BX.TRF.PWKR.DT.GD.ZS" = "Personal remittances, received (% of GDP)"
-"FI.RES.TOTL.CD" = "Total reserves (includes gold, current US$)"
-"FR.INR.RINR" = "Real interest rate (%)"
-"FR.INR.LEND" = "Lending interest rate (%)"
-"FS.AST.PRVT.GD.ZS" = "Domestic credit to private sector (% of GDP)"
-"FM.LBL.BMNY.GD.ZS" = "Broad money (% of GDP)"
-"SI.POV.GINI" = "Gini index"
-"SI.POV.DDAY" = "Poverty headcount ratio at the international poverty line (% of population)"
+codes = [
+  { code = "NY.GDP.MKTP.CD", label = "GDP (current US$)" },
+  { code = "NY.GDP.MKTP.KD", label = "GDP (constant 2015 US$)" },
+  { code = "NY.GDP.MKTP.KD.ZG", label = "GDP growth (annual %)" },
+  { code = "NY.GDP.MKTP.PP.CD", label = "GDP, PPP (current international $)" },
+  { code = "NY.GDP.PCAP.CD", label = "GDP per capita (current US$)" },
+  { code = "NY.GDP.PCAP.KD", label = "GDP per capita (constant 2015 US$)" },
+  { code = "NY.GDP.PCAP.KD.ZG", label = "GDP per capita growth (annual %)" },
+  { code = "NY.GDP.PCAP.PP.CD", label = "GDP per capita, PPP (current international $)" },
+  { code = "NY.GNP.PCAP.CD", label = "GNI per capita, Atlas method (current US$)" },
+  { code = "NY.GDP.DEFL.KD.ZG", label = "Inflation, GDP deflator (annual %)" },
+  { code = "NE.CON.PRVT.ZS", label = "Households and NPISHs final consumption expenditure (% of GDP)" },
+  { code = "NE.CON.GOVT.ZS", label = "General government final consumption expenditure (% of GDP)" },
+  { code = "NE.GDI.TOTL.ZS", label = "Gross capital formation (% of GDP)" },
+  { code = "NY.GNS.ICTR.ZS", label = "Gross savings (% of GDP)" },
+  { code = "NV.AGR.TOTL.ZS", label = "Agriculture, forestry, and fishing, value added (% of GDP)" },
+  { code = "NV.IND.TOTL.ZS", label = "Industry (including construction), value added (% of GDP)" },
+  { code = "NV.IND.MANF.ZS", label = "Manufacturing, value added (% of GDP)" },
+  { code = "NV.SRV.TOTL.ZS", label = "Services, value added (% of GDP)" },
+  { code = "FP.CPI.TOTL", label = "Consumer price index (2010 = 100)" },
+  { code = "FP.CPI.TOTL.ZG", label = "Inflation, consumer prices (annual %)" },
+  { code = "PA.NUS.FCRF", label = "Official exchange rate (LCU per US$, period average)" },
+  { code = "PA.NUS.PPP", label = "PPP conversion factor, GDP (LCU per international $)" },
+  { code = "SL.UEM.TOTL.ZS", label = "Unemployment, total (% of total labor force) (modeled ILO estimate)" },
+  { code = "SL.UEM.1524.ZS", label = "Unemployment, youth total (% of total labor force ages 15-24) (modeled ILO estimate)" },
+  { code = "SL.TLF.CACT.ZS", label = "Labor force participation rate, total (% of total population ages 15+) (modeled ILO estimate)" },
+  { code = "SL.EMP.TOTL.SP.ZS", label = "Employment to population ratio, 15+, total (%) (modeled ILO estimate)" },
+  { code = "SL.TLF.TOTL.IN", label = "Labor force, total" },
+  { code = "SP.POP.TOTL", label = "Population, total" },
+  { code = "SP.POP.GROW", label = "Population growth (annual %)" },
+  { code = "SP.URB.TOTL.IN.ZS", label = "Urban population (% of total population)" },
+  { code = "SP.POP.65UP.TO.ZS", label = "Population ages 65 and above (% of total population)" },
+  { code = "SP.DYN.LE00.IN", label = "Life expectancy at birth, total (years)" },
+  { code = "SP.DYN.TFRT.IN", label = "Fertility rate, total (births per woman)" },
+  { code = "GC.DOD.TOTL.GD.ZS", label = "Central government debt, total (% of GDP)" },
+  { code = "GC.REV.XGRT.GD.ZS", label = "Revenue, excluding grants (% of GDP)" },
+  { code = "GC.XPN.TOTL.GD.ZS", label = "Expense (% of GDP)" },
+  { code = "GC.NLD.TOTL.GD.ZS", label = "Net lending (+) / net borrowing (-) (% of GDP)" },
+  { code = "GC.TAX.TOTL.GD.ZS", label = "Tax revenue (% of GDP)" },
+  { code = "DT.DOD.DECT.CD", label = "External debt stocks, total (DOD, current US$)" },
+  { code = "BN.CAB.XOKA.CD", label = "Current account balance (BoP, current US$)" },
+  { code = "BN.CAB.XOKA.GD.ZS", label = "Current account balance (% of GDP)" },
+  { code = "NE.TRD.GNFS.ZS", label = "Trade (% of GDP)" },
+  { code = "NE.EXP.GNFS.ZS", label = "Exports of goods and services (% of GDP)" },
+  { code = "NE.IMP.GNFS.ZS", label = "Imports of goods and services (% of GDP)" },
+  { code = "BX.KLT.DINV.WD.GD.ZS", label = "Foreign direct investment, net inflows (% of GDP)" },
+  { code = "BX.TRF.PWKR.DT.GD.ZS", label = "Personal remittances, received (% of GDP)" },
+  { code = "FI.RES.TOTL.CD", label = "Total reserves (includes gold, current US$)" },
+  { code = "FR.INR.RINR", label = "Real interest rate (%)" },
+  { code = "FR.INR.LEND", label = "Lending interest rate (%)" },
+  { code = "FS.AST.PRVT.GD.ZS", label = "Domestic credit to private sector (% of GDP)" },
+  { code = "FM.LBL.BMNY.GD.ZS", label = "Broad money (% of GDP)" },
+  { code = "SI.POV.GINI", label = "Gini index" },
+  { code = "SI.POV.DDAY", label = "Poverty headcount ratio at the international poverty line (% of population)" },
+]
 
 # The `key` of econ-graph-core's countries.csv: ISO 3166-1 alpha-3 for countries, the World Bank
 # code for aggregates (WLD, EMU, EUU, income groups).

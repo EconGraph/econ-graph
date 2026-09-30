@@ -117,7 +117,7 @@ fn dataset_file_lists_every_indicator() {
         .collect();
     let from_file: BTreeMap<&str, &str> = codes
         .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .map(|c| (c.code.as_str(), c.label.as_str()))
         .collect();
     assert_eq!(from_list, from_file);
     assert_eq!(
