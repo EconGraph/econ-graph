@@ -366,7 +366,6 @@ fn fred_dataset() -> SeriesDataset {
     }
 }
 
-
 // ---- Wire formats (only the fields we use; FRED sends many more) ----
 
 #[derive(Debug, Deserialize)]
