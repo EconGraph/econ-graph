@@ -10,6 +10,7 @@ members = [
     "crates/econ-graph-mcp",
     "crates/econ-graph-backend",
     "crates/econ-graph-metrics",
+    "crates/econ-graph-flags-build",
 ]
 resolver = "2"
 
@@ -56,9 +57,7 @@ regex = "1.13"
 csv = "1.4"
 
 # Authentication
-bcrypt = "0.19"
 jsonwebtoken = { version = "11.1", features = ["aws_lc_rs"] }
-oauth2 = "5.0"
 
 # Scheduling
 tokio-cron-scheduler = "0.15"

@@ -69,8 +69,10 @@ const About: React.FC = () => {
   const dataSources = [
     'Federal Reserve Economic Data (FRED)',
     'Bureau of Labor Statistics (BLS)',
-    'U.S. Census Bureau',
-    'World Bank Open Data',
+    'Census Bureau Business Dynamics Statistics (BDS)',
+    'Federal Housing Finance Agency (FHFA)',
+    'Bureau of Economic Analysis (BEA)',
+    'World Bank World Development Indicators (WDI)',
   ];
 
   return (
@@ -263,7 +265,7 @@ const About: React.FC = () => {
               for scalability, security, and maintainability.
             </Typography>
             <Link
-              href='https://github.com/econograph/econograph'
+              href='https://github.com/EconGraph/econ-graph'
               target='_blank'
               rel='noopener noreferrer'
               sx={{ display: 'flex', alignItems: 'center', textDecoration: 'none' }}

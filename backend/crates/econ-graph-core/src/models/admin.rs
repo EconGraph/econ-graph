@@ -317,8 +317,6 @@ impl SecurityEvent {
 pub struct SystemHealthMetrics {
     pub total_users: i64,
     pub active_users: i64,
-    pub total_sessions: i64,
-    pub active_sessions: i64,
     pub database_size_mb: f64,
     pub queue_items: i64,
     pub unresolved_security_events: i64,
@@ -343,21 +341,6 @@ impl SystemHealthMetrics {
         let thirty_days_ago = Utc::now() - chrono::Duration::days(30);
         let active_users = crate::schema::users::table
             .filter(crate::schema::users::last_login_at.gt(thirty_days_ago))
-            .count()
-            .get_result::<i64>(&mut conn)
-            .await
-            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-
-        // Get total sessions
-        let total_sessions = crate::schema::user_sessions::table
-            .count()
-            .get_result::<i64>(&mut conn)
-            .await
-            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-
-        // Get active sessions (not expired)
-        let active_sessions = crate::schema::user_sessions::table
-            .filter(crate::schema::user_sessions::expires_at.gt(Utc::now()))
             .count()
             .get_result::<i64>(&mut conn)
             .await
@@ -389,8 +372,6 @@ impl SystemHealthMetrics {
         Ok(SystemHealthMetrics {
             total_users,
             active_users,
-            total_sessions,
-            active_sessions,
             database_size_mb,
             queue_items,
             unresolved_security_events,

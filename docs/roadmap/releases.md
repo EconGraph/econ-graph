@@ -1,6 +1,13 @@
 # Roadmap: release trains
 
-Status: proposed (2026-09-26). Forks 1 to 3 are decided; fork 4 is open for Joe.
+> **Moved to Linear on 2026-09-27.** Release plans are tracked in
+> [Linear](https://linear.app/econgraph): train 1 is
+> [ECO-5](https://linear.app/econgraph/issue/ECO-5), trains 2 to 7 are ECO-6 to ECO-11,
+> and each train 1 item below is a child issue of ECO-5 titled "R1-n". This doc stays as
+> the reasoning behind the trains. Its State column and PR references are no longer
+> maintained; where they differ from Linear, Linear is current.
+
+Status: accepted for train 1 (2026-09-27). Forks 1 to 3 are decided; fork 4 (what train 6 is) is open for Joe.
 
 The topic roadmaps are organized by feature line: auth, admin UI, federation and global
 analysis. This doc cuts across them. It says what goes into the next release, what is
@@ -17,11 +24,11 @@ links back here from its own "Release trains" section.
   train is `v4.0.0`, above every existing tag, and each later train bumps the minor
   version. The old tags stay: deleting published tags would break anyone who fetched them.
   Each release also pushes a `train-N` tag, which the feature flag file's `remove_by`
-  check reads ([feature-flags.md](./feature-flags.md)).
+  check reads ([feature flags design record](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2)).
 - **Work keeps landing as small PRs on `main`.** The only branches cut from it are the release branches for QA.
   Unfinished work merges only behind build-time flags that compile it out of release
   builds. Runtime flags are for alpha and beta features that work end to end, never for
-  mock data ([feature-flags.md](./feature-flags.md), #195).
+  mock data ([feature flags roadmap](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2), #195).
 - **Unfinished screens don't ship (Joe, 2026-09-26).** A screen that isn't finished is
   either not merged or compiled out of release builds. A feature that belongs to a later
   train is not deleted from an earlier one to get there. The global tabs are
@@ -95,7 +102,7 @@ OECD, RBA, SNB, UN Stats, WTO in `static_catalogs.rs`) are hard-coded lists that
 fail to fetch. They are useful in a development environment and only meant for one (Joe,
 2026-09-26), so train 1 keeps them for development and leaves them out of release and
 production builds, and search in those builds never returns a series that can't have
-data. `imf.rs` is deleted. Sources come back as real adapters through [data-sources.md](./data-sources.md).
+data. `imf.rs` is deleted. Sources come back as real adapters through the [data sources roadmap](https://linear.app/econgraph/document/data-sources-roadmap-design-record-from-pr-192-2db0c59b5869).
 
 **Datasets metadata moves into train 1.** The new adapters (World Bank, BEA) are
 where country, indicator and table dimensions first appear. If they land before the
@@ -115,7 +122,7 @@ The State column tracks each item's PRs. Every PR updates its item's row when it
 | 2 | Rotate the leaked Google and Facebook credentials and move them into a Kubernetes Secret, along with the other plaintext credentials in `k8s/manifests` | Security section of the [index](./README.md) | Waiting on Joe to rotate |
 | 3 | The collaboration API takes the acting user from the verified token and never from the request, for reads as well as writes: today `annotationsForSeries` takes a `userId` argument (`backend/crates/econ-graph-graphql/src/graphql/query.rs:266-270`), so any caller can read another user's private annotations | [analysis-workspace.md](./analysis-workspace.md) phase 2; #194 | #194 open |
 | 4 | Attach the existing GraphQL depth and complexity limits (`backend/crates/econ-graph-graphql/src/security/*`) to the schema, and turn off `/playground` in deployed builds | Security section of the index | #221 draft |
-| 5 | `latestRevisionOnly` and `asOf` done in SQL | #184 (federation phase 0) | #184 open |
+| 5 | `latestRevisionOnly` and `asOf` done in SQL | #184 (federation phase 0) | #184 merged |
 | 6 | Ranked search with a weighted tsvector and pg_trgm. With tens of thousands of series, `ILIKE` with a constant rank stops being usable | #165 | #165 draft |
 | 7 | Series detail page on `series` and `seriesData`, with the existing transformations. Delete the mock generators | New | #204, #209 drafts |
 | 8 | Dashboard cards read the latest values of a fixed list of series (for example FRED `GDP`, `UNRATE`, `CPIAUCSL`, `FEDFUNDS`) | New | #212 draft |
@@ -125,19 +132,19 @@ The State column tracks each item's PRs. Every PR updates its item's row when it
 | 12 | Fine-grained role catalog and `authorize()`, replacing `require_admin` and the three disagreeing role vocabularies | Auth phase 1 | In progress |
 | 13 | Keycloak as the identity provider: realm as code, Google as an identity provider, the backend verifying Keycloak tokens by JWKS and reading `roles` from them, in-house login and JWT issuance retired. Staff use the Keycloak admin console | Auth phase 2 | In progress |
 | 14 | Sign-in in the main frontend through Keycloak (authorization code with PKCE), then private and public annotations and comments on the series page, on the existing backend (`annotationsForSeries`, `commentsForAnnotation`). This comes after the collaboration API takes the acting user from the token instead of the request: today `shareChart` reads `ownerUserId` from its input (`backend/crates/econ-graph-graphql/src/graphql/mutation.rs:123`). Sharing waits for train 2, because there is no charts table for a share to point at | Auth phase 2; [analysis-workspace.md](./analysis-workspace.md) phases 2 and 3 (#191) | #211 draft; more to come |
-| 15 | The ten static catalogs (`static_catalogs.rs`) become development-only: kept for development environments and left out of release and production builds. `imf.rs` is deleted | [data-sources.md](./data-sources.md) decision 1 (#192) | In progress |
-| 16 | Release flags at build time: a flag file in the repo with metadata and a CI check, frontend flags folded in by Vite so flagged-off code is absent from the release bundle, and backend startup flags (for example `/mcp`) | [feature-flags.md](./feature-flags.md) phase 1 (#195) | #198 draft |
-| 17 | Flag off what can't work yet. The "Coming Soon" global tabs sit behind build-time flags that are off in every profile until the PRs that replace them delete them. `/mcp` is flagged off in release builds. The financial components and the XBRL parser are compiled out. Deleted as known bad: `/analysis` (`ProfessionalAnalysis`, a second series view on mock data) with `ProfessionalChart` and `ChartCollaboration`, the financial demo page's own inline fixtures (the mock GraphQL query documents that `components/financial` imports stay with those compiled-out components until SEC phase 4), the fake correlation code, and on the SEC side the Arelle path, the large-object placeholder, the hard-coded CIK list and the stubs that report success with nothing done | Global analysis phase 1; [feature-flags.md](./feature-flags.md) fork 1; [sec-financial-data.md](./sec-financial-data.md) phase 0 | #199 draft; more to come |
+| 15 | The ten static catalogs (`static_catalogs.rs`) become development-only: kept for development environments and left out of release and production builds. `imf.rs` is deleted | [data sources design record](https://linear.app/econgraph/document/data-sources-roadmap-design-record-from-pr-192-2db0c59b5869) decision 1 (#192) | In progress |
+| 16 | Release flags at build time: a flag file in the repo with metadata and a CI check, frontend flags folded in by Vite so flagged-off code is absent from the release bundle, and backend startup flags (for example `/mcp`) | [feature flags design record](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2) phase 1 (#195) | #198 draft |
+| 17 | Flag off what can't work yet. The "Coming Soon" global tabs sit behind build-time flags that are off in every profile until the PRs that replace them delete them. `/mcp` is flagged off in release builds. The financial components and the XBRL parser are compiled out. Deleted as known bad: `/analysis` (`ProfessionalAnalysis`, a second series view on mock data) with `ProfessionalChart` and `ChartCollaboration`, the financial demo page's own inline fixtures (the mock GraphQL query documents that `components/financial` imports stay with those compiled-out components until SEC phase 4), the fake correlation code, and on the SEC side the Arelle path, the large-object placeholder, the hard-coded CIK list and the stubs that report success with nothing done | Global analysis phase 1; [feature flags design record](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2) fork 1; [SEC financial data design record](https://linear.app/econgraph/document/sec-financial-data-roadmap-design-record-from-pr-193-3a5b22c09d18) phase 0 | #199 draft; more to come |
 | 18 | Committed `schema.graphql` with a backend test that fails when it drifts, and the main frontend's operations validated against it | Admin UI phase 1, applied to the main frontend first | #208 draft |
 | 19 | Release mechanics: version bump, release notes, deploy from the tag | New | QA plan in `docs/release/v4.0.0-qa.md` (PR #238); version and tag workflow not started |
-| 20 | Datasets metadata: the `datasets` table and the `economic_series` dataset and dimension columns. Goes first: items 10 and 22 to 24 build on it | Federation phase 3's first PR; global analysis phase 3 | #220 merged (DS-1); #225 merged (DS-3: adapters declare datasets, TOML definitions under `data/datasets/`, the crawler writes `dataset_id` and `dimensions`); DS-6 #229, DS-4 #231, DS-5 #237 build on them |
-| 21 | BLS: widen the hard-coded series list to the main CPI, CES and LAUS series | [data-sources.md](./data-sources.md) | In progress |
+| 20 | Datasets metadata: the `datasets` table and the `economic_series` dataset and dimension columns. Goes first: items 10 and 22 to 24 build on it | Federation phase 3's first PR; global analysis phase 3 | #220 merged (DS-1); #225 draft (DS-3: adapters declare datasets, TOML definitions under `data/datasets/`, the crawler writes `dataset_id` and `dimensions`) |
+| 21 | BLS: widen the hard-coded series list to the main CPI, CES and LAUS series | [data sources design record](https://linear.app/econgraph/document/data-sources-roadmap-design-record-from-pr-192-2db0c59b5869) | In progress |
 | 22 | FHFA HPI rebuilt on the published master CSV: dataset `fhfa_hpi`, about 200 series (purchase-only and all-transactions; US, census divisions, states), one download per fetch batch | [fhfa.md](../data-sources/fhfa.md) | #240 draft |
 | 23 | BEA: real NIPA table and line ids, and `fetch_series` | [bea.md](../data-sources/bea.md) | In progress |
 | 24 | World Bank WDI: `fetch_series` for the curated set of about 50 indicators | Global analysis phase 4 | In progress |
 | 25 | Coverage: a report of series with and without data per source (exit criterion 2), and search hides series with no data points | New | In progress |
 | 26 | Scheduled refresh for every enabled source with an alert on crawl failure (exit criterion 3). The scheduler exists; the alert and per-source schedules are what's new | New | #210 draft |
-| 27 | Batch fetch in the crawler adapter contract and worker: `batch_key`, `fetch_batch`, a `max_batch` policy and batched claiming, so a source can serve many series per request. Items 21 to 24 build on it (BLS batches 50 series per request, or 25 without a key) | [data-sources.md](./data-sources.md) (#192, moved from train 3 into train 1) | #213 open |
+| 27 | Batch fetch in the crawler adapter contract and worker: `batch_key`, `fetch_batch`, a `max_batch` policy and batched claiming, so a source can serve many series per request. Items 21 to 24 build on it (BLS batches 50 series per request, or 25 without a key) | [data sources design record](https://linear.app/econgraph/document/data-sources-roadmap-design-record-from-pr-192-2db0c59b5869) (#192, moved from train 3 into train 1) | #213 merged |
 
 ### Explicitly out
 
@@ -162,7 +169,7 @@ The State column tracks each item's PRs. Every PR updates its item's row when it
   There is no production data, so the phase 5 cutover drops them and nothing is migrated.
 - **SEC financial data in the UI.** No GraphQL API exists for it yet. The financial
   components are compiled out, and the demo page's own inline fixtures are deleted. Company pages
-  get a train of their own, train 4 (Joe, 2026-09-26). [sec-financial-data.md](./sec-financial-data.md)
+  get a train of their own, train 4 (Joe, 2026-09-26). The [SEC financial data roadmap](https://linear.app/econgraph/document/sec-financial-data-roadmap-design-record-from-pr-193-3a5b22c09d18)
   (#193) owns the phases. Its phase 0 (compile out, delete what is known bad) and phase 1
   (ingest) change nothing a user sees, so they can merge during train 1.
 
@@ -171,9 +178,9 @@ MCP by [auth-plans-permissions.md](./auth-plans-permissions.md) and the admin ap
 [admin-ui.md](./admin-ui.md). Three new roadmaps cover the rest:
 
 - [analysis-workspace.md](./analysis-workspace.md) (#191): `/analysis`, multi-series charts, saved charts and chart export.
-- [sec-financial-data.md](./sec-financial-data.md) (#193): the financial components and the
-  SEC API. It replaces [`SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md`](../development/SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md).
-- [data-sources.md](./data-sources.md) (#192): the development-only static catalogs, the generic SDMX adapter, source order, and keys and rate limits by source.
+- [SEC financial data roadmap](https://linear.app/econgraph/document/sec-financial-data-roadmap-design-record-from-pr-193-3a5b22c09d18) (#193): the financial components and the
+  SEC API. It replaces [`SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md`](../archive/development/SEC_EDGAR_XBRL_IMPLEMENTATION_PLAN.md).
+- [data sources roadmap](https://linear.app/econgraph/document/data-sources-roadmap-design-record-from-pr-192-2db0c59b5869) (#192): the development-only static catalogs, the generic SDMX adapter, source order, and keys and rate limits by source.
 
 ### Exit criteria
 
@@ -234,14 +241,14 @@ the topic roadmaps own the detail.
 
 | Train | Theme | Contains | Depends on |
 |---|---|---|---|
-| 2 (`v4.1.0`) | Machine access and staff | MCP with OAuth and client-credentials machine access (auth phase 6). Multi-series charts on `/chart` and saved charts with sharing, CSV and PNG export ([analysis-workspace.md](./analysis-workspace.md) phases 4 and 5). Admin UI phases 0 to 2 (cleanup, one client, Keycloak login, routing), deployed for staff. Runtime flags, `preview:access` and kill switches ([feature-flags.md](./feature-flags.md) phase 2) | Train 1 |
-| 3 (`v4.2.0`) | Cross-country analysis and more sources | Federation phase 1 (`TimeSeriesStore` trait). The remaining adapters stamp crawl-date vintages, so `asOf` has history for every source. Global analysis phases 7 to 10 (country comparison, correlations on request, legacy tables dropped, events). A generic SDMX adapter, with the IMF first, then the ECB, OECD, Eurostat and ILO ([data-sources.md](./data-sources.md)). US state maps for Census BDS. Frequency alignment and formula series ([analysis-workspace.md](./analysis-workspace.md) phase 6) | Train 1. Can run in parallel with train 2 |
-| 4 (`v4.3.0`) | Company pages | [sec-financial-data.md](./sec-financial-data.md) phases 1 to 6 on SEC's `companyfacts` JSON (phase 1, ingest, may land earlier since users can't see it): every company that files XBRL, standard concepts, the company API, the company page (filings, a chart of concepts over time, statement tables with a period picker, CSV download), ratios and peers, notes on company charts, statement lines and facts, and MCP tools for company data. Joe wants this train fully useful, so it ships only when all of that works, rather than as a thin slice. Share prices (market cap, P/E, a price chart) are out of this train and deferred (Joe, 2026-09-26), since they need a licensed end-of-day price source. The compiled-out `components/financial` code comes back piece by piece as the page uses it | Train 2 (MCP OAuth for the MCP tools, sharing for notes). Runs in parallel with train 3 |
-| 5 (`v4.4.0`) | Company segments and filings as reported | [sec-financial-data.md](./sec-financial-data.md) phases 7 to 9: raw filings in object storage, our own XBRL parser, then segment and geographic breakdowns, company-specific concepts and statements laid out as filed. This is the headline capability for company data, the part SEC's JSON can't give and that makes the platform powerful (Joe, 2026-09-26), not an add-on. Phase 7 changes nothing users see, so it can merge during train 4. SEC's `companyfacts` JSON keeps being crawled after the parser lands, as a quality check on the parser's facts | Train 4 |
+| 2 (`v4.1.0`) | Machine access and staff | MCP with OAuth and client-credentials machine access (auth phase 6). Multi-series charts on `/chart` and saved charts with sharing, CSV and PNG export ([analysis-workspace.md](./analysis-workspace.md) phases 4 and 5). Admin UI phases 0 to 2 (cleanup, one client, Keycloak login, routing), deployed for staff. Runtime flags, `preview:access` and kill switches ([feature flags roadmap](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2) phase 2) | Train 1 |
+| 3 (`v4.2.0`) | Cross-country analysis and more sources | Federation phase 1 (`TimeSeriesStore` trait). The remaining adapters stamp crawl-date vintages, so `asOf` has history for every source. Global analysis phases 7 to 10 (country comparison, correlations on request, legacy tables dropped, events). A generic SDMX adapter, with the IMF first, then the ECB, OECD, Eurostat and ILO ([data sources roadmap](https://linear.app/econgraph/document/data-sources-roadmap-design-record-from-pr-192-2db0c59b5869)). US state maps for Census BDS. Frequency alignment and formula series ([analysis-workspace.md](./analysis-workspace.md) phase 6) | Train 1. Can run in parallel with train 2 |
+| 4 (`v4.3.0`) | Company pages | [SEC financial data roadmap](https://linear.app/econgraph/document/sec-financial-data-roadmap-design-record-from-pr-193-3a5b22c09d18) phases 1 to 6 on SEC's `companyfacts` JSON (phase 1, ingest, may land earlier since users can't see it): every company that files XBRL, standard concepts, the company API, the company page (filings, a chart of concepts over time, statement tables with a period picker, CSV download), ratios and peers, notes on company charts, statement lines and facts, and MCP tools for company data. Joe wants this train fully useful, so it ships only when all of that works, rather than as a thin slice. Share prices (market cap, P/E, a price chart) are out of this train and deferred (Joe, 2026-09-26), since they need a licensed end-of-day price source. The compiled-out `components/financial` code comes back piece by piece as the page uses it | Train 2 (MCP OAuth for the MCP tools, sharing for notes). Runs in parallel with train 3 |
+| 5 (`v4.4.0`) | Company segments and filings as reported | [SEC financial data roadmap](https://linear.app/econgraph/document/sec-financial-data-roadmap-design-record-from-pr-193-3a5b22c09d18) phases 7 to 9: raw filings in object storage, our own XBRL parser, then segment and geographic breakdowns, company-specific concepts and statements laid out as filed. This is the headline capability for company data, the part SEC's JSON can't give and that makes the platform powerful (Joe, 2026-09-26), not an add-on. Phase 7 changes nothing users see, so it can merge during train 4. SEC's `companyfacts` JSON keeps being crawled after the parser lands, as a quality check on the parser's facts | Train 4 |
 | 6 (`v4.5.0`) | Data plane split | Federation phase 2 (two databases, subgraphs and a gateway, a staging data plane, the `dev-readonly` client). Admin UI phase 4 (crawler admin on the post-#157 crawler) | Trains 2 and 3. Can run in parallel with trains 4 and 5 |
 | 7 (`v4.6.0`) | Iceberg storage | Federation phases 3 to 5 (Iceberg tables, transactional commits, cutover, drop `data_points`), then phase 6 (Arrow Flight) | Train 6 |
 | Unscheduled | Teams and plans | Auth phases 3 (organizations), 4 (plans and limits) and 7 (staff tooling), admin UI phase 3 | Train 2, and a customer who needs it |
-| Unscheduled | Product analytics and experiments | [feature-flags.md](./feature-flags.md) phases 3 and 4 | A public deployment, then enough weekly users (about 6,500 per arm for a 10% relative lift) |
+| Unscheduled | Product analytics and experiments | [feature flags roadmap](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2) phases 3 and 4 | A public deployment, then enough weekly users (about 6,500 per arm for a 10% relative lift) |
 | Unscheduled | Billing, enterprise SSO | Auth phases 5 and 8 | Teams and plans |
 
 ### Where this challenges the topic roadmaps

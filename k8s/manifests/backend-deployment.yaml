@@ -68,46 +68,37 @@ spec:
               name: econ-graph-config
               key: FRONTEND_PORT
         # Backend Configuration
+        # Credentials come from the econ-graph-secrets Secret, created out of band by
+        # scripts/deploy/create-secrets.sh. OAuth keys are optional: the script omits
+        # them when unset.
         - name: DATABASE_URL
           valueFrom:
-            configMapKeyRef:
-              name: econ-graph-config
-              key: DATABASE_URL
+            secretKeyRef:
+              name: econ-graph-secrets
+              key: database-url
         - name: RUST_LOG
           valueFrom:
             configMapKeyRef:
               name: econ-graph-config
               key: RUST_LOG
-        - name: JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: econ-graph-secrets
-              key: jwt-secret
         - name: CORS_ALLOWED_ORIGINS
           valueFrom:
             configMapKeyRef:
               name: econ-graph-config
               key: CORS_ORIGIN
-        - name: GOOGLE_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              name: econ-graph-secrets
-              key: google-client-id
-        - name: GOOGLE_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: econ-graph-secrets
-              key: google-client-secret
-        - name: FACEBOOK_APP_ID
-          valueFrom:
-            secretKeyRef:
-              name: econ-graph-secrets
-              key: facebook-app-id
-        - name: FACEBOOK_APP_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: econ-graph-secrets
-              key: facebook-app-secret
+        # Sign-in through Keycloak (k8s/manifests/keycloak). OIDC_ISSUER is the public URL the
+        # tokens name in `iss`; the API fetches signing keys from the in-cluster service, since
+        # the public URL goes through the ingress. OIDC_REQUIRED stops startup without an issuer.
+        # OIDC_ISSUER must equal Keycloak's KC_HOSTNAME plus /realms/econ-graph: change them
+        # together, or every token fails the issuer check.
+        - name: OIDC_ISSUER
+          value: "http://localhost/idp/realms/econ-graph"
+        - name: OIDC_AUDIENCE
+          value: "econ-graph-api"
+        - name: OIDC_JWKS_URL
+          value: "http://keycloak-service:8080/idp/realms/econ-graph/protocol/openid-connect/certs"
+        - name: OIDC_REQUIRED
+          value: "true"
         resources:
           requests:
             memory: "256Mi"

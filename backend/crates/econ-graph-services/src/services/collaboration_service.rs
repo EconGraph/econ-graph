@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use econ_graph_core::{
     database::DatabasePool,
+    enums::AnnotationVisibility,
     error::{AppError, AppResult},
     models::user::{
         AnnotationComment, ChartAnnotation, ChartCollaborator, NewAnnotationComment,
@@ -72,6 +73,32 @@ impl fmt::Display for PermissionLevel {
     }
 }
 
+/// The collaborator list `viewer` may see: all of it if `viewer` is one of them, else none.
+pub fn visible_collaborators<T>(
+    collaborators: Vec<(ChartCollaborator, T)>,
+    viewer: Uuid,
+) -> Vec<(ChartCollaborator, T)> {
+    if collaborators.iter().any(|(c, _)| c.user_id == viewer) {
+        collaborators
+    } else {
+        Vec::new()
+    }
+}
+
+/// Whether `viewer` may see `annotation`: public annotations are visible to everyone,
+/// private ones only to their author.
+pub fn can_view_annotation(annotation: &ChartAnnotation, viewer: Option<Uuid>) -> bool {
+    annotation.visibility == AnnotationVisibility::Public || viewer == Some(annotation.user_id)
+}
+
+/// Whether a user's `chart_collaborators.role` lookup grants admin on the chart.
+///
+/// No collaborator row (`None`) or no role grants nothing: there is no chart ownership
+/// record yet, so a user with no row must not be treated as the owner.
+fn role_grants_admin(role: Option<Option<String>>) -> bool {
+    matches!(role, Some(Some(role)) if PermissionLevel::from_string(&role).can_admin())
+}
+
 /// Collaboration service for managing annotations and sharing
 pub struct CollaborationService {
     pool: DatabasePool,
@@ -117,7 +144,7 @@ impl CollaborationService {
             description: Some(content),
             color,
             annotation_type: Some(annotation_type),
-            is_visible: Some(is_public),
+            visibility: AnnotationVisibility::from_is_public(is_public),
             is_pinned: Some(false),
             tags: None,
         };
@@ -149,8 +176,8 @@ impl CollaborationService {
             chart_annotations::table
                 .filter(chart_annotations::series_id.eq(series_id))
                 .filter(
-                    chart_annotations::is_visible
-                        .eq(true)
+                    chart_annotations::visibility
+                        .eq(AnnotationVisibility::Public)
                         .or(chart_annotations::user_id.eq(uid)),
                 )
                 .order_by(chart_annotations::created_at.desc())
@@ -159,7 +186,7 @@ impl CollaborationService {
         } else {
             chart_annotations::table
                 .filter(chart_annotations::series_id.eq(series_id))
-                .filter(chart_annotations::is_visible.eq(true))
+                .filter(chart_annotations::visibility.eq(AnnotationVisibility::Public))
                 .order_by(chart_annotations::created_at.desc())
                 .select(ChartAnnotation::as_select())
                 .load::<ChartAnnotation>(&mut conn)
@@ -192,6 +219,7 @@ impl CollaborationService {
             .await
             .optional()
             .map_err(|e| AppError::DatabaseError(e.to_string()))?
+            .filter(|annotation| can_view_annotation(annotation, Some(user_id)))
             .ok_or_else(|| AppError::NotFound("Annotation not found".to_string()))?;
 
         // Check permission to comment on this series
@@ -223,10 +251,14 @@ impl CollaborationService {
         Ok(comment)
     }
 
-    /// Get comments for an annotation
+    /// Get comments for an annotation, if `viewer` may see that annotation.
+    ///
+    /// An annotation hidden from `viewer` (see [`can_view_annotation`]) is reported as not
+    /// found, so its comments stay as private as the annotation itself.
     pub async fn get_comments_for_annotation(
         &self,
         annotation_id: Uuid,
+        viewer: Option<Uuid>,
     ) -> AppResult<Vec<AnnotationComment>> {
         let mut conn = self.pool.get().await.map_err(|e| {
             econ_graph_core::error::AppError::DatabaseError(format!(
@@ -235,8 +267,18 @@ impl CollaborationService {
             ))
         })?;
 
+        let annotation = chart_annotations::table
+            .filter(chart_annotations::id.eq(annotation_id))
+            .select(ChartAnnotation::as_select())
+            .first::<ChartAnnotation>(&mut conn)
+            .await
+            .optional()
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?
+            .filter(|annotation| can_view_annotation(annotation, viewer))
+            .ok_or_else(|| AppError::NotFound("Annotation not found".to_string()))?;
+
         let comments = annotation_comments::table
-            .filter(annotation_comments::annotation_id.eq(annotation_id))
+            .filter(annotation_comments::annotation_id.eq(annotation.id))
             .order_by(annotation_comments::created_at.asc())
             .select(AnnotationComment::as_select())
             .load::<AnnotationComment>(&mut conn)
@@ -309,10 +351,14 @@ impl CollaborationService {
         Ok(collaborator)
     }
 
-    /// Get collaborators for a chart
+    /// Get a chart's collaborators, as seen by `viewer`.
+    ///
+    /// Only the chart's own collaborators may see who else is on it; anyone else gets an
+    /// empty list, which also avoids revealing whether the chart exists.
     pub async fn get_collaborators(
         &self,
         chart_id: Uuid,
+        viewer: Uuid,
     ) -> AppResult<Vec<(ChartCollaborator, User)>> {
         let mut conn = self.pool.get().await.map_err(|e| {
             econ_graph_core::error::AppError::DatabaseError(format!(
@@ -329,7 +375,7 @@ impl CollaborationService {
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
-        Ok(collaborators)
+        Ok(visible_collaborators(collaborators, viewer))
     }
 
     /// Check if user has permission to annotate a series
@@ -368,14 +414,74 @@ impl CollaborationService {
             .optional()
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
-        if let Some(Some(perm_str)) = permission {
-            let perm = PermissionLevel::from_string(&perm_str);
-            Ok(perm.can_admin())
-        } else {
-            // If no explicit permission, check if user is the owner
-            // For now, return true to allow sharing (this could be enhanced)
-            Ok(true)
+        Ok(role_grants_admin(permission))
+    }
+
+    /// Update an annotation's own fields (only by its author).
+    ///
+    /// A private annotation the caller cannot see is reported as not found, as in
+    /// [`Self::delete_annotation`]; a caller who can see it but isn't its author gets
+    /// `Unauthorized` rather than a silent no-op, since the field arguments are `Some` only
+    /// when the caller actually asked to change them.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_annotation(
+        &self,
+        annotation_id: Uuid,
+        user_id: Uuid,
+        title: Option<String>,
+        content: Option<String>,
+        color: Option<String>,
+        annotation_type: Option<String>,
+        is_public: Option<bool>,
+    ) -> AppResult<ChartAnnotation> {
+        let mut conn = self.pool.get().await.map_err(|e| {
+            econ_graph_core::error::AppError::DatabaseError(format!(
+                "Failed to get database connection: {}",
+                e
+            ))
+        })?;
+
+        let annotation = chart_annotations::table
+            .filter(chart_annotations::id.eq(annotation_id))
+            .select(ChartAnnotation::as_select())
+            .first::<ChartAnnotation>(&mut conn)
+            .await
+            .optional()
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?
+            .ok_or_else(|| AppError::NotFound("Annotation not found".to_string()))?;
+
+        if !can_view_annotation(&annotation, Some(user_id)) {
+            return Err(AppError::NotFound("Annotation not found".to_string()));
         }
+
+        if annotation.user_id != user_id {
+            return Err(AppError::Unauthorized("Unauthorized".to_string()));
+        }
+
+        let updated = diesel::update(
+            chart_annotations::table.filter(chart_annotations::id.eq(annotation_id)),
+        )
+        .set((
+            title.map(|t| chart_annotations::title.eq(t)),
+            content.map(|c| chart_annotations::description.eq(Some(c))),
+            color.map(|c| chart_annotations::color.eq(Some(c))),
+            annotation_type.map(|t| chart_annotations::annotation_type.eq(Some(t))),
+            is_public
+                .map(|p| chart_annotations::visibility.eq(AnnotationVisibility::from_is_public(p))),
+            chart_annotations::updated_at.eq(chrono::Utc::now()),
+        ))
+        .returning(ChartAnnotation::as_select())
+        .get_result::<ChartAnnotation>(&mut conn)
+        .await
+        .map_err(|e| match e {
+            // The annotation was deleted between the lookup above and this update.
+            diesel::result::Error::NotFound => {
+                AppError::NotFound("Annotation not found".to_string())
+            }
+            e => AppError::DatabaseError(e.to_string()),
+        })?;
+
+        Ok(updated)
     }
 
     /// Delete an annotation (only by owner or admin)
@@ -396,6 +502,13 @@ impl CollaborationService {
             .optional()
             .map_err(|e| AppError::DatabaseError(e.to_string()))?
             .ok_or_else(|| AppError::NotFound("Annotation not found".to_string()))?;
+
+        // A private annotation the caller cannot see is reported as not found, as in
+        // add_comment and get_comments_for_annotation, even to a chart admin: its
+        // existence stays hidden and nobody but its author can delete it.
+        if !can_view_annotation(&annotation, Some(user_id)) {
+            return Err(AppError::NotFound("Annotation not found".to_string()));
+        }
 
         // Check if user owns the annotation or has admin permission
         if annotation.user_id != user_id {
@@ -463,5 +576,77 @@ mod tests {
         assert!(admin.can_comment());
         assert!(admin.can_edit());
         assert!(admin.can_admin());
+    }
+
+    fn annotation(owner: Uuid, visibility: AnnotationVisibility) -> ChartAnnotation {
+        ChartAnnotation {
+            id: Uuid::new_v4(),
+            user_id: owner,
+            series_id: Some("GDP".to_string()),
+            chart_id: None,
+            annotation_date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+            annotation_value: None,
+            title: "t".to_string(),
+            description: None,
+            color: None,
+            annotation_type: None,
+            visibility,
+            is_pinned: None,
+            tags: None,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    fn collaborator(chart_id: Uuid, user_id: Uuid) -> (ChartCollaborator, ()) {
+        let collaborator = ChartCollaborator {
+            id: Uuid::new_v4(),
+            chart_id,
+            user_id,
+            invited_by: None,
+            role: Some("view".to_string()),
+            permissions: None,
+            created_at: None,
+            last_accessed_at: None,
+        };
+        (collaborator, ())
+    }
+
+    /// A chart's collaborators see the whole list; anyone else sees nothing.
+    #[test]
+    fn test_visible_collaborators_only_for_collaborators() {
+        let chart = Uuid::new_v4();
+        let (alice, bob, stranger) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let list = || vec![collaborator(chart, alice), collaborator(chart, bob)];
+
+        assert_eq!(visible_collaborators(list(), alice).len(), 2);
+        assert_eq!(visible_collaborators(list(), bob).len(), 2);
+        assert!(visible_collaborators(list(), stranger).is_empty());
+        assert!(visible_collaborators(Vec::<(ChartCollaborator, ())>::new(), alice).is_empty());
+    }
+
+    /// Public annotations are visible to anyone; private ones only to their author.
+    #[test]
+    fn test_can_view_annotation() {
+        let owner = Uuid::new_v4();
+        let other = Uuid::new_v4();
+
+        let public = annotation(owner, AnnotationVisibility::Public);
+        assert!(can_view_annotation(&public, None));
+        assert!(can_view_annotation(&public, Some(other)));
+
+        let private = annotation(owner, AnnotationVisibility::Private);
+        assert!(can_view_annotation(&private, Some(owner)));
+        assert!(!can_view_annotation(&private, Some(other)));
+        assert!(!can_view_annotation(&private, None));
+    }
+
+    /// Only an explicit admin role grants admin; a missing row or role grants nothing.
+    #[test]
+    fn test_role_grants_admin_fails_closed() {
+        assert!(role_grants_admin(Some(Some("admin".to_string()))));
+        assert!(!role_grants_admin(Some(Some("edit".to_string()))));
+        assert!(!role_grants_admin(Some(None)));
+        assert!(!role_grants_admin(None));
     }
 }

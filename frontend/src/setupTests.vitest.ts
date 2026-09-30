@@ -130,6 +130,7 @@ vi.mock('chart.js', () => ({
   registerables: [],
   CategoryScale: vi.fn(),
   LinearScale: vi.fn(),
+  TimeScale: vi.fn(),
   PointElement: vi.fn(),
   LineElement: vi.fn(),
   BarElement: vi.fn(),
@@ -274,6 +275,16 @@ vi.mock('./hooks/useSeriesData', () => ({
   })),
 }));
 
+vi.mock('./hooks/useSeriesAnnotations', () => ({
+  useSeriesAnnotations: vi.fn().mockImplementation(() => ({
+    data: [],
+    isLoading: false,
+    error: null,
+    isError: false,
+    isSuccess: true,
+  })),
+}));
+
 // Mock D3 modules
 vi.mock('d3-geo', () => ({
   geoPath: vi.fn(() => ({
@@ -310,16 +321,16 @@ const mockUseAuth = vi.fn(() => ({
     id: 'test-user-1',
     email: 'test@example.com',
     name: 'Test User',
-    role: 'user',
-    preferences: {
-      theme: 'light',
-    },
   },
   isAuthenticated: true,
   isLoading: false,
-  login: vi.fn(),
-  logout: vi.fn(),
-  register: vi.fn(),
+  isConfigured: true,
+  accountUrl: null,
+  error: null,
+  signIn: vi.fn(),
+  signOut: vi.fn(),
+  completeSignIn: vi.fn(),
+  clearError: vi.fn(),
 }));
 
 vi.mock('@/hooks/useAuth', () => ({

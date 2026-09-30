@@ -1,0 +1,40 @@
+name: Docs Checks
+
+# Runs on every PR, including docs-only ones that Core CI skips and stacked
+# PRs based on another branch.
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  markdown:
+    name: Markdown lint and links
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    # Same markdownlint-cli version and rules (.markdownlint.json) as the pre-commit hook
+    - name: Lint Markdown
+      run: git ls-files -z '*.md' | xargs -0 npx --yes markdownlint-cli@0.38.0 --
+
+    # Relative links and images only: --offline skips http(s) URLs, which
+    # would make the check depend on other sites being up
+    - name: Check relative links
+      uses: lycheeverse/lychee-action@v2
+      with:
+        args: --offline --no-progress './**/*.md'
+        fail: true
+        jobSummary: true

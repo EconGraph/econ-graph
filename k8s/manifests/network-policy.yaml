@@ -92,6 +92,14 @@ spec:
     ports:
     - protocol: TCP
       port: 5432
+  # Allow egress to Keycloak, for the signing keys that verify access tokens
+  - to:
+    - podSelector:
+        matchLabels:
+          app: keycloak
+    ports:
+    - protocol: TCP
+      port: 8080
   # Allow DNS
   - to: []
     ports:

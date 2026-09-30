@@ -677,6 +677,8 @@ impl Worker {
         self.persist(source, external_id, &fetched).await
     }
 
+    /// Shared by [`fetch_series`](Self::fetch_series) and the batch path: checks the series'
+    /// dataset (if any) against the catalog, then writes it.
     async fn persist(
         &self,
         source: SourceId,

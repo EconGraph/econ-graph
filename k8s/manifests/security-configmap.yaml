@@ -6,9 +6,14 @@ metadata:
   labels:
     app: nginx-ingress
 data:
-  # Security configuration for nginx ingress controller
+  # Security configuration for nginx ingress controller.
+  # NOTE: as of 2026-09, nothing mounts this ConfigMap into a Deployment or Ingress; the headers
+  # actually served come from the ssl-ingress.yaml / terraform/modules/ingress annotations instead.
+  # The location blocks below are directive snippets, not complete server blocks: each needs the
+  # same proxy_pass/root as the surrounding server block wherever this file is included.
   security.conf: |
-    # Security headers for all responses
+    # Security headers for all responses. Only /silent-callback.html (the sign-in iframe) may be
+    # framed, and only by this origin; see the location block below.
     add_header X-Frame-Options "DENY" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
@@ -17,7 +22,7 @@ data:
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
     
     # Content Security Policy
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.econ-graph.com wss:; frame-ancestors 'none';" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.econ-graph.com wss:; frame-ancestors 'none';" always;
     
     # Hide nginx version
     server_tokens off;
@@ -52,6 +57,19 @@ data:
     proxy_buffers 8 4k;
     proxy_busy_buffers_size 8k;
     
+    # The Keycloak silent sign-in page loads in a hidden iframe on our own pages. nginx does not
+    # merge add_header directives across contexts: as soon as a location adds one, none of the
+    # parent block's add_header lines apply here, so every header this path needs is repeated.
+    location = /silent-callback.html {
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; connect-src 'self' https:; frame-ancestors 'self';" always;
+    }
+
     # Security for sensitive endpoints
     location ~ ^/(admin|grafana|api/admin) {
         # Additional security for admin endpoints
@@ -72,24 +90,7 @@ data:
         # Rate limiting for API
         limit_req zone=api burst=20 nodelay;
         
-        # CORS for API
-        add_header Access-Control-Allow-Origin "https://www.econ-graph.com,https://econ-graph.com" always;
-        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, PATCH" always;
-        add_header Access-Control-Allow-Headers "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,Accept,Origin,X-CSRF-Token" always;
-        add_header Access-Control-Allow-Credentials "true" always;
-        add_header Access-Control-Max-Age "86400" always;
-        
-        # Handle preflight requests
-        if ($request_method = 'OPTIONS') {
-            add_header Access-Control-Allow-Origin "https://www.econ-graph.com,https://econ-graph.com";
-            add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, PATCH";
-            add_header Access-Control-Allow-Headers "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,Accept,Origin,X-CSRF-Token";
-            add_header Access-Control-Allow-Credentials "true";
-            add_header Access-Control-Max-Age "86400";
-            add_header Content-Length 0;
-            add_header Content-Type text/plain;
-            return 204;
-        }
+        # CORS is enforced by the backend from CORS_ALLOWED_ORIGINS.
     }
     
     # Security for GraphQL endpoint
@@ -97,22 +98,5 @@ data:
         # Rate limiting for GraphQL
         limit_req zone=api burst=30 nodelay;
         
-        # CORS for GraphQL
-        add_header Access-Control-Allow-Origin "https://www.econ-graph.com,https://econ-graph.com" always;
-        add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
-        add_header Access-Control-Allow-Headers "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,Accept,Origin,X-CSRF-Token" always;
-        add_header Access-Control-Allow-Credentials "true" always;
-        add_header Access-Control-Max-Age "86400" always;
-        
-        # Handle preflight requests
-        if ($request_method = 'OPTIONS') {
-            add_header Access-Control-Allow-Origin "https://www.econ-graph.com,https://econ-graph.com";
-            add_header Access-Control-Allow-Methods "GET, POST, OPTIONS";
-            add_header Access-Control-Allow-Headers "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,Accept,Origin,X-CSRF-Token";
-            add_header Access-Control-Allow-Credentials "true";
-            add_header Access-Control-Max-Age "86400";
-            add_header Content-Length 0;
-            add_header Content-Type text/plain;
-            return 204;
-        }
+        # CORS is enforced by the backend from CORS_ALLOWED_ORIGINS.
     }

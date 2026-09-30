@@ -48,9 +48,9 @@ use econ_graph_core::{
 ///
 /// # Examples
 /// ```rust,no_run
-/// use econ_graph_backend::services::list_series;
-/// use econ_graph_backend::models::SeriesSearchParams;
-/// use econ_graph_backend::database::DatabasePool;
+/// use econ_graph_services::series_service::list_series;
+/// use econ_graph_core::models::SeriesSearchParams;
+/// use econ_graph_core::database::DatabasePool;
 /// use uuid::Uuid;
 ///
 /// # async fn example(pool: &DatabasePool) -> Result<(), Box<dyn std::error::Error>> {
@@ -149,9 +149,9 @@ pub async fn list_series(
 ///
 /// # Examples
 /// ```rust,no_run
-/// use econ_graph_backend::services::get_series_by_id;
-/// use econ_graph_backend::database::DatabasePool;
-/// use econ_graph_backend::error::AppError;
+/// use econ_graph_services::series_service::get_series_by_id;
+/// use econ_graph_core::database::DatabasePool;
+/// use econ_graph_core::error::AppError;
 /// use uuid::Uuid;
 ///
 /// # async fn example(pool: &DatabasePool) -> Result<(), AppError> {
@@ -196,16 +196,19 @@ pub async fn get_series_by_id(
 /// # Parameters
 /// - `pool`: Database connection pool for async PostgreSQL operations
 /// - `params`: Query parameters including series ID, date ranges, revision filters, and pagination
+/// - `context`: Earlier points to load with a page after the first, for transformations
 ///
 /// # Returns
-/// - `Ok(Vec<DataPoint>)`: Vector of data points matching the query criteria
+/// - `Ok(SeriesDataPage)`: One page of matching points ordered by date (then revision date), the
+///   total number of matching points across all pages, and the page's offset
 /// - `Err(AppError)`: Database connection errors, invalid parameters, or query execution failures
 ///
 /// # Filtering Capabilities
 /// - **Time Range**: Filter by start and end dates for focused analysis periods
 /// - **Data Vintage**: Choose between original releases and revised estimates
 /// - **Revision Control**: Access complete revision history or latest values only
-/// - **Pagination**: Efficiently handle large datasets with limit and offset
+/// - **Pagination**: `limit` defaults to and is capped at [`MAX_SERIES_DATA_PAGE`]; page with
+///   `offset` until [`SeriesDataPage::has_next_page`] is false
 ///
 /// # Data Vintage Options
 /// - **Original Only**: First published estimates (real-time data perspective)
@@ -216,7 +219,7 @@ pub async fn get_series_by_id(
 /// - Multi-column indexes on (series_id, date, revision_date) for fast filtering
 /// - Query optimization for common access patterns
 /// - Efficient handling of large time series through pagination
-/// - Post-processing optimization for revision filtering when needed
+/// - Revision filtering runs in SQL, so the count and pages see the same rows
 ///
 /// # Use Cases
 /// - Chart data retrieval for visualization components
@@ -227,9 +230,9 @@ pub async fn get_series_by_id(
 ///
 /// # Examples
 /// ```rust,no_run
-/// use econ_graph_backend::services::get_series_data;
-/// use econ_graph_backend::models::DataQueryParams;
-/// use econ_graph_backend::database::DatabasePool;
+/// use econ_graph_services::series_service::get_series_data;
+/// use econ_graph_core::models::DataQueryParams;
+/// use econ_graph_core::database::DatabasePool;
 /// use uuid::Uuid;
 /// use chrono::NaiveDate;
 ///
@@ -242,10 +245,11 @@ pub async fn get_series_by_id(
 ///     end_date: Some(NaiveDate::from_ymd_opt(2024, 11, 30).unwrap()),
 ///     original_only: Some(true),
 ///     latest_revision_only: Some(false),
+///     as_of: None,
 ///     limit: Some(12),
 ///     offset: Some(0),
 /// };
-/// let data_points = get_series_data(pool, params).await?;
+/// let page = get_series_data(pool, params, None).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -258,58 +262,171 @@ pub async fn get_series_by_id(
 pub async fn get_series_data(
     pool: &DatabasePool,
     params: DataQueryParams,
-) -> AppResult<Vec<DataPoint>> {
+    context: Option<PageContext>,
+) -> AppResult<SeriesDataPage> {
+    let limit = params
+        .limit
+        .unwrap_or(MAX_SERIES_DATA_PAGE)
+        .clamp(0, MAX_SERIES_DATA_PAGE);
+    let offset = params.offset.unwrap_or(0).max(0);
+
     let mut conn = pool.get().await.map_err(|e| {
-        econ_graph_core::error::AppError::DatabaseError(format!(
-            "Failed to get database connection: {}",
-            e
-        ))
+        AppError::DatabaseError(format!("Failed to get database connection: {}", e))
     })?;
 
+    // One snapshot, so a crawl writing in between can't make the count, the page and the
+    // context disagree.
+    conn.build_transaction()
+        .repeatable_read()
+        .read_only()
+        .run(async |conn| {
+            let total_count = filtered_data_points(&params)
+                .count()
+                .get_result::<i64>(conn)
+                .await?;
+
+            let points = in_page_order(filtered_data_points(&params))
+                .limit(limit)
+                .offset(offset)
+                .load::<DataPoint>(conn)
+                .await?;
+
+            let context = match (context, points.as_slice().first()) {
+                (Some(context), Some(first)) if offset > 0 => {
+                    load_context(conn, &params, first, context).await?
+                }
+                _ => Vec::new(),
+            };
+
+            Ok(SeriesDataPage {
+                points,
+                context,
+                total_count,
+                offset,
+            })
+        })
+        .await
+}
+
+/// Largest page [`get_series_data`] returns. A longer series is read page by page.
+pub const MAX_SERIES_DATA_PAGE: i64 = 10_000;
+
+/// One page of a series' data points, in page order: date, then revision date, then id.
+#[derive(Debug, Clone)]
+pub struct SeriesDataPage {
+    /// The points on this page.
+    pub points: Vec<DataPoint>,
+    /// Points before this page that a transformation compares the page's points with (see
+    /// [`PageContext`]), in page order. Empty on the first page.
+    pub context: Vec<DataPoint>,
+    /// How many points match the filters across all pages.
+    pub total_count: i64,
+    /// How many matching points come before this page.
+    pub offset: i64,
+}
+
+impl SeriesDataPage {
+    /// Whether matching points remain after this page.
+    pub fn has_next_page(&self) -> bool {
+        self.offset + (self.points.len() as i64) < self.total_count
+    }
+}
+
+/// Which points before a page a transformation of it needs, so the page transforms the same as
+/// it would inside the whole series.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageContext {
+    /// Every earlier point dated at most this many days before the page's first point.
+    Days(i64),
+    /// The point just before the page.
+    PreviousPoint,
+    /// The series' first point (the base of a percent change).
+    FirstPoint,
+}
+
+/// Points before `first` in page order, selected by `context`, in page order.
+async fn load_context(
+    conn: &mut diesel_async::AsyncPgConnection,
+    params: &DataQueryParams,
+    first: &DataPoint,
+    context: PageContext,
+) -> Result<Vec<DataPoint>, diesel::result::Error> {
+    use data_points::dsl::{date, id, revision_date};
+
+    // (date, revision_date, id) < first's, spelled out for Diesel.
+    let before_first = date.lt(first.date).or(date.eq(first.date).and(
+        revision_date
+            .lt(first.revision_date)
+            .or(revision_date.eq(first.revision_date).and(id.lt(first.id))),
+    ));
+    let earlier = filtered_data_points(params).filter(before_first);
+
+    match context {
+        PageContext::Days(days) => {
+            let from = first
+                .date
+                .checked_sub_signed(chrono::Duration::days(days))
+                .unwrap_or(chrono::NaiveDate::MIN);
+            in_page_order(earlier.filter(date.ge(from)))
+                .load::<DataPoint>(conn)
+                .await
+        }
+        PageContext::PreviousPoint => {
+            earlier
+                .order_by((date.desc(), revision_date.desc(), id.desc()))
+                .limit(1)
+                .load::<DataPoint>(conn)
+                .await
+        }
+        PageContext::FirstPoint => {
+            in_page_order(earlier)
+                .limit(1)
+                .load::<DataPoint>(conn)
+                .await
+        }
+    }
+}
+
+/// Data points of `params.series_id` matching its date and revision filters, unordered and
+/// unpaged. The count, the page and the context all start here so they agree.
+fn filtered_data_points(
+    params: &DataQueryParams,
+) -> data_points::BoxedQuery<'static, diesel::pg::Pg> {
     let mut query = data_points::table
         .filter(data_points::series_id.eq(params.series_id))
         .into_boxed();
 
-    // Apply date range filters
     if let Some(start_date) = params.start_date {
         query = query.filter(data_points::date.ge(start_date));
     }
-
     if let Some(end_date) = params.end_date {
         query = query.filter(data_points::date.le(end_date));
     }
 
-    // Apply revision filters
-    if let Some(original_only) = params.original_only {
-        if original_only {
-            query = query.filter(data_points::is_original_release.eq(true));
-        }
+    let original_only = params.original_only.unwrap_or(false);
+    if original_only {
+        query = query.filter(data_points::is_original_release.eq(true));
+    }
+    if params.as_of.is_some() || params.latest_revision_only.unwrap_or(false) {
+        query = query.filter(econ_graph_core::models::revision_filter(
+            params.as_of,
+            original_only,
+        ));
     }
 
-    if let Some(latest_revision_only) = params.latest_revision_only {
-        if latest_revision_only {
-            // This is a complex query - for now, we'll handle it in the application layer
-            // In production, this should be optimized with a proper SQL query
-        }
-    }
+    query
+}
 
-    // Apply pagination
-    let limit = params.limit.unwrap_or(1000).min(10000);
-    let offset = params.offset.unwrap_or(0);
-
-    query = query.limit(limit).offset(offset);
-
-    // Order by date
-    query = query.order_by(data_points::date.asc());
-
-    let mut data_points = query.load::<DataPoint>(&mut *conn).await?;
-
-    // Post-process for latest revision only if requested
-    if params.latest_revision_only.unwrap_or(false) {
-        data_points = filter_latest_revisions(data_points);
-    }
-
-    Ok(data_points)
+/// Page order: date, then revision date, then id, so pages are stable when a date has several
+/// revisions.
+fn in_page_order(
+    query: data_points::BoxedQuery<'static, diesel::pg::Pg>,
+) -> data_points::BoxedQuery<'static, diesel::pg::Pg> {
+    query.order_by((
+        data_points::date.asc(),
+        data_points::revision_date.asc(),
+        data_points::id.asc(),
+    ))
 }
 
 /// Transform data points according to the specified transformation
@@ -372,33 +489,6 @@ pub async fn transform_data_points(
             "Unsupported transformation".to_string(),
         )),
     }
-}
-
-/// Filter data points to keep only the latest revision for each date
-fn filter_latest_revisions(data_points: Vec<DataPoint>) -> Vec<DataPoint> {
-    use std::collections::HashMap;
-
-    let mut latest_revisions: HashMap<chrono::NaiveDate, DataPoint> = HashMap::new();
-
-    for data_point in data_points {
-        let date = data_point.date;
-
-        match latest_revisions.get(&date) {
-            Some(existing) => {
-                if data_point.revision_date > existing.revision_date {
-                    latest_revisions.insert(date, data_point);
-                }
-            }
-            None => {
-                latest_revisions.insert(date, data_point);
-            }
-        }
-    }
-
-    let mut result: Vec<DataPoint> = latest_revisions.into_values().collect();
-    result.sort_by_key(|a| a.date);
-
-    result
 }
 
 /// Calculate year-over-year changes
@@ -502,56 +592,6 @@ mod tests {
     use chrono::NaiveDate;
     use rust_decimal_macros::dec;
     use uuid::Uuid;
-
-    #[test]
-    fn test_filter_latest_revisions() {
-        // REQUIREMENT: Support plotting both original releases and later corrections
-        // PURPOSE: Verify that latest revision filtering works correctly for data analysis
-        // This ensures users can choose between original and revised data for analysis
-
-        let data_points = vec![
-            DataPoint {
-                id: Uuid::new_v4(),
-                series_id: Uuid::new_v4(),
-                date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
-                value: Some(BigDecimal::from(100)),
-                revision_date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
-                is_original_release: true,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-            },
-            DataPoint {
-                id: Uuid::new_v4(),
-                series_id: Uuid::new_v4(),
-                date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
-                value: Some(BigDecimal::from(101)),
-                revision_date: NaiveDate::from_ymd_opt(2024, 2, 1).unwrap(), // Later revision
-                is_original_release: false,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-            },
-        ];
-
-        let filtered = filter_latest_revisions(data_points);
-
-        // Verify only latest revision is kept - important for accurate current analysis
-        assert_eq!(
-            filtered.len(),
-            1,
-            "Should filter to only latest revision per date"
-        );
-        // Verify correct revision value is preserved - ensures data accuracy
-        assert_eq!(
-            filtered[0].value,
-            Some(BigDecimal::from(101)),
-            "Should keep the later revision value"
-        );
-        // Verify revision metadata is maintained - important for data provenance
-        assert!(
-            !filtered[0].is_original_release,
-            "Should preserve revision metadata"
-        );
-    }
 
     #[test]
     fn test_calculate_yoy_changes() {

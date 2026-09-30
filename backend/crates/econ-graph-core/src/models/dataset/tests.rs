@@ -509,6 +509,32 @@ async fn database_rejects_components_rust_cannot_read() {
 }
 
 #[tokio::test]
+async fn database_rejects_empty_or_non_array_measures_with_a_check() {
+    // Each value must fail a named check constraint, never raise a runtime
+    // error such as "cannot get array length of a non-array".
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let mut conn = pool.get().await.unwrap();
+
+    for measures in [r#"[]"#, r#"{}"#, r#""value""#, r#"5"#] {
+        let result = diesel::sql_query(
+            "INSERT INTO datasets (source_id, code, name, measures) VALUES ($1, $2, 'Bad', $3::jsonb)",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(source.id)
+        .bind::<diesel::sql_types::Text, _>(format!("BAD_{}", Uuid::new_v4()))
+        .bind::<diesel::sql_types::Text, _>(measures)
+        .execute(&mut conn)
+        .await;
+        let constraint = violated(result);
+        assert!(
+            constraint == "datasets_measures_valid"
+                || constraint == "datasets_default_measure_declared",
+            "{measures}: {constraint}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn used_dataset_cannot_be_deleted_but_its_source_can() {
     let pool = test_pool().await;
     let source = new_source(&pool).await;
