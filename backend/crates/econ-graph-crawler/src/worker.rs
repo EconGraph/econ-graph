@@ -706,6 +706,7 @@ impl Worker {
         result: Fetched,
         duration: Duration,
     ) -> JobOutcome {
+        let finish_started = Instant::now();
         let outcome = match self.commit_result(source, item, result, duration).await {
             Ok(outcome) => outcome,
             Err(error) => {
@@ -713,7 +714,10 @@ impl Worker {
                 // Retry the infrastructure failure under a fresh lease-guarded transaction.
                 tracing::warn!(id = %item.id, %error, "result transaction rolled back");
                 let error = db_error(error);
-                match self.commit_result(source, item, Err(error), duration).await {
+                match self
+                    .commit_result(source, item, Err(error), duration + finish_started.elapsed())
+                    .await
+                {
                     Ok(outcome) => outcome,
                     Err(error) => {
                         tracing::error!(id = %item.id, %error, "recording database failure failed");
@@ -724,6 +728,7 @@ impl Worker {
                 }
             }
         };
+        let duration = duration + finish_started.elapsed();
         match &outcome {
             JobOutcome::Completed(stats) => tracing::info!(id = %item.id, %source,
                 kind = %item.kind, series_id = %item.series_id, points = stats.points_written,
@@ -745,6 +750,7 @@ impl Worker {
         result: Fetched,
         duration: Duration,
     ) -> AppResult<JobOutcome> {
+        let commit_started = Instant::now();
         let mut conn = self.ctx.pool.get().await.map_err(|e| {
             AppError::DatabaseError(format!("Failed to get database connection: {e}"))
         })?;
@@ -756,7 +762,11 @@ impl Worker {
                 if item.locked_by.as_deref() != Some(self.config.worker_id.as_str())
                     || !CrawlQueueItem::lock_current_claim(conn, item).await?
                 {
-                    self.warn_lost_lease(item, "persist result", duration);
+                    self.warn_lost_lease(
+                        item,
+                        "persist result",
+                        duration + commit_started.elapsed(),
+                    );
                     return Ok(JobOutcome::LeaseLost {
                         error: result.err().map(|e| e.to_string()),
                     });
@@ -799,8 +809,14 @@ impl Worker {
                     Err(error) => Err(error),
                 };
                 if item.job_kind() == JobKind::FetchSeries {
-                    self.record_attempt_conn(conn, source, item, &result, duration)
-                        .await?;
+                    self.record_attempt_conn(
+                        conn,
+                        source,
+                        item,
+                        &result,
+                        duration + commit_started.elapsed(),
+                    )
+                    .await?;
                 }
                 self.transition_conn(conn, source, item, result).await
             })
