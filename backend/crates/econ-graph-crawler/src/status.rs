@@ -441,4 +441,94 @@ mod tests {
             "the concurrent completion must not leak into this snapshot"
         );
     }
+    /// Cancel the real status query after its transaction starts, then reuse the only pooled
+    /// connection. A raw SQL BEGIN is invisible to Diesel's pool cleanup and leaks READ ONLY
+    /// into the next borrow; a tracked transaction must discard that connection on cancellation.
+    #[tokio::test]
+    async fn cancelled_status_does_not_leak_transaction_to_pool() {
+        use diesel::sql_types::Integer;
+        use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
+        use diesel_async::AsyncPgConnection;
+        use std::time::Duration as StdDuration;
+
+        let Some((pool, _guard)) = pool().await else {
+            return;
+        };
+        let url = std::env::var("DATABASE_URL").unwrap();
+        let singleton = Pool::builder()
+            .max_size(1)
+            .connection_timeout(StdDuration::from_secs(10))
+            .build(AsyncDieselConnectionManager::<AsyncPgConnection>::new(url))
+            .await
+            .unwrap();
+        let mut status_conn = singleton.get().await.unwrap();
+        let pid = diesel::select(diesel::dsl::sql::<Integer>("pg_backend_pid()"))
+            .get_result::<i32>(&mut status_conn)
+            .await
+            .unwrap();
+        drop(status_conn);
+
+        // This lock blocks GLOBAL_SQL, so observing that query waiting proves that the real
+        // crawler_status has finished BEGIN and is still inside its transaction.
+        let mut locker = pool.get().await.unwrap();
+        diesel::sql_query("BEGIN").execute(&mut locker).await.unwrap();
+        diesel::sql_query("LOCK TABLE crawl_queue IN ACCESS EXCLUSIVE MODE")
+            .execute(&mut locker)
+            .await
+            .unwrap();
+        let mut observer = pool.get().await.unwrap();
+        let query_pool = singleton.clone();
+        let task = tokio::spawn(async move { crawler_status(&query_pool).await });
+        let blocked_sql = format!(
+            "EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = {pid} \
+             AND state = 'active' AND wait_event_type = 'Lock' \
+             AND xact_start IS NOT NULL AND query LIKE '%FROM crawl_queue%')"
+        );
+        let blocked = tokio::time::timeout(StdDuration::from_secs(10), async {
+            loop {
+                let waiting = diesel::select(diesel::dsl::sql::<Bool>(&blocked_sql))
+                    .get_result::<bool>(&mut observer)
+                    .await
+                    .unwrap();
+                if waiting {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+
+        task.abort();
+        let cancelled = tokio::time::timeout(StdDuration::from_secs(10), task)
+            .await
+            .expect("status task must stop after abort");
+        // Release the table lock before any assertions or pool validation: a driver may finish
+        // sending the cancelled SELECT, and the next SELECT 1 must not queue behind this lock.
+        diesel::sql_query("ROLLBACK")
+            .execute(&mut locker)
+            .await
+            .unwrap();
+        blocked.expect("the production status query must reach the locked table");
+        assert!(cancelled.unwrap_err().is_cancelled());
+
+        let mut reused = tokio::time::timeout(StdDuration::from_secs(10), singleton.get())
+            .await
+            .expect("the singleton pool must remain usable")
+            .unwrap();
+        let read_only = diesel::select(diesel::dsl::sql::<Bool>(
+            "current_setting('transaction_read_only')::boolean",
+        ))
+        .get_result::<bool>(&mut reused)
+        .await
+        .unwrap();
+        let write = diesel::sql_query("UPDATE crawl_queue SET priority = priority WHERE FALSE")
+            .execute(&mut reused)
+            .await;
+        assert!(
+            !read_only,
+            "cancelled crawler_status leaked its read-only transaction into the next pool borrow"
+        );
+        write.expect("a writer borrowing after cancelled crawler_status must succeed");
+    }
+
 }
