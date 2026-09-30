@@ -599,46 +599,99 @@ mod tests {
         let owner = Uuid::new_v4();
         let outsider = Uuid::new_v4();
         let annotation_id = Uuid::new_v4();
-        diesel::sql_query("INSERT INTO users (id, email, name) VALUES ($1, 'delete-test@example.com', 'Owner')")
-            .bind::<diesel::sql_types::Uuid, _>(owner)
-            .execute(&mut conn).await.unwrap();
+        diesel::sql_query(
+            "INSERT INTO users (id, email, name) VALUES ($1, 'delete-test@example.com', 'Owner')",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(owner)
+        .execute(&mut conn)
+        .await
+        .unwrap();
         diesel::sql_query("INSERT INTO chart_annotations (id, user_id, annotation_date, title, visibility) VALUES ($1, $2, CURRENT_DATE, 'Delete test', 'public')")
             .bind::<diesel::sql_types::Uuid, _>(annotation_id)
             .bind::<diesel::sql_types::Uuid, _>(owner)
             .execute(&mut conn).await.unwrap();
         diesel::insert_into(annotation_comments::table)
-            .values(NewAnnotationComment { annotation_id, user_id: owner, content: "Keep until deletion succeeds".into() })
-            .execute(&mut conn).await.unwrap();
+            .values(NewAnnotationComment {
+                annotation_id,
+                user_id: owner,
+                content: "Keep until deletion succeeds".into(),
+            })
+            .execute(&mut conn)
+            .await
+            .unwrap();
 
-        assert!(matches!(service.delete_annotation(annotation_id, outsider).await,
-            Err(AppError::Unauthorized(_))));
+        assert!(matches!(
+            service.delete_annotation(annotation_id, outsider).await,
+            Err(AppError::Unauthorized(_))
+        ));
         diesel::update(chart_annotations::table.find(annotation_id))
             .set(chart_annotations::visibility.eq(AnnotationVisibility::Private))
-            .execute(&mut conn).await.unwrap();
-        assert!(matches!(service.delete_annotation(annotation_id, outsider).await,
-            Err(AppError::NotFound(_))));
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        assert!(matches!(
+            service.delete_annotation(annotation_id, outsider).await,
+            Err(AppError::NotFound(_))
+        ));
 
         // Fail the parent DELETE after authorization, reproducing the partial-delete risk.
-        diesel::sql_query("CREATE FUNCTION reject_annotation_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced delete failure'; END $$")
+        diesel::sql_query("CREATE FUNCTION reject_annotation_delete() RETURNS trigger LANGUAGE plpgsql AS $ BEGIN RAISE EXCEPTION 'forced delete failure'; END $")
             .execute(&mut conn).await.unwrap();
         diesel::sql_query("CREATE TRIGGER reject_annotation_delete BEFORE DELETE ON chart_annotations FOR EACH ROW EXECUTE FUNCTION reject_annotation_delete()")
             .execute(&mut conn).await.unwrap();
-        assert!(matches!(service.delete_annotation(annotation_id, owner).await,
-            Err(AppError::DatabaseError(_))));
-        assert_eq!(chart_annotations::table.find(annotation_id).count()
-            .get_result::<i64>(&mut conn).await.unwrap(), 1);
-        assert_eq!(annotation_comments::table.filter(annotation_comments::annotation_id.eq(annotation_id)).count()
-            .get_result::<i64>(&mut conn).await.unwrap(), 1);
+        assert!(matches!(
+            service.delete_annotation(annotation_id, owner).await,
+            Err(AppError::DatabaseError(_))
+        ));
+        assert_eq!(
+            chart_annotations::table
+                .find(annotation_id)
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            annotation_comments::table
+                .filter(annotation_comments::annotation_id.eq(annotation_id))
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .unwrap(),
+            1
+        );
 
         diesel::sql_query("DROP TRIGGER reject_annotation_delete ON chart_annotations")
-            .execute(&mut conn).await.unwrap();
-        assert!(service.delete_annotation(annotation_id, owner).await.unwrap());
-        assert_eq!(chart_annotations::table.find(annotation_id).count()
-            .get_result::<i64>(&mut conn).await.unwrap(), 0);
-        assert_eq!(annotation_comments::table.filter(annotation_comments::annotation_id.eq(annotation_id)).count()
-            .get_result::<i64>(&mut conn).await.unwrap(), 0);
-        assert!(matches!(service.delete_annotation(annotation_id, owner).await,
-            Err(AppError::NotFound(_))));
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        assert!(service
+            .delete_annotation(annotation_id, owner)
+            .await
+            .unwrap());
+        assert_eq!(
+            chart_annotations::table
+                .find(annotation_id)
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            annotation_comments::table
+                .filter(annotation_comments::annotation_id.eq(annotation_id))
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(matches!(
+            service.delete_annotation(annotation_id, owner).await,
+            Err(AppError::NotFound(_))
+        ));
     }
 
     fn annotation(owner: Uuid, visibility: AnnotationVisibility) -> ChartAnnotation {
