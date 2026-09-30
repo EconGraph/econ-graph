@@ -881,8 +881,8 @@ label = "Observation status"
         assert!(e.to_string().contains("is listed as both"), "{e}");
     }
 
-    /// Every production adapter's declarations match the shipped dataset files: today FRED and
-    /// BLS (DS-4); Census BDS (DS-5) adds more.
+    /// Every production adapter's declarations match the shipped dataset files: FRED, BLS,
+    /// Census BDS and FHFA all declare datasets.
     #[test]
     fn default_registry_declarations_match_shipped_files() {
         DatasetCatalog::load(&crate::sources::default_registry()).unwrap();

@@ -26,11 +26,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context};
 use clap::Parser;
-use econ_graph_crawler::dataset::DatasetCatalog;
 use econ_graph_crawler::persist;
 use econ_graph_crawler::source::SourceId;
 use econ_graph_crawler::sources::registry_at;
 use econ_graph_crawler::testkit::{test_ctx, MockSource, Reply, Route};
+use econ_graph_crawler::DatasetCatalog;
 use serde::Deserialize;
 
 /// Loads recorded fixtures into `DATABASE_URL` through the source adapters.

@@ -1,4 +1,4 @@
-# U.S. states and the District of Columbia, read at runtime by the FHFA and Census adapters.
+# U.S. states and the District of Columbia, read at runtime by the Census adapter.
 # Columns: two-digit state FIPS code, USPS postal code, name. Lines starting with # are comments.
 # The crawler looks for this file in $CRAWLER_DATA_DIR (the crawler-worker image sets /app/data).
 fips,postal,name

@@ -52,14 +52,9 @@ Based on the current implementation in `backend/src/models/data_source.rs`, here
   - Government economic data APIs often have generous limits for research purposes
 
 #### 5. **FHFA (Federal Housing Finance Agency)**
-- **Configured Rate Limit**: 1000 requests/minute
-- **API Documentation URL**: https://www.fhfa.gov/data/developer-information
-- **Status**: 🔍 **ESTIMATED** - Based on similar government data APIs
-- **Reasoning**:
-  - FHFA provides housing finance data (House Price Index, etc.)
-  - 1000/minute matches other government economic data APIs
-  - Housing data is often accessed in bulk for research and analysis
-  - Government APIs typically have generous limits for public data access
+- **Configured Rate Limit**: the crawler's own policy (`SourcePolicy`, 1 request/second, concurrency 2) governs FHFA. The `data_sources` row from `data_source.rs` still lists `https://api.fhfa.gov` at 1000/minute; the crawler doesn't use it
+- **Data URL**: https://www.fhfa.gov/hpi/download/monthly/hpi_master.csv
+- **Status**: no API. FHFA publishes the House Price Index as files, and the crawler downloads the HPI master CSV once per discovery and once per fetch batch (every series shares one batch), so a refresh is a request or two
 
 ### International Sources
 
@@ -204,7 +199,7 @@ Our rate limits are based on:
 
 ### Rate Limit Categories
 
-- **Government APIs (FRED, BLS, Census, BEA, FHFA)**: 120-500 requests/minute
+- **Government APIs (FRED, BLS, Census, BEA)**: 120-500 requests/minute
 - **International Organizations (World Bank, IMF, ECB, OECD, etc.)**: 1000 requests/minute
 - **Central Banks (BoE, BoJ, RBA, BoC, SNB)**: 1000 requests/minute
 - **UN Agencies (UNSD, ILO)**: 1000 requests/minute
