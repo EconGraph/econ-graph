@@ -1098,6 +1098,9 @@ mod empty_series_tests {
                 first_missing_date: None,
                 crawl_status: None,
                 crawl_error_message: None,
+                dataset_id: None,
+                dimensions: Default::default(),
+                default_measure: None,
             },
         )
         .await
@@ -1121,6 +1124,9 @@ mod empty_series_tests {
                 first_missing_date: None,
                 crawl_status: None,
                 crawl_error_message: None,
+                dataset_id: None,
+                dimensions: Default::default(),
+                default_measure: None,
             },
         )
         .await
@@ -1228,6 +1234,9 @@ mod empty_series_tests {
                 first_missing_date: None,
                 crawl_status: None,
                 crawl_error_message: None,
+                dataset_id: None,
+                dimensions: Default::default(),
+                default_measure: None,
             },
         )
         .await
