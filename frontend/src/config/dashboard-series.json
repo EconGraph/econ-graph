@@ -1,0 +1,34 @@
+[
+  {
+    "id": "gdp",
+    "label": "Gross Domestic Product",
+    "sourceName": "Federal Reserve Economic Data (FRED)",
+    "sourceLabel": "FRED",
+    "externalId": "GDP",
+    "fractionDigits": 1
+  },
+  {
+    "id": "unemployment",
+    "label": "Unemployment Rate",
+    "sourceName": "Federal Reserve Economic Data (FRED)",
+    "sourceLabel": "FRED",
+    "externalId": "UNRATE",
+    "fractionDigits": 1
+  },
+  {
+    "id": "cpi",
+    "label": "Consumer Price Index",
+    "sourceName": "Federal Reserve Economic Data (FRED)",
+    "sourceLabel": "FRED",
+    "externalId": "CPIAUCSL",
+    "fractionDigits": 3
+  },
+  {
+    "id": "fed-funds",
+    "label": "Federal Funds Rate",
+    "sourceName": "Federal Reserve Economic Data (FRED)",
+    "sourceLabel": "FRED",
+    "externalId": "FEDFUNDS",
+    "fractionDigits": 2
+  }
+]

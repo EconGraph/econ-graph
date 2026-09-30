@@ -1,12 +1,50 @@
-// REQUIREMENT: Comprehensive unit tests for Dashboard page component
-// PURPOSE: Test economic indicators dashboard layout and functionality
-// This ensures the main overview interface provides accurate economic information
+// Dashboard page tests: the indicator cards render the latest observation from GraphQL
+// (mocked with the fixtures in test-utils/mocks/graphql-responses/get_series_latest_observation).
 
 import React from 'react';
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, within } from '@testing-library/react';
+import { vi } from 'vitest';
 import { TestProviders } from '../../test-utils/test-providers';
 import Dashboard from '../Dashboard';
+import dashboardSource from '../Dashboard.tsx?raw';
+import cardSource from '../../components/dashboard/LatestValueCard.tsx?raw';
+import { DASHBOARD_SERIES } from '../../config/dashboardSeries';
+import { executeGraphQL } from '../../utils/graphql';
+import gdp from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/gdp.json';
+import unrate from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/unrate.json';
+import cpiaucsl from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/cpiaucsl.json';
+import fedfunds from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/fedfunds.json';
+import notFound from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/not_found.json';
+import emptySeries from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/empty_series.json';
+import nullValue from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/null_value.json';
+
+vi.mock('../../utils/graphql', async () => {
+  const actual = await vi.importActual<typeof import('../../utils/graphql')>('../../utils/graphql');
+  return { ...actual, executeGraphQL: vi.fn() };
+});
+
+const mockedExecuteGraphQL = vi.mocked(executeGraphQL);
+
+type Fixture = { data: unknown };
+const FIXTURES: Record<string, Fixture> = {
+  GDP: gdp,
+  UNRATE: unrate,
+  CPIAUCSL: cpiaucsl,
+  FEDFUNDS: fedfunds,
+};
+
+/**
+ * Answer each series lookup from a fixture chosen by external id.
+ * @param overrides - Fixtures (or errors) to use instead of the defaults, by external id.
+ */
+function mockResponses(overrides: Record<string, Fixture | Error> = {}) {
+  mockedExecuteGraphQL.mockImplementation(async ({ variables }) => {
+    const externalId = variables?.externalId as string;
+    const response = overrides[externalId] ?? FIXTURES[externalId] ?? notFound;
+    if (response instanceof Error) throw response;
+    return response as Awaited<ReturnType<typeof executeGraphQL>>;
+  });
+}
 
 function renderDashboard() {
   return render(
@@ -16,329 +54,216 @@ function renderDashboard() {
   );
 }
 
+/**
+ * The card for a dashboard entry, found by its heading.
+ * @param label - The card heading.
+ * @returns The card element.
+ */
+function card(label: string): HTMLElement {
+  return screen.getByRole('article', { name: label });
+}
+
 describe('Dashboard', () => {
-  test('should render dashboard layout successfully', () => {
-    // REQUIREMENT: Test basic dashboard rendering and layout
-    // PURPOSE: Verify that dashboard displays economic indicators overview
-    // This ensures users can access key economic metrics
-
-    renderDashboard();
-
-    // Verify main dashboard elements
-    expect(screen.getByRole('heading', { name: /economic dashboard/i })).toBeInTheDocument();
-    expect(screen.getByText(/key economic indicators with professional collaboration features/i)).toBeInTheDocument();
-    expect(screen.getByText(/key indicators/i)).toBeInTheDocument();
+  beforeEach(() => {
+    mockedExecuteGraphQL.mockReset();
   });
 
-  test('should display featured economic indicators', async () => {
-    // REQUIREMENT: Test economic indicators display
-    // PURPOSE: Verify that key economic metrics are shown to users
-    // This provides visibility into current economic conditions
-
-    renderDashboard();
-
-    // Should show the four main economic indicators (checking for specific instances in cards)
-    expect(screen.getByText(/real gross domestic product/i)).toBeInTheDocument();
-
-    // For unemployment rate, we expect multiple instances - check that at least one exists
-    const unemploymentElements = screen.getAllByText(/unemployment rate/i);
-    expect(unemploymentElements.length).toBeGreaterThan(0);
-
-    // For consumer price index, we expect multiple instances - check that at least one exists
-    const cpiElements = screen.getAllByText(/consumer price index/i);
-    expect(cpiElements.length).toBeGreaterThan(0);
-
-    expect(screen.getByText(/federal funds rate/i)).toBeInTheDocument();
-
-    // Should show actual values
-    expect(screen.getByText(/\$27\.36T/)).toBeInTheDocument();
-    expect(screen.getByText(/3\.7%/)).toBeInTheDocument();
-    expect(screen.getByText(/3\.2%/)).toBeInTheDocument();
-    expect(screen.getByText(/5\.25%/)).toBeInTheDocument();
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
-  test('should show data source information', async () => {
-    // REQUIREMENT: Test data source display
-    // PURPOSE: Verify that data sources are clearly identified
-    // This helps users understand data provenance and reliability
-
-    renderDashboard();
-
-    // Should show data source chips (multiple instances expected)
-    expect(screen.getByText('BEA')).toBeInTheDocument();
-
-    const blsElements = screen.getAllByText('BLS');
-    expect(blsElements.length).toBeGreaterThan(0);
-
-    expect(screen.getByText('Federal Reserve')).toBeInTheDocument();
+  test('lists the four FRED series from the config file', () => {
+    expect(DASHBOARD_SERIES.map(entry => entry.externalId)).toEqual([
+      'GDP',
+      'UNRATE',
+      'CPIAUCSL',
+      'FEDFUNDS',
+    ]);
+    for (const entry of DASHBOARD_SERIES) {
+      expect(entry.sourceName).toBe('Federal Reserve Economic Data (FRED)');
+    }
   });
 
-  test('should display recent data releases', async () => {
-    // REQUIREMENT: Test recent activity display
-    // PURPOSE: Verify that recent data releases are shown for user awareness
-    // This helps users stay informed about data updates
-
+  test('looks each series up by source name and external id', async () => {
+    mockResponses();
     renderDashboard();
 
-    // Check for the specific heading (not the description text)
-    expect(screen.getByRole('heading', { name: /recent data releases/i })).toBeInTheDocument();
-
-    // Should show recent releases
-    expect(screen.getByText(/employment situation summary/i)).toBeInTheDocument();
-
-    // For industrial production, we expect multiple instances - check that at least one exists
-    const industrialElements = screen.getAllByText(/industrial production/i);
-    expect(industrialElements.length).toBeGreaterThan(0);
-
-    // Should show release dates and sources
-    expect(screen.getByText(/nonfarm payrolls, unemployment rate/i)).toBeInTheDocument();
-    expect(screen.getByText(/cpi-u, core cpi/i)).toBeInTheDocument();
+    await screen.findByText('29,723.9');
+    expect(mockedExecuteGraphQL).toHaveBeenCalledTimes(4);
+    for (const entry of DASHBOARD_SERIES) {
+      expect(mockedExecuteGraphQL).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: expect.stringContaining('seriesByExternalId'),
+          variables: { sourceName: entry.sourceName, externalId: entry.externalId },
+        })
+      );
+    }
   });
 
-  test('should show quick action buttons', async () => {
-    // REQUIREMENT: Test quick access navigation elements
-    // PURPOSE: Verify that users can quickly navigate to key features
-    // This improves user productivity and system discoverability
-
+  test('shows each value, its units and its observation date from the response', async () => {
+    mockResponses();
     renderDashboard();
 
-    // Should show quick action buttons in the sidebar
-    expect(screen.getByText(/employment data/i)).toBeInTheDocument();
-    expect(screen.getByText(/inflation indicators/i)).toBeInTheDocument();
-    expect(screen.getByText(/gdp & growth/i)).toBeInTheDocument();
-    expect(screen.getByText(/browse data sources/i)).toBeInTheDocument();
-    expect(screen.getByText(/explore all series/i)).toBeInTheDocument();
+    const gdpCard = card('Gross Domestic Product');
+    expect(await within(gdpCard).findByText('29,723.9')).toBeInTheDocument();
+    expect(within(gdpCard).getByText('Billions of Dollars')).toBeInTheDocument();
+    expect(within(gdpCard).getByText('Oct 1, 2024')).toHaveAttribute('datetime', '2024-10-01');
+    expect(within(gdpCard).getByText('FRED GDP')).toBeInTheDocument();
+
+    const unrateCard = card('Unemployment Rate');
+    expect(await within(unrateCard).findByText('4.1')).toBeInTheDocument();
+    expect(within(unrateCard).getByText('Percent')).toBeInTheDocument();
+    expect(within(unrateCard).getByText('Feb 1, 2025')).toBeInTheDocument();
+
+    // 319.0825 rounds up to 319.083 on the digits; float rounding would give 319.082.
+    const cpiCard = card('Consumer Price Index');
+    expect(await within(cpiCard).findByText('319.083')).toBeInTheDocument();
+    expect(within(cpiCard).getByText('Index 1982-1984=100')).toBeInTheDocument();
+
+    const fedFundsCard = card('Federal Funds Rate');
+    expect(await within(fedFundsCard).findByText('4.33')).toBeInTheDocument();
   });
 
-  test('should display system status information', async () => {
-    // REQUIREMENT: Test system status display
-    // PURPOSE: Verify that data freshness indicators are shown
-    // This helps users understand data currency and reliability
-
+  test('links each card to its series page', async () => {
+    mockResponses();
     renderDashboard();
 
-    expect(screen.getByText(/system status/i)).toBeInTheDocument();
-    expect(screen.getByText(/data freshness/i)).toBeInTheDocument();
-    expect(screen.getByText(/current/i)).toBeInTheDocument();
-    expect(screen.getByText(/last updated: 2 hours ago/i)).toBeInTheDocument();
+    await screen.findByText('29,723.9');
+    expect(within(card('Gross Domestic Product')).getByRole('link')).toHaveAttribute(
+      'href',
+      `/series/${gdp.data.seriesByExternalId.id}`
+    );
+    expect(within(card('Federal Funds Rate')).getByRole('link')).toHaveAttribute(
+      'href',
+      `/series/${fedfunds.data.seriesByExternalId.id}`
+    );
   });
 
-  test('should handle indicator card interactions', async () => {
-    // REQUIREMENT: Test widget interactivity
-    // PURPOSE: Verify that indicator cards respond to user interactions
-    // This enables detailed exploration from overview information
-
+  test('shows "No data yet" without a link when the series does not exist', async () => {
+    mockResponses({ GDP: notFound });
     renderDashboard();
 
-    // Find GDP indicator card using accessible queries
-    const gdpCard = screen.getByText(/real gross domestic product/i);
-
-    // Verify the card is clickable (has button role or is within a clickable element)
-    expect(gdpCard).toBeInTheDocument();
-    // Navigation would be tested with router mocks in a full implementation
+    const gdpCard = card('Gross Domestic Product');
+    expect(await within(gdpCard).findByText('No data yet')).toBeInTheDocument();
+    expect(within(gdpCard).queryByRole('link')).not.toBeInTheDocument();
+    // The other cards still load.
+    expect(await within(card('Unemployment Rate')).findByText('4.1')).toBeInTheDocument();
   });
 
-  test('should display change indicators with proper styling', async () => {
-    // REQUIREMENT: Test change indicator display
-    // PURPOSE: Verify that economic changes are visually represented
-    // This helps users quickly understand economic trends
-
+  test('shows "No data yet" without a link when the series has no observations', async () => {
+    // series(id) treats a series with no observations as not found, so linking to it would
+    // send the visitor to a "Series not found" page.
+    mockResponses({ FEDFUNDS: emptySeries });
     renderDashboard();
 
-    // Should show change percentages
-    expect(screen.getByText(/\+2\.4%/)).toBeInTheDocument();
-    expect(screen.getByText(/-0\.1%/)).toBeInTheDocument();
-    expect(screen.getByText(/\+0\.2%/)).toBeInTheDocument();
-    expect(screen.getByText(/0\.0%/)).toBeInTheDocument();
-
-    // Should show time periods (handle multiple instances)
-    expect(screen.getByText(/q3 2024/i)).toBeInTheDocument();
-
-    const novElements = screen.getAllByText(/nov 2024/i);
-    expect(novElements.length).toBeGreaterThan(0);
-
-    expect(screen.getByText(/dec 2024/i)).toBeInTheDocument();
+    const fedFundsCard = card('Federal Funds Rate');
+    expect(await within(fedFundsCard).findByText('No data yet')).toBeInTheDocument();
+    expect(within(fedFundsCard).queryByRole('link')).not.toBeInTheDocument();
   });
 
-  test('should show refresh functionality', async () => {
-    // REQUIREMENT: Test dashboard refresh capability
-    // PURPOSE: Verify that users can refresh data
-    // This ensures access to current information
-
+  test('says no value was reported when the latest observation has a null value', async () => {
+    mockResponses({ UNRATE: nullValue });
     renderDashboard();
 
-    const refreshButton = screen.getByLabelText(/refresh data/i);
-    expect(refreshButton).toBeInTheDocument();
+    const unrateCard = card('Unemployment Rate');
+    expect(await within(unrateCard).findByText('No value reported')).toBeInTheDocument();
+    expect(within(unrateCard).getByText('Feb 1, 2025')).toBeInTheDocument();
   });
 
-  test('should handle responsive layout', () => {
-    // REQUIREMENT: Test responsive dashboard layout
-    // PURPOSE: Verify that dashboard adapts to different screen sizes
-    // This ensures accessibility across devices
-
+  test('shows an error on the card when the lookup fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockResponses({ CPIAUCSL: new Error('HTTP error! status: 500') });
     renderDashboard();
 
-    // The MUI Grid system should handle responsiveness
-    // We can verify that the grid containers exist
-    const gridContainers = screen.getAllByRole('generic');
-    expect(gridContainers.length).toBeGreaterThan(0);
+    const cpiCard = card('Consumer Price Index');
+    expect(await within(cpiCard).findByText("Couldn't load this series")).toBeInTheDocument();
+    expect(within(cpiCard).queryByText('No data yet')).not.toBeInTheDocument();
   });
 
-  test('should display proper accessibility attributes', () => {
-    // REQUIREMENT: Test accessibility compliance
-    // PURPOSE: Verify that dashboard is accessible to all users
-    // This ensures inclusive design
-
-    renderDashboard();
-
-    // Check for proper headings hierarchy
-    expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
-
-    // Check for button accessibility
-    const refreshButton = screen.getByLabelText(/refresh data/i);
-    expect(refreshButton).toHaveAttribute('aria-label');
-
-    const viewDetailsButtons = screen.getAllByLabelText(/view details/i);
-    expect(viewDetailsButtons.length).toBeGreaterThan(0);
+  test.each([
+    ['Dashboard.tsx', dashboardSource],
+    ['LatestValueCard.tsx', cardSource],
+  ])('keeps no hard-coded indicator values in %s', (_file, source) => {
+    // Currency amounts, fractional percentages, ISO dates, and digits in JSX text.
+    expect(source).not.toMatch(/\$\d/);
+    expect(source).not.toMatch(/\d\.\d+%/);
+    expect(source).not.toMatch(/\b(19|20)\d\d-\d\d-\d\d\b/);
+    expect(source).not.toMatch(/>[^<>{}]*\d[^<>{}]*</);
   });
 
-  test('should show proper data formatting', () => {
-    // REQUIREMENT: Test data presentation
-    // PURPOSE: Verify that economic data is properly formatted
-    // This ensures clear communication of information
-
+  test('shows a loading placeholder without a link until the lookup returns', () => {
+    mockedExecuteGraphQL.mockImplementation(() => new Promise(() => {}));
     renderDashboard();
 
-    // Should show properly formatted currency
-    expect(screen.getByText(/\$27\.36T/)).toBeInTheDocument();
-
-    // Should show properly formatted percentages
-    expect(screen.getByText(/3\.7%/)).toBeInTheDocument();
-    expect(screen.getByText(/3\.2%/)).toBeInTheDocument();
-    expect(screen.getByText(/5\.25%/)).toBeInTheDocument();
+    const gdpCard = card('Gross Domestic Product');
+    expect(within(gdpCard).getByRole('progressbar', { name: 'Loading' })).toBeInTheDocument();
+    expect(within(gdpCard).queryByRole('link')).not.toBeInTheDocument();
   });
 
-  test('should handle navigation interactions', async () => {
-    // REQUIREMENT: Test navigation functionality
-    // PURPOSE: Verify that dashboard navigation works correctly
-    // This ensures users can move to detailed views
-
-    const user = userEvent.setup();
+  test('names each card link by the card heading', async () => {
+    mockResponses();
     renderDashboard();
 
-    // Test quick action buttons
-    const employmentButton = screen.getByText(/employment data/i);
-    const inflationButton = screen.getByText(/inflation indicators/i);
-    const gdpButton = screen.getByText(/gdp & growth/i);
-
-    expect(employmentButton).toBeInTheDocument();
-    expect(inflationButton).toBeInTheDocument();
-    expect(gdpButton).toBeInTheDocument();
-
-    // In a full implementation, these would test actual navigation
-    // For now, we verify the buttons exist and are clickable
-    await user.click(employmentButton);
-    await user.click(inflationButton);
-    await user.click(gdpButton);
+    expect(
+      await screen.findByRole('link', { name: 'Gross Domestic Product' })
+    ).toHaveAttribute('href', `/series/${gdp.data.seriesByExternalId.id}`);
   });
 
-  // =============================================================================
-  // EMPTY STATE TESTS - Critical for deployment scenarios with empty databases
-  // =============================================================================
-
-  test('should handle empty economic data gracefully', () => {
-    // REQUIREMENT: Test dashboard behavior when no economic data is available
-    // PURPOSE: Verify graceful handling when database has no economic series
-    // This prevents blank dashboard when deployment has empty database
-
-    // Note: The current Dashboard component uses mock data and doesn't handle
-    // empty states from the API. This test documents the current behavior
-    // and identifies where empty state handling should be added.
-
+  test('shows the raw value when it is not a decimal the formatter understands', async () => {
+    mockResponses({
+      GDP: {
+        data: {
+          seriesByExternalId: {
+            ...gdp.data.seriesByExternalId,
+            latestObservation: { ...gdp.data.seriesByExternalId.latestObservation, value: 'n/a' },
+          },
+        },
+      },
+    });
     renderDashboard();
 
-    // Should still render dashboard structure
-    expect(screen.getByRole('heading', { name: /economic dashboard/i })).toBeInTheDocument();
-    expect(screen.getByText(/key economic indicators/i)).toBeInTheDocument();
-
-    // Should show placeholder data or loading states
-    // In a real implementation, this would show empty state messages
-    // when API returns no data for economic indicators
+    expect(await within(card('Gross Domestic Product')).findByText('n/a')).toBeInTheDocument();
   });
 
-  test('should maintain dashboard structure during data loading', () => {
-    // REQUIREMENT: Test dashboard structure during loading states
-    // PURPOSE: Verify dashboard remains functional while data loads
-    // This ensures good UX during API calls
-
+  test('keeps the quick links to the explorer and data sources', () => {
+    mockResponses();
     renderDashboard();
 
-    // Should maintain core dashboard structure
-    expect(screen.getByRole('heading', { name: /economic dashboard/i })).toBeInTheDocument();
-    expect(screen.getByText(/key indicators/i)).toBeInTheDocument();
-
-    // Should show system status section
-    expect(screen.getByText(/system status/i)).toBeInTheDocument();
-    expect(screen.getByText(/data freshness/i)).toBeInTheDocument();
-
-    // Should maintain navigation elements
-    expect(screen.getByText(/employment data/i)).toBeInTheDocument();
-    expect(screen.getByText(/inflation indicators/i)).toBeInTheDocument();
-    expect(screen.getByText(/gdp & growth/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /explore all series/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /browse data sources/i })).toBeInTheDocument();
   });
 
-  test('should handle missing economic indicators gracefully', () => {
-    // REQUIREMENT: Test dashboard when specific economic indicators are missing
-    // PURPOSE: Verify graceful handling when some data sources fail
-    // This prevents partial dashboard failures
-
+  // ECO-246 (every-control crawl): these controls were removed along with the fake panels
+  // they belonged to, rather than wired up, so the crawl's dashboard allowlist entries for
+  // them are gone. Each one is checked here so a regression fails a unit test, not the crawl.
+  test.each([
+    'Employment Data',
+    'Inflation Indicators',
+    'GDP & Growth',
+    'refresh data',
+    'view details',
+  ])('does not render the removed "%s" control', name => {
+    mockResponses();
     renderDashboard();
 
-    // Should still show dashboard structure even if some indicators fail
-    expect(screen.getByRole('heading', { name: /economic dashboard/i })).toBeInTheDocument();
-
-    // Should maintain collaboration features
-    expect(screen.getByText(/professional collaboration features/i)).toBeInTheDocument();
-
-    // Should show system status regardless of data availability
-    expect(screen.getByText(/system status/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
   });
 
-  test('should provide clear feedback during system issues', () => {
-    // REQUIREMENT: Test dashboard feedback during system problems
-    // PURPOSE: Verify users understand when there are system issues
-    // This improves transparency during deployment problems
-
+  test('does not render the collaboration badge button', () => {
+    mockResponses();
     renderDashboard();
 
-    // Should show system status information
-    expect(screen.getByText(/system status/i)).toBeInTheDocument();
-    expect(screen.getByText(/data freshness/i)).toBeInTheDocument();
-
-    // Should provide status indicators
-    const statusChips = screen.getAllByText(/current/i);
-    expect(statusChips.length).toBeGreaterThan(0);
-
-    // Should show last updated information
-    expect(screen.getByText(/last updated/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /collaboration/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/collaborator/i)).not.toBeInTheDocument();
   });
 
-  test('should maintain accessibility during empty states', () => {
-    // REQUIREMENT: Test accessibility features during empty states
-    // PURPOSE: Verify screen readers work properly during data issues
-    // This ensures inclusive user experience during deployment issues
-
+  test('never links a card to a hard-coded id like /series/gdp', async () => {
+    mockResponses();
     renderDashboard();
 
-    // Should maintain proper heading structure
-    expect(screen.getByRole('heading', { name: /economic dashboard/i })).toBeInTheDocument();
-
-    // Should maintain accessible navigation
-    const navButtons = screen.getAllByRole('button');
-    expect(navButtons.length).toBeGreaterThan(0);
-
-    // Should maintain accessible status information
-    expect(screen.getByText(/system status/i)).toBeInTheDocument();
-    expect(screen.getByText(/data freshness/i)).toBeInTheDocument();
+    await screen.findByText('29,723.9');
+    for (const link of screen.getAllByRole('link')) {
+      expect(link.getAttribute('href')).not.toMatch(/^\/series\/[a-z-]+$/);
+    }
   });
 });
