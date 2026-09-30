@@ -635,7 +635,7 @@ mod tests {
         ));
 
         // Fail the parent DELETE after authorization, reproducing the partial-delete risk.
-        diesel::sql_query("CREATE FUNCTION reject_annotation_delete() RETURNS trigger LANGUAGE plpgsql AS $ BEGIN RAISE EXCEPTION 'forced delete failure'; END $")
+        diesel::sql_query("CREATE FUNCTION reject_annotation_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced delete failure'; END $$")
             .execute(&mut conn).await.unwrap();
         diesel::sql_query("CREATE TRIGGER reject_annotation_delete BEFORE DELETE ON chart_annotations FOR EACH ROW EXECUTE FUNCTION reject_annotation_delete()")
             .execute(&mut conn).await.unwrap();
