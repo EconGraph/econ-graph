@@ -29,6 +29,7 @@ use econ_graph_core::DatabasePool;
 
 use crate::adapter::{AdapterRegistry, ApiKeys, CrawlCtx};
 use crate::coverage::{covered_sources, crawl_coverage, SourceCoverage};
+use crate::dataset::DatasetCatalog;
 use crate::http::{HttpConfig, HttpFetcher};
 use crate::persist;
 use crate::policy::SourcePolicy;
@@ -303,8 +304,12 @@ async fn fetch_one(
             .await?
             .and_then(|latest| crate::worker::incremental_since(latest, ctx.http.policy(source)))
     };
+    let mut datasets = DatasetCatalog::empty();
+    datasets.load_adapter(&*adapter)?;
+    persist::sync_datasets(&pool, &datasets).await?;
     tracing::info!(%source, series_id = external_id, ?since, "fetching");
     let fetched = adapter.fetch_series(&ctx, external_id, since).await?;
+    datasets.check(source, external_id, fetched.dataset.as_ref())?;
     let write = persist::persist_series(&pool, source, external_id, &fetched).await?;
     Ok(format!(
         "{source} {external_id}: {} point(s) written ({} new), latest {}, series {}{}\n",

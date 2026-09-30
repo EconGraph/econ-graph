@@ -443,6 +443,7 @@ fn to_discovered(i: WbIndicator) -> DiscoveredSeries {
         description: non_empty(i.source_note),
         units: non_empty(i.unit),
         frequency: Some(DEFAULT_FREQUENCY.to_string()),
+        dataset: None,
     }
 }
 
