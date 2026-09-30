@@ -156,7 +156,8 @@
     "test:e2e:global-analysis": "playwright test --config=ci/configs/playwright-global-analysis.config.ts",
     "test:e2e:mobile:global-analysis": "playwright test --config=ci/configs/playwright-mobile-global-analysis.config.ts",
     "lint:accessibility": "eslint src --config eslint.accessibility.config.js --no-inline-config --max-warnings 0",
-    "test:accessibility": "vitest run --config vitest.accessibility.config.ts"
+    "test:accessibility": "vitest run --config vitest.accessibility.config.ts",
+    "test:accessibility:browser": "playwright test --config playwright.financial-accessibility.config.ts"
   },
   "overrides": {
     "nth-check": "^2.1.1",

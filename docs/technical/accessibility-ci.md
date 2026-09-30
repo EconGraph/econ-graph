@@ -35,6 +35,36 @@ audit. The workflow summary uses actual job and step outcomes, distinguishes
 skipped checks from passes, and fails when a dependency job fails or is cancelled.
 The manual artifact is a checklist, not evidence of completed testing.
 
+## Focused financial browser regressions
+
+In `frontend`, run:
+
+```sh
+npx playwright install chromium
+npm run test:accessibility:browser
+```
+
+These five Playwright/Chromium checks mount the real FinancialExport,
+FinancialMobile and FinancialDashboard components with production CSS and theme
+providers. Only data is supplied by the fixture (including a seeded QueryClient);
+no UI components or styles are mocked. The test-only HTML entry is outside the
+production routes and Vite build entries. This is focused component/browser
+coverage, not a full application end-to-end audit.
+
+Checks cover export choices at 390px and 1280px, mobile filing rows at 390px,
+and desktop dashboard filing rows in light and dark themes. Geometry assertions verify stacked text,
+full-width rows, icon alignment and the responsive export grid. Computed styles
+check the native-button reset and selection indication. Real Tab/Shift+Tab,
+Space and Enter exercise keyboard focus, export selection and dashboard filing
+selection. A targeted contrast assertion catches dark-theme hover text regressions. A 2px focus outline with an offset is required. The accessibility
+workflow runs this suite alongside the unchanged static and axe audits and
+preserves failure screenshots/traces; a failed browser job fails the summary.
+
+For environments with an existing Chromium installation, set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` to its executable path. Local validation used
+Chrome for Testing 153.0.8010.12 from the official Google storage host after the
+Playwright CDN returned an unavailable HTML page instead of an archive.
+
 ## Findings exposed by the repaired checks
 
 Validation against main `1dbb3ce` exposed the defects below. The follow-up
@@ -62,6 +92,14 @@ A temporary test in each accessibility directory rendered
 Removing the button's accessible name produced `button-name` and exit 1 in both
 projects. The temporary tests and deliberate violations were removed afterward.
 Temporarily removing the app test files also produced exit 1 for empty suites.
+
+For the financial browser suite, temporarily emptying the production
+`financial-selection.css` made all four tests fail with the browser default
+`appearance: auto` instead of the required button reset. Restoring the stylesheet
+returned the suite to four passes. A subsequent dark-theme hover case reproduced
+the reviewer finding at about 1.05:1 contrast before the correction; translucent
+hover/selection surfaces restored readable inherited text. All five final browser
+cases pass. The deliberate regressions were not committed.
 
 ## Coverage limits
 

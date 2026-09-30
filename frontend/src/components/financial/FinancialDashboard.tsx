@@ -1,3 +1,4 @@
+import './financial-selection.css';
 import React, { useState, useEffect } from 'react';
 import {
   Card,
@@ -201,7 +202,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                       <button
                         type='button'
                         key={statement.id}
-                        className='w-full text-left focus-visible:outline focus-visible:outline-2 flex items-center justify-between p-2 hover:bg-gray-50 rounded-md cursor-pointer'
+                        className='financial-selection financial-selection--filing'
                         onClick={() => setSelectedStatement(statement.id)}
                       >
                         <Typography variant='body2' component='span'>

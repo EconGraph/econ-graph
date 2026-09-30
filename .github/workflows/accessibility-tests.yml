@@ -152,6 +152,37 @@ jobs:
           path: ${{ matrix.project }}/accessibility-results/
           retention-days: 7
 
+  accessibility-financial-browser:
+    name: Financial Layout and Keyboard Focus (Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.test_type == 'all' || inputs.test_type == 'runtime' }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Check financial layout and keyboard focus
+        run: npm run test:accessibility:browser
+      - name: Preserve browser failure traces and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accessibility-financial-browser-${{ github.run_attempt }}
+          path: frontend/test-results/
+          retention-days: 7
+
   accessibility-manual-tests:
     name: Accessibility Manual Testing Guidelines
     runs-on: ubuntu-latest
@@ -214,6 +245,7 @@ jobs:
       [
         accessibility-static-analysis,
         accessibility-runtime-tests,
+        accessibility-financial-browser,
         accessibility-manual-tests,
       ]
     if: always()
@@ -228,13 +260,14 @@ jobs:
         env:
           STATIC_RESULT: ${{ needs.accessibility-static-analysis.result }}
           RUNTIME_RESULT: ${{ needs.accessibility-runtime-tests.result }}
+          BROWSER_RESULT: ${{ needs.accessibility-financial-browser.result }}
           MANUAL_RESULT: ${{ needs.accessibility-manual-tests.result }}
         run: |
           python - <<'PYTHON'
           import json, os
           from pathlib import Path
           lines = ['# Accessibility Testing Summary', '', '| Job | Result |', '| --- | --- |']
-          for name in ['STATIC', 'RUNTIME', 'MANUAL']:
+          for name in ['STATIC', 'RUNTIME', 'BROWSER', 'MANUAL']:
               lines.append(f'| {name.lower()} | {os.environ[name + "_RESULT"]} |')
           lines += ['', '| Project | Check | Install | Audit |', '| --- | --- | --- | --- |']
           reports = list(Path('accessibility-results').rglob('*-status.json'))
@@ -244,6 +277,7 @@ jobs:
           if not reports:
               lines += ['', 'No per-project outcome reports were available. Consult job logs; missing reports do not imply a pass.']
           lines += ['', 'Static checks use ESLint jsx-a11y; runtime checks use Vitest and axe-core.',
+                    'Focused financial browser tests use Playwright/Chromium to check layout and keyboard focus.',
                     'A skipped audit did not run. A manual checklist is guidance, not a completed audit.',
                     'Run locally in either project: `npm ci`, `npm run lint:accessibility`, `npm run test:accessibility`.',
                     'jsdom cannot fully check layout, contrast, keyboard use or screen reader behavior; browser/manual audits remain necessary.']
@@ -264,9 +298,10 @@ jobs:
         env:
           STATIC_RESULT: ${{ needs.accessibility-static-analysis.result }}
           RUNTIME_RESULT: ${{ needs.accessibility-runtime-tests.result }}
+          BROWSER_RESULT: ${{ needs.accessibility-financial-browser.result }}
           MANUAL_RESULT: ${{ needs.accessibility-manual-tests.result }}
         run: |
-          for result in "$STATIC_RESULT" "$RUNTIME_RESULT" "$MANUAL_RESULT"; do
+          for result in "$STATIC_RESULT" "$RUNTIME_RESULT" "$BROWSER_RESULT" "$MANUAL_RESULT"; do
             if [[ "$result" == failure || "$result" == cancelled ]]; then
               exit 1
             fi
