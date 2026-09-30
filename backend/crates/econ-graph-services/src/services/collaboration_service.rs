@@ -317,7 +317,9 @@ impl CollaborationService {
                 .await
                 .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
-            let role = grants.iter().find(|grant| grant.user_id == owner_user_id)
+            let role = grants
+                .iter()
+                .find(|grant| grant.user_id == owner_user_id)
                 .map(|grant| grant.role.clone());
             if !role_grants_admin(role) {
                 return Err(AppError::Unauthorized("Unauthorized".to_string()));
@@ -341,7 +343,8 @@ impl CollaborationService {
                 .get_result::<ChartCollaborator>(conn)
                 .await
                 .map_err(|e| AppError::DatabaseError(e.to_string()))
-        }).await
+        })
+        .await
     }
 
     /// Get a chart's collaborators, as seen by `viewer`.
@@ -547,25 +550,43 @@ mod tests {
         use diesel_async::SimpleAsyncConnection;
         let database_url = std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must point to the test PostgreSQL database");
-        let base_pool = econ_graph_core::database::create_pool(&database_url).await.unwrap();
+        let base_pool = econ_graph_core::database::create_pool(&database_url)
+            .await
+            .unwrap();
         let schema = format!("sharing_{}", Uuid::new_v4().simple());
         let mut base_conn = base_pool.get().await.unwrap();
-        base_conn.batch_execute(&format!("CREATE SCHEMA {schema}")).await.unwrap();
+        base_conn
+            .batch_execute(&format!("CREATE SCHEMA {schema}"))
+            .await
+            .unwrap();
         let separator = if database_url.contains('?') { '&' } else { '?' };
         let pool = econ_graph_core::database::create_pool(&format!(
             "{database_url}{separator}options=-csearch_path%3D{schema}"
-        )).await.unwrap();
+        ))
+        .await
+        .unwrap();
         let mut conn = pool.get().await.unwrap();
-        conn.batch_execute("CREATE TABLE chart_collaborators (
+        conn.batch_execute(
+            "CREATE TABLE chart_collaborators (
             id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
             chart_id uuid NOT NULL, user_id uuid NOT NULL, invited_by uuid,
             role varchar(20), permissions jsonb, created_at timestamptz DEFAULT now(),
-            last_accessed_at timestamptz);").await.unwrap();
+            last_accessed_at timestamptz);",
+        )
+        .await
+        .unwrap();
         let (chart, admin, target) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
         diesel::insert_into(chart_collaborators::table)
-            .values(NewChartCollaborator { chart_id: chart, user_id: admin,
-                invited_by: None, role: Some("admin".into()), permissions: None })
-            .execute(&mut conn).await.unwrap();
+            .values(NewChartCollaborator {
+                chart_id: chart,
+                user_id: admin,
+                invited_by: None,
+                role: Some("admin".into()),
+                permissions: None,
+            })
+            .execute(&mut conn)
+            .await
+            .unwrap();
         drop(conn);
         (pool, chart, admin, target)
     }
@@ -574,17 +595,28 @@ mod tests {
         use diesel_async::SimpleAsyncConnection;
         let mut conn = pool.get().await.unwrap();
         conn.transaction::<(), diesel::result::Error, _>(async |conn| {
-            conn.batch_execute(include_str!("../../../../migrations/2026-09-30-000100_unique_chart_collaborators/up.sql")).await
-        }).await.unwrap();
+            conn.batch_execute(include_str!(
+                "../../../../migrations/2026-09-30-000100_unique_chart_collaborators/up.sql"
+            ))
+            .await
+        })
+        .await
+        .unwrap();
     }
 
     async fn cleanup_sharing(pool: &DatabasePool) {
         use diesel_async::SimpleAsyncConnection;
         let mut conn = pool.get().await.unwrap();
-        let schema: String = diesel::select(diesel::dsl::sql::<diesel::sql_types::Text>("current_schema()"))
-            .get_result(&mut conn).await.unwrap();
+        let schema: String = diesel::select(diesel::dsl::sql::<diesel::sql_types::Text>(
+            "current_schema()",
+        ))
+        .get_result(&mut conn)
+        .await
+        .unwrap();
         assert!(schema.starts_with("sharing_"));
-        conn.batch_execute(&format!("DROP SCHEMA {schema} CASCADE")).await.unwrap();
+        conn.batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -596,9 +628,15 @@ mod tests {
         let mut conn = pool.get().await.unwrap();
         diesel::insert_into(chart_collaborators::table)
             .values(NewChartCollaborator {
-                chart_id: chart, user_id: second_admin, invited_by: None,
-                role: Some("admin".into()), permissions: None,
-            }).execute(&mut conn).await.unwrap();
+                chart_id: chart,
+                user_id: second_admin,
+                invited_by: None,
+                role: Some("admin".into()),
+                permissions: None,
+            })
+            .execute(&mut conn)
+            .await
+            .unwrap();
         drop(conn);
         let service = CollaborationService::new(pool.clone());
         let (first, second) = tokio::join!(
@@ -611,7 +649,9 @@ mod tests {
         let grants = chart_collaborators::table
             .filter(chart_collaborators::chart_id.eq(chart))
             .filter(chart_collaborators::user_id.eq(target))
-            .load::<ChartCollaborator>(&mut conn).await.unwrap();
+            .load::<ChartCollaborator>(&mut conn)
+            .await
+            .unwrap();
         assert_eq!(grants.len(), 1);
         assert!(matches!(grants[0].role.as_deref(), Some("view" | "edit")));
         drop(conn);
@@ -629,19 +669,33 @@ mod tests {
         revoker.batch_execute("BEGIN").await.unwrap();
         diesel::update(chart_collaborators::table.filter(chart_collaborators::user_id.eq(admin)))
             .set(chart_collaborators::role.eq("view"))
-            .execute(&mut revoker).await.unwrap();
+            .execute(&mut revoker)
+            .await
+            .unwrap();
         let mut share = tokio::spawn(async move {
-            service.share_chart(chart, admin, target, PermissionLevel::Admin).await
+            service
+                .share_chart(chart, admin, target, PermissionLevel::Admin)
+                .await
         });
         // Revocation owns the grant lock before the share begins. Keep it open
         // while the competing request reaches its locking read.
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(100), &mut share)
-            .await.is_err(), "sharing must wait for the locked grant");
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), &mut share)
+                .await
+                .is_err(),
+            "sharing must wait for the locked grant"
+        );
         revoker.batch_execute("COMMIT").await.unwrap();
-        assert!(matches!(share.await.unwrap(), Err(AppError::Unauthorized(_))));
+        assert!(matches!(
+            share.await.unwrap(),
+            Err(AppError::Unauthorized(_))
+        ));
         let count: i64 = chart_collaborators::table
-            .filter(chart_collaborators::user_id.eq(target)).count()
-            .get_result(&mut revoker).await.unwrap();
+            .filter(chart_collaborators::user_id.eq(target))
+            .count()
+            .get_result(&mut revoker)
+            .await
+            .unwrap();
         assert_eq!(count, 0);
         drop(revoker);
         cleanup_sharing(&pool).await;
@@ -652,31 +706,54 @@ mod tests {
     async fn migration_reconciles_duplicates_without_promoting_grants() {
         let (pool, chart, admin, _) = sharing_fixture().await;
         let mut conn = pool.get().await.unwrap();
-        let original: ChartCollaborator = chart_collaborators::table.first(&mut conn).await.unwrap();
+        let original: ChartCollaborator =
+            chart_collaborators::table.first(&mut conn).await.unwrap();
         diesel::update(chart_collaborators::table.find(original.id))
             .set(chart_collaborators::created_at.eq(chrono::Utc::now() - chrono::Duration::days(1)))
-            .execute(&mut conn).await.unwrap();
+            .execute(&mut conn)
+            .await
+            .unwrap();
         for role in [Some("edit"), None, Some("unknown")] {
             diesel::insert_into(chart_collaborators::table)
-                .values(NewChartCollaborator { chart_id: chart, user_id: admin,
-                    invited_by: None, role: role.map(str::to_owned),
-                    permissions: Some(serde_json::json!({"edit": true})) })
-                .execute(&mut conn).await.unwrap();
+                .values(NewChartCollaborator {
+                    chart_id: chart,
+                    user_id: admin,
+                    invited_by: None,
+                    role: role.map(str::to_owned),
+                    permissions: Some(serde_json::json!({"edit": true})),
+                })
+                .execute(&mut conn)
+                .await
+                .unwrap();
         }
         drop(conn);
         migrate_sharing(&pool).await;
         let mut conn = pool.get().await.unwrap();
-        let grants = chart_collaborators::table.load::<ChartCollaborator>(&mut conn).await.unwrap();
+        let grants = chart_collaborators::table
+            .load::<ChartCollaborator>(&mut conn)
+            .await
+            .unwrap();
         assert_eq!(grants.len(), 1);
         assert_eq!(grants[0].id, original.id);
         assert_eq!(grants[0].role.as_deref(), Some("view"));
         assert_eq!(grants[0].permissions, None);
         let duplicate = diesel::insert_into(chart_collaborators::table)
-            .values(NewChartCollaborator { chart_id: chart, user_id: admin,
-                invited_by: None, role: Some("admin".into()), permissions: None })
-            .execute(&mut conn).await;
-        assert!(matches!(duplicate, Err(diesel::result::Error::DatabaseError(
-            diesel::result::DatabaseErrorKind::UniqueViolation, _))));
+            .values(NewChartCollaborator {
+                chart_id: chart,
+                user_id: admin,
+                invited_by: None,
+                role: Some("admin".into()),
+                permissions: None,
+            })
+            .execute(&mut conn)
+            .await;
+        assert!(matches!(
+            duplicate,
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _
+            ))
+        ));
         drop(conn);
         cleanup_sharing(&pool).await;
     }
