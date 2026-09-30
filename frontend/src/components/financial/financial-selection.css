@@ -19,7 +19,7 @@
 }
 
 .financial-selection:hover {
-  background: #f9fafb;
+  background: rgb(127 127 127 / 12%);
 }
 
 .financial-selection:focus-visible {
@@ -45,7 +45,7 @@
 
 .financial-selection--format[aria-pressed='true'] {
   border-color: #1976d2;
-  background: #eff6ff;
+  background: rgb(25 118 210 / 8%);
 }
 
 .financial-selection__content,
@@ -88,7 +88,8 @@
 }
 
 .financial-selection__description {
-  color: #4b5563;
+  color: inherit;
+  opacity: 0.75;
   font-size: 0.875rem;
 }
 
