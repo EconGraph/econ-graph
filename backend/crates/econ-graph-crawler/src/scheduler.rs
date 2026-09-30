@@ -143,7 +143,7 @@ pub fn refresh_interval(frequency: &str) -> Duration {
 }
 
 /// `CASE` expression over `f` (lower-cased, trimmed frequency) returning the interval in days.
-fn frequency_days_sql(f: &str) -> String {
+pub(crate) fn frequency_days_sql(f: &str) -> String {
     let mut sql = String::from("CASE");
     for rule in FREQUENCY_RULES {
         let mut conds: Vec<String> = Vec::new();
@@ -826,18 +826,29 @@ mod tests {
         let Some(db) = db().await else { return };
         let p = &db.pool;
         let ids = [
+            "bds/national..T15CX",
+            "bds/state.06.T15CX",
+            "bds/state.03.T15CX",
+            "bds/state..T15CX",
+            "bds/county.001.T15CX",
+            "bds/national.06.T15CX",
+            "bdsx/national..T15CX",
+            "bds/national..T15CX.A",
+            "bds/state.06.T15CX&x=1",
+            "bds/state.6.T15CX",
             "CENSUS_BDS_T15CX_us",
             "CENSUS_BDS_T15CX_state_06",
-            "CENSUS_BDS_T15CX_state_03",
-            "CENSUS_BDS_T15CX_state",
-            "CENSUS_BDS_T15CX_county",
-            "CENSUS_BDS_T15CX_Alabama",
         ];
+        let census = persist::data_source_id(p, SourceId::Census).await.unwrap();
         let cleanup = [
-            "DELETE FROM economic_series WHERE external_id LIKE 'CENSUS\\_BDS\\_T15CX\\_%'",
-            "DELETE FROM series_metadata WHERE external_id LIKE 'CENSUS\\_BDS\\_T15CY\\_%'",
+            format!(
+                "DELETE FROM economic_series WHERE source_id = '{census}' AND external_id LIKE '%T15CX%'"
+            ),
+            format!(
+                "DELETE FROM series_metadata WHERE source_id = '{census}' AND external_id LIKE '%T15CY%'"
+            ),
         ];
-        for sql in cleanup {
+        for sql in &cleanup {
             exec(p, sql).await;
         }
         for id in ids {
@@ -848,10 +859,9 @@ mod tests {
             p,
             SourceId::Census,
             &[
+                ("bds/national..T15CY", "Annual"),
+                ("bds/state.06.T15CY", "Annual"),
                 ("CENSUS_BDS_T15CY_us", "Annual"),
-                ("CENSUS_BDS_T15CY_state_06", "Annual"),
-                ("CENSUS_BDS_T15CY_state", "Annual"),
-                ("CENSUS_BDS_T15CY_Alabama", "Annual"),
             ],
         )
         .await;
@@ -871,13 +881,13 @@ mod tests {
         assert_eq!(
             queued,
             vec![
-                "CENSUS_BDS_T15CX_state_06",
-                "CENSUS_BDS_T15CX_us",
-                "CENSUS_BDS_T15CY_state_06",
-                "CENSUS_BDS_T15CY_us",
+                "bds/national..T15CX",
+                "bds/national..T15CY",
+                "bds/state.06.T15CX",
+                "bds/state.06.T15CY",
             ]
         );
-        for sql in cleanup {
+        for sql in &cleanup {
             exec(p, sql).await;
         }
     }

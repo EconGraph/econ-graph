@@ -164,6 +164,7 @@ fn known_series(dataset_name: &str) -> Vec<DiscoveredSeries> {
             units: Some(units.to_string()),
             frequency: Some(frequency.to_string()),
             data_url: None,
+            dataset: None,
         };
     match dataset_name {
         "NIPA" => vec![

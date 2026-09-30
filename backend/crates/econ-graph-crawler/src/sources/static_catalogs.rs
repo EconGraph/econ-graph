@@ -88,6 +88,7 @@ impl CatalogEntry {
             units: Some(self.units.to_string()),
             frequency: Some(self.frequency.to_string()),
             data_url: Some(self.data_url.to_string()),
+            dataset: None,
         }
     }
 }

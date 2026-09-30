@@ -61,6 +61,40 @@ enum AnnotationVisibilityEnum {
 }
 
 """
+A country or aggregate from the shared countries reference file.
+"""
+type Area {
+	"""
+	Display name, e.g. `United States`.
+	"""
+	name: String!
+	"""
+	ISO 3166-1 alpha-3, e.g. `USA`; null for aggregates.
+	"""
+	iso3: String
+	"""
+	ISO 3166-1 numeric, e.g. `840` (world-atlas feature ids are this, zero-padded to
+	three digits); null for aggregates and Kosovo.
+	"""
+	isoNumeric: Int
+	kind: AreaKindType!
+}
+
+"""
+Whether an area is a country or an aggregate of countries.
+"""
+enum AreaKindType {
+	"""
+	An ISO 3166-1 country or territory, or Kosovo.
+	"""
+	COUNTRY
+	"""
+	A group of countries published as one area, e.g. `WLD` (World).
+	"""
+	AGGREGATE
+}
+
+"""
 GraphQL connection for audit logs
 """
 type AuditLogConnection {
@@ -345,6 +379,34 @@ input CreateAnnotationInput {
 	isPublic: Boolean
 }
 
+"""
+One key of a cross-section.
+"""
+type CrossSectionEntry {
+	"""
+	The series' value of the `across` dimension, e.g. `USA`.
+	"""
+	key: String!
+	"""
+	The area for `key` when `across` uses the countries code list; otherwise null.
+	"""
+	area: Area
+	seriesId: ID!
+	"""
+	The requested date, or with `latest` the date of the key's latest non-null value
+	(null when it has none).
+	"""
+	date: NaiveDate
+	"""
+	Null when the series has no value at the date.
+	"""
+	value: BigDecimal
+	"""
+	Observation attributes. Always empty until datasets store attributes.
+	"""
+	flags: [ObservationFlag!]!
+}
+
 input DataFilter {
 	startDate: NaiveDate
 	endDate: NaiveDate
@@ -426,6 +488,14 @@ input DeleteAnnotationInput {
 	Annotation ID to delete
 	"""
 	annotationId: ID!
+}
+
+"""
+One dimension pinned to a value, e.g. `{dimension: "indicator", value: "NY.GDP.PCAP.CD"}`.
+"""
+input DimensionFilterInput {
+	dimension: String!
+	value: String!
 }
 
 type EconomicSeriesType {
@@ -549,6 +619,14 @@ Format: %Y-%m-%d
 scalar NaiveDate
 
 """
+An observation attribute, e.g. `{name: "obs_status", value: "E"}`.
+"""
+type ObservationFlag {
+	name: String!
+	value: String!
+}
+
+"""
 Page information for pagination
 """
 type PageInfo {
@@ -586,6 +664,17 @@ type Query {
 	Get a specific data source by ID
 	"""
 	dataSource(id: ID!): DataSourceType
+	"""
+	One measure of one dataset, for every value of one dimension, at one date.
+	
+	`filter` pins every dataset dimension except `across`, e.g.
+	`crossSection(datasetId: $wdi, filter: [{dimension: "indicator", value:
+	"NY.GDP.PCAP.CD"}], across: "area", latest: true)`. Give exactly one of `date` and
+	`latest: true`; `latest` returns each key's most recent non-null value with its own
+	date. `measure` defaults to the dataset's default measure. Every active matching series
+	is returned, ordered by key, with a null value where it has none.
+	"""
+	crossSection(datasetId: ID!, measure: String, filter: [DimensionFilterInput!]! = [], across: String!, date: NaiveDate, latest: Boolean): [CrossSectionEntry!]!
 	"""
 	List all data sources
 	"""
