@@ -1,26 +1,26 @@
 {
   "codebase_stats": {
-    "backend_production": 56447,
-    "backend_tests": 13385,
-    "configuration": 29104,
-    "documentation": 51907,
+    "backend_production": 57660,
+    "backend_tests": 14049,
+    "configuration": 29107,
+    "documentation": 51961,
     "frontend_production": 36152,
     "frontend_tests": 5766,
     "scripts": 18134,
-    "total_lines": 210895,
-    "infrastructure": 47238
+    "total_lines": 212829,
+    "infrastructure": 47241
   },
   "cost_analysis": {
     "traditional_development": {
       "line_costs": {
-        "production": 231497.5,
-        "tests": 23938.75,
-        "infrastructure": 47238.0,
-        "documentation": 38930.25
+        "production": 234530.0,
+        "tests": 24768.75,
+        "infrastructure": 47241.0,
+        "documentation": 38970.75
       },
-      "base_cost": 341604.5,
-      "overhead_cost": 256203.38,
-      "total_cost": 597807.88
+      "base_cost": 345510.5,
+      "overhead_cost": 259132.88,
+      "total_cost": 604643.38
     },
     "ai_assisted_development": {
       "staff_engineer_cost": 33600.0,
@@ -28,7 +28,7 @@
       "total_cost": 34908.55
     },
     "savings": {
-      "dollar_amount": 562899.33,
+      "dollar_amount": 569734.83,
       "percentage": 94.2
     }
   },
@@ -37,5 +37,5 @@
     "total_tokens": 4285966700,
     "total_requests": 6768
   },
-  "last_updated": "2026-09-30T06:48:15Z"
+  "last_updated": "2026-09-30T08:54:16Z"
 }

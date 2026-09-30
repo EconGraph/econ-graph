@@ -156,6 +156,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         areas = areas.all().len(),
         "shared reference data loaded"
     );
+    // Dataset definitions for every adapter: a declared code without a definition (or the
+    // reverse) stops the worker here, and the rows are upserted before any job writes a series.
+    let datasets = econ_graph_crawler::DatasetCatalog::load(&registry)?;
+    let synced = econ_graph_crawler::persist::sync_datasets(&pool, &datasets).await?;
+    tracing::info!(datasets = synced, "datasets synced");
     // Built-in policies, overridden by whatever each registered adapter declares.
     let policies: HashMap<SourceId, SourcePolicy> = SourceId::ALL
         .into_iter()
@@ -250,11 +255,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("metrics server disabled");
     }
 
-    let worker = Worker::new(ctx, registry, config).with_handler(
-        SourceId::Sec,
-        JobKind::FetchFiling,
-        Arc::new(SecFilingHandler::new()),
-    );
+    let worker = Worker::new(ctx, registry, config)
+        .with_datasets(datasets)
+        .with_handler(
+            SourceId::Sec,
+            JobKind::FetchFiling,
+            Arc::new(SecFilingHandler::new()),
+        );
     alive.store(true, Ordering::SeqCst);
     worker.run(shutdown_signal()).await;
     alive.store(false, Ordering::SeqCst);

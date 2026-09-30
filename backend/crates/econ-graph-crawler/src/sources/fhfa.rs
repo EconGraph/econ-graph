@@ -164,6 +164,7 @@ impl SourceAdapter for FhfaAdapter {
                 units: Some(UNITS.into()),
                 frequency: Some(FREQUENCY.into()),
                 external_id: e.external_id,
+                dataset: None,
             })
             .collect())
     }
@@ -212,6 +213,7 @@ impl SourceAdapter for FhfaAdapter {
                 seasonal_adjustment: None,
             }),
             points,
+            dataset: None,
         })
     }
 }
