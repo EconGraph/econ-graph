@@ -163,9 +163,9 @@ To enable sign-in, first configure a reachable Keycloak realm and API audience,
 then export these settings before starting the backend:
 
 ```bash
-export OIDC_ISSUER=http://localhost/idp/realms/econ-graph
+export OIDC_ISSUER=http://localhost:8081/realms/econ-graph
 export OIDC_AUDIENCE=econ-graph-api
-export OIDC_JWKS_URL=http://localhost/idp/realms/econ-graph/protocol/openid-connect/certs
+export OIDC_JWKS_URL=http://localhost:8081/realms/econ-graph/protocol/openid-connect/certs
 ```
 
 These URLs are example identity-provider settings, not a Keycloak installation.
@@ -317,3 +317,4 @@ This project is licensed under the Microsoft Reference Source License (MS-RSL). 
 ## Support
 
 For technical support, feature requests, or bug reports, please refer to the project documentation or contact the development team.
+

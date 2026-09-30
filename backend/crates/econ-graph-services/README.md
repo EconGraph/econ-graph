@@ -47,3 +47,4 @@ cargo test -p econ-graph-services services::queue_service
 ## License
 
 This project is licensed under the Microsoft Reference Source License (MS-RSL). See the LICENSE file for complete terms and conditions.
+

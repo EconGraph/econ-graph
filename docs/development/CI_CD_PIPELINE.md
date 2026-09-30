@@ -25,7 +25,7 @@ Exact paths are in the changes job. Shared paths include CI configuration, scrip
 
 | Job(s) | Dependency | Work |
 | --- | --- | --- |
-| Detect changes | None | PR path selection |
+| Detect changes | None | Complete successfully on every Core CI run; filter feature refs only |
 | Backend Build Cache | Detect changes | Compile backend and test targets with cargo build --all-targets; prepare the shared Rust cache |
 | Backend Smoke Tests (Fast) | Backend Build Cache | Formatting, Clippy, rustdoc, fast tests, release-flag checks, schema snapshot and Keycloak checks |
 | Backend Workspace Tests (all tests) | Backend Build Cache | Required crawler/queue/ratio checks and release CLI checks; broader workspace and doctest runs are advisory |
@@ -45,7 +45,6 @@ The cache build compiles test binaries; it does not execute tests. Rust test job
 
 ## Known coverage limitations
 
-- Main/develop/release pushes currently skip Detect changes at job level. The build-cache job overrides that skip, but backend test jobs downstream do not. Actual main runs can be green with backend tests skipped. This is a dependency-condition defect, not intentional path-based selection.
 - The broad workspace and doctest steps use continue-on-error. Required crawler/queue checks in the same job still fail the job. Inspect the broader step logs even when the job is green.
 - Admin tests are excluded from ordinary pushes by an explicit event condition.
 - Core CI E2E jobs are disabled unless explicitly selected on manual dispatch. Independent Release E2E runs on matching PRs, not ordinary main pushes.
@@ -78,7 +77,7 @@ Inspect individual job and step conclusions, not only the workflow badge. Distin
 
 GitHub applies a default success() status condition. A skipped ancestor can skip dependent jobs even after an intermediate job overrides that skip. If an upstream gate is optional, either let it complete successfully without performing its optional work or use an explicit status condition in each affected downstream job, preserving checks that required dependencies succeeded.
 
-For this workflow, making Detect changes complete on main while bypassing only its filter step avoids propagating an intentional skip into mandatory tests. Adding !cancelled() to one intermediate job alone is insufficient.
+Detect changes completes on main/develop/release refs while bypassing only its filter step, avoiding propagation of an intentional skip into mandatory tests. Adding !cancelled() to one intermediate job alone is insufficient.
 
 A YAML parser can detect syntax errors; it cannot establish which jobs GitHub will run. Validate main/develop/release selection, frontend-only and backend-only PRs, shared changes, failed dependencies and cancellation. Do not claim main coverage from a successful PR run alone.
 

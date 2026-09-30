@@ -66,3 +66,4 @@ Adapters are tested against a local mock upstream (`testkit`, see `src/testkit`)
 ## License
 
 This project is licensed under the Microsoft Reference Source License (MS-RSL). See the LICENSE file for complete terms and conditions.
+
