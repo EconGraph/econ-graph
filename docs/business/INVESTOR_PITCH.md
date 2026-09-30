@@ -45,7 +45,7 @@
 ### Technology Advantages
 - **Rust Backend**: Memory safety, zero-cost abstractions, blazing performance
 - **React Frontend**: Modern TypeScript UI with Material Design
-- **PostgreSQL**: Advanced indexing for sub-second query performance
+- **PostgreSQL**: Indexing capabilities for query optimization
 - **Kubernetes foundation**: Deployment manifests provide a basis for future scaling and reliability work
 - **Open Source**: Transparency and customization impossible with proprietary solutions
 - **AI-Assisted Development**: 0 lines of code delivered at ~$34557.836 vs $4.8M traditional cost
