@@ -543,4 +543,3 @@ mod tests {
         assert_eq!(data_source_template(SourceId::Sec).name, "SEC EDGAR");
     }
 }
-

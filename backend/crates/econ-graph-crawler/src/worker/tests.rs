@@ -1879,4 +1879,3 @@ async fn breaker_counts_one_result_per_batch_call() {
     assert_eq!(w.paused_sources(), vec![SRC]);
     assert_eq!(adapter.batch_calls().len(), 2);
 }
-
