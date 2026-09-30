@@ -178,7 +178,7 @@ EconGraph is a production-ready economic data intelligence platform that transfo
 - **UI Library**: Material-UI components
 - **Charts**: Chart.js with custom extensions
 - **State Management**: Context API and hooks
-- **Testing**: Jest and React Testing Library
+- **Testing**: Vitest and React Testing Library
 
 ### Infrastructure
 - **Containerization**: Docker with multi-stage builds
