@@ -314,11 +314,10 @@ impl XbrlStorage {
         download_url: &str,
         statement_id: &Uuid,
     ) -> Result<()> {
+        use diesel_async::AsyncConnection;
         use econ_graph_core::enums::{TaxonomyFileType, TaxonomySourceType};
         use econ_graph_core::models::XbrlTaxonomySchema;
         use sha2::{Digest, Sha256};
-
-        let mut conn = self.pool.get().await?;
 
         // Calculate file hash
         let mut hasher = Sha256::new();
@@ -367,31 +366,31 @@ impl XbrlStorage {
             updated_at: Utc::now(),
         };
 
-        // Insert the taxonomy schema
-        diesel::insert_into(econ_graph_core::schema::xbrl_taxonomy_schemas::table)
-            .values(&taxonomy_schema)
-            .execute(&mut conn)
-            .await
-            .context("Failed to insert taxonomy schema")?;
+        // Hold one connection only for the writes, and roll back the schema if its
+        // DTS reference cannot be stored.
+        let mut conn = self.pool.get().await?;
+        conn.transaction::<(), anyhow::Error, _>(async move |conn| {
+            diesel::insert_into(econ_graph_core::schema::xbrl_taxonomy_schemas::table)
+                .values(&taxonomy_schema)
+                .execute(conn)
+                .await
+                .context("Failed to insert taxonomy schema")?;
 
-        // Store DTS reference
-        self.store_dts_reference(reference, statement_id, &taxonomy_schema.id, download_url)
-            .await?;
-
-        Ok(())
+            self.store_dts_reference(conn, reference, statement_id, &taxonomy_schema.id)
+                .await
+        })
+        .await
     }
 
     /// Store DTS reference in the database
     async fn store_dts_reference(
         &self,
+        conn: &mut AsyncPgConnection,
         reference: &crate::models::DtsReference,
         statement_id: &Uuid,
         resolved_schema_id: &Uuid,
-        download_url: &str,
     ) -> Result<()> {
         use econ_graph_core::schema::xbrl_instance_dts_references;
-
-        let mut conn = self.pool.get().await?;
 
         let dts_reference = (
             xbrl_instance_dts_references::statement_id.eq(statement_id),
@@ -407,7 +406,7 @@ impl XbrlStorage {
 
         diesel::insert_into(xbrl_instance_dts_references::table)
             .values(dts_reference)
-            .execute(&mut conn)
+            .execute(conn)
             .await
             .context("Failed to insert DTS reference")?;
 
