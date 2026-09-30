@@ -530,5 +530,4 @@ mod tests {
         );
         write.expect("a writer borrowing after cancelled crawler_status must succeed");
     }
-
 }
