@@ -533,7 +533,10 @@ mod tests {
         let large = storage.get_storage_stats().await.unwrap();
         assert_eq!(large.total_size_bytes, u64::MAX - 1);
         assert_eq!(large.total_files, 3);
-        assert_eq!(large.compressed_files + large.uncompressed_files, large.total_files);
+        assert_eq!(
+            large.compressed_files + large.uncompressed_files,
+            large.total_files
+        );
     }
 
     #[tokio::test]
