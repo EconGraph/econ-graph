@@ -560,6 +560,29 @@ jobs:
         diesel migration run
       working-directory: backend
 
+    # Fail closed: only the focused user-admin regressions become required, while
+    # the unrelated full GraphQL/workspace suite below remains advisory.
+    - name: Run user administration authorization regressions (required)
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        : "${DATABASE_URL:?DATABASE_URL is required for authorization regressions}"
+        for test in \
+          narrow_role_cannot_act_on_another_user \
+          full_staff_set_can_act_on_another_user \
+          narrow_role_can_act_on_self \
+          narrow_role_denial_does_not_leak_whether_the_target_exists \
+          self_access_still_requires_named_operation_roles \
+          update_user_email_conflict_leaves_other_fields_unchanged; do
+          name="graphql::authorization_tests::$test"
+          log="$RUNNER_TEMP/$test.log"
+          cargo test -p econ-graph-graphql --lib "$name" -- --exact --test-threads=1 --nocapture | tee "$log"
+          # A renamed, ignored or empty filter must fail, even if cargo exits zero.
+          grep -Fq "test $name ... ok" "$log"
+          grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$log"
+        done
+      working-directory: backend
+
     # No lint exemptions for the new crawler crate (the workspace-wide clippy in
     # backend-smoke-tests still carries ~23 -A exemptions for legacy code).
     # --no-deps keeps -D warnings scoped to the crawler crates; without it the
