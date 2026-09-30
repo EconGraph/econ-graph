@@ -971,9 +971,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn skips_static_catalog_unimplemented_and_sec_sources() {
+    async fn skips_static_catalog_and_sec_sources() {
         let Some(db) = db().await else { return };
         let p = &db.pool;
+        // World Bank fetch is implemented and enabled by default, but another test
+        // (`discovery_is_enqueued_once_per_week`) disables it and shares this DB; enable it
+        // explicitly so this assertion doesn't depend on test run order.
+        set_enabled(p, SourceId::WorldBank, true).await;
         for (source, id) in [
             (SourceId::Ecb, "t15c_ecb"),
             (SourceId::Oecd, "t15c_oecd"),
@@ -995,11 +999,12 @@ mod tests {
             DEFAULT_BATCH_LIMIT,
         );
         s.tick().await.unwrap();
-        assert_eq!(queued_series(p).await, set(&["FRED/t15c_fred"]));
+        let expected = set(&["FRED/t15c_fred", "WORLD_BANK/t15c_wb"]);
+        assert_eq!(queued_series(p).await, expected);
         // Series of sources that aren't in the registry are ignored too.
         seed(p, SourceId::Bls, "t15c_bls", "Monthly", None, None).await;
         s.tick().await.unwrap();
-        assert_eq!(queued_series(p).await, set(&["FRED/t15c_fred"]));
+        assert_eq!(queued_series(p).await, expected);
     }
 
     #[tokio::test]
