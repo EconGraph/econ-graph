@@ -471,7 +471,10 @@ mod tests {
         // This lock blocks GLOBAL_SQL, so observing that query waiting proves that the real
         // crawler_status has finished BEGIN and is still inside its transaction.
         let mut locker = pool.get().await.unwrap();
-        diesel::sql_query("BEGIN").execute(&mut locker).await.unwrap();
+        diesel::sql_query("BEGIN")
+            .execute(&mut locker)
+            .await
+            .unwrap();
         diesel::sql_query("LOCK TABLE crawl_queue IN ACCESS EXCLUSIVE MODE")
             .execute(&mut locker)
             .await
