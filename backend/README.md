@@ -138,7 +138,7 @@ cargo run -p econ-graph-backend --bin econ-graph-backend
 
 The server applies pending migrations during startup and listens on port **9876**
 unless `BACKEND_PORT` overrides it. Verify startup with
-`curl --fail http://localhost:9876/health`. The database is initially empty;
+`curl --fail "http://localhost:${BACKEND_PORT:-9876}/health"`. The database is initially empty;
 see the [crawler deployment guide](../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md)
 for data loading.
 
