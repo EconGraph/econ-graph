@@ -48,6 +48,7 @@ retained schemas can read observations updated by a crawl.
 - `dataSource(id: ID!)` - Get a specific data source
 - `dataSources` - List all data sources
 - `seriesData(seriesId: ID!, filter: DataFilter, transformation: DataTransformation, first: Int, after: String)` - Get time series data, one page at a time
+- `crossSection(datasetId: ID!, measure: String, filter: [DimensionFilterInput!]! = [], across: String!, date: NaiveDate, latest: Boolean)` - One measure of a dataset for every value of one dimension (e.g. every country), at a date or at each key's latest value
 
 #### Monitoring Queries
 - `crawlerStatus` - Get crawler status information
@@ -167,6 +168,33 @@ query GetSeriesAsOf($seriesId: ID!) {
   }
 }
 ```
+
+### Cross-section for a map
+```graphql
+query GdpPerCapitaByCountry($wdi: ID!) {
+  crossSection(
+    datasetId: $wdi
+    filter: [{ dimension: "indicator", value: "NY.GDP.PCAP.CD" }]
+    across: "area"
+    latest: true
+  ) {
+    key
+    area { name iso3 isoNumeric kind }
+    seriesId
+    date
+    value
+  }
+}
+```
+
+`filter` pins every dataset dimension except `across`. Give exactly one of `date` and
+`latest: true`. With `latest`, each key gets its most recent non-null value with its own
+date, since the latest year is often missing for many countries. Every active matching
+series is returned, ordered by key; `value` (and with `latest`, `date`) is null where the
+series has no value. `area` is set when `across` uses the `countries` code list, and `kind` tells
+countries from aggregates such as `WLD`. `flags` stays empty until datasets store
+observation attributes, and `asOf` is not supported yet. An unknown dataset is a
+`NOT_FOUND` error; an invalid request is `BAD_REQUEST`.
 
 ### Multiple Series with Batched Relationship Fields
 ```graphql

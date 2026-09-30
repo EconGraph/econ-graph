@@ -355,3 +355,4 @@ Let's discuss how EconGraph can deliver exceptional returns while transforming h
 ---
 
 *This pitch deck represents a compelling investment opportunity in a large, growing market with a proven team and differentiated technology solution. EconGraph is positioned to capture significant market share and deliver strong returns to investors.*
+

@@ -133,7 +133,7 @@ pub fn refresh_interval(frequency: &str) -> Duration {
 }
 
 /// `CASE` expression over `f` (lower-cased, trimmed frequency) returning the interval in days.
-fn frequency_days_sql(f: &str) -> String {
+pub(crate) fn frequency_days_sql(f: &str) -> String {
     let mut sql = String::from("CASE");
     for rule in FREQUENCY_RULES {
         let mut conds: Vec<String> = Vec::new();
