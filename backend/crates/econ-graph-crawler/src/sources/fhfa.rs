@@ -493,6 +493,12 @@ impl SourceAdapter for FhfaAdapter {
         &[DATASET]
     }
 
+    /// Discovery reads every in-scope row of the master file (see the module docs): a series it
+    /// no longer lists, including the retired `{CODE}HPI` ids, has been retired by FHFA.
+    fn discovery_is_complete(&self) -> bool {
+        true
+    }
+
     /// Every train 1 series in the master file (see the module docs).
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         let url = self.master_url();
@@ -607,6 +613,8 @@ mod tests {
         );
         assert_eq!(FhfaAdapter::default().id(), SourceId::Fhfa);
         assert_eq!(FhfaAdapter::default().datasets(), [DATASET]);
+        assert!(FhfaAdapter::default().discovery_is_complete());
+        assert_eq!(FhfaAdapter::default().retirement_scope_prefix(), None);
     }
 
     #[test]
