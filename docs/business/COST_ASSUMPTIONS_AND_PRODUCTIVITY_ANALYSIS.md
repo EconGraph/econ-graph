@@ -80,28 +80,28 @@ in the existing Git-tracked categories, not a measure of delivered functionality
 
 ### Codebase Composition and Traditional Cost
 
-**Total Codebase**: 208,898 lines of manually written code (selected Git-tracked categories; excludes lock files and generated cost JSON)
+**Total Codebase**: 207,286 lines of manually written code (selected Git-tracked categories; excludes lock files and generated cost JSON)
 
 | Code Type | Lines | Share | Rate/Line | Base Cost |
 |-----------|-------|-------|-----------|-----------|
-| Production Code | 89,802 | 43.0% | $2.50 | $224,505.00 |
+| Production Code | 89,802 | 43.3% | $2.50 | $224,505.00 |
 | Test Code | 17,713 | 8.5% | $1.25 | $22,141.25 |
-| Infrastructure (configuration + scripts) | 46,957 | 22.5% | $1.00 | $46,957.00 |
-| Documentation | 54,426 | 26.1% | $0.75 | $40,819.50 |
-| **Total Base Cost** | **208,898** | **100.0%** | | **$334,422.75** |
+| Infrastructure (configuration + scripts) | 46,959 | 22.7% | $1.00 | $46,959.00 |
+| Documentation | 52,812 | 25.5% | $0.75 | $39,609.00 |
+| **Total Base Cost** | **207,286** | **100.0%** | | **$333,214.25** |
 
 - **Backend Production**: 53,650 lines
 - **Backend Tests**: 11,981 lines
 - **Frontend Production**: 36,152 lines
 - **Frontend Tests**: 5,732 lines
-- **Configuration Files**: 28,855 lines
+- **Configuration Files**: 28,857 lines
 - **Scripts and Automation**: 18,102 lines
 
 | Cost Category | Amount |
 |---------------|--------|
-| Base Development Cost | $334,422.75 |
-| Overhead (75% of base) | $250,817.06 |
-| **Total Traditional Cost** | **$585,239.81** |
+| Base Development Cost | $333,214.25 |
+| Overhead (75% of base) | $249,910.69 |
+| **Total Traditional Cost** | **$583,124.94** |
 
 Overhead preserves the original 20% project management + 15% code reviews +
 25% testing/QA + 15% integration/deployment assumptions. Monetary components
@@ -127,9 +127,9 @@ Shares are rounded independently and may not sum to exactly 100.0%.
 
 | Development Approach | Total Cost | Cost per Counted Line |
 |----------------------|------------|-----------------------|
-| Traditional Development | $585,239.81 | $2.80 |
+| Traditional Development | $583,124.94 | $2.81 |
 | AI-Assisted Development | $34,908.55 | $0.17 |
-| **Savings** | **$550,331.26** | **94.0% reduction** |
+| **Savings** | **$548,216.39** | **94.0% reduction** |
 
 ### Assumptions and Limits
 
@@ -187,7 +187,7 @@ assumptions, not outputs of these calculations.
 The data presented in this document provides a comprehensive foundation for cost assumptions in software development projects. The dramatic cost differences between traditional and AI-assisted development (94.0% cost reduction) demonstrate the transformative potential of AI tools in software development.
 
 **Key Takeaways**:
-1. **Traditional Development**: $585,239.81 under the line-based model
+1. **Traditional Development**: $583,124.94 under the line-based model
 2. **AI-Assisted Development**: $34,908.55 under the fixed staffing/usage assumptions
 3. **Productivity Gains**: 10-20x faster development cycles
 4. **Quality Maintenance**: Professional-grade results with AI assistance
