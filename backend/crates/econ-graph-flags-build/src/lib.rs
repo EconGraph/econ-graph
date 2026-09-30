@@ -14,8 +14,8 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The environment variable selecting a flag profile. Unset (or any value other than one of
-/// [`PROFILES`] other than `"release"`) means `release`.
+/// The environment variable selecting a flag profile. Unset means `release`; any other value
+/// must be one of [`PROFILES`], or [`plan`] refuses it with [`Error::UnknownProfile`].
 pub const PROFILE_ENV: &str = "FLAGS_PROFILE";
 
 /// The flag profiles a generated flags directory holds a file for.
