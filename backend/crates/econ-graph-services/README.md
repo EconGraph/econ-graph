@@ -26,14 +26,17 @@ The crate includes comprehensive tests to ensure business logic correctness, and
 
 ### Running Tests
 
-```bash
-# Run all tests
-cargo test
+Run from `backend/` (use `cd backend` from the repository root); `-p` selects this
+crate rather than every default workspace member. Docker must be available for
+database-backed tests.
 
-# Run specific test modules
-cargo test services::search
-cargo test services::queue_service
-cargo test integration
+```bash
+# Run this crate's tests
+cargo test -p econ-graph-services
+
+# Filter by existing service module names
+cargo test -p econ-graph-services services::search_service
+cargo test -p econ-graph-services services::queue_service
 ```
 
 ### Test Infrastructure
