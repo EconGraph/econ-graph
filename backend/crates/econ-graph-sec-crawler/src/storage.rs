@@ -553,7 +553,10 @@ mod tests {
                 .get_result(&mut conn)
                 .await
                 .unwrap();
-            assert_eq!(schemas, 0, "failed reference must not leave an orphan schema");
+            assert_eq!(
+                schemas, 0,
+                "failed reference must not leave an orphan schema"
+            );
             assert_eq!(references, 0);
         }
 
