@@ -4,3 +4,6 @@
 /vite.config.d.ts
 *.tsbuildinfo
 /test-results-smoke/
+
+# Generated accessibility audit artifacts
+accessibility-results/
