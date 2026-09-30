@@ -69,7 +69,7 @@ and monthly NIPA series are seasonally adjusted, and dollar levels are at annual
 
 `NoteRef` on each row points into the `Notes` array (table notes, and per-cell notes such
 as `(D)` suppressed in Regional data, from public docs). Notes aren't stored; suppressed
-cells are skipped.
+cells become points with no value.
 
 ## Dataset mapping
 
