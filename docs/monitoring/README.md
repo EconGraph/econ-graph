@@ -1,6 +1,6 @@
 # EconGraph Grafana Dashboards
 
-This directory contains comprehensive Grafana dashboards for monitoring the EconGraph platform. These dashboards provide real-time visibility into system performance, database health, and crawler operations.
+This directory contains comprehensive Grafana dashboards for monitoring the EconGraph platform. Dashboard coverage depends on the metrics and alert rules actually deployed; some Terraform queries still target older metric names. Verify live series before relying on a panel or alert.
 
 ## Dashboard Overview
 
@@ -137,21 +137,32 @@ The dashboards will be available at: `https://grafana.yourdomain.com`
 
 ### Required Prometheus Metrics
 
-The dashboards expect the following metrics to be available:
+The metric names below reflect the current Rust implementations. The older Terraform dashboards and alert rules are documented separately below; they do not automatically adapt to renamed metrics.
 
 #### Application Metrics
 - `up{job="econgraph-backend"}` - Service availability
 - `http_requests_total` - HTTP request counts
 - `http_request_duration_seconds` - Request latencies
-- `graphql_request_duration_seconds` - GraphQL-specific latencies
+- `graphql_query_duration_seconds` - GraphQL-specific latencies (histogram; use the `_bucket` series for percentiles)
 
 #### Crawler Metrics
-- `econgraph_queue_items` - Queue item counts by status
-- `econgraph_queue_items_processed_total` - Processing counters
-- `econgraph_queue_items_failed_total` - Failure counters
-- `econgraph_last_crawl_timestamp` - Last crawl timestamps
-- `econgraph_crawl_errors_total` - Error counters
-- `econgraph_api_requests_total` - API request tracking
+
+The worker serves `/metrics` on port 9102 by default. Its queue metrics are:
+
+- `crawler_queue_items{source,status}` - Queue counts for pending, processing, and retrying jobs
+- `crawler_jobs_total{source,kind,outcome}` - Finished job attempts; outcomes are completed, retrying, and failed
+- `crawler_queue_failed_24h{source}` - Jobs that became failed during the last 24 hours
+- `crawler_last_success_timestamp_seconds{source}` - Latest completed job timestamp; absent for a source with no successful job
+
+HTTP-level crawler metrics include `econgraph_crawler_requests_total`,
+`econgraph_crawler_errors_total`, and `econgraph_crawler_rate_limit_hits_total`.
+See [crawler metrics definitions](../../backend/crates/econ-graph-metrics/src/crawler.rs)
+and the [worker metrics endpoint](../../backend/crates/econ-graph-crawler-worker/src/metrics.rs).
+
+The Terraform dashboards still query older names such as `econgraph_queue_items`,
+`econgraph_queue_items_processed_total`, and `econgraph_last_crawl_timestamp`.
+Those queries need migration to the current worker series; an empty panel is not
+evidence that the queue is healthy or empty.
 
 #### Database Metrics (via postgres_exporter)
 - `pg_database_size_bytes` - Database size
@@ -170,24 +181,29 @@ The dashboards expect the following metrics to be available:
 Ensure your metrics include appropriate labels:
 - `job` - Service identifier (econgraph-backend, econgraph-crawler)
 - `source` - Data source (fred, bls, census, worldbank)
-- `status` - Queue item status (pending, processing, completed, failed)
+- `status` - Metric-specific status; queue gauges use pending, processing, retrying
+- `outcome` - Finished job outcome (completed, retrying, failed)
 - `pod` - Kubernetes pod name
 - `error_type` - Error classification
 
 ## Alerting Rules
 
-The dashboards work in conjunction with Prometheus alerting rules. Key alerts include:
+The referenced [Terraform monitoring module](../../terraform/modules/monitoring/main.tf)
+currently defines these alerts:
 
-### Critical Alerts
-- **EconGraphBackendDown**: Backend service unavailable
-- **EconGraphDatabaseDown**: Database connection failures
-- **EconGraphQueueStuck**: Queue processing stopped
+| Alert | Condition | Duration |
+| --- | --- | --- |
+| `EconGraphBackendDown` | Backend scrape target reports `up == 0` | 5 minutes |
+| `EconGraphHighResponseTime` | HTTP 95th percentile latency exceeds 1 second | 10 minutes |
+| `EconGraphQueueBacklog` | Older `econgraph_queue_items{status="pending"}` metric exceeds 1000 | 15 minutes |
+| `EconGraphDatabaseConnectionsHigh` | Active database connections exceed 80 | 5 minutes |
 
-### Warning Alerts
-- **EconGraphHighResponseTime**: API latency above threshold
-- **EconGraphQueueBacklog**: Large queue backlog
-- **EconGraphHighErrorRate**: Elevated error rates
-- **EconGraphDataStale**: Data sources not updating
+It does not define `EconGraphDatabaseDown`, `EconGraphQueueStuck`,
+`EconGraphHighErrorRate`, or `EconGraphDataStale`. Other deployment paths may
+have separate rules; inspect the live Prometheus rule list for coverage.
+The backlog rule needs migration to `crawler_queue_items` when scraping the
+current worker. Confirm the scrape job labels and matching series before relying
+on any rule.
 
 ### Configuration
 
@@ -294,13 +310,13 @@ Add template variables for filtering:
    rate(http_requests_total[5m])
    
    # Test aggregations
-   sum by (status) (econgraph_queue_items)
+   sum by (status) (crawler_queue_items)
    ```
 
 3. **Check Metric Labels**:
    ```promql
    # List all labels for a metric
-   group by (__name__)({__name__=~"econgraph_.*"})
+   group by (__name__)({__name__=~"(econgraph_crawler_.*|crawler_.*)"})
    ```
 
 ## Maintenance
