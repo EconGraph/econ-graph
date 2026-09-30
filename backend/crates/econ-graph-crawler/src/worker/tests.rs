@@ -1711,6 +1711,14 @@ impl SourceAdapter for LeaseGateAdapter {
         SRC
     }
 
+    fn discovery_is_complete(&self) -> bool {
+        self.catalog.is_some()
+    }
+
+    fn retirement_scope_prefix(&self) -> Option<&str> {
+        Some("t5_lease_catalog")
+    }
+
     async fn discover(&self, _: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         self.entered.wait().await;
         self.resume.wait().await;
@@ -2064,6 +2072,13 @@ fn discovered(external_id: &str, title: &str) -> DiscoveredSeries {
 async fn expired_discovery_cannot_overwrite_or_insert_stale_metadata() {
     let Some(db) = db().await else { return };
     tokio::time::timeout(Duration::from_secs(30), async {
+        // B's complete catalog retires the stale-only series and keeps its own series active.
+        // A must neither reactivate the former nor retire the latter when it resumes.
+        for id in ["t5_lease_catalog_stale_only", "t5_lease_catalog_newer_only"] {
+            persist::persist_series(&db.pool, SRC, id, &FetchedSeries::default())
+                .await
+                .unwrap();
+        }
         let old = Arc::new(LeaseGateAdapter {
             entered: tokio::sync::Barrier::new(2),
             resume: tokio::sync::Barrier::new(2),
@@ -2079,7 +2094,10 @@ async fn expired_discovery_cannot_overwrite_or_insert_stale_metadata() {
             resume: tokio::sync::Barrier::new(2),
             result: Ok(FetchedSeries::default()),
             batching: false,
-            catalog: Some(vec![discovered("t5_lease_catalog", "Newer catalog")]),
+            catalog: Some(vec![
+                discovered("t5_lease_catalog", "Newer catalog"),
+                discovered("t5_lease_catalog_newer_only", "Newer only"),
+            ]),
         });
         let a = lease_worker(&db.pool, &old, "t5-discovery-a");
         let b = lease_worker(&db.pool, &newer, "t5-discovery-b");
@@ -2113,15 +2131,37 @@ async fn expired_discovery_cannot_overwrite_or_insert_stale_metadata() {
         );
         assert_eq!(item(&db.pool, job).await.status, "completed");
         let mut conn = db.pool.get().await.unwrap();
-        let metadata: Vec<(String, String)> = series_metadata::table
+        let metadata: Vec<(String, String, bool)> = series_metadata::table
             .filter(series_metadata::external_id.like("t5_lease_catalog%"))
-            .select((series_metadata::external_id, series_metadata::title))
+            .select((
+                series_metadata::external_id,
+                series_metadata::title,
+                series_metadata::is_active,
+            ))
+            .order(series_metadata::external_id.asc())
             .load(&mut conn)
             .await
             .unwrap();
         assert_eq!(
             metadata,
-            vec![("t5_lease_catalog".into(), "Newer catalog".into())]
+            vec![
+                ("t5_lease_catalog".into(), "Newer catalog".into(), true),
+                ("t5_lease_catalog_newer_only".into(), "Newer only".into(), true),
+            ]
+        );
+        let active: Vec<(String, bool)> = economic_series::table
+            .filter(economic_series::external_id.like("t5_lease_catalog%"))
+            .select((economic_series::external_id, economic_series::is_active))
+            .order(economic_series::external_id.asc())
+            .load(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            active,
+            vec![
+                ("t5_lease_catalog_newer_only".into(), true),
+                ("t5_lease_catalog_stale_only".into(), false),
+            ]
         );
     })
     .await

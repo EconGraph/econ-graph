@@ -264,43 +264,68 @@ __tests__/
 
 ### Environment Configuration
 
-**Required Environment Variables**:
+The admin frontend uses Vite. Its development settings are in
+[`vite.config.js`](vite.config.js) and [`vite.config.ts`](vite.config.ts):
 
-- `REACT_APP_API_URL`: Backend API endpoint
-- `REACT_APP_GRAFANA_URL`: Grafana dashboard URL
-- `REACT_APP_ADMIN_PORT`: Admin interface port
+- Development server: port `3000`, with base path `/admin/`.
+- Development proxy: `/api` and `/graphql` forward to `http://localhost:8081`.
+- Production build output: `build/` (explicitly configured with `build.outDir`).
+
+The backend's default port is `9876`; the admin proxy currently assumes a backend
+on `8081`. Align the proxy target with your backend before making API requests.
+See the [backend setup guide](../backend/README.md) for backend configuration.
+
+`REACT_APP_API_URL`, `REACT_APP_GRAFANA_URL`, and `REACT_APP_ADMIN_PORT` are not
+wired configuration options. Grafana links currently use
+`http://localhost:30001` in
+[`MonitoringPage.tsx`](src/pages/MonitoringPage.tsx) and
+[`useMonitoring.ts`](src/hooks/useMonitoring.ts).
+
+**Known migration gap:** [`graphqlClient.ts`](src/services/graphqlClient.ts)
+still reads `process.env.REACT_APP_GRAPHQL_ENDPOINT` and falls back to
+`http://localhost:8080/graphql`. This is an absolute URL, so it bypasses Vite's
+`/graphql` proxy. The Vite configs do not map that environment variable, and
+there is no implemented `VITE_*` endpoint setting in this client. Changing the
+proxy alone does not resolve this client configuration; it needs a separate
+code fix.
 
 ### Build Process
 
 ```bash
-# Install dependencies
-npm install
+# From the repository root
+cd admin-frontend
 
-# Run tests
-npm test
+# Install locked dependencies, including build/test tools
+npm ci
+
+# Run the Vitest suite once (npm test starts watch mode)
+npm run test:run
 
 # Build for production
 npm run build
 
 # Start development server
-npm start
+npm run dev
 ```
+
+Open `http://localhost:3000/admin/` when port `3000` is available; Vite prints
+the chosen URL if it uses another port.
 
 ### Docker Integration
 
-The admin interface is containerized and deployed alongside the main application:
+Use the checked-in [`Dockerfile`](Dockerfile), which installs build dependencies,
+copies source, runs `npm run build`, and copies `build/` into NGINX:
 
-```dockerfile
-FROM node:24-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-
-FROM nginx:alpine
-COPY --from=builder /app/build /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/nginx.conf
-EXPOSE 3000
+```bash
+# From the repository root: admin-frontend is the build context
+docker build -t econgraph-admin:local ./admin-frontend
 ```
+
+The container's [`nginx.conf`](nginx.conf) listens on `3001`, distinct from
+Vite's development port `3000`. Its API upstream uses the Kubernetes service
+`econ-graph-backend-service.econ-graph.svc.cluster.local:9876`; running the image
+outside that cluster requires an appropriate NGINX upstream configuration.
+Building the image does not resolve the GraphQL client migration gap above.
 
 ## Security Considerations
 
@@ -398,20 +423,12 @@ EXPOSE 3000
    - Check API response times
    - Validate resource utilization
 
-### Debug Mode
+### Debugging
 
-Enable debug logging by setting:
-
-```bash
-REACT_APP_DEBUG=true
-```
-
-This provides detailed logging for:
-
-- Authentication flow
-- API requests and responses
-- Component rendering
-- Error handling
+Use the browser console and Network panel to inspect authentication and API
+failures. Check the actual request URL when diagnosing the proxy/client mismatch
+described above. `REACT_APP_DEBUG` is not read by the application, so setting it
+does not enable additional logging.
 
 ## Contributing
 

@@ -262,7 +262,11 @@ type Dispatched = Result<JobStats, CrawlError>;
 #[derive(Clone)]
 enum JobWrite {
     Series(FetchedSeries),
-    Discovery(Vec<DiscoveredSeries>),
+    Discovery {
+        found: Vec<DiscoveredSeries>,
+        complete: bool,
+        scope_prefix: Option<String>,
+    },
     Handler(JobStats),
 }
 
@@ -682,9 +686,15 @@ impl Worker {
             .registry
             .get(source)
             .ok_or_else(|| CrawlError::Permanent(format!("no adapter registered for {source}")))?;
+        let complete = adapter.discovery_is_complete();
+        let scope_prefix = adapter.retirement_scope_prefix().map(str::to_string);
         let ctx = self.ctx.clone();
         let found = guarded(async move { adapter.discover(&ctx).await }).await?;
-        Ok(JobWrite::Discovery(found))
+        Ok(JobWrite::Discovery {
+            found,
+            complete,
+            scope_prefix,
+        })
     }
 
     /// No upstream work is allowed here. Holding the queue row lock from validation
@@ -764,11 +774,27 @@ impl Worker {
                             metadata_written: 0,
                         })
                     }
-                    Ok(JobWrite::Discovery(found)) => Ok(JobStats {
-                        metadata_written: persist::persist_discovered_conn(conn, source, &found)
-                            .await?,
-                        ..JobStats::default()
-                    }),
+                    Ok(JobWrite::Discovery {
+                        found,
+                        complete,
+                        scope_prefix,
+                    }) => {
+                        let metadata_written =
+                            persist::persist_discovered_conn(conn, source, &found).await?;
+                        if complete {
+                            persist::retire_unlisted_conn(
+                                conn,
+                                source,
+                                &found,
+                                scope_prefix.as_deref(),
+                            )
+                            .await?;
+                        }
+                        Ok(JobStats {
+                            metadata_written,
+                            ..JobStats::default()
+                        })
+                    }
                     Ok(JobWrite::Handler(stats)) => Ok(stats),
                     Err(error) => Err(error),
                 };
