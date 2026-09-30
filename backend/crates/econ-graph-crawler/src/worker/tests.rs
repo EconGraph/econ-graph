@@ -2135,6 +2135,102 @@ async fn breaker_counts_one_result_per_batch_call() {
     assert_eq!(w.paused_sources(), vec![SRC]);
     assert_eq!(adapter.batch_calls().len(), 2);
 }
+/// A fresh database gets data from discovery plus the scheduler alone: discovery writes only
+/// `series_metadata`, the next scheduler tick enqueues `fetch_series` for each discovered series,
+/// and the worker persists their points. Nothing is enqueued by hand except the discovery job.
+#[tokio::test]
+async fn discovered_series_are_fetched_after_a_scheduler_tick() {
+    use crate::scheduler::{RefreshScheduler, SchedulerConfig};
+    // BEA, the `SRC` of the other tests here, can't fetch yet, so the scheduler would skip it.
+    const FETCHABLE: SourceId = SourceId::Fhfa;
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    let mock = MockSource::start().await;
+    mock.mount(
+        &Route::get("/catalog"),
+        Reply::json(serde_json::json!({"series": [["t5_new_a", "New A"], ["t5_new_b", "New B"]]})),
+    )
+    .await;
+    for id in ["t5_new_a", "t5_new_b"] {
+        mock.mount(
+            &Route::get(format!("/series/{id}")),
+            series_json(id, &[("2024-01-01", Some("1")), ("2024-02-01", Some("2"))]),
+        )
+        .await;
+    }
+    let mut registry = AdapterRegistry::new();
+    registry.register(Arc::new(TestAdapter {
+        id: FETCHABLE,
+        base_url: mock.base_url(),
+    }));
+    let w = Worker::new(ctx(p), registry, config("t5-fresh"));
+    #[derive(diesel::QueryableByName)]
+    struct WasEnabled {
+        #[diesel(sql_type = diesel::sql_types::Bool)]
+        was_enabled: bool,
+    }
+    let was_enabled = {
+        let mut conn = p.get().await.unwrap();
+        diesel::sql_query(
+            "WITH prev AS (SELECT is_enabled FROM data_sources WHERE name = $1) \
+             UPDATE data_sources SET is_enabled = TRUE WHERE name = $1 \
+             RETURNING (SELECT is_enabled FROM prev) AS was_enabled",
+        )
+        .bind::<diesel::sql_types::Text, _>(persist::data_source_template(FETCHABLE).name)
+        .get_result::<WasEnabled>(&mut conn)
+        .await
+        .unwrap()
+        .was_enabled
+    };
+    // Catch a mid-assertion panic so FHFA's original enabled state is always restored below,
+    // instead of leaking into other tests that share this database.
+    let assertions = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(async {
+        enqueue(
+            p,
+            FETCHABLE.as_str(),
+            "catalog",
+            JobKind::DiscoverCatalog,
+            5,
+        )
+        .await;
+        assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
+        assert!(series_row(p, "t5_new_a").await.is_none(), "discovery only");
+
+        let scheduler = RefreshScheduler::new(
+            p.clone(),
+            vec![FETCHABLE],
+            SchedulerConfig {
+                batch_limit: 10_000,
+                ..SchedulerConfig::default()
+            },
+        );
+        scheduler.tick().await.unwrap();
+        // Other tests may leave FHFA series behind; their fetches 404 and fail, which is fine.
+        for _ in 0..1000 {
+            if w.run_once().await.is_none() {
+                break;
+            }
+        }
+        for id in ["t5_new_a", "t5_new_b"] {
+            let (series_id, .., status) = series_row(p, id).await.expect("series row");
+            assert_eq!(status.as_deref(), Some("success"), "{id}");
+            assert_eq!(point_count(p, series_id).await, 2, "{id}");
+        }
+    }))
+    .await;
+    {
+        let mut conn = p.get().await.unwrap();
+        diesel::sql_query("UPDATE data_sources SET is_enabled = $2 WHERE name = $1")
+            .bind::<diesel::sql_types::Text, _>(persist::data_source_template(FETCHABLE).name)
+            .bind::<diesel::sql_types::Bool, _>(was_enabled)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+    if let Err(panic) = assertions {
+        std::panic::resume_unwind(panic);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Expired fetches must not mutate data owned by a newer claim.

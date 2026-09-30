@@ -38,7 +38,11 @@ import {
 import { useSeriesData, useSeriesDetail, SeriesDataPoint } from '../hooks/useSeriesData';
 import { useSeriesAnnotations } from '../hooks/useSeriesAnnotations';
 import { useSeriesAnnotationEditor } from '../components/annotations/useSeriesAnnotationEditor';
-import { DataTransformation, describeTransformation } from '../utils/transformations';
+import {
+  DataTransformation,
+  describeTransformation,
+  transformedUnits,
+} from '../utils/transformations';
 import { formatIsoDate } from '../utils/dates';
 import { buildSeriesCsv, downloadCsv, seriesCsvFileName } from '../utils/seriesCsv';
 
@@ -205,8 +209,7 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
       const csv = buildSeriesCsv({
         title: series.title,
         source: series.source?.name ?? '',
-        // Transformed values are percent changes, as the chart's axis says.
-        units: shownTransformation === 'NONE' ? units : '%',
+        units: transformedUnits(shownTransformation, units),
         transformation: transformationLabel,
         retrievedAt: data.dataUpdatedAt ? new Date(data.dataUpdatedAt) : null,
         points: selectShownPoints(points, dateRange),
