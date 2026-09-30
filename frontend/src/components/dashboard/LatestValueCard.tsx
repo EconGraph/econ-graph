@@ -105,7 +105,9 @@ export const LatestValueCard: React.FC<LatestValueCardProps> = ({ entry }) => {
 
   return (
     <Card component='article' aria-labelledby={headingId} sx={{ height: '100%' }}>
-      {series ? (
+      {/* The series(id) query treats a series with no observations as not found, so a series
+          page link is only useful once there is an observation to show. */}
+      {series && observation ? (
         <CardActionArea
           component={RouterLink}
           aria-labelledby={headingId}

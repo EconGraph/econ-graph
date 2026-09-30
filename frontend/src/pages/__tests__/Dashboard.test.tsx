@@ -150,16 +150,15 @@ describe('Dashboard', () => {
     expect(await within(card('Unemployment Rate')).findByText('4.1')).toBeInTheDocument();
   });
 
-  test('shows "No data yet" when the series has no observations', async () => {
+  test('shows "No data yet" without a link when the series has no observations', async () => {
+    // series(id) treats a series with no observations as not found, so linking to it would
+    // send the visitor to a "Series not found" page.
     mockResponses({ FEDFUNDS: emptySeries });
     renderDashboard();
 
     const fedFundsCard = card('Federal Funds Rate');
     expect(await within(fedFundsCard).findByText('No data yet')).toBeInTheDocument();
-    expect(within(fedFundsCard).getByRole('link')).toHaveAttribute(
-      'href',
-      `/series/${emptySeries.data.seriesByExternalId.id}`
-    );
+    expect(within(fedFundsCard).queryByRole('link')).not.toBeInTheDocument();
   });
 
   test('says no value was reported when the latest observation has a null value', async () => {
