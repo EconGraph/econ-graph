@@ -2226,6 +2226,7 @@ fn lease_response(title: &str, value: i32) -> FetchedSeries {
             revision_date: d("2024-06-01"),
             is_original_release: true,
         }],
+        dataset: None,
     }
 }
 
@@ -2523,6 +2524,7 @@ fn discovered(external_id: &str, title: &str) -> DiscoveredSeries {
         units: None,
         frequency: None,
         data_url: None,
+        dataset: None,
     }
 }
 
