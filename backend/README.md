@@ -175,13 +175,21 @@ unavailable.
 
 ### **Build and test**
 
-Run from `backend/` with Docker available for database-backed tests:
+Run from `backend/` with the `econ-graph-db` container above running and Docker
+available. Create a separate, disposable test database once. Database-backed tests
+**drop and recreate its public schema**, so never point them at application data.
+The subshell below keeps the application's exported `DATABASE_URL` unchanged.
 
 ```bash
 cargo build --workspace
-cargo test --workspace
-cargo test -p econ-graph-core
-cargo test -p econ-graph-services
+# One-time creation; skip this command if econ_graph_test already exists.
+docker exec econ-graph-db createdb -U postgres econ_graph_test
+(
+  export DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph_test
+  cargo test --workspace
+  cargo test -p econ-graph-core
+  cargo test -p econ-graph-services
+)
 ```
 
 ## Testing Strategy

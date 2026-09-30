@@ -27,16 +27,21 @@ The crate includes comprehensive tests to ensure business logic correctness, and
 ### Running Tests
 
 Run from `backend/` (use `cd backend` from the repository root); `-p` selects this
-crate rather than every default workspace member. Docker must be available for
-database-backed tests.
+crate rather than every default workspace member. First create the disposable
+`econ_graph_test` database using the [backend test setup](../../README.md#build-and-test).
+Database-backed tests drop and recreate its public schema. Keep Docker available;
+the subshell below leaves the application's exported `DATABASE_URL` unchanged.
 
 ```bash
-# Run this crate's tests
-cargo test -p econ-graph-services
+(
+  export DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph_test
+  # Run this crate's tests
+  cargo test -p econ-graph-services
 
-# Filter by existing service module names
-cargo test -p econ-graph-services services::search_service
-cargo test -p econ-graph-services services::queue_service
+  # Filter by existing service module names
+  cargo test -p econ-graph-services services::search_service
+  cargo test -p econ-graph-services services::queue_service
+)
 ```
 
 ### Test Infrastructure
