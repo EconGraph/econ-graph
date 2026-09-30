@@ -234,6 +234,9 @@ impl EconomicSeries {
     }
 
     /// Create a new economic series
+    ///
+    /// Uses a generated id. Crawled series get stable ids from `econ_graph_crawler::persist`;
+    /// don't use this for them.
     pub async fn create(
         pool: &crate::database::DatabasePool,
         new_series: &NewEconomicSeries,
@@ -283,6 +286,9 @@ impl EconomicSeries {
     }
 
     /// Get or create an economic series
+    ///
+    /// Uses a generated id. Crawled series get stable ids from `econ_graph_crawler::persist`;
+    /// don't use this for them.
     pub async fn get_or_create(
         pool: &crate::database::DatabasePool,
         external_id: &str,

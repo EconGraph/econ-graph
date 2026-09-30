@@ -47,8 +47,8 @@ The integration focuses on key economic variables:
 - `EXIT` - Firm exit
 
 ### Geographic Levels
-- `us` - United States (national); fetched as `CENSUS_BDS_{VARIABLE}_us`
-- `state` - State level; fetched per state and DC as `CENSUS_BDS_{VARIABLE}_state_{FIPS}`
+- `us` - United States (national); fetched as `bds/national..{VARIABLE}`
+- `state` - State level; fetched per state and DC as `bds/state.{FIPS}.{VARIABLE}`
 - `county` - County level (not fetched)
 - `metro` - Metropolitan areas (not fetched)
 - `cbsa` - Core Based Statistical Areas (not fetched)
@@ -101,8 +101,9 @@ Automatically discovers and catalogs BDS series:
 - Fetches available variables and geography levels
 - Filters for economic indicators
 - Records each series in `series_metadata` (fetching then creates the `economic_series` rows)
-- Generates external IDs `CENSUS_BDS_{VARIABLE}_us` (national) and
-  `CENSUS_BDS_{VARIABLE}_state_{FIPS}` (one per state and DC)
+- Puts every series in the `bds` dataset (`data/datasets/census.toml`) with dimensions
+  `geo_level`, `state` and `variable`, and generates the canonical external IDs
+  `bds/national..{VARIABLE}` (national) and `bds/state.{FIPS}.{VARIABLE}` (one per state and DC)
 
 ## Usage Examples
 
@@ -116,13 +117,14 @@ rather than called directly:
 crawler discover --source CENSUS
 
 # Enqueue a series for fetching; crawler-worker drains the queue
-crawler enqueue --source CENSUS --series CENSUS_BDS_ESTAB_us
-crawler enqueue --source CENSUS --series CENSUS_BDS_ESTAB_state_06   # California
+crawler enqueue --source CENSUS --series bds/national..ESTAB
+crawler enqueue --source CENSUS --series bds/state.06.ESTAB   # California
 ```
 
 Notes:
-- Discovery produces a national series (`..._us`) and one series per state and DC
-  (`..._state_{FIPS}`) for every economic variable. County and metro-area levels are skipped.
+- Discovery produces a national series (`bds/national..{VARIABLE}`) and one series per state
+  and DC (`bds/state.{FIPS}.{VARIABLE}`) for every economic variable. County and metro-area
+  levels are skipped.
   Any other id is rejected as a permanent error without making a request.
 - `CENSUS_API_KEY` is required: the Census API rejects keyless requests, so without it the
   adapter fails with an auth error before making any request.

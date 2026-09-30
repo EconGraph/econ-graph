@@ -391,6 +391,7 @@ impl DataSourceType {
         let all_series = dsl::economic_series
             .filter(dsl::source_id.eq(source_uuid))
             .filter(dsl::is_active.eq(true))
+            .filter(dsl::end_date.is_not_null())
             .select(models::EconomicSeries::as_select())
             .load::<models::EconomicSeries>(&mut conn)
             .await?;
@@ -442,6 +443,7 @@ impl DataSourceType {
         let count = dsl::economic_series
             .filter(dsl::source_id.eq(source_uuid))
             .filter(dsl::is_active.eq(true))
+            .filter(dsl::end_date.is_not_null())
             .count()
             .get_result::<i64>(&mut conn)
             .await?;

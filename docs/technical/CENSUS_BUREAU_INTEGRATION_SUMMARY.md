@@ -33,17 +33,24 @@ Variables are filtered by the keyword rules in `is_economic_variable` (establish
 employment, creation/destruction, ...) and crossed with the geography levels that give single
 series:
 
-- `us`: one national series per variable, `CENSUS_BDS_{VARIABLE}_us` (e.g. `CENSUS_BDS_ESTAB_us`);
-- `state`: one series per state and DC, `CENSUS_BDS_{VARIABLE}_state_{FIPS}` with the two-digit
-  state FIPS code (e.g. `CENSUS_BDS_ESTAB_state_06` for California), 51 per variable. The states
+- `us`: one national series per variable, `bds/national..{VARIABLE}` (e.g. `bds/national..ESTAB`);
+- `state`: one series per state and DC, `bds/state.{FIPS}.{VARIABLE}` with the two-digit
+  state FIPS code (e.g. `bds/state.06.ESTAB` for California), 51 per variable. The states
   come from `backend/crates/econ-graph-crawler/data/us_states.csv`, which the crawler reads at
   runtime from `CRAWLER_DATA_DIR` (shared with the FHFA adapter).
 
 Finer levels (county, metro area) have thousands of areas and are skipped.
 
-**Fetching** (`fetch_series`) is supported for both kinds of id. Any other id (including the bare
-`CENSUS_BDS_{VARIABLE}_state` ids older discovery runs recorded) is a `Permanent` error, and the
-refresh scheduler never enqueues it. The request is
+Every series belongs to the `bds` dataset, defined in
+`backend/crates/econ-graph-crawler/data/datasets/census.toml`. The dataset is stored long: each
+variable is its own series. Its dimensions, in id order, are `geo_level` (`national` or `state`),
+`state` (the FIPS code, empty for national series) and `variable`. The external id is the
+canonical dataset key `bds/{geo_level}.{state}.{variable}`, and each series row stores the same
+values in its `dimensions`.
+
+**Fetching** (`fetch_series`) is supported for both kinds of id. Any other id (including ids from
+earlier versions, e.g. `CENSUS_BDS_*`) is a `Permanent` error, and the refresh scheduler never
+enqueues it. The request is
 `GET {base}/timeseries/bds?get={VARIABLE},YEAR&for={us:*|state:FIPS}&key=KEY` (all years; the
 old comma-separated `YEAR=` list hit the API's "204 No Content" limitation for multi-year queries).
 `since` is applied client-side by year. Each row becomes a point dated January 1 of its `YEAR`.
@@ -84,9 +91,9 @@ cargo test -p econ-graph-crawler --all-features census -- --test-threads=1
 # Discover Census series (series metadata is written when crawler-worker runs the job)
 crawler discover --source CENSUS
 # Queue one series for the worker
-crawler enqueue --source CENSUS --series CENSUS_BDS_ESTAB_us
+crawler enqueue --source CENSUS --series bds/national..ESTAB
 # Or fetch one series now, bypassing the queue
-crawler fetch --source CENSUS --series CENSUS_BDS_ESTAB_us
+crawler fetch --source CENSUS --series bds/state.06.ESTAB
 ```
 
 ## Known API Limitations

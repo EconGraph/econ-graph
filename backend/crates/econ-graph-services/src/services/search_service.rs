@@ -88,6 +88,7 @@ impl SearchService {
                          WHERE NOT q.vacuous
                          AND (es.search_vector @@ q.tsq
                               OR (strpos(q.tsq::text, '!') = 0 AND es.title % $1))
+                         AND es.end_date IS NOT NULL
                          AND ($2::uuid IS NULL OR es.source_id = $2)
                          AND ($3::text IS NULL OR es.frequency = $3)
                          AND ($4::boolean OR es.is_active = true)
@@ -159,7 +160,7 @@ impl SearchService {
                         AS suggestion_type,
                     COUNT(*) AS match_count
              FROM economic_series
-             WHERE is_active = true AND (title ILIKE $3 OR title % $1)
+             WHERE is_active = true AND end_date IS NOT NULL AND (title ILIKE $3 OR title % $1)
              GROUP BY title
              ORDER BY (title ILIKE $3) DESC, rank DESC, title ASC
              LIMIT $2",
@@ -303,14 +304,20 @@ mod db_tests {
             "INSERT INTO data_sources (name, description, base_url)
              VALUES ('search-test', 'search tests', 'http://localhost')
              ON CONFLICT (name) DO NOTHING",
-            "INSERT INTO economic_series (source_id, external_id, title, description, frequency)
-             SELECT id, v.e, v.t, v.d, 'Monthly' FROM data_sources,
+            "INSERT INTO economic_series
+                 (source_id, external_id, title, description, frequency, end_date)
+             SELECT id, v.e, v.t, v.d, 'Monthly', '2020-01-01'::date FROM data_sources,
              (VALUES ('srch_UNRATE', 'Unemployment Rate',
                       'Unemployed persons as a share of the labor force'),
                      ('srch_CPI', 'Consumer Price Index for All Urban Consumers',
                       'Measure of inflation in prices paid by urban consumers'),
                      ('srch_HOUSES', 'New Dwellings Begun', NULL)) v(e, t, d)
              WHERE name = 'search-test'",
+            // A discovered series with no data yet (e.g. its source adapter was removed before
+            // ever crawling it): must never appear in search results.
+            "INSERT INTO economic_series (source_id, external_id, title, description, frequency)
+             SELECT id, 'srch_NODATA', 'Unemployment No Data Series', NULL, 'Monthly'
+             FROM data_sources WHERE name = 'search-test'",
         ] {
             diesel::sql_query(sql).execute(&mut conn).await.unwrap();
         }
@@ -348,6 +355,10 @@ mod db_tests {
             .unwrap();
         assert_eq!(titles(&exact).into_iter().next(), Some("Unemployment Rate"));
         assert!(exact[0].rank > 0.0 && exact[0].similarity_score > 0.0);
+        assert!(
+            !titles(&exact).contains(&"Unemployment No Data Series"),
+            "a series with no data points must never appear in search results"
+        );
 
         // Stemmed match on the description only.
         let described = service
@@ -421,6 +432,12 @@ mod db_tests {
         let first = <[_]>::first(&completions).expect("a completion");
         assert_eq!(first.suggestion, "Unemployment Rate");
         assert!(matches!(first.suggestion_type, SuggestionType::Completion));
+        assert!(
+            !completions
+                .iter()
+                .any(|s| s.suggestion == "Unemployment No Data Series"),
+            "a series with no data points must never be suggested"
+        );
 
         let corrections = service
             .get_suggestions("unemploymnt rate", 5)
