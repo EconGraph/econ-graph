@@ -1799,10 +1799,15 @@ async fn expired_fetch_preserves_newer_result(
 
     newer.resume.wait().await;
     let b_outcome = b_task.await.expect("B task").expect("B claimed");
-    assert!(matches!(b_outcome, JobOutcome::Completed(_)), "{b_outcome:?}");
+    assert!(
+        matches!(b_outcome, JobOutcome::Completed(_)),
+        "{b_outcome:?}"
+    );
     let completed = item(pool, id).await;
     assert_eq!(completed.status, "completed");
-    let (series_id, ..) = series_row(pool, external_id).await.expect("B persisted series");
+    let (series_id, ..) = series_row(pool, external_id)
+        .await
+        .expect("B persisted series");
     let baseline = series_row(pool, external_id).await.unwrap();
     assert_eq!(baseline.2, "Newer response");
     assert_eq!(baseline.6.as_deref(), Some("success"));
@@ -1836,21 +1841,31 @@ async fn expired_fetch_preserves_newer_result(
         .load(&mut conn)
         .await
         .unwrap();
-    let (title, status, error): (String, Option<String>, Option<String>) =
-        economic_series::table
-            .find(series_id)
-            .select((
-                economic_series::title,
-                economic_series::crawl_status,
-                economic_series::crawl_error_message,
-            ))
-            .first(&mut conn)
-            .await
-            .unwrap();
-    assert_eq!(values, vec![Some(BigDecimal::from(222))], "A overwrote B's observation");
+    let (title, status, error): (String, Option<String>, Option<String>) = economic_series::table
+        .find(series_id)
+        .select((
+            economic_series::title,
+            economic_series::crawl_status,
+            economic_series::crawl_error_message,
+        ))
+        .first(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(
+        values,
+        vec![Some(BigDecimal::from(222))],
+        "A overwrote B's observation"
+    );
     assert_eq!(title, "Newer response", "A overwrote B's metadata");
-    assert_eq!(status.as_deref(), Some("success"), "A replaced B's success status");
-    assert!(error.is_none(), "A attached a stale error to B's successful series: {error:?}");
+    assert_eq!(
+        status.as_deref(),
+        Some("success"),
+        "A replaced B's success status"
+    );
+    assert!(
+        error.is_none(),
+        "A attached a stale error to B's successful series: {error:?}"
+    );
 }
 
 #[tokio::test]
