@@ -580,6 +580,11 @@ jobs:
         cargo test -p econ-graph-crawler --all-features -- --test-threads=1
         cargo test -p econ-graph-crawler-worker -- --test-threads=1
         cargo test -p econ-graph-sec-crawler --lib -- --test-threads=1
+        # Keep this database regression opt-in locally, but require it against this job's Postgres.
+        # --exact plus the result check prevents a renamed/missing test from silently passing.
+        cargo test -p econ-graph-sec-crawler --lib storage::tests::storage_stats_handle_empty_mixed_and_large_totals -- --exact --ignored --test-threads=1 | tee /tmp/xbrl-storage-stats-test.log
+        grep -Fq "test storage::tests::storage_stats_handle_empty_mixed_and_large_totals ... ok" /tmp/xbrl-storage-stats-test.log
+        grep -Fq "test result: ok. 1 passed; 0 failed; 0 ignored;" /tmp/xbrl-storage-stats-test.log
         # The XBRL parser is compiled out by default (feature xbrl-parser); test it here too.
         cargo test -p econ-graph-sec-crawler --features xbrl-parser --lib -- --test-threads=1
         cargo test -p econ-graph-core --features financial-ratios --lib financial_ratios -- --test-threads=1
