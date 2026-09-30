@@ -1,0 +1,4 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+reviews:
+  # Suppress skipped-review notices, including draft PR notices.
+  review_status: false
