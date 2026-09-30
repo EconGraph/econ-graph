@@ -494,4 +494,146 @@ mod tests {
         );
         assert!(err.to_string().contains("too large, not stored"));
     }
+
+    #[cfg(feature = "xbrl-parser")]
+    mod taxonomy {
+        use super::*;
+        use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+        use econ_graph_core::schema::{
+            companies, xbrl_instance_dts_references, xbrl_taxonomy_schemas,
+        };
+        use econ_graph_core::test_utils::TestContainer;
+        use std::time::Duration;
+
+        fn reference() -> crate::models::DtsReference {
+            crate::models::DtsReference {
+                reference_type: "schemaRef".to_string(),
+                reference_role: None,
+                reference_href: "https://example.com/atomic-storage.xsd".to_string(),
+                reference_arcrole: None,
+            }
+        }
+
+        #[tokio::test]
+        #[serial_test::serial]
+        async fn taxonomy_schema_rolls_back_when_reference_insert_fails() {
+            let container = TestContainer::new().await;
+            container.clean_database().await.unwrap();
+            let pool = container.pool().clone();
+            let storage = XbrlStorage::new(pool.clone(), XbrlStorageConfig::default());
+            let reference = reference();
+
+            // No statement exists for this ID: only the second insert should fail.
+            let error = storage
+                .store_taxonomy_component(
+                    &reference,
+                    b"<schema/>",
+                    &reference.reference_href,
+                    &Uuid::new_v4(),
+                )
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("Failed to insert DTS reference"));
+            assert!(matches!(
+                error.downcast_ref::<diesel::result::Error>(),
+                Some(diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+                    _
+                ))
+            ));
+
+            let mut conn = pool.get().await.unwrap();
+            let schemas: i64 = xbrl_taxonomy_schemas::table
+                .count()
+                .get_result(&mut conn)
+                .await
+                .unwrap();
+            let references: i64 = xbrl_instance_dts_references::table
+                .count()
+                .get_result(&mut conn)
+                .await
+                .unwrap();
+            assert_eq!(schemas, 0, "failed reference must not leave an orphan schema");
+            assert_eq!(references, 0);
+        }
+
+        #[tokio::test]
+        #[serial_test::serial]
+        async fn taxonomy_storage_succeeds_with_one_pool_connection() {
+            let container = TestContainer::new().await;
+            container.clean_database().await.unwrap();
+            let database_url = std::env::var("DATABASE_URL")
+                .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+            let pool = DatabasePool::builder()
+                .max_size(1)
+                .connection_timeout(Duration::from_secs(2))
+                .build(AsyncDieselConnectionManager::<AsyncPgConnection>::new(
+                    database_url,
+                ))
+                .await
+                .unwrap();
+            let company_id = Uuid::new_v4();
+            {
+                let mut conn = pool.get().await.unwrap();
+                diesel::insert_into(companies::table)
+                    .values((
+                        companies::id.eq(company_id),
+                        companies::cik.eq("0009999901"),
+                        companies::name.eq("Taxonomy storage test"),
+                        companies::is_active.eq(true),
+                        companies::created_at.eq(Utc::now()),
+                        companies::updated_at.eq(Utc::now()),
+                    ))
+                    .execute(&mut conn)
+                    .await
+                    .unwrap();
+            }
+            let storage = XbrlStorage::new(pool.clone(), XbrlStorageConfig::default());
+            let now = Utc::now();
+            let statement = storage
+                .store_xbrl_file(
+                    "0009999901-24-000001",
+                    b"<xbrl/>",
+                    company_id,
+                    now,
+                    now,
+                    2024,
+                    None,
+                    Some("10-K"),
+                    None,
+                )
+                .await
+                .unwrap();
+            let reference = reference();
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                storage.store_taxonomy_component(
+                    &reference,
+                    b"<schema/>",
+                    &reference.reference_href,
+                    &statement.id,
+                ),
+            )
+            .await
+            .expect("taxonomy storage must not wait for a second pool connection")
+            .unwrap();
+
+            let mut conn = pool.get().await.unwrap();
+            let schema_id: Uuid = xbrl_taxonomy_schemas::table
+                .select(xbrl_taxonomy_schemas::id)
+                .get_result(&mut conn)
+                .await
+                .unwrap();
+            let resolved: (Option<Uuid>, bool) = xbrl_instance_dts_references::table
+                .filter(xbrl_instance_dts_references::statement_id.eq(statement.id))
+                .select((
+                    xbrl_instance_dts_references::resolved_schema_id,
+                    xbrl_instance_dts_references::is_resolved,
+                ))
+                .get_result(&mut conn)
+                .await
+                .unwrap();
+            assert_eq!(resolved, (Some(schema_id), true));
+        }
+    }
 }
