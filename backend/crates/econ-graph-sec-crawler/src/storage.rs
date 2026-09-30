@@ -244,34 +244,25 @@ impl XbrlStorage {
 
         let mut conn = self.pool.get().await?;
 
-        // Count total files
-        let total_files: i64 = financial_statements
-            .count()
+        // All aggregates share one PostgreSQL statement snapshot, so inserts/deletes cannot
+        // make the compression count exceed the total used for subtraction below.
+        let (total_files, total_size, bytea_count, compressed_count): (
+            i64,
+            Option<BigDecimal>,
+            i64,
+            i64,
+        ) = financial_statements
+            .select((
+                diesel::dsl::count_star(),
+                diesel::dsl::sum(xbrl_file_size_bytes),
+                diesel::dsl::count(xbrl_file_content),
+                diesel::dsl::count(
+                    diesel::dsl::case_when(xbrl_file_compressed.eq(true), 1_i32),
+                ),
+            ))
             .get_result(&mut conn)
             .await
-            .context("Failed to count total files")?;
-
-        // Calculate total size
-        let total_size: Option<bigdecimal::BigDecimal> = financial_statements
-            .select(diesel::dsl::sum(xbrl_file_size_bytes))
-            .first(&mut conn)
-            .await
-            .context("Failed to calculate total size")?;
-
-        let bytea_count: i64 = financial_statements
-            .filter(xbrl_file_content.is_not_null())
-            .count()
-            .get_result(&mut conn)
-            .await
-            .context("Failed to count bytea files")?;
-
-        // Count by compression type
-        let compressed_count: i64 = financial_statements
-            .filter(xbrl_file_compressed.eq(true))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .context("Failed to count compressed files")?;
+            .context("Failed to query XBRL storage statistics")?;
 
         Ok(XbrlStorageStats {
             total_files: total_files as u64,
@@ -456,6 +447,94 @@ impl XbrlStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "requires a PostgreSQL DATABASE_URL"]
+    async fn storage_stats_handle_empty_mixed_and_large_totals() {
+        use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+
+        // One pooled connection keeps the temporary table private to this test while calling
+        // the public API. No migrations or writes to the real financial_statements table.
+        let pool = DatabasePool::builder()
+            .max_size(1)
+            .build(AsyncDieselConnectionManager::<AsyncPgConnection>::new(
+                std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
+            ))
+            .await
+            .unwrap();
+        {
+            let mut conn = pool.get().await.unwrap();
+            diesel::sql_query(
+                "CREATE TEMPORARY TABLE financial_statements (
+                    xbrl_file_size_bytes bigint,
+                    xbrl_file_content bytea,
+                    xbrl_file_compressed boolean NOT NULL
+                )",
+            )
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        }
+        let storage = XbrlStorage::new(pool.clone(), XbrlStorageConfig::default());
+        let empty = storage.get_storage_stats().await.unwrap();
+        assert_eq!(empty.total_files, 0);
+        assert_eq!(empty.total_size_bytes, 0);
+        assert_eq!(empty.bytea_files, 0);
+        assert_eq!(empty.compressed_files, 0);
+        assert_eq!(empty.uncompressed_files, 0);
+
+        {
+            let mut conn = pool.get().await.unwrap();
+            diesel::sql_query(
+                "INSERT INTO financial_statements VALUES
+                    (100, decode('01', 'hex'), true),
+                    (200, NULL, false),
+                    (NULL, NULL, true),
+                    (0, decode('', 'hex'), false)",
+            )
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        }
+        let mixed = storage.get_storage_stats().await.unwrap();
+        assert_eq!(mixed.total_files, 4);
+        assert_eq!(mixed.total_size_bytes, 300);
+        assert_eq!(mixed.bytea_files, 2);
+        assert_eq!(mixed.compressed_files, 2);
+        assert_eq!(mixed.uncompressed_files, 2);
+
+        {
+            let mut conn = pool.get().await.unwrap();
+            diesel::sql_query("TRUNCATE financial_statements")
+                .execute(&mut conn)
+                .await
+                .unwrap();
+            diesel::sql_query("INSERT INTO financial_statements VALUES (NULL, NULL, false)")
+                .execute(&mut conn)
+                .await
+                .unwrap();
+        }
+        let null_size = storage.get_storage_stats().await.unwrap();
+        assert_eq!(null_size.total_files, 1);
+        assert_eq!(null_size.total_size_bytes, 0);
+        assert_eq!(null_size.uncompressed_files, 1);
+
+        {
+            let mut conn = pool.get().await.unwrap();
+            diesel::sql_query(
+                "INSERT INTO financial_statements VALUES
+                    (9223372036854775807, NULL, true),
+                    (9223372036854775807, NULL, true)",
+            )
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        }
+        let large = storage.get_storage_stats().await.unwrap();
+        assert_eq!(large.total_size_bytes, u64::MAX - 1);
+        assert_eq!(large.total_files, 3);
+        assert_eq!(large.compressed_files + large.uncompressed_files, large.total_files);
+    }
 
     #[tokio::test]
     async fn oversized_file_is_rejected_before_touching_the_database() {
