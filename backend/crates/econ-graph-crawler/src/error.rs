@@ -36,6 +36,17 @@ pub enum CrawlError {
     /// Any other 4xx, or a logic/configuration error. Not retried.
     #[error("permanent error: {0}")]
     Permanent(String),
+    /// Local work contention: another crawl in this process is already doing the same shared
+    /// work (for example, downloading a source's one shared file). Not an upstream rate limit,
+    /// so it doesn't trip the per-source breaker; like `RateLimited`, it doesn't count as a
+    /// failed attempt. Retry after `retry_after`, an adapter-computed backoff with jitter.
+    #[error("busy: {message} (retry after {}s)", retry_after.as_secs())]
+    Busy {
+        /// Adapter-computed delay before retrying, already including jitter.
+        retry_after: Duration,
+        /// What is contended, e.g. the shared URL.
+        message: String,
+    },
 }
 
 impl CrawlError {
@@ -63,11 +74,11 @@ impl CrawlError {
         }
     }
 
-    /// True for `RateLimited` and `Transient`: the same request may succeed later.
+    /// True for `RateLimited`, `Transient` and `Busy`: the same request may succeed later.
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
-            CrawlError::RateLimited { .. } | CrawlError::Transient(_)
+            CrawlError::RateLimited { .. } | CrawlError::Transient(_) | CrawlError::Busy { .. }
         )
     }
 
@@ -88,6 +99,7 @@ impl CrawlError {
             CrawlError::Auth(_) => "auth",
             CrawlError::Parse(_) => "parse",
             CrawlError::Permanent(_) => "permanent",
+            CrawlError::Busy { .. } => "busy",
         }
     }
 }
@@ -104,6 +116,7 @@ impl From<CrawlError> for AppError {
             CrawlError::Transient(m) => AppError::ServiceUnavailable(m),
             CrawlError::NotFound(m) => AppError::NotFound(m),
             CrawlError::Parse(m) => AppError::ParserError(m),
+            CrawlError::Busy { message, .. } => AppError::ServiceUnavailable(message),
             e @ (CrawlError::Auth(_) | CrawlError::Permanent(_)) => {
                 AppError::ExternalApiError(e.to_string())
             }
@@ -125,13 +138,17 @@ mod tests {
             CrawlError::Auth("a".into()),
             CrawlError::Parse("p".into()),
             CrawlError::Permanent("x".into()),
+            CrawlError::Busy {
+                retry_after: Duration::from_millis(500),
+                message: "b".into(),
+            },
         ]
     }
 
     #[test]
     fn retryability() {
         let retryable: Vec<bool> = all().iter().map(CrawlError::is_retryable).collect();
-        assert_eq!(retryable, [true, true, false, false, false, false]);
+        assert_eq!(retryable, [true, true, false, false, false, false, true]);
         assert!(CrawlError::RateLimited { retry_after: None }.is_retryable());
     }
 
@@ -139,6 +156,8 @@ mod tests {
     fn retry_after_only_for_rate_limited() {
         let e = all();
         assert_eq!(e[0].retry_after(), Some(Duration::from_secs(5)));
+        // `Busy` carries its own delay outside `retry_after`, which is specifically the
+        // server-requested `Retry-After`.
         assert!(e[1..].iter().all(|e| e.retry_after().is_none()));
         assert_eq!(
             CrawlError::RateLimited { retry_after: None }.retry_after(),
@@ -157,7 +176,8 @@ mod tests {
                 "not_found",
                 "auth",
                 "parse",
-                "permanent"
+                "permanent",
+                "busy",
             ]
         );
     }
@@ -192,5 +212,6 @@ mod tests {
         assert!(matches!(&m[3], AppError::ExternalApiError(s) if s.contains("authentication")));
         assert!(matches!(&m[4], AppError::ParserError(s) if s == "p"));
         assert!(matches!(&m[5], AppError::ExternalApiError(_)));
+        assert!(matches!(&m[6], AppError::ServiceUnavailable(s) if s == "b"));
     }
 }

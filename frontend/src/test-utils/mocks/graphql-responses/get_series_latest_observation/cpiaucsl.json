@@ -1,0 +1,13 @@
+{
+  "data": {
+    "seriesByExternalId": {
+      "id": "0192f0a1-0000-7000-8000-000000000003",
+      "units": "Index 1982-1984=100",
+      "latestObservation": {
+        "date": "2025-02-01",
+        "value": "319.082500",
+        "revisionDate": "2025-03-12"
+      }
+    }
+  }
+}

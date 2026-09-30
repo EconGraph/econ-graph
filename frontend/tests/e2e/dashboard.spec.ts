@@ -107,8 +107,8 @@ test.describe('Dashboard', () => {
   });
 
   test('should handle data loading errors gracefully', async ({ page }) => {
-    // The dashboard uses static data, so we'll test that it loads without errors
-    // and displays the expected content even if there are no network requests
+    // Each indicator card loads its own latest value; a card whose series is missing shows
+    // "No data yet" rather than an error, so the page should load without error messages
 
     await page.reload();
     await page.waitForLoadState('networkidle');
@@ -126,7 +126,7 @@ test.describe('Dashboard', () => {
     await expect(dashboardContent).toBeVisible();
     await expect(indicatorCards.first()).toBeVisible();
 
-    // Should not show any error messages since this page uses static data
+    // Should not show any error messages
     const errorMessage = page.locator('[role="alert"]').or(
       page.locator('.error').or(
         page.getByText(/error/i)

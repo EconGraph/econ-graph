@@ -1422,6 +1422,7 @@ dependencies = [
  "bigdecimal",
  "chrono",
  "clap",
+ "csv",
  "diesel",
  "diesel-async",
  "econ-graph-core",

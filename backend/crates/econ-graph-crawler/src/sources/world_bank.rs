@@ -2,106 +2,101 @@
 // Licensed under the Microsoft Reference Source License (MS-RSL).
 // See LICENSE file for complete terms and conditions.
 
-//! World Bank Indicators API (v2) adapter — discovery only.
+//! World Bank Indicators API (v2) adapter: a curated set of World Development Indicators for
+//! every country and aggregate. Every request is a `GET` with `format=json`; the API needs no key.
 //!
-//! Ported from `econ-graph-services/src/services/series_discovery/world_bank.rs`. Every request is
-//! a `GET` with `format=json`; the API needs no key.
+//! # Series and ids
 //!
-//! # Discovery
+//! The indicators are the rows of `wdi_indicators.csv` in the crawler's data directory
+//! ([`crate::reference::wdi_indicators`]), which also gives each one's unit. There is one series
+//! per indicator and area, in dataset `wdi` (`datasets/world_bank.toml`) with dimensions
+//! `indicator` (the WDI code) and `area` (the `key` of `econ-graph-core`'s `countries.csv`: ISO
+//! alpha-3 for countries, the World Bank code for aggregates such as `WLD` and `EMU`). The
+//! external id is the dataset's canonical id, `wdi/{indicator}.{area}` (for example
+//! `wdi/NY.GDP.PCAP.CD.USA`).
 //!
-//! Same strategies and order as the old code, de-duplicated by indicator id in first-seen order
-//! (the old sort + `dedup_by` kept the first-inserted entry as well):
-//! 1. `{base}/topic/{3,7,11}/indicator?per_page=1000&page=N` (Economy & Growth, Financial Sector,
-//!    Trade), at most [`MAX_TOPIC_PAGES`] pages per topic.
-//! 2. `{base}/indicator/{id}` for each of [`KEY_INDICATORS`].
-//! 3. `{base}/country/{c}/indicator/{id}?per_page=1` for [`MAJOR_COUNTRIES`] x [`COUNTRY_SAMPLE_INDICATORS`]:
-//!    an indicator with data yields a synthetic entry (only kept if 1–2 did not already find it).
-//! 4. `{base}/indicator?per_page=100&page=N`, pages 1..=[`MAX_SEARCH_PAGES`], filtered by
-//!    [`is_economic_indicator`].
+//! # Requests
 //!
-//! Pagination follows the `pages` field of the response metadata and never exceeds the caps, so
-//! discovery makes at most `3 * 5 + 10 + 75 + 10 = 110` requests. The old fixed 100 ms sleeps are
-//! gone: the per-source rate limiter paces requests.
+//! Discovery and fetching both use one request per indicator for every area:
+//! `{base}/country/all/indicator/{id}?format=json&per_page=20000&page=N`. One page holds the
+//! whole indicator today (about 266 areas times 65 years); further pages are followed when the
+//! response's `pages` says so, up to [`MAX_PAGES`].
 //!
-//! `Auth` and `RateLimited` abort discovery; every other per-request failure is logged and
-//! skipped (a failed page ends that walk, keeping earlier pages), unless every request failed.
+//! - **Discovery** makes that request for each indicator and lists the areas with at least one
+//!   value. A series with no values is never created. `Auth` and `RateLimited` abort discovery;
+//!   another failure skips that indicator with a warning, unless every indicator failed.
+//! - **Fetching** is batched by indicator ([`SourceAdapter::batch_key`]): one request serves every
+//!   area of an indicator, up to [`MAX_BATCH`] series. A lone `fetch_series` makes the same request
+//!   and keeps its own area.
 //!
-//! # Response format and errors
+//! # Rows
 //!
-//! Successful responses are a two-element array `[meta, items]` (`items` may be `null`). Errors
+//! Each row names its area by `countryiso3code` (ISO alpha-3, or the World Bank's code for an
+//! aggregate) and `country.id` (ISO alpha-2, or a two-character aggregate id). The area is looked
+//! up in the shared country table ([`econ_graph_core::reference::areas`]) by World Bank code, then
+//! ISO alpha-3, then (for a row without `countryiso3code`) ISO alpha-2. Rows for an area the table does not list (regional aggregates
+//! outside it, the Channel Islands) are skipped, with one warning per request naming them.
+//!
+//! Dates are years (`2023`), or `2023Q2` / `2023M05` for the rare quarterly or monthly indicator,
+//! stored as the period's first day. A `null` value is no observation and is dropped.
+//!
+//! Every point's `revision_date` is the response's `lastupdated` (the date the World Bank last
+//! updated the database), so each database update is stored as a new vintage of the whole series;
+//! `is_original_release` is `true`, as for the other sources without vintage history. `since` is
+//! ignored: the full history comes in the same single request, and returning all of it keeps
+//! revisions to old years. The row's `obs_status` and `decimal` are dropped: `data_points` has no
+//! attribute columns in train 1 (the dataset still declares them, for the schema). WDI leaves
+//! `obs_status` empty for nearly every row.
+//!
+//! # Errors
+//!
+//! Successful responses are a two-element array `[meta, rows]` (`rows` may be `null`). Errors
 //! come back as HTTP 200 with a one-element array `[{"message": [{"id", "key", "value"}]}]`;
 //! [`classify_world_bank_message`] maps "Invalid value" / unknown-indicator messages (ids 120 and
-//! 175) to `NotFound` and anything else to `Permanent`.
-//!
-//! Note: the old code deserialized `items` as `{"indicator": [...]}`, which does not match the
-//! API (the second element is a plain array), so its topic/paginated strategies always failed.
-//! This adapter parses the array.
-//!
-//! # Fetching
-//!
-//! Not implemented: the old code never parsed indicator *values* (it only checked that the
-//! country/indicator endpoint returned a non-empty array), and a discovered indicator id is not
-//! tied to a country. [`SourceAdapter::fetch_series`] returns `Permanent`.
+//! 175) to `NotFound` and anything else to `Permanent`. A response without `lastupdated` is a
+//! `Parse` error. An id that is not a `wdi` id of a listed indicator is `NotFound` without a
+//! request.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::str::FromStr;
 
 use async_trait::async_trait;
+use bigdecimal::BigDecimal;
 use chrono::NaiveDate;
+use econ_graph_core::reference::{areas, Area};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::adapter::{CrawlCtx, DiscoveredSeries, FetchedSeries, SourceAdapter};
+use crate::adapter::{
+    BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, NewSeriesMetadataLite,
+    SourceAdapter,
+};
+use crate::dataset::{DatasetDef, SeriesDataset};
 use crate::error::CrawlError;
+use crate::policy::SourcePolicy;
+use crate::reference::{self, WdiIndicator};
 use crate::source::SourceId;
 
 /// The real World Bank API root.
 pub const DEFAULT_BASE_URL: &str = "https://api.worldbank.org/v2";
 
-/// Human-facing indicator page, used for [`DiscoveredSeries::data_url`] (never requested).
+/// The dataset every series belongs to.
+pub const DATASET: &str = "wdi";
+
+/// Human-facing indicator page, used for `data_url` (never requested).
 const WEB_INDICATOR_URL: &str = "https://data.worldbank.org/indicator";
 
-/// Topics walked first: Economy & Growth, Financial Sector, Trade.
-const TOPICS: &[&str] = &["3", "7", "11"];
-/// Page size and page cap for topic listings.
-const TOPIC_PAGE_SIZE: usize = 1000;
-const MAX_TOPIC_PAGES: usize = 5;
+/// Rows per page. One page holds a whole indicator for every area.
+const PER_PAGE: &str = "20000";
 
-/// Key economic indicators fetched by direct lookup.
-const KEY_INDICATORS: &[&str] = &[
-    "NY.GDP.MKTP.CD",
-    "NY.GDP.MKTP.KD.ZG",
-    "FP.CPI.TOTL.ZG",
-    "SL.UEM.TOTL.ZS",
-    "FR.INR.RINR",
-    "NE.TRD.GNFS.ZS",
-    "GC.DOD.TOTL.GD.ZS",
-    "GC.REV.XGRT.GD.ZS",
-    "GC.XPN.TOTL.GD.ZS",
-    "BN.CAB.XOKA.GD.ZS",
-];
+/// Upper bound on pages per indicator (a response claiming more is cut off with a warning).
+pub const MAX_PAGES: u64 = 10;
 
-/// Countries probed for [`COUNTRY_SAMPLE_INDICATORS`].
-const MAJOR_COUNTRIES: &[&str] = &[
-    "US", "CN", "DE", "JP", "GB", "FR", "IT", "CA", "AU", "BR", "IN", "RU", "ZA", "MX", "KR",
-];
+/// Most series fetched per request: every area of one indicator (the country table has about 260
+/// rows), with room to spare.
+pub const MAX_BATCH: usize = 400;
 
-/// Indicators probed per country.
-const COUNTRY_SAMPLE_INDICATORS: &[&str] = &[
-    "NY.GDP.MKTP.CD",
-    "FP.CPI.TOTL.ZG",
-    "SL.UEM.TOTL.ZS",
-    "NE.TRD.GNFS.ZS",
-    "GC.DOD.TOTL.GD.ZS",
-];
-
-/// Page size and page cap for the full indicator listing.
-const SEARCH_PAGE_SIZE: usize = 100;
-const MAX_SEARCH_PAGES: usize = 10;
-
-/// World Bank data is overwhelmingly annual; the indicator endpoint carries no frequency.
-const DEFAULT_FREQUENCY: &str = "Annual";
-
-/// World Bank adapter. See the module docs for endpoints and error mapping.
+/// World Bank adapter. See the module docs for endpoints, ids and error mapping.
 #[derive(Debug, Clone)]
 pub struct WorldBankAdapter {
     base_url: String,
@@ -115,80 +110,55 @@ impl WorldBankAdapter {
         }
     }
 
-    fn url(&self, path: &str) -> String {
-        format!("{}{path}", self.base_url)
-    }
-
-    /// One `GET` returning `(pages, items)`.
-    async fn get_list(
+    /// Every row of `indicator` for every area, following pages.
+    async fn fetch_indicator(
         &self,
         ctx: &CrawlCtx,
-        path: &str,
-        extra: &[(&str, &str)],
-    ) -> Result<(Option<u64>, Vec<Value>), CrawlError> {
-        let mut query = vec![("format", "json")];
-        query.extend_from_slice(extra);
-        let body: Value = ctx
-            .http
-            .get_json(SourceId::WorldBank, &self.url(path), &query)
-            .await?;
-        parse_list(path, body)
-    }
-
-    /// Walks `path` page by page (`per_page`, `page=1..`) until the last page, an empty page, or
-    /// `max_pages`. Page 1 failing is an error; a later page failing ends the walk (aborting
-    /// errors still propagate).
-    async fn walk_pages(
-        &self,
-        ctx: &CrawlCtx,
-        path: &str,
-        per_page: usize,
-        max_pages: usize,
-    ) -> Result<Vec<WbIndicator>, CrawlError> {
-        let per_page = per_page.to_string();
-        let mut out = Vec::new();
-        for page in 1..=max_pages {
+        indicator: &str,
+    ) -> Result<IndicatorData, CrawlError> {
+        let path = format!("/country/all/indicator/{indicator}");
+        let url = format!("{}{path}", self.base_url);
+        let mut rows = Vec::new();
+        let mut last_updated = None;
+        let mut page = 1u64;
+        loop {
             let page_s = page.to_string();
-            let result = self
-                .get_list(ctx, path, &[("per_page", &per_page), ("page", &page_s)])
-                .await
-                .and_then(|(pages, items)| Ok((pages, parse_indicators(path, items)?)));
-            let (pages, items) = match result {
-                Ok(r) => r,
-                Err(e) if page == 1 => return Err(e),
-                Err(e) => {
-                    skip_or_abort(e, path)?;
-                    break;
-                }
-            };
+            let body: Value = ctx
+                .http
+                .get_json(
+                    SourceId::WorldBank,
+                    &url,
+                    &[
+                        ("format", "json"),
+                        ("per_page", PER_PAGE),
+                        ("page", &page_s),
+                    ],
+                )
+                .await?;
+            let (meta, items) = parse_list(&path, body)?;
+            if page == 1 {
+                last_updated = meta.last_updated;
+            }
             let got = items.len();
-            out.extend(items);
-            if got == 0 || pages.is_none_or(|p| page as u64 >= p) {
+            rows.extend(parse_rows(&path, items)?);
+            let pages = meta.pages.unwrap_or(1);
+            if got == 0 || page >= pages {
                 break;
             }
+            if page >= MAX_PAGES {
+                tracing::warn!(
+                    indicator,
+                    pages,
+                    "World Bank indicator has more pages than MAX_PAGES; the rest are skipped"
+                );
+                break;
+            }
+            page += 1;
         }
-        Ok(out)
-    }
-
-    async fn single_indicator(&self, ctx: &CrawlCtx, id: &str) -> Result<WbIndicator, CrawlError> {
-        let path = format!("/indicator/{id}");
-        let (_, items) = self.get_list(ctx, &path, &[]).await?;
-        parse_indicators(&path, items)?
-            .into_iter()
-            .next()
-            .ok_or_else(|| CrawlError::NotFound(format!("World Bank indicator {id}: no result")))
-    }
-
-    /// Whether `country` has any data for `indicator` (one observation requested).
-    async fn country_has_data(
-        &self,
-        ctx: &CrawlCtx,
-        country: &str,
-        indicator: &str,
-    ) -> Result<bool, CrawlError> {
-        let path = format!("/country/{country}/indicator/{indicator}");
-        let (_, items) = self.get_list(ctx, &path, &[("per_page", "1")]).await?;
-        Ok(!items.is_empty())
+        let last_updated = last_updated.ok_or_else(|| {
+            CrawlError::Parse(format!("World Bank {path}: response has no lastupdated"))
+        })?;
+        Ok(IndicatorData::group(indicator, last_updated, rows))
     }
 }
 
@@ -198,118 +168,226 @@ impl Default for WorldBankAdapter {
     }
 }
 
-/// Collects discovery results: first-seen de-duplication plus the skip/abort bookkeeping.
-#[derive(Default)]
-struct Collector {
-    seen: HashSet<String>,
-    found: Vec<DiscoveredSeries>,
-    any_ok: bool,
-    last_err: Option<CrawlError>,
-}
-
-impl Collector {
-    fn add(&mut self, indicators: impl IntoIterator<Item = WbIndicator>) {
-        self.any_ok = true;
-        for i in indicators {
-            if self.seen.insert(i.id.clone()) {
-                self.found.push(to_discovered(i));
-            }
-        }
-    }
-
-    fn fail(&mut self, err: CrawlError, what: &str) -> Result<(), CrawlError> {
-        self.last_err = Some(skip_or_abort(err, what)?);
-        Ok(())
-    }
-
-    fn finish(self) -> Result<Vec<DiscoveredSeries>, CrawlError> {
-        match (self.any_ok, self.last_err) {
-            (false, Some(e)) => Err(e),
-            _ => {
-                tracing::info!(series = self.found.len(), "World Bank discovery finished");
-                Ok(self.found)
-            }
-        }
-    }
-}
-
 #[async_trait]
 impl SourceAdapter for WorldBankAdapter {
     fn id(&self) -> SourceId {
         SourceId::WorldBank
     }
 
-    /// See the module docs for the four strategies, caps and error handling.
+    fn policy(&self) -> SourcePolicy {
+        SourcePolicy {
+            max_batch: MAX_BATCH,
+            ..SourcePolicy::default_for(SourceId::WorldBank)
+        }
+    }
+
+    fn datasets(&self) -> &[&str] {
+        &[DATASET]
+    }
+
+    /// One request per indicator; see the module docs. Series come out indicator by indicator
+    /// (in file order), areas sorted by key, so the queue holds each indicator's series together
+    /// for batching.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
-        let mut c = Collector::default();
-
-        for topic in TOPICS {
-            let path = format!("/topic/{topic}/indicator");
-            match self
-                .walk_pages(ctx, &path, TOPIC_PAGE_SIZE, MAX_TOPIC_PAGES)
-                .await
-            {
-                Ok(found) => c.add(found),
-                Err(e) => c.fail(e, &path)?,
-            }
-        }
-
-        for id in KEY_INDICATORS {
-            match self.single_indicator(ctx, id).await {
-                Ok(found) => c.add([found]),
-                Err(e) => c.fail(e, id)?,
-            }
-        }
-
-        for country in MAJOR_COUNTRIES {
-            for indicator in COUNTRY_SAMPLE_INDICATORS {
-                match self.country_has_data(ctx, country, indicator).await {
-                    Ok(true) => c.add([country_sample(country, indicator)]),
-                    Ok(false) => c.any_ok = true,
-                    Err(e) => c.fail(e, &format!("{country}/{indicator}"))?,
+        let indicators = reference::wdi_indicators()?;
+        let def = wdi_def()?;
+        let areas = areas().map_err(|e| CrawlError::Permanent(e.to_string()))?;
+        let mut found = Vec::new();
+        let (mut any_ok, mut last_err) = (false, None);
+        for indicator in indicators {
+            match self.fetch_indicator(ctx, &indicator.id).await {
+                Ok(data) => {
+                    any_ok = true;
+                    for (area, rows) in data.resolve(areas) {
+                        let (external_id, dataset) = series_id(def, &indicator.id, &area.key)?;
+                        let meta = metadata(indicator, area, &rows);
+                        found.push(DiscoveredSeries {
+                            external_id,
+                            title: meta.title,
+                            description: meta.description,
+                            units: meta.units,
+                            frequency: meta.frequency,
+                            data_url: Some(data_url(&indicator.id, &rows)),
+                            dataset: Some(dataset),
+                        });
+                    }
+                }
+                Err(e @ (CrawlError::Auth(_) | CrawlError::RateLimited { .. })) => return Err(e),
+                Err(e) => {
+                    tracing::warn!(indicator = %indicator.id, error = %e, "World Bank indicator failed; skipping");
+                    last_err = Some(e);
                 }
             }
         }
-
-        match self
-            .walk_pages(ctx, "/indicator", SEARCH_PAGE_SIZE, MAX_SEARCH_PAGES)
-            .await
-        {
-            Ok(found) => c.add(found.into_iter().filter(is_economic_indicator)),
-            Err(e) => c.fail(e, "/indicator")?,
+        match (any_ok, last_err) {
+            (false, Some(e)) => Err(e),
+            _ => {
+                tracing::info!(series = found.len(), "World Bank discovery finished");
+                Ok(found)
+            }
         }
-
-        c.finish()
     }
 
-    /// Not implemented; see the module docs.
+    /// The same request as a batch: every area of the indicator, keeping `external_id`'s.
     async fn fetch_series(
         &self,
-        _ctx: &CrawlCtx,
-        _external_id: &str,
-        _since: Option<NaiveDate>,
+        ctx: &CrawlCtx,
+        external_id: &str,
+        since: Option<NaiveDate>,
     ) -> Result<FetchedSeries, CrawlError> {
-        Err(CrawlError::Permanent(
-            "WORLD_BANK fetch_series not implemented yet".into(),
-        ))
+        let mut out = self
+            .fetch_batch(ctx, &[external_id.to_string()], since)
+            .await?;
+        out.remove(external_id).unwrap_or_else(|| {
+            Err(CrawlError::NotFound(format!(
+                "World Bank {external_id}: no values for this area"
+            )))
+        })
     }
-}
 
-/// Returns `err` for aborting errors (auth, rate limiting); otherwise logs it and hands it back
-/// to be remembered as the last failure.
-fn skip_or_abort(err: CrawlError, what: &str) -> Result<CrawlError, CrawlError> {
-    match err {
-        CrawlError::Auth(_) | CrawlError::RateLimited { .. } => Err(err),
-        e => {
-            tracing::warn!(query = what, error = %e, "World Bank request failed; skipping");
-            Ok(e)
+    /// The indicator: every area of an indicator comes from one request.
+    fn batch_key(&self, external_id: &str) -> Option<String> {
+        parse_id(external_id).map(|(indicator, _)| indicator.to_string())
+    }
+
+    /// One request per distinct indicator among `external_ids` (one, when the worker batches by
+    /// [`batch_key`](Self::batch_key)). An id whose area has no values is left out of the map
+    /// (so it fails as `NotFound`); an id that is not a listed indicator's is `NotFound` without a
+    /// request. A failed request fails that indicator's ids.
+    async fn fetch_batch(
+        &self,
+        ctx: &CrawlCtx,
+        external_ids: &[String],
+        _since: Option<NaiveDate>,
+    ) -> Result<BatchFetch, CrawlError> {
+        let indicators = reference::wdi_indicators()?;
+        let def = wdi_def()?;
+        let areas = areas().map_err(|e| CrawlError::Permanent(e.to_string()))?;
+        let mut out = BatchFetch::with_capacity(external_ids.len());
+        // Requested areas per indicator, in first-requested order.
+        let mut wanted: Vec<(&WdiIndicator, BTreeMap<&str, &str>)> = Vec::new();
+        for id in external_ids {
+            let listed = parse_id(id)
+                .and_then(|(ind, area)| Some((indicators.iter().find(|i| i.id == ind)?, area)));
+            let Some((indicator, area)) = listed else {
+                out.insert(
+                    id.clone(),
+                    Err(CrawlError::NotFound(format!(
+                        "World Bank {id}: not a {DATASET} id of a listed indicator"
+                    ))),
+                );
+                continue;
+            };
+            match wanted.iter_mut().find(|(i, _)| i.id == indicator.id) {
+                Some((_, ids)) => {
+                    ids.insert(area, id);
+                }
+                None => wanted.push((indicator, BTreeMap::from([(area, id.as_str())]))),
+            }
         }
+        for (indicator, ids) in wanted {
+            let data = match self.fetch_indicator(ctx, &indicator.id).await {
+                Ok(data) => data,
+                Err(e) => {
+                    for id in ids.values() {
+                        out.insert((*id).to_string(), Err(e.clone()));
+                    }
+                    continue;
+                }
+            };
+            for (area, rows) in data.resolve(areas) {
+                let Some(id) = ids.get(area.key.as_str()) else {
+                    continue;
+                };
+                let series =
+                    series_id(def, &indicator.id, &area.key).map(|(_, dataset)| FetchedSeries {
+                        metadata: Some(metadata(indicator, area, &rows)),
+                        points: rows
+                            .iter()
+                            .map(|r| FetchedPoint {
+                                date: r.date,
+                                value: Some(r.value.clone()),
+                                revision_date: data.last_updated,
+                                is_original_release: true,
+                            })
+                            .collect(),
+                        dataset: Some(dataset),
+                    });
+                out.insert((*id).to_string(), series);
+            }
+        }
+        Ok(out)
     }
 }
 
-/// Splits a `[meta, items]` response into `(pages, items)`; a `[{"message": ..}]` body becomes
-/// an error via [`classify_world_bank_message`].
-fn parse_list(what: &str, body: Value) -> Result<(Option<u64>, Vec<Value>), CrawlError> {
+/// The `wdi` definition from `datasets/world_bank.toml` (cached by [`reference::datasets`]).
+fn wdi_def() -> Result<&'static DatasetDef, CrawlError> {
+    reference::datasets(SourceId::WorldBank)?
+        .iter()
+        .find(|d| d.code == DATASET)
+        .ok_or_else(|| {
+            CrawlError::Permanent(format!(
+                "{} defines no {DATASET} dataset",
+                reference::datasets_file(SourceId::WorldBank).display()
+            ))
+        })
+}
+
+/// The canonical id and dataset of `indicator` for `area`.
+fn series_id(
+    def: &DatasetDef,
+    indicator: &str,
+    area: &str,
+) -> Result<(String, SeriesDataset), CrawlError> {
+    def.series([("indicator", indicator), ("area", area)])
+}
+
+/// `(indicator, area)` from `wdi/{indicator}.{area}`. Indicator codes contain dots and area keys
+/// never do, so the area is everything after the last dot.
+fn parse_id(external_id: &str) -> Option<(&str, &str)> {
+    let rest = external_id.strip_prefix(DATASET)?.strip_prefix('/')?;
+    let (indicator, area) = rest.rsplit_once('.')?;
+    (!indicator.is_empty() && !area.is_empty()).then_some((indicator, area))
+}
+
+fn metadata(indicator: &WdiIndicator, area: &Area, rows: &[Row]) -> NewSeriesMetadataLite {
+    NewSeriesMetadataLite {
+        title: format!("{}: {}", indicator.name, area.name),
+        description: Some(format!(
+            "World Development Indicators {} for {}",
+            indicator.id, area.name
+        )),
+        units: Some(indicator.unit.clone()),
+        frequency: Some(
+            rows.first()
+                .map_or(Frequency::Annual, |r| r.frequency)
+                .label()
+                .to_string(),
+        ),
+        seasonal_adjustment: None,
+    }
+}
+
+/// The indicator's page on data.worldbank.org, filtered to the row's area.
+fn data_url(indicator: &str, rows: &[Row]) -> String {
+    match rows.first() {
+        Some(r) if !r.wb_id.is_empty() => {
+            format!("{WEB_INDICATOR_URL}/{indicator}?locations={}", r.wb_id)
+        }
+        _ => format!("{WEB_INDICATOR_URL}/{indicator}"),
+    }
+}
+
+/// Response metadata we use.
+#[derive(Debug, Default, PartialEq)]
+struct Meta {
+    pages: Option<u64>,
+    last_updated: Option<NaiveDate>,
+}
+
+/// Splits a `[meta, items]` response into its metadata and items; a `[{"message": ..}]` body
+/// becomes an error via [`classify_world_bank_message`].
+fn parse_list(what: &str, body: Value) -> Result<(Meta, Vec<Value>), CrawlError> {
     let Value::Array(mut parts) = body else {
         return Err(CrawlError::Parse(format!(
             "World Bank {what}: response is not an array"
@@ -319,31 +397,42 @@ fn parse_list(what: &str, body: Value) -> Result<(Option<u64>, Vec<Value>), Craw
         return Err(classify_world_bank_message(what, messages));
     }
     if parts.len() < 2 {
-        return Ok((None, Vec::new()));
+        return Err(CrawlError::Parse(format!(
+            "World Bank {what}: expected [metadata, rows]"
+        )));
     }
     let items = match parts.swap_remove(1) {
         Value::Null => Vec::new(),
         Value::Array(items) => items,
         other => {
             return Err(CrawlError::Parse(format!(
-                "World Bank {what}: expected an item array, got {}",
+                "World Bank {what}: expected a row array, got {}",
                 type_name(&other)
             )))
         }
     };
-    let pages = parts
-        .first()
-        .and_then(|meta| meta.get("pages"))
-        .and_then(|p| {
-            p.as_u64()
-                .or_else(|| p.as_str().and_then(|s| s.trim().parse().ok()))
-        });
-    Ok((pages, items))
-}
-
-fn parse_indicators(what: &str, items: Vec<Value>) -> Result<Vec<WbIndicator>, CrawlError> {
-    serde_json::from_value(Value::Array(items))
-        .map_err(|e| CrawlError::Parse(format!("World Bank {what}: bad indicator list: {e}")))
+    let meta = parts.first();
+    let pages = meta.and_then(|m| m.get("pages")).and_then(|p| {
+        p.as_u64()
+            .or_else(|| p.as_str().and_then(|s| s.trim().parse().ok()))
+    });
+    let last_updated = match meta.and_then(|m| m.get("lastupdated")) {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_str()
+                .and_then(|s| NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok())
+                .ok_or_else(|| {
+                    CrawlError::Parse(format!("World Bank {what}: bad lastupdated {v}"))
+                })?,
+        ),
+    };
+    Ok((
+        Meta {
+            pages,
+            last_updated,
+        },
+        items,
+    ))
 }
 
 fn type_name(v: &Value) -> &'static str {
@@ -378,428 +467,200 @@ pub fn classify_world_bank_message(what: &str, messages: &Value) -> CrawlError {
     }
 }
 
-/// Same keyword / id-prefix test as the old `is_economic_indicator`.
-pub fn is_economic_indicator(indicator: &WbIndicator) -> bool {
-    const KEYWORDS: &[&str] = &[
-        "gdp",
-        "gross domestic product",
-        "inflation",
-        "unemployment",
-        "interest rate",
-        "exchange rate",
-        "trade",
-        "debt",
-        "revenue",
-        "expenditure",
-        "current account",
-        "balance of payments",
-        "economic",
-        "financial",
-        "monetary",
-        "fiscal",
-        "price",
-        "wage",
-        "income",
-        "consumption",
-        "investment",
-        "savings",
-        "export",
-        "import",
-        "balance",
-        "surplus",
-        "deficit",
-        "budget",
-    ];
-    const ID_PATTERNS: &[&str] = &[
-        "ny.gdp", "fp.cpi", "sl.uem", "fr.inr", "ne.trd", "gc.rev", "gc.xpn", "bn.cab", "dt.dod",
-        "ic.tax", "ic.bus", "ic.reg", "ic.gov", "ic.lgl", "ie.tic", "ie.tra", "ie.tec", "ie.eng",
-        "ie.ene", "ie.env", "ie.hea", "ie.edu", "ie.agr", "ie.fin", "ie.inf", "ie.urb", "ie.rur",
-        "ie.gen",
-    ];
-    let name = indicator.name.to_lowercase();
-    let id = indicator.id.to_lowercase();
-    KEYWORDS.iter().any(|k| name.contains(k)) || ID_PATTERNS.iter().any(|p| id.contains(p))
+/// Observation frequency, from the form of the row's date.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Frequency {
+    Annual,
+    Quarterly,
+    Monthly,
 }
 
-/// The synthetic entry the old code created for an indicator seen via a country probe.
-fn country_sample(country: &str, indicator: &str) -> WbIndicator {
-    WbIndicator {
-        id: indicator.to_string(),
-        name: format!("{indicator} for {country}"),
-        unit: None,
-        source_note: Some(format!("Available for country: {country}")),
-    }
-}
-
-fn non_empty(s: Option<String>) -> Option<String> {
-    s.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-}
-
-fn to_discovered(i: WbIndicator) -> DiscoveredSeries {
-    DiscoveredSeries {
-        data_url: Some(format!("{WEB_INDICATOR_URL}/{}", i.id)),
-        external_id: i.id,
-        title: i.name,
-        description: non_empty(i.source_note),
-        units: non_empty(i.unit),
-        frequency: Some(DEFAULT_FREQUENCY.to_string()),
-        dataset: None,
-    }
-}
-
-// ---- Wire format (only the fields we use) ----
-
-/// One entry of an indicator list (`/indicator`, `/topic/{id}/indicator`, `/indicator/{id}`).
-#[derive(Debug, Clone, Deserialize)]
-pub struct WbIndicator {
-    /// Indicator code, e.g. `NY.GDP.MKTP.CD`.
-    pub id: String,
-    /// Indicator name.
-    pub name: String,
-    /// Unit, usually empty.
-    #[serde(default)]
-    pub unit: Option<String>,
-    /// Long description.
-    #[serde(default, rename = "sourceNote")]
-    pub source_note: Option<String>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::testkit::{test_ctx, MockSource, Reply, Route};
-
-    const TOPIC: &str = include_str!("../../tests/fixtures/world_bank/topic_indicators.json");
-    const SINGLE: &str = include_str!("../../tests/fixtures/world_bank/indicator_single.json");
-    const PAGE1: &str = include_str!("../../tests/fixtures/world_bank/indicators_page1.json");
-    const PAGE2: &str = include_str!("../../tests/fixtures/world_bank/indicators_page2.json");
-    const COUNTRY: &str = include_str!("../../tests/fixtures/world_bank/country_indicator.json");
-    const INVALID: &str = include_str!("../../tests/fixtures/world_bank/error_invalid_value.json");
-
-    fn ids(found: &[DiscoveredSeries]) -> Vec<&str> {
-        found.iter().map(|s| s.external_id.as_str()).collect()
-    }
-
-    fn count(reqs: &[wiremock::Request], path: &str) -> usize {
-        reqs.iter().filter(|r| r.url.path() == path).count()
-    }
-
-    #[test]
-    fn constructor_convention() {
-        assert_eq!(WorldBankAdapter::default().base_url, DEFAULT_BASE_URL);
-        assert_eq!(WorldBankAdapter::new("http://x/").base_url, "http://x");
-        assert_eq!(WorldBankAdapter::default().id(), SourceId::WorldBank);
-    }
-
-    #[tokio::test]
-    async fn fetch_series_is_not_implemented() {
-        let mock = MockSource::start().await;
-        let e = WorldBankAdapter::new(mock.base_url())
-            .fetch_series(&test_ctx(), "NY.GDP.MKTP.CD", None)
-            .await
-            .unwrap_err();
-        assert_eq!(
-            e,
-            CrawlError::Permanent("WORLD_BANK fetch_series not implemented yet".into())
-        );
-        assert!(mock.received_requests().await.is_empty());
-    }
-
-    #[tokio::test]
-    async fn discover_runs_all_strategies_and_dedupes() {
-        let mock = MockSource::start().await;
-        // Topic 3 has two indicators; 7 is empty; 11 fails (skipped).
-        mock.mount_expect(
-            &Route::get("/topic/3/indicator")
-                .query("format", "json")
-                .query("per_page", "1000")
-                .query("page", "1"),
-            Reply::json_str(TOPIC),
-            1,
-        )
-        .await;
-        mock.mount(
-            &Route::get("/topic/11/indicator"),
-            Reply::text("boom").with_status(500),
-        )
-        .await;
-        mock.mount(
-            &Route::get("/topic/7/indicator"),
-            Reply::json(serde_json::json!([{"page": 1, "pages": 0, "total": 0}, null])),
-        )
-        .await;
-        // Key lookups: FR.INR.RINR found; NY.GDP.MKTP.CD duplicates topic 3; the rest invalid.
-        mock.mount(
-            &Route::get("/indicator/FR.INR.RINR"),
-            Reply::json_str(SINGLE),
-        )
-        .await;
-        mock.mount(
-            &Route::get("/indicator/NY.GDP.MKTP.CD"),
-            Reply::json_str(TOPIC),
-        )
-        .await;
-        // Country probe: only JP has GC.DOD.TOTL.GD.ZS (not found by any other strategy).
-        mock.mount(
-            &Route::get("/country/JP/indicator/GC.DOD.TOTL.GD.ZS").query("per_page", "1"),
-            Reply::json_str(COUNTRY),
-        )
-        .await;
-        mock.mount(
-            &Route::get("/country/US/indicator/NY.GDP.MKTP.CD"),
-            Reply::json_str(COUNTRY),
-        )
-        .await;
-        // Two pages of the full listing; non-economic entries are filtered out.
-        mock.mount_expect(
-            &Route::get("/indicator")
-                .query("per_page", "100")
-                .query("page", "1"),
-            Reply::json_str(PAGE1),
-            1,
-        )
-        .await;
-        mock.mount_expect(
-            &Route::get("/indicator")
-                .query("per_page", "100")
-                .query("page", "2"),
-            Reply::json_str(PAGE2),
-            1,
-        )
-        .await;
-        // Everything else: the in-body "Invalid value" error.
-        mock.server()
-            .register(
-                wiremock::Mock::given(wiremock::matchers::method("GET")).respond_with(
-                    wiremock::ResponseTemplate::new(200)
-                        .set_body_raw(INVALID.as_bytes().to_vec(), "application/json"),
-                ),
-            )
-            .await;
-
-        let found = WorldBankAdapter::new(mock.base_url())
-            .discover(&test_ctx())
-            .await
-            .unwrap();
-        assert_eq!(
-            ids(&found),
-            [
-                "NY.GDP.MKTP.CD",
-                "NY.GDP.MKTP.KD.ZG",
-                "FR.INR.RINR",
-                "GC.DOD.TOTL.GD.ZS",
-                "BN.CAB.XOKA.GD.ZS",
-                "DT.DOD.DECT.CD",
-            ]
-        );
-        let gdp = &found[0];
-        assert_eq!(gdp.title, "GDP (current US$)");
-        assert!(gdp
-            .description
-            .as_deref()
-            .unwrap()
-            .starts_with("GDP at purchaser"));
-        assert_eq!(gdp.units, None, "empty unit -> None");
-        assert_eq!(gdp.frequency.as_deref(), Some("Annual"));
-        assert_eq!(
-            gdp.data_url.as_deref(),
-            Some("https://data.worldbank.org/indicator/NY.GDP.MKTP.CD")
-        );
-        assert_eq!(found[3].title, "GC.DOD.TOTL.GD.ZS for JP");
-
-        let reqs = mock.received_requests().await;
-        assert!(reqs.iter().all(|r| r
-            .url
-            .query_pairs()
-            .any(|(k, v)| k == "format" && v == "json")));
-        // 1 + 1 + (3 in-process attempts on 500) topic requests, 10 key lookups,
-        // 15 * 5 country probes, 2 listing pages.
-        assert_eq!(count(&reqs, "/topic/11/indicator"), 3);
-        assert_eq!(
-            reqs.len(),
-            2 + 3
-                + KEY_INDICATORS.len()
-                + MAJOR_COUNTRIES.len() * COUNTRY_SAMPLE_INDICATORS.len()
-                + 2
-        );
-        mock.server().verify().await;
-    }
-
-    #[tokio::test]
-    async fn discover_page_count_is_bounded() {
-        let mock = MockSource::start().await;
-        // Claims a huge page count, forever.
-        let endless = PAGE1.replace("\"pages\": 2", "\"pages\": 1000000");
-        assert_ne!(endless, PAGE1);
-        mock.mount(&Route::get("/indicator"), Reply::json_str(endless.clone()))
-            .await;
-        for topic in TOPICS {
-            mock.mount(
-                &Route::get(format!("/topic/{topic}/indicator")),
-                Reply::json_str(endless.clone()),
-            )
-            .await;
+impl Frequency {
+    fn label(self) -> &'static str {
+        match self {
+            Frequency::Annual => "Annual",
+            Frequency::Quarterly => "Quarterly",
+            Frequency::Monthly => "Monthly",
         }
-        let found = WorldBankAdapter::new(mock.base_url())
-            .discover(&test_ctx())
-            .await
-            .unwrap();
-        assert!(ids(&found).contains(&"BN.CAB.XOKA.GD.ZS"));
-        let reqs = mock.received_requests().await;
-        assert_eq!(count(&reqs, "/indicator"), MAX_SEARCH_PAGES);
-        for topic in TOPICS {
-            assert_eq!(
-                count(&reqs, &format!("/topic/{topic}/indicator")),
-                MAX_TOPIC_PAGES
+    }
+}
+
+/// `2023` -> 2023-01-01, `2023Q2` -> 2023-04-01, `2023M05` -> 2023-05-01.
+fn parse_period(s: &str) -> Option<(NaiveDate, Frequency)> {
+    let s = s.trim();
+    let year: i32 = s.get(..4)?.parse().ok()?;
+    let rest = &s[4..];
+    let (month, freq) = if rest.is_empty() {
+        (1, Frequency::Annual)
+    } else if let Some(q) = rest.strip_prefix('Q') {
+        let q: u32 = q.parse().ok().filter(|q| (1..=4).contains(q))?;
+        (3 * q - 2, Frequency::Quarterly)
+    } else {
+        let m = rest.strip_prefix('M')?;
+        (m.parse().ok()?, Frequency::Monthly)
+    };
+    Some((NaiveDate::from_ymd_opt(year, month, 1)?, freq))
+}
+
+/// One observation with a value, and the area as the row names it.
+#[derive(Debug, Clone, PartialEq)]
+struct Row {
+    /// `countryiso3code` (ISO alpha-3, or the World Bank code of an aggregate); may be empty.
+    iso3: String,
+    /// `country.id` (ISO alpha-2, or a two-character aggregate id).
+    wb_id: String,
+    /// `country.value`, for warnings.
+    name: String,
+    date: NaiveDate,
+    frequency: Frequency,
+    value: BigDecimal,
+}
+
+/// Wire format of a data row (only the fields we use).
+#[derive(Debug, Deserialize)]
+struct WbRow {
+    country: IdValue,
+    #[serde(default, rename = "countryiso3code")]
+    iso3: Option<String>,
+    date: String,
+    value: Option<serde_json::Number>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IdValue {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    value: Option<String>,
+}
+
+/// The rows with a value. A row whose date or value cannot be parsed is a `Parse` error.
+fn parse_rows(what: &str, items: Vec<Value>) -> Result<Vec<Row>, CrawlError> {
+    let raw: Vec<WbRow> = serde_json::from_value(Value::Array(items))
+        .map_err(|e| CrawlError::Parse(format!("World Bank {what}: bad data rows: {e}")))?;
+    let mut rows = Vec::with_capacity(raw.len());
+    for r in raw {
+        let Some(value) = r.value else { continue };
+        let (date, frequency) = parse_period(&r.date).ok_or_else(|| {
+            CrawlError::Parse(format!("World Bank {what}: bad date {:?}", r.date))
+        })?;
+        let value = BigDecimal::from_str(&value.to_string())
+            .map_err(|e| CrawlError::Parse(format!("World Bank {what}: bad value {value}: {e}")))?;
+        rows.push(Row {
+            iso3: r.iso3.unwrap_or_default().trim().to_string(),
+            wb_id: r.country.id.unwrap_or_default().trim().to_string(),
+            name: r.country.value.unwrap_or_default(),
+            date,
+            frequency,
+            value,
+        });
+    }
+    Ok(rows)
+}
+
+/// One indicator's rows with values, grouped by the area code the rows use.
+struct IndicatorData {
+    indicator: String,
+    last_updated: NaiveDate,
+    /// `(iso3, wb_id)` -> rows, sorted by date.
+    by_code: BTreeMap<(String, String), Vec<Row>>,
+}
+
+impl IndicatorData {
+    fn group(indicator: &str, last_updated: NaiveDate, rows: Vec<Row>) -> Self {
+        let mut by_code: BTreeMap<(String, String), Vec<Row>> = BTreeMap::new();
+        for r in rows {
+            by_code
+                .entry((r.iso3.clone(), r.wb_id.clone()))
+                .or_default()
+                .push(r);
+        }
+        for rows in by_code.values_mut() {
+            rows.sort_by_key(|r| r.date);
+            // A repeated date keeps its last row.
+            rows.reverse();
+            rows.dedup_by_key(|r| r.date);
+            rows.reverse();
+        }
+        Self {
+            indicator: indicator.to_string(),
+            last_updated,
+            by_code,
+        }
+    }
+
+    /// Rows per area of the country table, sorted by area key. Codes the table does not know are
+    /// logged once and dropped. Two raw codes can resolve to the same area (a country whose
+    /// `countryiso3code` is empty on some rows and set on others), so rows are merged rather than
+    /// keeping only the first-seen code, with a repeated date keeping its last-merged row.
+    fn resolve<'a>(
+        &self,
+        areas: &'a econ_graph_core::reference::Areas,
+    ) -> Vec<(&'a Area, Vec<Row>)> {
+        let mut out: BTreeMap<&str, (&Area, Vec<Row>)> = BTreeMap::new();
+        let mut unknown = BTreeSet::new();
+        let mut merged = BTreeSet::new();
+        for ((iso3, wb_id), rows) in &self.by_code {
+            let area = lookup(areas, iso3, wb_id);
+            match area {
+                Some(area) => match out.entry(area.key.as_str()) {
+                    std::collections::btree_map::Entry::Vacant(e) => {
+                        e.insert((area, rows.clone()));
+                    }
+                    std::collections::btree_map::Entry::Occupied(mut e) => {
+                        merged.insert(area.key.as_str());
+                        let combined = &mut e.get_mut().1;
+                        combined.extend(rows.iter().cloned());
+                        combined.sort_by_key(|r| r.date);
+                        // A date shared between the merged codes keeps its later-merged row (the
+                        // same "last wins" rule `group` uses within one raw code).
+                        combined.reverse();
+                        combined.dedup_by_key(|r| r.date);
+                        combined.reverse();
+                    }
+                },
+                None => {
+                    let name = rows.first().map_or("", |r| r.name.as_str());
+                    unknown.insert(format!("{iso3}/{wb_id} {name}"));
+                }
+            }
+        }
+        if !unknown.is_empty() {
+            tracing::warn!(
+                indicator = %self.indicator,
+                count = unknown.len(),
+                areas = ?unknown,
+                "World Bank rows for areas not in the country table skipped"
             );
         }
-    }
-
-    #[tokio::test]
-    async fn discover_aborts_on_rate_limit_and_auth() {
-        for (reply, kind) in [
-            (Reply::status(429).retry_after(60), "rate_limited"),
-            (Reply::status(403), "auth"),
-        ] {
-            let mock = MockSource::start().await;
-            mock.mount(&Route::get("/topic/3/indicator"), reply).await;
-            let e = WorldBankAdapter::new(mock.base_url())
-                .discover(&test_ctx())
-                .await
-                .unwrap_err();
-            assert_eq!(e.kind(), kind);
-            assert_eq!(mock.received_requests().await.len(), 1);
+        if !merged.is_empty() {
+            tracing::info!(
+                indicator = %self.indicator,
+                areas = ?merged,
+                "World Bank rows for these areas used more than one raw code (e.g. countryiso3code \
+                 empty on some rows); merged into one series"
+            );
         }
-    }
-
-    #[tokio::test]
-    async fn discover_fails_when_everything_fails() {
-        let mock = MockSource::start().await;
-        let e = WorldBankAdapter::new(mock.base_url())
-            .discover(&test_ctx())
-            .await
-            .unwrap_err();
-        // Nothing mounted: every request 404s.
-        assert_eq!(e.kind(), "not_found");
-    }
-
-    #[test]
-    fn parse_list_shapes() {
-        let (pages, items) = parse_list("x", serde_json::from_str(PAGE1).unwrap()).unwrap();
-        assert_eq!(pages, Some(2));
-        assert_eq!(items.len(), 2);
-        // `pages` as a string, and `null` items.
-        let (pages, items) = parse_list("x", serde_json::json!([{"pages": "3"}, null])).unwrap();
-        assert_eq!((pages, items.len()), (Some(3), 0));
-        assert_eq!(
-            parse_list("x", serde_json::json!({"a": 1}))
-                .unwrap_err()
-                .kind(),
-            "parse"
-        );
-        let e = parse_list("x", serde_json::from_str(INVALID).unwrap()).unwrap_err();
-        assert_eq!(e.kind(), "not_found", "{e}");
-        let other = classify_world_bank_message(
-            "x",
-            &serde_json::json!([{"id": "999", "key": "Something", "value": "else"}]),
-        );
-        assert_eq!(other.kind(), "permanent");
-    }
-
-    #[test]
-    fn economic_filter() {
-        let ind = |id: &str, name: &str| WbIndicator {
-            id: id.into(),
-            name: name.into(),
-            unit: None,
-            source_note: None,
-        };
-        assert!(is_economic_indicator(&ind(
-            "NY.GDP.MKTP.CD",
-            "GDP (current US$)"
-        )));
-        assert!(is_economic_indicator(&ind("DT.DOD.X", "Something")));
-        assert!(!is_economic_indicator(&ind(
-            "SH.STA.ACSN",
-            "Improved sanitation facilities (% of population with access)"
-        )));
+        out.into_values().collect()
     }
 }
 
-/// Discovery contract (fetch_series is not implemented, so the fetch half of
-/// `adapter_contract_tests!` does not apply; these use the same testkit assertions).
+/// The area a row names: `countryiso3code` as a World Bank code or ISO alpha-3, or, only when a
+/// row has no `countryiso3code`, `country.id` as ISO alpha-2 (aggregate ids are not ISO codes).
+fn lookup<'a>(
+    areas: &'a econ_graph_core::reference::Areas,
+    iso3: &str,
+    wb_id: &str,
+) -> Option<&'a Area> {
+    let by_iso3 = (!iso3.is_empty())
+        .then(|| areas.by_wb_code(iso3).or_else(|| areas.by_iso3(iso3)))
+        .flatten();
+    by_iso3.or_else(|| {
+        (iso3.is_empty() && wb_id.len() == 2)
+            .then(|| areas.by_iso2(wb_id))
+            .flatten()
+    })
+}
+
 #[cfg(test)]
-mod contract {
-    use super::WorldBankAdapter;
-    use crate::testkit::contract::{assert_discover_ok, MALFORMED_JSON};
-    use crate::testkit::{test_ctx, MockSource, Reply, Route};
-    use crate::SourceAdapter;
-
-    #[tokio::test]
-    async fn contract_discover_ok() {
-        let mock = MockSource::start().await;
-        mock.mount(
-            &Route::get("/indicator"),
-            Reply::json_str(include_str!(
-                "../../tests/fixtures/world_bank/indicators_page1.json"
-            )),
-        )
-        .await;
-        let adapter = WorldBankAdapter::new(mock.base_url());
-        assert_discover_ok(&adapter, &test_ctx(), &mock, 1).await;
-    }
-
-    /// Every request answers `status` with `body`.
-    async fn mount_everything(mock: &MockSource, status: u16, body: &str) {
-        mock.server()
-            .register(
-                wiremock::Mock::given(wiremock::matchers::method("GET"))
-                    .respond_with(wiremock::ResponseTemplate::new(status).set_body_string(body)),
-            )
-            .await;
-    }
-
-    #[tokio::test]
-    async fn contract_discover_429_rate_limited() {
-        let mock = MockSource::start().await;
-        mock.mount(
-            &Route::get("/topic/3/indicator"),
-            Reply::status(429).retry_after(1),
-        )
-        .await;
-        let e = WorldBankAdapter::new(mock.base_url())
-            .discover(&test_ctx())
-            .await
-            .unwrap_err();
-        assert_eq!(e.kind(), "rate_limited", "{e}");
-    }
-
-    #[tokio::test]
-    async fn contract_discover_500_transient() {
-        // Every request fails; the listing (the last request) with a 500, the rest 404 (an
-        // all-500 mock would spend ~1 s of in-process backoff per request). Discovery reports
-        // the last failure.
-        let mock = MockSource::start().await;
-        mock.mount(
-            &Route::get("/indicator"),
-            Reply::text("internal error").with_status(500),
-        )
-        .await;
-        let e = WorldBankAdapter::new(mock.base_url())
-            .discover(&test_ctx())
-            .await
-            .unwrap_err();
-        assert_eq!(e.kind(), "transient", "{e}");
-    }
-
-    #[tokio::test]
-    async fn contract_discover_malformed_is_parse_error() {
-        let mock = MockSource::start().await;
-        mount_everything(&mock, 200, MALFORMED_JSON).await;
-        let e = WorldBankAdapter::new(mock.base_url())
-            .discover(&test_ctx())
-            .await
-            .unwrap_err();
-        assert_eq!(e.kind(), "parse", "{e}");
-    }
-}
+mod tests;

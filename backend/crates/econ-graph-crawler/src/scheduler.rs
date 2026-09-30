@@ -68,7 +68,7 @@ use crate::sources::static_catalogs::is_static_catalog_source;
 /// `CrawlError::Permanent("... not implemented yet")`. Enqueuing refreshes for them would only
 /// produce failed jobs, so the scheduler skips them. Remove a source here once its adapter
 /// implements `fetch_series`.
-pub const FETCH_UNIMPLEMENTED: &[SourceId] = &[SourceId::WorldBank, SourceId::Bea];
+pub const FETCH_UNIMPLEMENTED: &[SourceId] = &[];
 
 /// How often each source's catalog is re-discovered.
 pub const DISCOVERY_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -753,14 +753,14 @@ mod tests {
         for s in [
             SourceId::Fred,
             SourceId::Bls,
+            SourceId::Bea,
             SourceId::Census,
             SourceId::Fhfa,
+            SourceId::WorldBank,
         ] {
             assert!(supports_fetch(s), "{s}");
         }
         for s in [
-            SourceId::WorldBank,
-            SourceId::Bea,
             SourceId::Sec,
             SourceId::Ecb,
             SourceId::Oecd,
@@ -778,7 +778,9 @@ mod tests {
             vec![
                 SourceId::Fred,
                 SourceId::Bls,
+                SourceId::Bea,
                 SourceId::Census,
+                SourceId::WorldBank,
                 SourceId::Fhfa
             ]
         );
@@ -969,13 +971,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn skips_static_catalog_unimplemented_and_sec_sources() {
+    async fn skips_static_catalog_and_sec_sources() {
         let Some(db) = db().await else { return };
         let p = &db.pool;
+        // World Bank fetch is implemented and enabled by default, but another test
+        // (`discovery_is_enqueued_once_per_week`) disables it and shares this DB; enable it
+        // explicitly so this assertion doesn't depend on test run order.
+        set_enabled(p, SourceId::WorldBank, true).await;
         for (source, id) in [
             (SourceId::Ecb, "t15c_ecb"),
             (SourceId::Oecd, "t15c_oecd"),
-            (SourceId::Bea, "t15c_bea"),
+            (SourceId::WorldBank, "t15c_wb"),
             (SourceId::Sec, "t15c_sec"),
             (SourceId::Fred, "t15c_fred"),
         ] {
@@ -986,18 +992,19 @@ mod tests {
             &[
                 SourceId::Ecb,
                 SourceId::Oecd,
-                SourceId::Bea,
+                SourceId::WorldBank,
                 SourceId::Sec,
                 SourceId::Fred,
             ],
             DEFAULT_BATCH_LIMIT,
         );
         s.tick().await.unwrap();
-        assert_eq!(queued_series(p).await, set(&["FRED/t15c_fred"]));
+        let expected = set(&["FRED/t15c_fred", "WORLD_BANK/t15c_wb"]);
+        assert_eq!(queued_series(p).await, expected);
         // Series of sources that aren't in the registry are ignored too.
         seed(p, SourceId::Bls, "t15c_bls", "Monthly", None, None).await;
         s.tick().await.unwrap();
-        assert_eq!(queued_series(p).await, set(&["FRED/t15c_fred"]));
+        assert_eq!(queued_series(p).await, expected);
     }
 
     #[tokio::test]

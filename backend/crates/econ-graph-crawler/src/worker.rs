@@ -13,6 +13,7 @@
 //! | `Ok`                                | `complete`                                                              |
 //! | `RateLimited { retry_after }`       | `retry_later(retry_after or policy.backoff(retry_count), count = false)` |
 //! | `Transient` (incl. panics, DB errors while persisting) | `retry_later(policy.backoff(retry_count), count = true)` (fails once `max_retries` is reached) |
+//! | `Busy { retry_after }`              | `retry_later(retry_after, count = false)` (local contention, not the source's fault) |
 //! | `NotFound` / `Auth` / `Parse` / `Permanent` | `fail`                                                          |
 //! | unknown `source` / `kind`, no adapter or handler | `fail`                                                 |
 //!
@@ -968,6 +969,7 @@ impl Worker {
                 false,
             )),
             CrawlError::Transient(_) => Some((policy.backoff(attempt), true)),
+            CrawlError::Busy { retry_after, .. } => Some((*retry_after, false)),
             CrawlError::NotFound(_)
             | CrawlError::Auth(_)
             | CrawlError::Parse(_)
