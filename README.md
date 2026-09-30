@@ -280,8 +280,12 @@ EconGraph maintains the highest standards of quality and reliability expected by
 
 5. **🎉 Open your browser** to `http://localhost:3000`
 
-This starts an empty local database. Sign-in is disabled while `OIDC_ISSUER` is unset;
-protected operations require a configured identity provider. See the
+This starts an empty local database. The backend treats callers as anonymous while
+`OIDC_ISSUER` is unset; protected operations require a configured identity provider.
+Vite's development frontend defaults to the Keycloak realm at
+`http://localhost:8081/realms/econ-graph`. Sign-in requires that realm to be reachable
+and matching frontend (`VITE_OIDC_ISSUER`, `VITE_OIDC_CLIENT_ID`) and backend
+(`OIDC_ISSUER`, `OIDC_AUDIENCE`, optionally `OIDC_JWKS_URL`) settings. See the
 [backend development setup](backend/README.md#development-workflow) for configuration
 and the [crawler deployment guide](docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md) to load data.
 The explicit `BACKEND_URL` aligns Vite's proxy with the backend's default port.
