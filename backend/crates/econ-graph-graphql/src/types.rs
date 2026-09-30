@@ -211,15 +211,20 @@ impl EconomicSeriesType {
             query = query.filter(dsl::date.le(end_date));
         }
 
-        if filter.original_only.unwrap_or(false) {
+        let original_only = filter.original_only.unwrap_or(false);
+        let as_of_or_latest =
+            filter.as_of.is_some() || filter.latest_revision_only.unwrap_or(false);
+
+        if original_only || as_of_or_latest {
+            query = query.filter(models::exclude_synthetic_legacy_rows());
+        }
+
+        if original_only {
             query = query.filter(dsl::is_original_release.eq(true));
         }
 
-        if filter.as_of.is_some() || filter.latest_revision_only.unwrap_or(false) {
-            query = query.filter(models::revision_filter(
-                filter.as_of,
-                filter.original_only.unwrap_or(false),
-            ));
+        if as_of_or_latest {
+            query = query.filter(models::revision_filter(filter.as_of, original_only));
         }
 
         let data_points = query

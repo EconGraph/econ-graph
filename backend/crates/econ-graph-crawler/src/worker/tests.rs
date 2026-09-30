@@ -609,6 +609,75 @@ async fn revision_filter_picks_latest_and_as_of_revisions() {
     assert_eq!(original(Some(d("2024-01-31"))).await, vec![]);
 }
 
+/// A synthetic legacy row (`revision_date = date`, `is_original_release`, written by the
+/// pre-vintage FRED adapter) must not win an early `asOf` query or double up `originalOnly` once
+/// the series has a genuine vintage. Mirrors the GDP e2e fixture's 2025-04-01 values.
+#[tokio::test]
+async fn exclude_synthetic_legacy_rows_keeps_asof_and_original_only_correct() {
+    let Some(db) = db().await else { return };
+    let write = persist::persist_series(
+        &db.pool,
+        SRC,
+        "t5_legacy_row",
+        &FetchedSeries {
+            metadata: None,
+            points: vec![
+                // Legacy row from before this crate tracked vintages: tagged as the original
+                // release on its own observation date, but really just the current value as of
+                // an old crawl.
+                revision("2025-04-01", "30485.729", "2025-04-01", true),
+                // Real ALFRED vintages, published much later.
+                revision("2025-04-01", "30331.117", "2025-07-30", true),
+                revision("2025-04-01", "30353.902", "2025-08-28", false),
+                revision("2025-04-01", "30485.729", "2025-09-25", false),
+            ],
+            dataset: None,
+        },
+    )
+    .await
+    .unwrap();
+    let series_id = write.series_id;
+
+    let query = |as_of: Option<NaiveDate>, original_only: bool| {
+        let pool = db.pool.clone();
+        async move {
+            let mut conn = pool.get().await.unwrap();
+            let mut query = data_points::table
+                .filter(data_points::series_id.eq(series_id))
+                .filter(econ_graph_core::models::exclude_synthetic_legacy_rows())
+                .into_boxed();
+            if original_only {
+                query = query.filter(data_points::is_original_release.eq(true));
+            }
+            if as_of.is_some() || original_only {
+                query = query.filter(econ_graph_core::models::revision_filter(
+                    as_of,
+                    original_only,
+                ));
+            }
+            query
+                .select((data_points::date, data_points::value))
+                .load::<(NaiveDate, Option<BigDecimal>)>(&mut conn)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|(date, v)| (date, v.unwrap().normalized().to_string()))
+                .collect::<Vec<_>>()
+        }
+    };
+
+    // As of 2025-06-01 no real vintage had published yet, so the legacy row's value must not
+    // appear (it wasn't actually known that early).
+    assert_eq!(query(Some(d("2025-06-01")), false).await, vec![]);
+
+    // Once a real vintage exists, `originalOnly` returns exactly the genuine original release,
+    // not the legacy row too.
+    assert_eq!(
+        query(None, true).await,
+        vec![(d("2025-04-01"), "30331.117".to_string())]
+    );
+}
+
 /// A same-day revision beats the original release, and filtering happens before `LIMIT`, so a
 /// page holds one row per observation.
 #[tokio::test]

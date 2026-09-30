@@ -405,10 +405,14 @@ fn filtered_data_points(
     }
 
     let original_only = params.original_only.unwrap_or(false);
+    let as_of_or_latest = params.as_of.is_some() || params.latest_revision_only.unwrap_or(false);
+    if original_only || as_of_or_latest {
+        query = query.filter(econ_graph_core::models::exclude_synthetic_legacy_rows());
+    }
     if original_only {
         query = query.filter(data_points::is_original_release.eq(true));
     }
-    if params.as_of.is_some() || params.latest_revision_only.unwrap_or(false) {
+    if as_of_or_latest {
         query = query.filter(econ_graph_core::models::revision_filter(
             params.as_of,
             original_only,
