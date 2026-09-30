@@ -37,7 +37,8 @@
 //! - [`worker`]: the [`Worker`] that drains `crawl_queue`, and the [`JobHandler`] extension point
 //! - [`scheduler`]: [`RefreshScheduler`], enqueues due series refreshes and weekly catalog discovery
 //! - [`status`]: crawler status derived from `crawl_queue` ([`status::crawler_status`])
-//! - [`cli`]: the `crawler` operator CLI (enqueue, discover, status, sources, fetch)
+//! - [`coverage`]: per-source data coverage and freshness ([`coverage::crawl_coverage`])
+//! - [`cli`]: the `crawler` operator CLI (enqueue, discover, status, coverage, sources, fetch)
 //! - `testkit` (feature `testkit`, always on in this crate's tests): mock upstream + adapter contract tests
 //!
 //! ## Usage
@@ -63,6 +64,7 @@
 
 pub mod adapter;
 pub mod cli;
+pub mod coverage;
 pub mod dataset;
 pub mod error;
 pub mod http;
@@ -71,6 +73,7 @@ pub mod policy;
 pub mod rate_limit;
 pub mod reference;
 pub mod scheduler;
+pub mod series_id;
 pub mod source;
 pub mod sources;
 pub mod status;
@@ -88,5 +91,6 @@ pub use http::{HttpConfig, HttpFetcher};
 pub use policy::SourcePolicy;
 pub use rate_limit::{SourcePermit, SourceRateLimiter};
 pub use scheduler::{RefreshScheduler, SchedulerConfig, SchedulerTickStats};
+pub use series_id::{stable_series_id, SERIES_ID_NAMESPACE};
 pub use source::{SourceId, UnknownSource};
 pub use worker::{JobHandler, JobOutcome, JobStats, Worker, WorkerConfig};

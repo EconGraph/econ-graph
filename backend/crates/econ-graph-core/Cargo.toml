@@ -21,6 +21,9 @@ diesel_migrations.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+# Reference data files (data/*.csv)
+csv.workspace = true
+
 # Date/Time
 chrono.workspace = true
 

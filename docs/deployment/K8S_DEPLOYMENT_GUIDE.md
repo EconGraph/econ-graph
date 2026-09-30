@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide provides comprehensive instructions for deploying the EconGraph application to a Kubernetes cluster. The deployment includes a complete production-ready stack with SSL/TLS, security policies, monitoring, and automated certificate management.
+This guide provides comprehensive instructions for deploying the EconGraph application to a Kubernetes cluster. The manifests include SSL/TLS, security policies, monitoring, and certificate management. The MicroK8s procedure below is a manual deployment reference; it is not a validated one-command production bootstrap.
 
 ### Architecture Components
 
@@ -28,27 +28,16 @@ This guide provides comprehensive instructions for deploying the EconGraph appli
 - **Docker**: For building application images
 - **kubectl**: Configured for MicroK8s
 
-## Quick Start (Recommended)
+## Deployment Path
 
-### One-Command Deployment
+For the maintained Kind setup, follow [k8s/README.md](../../k8s/README.md).
 
-```bash
-cd /path/to/EconGraph/FrontEnd-1
-./scripts/deploy/restart-k8s-rollout.sh
-```
-
-This automated script will:
-- ✅ Check/start MicroK8s and enable required addons
-- ✅ Build Docker images with proper versioned tags
-- ✅ Load images into MicroK8s container runtime
-- ✅ Apply all Kubernetes manifests with security contexts
-- ✅ Deploy monitoring stack (Grafana, Loki, Prometheus, Promtail)
-- ✅ Install cert-manager for SSL certificate management
-- ✅ Configure Let's Encrypt staging and production issuers
-- ✅ Deploy SSL ingress with comprehensive security features
-- ✅ Apply Network Policies for secure pod communication
-- ✅ Wait for all rollouts to complete
-- ✅ Test HTTPS termination and display service URLs
+The existing `scripts/deploy/restart-k8s-rollout.sh` is not a supported fresh
+MicroK8s bootstrap: it calls `build-images.sh`, which imports images into a Kind
+cluster, then expects an admin image that the build script currently excludes.
+Do not use it as a one-command MicroK8s deployment. The manual steps below show
+how to build and import images for MicroK8s without that script. The admin UI is
+not included in the current build path; its deployment requires separate work.
 
 ## Manual Deployment
 
@@ -66,8 +55,11 @@ newgrp microk8s
 microk8s enable dns ingress storage metrics-server
 
 # Configure kubectl
-microk8s kubectl config view --raw > ~/.kube/config
-kubectl config use-context microk8s
+# Keep the existing kubeconfig intact; use a dedicated file for this shell.
+mkdir -p "$HOME/.kube"
+(umask 077; microk8s kubectl config view --raw > "$HOME/.kube/econgraph-microk8s.config")
+export KUBECONFIG="$HOME/.kube/econgraph-microk8s.config"
+kubectl config current-context
 
 # Verify setup
 microk8s status --wait-ready
@@ -76,17 +68,38 @@ microk8s status --wait-ready
 ### Step 2: Build and Load Images
 
 ```bash
-# Build images with versioned tags
-./scripts/deploy/build-images.sh
+# Run from the repository root. These tags match the checked-in manifests.
+docker build -t econ-graph-backend:v3.7.4 backend
+docker build --target crawler-worker -t econ-graph-crawler-worker:v3.7.4 backend
+docker build \
+  --build-arg VITE_API_URL="http://localhost" \
+  --build-arg VITE_GRAPHQL_URL="/graphql" \
+  --build-arg VITE_WS_URL="ws://localhost/graphql" \
+  --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER:-}" \
+  --build-arg VITE_OIDC_CLIENT_ID="${VITE_OIDC_CLIENT_ID:-econ-graph-web}" \
+  -t econ-graph-frontend:v3.7.4 frontend
+docker build -t econ-graph-chart-api:v1.0.0 chart-api-service
 
-# Images are automatically loaded into MicroK8s
-# No separate load commands needed (unlike kind clusters)
+# Explicitly import local Docker images into MicroK8s, not Kind.
+set -o pipefail
+for image in econ-graph-backend:v3.7.4 econ-graph-crawler-worker:v3.7.4 \
+             econ-graph-frontend:v3.7.4 econ-graph-chart-api:v1.0.0; do
+  docker save "$image" | microk8s ctr images import -
+done
 ```
+
+Set `VITE_OIDC_ISSUER` before building to enable frontend sign-in. Configure
+the issuer and client for the intended environment; an unset issuer hides sign-in.
+Admin images are not built above. Review the admin manifests before applying the
+whole directory.
 
 ### Step 3: Deploy Application Stack
 
 ```bash
-# Apply all manifests
+# Create credentials before applying resources that reference them.
+kubectl apply -f k8s/manifests/namespace.yaml
+./scripts/deploy/create-secrets.sh
+# Review manifests and prerequisites (including cert-manager below) before applying.
 kubectl apply -f k8s/manifests/
 
 # Deploy monitoring stack
@@ -142,9 +155,9 @@ kubectl port-forward service/grafana-service 3000:3000 -n econ-graph
 ## Security Features
 
 ### Pod Security Standards
-All pods run with restricted security contexts:
+Application manifests use security contexts; inspect each container for exceptions:
 - **Non-root containers**: `runAsNonRoot: true`
-- **Read-only filesystems**: `readOnlyRootFilesystem: true`
+- **Read-only filesystems**: Used where supported; PostgreSQL explicitly sets `readOnlyRootFilesystem: false` because it needs writable storage.
 - **No privilege escalation**: `allowPrivilegeEscalation: false`
 - **Dropped capabilities**: All capabilities dropped except required ones
 - **Seccomp profiles**: Runtime default seccomp profiles
@@ -247,15 +260,20 @@ kubectl logs <backend-pod> -n econ-graph -c wait-for-postgres
 kubectl get pods -n econ-graph | grep postgres
 kubectl get svc -n econ-graph | grep postgres
 
-# Test connectivity (if network policies are blocking)
-kubectl delete networkpolicy --all -n econ-graph
+# Inspect service endpoints, pod labels, and the policies that select these pods.
+kubectl get endpoints postgres-service -n econ-graph
+kubectl get pods -n econ-graph --show-labels
+kubectl get networkpolicies -n econ-graph
+kubectl describe networkpolicy econ-graph-network-policy -n econ-graph
+kubectl get networkpolicies -n econ-graph -o yaml > /tmp/econgraph-networkpolicies-before.yaml
 
-# Restart backend deployment
-kubectl rollout restart deployment/econ-graph-backend -n econ-graph
-
-# Re-apply network policies after connectivity is established
-kubectl apply -f k8s/manifests/network-policy.yaml
+# Compare the relevant rule with the checked-in policy.
+kubectl diff -f k8s/manifests/network-policy.yaml
 ```
+
+Fix the specific ingress/egress rule for the affected pods after inspecting the
+selectors and PostgreSQL port. Preserve independently managed policies; do not
+delete every policy in the namespace to test connectivity.
 
 #### 3. Network Policy Blocking Traffic
 **Symptoms**: Services can't communicate, ACME challenges fail
@@ -315,8 +333,7 @@ kubectl describe pod postgresql-0 -n econ-graph
 # Check available images in MicroK8s
 microk8s ctr images list | grep econ-graph
 
-# Rebuild and load images
-./scripts/deploy/build-images.sh
+# Rebuild and import using Step 2 above; build-images.sh imports into Kind.
 ```
 
 ### Debug Commands
@@ -372,9 +389,10 @@ kubectl get pvc -n econ-graph
 ## Restart Procedures
 
 ### Full Restart
-```bash
-./scripts/deploy/restart-k8s-rollout.sh
-```
+
+For MicroK8s, rebuild/import images using Step 2 and restart the individual
+services below. The legacy restart script has the bootstrap limitations described
+under Deployment Path.
 
 ### Individual Service Restart
 ```bash

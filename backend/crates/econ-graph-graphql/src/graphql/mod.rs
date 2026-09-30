@@ -5,6 +5,7 @@
 //! models with the external API consumers.
 
 pub mod context;
+pub mod cross_section;
 pub mod dataloaders;
 pub mod global_analysis;
 pub mod mutation;
@@ -20,7 +21,11 @@ mod annotation_visibility_tests;
 #[cfg(test)]
 mod authorization_tests;
 #[cfg(test)]
+mod latest_observation_tests;
+#[cfg(test)]
 pub mod n_plus_one_tests;
+#[cfg(test)]
+pub(crate) mod test_db;
 
 // Re-export commonly used types
 pub use mutation::Mutation;

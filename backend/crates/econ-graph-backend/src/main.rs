@@ -489,6 +489,19 @@ async fn main() -> AppResult<()> {
         e
     })?;
 
+    // Reference data read at runtime ($REFERENCE_DATA_DIR): fail at startup, not on first use.
+    let areas = econ_graph_core::reference::areas().map_err(|e| {
+        let error = AppError::ConfigError(e.to_string());
+        error.log_with_context("Application startup reference data");
+        eprintln!("❌ {}", e);
+        error
+    })?;
+    info!(
+        "🌍 Reference data loaded from {}: {} areas",
+        econ_graph_core::reference::data_dir().display(),
+        areas.all().len()
+    );
+
     // Sign-in through the identity provider: OIDC_ISSUER unset disables it (every caller is
     // anonymous); a malformed setting, or OIDC_REQUIRED=true without an issuer, stops startup.
     // Nothing is fetched from the provider here, so it may be down while the API starts.

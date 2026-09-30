@@ -704,6 +704,8 @@ impl Worker {
             .registry
             .get(source)
             .ok_or_else(|| CrawlError::Permanent(format!("no adapter registered for {source}")))?;
+        let complete = adapter.discovery_is_complete();
+        let scope_prefix = adapter.retirement_scope_prefix().map(str::to_string);
         let ctx = self.ctx.clone();
         let found = guarded(async move { adapter.discover(&ctx).await }).await?;
         self.datasets.check_all(
@@ -715,6 +717,11 @@ impl Worker {
         let written = persist::persist_discovered(&self.ctx.pool, source, &found)
             .await
             .map_err(db_error)?;
+        if complete {
+            persist::retire_unlisted(&self.ctx.pool, source, &found, scope_prefix.as_deref())
+                .await
+                .map_err(db_error)?;
+        }
         Ok(JobStats {
             metadata_written: written,
             ..JobStats::default()
