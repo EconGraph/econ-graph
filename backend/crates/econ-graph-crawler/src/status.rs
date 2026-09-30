@@ -129,31 +129,24 @@ pub async fn crawler_status(pool: &DatabasePool) -> AppResult<CrawlerStatusSnaps
         .await
         .map_err(|e| AppError::DatabaseError(format!("failed to get database connection: {e}")))?;
 
-    diesel::sql_query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
-        .execute(&mut conn)
+    // Use Diesel's transaction manager so cancellation marks the connection as holding an
+    // unfinished transaction. The pool discards it instead of lending READ ONLY and an old
+    // snapshot to the next caller.
+    let (global, per_source) = conn
+        .build_transaction()
+        .repeatable_read()
+        .read_only()
+        .run(async |conn| {
+            let global: GlobalRow = diesel::sql_query(GLOBAL_SQL)
+                .bind::<diesel::sql_types::Integer, _>(RECENT_ACTIVITY_MINUTES as i32)
+                .get_result(&mut *conn)
+                .await?;
+            let per_source = diesel::sql_query(PER_SOURCE_SQL)
+                .load::<SourceRow>(&mut *conn)
+                .await?;
+            Ok::<_, AppError>((global, per_source))
+        })
         .await?;
-
-    let outcome: AppResult<(GlobalRow, Vec<SourceRow>)> = async {
-        let global: GlobalRow = diesel::sql_query(GLOBAL_SQL)
-            .bind::<diesel::sql_types::Integer, _>(RECENT_ACTIVITY_MINUTES as i32)
-            .get_result(&mut conn)
-            .await?;
-        let per_source = diesel::sql_query(PER_SOURCE_SQL)
-            .load::<SourceRow>(&mut conn)
-            .await?;
-        Ok((global, per_source))
-    }
-    .await;
-
-    // Always end the transaction we opened, whichever way the reads went, then propagate.
-    diesel::sql_query(if outcome.is_ok() {
-        "COMMIT"
-    } else {
-        "ROLLBACK"
-    })
-    .execute(&mut conn)
-    .await?;
-    let (global, per_source) = outcome?;
 
     Ok(CrawlerStatusSnapshot {
         active_workers: global.active_workers,
