@@ -624,10 +624,7 @@ mod tests {
 
             let mut conn = pool.get().await.unwrap();
             let (schema_id, file_hash): (Uuid, String) = xbrl_taxonomy_schemas::table
-                .select((
-                    xbrl_taxonomy_schemas::id,
-                    xbrl_taxonomy_schemas::file_hash,
-                ))
+                .select((xbrl_taxonomy_schemas::id, xbrl_taxonomy_schemas::file_hash))
                 .get_result(&mut conn)
                 .await
                 .unwrap();
