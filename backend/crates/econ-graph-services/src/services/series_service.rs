@@ -81,6 +81,7 @@ pub async fn list_series(
 
     let mut query = economic_series::table
         .filter(economic_series::is_active.eq(params.is_active.unwrap_or(true)))
+        .filter(economic_series::end_date.is_not_null())
         .into_boxed();
 
     // Apply filters
