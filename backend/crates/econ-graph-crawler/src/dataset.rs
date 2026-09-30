@@ -881,9 +881,8 @@ label = "Observation status"
         assert!(e.to_string().contains("is listed as both"), "{e}");
     }
 
-    /// Every production adapter's declarations match the shipped dataset files. Passes
-    /// vacuously until an adapter declares a dataset (DS-4, DS-5): every `datasets()` is empty
-    /// today, so `load_adapter` reads no file.
+    /// Every production adapter's declarations match the shipped dataset files: today FRED and
+    /// BLS (DS-4); Census BDS (DS-5) adds more.
     #[test]
     fn default_registry_declarations_match_shipped_files() {
         DatasetCatalog::load(&crate::sources::default_registry()).unwrap();
