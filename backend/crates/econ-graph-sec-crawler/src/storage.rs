@@ -256,9 +256,10 @@ impl XbrlStorage {
                 diesel::dsl::count_star(),
                 diesel::dsl::sum(xbrl_file_size_bytes),
                 diesel::dsl::count(xbrl_file_content),
-                diesel::dsl::count(
-                    diesel::dsl::case_when(xbrl_file_compressed.eq(true), 1_i32),
-                ),
+                diesel::dsl::count(diesel::dsl::case_when::<_, _, diesel::sql_types::Integer>(
+                    xbrl_file_compressed.eq(true),
+                    1_i32,
+                )),
             ))
             .get_result(&mut conn)
             .await
