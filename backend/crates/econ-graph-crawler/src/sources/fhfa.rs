@@ -148,6 +148,11 @@ impl SourceAdapter for FhfaAdapter {
         SourceId::Fhfa
     }
 
+    /// The catalog file lists every series this adapter fetches.
+    fn discovery_is_complete(&self) -> bool {
+        true
+    }
+
     /// The static catalog; no request (see the module docs).
     async fn discover(&self, _ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         Ok(catalog()?
@@ -159,6 +164,7 @@ impl SourceAdapter for FhfaAdapter {
                 units: Some(UNITS.into()),
                 frequency: Some(FREQUENCY.into()),
                 external_id: e.external_id,
+                dataset: None,
             })
             .collect())
     }
@@ -207,6 +213,7 @@ impl SourceAdapter for FhfaAdapter {
                 seasonal_adjustment: None,
             }),
             points,
+            dataset: None,
         })
     }
 }

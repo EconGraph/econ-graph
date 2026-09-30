@@ -13,6 +13,8 @@
 //! - **Search**: full-text series search (`search_service`)
 //! - **Series**: series queries (`series_service`)
 //! - **Global analysis**: cross-country analysis (`global_analysis_service`)
+//! - **Cross-section**: one measure across a dataset dimension, e.g. by country
+//!   (`cross_section_service`)
 //! - **Queue**: `crawl_queue` statistics and admin helpers (`queue_service`)
 //! - **Collaboration**: chart annotations and sharing (`collaboration_service`)
 //!

@@ -6,13 +6,16 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 
+import { flagDefines, flagsGuard, resolveFlagProfile } from './flags.config.ts';
+
 // Where the dev server and `vite preview` proxy /api and /graphql. The release e2e stack
 // (playwright.release.config.ts) points it at its own backend.
 const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:8080';
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [
+    flagsGuard(),
     react({
       // Enable React Fast Refresh
       fastRefresh: true,
@@ -94,6 +97,7 @@ export default defineConfig({
   define: {
     // Define global constants
     __DEV__: JSON.stringify(process.env.NODE_ENV === 'development'),
+    ...flagDefines(resolveFlagProfile(command)),
   },
 
   // Optimize dependencies
@@ -157,4 +161,4 @@ export default defineConfig({
       ],
     },
   },
-});
+}));

@@ -1,0 +1,45 @@
+{
+  "$schema": "./schema/flags.json",
+  "flags": {
+    "build_canary": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "build",
+        "owner": "https://linear.app/econgraph/project/feature-flags-bc727011a0f7",
+        "remove_by": "unscheduled"
+      }
+    },
+    "mcp": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "build",
+        "owner": "ECO-123",
+        "remove_by": "train 2"
+      }
+    },
+    "financial_components": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "build",
+        "owner": "ECO-144",
+        "remove_by": "train 4"
+      }
+    },
+    "global_analysis_tabs": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "build",
+        "owner": "ECO-105",
+        "remove_by": "train 3"
+      }
+    }
+  }
+}

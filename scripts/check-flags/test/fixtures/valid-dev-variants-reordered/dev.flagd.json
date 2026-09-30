@@ -1,0 +1,12 @@
+{
+  "flags": {
+    "build_canary": {
+      "state": "ENABLED",
+      "variants": {
+        "off": false,
+        "on": true
+      },
+      "defaultVariant": "on"
+    }
+  }
+}

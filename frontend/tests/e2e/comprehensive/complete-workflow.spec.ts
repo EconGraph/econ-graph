@@ -73,9 +73,7 @@ test.describe('Complete Application Workflow', () => {
       await menuButton.click();
 
       const globalLink = page.getByRole('link', { name: /global/i }).or(
-        page.getByRole('link', { name: /analysis/i }).or(
-          page.locator('a[href*="/global"]')
-        )
+        page.locator('a[href*="/global"]')
       );
 
       if (await globalLink.isVisible()) {
@@ -141,7 +139,7 @@ test.describe('Complete Application Workflow', () => {
   });
 
   test('should handle responsive design across all pages', async ({ page }) => {
-    const pages = ['/', '/explore', '/sources', '/global', '/analysis', '/about'];
+    const pages = ['/', '/explore', '/sources', '/global', '/about'];
 
     for (const pagePath of pages) {
       await page.goto(pagePath);
@@ -172,7 +170,7 @@ test.describe('Complete Application Workflow', () => {
       }
     });
 
-    const pages = ['/', '/explore', '/sources', '/global', '/analysis', '/about'];
+    const pages = ['/', '/explore', '/sources', '/global', '/about'];
 
     for (const pagePath of pages) {
       await page.goto(pagePath);

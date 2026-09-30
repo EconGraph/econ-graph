@@ -13,6 +13,7 @@ use bigdecimal::BigDecimal;
 use chrono::NaiveDate;
 use econ_graph_core::DatabasePool;
 
+use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
 use crate::http::HttpFetcher;
 use crate::policy::SourcePolicy;
@@ -109,6 +110,9 @@ pub struct FetchedSeries {
     pub metadata: Option<NewSeriesMetadataLite>,
     /// Observations, in any order.
     pub points: Vec<FetchedPoint>,
+    /// The series' dataset and dimension values, when the adapter declares datasets. `None`
+    /// keeps whatever is stored.
+    pub dataset: Option<SeriesDataset>,
 }
 
 /// One observation of a series.
@@ -139,6 +143,8 @@ pub struct DiscoveredSeries {
     pub frequency: Option<String>,
     /// Link to the series on the source's website or API.
     pub data_url: Option<String>,
+    /// The series' dataset and dimension values, when the adapter declares datasets.
+    pub dataset: Option<SeriesDataset>,
 }
 
 /// Per-series results of [`SourceAdapter::fetch_batch`], keyed by external id.
@@ -156,8 +162,35 @@ pub trait SourceAdapter: Send + Sync {
         SourcePolicy::default_for(self.id())
     }
 
+    /// Codes of the datasets this adapter writes, each defined in the source's
+    /// `datasets/<source>.toml` (see [`crate::dataset`]). Every series it returns with a
+    /// [`SeriesDataset`] must use one of these codes and the definition's dimension keys.
+    /// Default: none.
+    fn datasets(&self) -> &[&str] {
+        &[]
+    }
+
     /// Lists the series this source offers.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError>;
+
+    /// Whether a successful [`discover`](Self::discover) lists every series this adapter crawls,
+    /// so a series it no longer lists has been retired by the source. The worker then marks such
+    /// series inactive (see [`persist::retire_unlisted`](crate::persist::retire_unlisted)); they
+    /// are never deleted. Defaults to `false`, for discoveries that return a sample (FRED by
+    /// popularity, World Bank by topic) or tolerate partial failure.
+    fn discovery_is_complete(&self) -> bool {
+        false
+    }
+
+    /// Restricts [`discovery_is_complete`](Self::discovery_is_complete) retirement to
+    /// `external_id`s starting with this prefix, when this adapter isn't the only thing that
+    /// writes series under its [`SourceId`] (for example Census, whose BDS discovery is complete
+    /// but whose data source also holds ACS series seeded outside the crawler). `None` (the
+    /// default) scopes retirement to the whole source, which is correct whenever the adapter owns
+    /// it exclusively.
+    fn retirement_scope_prefix(&self) -> Option<&str> {
+        None
+    }
 
     /// Fetches observations for `external_id`, only those on or after `since` when given
     /// (adapters may return more if the source can't filter).
@@ -363,6 +396,11 @@ mod tests {
     fn default_adapter_policy_is_source_default() {
         let d = Dummy(SourceId::Bea, "");
         assert_eq!(d.policy(), SourcePolicy::default_for(SourceId::Bea));
+    }
+
+    #[test]
+    fn default_adapter_declares_no_datasets() {
+        assert!(Dummy(SourceId::Bea, "").datasets().is_empty());
     }
 
     #[test]

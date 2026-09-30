@@ -1,14 +1,10 @@
 # IMF (International Monetary Fund)
 
-Adapter: `backend/crates/econ-graph-crawler/src/sources/imf.rs`. Fixtures:
-`tests/fixtures/imf/` (catalog only). No key.
+No adapter (removed in #217): its discovery used made-up series ids and could never fetch
+data. `SourceId::Imf` stays reserved for a later SDMX adapter. The rest of this page is
+historical reference for that future adapter, not a description of anything on `main` today.
 
-> **Release 1 (#217, open):** the IMF adapter is deleted, because its ids were made up and
-> it could never fetch. `SourceId::Imf` stays for a later SDMX adapter. This page stays as
-> the reference for that adapter; "What we fetch today" describes `main` until #217
-> merges.
-
-## What we fetch today
+## What the old adapter did
 
 - **Discovery**: `GET http://dataservices.imf.org/REST/SDMX_JSON.svc/Dataflow`, filtered by
   keyword, then each matching dataset (IFS, BOP, GFS, WEO) expanded from a hard-coded list
