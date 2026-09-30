@@ -21,7 +21,7 @@ If every relevant job skipped, there may be no failure log. Inspect job conditio
 4. Preserve required dependency success checks when overriding default status conditions.
 5. Confirm behavior on a real main run as well as a PR.
 
-The [pipeline guide](../../docs/development/CI_CD_PIPELINE.md#known-coverage-limitations) records the current main dependency-skip defect and advisory checks.
+The [pipeline guide](../../docs/development/CI_CD_PIPELINE.md#known-coverage-limitations) records advisory checks and coverage limitations.
 
 ## Build or setup failures
 
