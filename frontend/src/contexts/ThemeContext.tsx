@@ -4,17 +4,8 @@
  * This enables personalized UI experience with light/dark theme support.
  */
 
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-  useMemo,
-  ReactNode,
-} from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, ReactNode } from 'react';
 import { createTheme, Theme, ThemeProvider as MuiThemeProvider } from '@mui/material/styles';
-import { useAuth } from './AuthContext';
 
 interface ThemeContextType {
   theme: Theme;
@@ -140,22 +131,15 @@ interface ThemeProviderProps {
 }
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
-  const authResult = useAuth();
-  const user = authResult?.user;
-  const [currentTheme, setCurrentTheme] = useState<'light' | 'dark'>('light');
-
-  // Initialize theme from user preferences or localStorage
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
-    const userTheme = user?.preferences?.theme;
-
-    if (userTheme) {
-      setCurrentTheme(userTheme);
-      localStorage.setItem('theme', userTheme);
-    } else if (savedTheme) {
-      setCurrentTheme(savedTheme);
+  // Start from the choice saved in this browser
+  const [currentTheme, setCurrentTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      return localStorage.getItem('theme') === 'dark' ? 'dark' : 'light';
+    } catch {
+      // Storage blocked (private mode): the default theme.
+      return 'light';
     }
-  }, [user?.preferences?.theme]);
+  });
 
   const toggleTheme = useCallback(() => {
     const newTheme = currentTheme === 'light' ? 'dark' : 'light';

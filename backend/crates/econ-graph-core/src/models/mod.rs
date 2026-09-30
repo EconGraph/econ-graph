@@ -7,10 +7,12 @@ pub mod crawl_attempt;
 pub mod crawl_queue;
 pub mod data_point;
 pub mod data_source;
+pub mod dataset;
 pub mod economic_series;
 pub mod educational_content;
 pub mod financial_annotation;
 pub mod financial_line_item;
+#[cfg(feature = "financial-ratios")]
 pub mod financial_ratios;
 pub mod financial_statement;
 pub mod global_analysis;
@@ -27,6 +29,7 @@ pub use crawl_attempt::*;
 pub use crawl_queue::*;
 pub use data_point::*;
 pub use data_source::*;
+pub use dataset::*;
 pub use economic_series::*;
 pub use educational_content::{
     AssessmentQuestion, ContentSection, EducationalModule, EducationalResource, ExpertInsight,
@@ -35,10 +38,11 @@ pub use educational_content::{
 };
 pub use financial_annotation::*;
 pub use financial_line_item::*;
+#[cfg(feature = "financial-ratios")]
 pub use financial_ratios::*;
 pub use financial_statement::*;
 pub use global_analysis::*;
 pub use search::*;
 pub use series_metadata::*;
-pub use user::{AnnotationComment, ChartAnnotation, ChartCollaborator, NewUser, User, UserSession};
+pub use user::{AnnotationComment, ChartAnnotation, ChartCollaborator, NewUser, User};
 pub use xbrl_taxonomy_schema::*;

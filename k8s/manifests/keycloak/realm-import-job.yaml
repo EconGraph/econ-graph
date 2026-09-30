@@ -1,0 +1,142 @@
+# keycloak-realm-import: applies config/keycloak/econ-graph-realm.json to the running
+# Keycloak on every deploy, so the realm (clients, roles, composites, mappers, the
+# Google identity provider) stays what the repository says.
+#
+# `kc.sh start --import-realm` only creates a realm that does not exist yet, and
+# `kc.sh import --override true` would delete the realm and every account in it. So
+# this Job runs keycloak-config-cli, which diffs the realm file against the server
+# through the admin API and changes only what differs. Users, their role mappings,
+# sessions and Google-brokered accounts are untouched: the realm file has no users.
+#
+# The admin API does not resolve the ${VAR:default} placeholders that Keycloak's own
+# import does, so an init container renders them first with
+# scripts/keycloak/render-realm.sh (both files come from the ConfigMap keycloak-realm,
+# written by scripts/deploy/deploy.sh). deploy.sh deletes the previous Job, applies
+# this one after the Keycloak Deployment and waits for it to complete.
+#
+# keycloak-config-cli is pinned to the newest build for Keycloak 26; bump it with the
+# Keycloak image in deployment.yaml.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-realm-import
+  namespace: econ-graph
+  labels:
+    app: keycloak-realm-import
+    component: auth
+spec:
+  # A render error or a rejected realm fails the same way every time.
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: keycloak-realm-import
+        component: auth
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      initContainers:
+      - name: render-realm
+        image: quay.io/keycloak/keycloak:26.7.4
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          if [ -n "${KC_GOOGLE_CLIENT_ID:-}" ] && [ -n "${KC_GOOGLE_CLIENT_SECRET:-}" ]; then export KC_GOOGLE_ENABLED=true; fi
+          bash /config/render-realm.sh /config/econ-graph-realm.json > /rendered/econ-graph-realm.json
+        env:
+        # Placeholders in config/keycloak/econ-graph-realm.json; keep in step with
+        # the keycloak container in deployment.yaml.
+        - name: KC_WEB_BASE_URL
+          value: "http://localhost"
+        # Second allowed web origin; only the compose e2e stack needs a different one.
+        - name: KC_WEB_E2E_BASE_URL
+          value: "http://localhost"
+        - name: KC_GOOGLE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: google-idp-client-id
+              optional: true
+        - name: KC_GOOGLE_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: google-idp-client-secret
+              optional: true
+        volumeMounts:
+        - name: realm
+          mountPath: /config
+          readOnly: true
+        - name: rendered
+          mountPath: /rendered
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "250m"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      containers:
+      - name: keycloak-config-cli
+        image: adorsys/keycloak-config-cli:6.5.1-26.5.5
+        env:
+        - name: KEYCLOAK_URL
+          value: "http://keycloak-service:8080/idp"
+        - name: KEYCLOAK_USER
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: admin-username
+        - name: KEYCLOAK_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: admin-password
+        # Wait for Keycloak; its first start builds an optimized image and is slow.
+        - name: KEYCLOAK_AVAILABILITYCHECK_ENABLED
+          value: "true"
+        - name: KEYCLOAK_AVAILABILITYCHECK_TIMEOUT
+          value: "600s"
+        - name: IMPORT_FILES_LOCATIONS
+          value: "/rendered/econ-graph-realm.json"
+        volumeMounts:
+        - name: rendered
+          mountPath: /rendered
+          readOnly: true
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        securityContext:
+          runAsNonRoot: true
+          # The image runs as `nobody`; a numeric id lets the kubelet verify runAsNonRoot.
+          runAsUser: 65534
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      volumes:
+      - name: realm
+        configMap:
+          name: keycloak-realm
+      - name: rendered
+        emptyDir: {}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault

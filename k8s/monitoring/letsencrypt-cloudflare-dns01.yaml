@@ -1,22 +1,10 @@
 # Let's Encrypt ClusterIssuer with DNS-01 challenge for Cloudflare
 # This configuration enables automatic SSL certificate generation using Cloudflare DNS
 
----
-# Cloudflare API credentials secret template
-apiVersion: v1
-kind: Secret
-metadata:
-  name: cloudflare-api-token-secret
-  namespace: cert-manager
-  labels:
-    app.kubernetes.io/name: cert-manager
-    app.kubernetes.io/component: cloudflare-webhook
-type: Opaque
-stringData:
-  # Replace with your actual Cloudflare API token
-  # Get from: https://dash.cloudflare.com/profile/api-tokens
-  # Required permissions: Zone - DNS - Edit, Zone - Zone - Read
-  api-token: "YOUR_CLOUDFLARE_API_TOKEN"
+# The Cloudflare API token Secret (cert-manager/cloudflare-api-token-secret, key
+# api-token) is not committed: scripts/deploy/setup-letsencrypt-cloudflare.sh
+# creates it from the token you pass. Required permissions: Zone - DNS - Edit,
+# Zone - Zone - Read.
 
 ---
 # Production Let's Encrypt ClusterIssuer with Cloudflare DNS-01 challenge

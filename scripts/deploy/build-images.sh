@@ -7,8 +7,17 @@ set -e
 
 echo "Building EconGraph Docker images..."
 
-# Version to tag images with (can be overridden: export VERSION=vX.Y.Z)
-VERSION=${VERSION:-v3.7.4}
+# Version to tag images with. k8s/manifests/backend-deployment.yaml,
+# frontend-deployment.yaml and crawler-worker.yaml hard-code this same tag, so it
+# can't be overridden independently: doing so would load images under a tag the
+# manifests don't reference and pods would sit on ErrImageNeverPull.
+EXPECTED_VERSION="v3.7.4"
+VERSION="${VERSION:-$EXPECTED_VERSION}"
+if [ "${VERSION}" != "${EXPECTED_VERSION}" ]; then
+  echo "❌ VERSION=${VERSION} but the k8s manifests hard-code image tag ${EXPECTED_VERSION}." >&2
+  echo "   Update the manifests' image tags too, or unset VERSION." >&2
+  exit 1
+fi
 
 # Get the project root directory
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -28,13 +37,16 @@ echo "Crawler-worker image built successfully"
 
 # Build frontend image
 echo "Building frontend image..."
+if [ -z "${VITE_OIDC_ISSUER:-}" ]; then
+  echo "Warning: VITE_OIDC_ISSUER is not set; the frontend image will have sign-in hidden." >&2
+fi
 cd ../frontend
 docker build \
-  --build-arg REACT_APP_API_URL="http://localhost" \
-  --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
-  --build-arg REACT_APP_WS_URL="ws://localhost/graphql" \
-  --build-arg REACT_APP_FACEBOOK_APP_ID="demo-facebook-app-id" \
-  --build-arg REACT_APP_GOOGLE_CLIENT_ID="80227441551-3dv05tkflnfrjpqv5fgii7b8br0brt7m.apps.googleusercontent.com" \
+  --build-arg VITE_API_URL="http://localhost" \
+  --build-arg VITE_GRAPHQL_URL="/graphql" \
+  --build-arg VITE_WS_URL="ws://localhost/graphql" \
+  --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER:-}" \
+  --build-arg VITE_OIDC_CLIENT_ID="${VITE_OIDC_CLIENT_ID:-econ-graph-web}" \
   --build-arg NODE_ENV="production" \
   -t econ-graph-frontend:${VERSION} -t econ-graph-frontend:latest .
 echo "Frontend image built successfully"
@@ -45,37 +57,27 @@ cd ../chart-api-service
 docker build -t econ-graph-chart-api:v1.0.0 -t econ-graph-chart-api:latest .
 echo "Chart API service image built successfully"
 
-# Build admin frontend image
-echo "Building admin frontend image..."
-cd ../admin-frontend
-docker build \
-  --build-arg REACT_APP_API_URL="http://localhost" \
-  --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
-  --build-arg REACT_APP_WS_URL="ws://localhost/graphql" \
-  --build-arg REACT_APP_GRAFANA_URL="http://localhost:30001" \
-  --build-arg REACT_APP_FACEBOOK_APP_ID="demo-facebook-app-id" \
-  --build-arg REACT_APP_GOOGLE_CLIENT_ID="80227441551-3dv05tkflnfrjpqv5fgii7b8br0brt7m.apps.googleusercontent.com" \
-  --build-arg NODE_ENV="production" \
-  -t econ-graph-admin-frontend:v1.0.0 -t econ-graph-admin-frontend:latest .
-echo "Admin frontend image built successfully"
+# Admin frontend image: not built here (re-enabled by ECO-242, train 2). It still
+# signs in through the retired in-house login and sends `role` on createUser/
+# updateUser (see #261/AUTH-5), so it gets 401 on every GraphQL call as of that PR.
 
-# Load images into kind cluster
-echo "Loading images into MicroK8s..."
-# Save images to temporary files and import
-docker save econ-graph-backend:${VERSION} | microk8s ctr images import - || true
-docker save econ-graph-crawler-worker:${VERSION} | microk8s ctr images import - || true
-docker save econ-graph-frontend:${VERSION} | microk8s ctr images import - || true
-docker save econ-graph-chart-api:v1.0.0 | microk8s ctr images import - || true
-docker save econ-graph-admin-frontend:v1.0.0 | microk8s ctr images import - || true
+# Load images into the kind cluster (nodes can't pull local-only images from
+# a registry, and the manifests set imagePullPolicy: Never for these)
+echo "Loading images into kind cluster 'econ-graph'..."
+KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-econ-graph}"
+kind load docker-image econ-graph-backend:${VERSION} --name "${KIND_CLUSTER_NAME}"
+kind load docker-image econ-graph-crawler-worker:${VERSION} --name "${KIND_CLUSTER_NAME}"
+kind load docker-image econ-graph-frontend:${VERSION} --name "${KIND_CLUSTER_NAME}"
+kind load docker-image econ-graph-chart-api:v1.0.0 --name "${KIND_CLUSTER_NAME}"
+# econ-graph-admin-frontend: not loaded (re-enabled by ECO-242, train 2).
 
 echo "All images built and loaded successfully!"
 echo ""
-echo "Images available in MicroK8s:"
+echo "Images available in kind cluster '${KIND_CLUSTER_NAME}':"
 echo "  - econ-graph-backend:${VERSION}"
 echo "  - econ-graph-crawler-worker:${VERSION}"
 echo "  - econ-graph-frontend:${VERSION}"
 echo "  - econ-graph-chart-api:v1.0.0"
-echo "  - econ-graph-admin-frontend:v1.0.0"
 echo ""
 echo "🔒 SSL Configuration:"
 echo "  - Let's Encrypt issuer configured for www.econ-graph.com"
