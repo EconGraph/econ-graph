@@ -45,11 +45,10 @@
 ### Technology Advantages
 - **Rust Backend**: Memory safety, zero-cost abstractions, blazing performance
 - **React Frontend**: Modern TypeScript UI with Material Design
-- **PostgreSQL**: Advanced indexing for sub-second query performance
-- **Kubernetes-ready**: Infinite scalability with 99.9% uptime guarantees
+- **PostgreSQL**: Indexing capabilities for query optimization
+- **Kubernetes foundation**: Deployment manifests provide a basis for future scaling and reliability work
 - **Open Source**: Transparency and customization impossible with proprietary solutions
-- **AI-Assisted Development**: 0 lines of code delivered at ~$34557.836 vs $4.8M traditional cost
-- **Comprehensive Testing**: 321,941 lines of test code ensuring enterprise reliability
+- **Testing**: Unit, database integration, and browser end-to-end tests cover different parts of the platform
 
 ---
 
@@ -90,7 +89,7 @@
 1. **Enterprise Licenses**: $2,400/year per seat
    - 90% cost savings vs. Bloomberg Terminal
    - Custom deployments and white-label solutions
-   - Priority support and SLA guarantees
+   - Planned priority support and service-level terms as operations mature
 
 2. **API Access Tiers**
    - Developer tier: $99/month (limited requests)
@@ -282,7 +281,7 @@
 4. **Open Source Adoption**: Enterprise acceptance of open-source solutions
 
 ### Why EconGraph?
-1. **Proven Technology**: Working prototype with paying customers
+1. **Technology Foundation**: Economic data platform under active development
 2. **Market Validation**: Strong product-market fit signals
 3. **Competitive Moat**: Open-source community and modern architecture
 4. **Experienced Team**: Technical expertise and domain knowledge
@@ -300,7 +299,7 @@
 - **Active Users**: Growing organic user base
 - **GitHub Stars**: Open-source community engagement
 - **Demo Interest**: High investor and customer interest
-- **Technical Validation**: 157 passing tests, production-ready code
+- **Technical Validation**: Unit, database integration, and browser end-to-end test suites
 
 ### Customer Feedback
 - **University Researchers**: "Finally, an affordable alternative to Bloomberg"
@@ -355,3 +354,5 @@ Let's discuss how EconGraph can deliver exceptional returns while transforming h
 ---
 
 *This pitch deck represents a compelling investment opportunity in a large, growing market with a proven team and differentiated technology solution. EconGraph is positioned to capture significant market share and deliver strong returns to investors.*
+
+

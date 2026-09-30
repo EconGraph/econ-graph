@@ -1,0 +1,7 @@
+# Topic roadmaps the roadmap index links to but whose files are pending.
+# Remove each exception when its roadmap lands. The CI checkout directory is
+# econ-graph, so links to similarly named files elsewhere remain checked.
+/econ-graph/docs/roadmap/data-sources\.md$
+/econ-graph/docs/roadmap/feature-flags\.md$
+/econ-graph/docs/roadmap/federation\.md$
+/econ-graph/docs/roadmap/sec-financial-data\.md$

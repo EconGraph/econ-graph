@@ -18,6 +18,11 @@
 //! - [`StaticCatalogAdapter::is_static_catalog`] / [`IS_STATIC_CATALOG`] and
 //!   [`is_static_catalog_source`] let status pages and the UI flag them.
 //!
+//! **Development only.** [`default_registry`](crate::sources::default_registry) registers these
+//! adapters only when the crate is built with the `static-catalogs` feature, which release builds
+//! leave off (for example `cargo run -p econ-graph-crawler-worker --features static-catalogs`).
+//! They give a development database catalog entries for more sources without any API keys.
+//!
 //! Because no HTTP is made, the testkit's `new(base_url)` constructor convention does not apply;
 //! the constructors are one per source ([`StaticCatalogAdapter::boc`], ...). The `data_url`
 //! values point at the real upstream sites and are informational only.
@@ -83,6 +88,7 @@ impl CatalogEntry {
             units: Some(self.units.to_string()),
             frequency: Some(self.frequency.to_string()),
             data_url: Some(self.data_url.to_string()),
+            dataset: None,
         }
     }
 }
@@ -790,14 +796,6 @@ mod tests {
                 adapter.id().as_str()
             );
             assert!(err.to_string().contains(&expected), "{err}");
-        }
-    }
-
-    #[test]
-    fn default_registry_registers_static_catalogs() {
-        let registry = crate::sources::default_registry();
-        for source in STATIC_CATALOG_SOURCES {
-            assert_eq!(registry.get(source).map(|a| a.id()), Some(source));
         }
     }
 }

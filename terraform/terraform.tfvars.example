@@ -4,8 +4,12 @@
 # REQUIRED: Domain configuration
 domain = "econgraph.example.com"
 
-# REQUIRED: Database password (use a strong password in production)
-database_password = "your-secure-database-password-here"
+# REQUIRED: Database password, at least 16 characters (or "" in the full
+# deploy to generate a random one). Prefer the environment:
+#   export TF_VAR_database_password="$(openssl rand -base64 24)"
+# A value set in terraform.tfvars overrides TF_VAR_*, and the placeholder is
+# rejected.
+# database_password = "your-secure-database-password-here"
 
 # Environment configuration
 environment = "prod"  # Options: dev, staging, prod
@@ -38,6 +42,13 @@ bls_api_key = "your-bls-api-key-here"
 # enable_dns01_challenge = true
 # cloudflare_api_token = "your-cloudflare-api-token"
 
+# Basic auth in front of Grafana (optional, sensitive). An htpasswd line,
+# generated with: htpasswd -nB admin (prompts for the password).
+# The bcrypt hash contains $, so single-quote it if you set
+# TF_VAR_monitoring_basic_auth in a shell instead.
+# Leave unset to rely on Grafana's own login only.
+# monitoring_basic_auth = "admin:<bcrypt-hash>"
+
 # Monitoring configuration (uncomment to customize)
 # prometheus_retention = "30d"
 # prometheus_storage_size = "50Gi"
@@ -69,9 +80,10 @@ admin_jwt_secret     = "your-admin-jwt-secret-256-bits"
 admin_session_key    = "your-admin-session-key-256-bits"
 admin_encryption_key = "your-admin-encryption-key-256-bits"
 
-# REQUIRED: Admin TLS certificates (base64 encoded)
-# admin_tls_cert = "base64-encoded-certificate"
-# admin_tls_key  = "base64-encoded-private-key"
+# REQUIRED: Admin TLS certificates (PEM text, not base64; the kubernetes
+# provider encodes Secret data itself)
+# admin_tls_cert = "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+# admin_tls_key  = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
 
 # Admin security settings
 admin_session_timeout = 1800  # 30 minutes

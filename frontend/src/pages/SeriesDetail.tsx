@@ -25,12 +25,22 @@ import {
   ArrowBack as ArrowBackIcon,
   Info as InfoIcon,
   TrendingUp as TrendingUpIcon,
+  Download as DownloadIcon,
 } from '@mui/icons-material';
 
-import InteractiveChart from '../components/charts/InteractiveChart';
+import SeriesChart, { SeriesChartAnnotation } from '../components/charts/SeriesChart';
+import SeriesAnnotationsPanel from '../components/charts/SeriesAnnotationsPanel';
+import {
+  EMPTY_DATE_RANGE,
+  selectShownPoints,
+  type SeriesChartDateRange,
+} from '../components/charts/seriesChartData';
 import { useSeriesData, useSeriesDetail, SeriesDataPoint } from '../hooks/useSeriesData';
+import { useSeriesAnnotations } from '../hooks/useSeriesAnnotations';
+import { useSeriesAnnotationEditor } from '../components/annotations/useSeriesAnnotationEditor';
 import { DataTransformation, describeTransformation } from '../utils/transformations';
 import { formatIsoDate } from '../utils/dates';
+import { buildSeriesCsv, downloadCsv, seriesCsvFileName } from '../utils/seriesCsv';
 
 /**
  * Series page: one economic series' metadata, chart and latest observations, read from
@@ -69,13 +79,57 @@ const formatValue = (value: number | null): string =>
 const hasValues = (points: SeriesDataPoint[] | undefined): points is SeriesDataPoint[] =>
   !!points && points.some(p => p.value !== null);
 
+/**
+ * Today as a local calendar date.
+ * @returns `YYYY-MM-DD`.
+ */
+const todayIso = () => {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+};
+
 const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
   const navigate = useNavigate();
   const [transformation, setTransformation] = React.useState<DataTransformation>('NONE');
+  // Owned here (rather than inside SeriesChart) so the CSV download writes exactly the
+  // range the chart shows. This also means the range now survives a chart remount (an
+  // observations error, or "not enough data" for a transformation); only a series change
+  // (the `key={id}` below) resets it.
+  const [dateRange, setDateRange] = React.useState<SeriesChartDateRange>(EMPTY_DATE_RANGE);
 
   const detail = useSeriesDetail(seriesId);
   const series = detail.data;
   const data = useSeriesData(seriesId, { transformation, enabled: !!series });
+  const annotations = useSeriesAnnotations(seriesId, { enabled: !!series });
+  const [selectedAnnotationId, setSelectedAnnotationId] = React.useState<string | null>(null);
+
+  const chartAnnotations = React.useMemo<SeriesChartAnnotation[]>(
+    () =>
+      (annotations.data ?? []).map(a => ({
+        kind: 'point',
+        id: a.id,
+        label: a.title,
+        date: a.date,
+        color: a.color,
+      })),
+    [annotations.data]
+  );
+
+  // The create form opens on the latest observation unless a point on the chart was clicked.
+  const latestDate = React.useMemo(() => {
+    const points = data.data?.points ?? [];
+    for (let i = points.length - 1; i >= 0; i--) {
+      if (points[i].value !== null) return points[i].date;
+    }
+    return undefined;
+  }, [data.data?.points]);
+  const editor = useSeriesAnnotationEditor({
+    seriesId,
+    defaultDate: latestDate ?? series?.endDate?.slice(0, 10) ?? todayIso(),
+    onCreated: setSelectedAnnotationId,
+    onDeleted: id => setSelectedAnnotationId(selected => (selected === id ? null : selected)),
+  });
 
   if (detail.isLoading) {
     return <PageSkeleton />;
@@ -147,10 +201,32 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
       </Alert>
     );
   } else if (hasValues(points)) {
+    const downloadShownPoints = () => {
+      const csv = buildSeriesCsv({
+        title: series.title,
+        source: series.source?.name ?? '',
+        // Transformed values are percent changes, as the chart's axis says.
+        units: shownTransformation === 'NONE' ? units : '%',
+        transformation: transformationLabel,
+        retrievedAt: data.dataUpdatedAt ? new Date(data.dataUpdatedAt) : null,
+        points: selectShownPoints(points, dateRange),
+      });
+      downloadCsv(seriesCsvFileName(series.externalId, shownTransformation), csv);
+    };
     chart = (
       <Box>
         {data.isPreviousData && <LinearProgress aria-label='Loading transformation' />}
-        <InteractiveChart
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+          <Button
+            size='small'
+            startIcon={<DownloadIcon />}
+            onClick={downloadShownPoints}
+            disabled={data.isPreviousData}
+          >
+            Download CSV
+          </Button>
+        </Box>
+        <SeriesChart
           data={points}
           title={series.title}
           units={units}
@@ -158,6 +234,11 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
           transformation={shownTransformation}
           selectedTransformation={transformation}
           onTransformationChange={setTransformation}
+          dateRange={dateRange}
+          onDateRangeChange={setDateRange}
+          annotations={chartAnnotations}
+          onAnnotationClick={setSelectedAnnotationId}
+          onPointClick={editor.onPointClick}
         />
       </Box>
     );
@@ -227,6 +308,20 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
         </Grid>
 
         <Grid item xs={12} lg={4}>
+          <Box sx={{ mb: 3 }}>
+            <SeriesAnnotationsPanel
+              annotations={annotations.data ?? []}
+              isLoading={annotations.isLoading}
+              error={annotations.isError ? (annotations.error as Error | null) : null}
+              onRetry={() => annotations.refetch()}
+              selectedId={selectedAnnotationId}
+              onSelect={setSelectedAnnotationId}
+              headerAction={editor.headerAction}
+              renderAnnotationExtra={editor.renderAnnotationExtra}
+            />
+          </Box>
+          {editor.dialogs}
+
           <Card sx={{ mb: 3 }}>
             <CardContent>
               <Typography variant='h6' gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>

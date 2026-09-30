@@ -64,6 +64,9 @@ mod tests {
             first_missing_date: None,
             crawl_status: None,
             crawl_error_message: None,
+            dataset_id: None,
+            dimensions: Default::default(),
+            default_measure: None,
         };
 
         let created_series = EconomicSeries::create(&pool, &new_series)
@@ -135,6 +138,9 @@ mod tests {
             first_missing_date: None,
             crawl_status: None,
             crawl_error_message: None,
+            dataset_id: None,
+            dimensions: Default::default(),
+            default_measure: None,
         };
 
         // This should fail due to foreign key constraint

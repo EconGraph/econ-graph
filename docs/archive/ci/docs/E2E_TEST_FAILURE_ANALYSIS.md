@@ -38,7 +38,6 @@ The E2E Comprehensive Tests are failing with "Process completed with exit code 1
 1. `complete-workflow.spec.ts` - Complex navigation flow with many assumptions
 2. `dashboard.spec.ts` - Assumes specific economic indicators are present
 3. `global-analysis.spec.ts` - Likely depends on specific data being available
-4. `professional-analysis.spec.ts` - May have similar data dependencies
 
 ### Medium Priority:
 1. `authentication.spec.ts` - May have auth flow assumptions
@@ -73,7 +72,7 @@ The E2E Comprehensive Tests are failing with "Process completed with exit code 1
 ## Implementation Plan
 
 1. **Phase 1**: Fix the most critical test files (complete-workflow, dashboard)
-2. **Phase 2**: Address data-dependent tests (global-analysis, professional-analysis)
+2. **Phase 2**: Address data-dependent tests (global-analysis)
 3. **Phase 3**: Improve remaining test files
 4. **Phase 4**: Add comprehensive test data setup
 

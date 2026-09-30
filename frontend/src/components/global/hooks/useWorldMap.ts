@@ -8,11 +8,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as d3 from 'd3';
 import { geoPath, geoNaturalEarth1, geoMercator, geoOrthographic } from 'd3-geo';
+import type { GeoProjection } from 'd3-geo';
 import { zoom } from 'd3-zoom';
+import type { ZoomBehavior } from 'd3-zoom';
 
 export interface MapProjection {
   name: string;
-  projection: any;
+  /** Builds a fresh projection, so map instances never share (and mutate) one. */
+  create: () => GeoProjection;
   defaultScale: number;
   defaultCenter: [number, number];
 }
@@ -20,45 +23,55 @@ export interface MapProjection {
 const PROJECTIONS: Record<string, MapProjection> = {
   naturalEarth: {
     name: 'Natural Earth',
-    projection: geoNaturalEarth1(),
+    create: geoNaturalEarth1,
     defaultScale: 150,
     defaultCenter: [0, 0],
   },
   mercator: {
     name: 'Mercator',
-    projection: geoMercator(),
+    create: geoMercator,
     defaultScale: 100,
     defaultCenter: [0, 0],
   },
   orthographic: {
     name: 'Orthographic',
-    projection: geoOrthographic(),
+    create: geoOrthographic,
     defaultScale: 200,
     defaultCenter: [0, 0],
   },
 };
 
+/**
+ * Build a projection of the given type, fitted to the whole globe when the
+ * container size is known and at its default scale otherwise.
+ * @param projectionType Key into PROJECTIONS; unknown types fall back to Natural Earth.
+ * @param size Container width and height in pixels, when measured.
+ * @returns A new projection.
+ */
+const buildProjection = (projectionType: string, size?: [number, number]): GeoProjection => {
+  const proj = PROJECTIONS[projectionType] || PROJECTIONS.naturalEarth;
+  const projection = proj.create();
+  if (size && size[0] > 0 && size[1] > 0) {
+    return projection.fitSize(size, { type: 'Sphere' });
+  }
+  return projection.scale(proj.defaultScale).center(proj.defaultCenter);
+};
+
 export const useWorldMap = (
   svgRef: React.RefObject<SVGSVGElement>,
-  projectionType = 'naturalEarth'
+  projectionType = 'naturalEarth',
+  size?: [number, number]
 ) => {
-  const [projection, setProjection] = useState(() => {
-    const proj = PROJECTIONS[projectionType] || PROJECTIONS.naturalEarth;
-    return proj.projection.scale(proj.defaultScale).center(proj.defaultCenter);
-  });
+  const [projection, setProjection] = useState(() => buildProjection(projectionType, size));
 
   const [path, setPath] = useState(() => geoPath().projection(projection));
 
-  const [zoomBehavior, setZoomBehavior] = useState<any>(null);
+  const [zoomBehavior, setZoomBehavior] = useState<ZoomBehavior<SVGSVGElement, unknown> | null>(
+    null
+  );
 
-  // Update projection when type changes
-  useEffect(() => {
-    const proj = PROJECTIONS[projectionType] || PROJECTIONS.naturalEarth;
-    const newProjection = proj.projection.scale(proj.defaultScale).center(proj.defaultCenter);
-
-    setProjection(newProjection);
-    setPath(geoPath().projection(newProjection));
-  }, [projectionType]);
+  // Projections, path generators and zoom behaviors are all functions, so every
+  // setter below wraps them in an updater; React would otherwise call them as one.
 
   // Create zoom behavior
   useEffect(() => {
@@ -72,34 +85,35 @@ export const useWorldMap = (
         mapContainer.attr('transform', transform);
       });
 
-    setZoomBehavior(zoomBehavior);
+    setZoomBehavior(() => zoomBehavior);
   }, [svgRef]);
 
-  // Handle window resize
+  const [fitWidth, fitHeight] = size ?? [0, 0];
+
+  // Build the projection for the current type, fitted to the map's drawing size
+  // when the caller gives one, and to the container on window resize otherwise
   useEffect(() => {
+    const refit = (fit?: [number, number]) => {
+      const newProjection = buildProjection(projectionType, fit);
+      setProjection(() => newProjection);
+      setPath(() => geoPath().projection(newProjection));
+    };
+
+    if (fitWidth > 0 && fitHeight > 0) {
+      refit([fitWidth, fitHeight]);
+      return;
+    }
+
     const handleResize = () => {
-      if (!svgRef.current) return;
-
-      const svg = d3.select(svgRef.current);
-      const container = svg.node()?.parentElement;
-
-      if (container) {
-        const { width, height } = container.getBoundingClientRect();
-
-        // Update projection to fit container
-        const proj = PROJECTIONS[projectionType] || PROJECTIONS.naturalEarth;
-        const newProjection = proj.projection.scale(Math.min(width, height) / 2).center([0, 0]);
-
-        setProjection(newProjection);
-        setPath(geoPath().projection(newProjection));
-      }
+      const rect = svgRef.current?.getBoundingClientRect();
+      refit(rect ? [rect.width, rect.height] : undefined);
     };
 
     window.addEventListener('resize', handleResize);
     handleResize(); // Initial call
 
     return () => window.removeEventListener('resize', handleResize);
-  }, [projectionType, svgRef]);
+  }, [projectionType, svgRef, fitWidth, fitHeight]);
 
   // Zoom to fit all countries
   const zoomToFit = useCallback(() => {

@@ -1,17 +1,39 @@
 # PostgreSQL initialization ConfigMap
+#
+# The postgres image runs this script once, when the data volume is first
+# initialised. It creates the application user `econgraph`, which the backend
+# and crawler-worker connect as (see DATABASE_URL in the econ-graph-secrets
+# Secret). Its password comes from APP_DB_PASSWORD, which postgres-deployment.yaml
+# reads from the econ-graph-postgres Secret (key app-password). psql reads it
+# from the environment with \getenv, so it appears neither in this file, nor in
+# the SQL text, nor on a command line.
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: postgresql-init
   namespace: econ-graph
 data:
-  init.sql: |
+  10-init-econgraph.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    : "${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set (econ-graph-postgres/app-password)}"
+
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'EOSQL'
+    \getenv app_password APP_DB_PASSWORD
+    \getenv db_name POSTGRES_DB
+
     -- Initialize database for EconGraph
     CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
     CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
     CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
-    -- Create user for the application
-    CREATE USER econgraph WITH ENCRYPTED PASSWORD 'password';
-    GRANT ALL PRIVILEGES ON DATABASE econ_graph TO econgraph;
+    -- Create user for the application. It owns the public schema and the
+    -- objects it creates (the backend runs the migrations at startup);
+    -- pgcrypto, which the migrations create, is a trusted extension, so no
+    -- superuser is needed.
+    CREATE USER econgraph WITH ENCRYPTED PASSWORD :'app_password';
+    GRANT ALL PRIVILEGES ON DATABASE :"db_name" TO econgraph;
+    ALTER SCHEMA public OWNER TO econgraph;
     GRANT ALL ON SCHEMA public TO econgraph;
+    EOSQL

@@ -1,0 +1,118 @@
+# promtool unit tests for the crawler.coverage group of prometheus-rules-crawler.yaml.
+# Run through ../check-prometheus-rules.sh, which writes each rule ConfigMap's files to a temp
+# directory and copies this file next to them.
+rule_files:
+  - crawler.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Coverage: FRED below 95% for longer than 6h fires; BLS at 99% never does. A source with
+  # nothing discovered reports 0 and fires like any other.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_coverage_ratio{source="FRED", pod="crawler-worker-1"}'
+        values: '0.9x96'
+      - series: 'crawler_coverage_ratio{source="BLS", pod="crawler-worker-1"}'
+        values: '0.99x96'
+      - series: 'crawler_coverage_ratio{source="CENSUS", pod="crawler-worker-1"}'
+        values: '0x96'
+    alert_rule_test:
+      - eval_time: 5h
+        alertname: CrawlerCoverageLow
+        exp_alerts: []
+      - eval_time: 7h
+        alertname: CrawlerCoverageLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: CENSUS
+            exp_annotations:
+              summary: Coverage for CENSUS is 0% (target 95%)
+              description: Fewer than 95% of the series discovered for CENSUS have data. Run `crawler coverage` for the numbers and check crawl_queue.error_message for that source.
+          - exp_labels:
+              severity: warning
+              source: FRED
+            exp_annotations:
+              summary: Coverage for FRED is 90% (target 95%)
+              description: Fewer than 95% of the series discovered for FRED have data. Run `crawler coverage` for the numbers and check crawl_queue.error_message for that source.
+
+  # Freshness: FRED gets 3 overdue series at 1h; the alert fires once that lasts 30m.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_coverage_series_overdue{source="FRED", pod="crawler-worker-1"}'
+        values: '0x11 3x24'
+      - series: 'crawler_coverage_series_overdue{source="BLS", pod="crawler-worker-1"}'
+        values: '0x35'
+    alert_rule_test:
+      - eval_time: 1h20m
+        alertname: CrawlerSourceNotRefreshed
+        exp_alerts: []
+      - eval_time: 1h40m
+        alertname: CrawlerSourceNotRefreshed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: FRED
+            exp_annotations:
+              summary: 3 FRED series not refreshed within twice their interval
+              description: FRED has series whose last successful crawl is older than twice their refresh interval (scheduler disabled or behind, source paused, or refreshes failing). `crawler coverage` shows the oldest successful crawl.
+
+  # Crawl failure: a FRED job failed at t=10m (Unix 600). The alert fires at once and clears an
+  # hour after the failure.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_last_failure_timestamp_seconds{source="FRED", pod="crawler-worker-1"}'
+        values: '_ _ 600x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: CrawlerCrawlFailed
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: CrawlerCrawlFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: FRED
+            exp_annotations:
+              summary: A FRED crawl job failed in the last hour
+              description: "A crawl_queue job for FRED ended in status failed. Find it with `SELECT series_id, kind, error_message FROM crawl_queue WHERE source = 'FRED' AND status = 'failed' ORDER BY COALESCE(finished_at, updated_at) DESC LIMIT 20`."
+      - eval_time: 1h15m
+        alertname: CrawlerCrawlFailed
+        exp_alerts: []
+
+  # Coverage gauges stale: refreshed every 5m until 20m, then the query keeps failing. Stale
+  # from 35m (15m without a refresh), firing after the 30m `for`.
+  - interval: 5m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}'
+        values: '1x36'
+      - series: 'crawler_coverage_last_refresh_timestamp_seconds{pod="crawler-worker-1"}'
+        values: '0 300 600 900 1200x32'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CrawlerCoverageStale
+        exp_alerts: []
+      - eval_time: 1h10m
+        alertname: CrawlerCoverageStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: crawler-worker coverage metrics are stale
+              description: crawler-worker is running but has not refreshed the crawler_coverage_* gauges for over 15 minutes (the coverage query is failing, see the worker log for "updating coverage gauges failed", or /metrics is not scraped), so the coverage and freshness alerts see old numbers.
+
+  # Gauges never scraped while the worker runs.
+  - interval: 5m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"}'
+        values: '1x24'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: CrawlerCoverageStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: crawler-worker coverage metrics are stale
+              description: crawler-worker is running but has not refreshed the crawler_coverage_* gauges for over 15 minutes (the coverage query is failing, see the worker log for "updating coverage gauges failed", or /metrics is not scraped), so the coverage and freshness alerts see old numbers.

@@ -14,6 +14,25 @@ pub type DatabasePool = Pool<AsyncPgConnection>;
 /// Type alias for a pooled connection
 pub type PooledConn<'a> = PooledConnection<'a, AsyncPgConnection>;
 
+/// A database URL with its password (and any other userinfo) removed, safe to log.
+/// Falls back to a fixed placeholder if `database_url` doesn't parse as a URL, so a
+/// malformed value never lands in a log verbatim.
+///
+/// libpq also accepts credentials as URI query parameters (e.g. `?password=...`), so the
+/// query string and fragment are dropped entirely rather than deny-listing parameter names.
+pub fn redact_database_url(database_url: &str) -> String {
+    match url::Url::parse(database_url) {
+        Ok(mut url) => {
+            let _ = url.set_password(None);
+            let _ = url.set_username("");
+            url.set_query(None);
+            url.set_fragment(None);
+            url.to_string()
+        }
+        Err(_) => "<unparseable database URL, redacted>".to_string(),
+    }
+}
+
 /// Create a database connection pool
 pub async fn create_pool(database_url: &str) -> AppResult<DatabasePool> {
     let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
@@ -56,10 +75,16 @@ pub async fn test_connection(pool: &DatabasePool) -> AppResult<()> {
     }
 }
 
+/// Advisory-lock key migrations take out for the duration of the run, so that when several
+/// replicas start at once only one of them runs `diesel`'s migrations while the rest block on
+/// `pg_advisory_lock` instead of racing each other over the `__diesel_schema_migrations` table.
+/// Arbitrary but fixed: any i64 works as long as every replica uses the same one.
+const MIGRATION_LOCK_KEY: i64 = 0x6567_5f6d_6967_7261; // "eg_migra" as bytes
+
 /// Run database migrations
 /// Note: Migrations require a synchronous connection
 pub async fn run_migrations(database_url: &str) -> AppResult<()> {
-    use diesel::Connection;
+    use diesel::{Connection, RunQueryDsl};
     use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 
     const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
@@ -78,7 +103,7 @@ pub async fn run_migrations(database_url: &str) -> AppResult<()> {
 
         info!(
             "Attempting to connect to database for migrations: {}",
-            formatted_url
+            redact_database_url(&formatted_url)
         );
 
         // Try to establish connection
@@ -91,11 +116,33 @@ pub async fn run_migrations(database_url: &str) -> AppResult<()> {
             error
         })?;
 
-        info!("Database connection established, running migrations...");
+        info!("Database connection established, waiting for migration lock...");
 
-        conn.run_pending_migrations(MIGRATIONS)
-            .map_err(|e| AppError::InternalError(format!("Failed to run migrations: {}", e)))?;
+        // Blocks here until whichever replica got there first releases the lock (or crashes /
+        // disconnects, which releases it automatically since it's session-scoped).
+        diesel::sql_query(format!("SELECT pg_advisory_lock({MIGRATION_LOCK_KEY})"))
+            .execute(&mut conn)
+            .map_err(|e| {
+                AppError::InternalError(format!("Failed to acquire migration lock: {}", e))
+            })?;
 
+        info!("Migration lock acquired, running migrations...");
+
+        let migration_result = conn
+            .run_pending_migrations(MIGRATIONS)
+            .map(|_| ())
+            .map_err(|e| AppError::InternalError(format!("Failed to run migrations: {}", e)));
+
+        if let Err(e) =
+            diesel::sql_query(format!("SELECT pg_advisory_unlock({MIGRATION_LOCK_KEY})"))
+                .execute(&mut conn)
+        {
+            // The connection is about to be dropped either way, which also releases the lock,
+            // so this is a log line rather than a returned error.
+            tracing::warn!("Failed to release migration lock explicitly: {}", e);
+        }
+
+        migration_result?;
         info!("Migrations completed successfully");
         Ok(())
     })
@@ -106,8 +153,10 @@ pub async fn run_migrations(database_url: &str) -> AppResult<()> {
     Ok(())
 }
 
-/// Execute a database transaction
-/// Note: Simplified implementation - transactions are complex with current type setup
+/// Execute an operation with a connection acquired from the database pool.
+///
+/// This helper does not begin, commit, or roll back a transaction. The caller is
+/// responsible for transaction management within the supplied closure if needed.
 pub async fn execute_with_connection<T, E, F, Fut>(pool: &DatabasePool, f: F) -> Result<T, E>
 where
     F: FnOnce(&mut AsyncPgConnection) -> Fut + Send,
@@ -118,7 +167,7 @@ where
     let mut conn = pool.get().await.map_err(|e| {
         let error_msg = format!("Failed to get database connection: {}", e);
         tracing::error!(
-            "Database connection pool error in transaction: {}",
+            "Database connection pool error in execute_with_connection: {}",
             error_msg
         );
         E::from(AppError::InternalError(error_msg))
@@ -137,6 +186,46 @@ pub async fn check_database_health(pool: &DatabasePool) -> AppResult<()> {
 mod tests {
     use super::*;
     // Tests now use TestContainer directly for better control
+
+    #[test]
+    fn redact_database_url_strips_credentials() {
+        assert_eq!(
+            redact_database_url("postgres://econgraph:s3cret@db.internal:5432/econ_graph"),
+            "postgres://db.internal:5432/econ_graph"
+        );
+    }
+
+    #[test]
+    fn redact_database_url_handles_username_only() {
+        assert_eq!(
+            redact_database_url("postgres://econgraph@db.internal/econ_graph"),
+            "postgres://db.internal/econ_graph"
+        );
+    }
+
+    #[test]
+    fn redact_database_url_falls_back_on_unparseable_input() {
+        assert_eq!(
+            redact_database_url("not a url"),
+            "<unparseable database URL, redacted>"
+        );
+    }
+
+    #[test]
+    fn redact_database_url_strips_a_password_query_parameter() {
+        assert_eq!(
+            redact_database_url("postgresql://db.internal/econ_graph?password=s3cret"),
+            "postgresql://db.internal/econ_graph"
+        );
+    }
+
+    #[test]
+    fn redact_database_url_strips_the_whole_query_string_when_mixed_with_other_params() {
+        assert_eq!(
+            redact_database_url("postgresql://db.internal/econ_graph?sslmode=require&password=x"),
+            "postgresql://db.internal/econ_graph"
+        );
+    }
 
     #[tokio::test]
     #[serial_test::serial]
@@ -158,6 +247,58 @@ mod tests {
             .get()
             .await
             .expect("Should be able to get connection from pool");
+    }
+
+    /// Proves `run_migrations` actually blocks on the advisory lock rather than racing ahead: it
+    /// takes the lock itself on a separate connection, starts `run_migrations` in the background,
+    /// and asserts the task is still pending while the lock is held and only completes once the
+    /// lock is released. A test that instead just ran two `run_migrations` calls concurrently
+    /// would pass even without the lock, since both would likely finish before either raced the
+    /// other (few migrations, no contention to force a slow one to wait).
+    ///
+    /// Connects directly with `DATABASE_URL` (unlike the other tests here) because
+    /// `TestContainer` always starts a throwaway Docker container even when pointed at an
+    /// external database, and this test's environment has no Docker daemon.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_migrations_block_while_another_session_holds_the_lock() {
+        use diesel_async::RunQueryDsl;
+
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+
+        let pool = create_pool(&database_url)
+            .await
+            .expect("Should connect to DATABASE_URL");
+
+        // Hold the same lock `run_migrations` takes, on our own connection, so a concurrent
+        // `run_migrations` call has to block on it rather than racing ahead.
+        let mut lock_conn = pool.get().await.expect("Should get a connection");
+        diesel::sql_query(format!("SELECT pg_advisory_lock({MIGRATION_LOCK_KEY})"))
+            .execute(&mut lock_conn)
+            .await
+            .expect("Should acquire the lock on the holder connection");
+
+        let url_for_task = database_url.clone();
+        let migration_task = tokio::spawn(async move { run_migrations(&url_for_task).await });
+
+        // Give the task time to reach (and block on) the lock.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            !migration_task.is_finished(),
+            "run_migrations should still be blocked on the advisory lock"
+        );
+
+        diesel::sql_query(format!("SELECT pg_advisory_unlock({MIGRATION_LOCK_KEY})"))
+            .execute(&mut lock_conn)
+            .await
+            .expect("Should release the lock");
+
+        tokio::time::timeout(Duration::from_secs(10), migration_task)
+            .await
+            .expect("run_migrations should complete soon after the lock is released")
+            .expect("migration task should not panic")
+            .expect("run_migrations should succeed once the lock is available");
     }
 
     #[tokio::test]
