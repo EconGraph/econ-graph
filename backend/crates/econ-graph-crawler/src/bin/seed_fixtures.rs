@@ -133,6 +133,14 @@ async fn run(args: Args) -> anyhow::Result<()> {
     let pool = econ_graph_core::create_pool(&args.database_url)
         .await
         .context("connecting to the database")?;
+    // Every registered adapter's dataset, synced up front: persist_series rejects a series naming
+    // a dataset that isn't in the table yet (see `dataset_ids` in persist.rs).
+    let datasets =
+        econ_graph_crawler::DatasetCatalog::load(&econ_graph_crawler::sources::default_registry())
+            .context("loading dataset definitions")?;
+    persist::sync_datasets(&pool, &datasets)
+        .await
+        .context("syncing datasets")?;
     // Fake API keys, fast rate limits and short timeouts; nothing here reaches a real upstream.
     let ctx = test_ctx();
 

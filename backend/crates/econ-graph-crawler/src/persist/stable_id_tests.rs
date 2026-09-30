@@ -322,12 +322,13 @@ async fn unlisted_series_are_retired_not_deleted_and_come_back() {
     assert_eq!(before, again);
 }
 
-/// Regression for the review finding on #219: Census discovery only ever lists `CENSUS_BDS_*`
-/// series, but the Census data source also holds ACS `series_metadata` rows seeded by the initial
-/// migration (`B01001001`, `B19013_001E`). A complete-catalog retirement for Census must not
-/// retire those, and `CensusAdapter::retirement_scope_prefix` (`ID_PREFIX`, `"CENSUS_BDS_"`)
-/// exists to stop it. See `unlisted_series_are_retired_not_deleted_and_come_back` for the
-/// unscoped (whole-source) case this specializes.
+/// Regression for the review finding on #219: Census discovery only ever lists `bds/*` series
+/// (the canonical dataset ids from DS-5), but the Census data source also holds ACS
+/// `series_metadata` rows seeded by the initial migration (`B01001001`, `B19013_001E`). A
+/// complete-catalog retirement for Census must not retire those, and
+/// `CensusAdapter::retirement_scope_prefix` (`ID_PREFIX`, `"bds/"`) exists to stop it. See
+/// `unlisted_series_are_retired_not_deleted_and_come_back` for the unscoped (whole-source) case
+/// this specializes.
 #[tokio::test]
 async fn census_retirement_is_scoped_to_bds_and_never_touches_seeded_acs_rows() {
     use crate::sources::census::CensusAdapter;
@@ -338,14 +339,14 @@ async fn census_retirement_is_scoped_to_bds_and_never_touches_seeded_acs_rows() 
     let adapter = CensusAdapter::default();
     assert!(adapter.discovery_is_complete());
     let scope = adapter.retirement_scope_prefix();
-    assert_eq!(scope, Some("CENSUS_BDS_"));
+    assert_eq!(scope, Some("bds/"));
 
     // The seeded ACS rows exist and are active before any Census discovery runs.
     assert_eq!(active(p, "B01001001").await, (None, Some(true)));
     assert_eq!(active(p, "B19013_001E").await, (None, Some(true)));
 
     // A BDS discovery that lists one national series and nothing else.
-    let bds = listed(&["CENSUS_BDS_ESTAB_us"]);
+    let bds = listed(&["bds/national..ESTAB"]);
     persist_discovered(p, SourceId::Census, &bds).await.unwrap();
     let retired = retire_unlisted(p, SourceId::Census, &bds, scope)
         .await
@@ -356,7 +357,7 @@ async fn census_retirement_is_scoped_to_bds_and_never_touches_seeded_acs_rows() 
     assert_eq!(retired.series_retired, 0, "{retired:?}");
     assert_eq!(active(p, "B01001001").await, (None, Some(true)));
     assert_eq!(active(p, "B19013_001E").await, (None, Some(true)));
-    assert_eq!(active(p, "CENSUS_BDS_ESTAB_us").await, (None, Some(true)));
+    assert_eq!(active(p, "bds/national..ESTAB").await, (None, Some(true)));
 
     // An unscoped call (as if the adapter forgot to scope itself) would retire them: proves the
     // scope parameter, not some other accident, is what protects the ACS rows above.
