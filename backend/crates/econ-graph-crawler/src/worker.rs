@@ -715,7 +715,12 @@ impl Worker {
                 tracing::warn!(id = %item.id, %error, "result transaction rolled back");
                 let error = db_error(error);
                 match self
-                    .commit_result(source, item, Err(error), duration + finish_started.elapsed())
+                    .commit_result(
+                        source,
+                        item,
+                        Err(error),
+                        duration + finish_started.elapsed(),
+                    )
                     .await
                 {
                     Ok(outcome) => outcome,
