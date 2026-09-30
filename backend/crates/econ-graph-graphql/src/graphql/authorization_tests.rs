@@ -253,7 +253,16 @@ async fn changing_is_active_needs_the_suspend_role() {
     assert!(!errs.iter().any(|e| is_auth_error(e)), "{errs:?}");
 }
 
-/// DB-backed user administration checks skip when `DATABASE_URL` is unavailable.
+/// Security regressions must execute against PostgreSQL, never silently pass without it.
+fn required_database_url() -> String {
+    let url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL is required for user administration security regressions");
+    assert!(
+        !url.trim().is_empty(),
+        "DATABASE_URL must not be empty for user administration security regressions"
+    );
+    url
+}
 async fn insert_user(pool: &DatabasePool) -> User {
     use diesel::prelude::*;
     use diesel_async::RunQueryDsl;
@@ -311,10 +320,7 @@ async fn run_user_mutation(pool: &DatabasePool, roles: &[Role], query: &str) -> 
 /// another user's roles and stopped requiring the full staff set before this test was added.
 #[tokio::test]
 async fn narrow_role_cannot_act_on_another_user() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("DATABASE_URL not set; skipping user administration test");
-        return;
-    };
+    let url = required_database_url();
     let _guard = crate::graphql::TEST_DB_LOCK.lock().await;
     econ_graph_core::database::run_migrations(&url)
         .await
@@ -361,10 +367,7 @@ async fn narrow_role_cannot_act_on_another_user() {
 
 #[tokio::test]
 async fn full_staff_set_can_act_on_another_user() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("DATABASE_URL not set; skipping user administration test");
-        return;
-    };
+    let url = required_database_url();
     let _guard = crate::graphql::TEST_DB_LOCK.lock().await;
     econ_graph_core::database::run_migrations(&url)
         .await
@@ -410,10 +413,7 @@ async fn full_staff_set_can_act_on_another_user() {
 /// mutation needs its own account: delete removes the row, so it runs last.
 #[tokio::test]
 async fn narrow_role_can_act_on_self() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("DATABASE_URL not set; skipping user administration test");
-        return;
-    };
+    let url = required_database_url();
     let _guard = crate::graphql::TEST_DB_LOCK.lock().await;
     econ_graph_core::database::run_migrations(&url)
         .await
@@ -472,10 +472,7 @@ async fn narrow_role_can_act_on_self() {
 /// that target even exists: the gate must not leak "User not found" for a nonexistent id.
 #[tokio::test]
 async fn narrow_role_denial_does_not_leak_whether_the_target_exists() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("DATABASE_URL not set; skipping user administration test");
-        return;
-    };
+    let url = required_database_url();
     let _guard = crate::graphql::TEST_DB_LOCK.lock().await;
     econ_graph_core::database::run_migrations(&url)
         .await
@@ -510,12 +507,70 @@ async fn narrow_role_denial_does_not_leak_whether_the_target_exists() {
     }
 }
 
+/// Self access bypasses only the staff-set gate, never the named operation role.
+#[tokio::test]
+async fn self_access_still_requires_named_operation_roles() {
+    let url = required_database_url();
+    let _guard = crate::graphql::TEST_DB_LOCK.lock().await;
+    econ_graph_core::database::run_migrations(&url)
+        .await
+        .expect("migrations");
+    let pool = econ_graph_core::database::create_pool(&url)
+        .await
+        .expect("pool");
+    let me = insert_user(&pool).await;
+    let id = me.id;
+    for (roles, query) in [
+        (
+            all_but(Role::AdminUsersUpdate),
+            format!(
+                r#"mutation {{ updateUser(id: "{id}", input: {{ name: "Denied" }}) {{ __typename }} }}"#
+            ),
+        ),
+        (
+            all_but(Role::AdminUsersDelete),
+            format!(r#"mutation {{ deleteUser(id: "{id}") }}"#),
+        ),
+        (
+            all_but(Role::AdminUsersSuspend),
+            format!(r#"mutation {{ suspendUser(id: "{id}") }}"#),
+        ),
+        (
+            all_but(Role::AdminUsersSuspend),
+            format!(r#"mutation {{ activateUser(id: "{id}") }}"#),
+        ),
+        (
+            vec![Role::AdminUsersUpdate],
+            format!(
+                r#"mutation {{ updateUser(id: "{id}", input: {{ isActive: false }}) {{ __typename }} }}"#
+            ),
+        ),
+        (
+            vec![Role::AdminUsersSuspend],
+            format!(
+                r#"mutation {{ updateUser(id: "{id}", input: {{ isActive: false }}) {{ __typename }} }}"#
+            ),
+        ),
+    ] {
+        let schema =
+            create_schema_with_data(pool.clone(), Arc::new(caller_with(me.clone(), roles)));
+        let errs: Vec<String> = schema
+            .execute(query.as_str())
+            .await
+            .errors
+            .into_iter()
+            .map(|e| e.message)
+            .collect();
+        assert_eq!(errs, ["Insufficient permissions"], "{query}: {errs:?}");
+    }
+    let unchanged = read_user(&pool, id).await.unwrap();
+    assert_eq!(unchanged.name, me.name);
+    assert!(unchanged.is_active);
+}
+
 #[tokio::test]
 async fn update_user_email_conflict_leaves_other_fields_unchanged() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("DATABASE_URL not set; skipping user update test");
-        return;
-    };
+    let url = required_database_url();
     let _guard = crate::graphql::TEST_DB_LOCK.lock().await;
     econ_graph_core::database::run_migrations(&url)
         .await
