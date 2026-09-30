@@ -68,6 +68,10 @@ env:
   # From the release's diesel_cli-x86_64-unknown-linux-gnu.tar.xz.sha256
   DIESEL_SHA256: cecfdb4f840e48ad230f77719fedc9720df351ab217de32bd1dd75cfe906b957
   DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
+  # promtool for the Prometheus rule checks, from the release tarball
+  PROMETHEUS_VERSION: 3.5.0
+  # From the release's sha256sums.txt (prometheus-3.5.0.linux-amd64.tar.gz)
+  PROMETHEUS_SHA256: e811827af26d822afb09a4f28314f61b618b12cff5369835a67f674d8b46f39a
 
 jobs:
   changes:
@@ -194,6 +198,28 @@ jobs:
         # jobs reuse it instead of recompiling deps under a second feature set
         cargo build --verbose --all-targets
       working-directory: backend
+
+  prometheus-rules:
+    name: Prometheus Rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install promtool
+      run: |
+        tarball="prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+        curl -sSfL -o "$tarball" "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/${tarball}"
+        echo "${PROMETHEUS_SHA256}  ${tarball}" | sha256sum -c -
+        tar xzf "$tarball" --strip-components=1 "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+        sudo install promtool /usr/local/bin/promtool
+
+    - name: Check rules and run rule tests
+      run: |
+        python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+        k8s/monitoring/check-prometheus-rules.sh
 
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
@@ -2363,3 +2389,4 @@ jobs:
 # Updated Wed Sep 17 08:11:38 PDT 2025
 
 # Workflow cache refresh: 2025-09-17 08:25:07 PDT
+
