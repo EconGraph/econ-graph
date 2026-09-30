@@ -1,0 +1,5 @@
+developer_instructions = """
+Omit AI attribution from git commit messages and pull request titles and bodies.
+Do not add AI Co-authored-by trailers, generated-by footers, or ChatGPT/Codex/Claude
+session links to commits or pull requests.
+"""

@@ -2,14 +2,14 @@
 
 > **Democratizing economic intelligence through modern, affordable, open-source technology that delivers 90% cost savings vs. Bloomberg Terminal**
 
-[![Tests](https://img.shields.io/badge/Tests-157%20Passing-brightgreen)](https://github.com/jmalicki/econ-graph/actions)
+[![Tests](https://img.shields.io/badge/Tests-Unit%20%7C%20Integration%20%7C%20E2E-blue)](https://github.com/jmalicki/econ-graph/actions)
 [![Backend](https://img.shields.io/badge/Backend-Rust%20%2B%20Axum-orange)](https://github.com/jmalicki/econ-graph/tree/main/backend)
 [![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-blue)](https://github.com/jmalicki/econ-graph/tree/main/frontend)
 [![License](https://img.shields.io/badge/License-MS--RSL-red.svg)](LICENSE)
 
 ## 🎯 **What EconGraph Does**
 
-EconGraph is a **production-ready economic data intelligence platform** that transforms how economists, analysts, and researchers access and analyze economic data. Built with modern technology and designed for enterprise use, it provides:
+EconGraph is an **economic data intelligence platform** that transforms how economists, analysts, and researchers access and analyze economic data. Built with modern technology and designed for enterprise use, it provides:
 
 ### 📊 **Core Capabilities**
 - **🌍 Global Data Access**: Unified interface to FRED, BLS, Census, World Bank, OECD, ECB, BOE data sources
@@ -22,7 +22,7 @@ EconGraph is a **production-ready economic data intelligence platform** that tra
 ### 💼 **Business Value**
 - **90% Cost Savings**: Delivers Bloomberg Terminal-level functionality at a fraction of the cost
 - **Open Source**: Full customization and source code access for enterprise needs
-- **Enterprise Ready**: Scalable architecture supporting thousands of concurrent users
+- **Deployment Foundation**: Kubernetes support provides a base for scaling and improving availability as deployments mature
 - **API-First Design**: Comprehensive GraphQL API for programmatic access and integrations
 - **Real-time Updates**: Automated data synchronization with source systems
 
@@ -63,7 +63,7 @@ EconGraph is a **production-ready economic data intelligence platform** that tra
 ### 🎯 **Major Achievements with AI Assistance**
 - **Frontend**: Complete React/TypeScript app with Material-UI, Chart.js, routing
 - **Backend**: Rust/Axum server with GraphQL, PostgreSQL, Diesel ORM, Docker
-- **Testing**: 157+ passing tests (unit, integration, e2e) with testcontainers
+- **Testing**: Unit, integration, and browser E2E tests
 - **CI/CD**: GitHub Actions workflows with security scanning, formatting, linting
 - **Documentation**: Google-style comments, comprehensive README, investor pitch
 - **Features**: Real-time collaboration, economic data visualization, transformations
@@ -86,13 +86,13 @@ EconGraph is a **production-ready economic data intelligence platform** that tra
 
 ## 🎯 **Product Overview**
 
-EconGraph is a **production-ready economic data intelligence platform** that transforms how economists, analysts, and researchers access and analyze economic data. Built with modern technology and designed for enterprise use.
+EconGraph is an **economic data intelligence platform** that transforms how economists, analysts, and researchers access and analyze economic data. Built with modern technology and designed for enterprise use.
 
 ### 💼 **Product Value**
 - **Modern User Experience**: Intuitive interface with responsive design
 - **Open Source Transparency**: Full customization and source code access
 - **Real-time Data Access**: Live updates from FRED, BLS, Census, World Bank, OECD
-- **Enterprise Ready**: Scalable architecture supporting thousands of concurrent users
+- **Deployment Foundation**: Kubernetes support provides a base for scaling and improving availability as deployments mature
 - **Comprehensive API**: GraphQL API for programmatic access and integrations
 
 ### 🎯 **Core Product Features**
@@ -169,28 +169,26 @@ EconGraph is a **production-ready economic data intelligence platform** that tra
 - **Open Source**: Full source code access and customization
 - **API Access**: Comprehensive GraphQL API for programmatic access
 - **Documentation**: Extensive technical documentation and examples
-- **Testing**: Comprehensive test suite with 157 passing tests
+- **Testing**: Unit, database integration, component, and browser E2E tests
 
 ---
 
 ## 🎯 **Product Quality & Reliability**
 
-### **📊 Enterprise-Grade Quality Assurance**
+### **📊 Testing Across Application Layers**
 
-EconGraph maintains the highest standards of quality and reliability expected by enterprise customers:
+EconGraph is well tested across its application layers, with unit tests,
+database-backed integration tests, frontend component tests, and browser E2E tests.
+Examples include database and API behavior, data transformations, sign-in, series
+search, and crawler controls. These tests exercise both individual components and
+complete user workflows.
 
-- ✅ **157 Comprehensive Tests**: Ensuring every feature works flawlessly
-- ✅ **Backend Reliability**: 64 tests covering database, API, and business logic
-- ✅ **Frontend Excellence**: 93 tests ensuring smooth user experience
-- ✅ **Integration Testing**: Real database testing with production-like data
-- ✅ **Performance Validation**: Load testing ensuring scalability
+### 🚀 **Scaling & Availability Foundation**
 
-### 🚀 **Quality Metrics**
-- **Test Coverage**: 90%+ code coverage across all components
-- **Performance**: Sub-second response times for typical queries
-- **Reliability**: 99.9% uptime with automated failover
-- **Security**: Enterprise-grade authentication and data protection
-- **Scalability**: Tested to support 1000+ concurrent users
+Containerization and Kubernetes provide a foundation for replication, health checks,
+and rolling updates, making it easier to develop scaling and availability capabilities.
+Capacity and uptime depend on the deployed configuration and measured workloads;
+the architecture alone does not establish a capacity benchmark or uptime guarantee.
 
 
 ---
@@ -200,21 +198,21 @@ EconGraph maintains the highest standards of quality and reliability expected by
 ### **🚀 Modern Architecture Advantages**
 
 #### **Backend Performance & Reliability**
-- **Rust + Axum**: Memory-safe, high-performance web framework delivering 10x faster response times
+- **Rust + Axum**: Memory-safe language with asynchronous request handling
 - **PostgreSQL + Diesel**: Enterprise-grade database with type-safe operations and ACID compliance
-- **GraphQL API**: Efficient data fetching reducing bandwidth by 60% vs. REST APIs
-- **Async Processing**: Non-blocking operations supporting 1000+ concurrent users
+- **GraphQL API**: Clients select the fields they need in each request
+- **Async Processing**: Non-blocking operations provide a foundation for handling concurrent requests
 
 #### **Frontend User Experience**
 - **React + TypeScript**: Modern, maintainable UI with full type safety
 - **Chart.js Integration**: Professional-grade data visualization with smooth animations
 - **Material-UI Design**: Consistent, accessible design system meeting enterprise standards
-- **React Query**: Intelligent caching reducing load times by 70%
+- **React Query**: Client-side caching helps reuse fetched data
 
 #### **Enterprise DevOps**
 - **Docker Containerization**: Consistent deployment across all environments
-- **GitHub Actions CI/CD**: Automated testing and deployment with 99.9% reliability
-- **Comprehensive Testing**: Jest + Playwright ensuring zero-downtime deployments
+- **GitHub Actions CI/CD**: Automated build and test workflows
+- **Comprehensive Testing**: Component and browser E2E tests exercise application behavior before changes ship
 - **Security Scanning**: Automated vulnerability detection and compliance monitoring
 
 ---
@@ -306,7 +304,7 @@ EconGraph maintains the highest standards of quality and reliability expected by
 ### 🎯 **Major Achievements with AI Assistance**
 - **Frontend**: Complete React/TypeScript app with Material-UI, Chart.js, routing
 - **Backend**: Rust/Axum server with GraphQL, PostgreSQL, Diesel ORM, Docker
-- **Testing**: 157+ passing tests (unit, integration, e2e) with testcontainers
+- **Testing**: Unit, integration, and browser E2E tests
 - **CI/CD**: GitHub Actions workflows with security scanning, formatting, linting
 - **Documentation**: Google-style comments, comprehensive README, investor pitch
 - **Features**: Real-time collaboration, economic data visualization, transformations
@@ -404,11 +402,11 @@ newgrp microk8s
 
 ## 📊 **Performance**
 
-### **Current Performance**
-- **⚡ API Response**: ~100ms for typical queries
-- **📊 Chart Rendering**: ~500ms for 1000 data points  
-- **🔍 Search Speed**: ~200ms for text queries
-- **💾 Memory Usage**: Efficient Rust backend with minimal overhead
+### **Performance Foundation**
+- **⚡ API**: Asynchronous request handling and database connection pooling
+- **📊 Charts**: Time series visualization with data transformations
+- **🔍 Search**: PostgreSQL full-text search and indexing
+- **💾 Measurement**: Query latency, rendering time, and resource use depend on the workload and deployment
 
 ### **Data Handling**
 - **📈 Time Series**: Handles thousands of data points per series
@@ -451,15 +449,16 @@ This project is licensed under the Microsoft Reference Source License (MS-RSL) -
 
 <div align="center">
 
-### 🎯 **Ready to explore this economic data visualization prototype?**
+### 🎯 **Explore the economic data visualization platform**
 
 **[🚀 Try the Live Demo](#getting-started)** • **[📚 Read the Code](https://github.com/jmalicki/econ-graph)**
 
 ---
 
-**Built as a learning project for full-stack development with Rust and React**
+**Built with Rust and React**
 
 </div># PostgreSQL 18 Environment
 # Trigger CI test
 # Package-lock.json sync fix
 # CI Trigger
+
