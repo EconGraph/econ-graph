@@ -153,8 +153,10 @@ pub async fn run_migrations(database_url: &str) -> AppResult<()> {
     Ok(())
 }
 
-/// Execute a database transaction
-/// Note: Simplified implementation - transactions are complex with current type setup
+/// Execute an operation with a connection acquired from the database pool.
+///
+/// This helper does not begin, commit, or roll back a transaction. The caller is
+/// responsible for transaction management within the supplied closure if needed.
 pub async fn execute_with_connection<T, E, F, Fut>(pool: &DatabasePool, f: F) -> Result<T, E>
 where
     F: FnOnce(&mut AsyncPgConnection) -> Fut + Send,
@@ -165,7 +167,7 @@ where
     let mut conn = pool.get().await.map_err(|e| {
         let error_msg = format!("Failed to get database connection: {}", e);
         tracing::error!(
-            "Database connection pool error in transaction: {}",
+            "Database connection pool error in execute_with_connection: {}",
             error_msg
         );
         E::from(AppError::InternalError(error_msg))

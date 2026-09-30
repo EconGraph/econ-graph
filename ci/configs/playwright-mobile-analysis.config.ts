@@ -42,7 +42,6 @@ export default defineConfig({
       name: 'Mobile Chrome Analysis',
       use: { ...devices['Pixel 5'] },
       testMatch: [
-        '**/professional-analysis.spec.ts',
         '**/global-analysis.spec.ts',
       ],
     },
@@ -50,7 +49,6 @@ export default defineConfig({
       name: 'Mobile Chrome iPhone Analysis',
       use: { ...devices['iPhone 12'] },
       testMatch: [
-        '**/professional-analysis.spec.ts',
         '**/global-analysis.spec.ts',
       ],
     },

@@ -201,7 +201,7 @@ impl Mutation {
         id: ID,
         input: UpdateUserInput,
     ) -> Result<UserType> {
-        require_role(ctx, Role::AdminUsersUpdate)?;
+        let caller = require_role(ctx, Role::AdminUsersUpdate)?;
         if input.is_active.is_some() {
             require_role(ctx, Role::AdminUsersSuspend)?;
         }
@@ -229,6 +229,7 @@ impl Mutation {
             return Err(GraphQLError::new("No fields to update"));
         }
         let mut conn = pool.get().await?;
+        require_manageable(ctx, caller, user_id)?;
         let final_user: User = diesel::update(users::table.filter(users::id.eq(user_id)))
             .set(&changes)
             .returning(User::as_select())
@@ -250,7 +251,7 @@ impl Mutation {
 
     /// Delete a user (requires `admin.users:delete`)
     async fn delete_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        require_role(ctx, Role::AdminUsersDelete)?;
+        let caller = require_role(ctx, Role::AdminUsersDelete)?;
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
 
@@ -259,6 +260,7 @@ impl Mutation {
         use econ_graph_core::schema::users;
 
         let mut conn = pool.get().await?;
+        require_manageable(ctx, caller, user_id)?;
 
         // Delete user (cascade will handle related records)
         let deleted = diesel::delete(users::table.filter(users::id.eq(user_id)))
@@ -272,7 +274,7 @@ impl Mutation {
 
     /// Suspend a user account (requires `admin.users:suspend`)
     async fn suspend_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        require_role(ctx, Role::AdminUsersSuspend)?;
+        let caller = require_role(ctx, Role::AdminUsersSuspend)?;
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
 
@@ -281,6 +283,7 @@ impl Mutation {
         use econ_graph_core::schema::users;
 
         let mut conn = pool.get().await?;
+        require_manageable(ctx, caller, user_id)?;
 
         // Suspend user
         let updated = diesel::update(users::table.filter(users::id.eq(user_id)))
@@ -295,7 +298,7 @@ impl Mutation {
 
     /// Activate a user account (requires `admin.users:suspend`)
     async fn activate_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        require_role(ctx, Role::AdminUsersSuspend)?;
+        let caller = require_role(ctx, Role::AdminUsersSuspend)?;
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
 
@@ -304,6 +307,7 @@ impl Mutation {
         use econ_graph_core::schema::users;
 
         let mut conn = pool.get().await?;
+        require_manageable(ctx, caller, user_id)?;
 
         // Activate user
         let updated = diesel::update(users::table.filter(users::id.eq(user_id)))
@@ -333,10 +337,19 @@ fn plan_trigger_crawl(
             "priority must be between 1 and 10 (got {priority})"
         ));
     }
+    // Sources with no adapter in this build (release leaves out the static catalogs; IMF has
+    // none at all) would otherwise queue a job the worker can only fail with "no adapter".
+    // SEC has no adapter in the registry either: it's fetched via `fetch_filing`, not `plan_trigger_crawl`.
+    let registry = econ_graph_crawler::sources::default_registry();
     let parse = |s: &str| {
-        s.trim()
+        let trimmed = s.trim();
+        let id = trimmed
             .parse::<SourceId>()
-            .map_err(|_| format!("unknown source {:?}", s.trim()))
+            .map_err(|_| format!("unknown source {trimmed:?}"))?;
+        if id != SourceId::Sec && registry.get(id).is_none() {
+            return Err(format!("source {trimmed:?} is not available in this build"));
+        }
+        Ok(id)
     };
     let mut sources: Vec<SourceId> = Vec::new();
     for s in input
@@ -436,6 +449,46 @@ impl AdminUserChangeset {
     }
 }
 
+/// Refuse with "Insufficient permissions", logging the denial like `require_role` does.
+fn deny_user_admin(ctx: &Context<'_>, caller: &Principal, why: &str) -> GraphQLError {
+    let context = ctx.data::<Arc<GraphQLContext>>().ok();
+    tracing::warn!(
+        request_id = context.map_or("unknown", |c| c.request_id.as_str()),
+        client_ip = context
+            .and_then(|c| c.client_ip.as_deref())
+            .unwrap_or("unknown"),
+        "User {} denied: {why}",
+        caller.user_id
+    );
+    GraphQLError::new("Insufficient permissions")
+}
+
+/// Whether `caller` holds every staff role in the catalog.
+fn holds_every_staff_role(caller: &Principal) -> bool {
+    Role::all()
+        .iter()
+        .filter(|role| role.is_staff())
+        .all(|&role| caller.has_role(role))
+}
+
+/// Refuse to act on another user unless the caller holds every staff role.
+///
+/// The API cannot see another user's roles (they live in the identity provider and arrive
+/// only in that user's own tokens), so it cannot tell whether the target is a fuller admin
+/// than the caller. A narrow staff role (say, `admin.users:update` alone) therefore acts only
+/// on the caller's own account; editing, deleting or suspending anyone else takes the full
+/// staff set.
+fn require_manageable(ctx: &Context<'_>, caller: &Principal, target_id: uuid::Uuid) -> Result<()> {
+    if target_id == caller.user_id || holds_every_staff_role(caller) {
+        return Ok(());
+    }
+    Err(deny_user_admin(
+        ctx,
+        caller,
+        &format!("acting on user {target_id} needs every staff role"),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -529,6 +582,11 @@ mod tests {
         assert!(err(input(&["FRED", "BLS"], &["GDP"], None, None)).contains("ambiguous"));
         assert!(err(input(&["NOPE"], &[], None, None)).contains("unknown source"));
         assert!(err(input(&[], &["GDP"], Some("NOPE"), None)).contains("unknown source"));
+        // IMF has no adapter in any build (its series ids were made up). The static catalogs
+        // (ECB and friends) can't be asserted against here: they register in this same test
+        // binary's dev-profile build via `debug_assertions`, so only a --release build excludes
+        // them (see the crawler crate's own `default_registry_holds_exactly_the_live_sources`).
+        assert!(err(input(&["IMF"], &[], None, None)).contains("not available in this build"));
         assert!(err(input(&["FRED"], &[], None, Some(0))).contains("priority"));
         assert!(err(input(&["FRED"], &[], None, Some(11))).contains("priority"));
         assert!(err(input(&[], &[], None, None)).contains("nothing to crawl"));
@@ -547,9 +605,7 @@ mod tests {
             return None;
         };
         let guard = DB_LOCK.lock().await;
-        econ_graph_core::database::run_migrations(&url)
-            .await
-            .expect("migrations");
+        crate::graphql::test_db::migrate_once(&url).await;
         let pool = econ_graph_core::database::create_pool(&url)
             .await
             .expect("pool");

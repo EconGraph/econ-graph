@@ -192,6 +192,38 @@ async function brokenNavigation(
 }
 
 /**
+ * Whether `err` is Playwright's error for a navigation destroying the JS context mid-`evaluate`.
+ * @param err - The error a `page.evaluate` call rejected with.
+ * @returns Whether it was a context-destroyed error rather than something else.
+ */
+function isContextDestroyed(err: unknown): boolean {
+  return err instanceof Error && /[Ee]xecution context was destroyed/.test(err.message);
+}
+
+/**
+ * Judges a click that landed on a different URL than it started on.
+ * @param page - The page after the navigation settled.
+ * @param beforeUrl - The URL before the click.
+ * @param visited - Every URL the main frame navigated to during the click, in order.
+ * @param isAppPath - Whether a pathname matches a route in App.tsx.
+ * @returns The outcome.
+ */
+async function navigatedOutcome(
+  page: Page,
+  beforeUrl: string,
+  visited: URL[],
+  isAppPath: (pathname: string) => boolean
+): Promise<ClickOutcome> {
+  if (new URL(page.url()).origin !== new URL(beforeUrl).origin) {
+    return { worked: true, disturbed: true, detail: `left for ${new URL(page.url()).origin}` };
+  }
+  const broken = await brokenNavigation(page, visited, isAppPath);
+  return broken
+    ? { worked: false, disturbed: true, detail: broken }
+    : { worked: true, disturbed: true, detail: `navigated to ${page.url()}` };
+}
+
+/**
  * Clicks a control and reports whether it did anything a visitor can see: a navigation to a
  * working page of the app (or off the site), a successful request, a download or popup, or a
  * change to what `observableState` reads.
@@ -257,13 +289,7 @@ export async function clickAndObserve(
   }
 
   if (page.url() !== beforeUrl) {
-    if (new URL(page.url()).origin !== new URL(beforeUrl).origin) {
-      return { worked: true, disturbed: true, detail: `left for ${new URL(page.url()).origin}` };
-    }
-    const broken = await brokenNavigation(page, visited, isAppPath);
-    return broken
-      ? { worked: false, disturbed: true, detail: broken }
-      : { worked: true, disturbed: true, detail: `navigated to ${page.url()}` };
+    return navigatedOutcome(page, beforeUrl, visited, isAppPath);
   }
   if (visited.length > 0) {
     // Navigated and came back to the same URL: a redirect may have dropped a parameter on the
@@ -272,7 +298,23 @@ export async function clickAndObserve(
     const broken = await brokenNavigation(page, visited, isAppPath);
     if (broken) return { worked: false, disturbed: true, detail: broken };
   }
-  const after = await observableState(page);
+  let after: string;
+  try {
+    after = await observableState(page);
+  } catch (err) {
+    if (!isContextDestroyed(err)) throw err;
+    // The click's navigation committed after the URL checks above but before this evaluate ran,
+    // destroying the context mid-call. Wait for it to finish, then judge it as a navigation
+    // rather than crashing. The `framenavigated` listener is already detached by now, so
+    // `visited` won't include this late navigation; navigatedOutcome's own route and empty-page
+    // checks still apply.
+    await page.waitForLoadState('load', { timeout: 10_000 }).catch(() => undefined);
+    await settle(page);
+    if (page.url() !== beforeUrl) {
+      return navigatedOutcome(page, beforeUrl, visited, isAppPath);
+    }
+    after = await observableState(page);
+  }
   if (after !== before) return { worked: true, disturbed: true, detail: 'changed the page' };
   if (effects.length > 0) return { worked: true, disturbed: true, detail: effects.join(', ') };
   return { worked: false, disturbed: visited.length > 0, detail: 'nothing changed' };

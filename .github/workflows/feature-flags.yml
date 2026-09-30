@@ -1,0 +1,54 @@
+name: Feature Flags
+
+# Its own workflow, without ci-core's paths-ignore, because the check depends
+# on release tags outside config/flags (a flag whose remove_by train has
+# shipped). So it also runs when a tag is pushed and weekly, rather than
+# failing the next unrelated PR.
+on:
+  push:
+    branches: [ main, develop, 'release/**' ]
+    tags: [ 'train-*' ]
+  # Every PR, whatever its base, so stacked PRs get the check too
+  pull_request:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  flags-check:
+    name: Feature Flags Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        # Tags, so the check can fail on a flag whose remove_by train shipped
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+
+    - name: Test the flag check against its fixtures
+      working-directory: scripts/check-flags
+      run: npm test
+
+    - name: Test the flag merge
+      working-directory: scripts/flags-merge
+      run: npm test
+
+    - name: Check config/flags
+      run: node scripts/check-flags
+
+    - name: Check the generated per-profile flag files are current
+      run: node scripts/flags-merge --check
