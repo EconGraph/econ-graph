@@ -34,7 +34,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel::sql_types::{Array, BigInt, Bool, Double, Nullable, Text, Uuid as SqlUuid};
-use diesel_async::RunQueryDsl;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
@@ -505,11 +505,20 @@ impl CrawlQueueItem {
     /// Mark completed and clear the lock, if `claim` (the row returned by `claim_next` /
     /// `claim_by_id`) is still the item's current claim.
     pub async fn complete(pool: &DatabasePool, claim: &Self) -> AppResult<LeaseOutcome> {
+        let mut conn = get_conn(pool).await?;
+        Self::complete_conn(&mut conn, claim).await
+    }
+
+    /// Connection form for callers composing an atomic result transaction.
+    pub async fn complete_conn(
+        conn: &mut AsyncPgConnection,
+        claim: &Self,
+    ) -> AppResult<LeaseOutcome> {
         let Some(lease) = claim.lease() else {
             return Ok(LeaseOutcome::LostLease);
         };
         Ok(
-            Self::finish(pool, claim.id, QueueStatus::Completed, None, Some(lease))
+            Self::finish_conn(conn, claim.id, QueueStatus::Completed, None, Some(lease))
                 .await?
                 .map_or(LeaseOutcome::LostLease, |_| LeaseOutcome::Applied),
         )
@@ -518,11 +527,21 @@ impl CrawlQueueItem {
     /// Permanent failure (status `failed`, error recorded, lock cleared), if `claim` is still the
     /// item's current claim.
     pub async fn fail(pool: &DatabasePool, claim: &Self, error: &str) -> AppResult<LeaseOutcome> {
+        let mut conn = get_conn(pool).await?;
+        Self::fail_conn(&mut conn, claim, error).await
+    }
+
+    /// Connection form for callers composing an atomic result transaction.
+    pub async fn fail_conn(
+        conn: &mut AsyncPgConnection,
+        claim: &Self,
+        error: &str,
+    ) -> AppResult<LeaseOutcome> {
         let Some(lease) = claim.lease() else {
             return Ok(LeaseOutcome::LostLease);
         };
-        Ok(Self::finish(
-            pool,
+        Ok(Self::finish_conn(
+            conn,
             claim.id,
             QueueStatus::Failed,
             Some(error),
@@ -544,14 +563,44 @@ impl CrawlQueueItem {
         delay: Duration,
         count_attempt: bool,
     ) -> AppResult<QueueTransition> {
+        let mut conn = get_conn(pool).await?;
+        Self::retry_later_conn(&mut conn, claim, error, delay, count_attempt).await
+    }
+
+    /// Connection form for callers composing an atomic result transaction.
+    pub async fn retry_later_conn(
+        conn: &mut AsyncPgConnection,
+        claim: &Self,
+        error: &str,
+        delay: Duration,
+        count_attempt: bool,
+    ) -> AppResult<QueueTransition> {
         let Some(lease) = claim.lease() else {
             return Ok(QueueTransition::LostLease);
         };
         Ok(
-            Self::reschedule(pool, claim.id, Some(lease), error, delay, count_attempt)
+            Self::reschedule_conn(conn, claim.id, Some(lease), error, delay, count_attempt)
                 .await?
                 .unwrap_or(QueueTransition::LostLease),
         )
+    }
+
+    /// Locks a current claim for the caller's transaction. The lock must be held until
+    /// result writes and the queue transition commit; a standalone check is not a fence.
+    pub async fn lock_current_claim(conn: &mut AsyncPgConnection, claim: &Self) -> AppResult<bool> {
+        let Some(lease) = claim.lease() else {
+            return Ok(false);
+        };
+        Ok(crawl_queue::table
+            .find(claim.id)
+            .filter(crawl_queue::status.eq("processing"))
+            .filter(crawl_queue::locked_by.eq(lease.worker_id))
+            .filter(crawl_queue::claim_token.eq(lease.claim_token))
+            .for_update()
+            .first::<Self>(conn)
+            .await
+            .optional()?
+            .is_some())
     }
 
     // --- Unguarded (admin / legacy) transitions: ignore who holds the lock ---
@@ -682,6 +731,17 @@ impl CrawlQueueItem {
         count_attempt: bool,
     ) -> AppResult<Option<QueueTransition>> {
         let mut conn = get_conn(pool).await?;
+        Self::reschedule_conn(&mut conn, id, lease, error, delay, count_attempt).await
+    }
+
+    async fn reschedule_conn(
+        conn: &mut AsyncPgConnection,
+        id: Uuid,
+        lease: Option<Lease<'_>>,
+        error: &str,
+        delay: Duration,
+        count_attempt: bool,
+    ) -> AppResult<Option<QueueTransition>> {
         // All SET expressions see the pre-update row, so the decision is made atomically.
         let item = diesel::sql_query(
             "UPDATE crawl_queue SET \
@@ -709,7 +769,7 @@ impl CrawlQueueItem {
         .bind::<Text, _>(error)
         .bind::<Nullable<Text>, _>(lease.map(|l| l.worker_id))
         .bind::<Nullable<SqlUuid>, _>(lease.map(|l| l.claim_token))
-        .get_result::<Self>(&mut conn)
+        .get_result::<Self>(conn)
         .await
         .optional()?;
 
@@ -735,6 +795,16 @@ impl CrawlQueueItem {
         lease: Option<Lease<'_>>,
     ) -> AppResult<Option<Self>> {
         let mut conn = get_conn(pool).await?;
+        Self::finish_conn(&mut conn, id, status, error, lease).await
+    }
+
+    async fn finish_conn(
+        conn: &mut AsyncPgConnection,
+        id: Uuid,
+        status: QueueStatus,
+        error: Option<&str>,
+        lease: Option<Lease<'_>>,
+    ) -> AppResult<Option<Self>> {
         let item = diesel::sql_query(
             "UPDATE crawl_queue SET \
                  status = $2, \
@@ -754,7 +824,7 @@ impl CrawlQueueItem {
         .bind::<Nullable<Text>, _>(error)
         .bind::<Nullable<Text>, _>(lease.map(|l| l.worker_id))
         .bind::<Nullable<SqlUuid>, _>(lease.map(|l| l.claim_token))
-        .get_result::<Self>(&mut conn)
+        .get_result::<Self>(conn)
         .await
         .optional()?;
         Ok(item)
