@@ -67,13 +67,12 @@ resource "kubernetes_config_map" "postgresql_config" {
     EOT
 
     "init.sql" = <<-EOT
-      -- Initialize database for EconGraph
-      CREATE DATABASE econ_graph;
-      CREATE USER econgraph WITH ENCRYPTED PASSWORD '${var.password}';
-      GRANT ALL PRIVILEGES ON DATABASE econ_graph TO econgraph;
-
-      -- Connect to the database
-      \c econ_graph;
+      -- Initialize database for EconGraph.
+      -- The postgres image entrypoint already creates the econgraph role and
+      -- the econ_graph database from POSTGRES_USER / POSTGRES_PASSWORD /
+      -- POSTGRES_DB in postgresql-secret, and runs this file connected to
+      -- econ_graph. The password therefore never appears in SQL text or in
+      -- this ConfigMap.
 
       -- Enable required extensions
       CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -94,9 +93,10 @@ resource "kubernetes_secret" "postgresql_secret" {
   }
 
   data = {
-    "POSTGRES_PASSWORD" = base64encode(var.password)
-    "POSTGRES_USER"     = base64encode("econgraph")
-    "POSTGRES_DB"       = base64encode("econ_graph")
+    # The kubernetes provider base64-encodes `data` itself; pass plain values.
+    "POSTGRES_PASSWORD" = var.password
+    "POSTGRES_USER"     = "econgraph"
+    "POSTGRES_DB"       = "econ_graph"
   }
 }
 

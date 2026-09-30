@@ -8,7 +8,6 @@ export default defineConfig({
   testDir: '../../tests/e2e/comprehensive',
   testIgnore: [
     '**/global-analysis/**',
-    '**/professional-analysis/**',
     '**/core/**',
     '**/analysis/**',
     '**/debug/**',

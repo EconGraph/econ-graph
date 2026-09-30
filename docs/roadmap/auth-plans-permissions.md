@@ -123,7 +123,7 @@ Starting set. All of these are Keycloak configuration, kept as code in a realm e
 
 Later levels (a second support tier, billing, data operations, security) are new composites built from the same catalog. In train 1, `admin` and `super_admin` hold the same roles, because the catalog has no role yet that only owners should hold.
 
-**Preview access** (train 2, with the first runtime flag; train 1 has only build-time flags): the fine-grained role `preview:access`, granted by the staff composites and a `beta-tester` composite, is what feature flags target for previews (see the [feature flags roadmap](./feature-flags.md), #195). A flag never grants access by itself, and anything that differs by plan is a role, never a flag.
+**Preview access** (train 2, with the first runtime flag; train 1 has only build-time flags): the fine-grained role `preview:access`, granted by the staff composites and a `beta-tester` composite, is what feature flags target for previews (see the [feature flags roadmap](https://linear.app/econgraph/document/feature-flags-roadmap-design-record-from-pr-195-82a6458acab2), #195). A flag never grants access by itself, and anything that differs by plan is a role, never a flag.
 
 **Organization roles**: `org-owner`, `org-admin`, `org-member`, `org-viewer`.
 
@@ -143,7 +143,7 @@ Later levels (a second support tier, billing, data operations, security) are new
 
 ### Multiple services and split development
 
-The [federation roadmap](./federation.md) (#178) splits the backend into an app side (users, organizations, charts, annotations, admin) and a data side (crawler, sources, series metadata, Parquet catalog and files), so a feature build can run a fresh app database against the shared, already-crawled data. The token design has to work across both:
+The [federation roadmap](https://linear.app/econgraph/document/federation-roadmap-design-record-from-pr-178-a1ebb66c538d) (#178) splits the backend into an app side (users, organizations, charts, annotations, admin) and a data side (crawler, sources, series metadata, Parquet catalog and files), so a feature build can run a fresh app database against the shared, already-crawled data. The token design has to work across both:
 
 - **One catalog, two enforcers.** The fine-grained role catalog lives in a small shared crate used by both services. Each service checks only the roles for its own resources: the data side checks `series:read`, `data:export` and similar; the app side checks `chart:share` and similar.
 - **Audience covers both services.** Train 1 has one backend and one audience, `econ-graph-api`. When the backend splits, Keycloak issues user tokens with `aud: ["econ-graph-api", "econ-graph-app", "econ-graph-data"]` (one audience mapper per service) and each new service accepts a token only if its own name is in `aud`; the `econ-graph-api` mapper is removed once no deployed service checks it, so a token issued before the switch stays valid through its five-minute life. The `roles` claim carries the fine-grained roles for both services, so one sign-in works everywhere.

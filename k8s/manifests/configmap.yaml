@@ -10,13 +10,10 @@ data:
   ADMIN_FRONTEND_PORT: "3001"
   DATABASE_PORT: "5432"
 
-  # Backend configuration
-  DATABASE_URL: "postgresql://postgres:password@postgres-service:5432/econ_graph"
+  # Backend configuration (credentials, including DATABASE_URL, live in the
+  # econ-graph-secrets Secret created by scripts/deploy/create-secrets.sh)
   RUST_LOG: "info"
   CORS_ORIGIN: "http://localhost:3000"
-  GOOGLE_CLIENT_ID: "80227441551-3dv05tkflnfrjpqv5fgii7b8br0brt7m.apps.googleusercontent.com"
-  GOOGLE_CLIENT_SECRET: "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"
-  FACEBOOK_ACCESS_TOKEN: "EAAPjY3gQKzABPVnOZA7Alyz4yGZANbHYvIqYtf87P4ET2LLbMzgs3fE0sjzmOhbZAfRaT4sAPgLPwSKgJnC3sI6pZAFhOeUto1bt7iwEd5iVu6ecZAlI35ianxY7uwCHNUjsBHM2hMS01lNdPCjc0s9LGXESKWnOALMAFEZA9ynw4enIjVWAOl56K3ECkZC249CTmq9w5fwvssv0JIj0tenZBeWUd1tnY4eFbd7Yy6LpnDQvEh8wugCb9o02mhesnDHcQ4utxLRsdx2n"
 
   # Chart API Service configuration
   CHART_API_SERVICE_URL: "http://chart-api-service.econ-graph.svc.cluster.local:3001/api/chart"

@@ -62,7 +62,7 @@ impl EconomicSeriesType {
 - `searchSeries(query: String!, ...)` - Full-text search across series
 - `dataSource(id: ID!)` - Get a specific data source
 - `dataSources` - List all data sources
-- `seriesData(seriesId: ID!, filter: DataFilter, transformation: DataTransformation)` - Get time series data
+- `seriesData(seriesId: ID!, filter: DataFilter, transformation: DataTransformation, first: Int, after: String)` - Get time series data, one page at a time
 
 #### Monitoring Queries
 - `crawlerStatus` - Get crawler status information
@@ -224,6 +224,29 @@ query GetSeriesData($seriesId: ID!, $transformation: DataTransformation) {
 }
 ```
 
+### Every Point of a Long Series
+`seriesData` returns at most 10,000 points per page (`first` defaults to and is capped at 10,000).
+`totalCount` counts every point matching the filter. Pass the previous page's `endCursor` as
+`after` until `hasNextPage` is false. A cursor is the number of points up to and including the
+one it names. A transformed page has the values it would have in the whole series, so pages can
+be concatenated. `LOG_DIFFERENCE` is `ln(value) - ln(previous value)`, empty unless both are
+positive.
+```graphql
+query GetSeriesPage($seriesId: ID!, $after: String) {
+  seriesData(seriesId: $seriesId, filter: { latestRevisionOnly: true }, first: 10000, after: $after) {
+    totalCount
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      date
+      value
+    }
+  }
+}
+```
+
 ### Data as Known on a Past Date
 `asOf` returns each observation's newest revision published on or before that date, and omits
 observations first published later. It takes precedence over `latestRevisionOnly`.
@@ -270,7 +293,7 @@ query GetMultipleSeries($sourceId: ID!) {
 
 ## Development Tools
 
-- **GraphQL Playground** - Available at `/graphql/playground` in development
+- **GraphQL Playground** - Served at `/playground` only when the backend runs with `ENABLE_GRAPHQL_PLAYGROUND=true` (docker-compose sets it; deployed environments do not)
 - **Introspection** - Full schema introspection support
 - **Query Validation** - Automatic query validation and error reporting
 

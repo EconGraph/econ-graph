@@ -1,0 +1,24 @@
+# Storage for nightly PostgreSQL backups.
+#
+# This is a separate PersistentVolumeClaim from postgres-deployment.yaml's
+# postgresql-data volume, so backups survive the primary volume being lost,
+# recreated, or torn down. It defaults to the cluster's default
+# StorageClass, which is fine for local/dev clusters (kind, microk8s). For a
+# real deployment, set storageClassName to a StorageClass backed by
+# off-node/off-cluster storage (e.g. an EBS-backed class in a different
+# failure domain, or NFS), or switch the CronJob to BACKUP_DESTINATION=s3
+# (see postgres-backup-cronjob.yaml) to ship dumps to object storage
+# instead of/in addition to this PVC.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-backup-data
+  namespace: econ-graph
+  labels:
+    app: postgresql
+    component: backup
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi

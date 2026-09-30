@@ -25,8 +25,8 @@ pub struct Mutation;
 
 #[Object]
 impl Mutation {
-    /// Enqueue crawl jobs (admin only). Nothing is crawled in the request: the jobs go to
-    /// `crawl_queue` and the crawler workers process them.
+    /// Enqueue crawl jobs (requires `admin.crawlers:manage`). Nothing is crawled in the
+    /// request: the jobs go to `crawl_queue` and the crawler workers process them.
     ///
     /// `series_ids` become `fetch_series` jobs for `source` (or for the single entry of
     /// `sources`); every listed source without series gets a `discover_catalog` job. Returns the
@@ -37,7 +37,7 @@ impl Mutation {
         ctx: &Context<'_>,
         input: TriggerCrawlInput,
     ) -> Result<CrawlerStatusType> {
-        let admin = require_admin(ctx)?;
+        let caller = require_role(ctx, Role::AdminCrawlersManage)?;
         let pool = ctx.data::<DatabasePool>()?;
 
         let jobs = plan_trigger_crawl(&input).map_err(GraphQLError::new)?;
@@ -51,7 +51,7 @@ impl Mutation {
             }
         }
         tracing::info!(
-            user_id = %admin.id,
+            user_id = %caller.user_id,
             requested = jobs.len(),
             enqueued,
             "triggerCrawl enqueued jobs"
@@ -70,11 +70,12 @@ impl Mutation {
         input: CreateAnnotationInput,
     ) -> Result<ChartAnnotationType> {
         // The author is the signed-in caller, never an id from the request.
-        let user_id = current_user(ctx)?.id;
+        let user_id = require_role(ctx, Role::AnnotationCreate)?.user_id;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
         let series_id = uuid::Uuid::parse_str(&input.series_id)?;
+        let is_public = input.is_public.unwrap_or(false);
 
         let annotation = collaboration_service
             .create_annotation(
@@ -86,7 +87,7 @@ impl Mutation {
                 input.content,
                 input.annotation_type,
                 input.color,
-                input.is_public.unwrap_or(false),
+                is_public,
             )
             .await?;
 
@@ -99,7 +100,7 @@ impl Mutation {
         ctx: &Context<'_>,
         input: AddCommentInput,
     ) -> Result<AnnotationCommentType> {
-        let user_id = current_user(ctx)?.id;
+        let user_id = require_role(ctx, Role::AnnotationComment)?.user_id;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
@@ -119,7 +120,7 @@ impl Mutation {
         input: ShareChartInput,
     ) -> Result<ChartCollaboratorType> {
         // The sharer is the signed-in caller, who must already be an admin on the chart.
-        let owner_user_id = current_user(ctx)?.id;
+        let owner_user_id = require_role(ctx, Role::ChartShare)?.user_id;
         let pool = ctx.data::<DatabasePool>()?;
         let collaboration_service = CollaborationService::new(pool.clone());
 
@@ -139,6 +140,36 @@ impl Mutation {
             .await?;
 
         Ok(ChartCollaboratorType::from(collaborator))
+    }
+
+    /// Update an annotation (only its author may update it)
+    async fn update_annotation(
+        &self,
+        ctx: &Context<'_>,
+        input: UpdateAnnotationInput,
+    ) -> Result<ChartAnnotationType> {
+        // Same role as creating one: updating can publish new (or newly public) content,
+        // unlike delete, which only removes it.
+        let user_id = require_role(ctx, Role::AnnotationCreate)?.user_id;
+        let pool = ctx.data::<DatabasePool>()?;
+        let collaboration_service = CollaborationService::new(pool.clone());
+
+        let annotation_id = uuid::Uuid::parse_str(&input.annotation_id)?;
+        let is_public = input.is_public;
+
+        let annotation = collaboration_service
+            .update_annotation(
+                annotation_id,
+                user_id,
+                input.title,
+                input.content,
+                input.color,
+                input.annotation_type,
+                is_public,
+            )
+            .await?;
+
+        Ok(ChartAnnotationType::from(annotation))
     }
 
     /// Delete an annotation
@@ -162,182 +193,64 @@ impl Mutation {
 
     // Admin User Management Mutations
 
-    /// Create a new user (admin only)
-    async fn create_user(&self, ctx: &Context<'_>, input: CreateUserInput) -> Result<UserType> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
-        let pool = ctx.data::<DatabasePool>()?;
-
-        use bcrypt::{hash, DEFAULT_COST};
-        use diesel::prelude::*;
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::models::User;
-        use econ_graph_core::schema::users;
-
-        let mut conn = pool.get().await?;
-
-        // Check if user already exists
-        let existing_user: Option<User> = users::table
-            .filter(users::email.eq(&input.email))
-            .select(User::as_select())
-            .first(&mut conn)
-            .await
-            .optional()?;
-
-        if existing_user.is_some() {
-            return Err(GraphQLError::new("User with this email already exists"));
-        }
-
-        // Hash password if provided
-        let password_hash = if let Some(password) = &input.password {
-            Some(
-                hash(password, DEFAULT_COST)
-                    .map_err(|e| GraphQLError::new(format!("Password hashing failed: {}", e)))?,
-            )
-        } else {
-            None
-        };
-
-        // Create new user
-        let new_user = models::NewUser {
-            email: input.email,
-            name: input.name,
-            avatar_url: None,
-            provider: "email".to_string(),
-            provider_id: None,
-            password_hash,
-            role: input.role,
-            organization: input.organization,
-            theme: "light".to_string(),
-            default_chart_type: "line".to_string(),
-            notifications_enabled: true,
-            collaboration_enabled: true,
-            email_verified: false,
-        };
-
-        let user = diesel::insert_into(users::table)
-            .values(&new_user)
-            .returning(User::as_select())
-            .get_result(&mut conn)
-            .await?;
-
-        Ok(UserType::from(user))
-    }
-
-    /// Update user information (admin only)
+    /// Update user information (requires `admin.users:update`; changing `isActive` also
+    /// requires `admin.users:suspend`). Roles are assigned in the identity provider.
     async fn update_user(
         &self,
         ctx: &Context<'_>,
         id: ID,
         input: UpdateUserInput,
     ) -> Result<UserType> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
+        require_role(ctx, Role::AdminUsersUpdate)?;
+        if input.is_active.is_some() {
+            require_role(ctx, Role::AdminUsersSuspend)?;
+        }
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
 
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
-        use econ_graph_core::models::user::UpdateUser;
         use econ_graph_core::models::User;
         use econ_graph_core::schema::users;
 
-        let mut conn = pool.get().await?;
-
-        // Check if user exists
-        let existing_user: Option<User> = users::table
-            .filter(users::id.eq(user_id))
-            .select(User::as_select())
-            .first(&mut conn)
-            .await
-            .optional()?;
-
-        let existing_user = existing_user.ok_or_else(|| GraphQLError::new("User not found"))?;
-
-        // Check if email is being changed and if it already exists
-        if let Some(new_email) = &input.email {
-            if new_email != &existing_user.email {
-                let email_exists: Option<User> = users::table
-                    .filter(users::email.eq(new_email))
-                    .filter(users::id.ne(user_id))
-                    .select(User::as_select())
-                    .first(&mut conn)
-                    .await
-                    .optional()?;
-
-                if email_exists.is_some() {
-                    return Err(GraphQLError::new("User with this email already exists"));
-                }
-            }
-        }
-
-        // Build update struct with only provided fields
-        let update_data = UpdateUser {
-            name: input.name.or(Some(existing_user.name)),
-            avatar_url: input.avatar_url.or(existing_user.avatar_url),
-            organization: input.organization.or(existing_user.organization),
-            theme: input.theme.or(Some(existing_user.theme)),
-            default_chart_type: input
-                .default_chart_type
-                .or(Some(existing_user.default_chart_type)),
-            notifications_enabled: input
-                .notifications_enabled
-                .or(Some(existing_user.notifications_enabled)),
-            collaboration_enabled: input
-                .collaboration_enabled
-                .or(Some(existing_user.collaboration_enabled)),
-            last_login_at: existing_user.last_login_at,
+        let changes = AdminUserChangeset {
+            email: input.email,
+            name: input.name,
+            avatar_url: input.avatar_url,
+            organization: input.organization,
+            theme: input.theme,
+            default_chart_type: input.default_chart_type,
+            notifications_enabled: input.notifications_enabled,
+            collaboration_enabled: input.collaboration_enabled,
+            email_verified: input.email_verified,
+            is_active: input.is_active,
         };
-
-        // Update user
-        let updated_user = diesel::update(users::table.filter(users::id.eq(user_id)))
-            .set(&update_data)
+        if changes.is_empty() {
+            return Err(GraphQLError::new("No fields to update"));
+        }
+        let mut conn = pool.get().await?;
+        let final_user: User = diesel::update(users::table.filter(users::id.eq(user_id)))
+            .set(&changes)
             .returning(User::as_select())
             .get_result(&mut conn)
-            .await?;
-
-        // Update role and email_verified if provided (these require separate updates)
-        let mut final_user = updated_user;
-
-        if let Some(role) = input.role {
-            final_user = diesel::update(users::table.filter(users::id.eq(user_id)))
-                .set(users::role.eq(role))
-                .returning(User::as_select())
-                .get_result(&mut conn)
-                .await?;
-        }
-
-        if let Some(email_verified) = input.email_verified {
-            final_user = diesel::update(users::table.filter(users::id.eq(user_id)))
-                .set(users::email_verified.eq(email_verified))
-                .returning(User::as_select())
-                .get_result(&mut conn)
-                .await?;
-        }
-
-        if let Some(email) = input.email {
-            final_user = diesel::update(users::table.filter(users::id.eq(user_id)))
-                .set(users::email.eq(email))
-                .returning(User::as_select())
-                .get_result(&mut conn)
-                .await?;
-        }
-
-        if let Some(is_active) = input.is_active {
-            final_user = diesel::update(users::table.filter(users::id.eq(user_id)))
-                .set(users::is_active.eq(is_active))
-                .returning(User::as_select())
-                .get_result(&mut conn)
-                .await?;
-        }
+            .await
+            .map_err(|error| match error {
+                diesel::result::Error::NotFound => GraphQLError::new("User not found"),
+                diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::UniqueViolation,
+                    info,
+                ) if info.constraint_name() == Some("users_email_key") => {
+                    GraphQLError::new("User with this email already exists")
+                }
+                other => other.into(),
+            })?;
 
         Ok(UserType::from(final_user))
     }
 
-    /// Delete a user (admin only)
+    /// Delete a user (requires `admin.users:delete`)
     async fn delete_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
+        require_role(ctx, Role::AdminUsersDelete)?;
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
 
@@ -347,30 +260,19 @@ impl Mutation {
 
         let mut conn = pool.get().await?;
 
-        // Check if user exists
-        let user_exists: Option<models::User> = users::table
-            .filter(users::id.eq(user_id))
-            .select(models::User::as_select())
-            .first(&mut conn)
-            .await
-            .optional()?;
-
-        if user_exists.is_none() {
-            return Err(GraphQLError::new("User not found"));
-        }
-
         // Delete user (cascade will handle related records)
-        diesel::delete(users::table.filter(users::id.eq(user_id)))
+        let deleted = diesel::delete(users::table.filter(users::id.eq(user_id)))
             .execute(&mut conn)
             .await?;
-
+        if deleted == 0 {
+            return Err(GraphQLError::new("User not found"));
+        }
         Ok(true)
     }
 
-    /// Suspend a user account (admin only)
+    /// Suspend a user account (requires `admin.users:suspend`)
     async fn suspend_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
+        require_role(ctx, Role::AdminUsersSuspend)?;
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
 
@@ -380,31 +282,20 @@ impl Mutation {
 
         let mut conn = pool.get().await?;
 
-        // Check if user exists
-        let user_exists: Option<models::User> = users::table
-            .filter(users::id.eq(user_id))
-            .select(models::User::as_select())
-            .first(&mut conn)
-            .await
-            .optional()?;
-
-        if user_exists.is_none() {
-            return Err(GraphQLError::new("User not found"));
-        }
-
         // Suspend user
-        diesel::update(users::table.filter(users::id.eq(user_id)))
+        let updated = diesel::update(users::table.filter(users::id.eq(user_id)))
             .set(users::is_active.eq(false))
             .execute(&mut conn)
             .await?;
-
+        if updated == 0 {
+            return Err(GraphQLError::new("User not found"));
+        }
         Ok(true)
     }
 
-    /// Activate a user account (admin only)
+    /// Activate a user account (requires `admin.users:suspend`)
     async fn activate_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
+        require_role(ctx, Role::AdminUsersSuspend)?;
         let pool = ctx.data::<DatabasePool>()?;
         let user_id = uuid::Uuid::parse_str(&id)?;
 
@@ -414,57 +305,14 @@ impl Mutation {
 
         let mut conn = pool.get().await?;
 
-        // Check if user exists
-        let user_exists: Option<models::User> = users::table
-            .filter(users::id.eq(user_id))
-            .select(models::User::as_select())
-            .first(&mut conn)
-            .await
-            .optional()?;
-
-        if user_exists.is_none() {
-            return Err(GraphQLError::new("User not found"));
-        }
-
         // Activate user
-        diesel::update(users::table.filter(users::id.eq(user_id)))
+        let updated = diesel::update(users::table.filter(users::id.eq(user_id)))
             .set(users::is_active.eq(true))
             .execute(&mut conn)
             .await?;
-
-        Ok(true)
-    }
-
-    /// Force logout a user (admin only)
-    async fn force_logout_user(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        // Require admin role
-        let _admin_user = require_admin(ctx)?;
-        let pool = ctx.data::<DatabasePool>()?;
-        let user_id = uuid::Uuid::parse_str(&id)?;
-
-        use diesel::prelude::*;
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::{user_sessions, users};
-
-        let mut conn = pool.get().await?;
-
-        // Check if user exists
-        let user_exists: Option<models::User> = users::table
-            .filter(users::id.eq(user_id))
-            .select(models::User::as_select())
-            .first(&mut conn)
-            .await
-            .optional()?;
-
-        if user_exists.is_none() {
+        if updated == 0 {
             return Err(GraphQLError::new("User not found"));
         }
-
-        // Delete all active sessions for the user
-        diesel::delete(user_sessions::table.filter(user_sessions::user_id.eq(user_id)))
-            .execute(&mut conn)
-            .await?;
-
         Ok(true)
     }
 }
@@ -485,10 +333,19 @@ fn plan_trigger_crawl(
             "priority must be between 1 and 10 (got {priority})"
         ));
     }
+    // Sources with no adapter in this build (release leaves out the static catalogs; IMF has
+    // none at all) would otherwise queue a job the worker can only fail with "no adapter".
+    // SEC has no adapter in the registry either: it's fetched via `fetch_filing`, not `plan_trigger_crawl`.
+    let registry = econ_graph_crawler::sources::default_registry();
     let parse = |s: &str| {
-        s.trim()
+        let trimmed = s.trim();
+        let id = trimmed
             .parse::<SourceId>()
-            .map_err(|_| format!("unknown source {:?}", s.trim()))
+            .map_err(|_| format!("unknown source {trimmed:?}"))?;
+        if id != SourceId::Sec && registry.get(id).is_none() {
+            return Err(format!("source {trimmed:?} is not available in this build"));
+        }
+        Ok(id)
     };
     let mut sources: Vec<SourceId> = Vec::new();
     for s in input
@@ -554,6 +411,37 @@ fn plan_trigger_crawl(
 impl Default for Mutation {
     fn default() -> Self {
         Self
+    }
+}
+
+/// `None` leaves a column alone. This never rewrites values from an earlier read.
+#[derive(diesel::AsChangeset)]
+#[diesel(table_name = econ_graph_core::schema::users)]
+struct AdminUserChangeset {
+    email: Option<String>,
+    name: Option<String>,
+    avatar_url: Option<String>,
+    organization: Option<String>,
+    theme: Option<String>,
+    default_chart_type: Option<String>,
+    notifications_enabled: Option<bool>,
+    collaboration_enabled: Option<bool>,
+    email_verified: Option<bool>,
+    is_active: Option<bool>,
+}
+
+impl AdminUserChangeset {
+    fn is_empty(&self) -> bool {
+        self.email.is_none()
+            && self.name.is_none()
+            && self.avatar_url.is_none()
+            && self.organization.is_none()
+            && self.theme.is_none()
+            && self.default_chart_type.is_none()
+            && self.notifications_enabled.is_none()
+            && self.collaboration_enabled.is_none()
+            && self.email_verified.is_none()
+            && self.is_active.is_none()
     }
 }
 
@@ -650,6 +538,11 @@ mod tests {
         assert!(err(input(&["FRED", "BLS"], &["GDP"], None, None)).contains("ambiguous"));
         assert!(err(input(&["NOPE"], &[], None, None)).contains("unknown source"));
         assert!(err(input(&[], &["GDP"], Some("NOPE"), None)).contains("unknown source"));
+        // IMF has no adapter in any build (its series ids were made up). The static catalogs
+        // (ECB and friends) can't be asserted against here: they register in this same test
+        // binary's dev-profile build via `debug_assertions`, so only a --release build excludes
+        // them (see the crawler crate's own `default_registry_holds_exactly_the_live_sources`).
+        assert!(err(input(&["IMF"], &[], None, None)).contains("not available in this build"));
         assert!(err(input(&["FRED"], &[], None, Some(0))).contains("priority"));
         assert!(err(input(&["FRED"], &[], None, Some(11))).contains("priority"));
         assert!(err(input(&[], &[], None, None)).contains("nothing to crawl"));
@@ -659,7 +552,7 @@ mod tests {
     // DB-backed: need DATABASE_URL (skipped otherwise); they empty crawl_queue.
     // ---------------------------------------------------------------------
 
-    static DB_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    use crate::graphql::TEST_DB_LOCK as DB_LOCK;
 
     async fn db() -> Option<(DatabasePool, tokio::sync::MutexGuard<'static, ()>)> {
         use diesel_async::RunQueryDsl;
@@ -668,9 +561,7 @@ mod tests {
             return None;
         };
         let guard = DB_LOCK.lock().await;
-        econ_graph_core::database::run_migrations(&url)
-            .await
-            .expect("migrations");
+        crate::graphql::test_db::migrate_once(&url).await;
         let pool = econ_graph_core::database::create_pool(&url)
             .await
             .expect("pool");
@@ -683,17 +574,13 @@ mod tests {
         Some((pool, guard))
     }
 
-    fn user(role: &str) -> User {
+    fn user(label: &str) -> User {
         let now = chrono::Utc::now();
         User {
             id: Uuid::new_v4(),
-            email: format!("{role}@example.test"),
-            name: role.into(),
+            email: format!("{label}@example.test"),
+            name: label.into(),
             avatar_url: None,
-            provider: "email".into(),
-            provider_id: None,
-            password_hash: None,
-            role: role.into(),
             organization: None,
             theme: "light".into(),
             default_chart_type: "line".into(),
@@ -712,11 +599,19 @@ mod tests {
         user: Option<User>,
         query: &str,
     ) -> async_graphql::Response {
+        let staff = user.as_ref().is_some_and(|u| is_staff_label(&u.name));
         let schema = crate::graphql::schema::create_schema_with_data(
             pool.clone(),
-            Arc::new(crate::graphql::context::GraphQLContext::new(user)),
+            Arc::new(crate::graphql::context::GraphQLContext::for_test_user(
+                user, staff,
+            )),
         );
         schema.execute(query).await
+    }
+
+    /// Whether a `user()` test helper label should hold every staff role.
+    fn is_staff_label(label: &str) -> bool {
+        matches!(label, "admin" | "super_admin")
     }
 
     async fn queue_rows(pool: &DatabasePool) -> Vec<(String, String, String)> {
@@ -853,22 +748,24 @@ mod tests {
             Some(user("viewer")),
             Some(user("analyst")),
         ] {
-            let role = u.as_ref().map(|u| u.role.clone());
+            let label = u.as_ref().map(|u| u.name.clone());
             let schema = crate::graphql::schema::create_schema_with_data(
                 unreachable_pool(),
-                Arc::new(crate::graphql::context::GraphQLContext::new(u)),
+                Arc::new(crate::graphql::context::GraphQLContext::for_test_user(
+                    u, false,
+                )),
             );
             let resp = schema.execute(query).await;
-            assert_eq!(resp.errors.len(), 1, "{role:?}: {:?}", resp.errors);
+            assert_eq!(resp.errors.len(), 1, "{label:?}: {:?}", resp.errors);
             let msg = &resp.errors[0].message;
-            let expected = if role.is_some() {
+            let expected = if label.is_some() {
                 "Insufficient permissions"
             } else {
                 "Authentication required"
             };
             assert!(
                 msg.contains(expected),
-                "{role:?}: expected {expected}, got {msg}"
+                "{label:?}: expected {expected}, got {msg}"
             );
         }
     }
@@ -911,7 +808,7 @@ mod collaboration_auth_tests {
             format!(r#"{{ chartCollaborators(chartId: "{id}") {{ id }} }}"#),
         ];
         let schema =
-            create_schema_with_data(unreachable_pool(), Arc::new(GraphQLContext::new(None)));
+            create_schema_with_data(unreachable_pool(), Arc::new(GraphQLContext::anonymous()));
         for mutation in mutations {
             let resp = schema.execute(mutation.as_str()).await;
             assert_eq!(resp.errors.len(), 1, "{mutation}: {:?}", resp.errors);
@@ -942,7 +839,7 @@ mod collaboration_auth_tests {
             ),
         ];
         let schema =
-            create_schema_with_data(unreachable_pool(), Arc::new(GraphQLContext::new(None)));
+            create_schema_with_data(unreachable_pool(), Arc::new(GraphQLContext::anonymous()));
         for mutation in mutations {
             let resp = schema.execute(mutation.as_str()).await;
             assert!(

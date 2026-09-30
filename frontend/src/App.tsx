@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { Container, Box } from '@mui/material';
 
@@ -11,10 +11,24 @@ import SeriesExplorer from './pages/SeriesExplorer';
 import SeriesDetail from './pages/SeriesDetail';
 import DataSources from './pages/DataSources';
 import About from './pages/About';
-import ProfessionalAnalysis from './pages/ProfessionalAnalysis';
 import GlobalAnalysis from './pages/GlobalAnalysis';
 import PrivacyPolicy from './pages/PrivacyPolicy';
-import UserDataDeletion from './pages/UserDataDeletion';
+import NotFound from './pages/NotFound';
+import AuthCallback from './pages/AuthCallback';
+import { CALLBACK_PATH } from './auth/oidcConfig';
+import ResetQueriesOnUserChange from './auth/ResetQueriesOnUserChange';
+
+// Build-time flag pattern (docs/build-flags.md): read `__FLAGS__.<name>` in the condition
+// and import the page lazily, so a release build without the flag contains none of its code.
+const FlagCanary = __FLAGS__.build_canary ? lazy(() => import('./pages/FlagCanary')) : null;
+
+// The financial statement viewer/dashboard demo (components/financial) is unfinished; ECO-144
+// keeps it out of release builds until it ships.
+const FinancialComponentsDemo = __FLAGS__.financial_components
+  ? lazy(() =>
+      import('./pages/FinancialComponentsDemo').then(m => ({ default: m.FinancialComponentsDemo }))
+    )
+  : null;
 
 // Sidebar width constant - must match Sidebar.tsx
 const SIDEBAR_WIDTH = 240;
@@ -34,6 +48,7 @@ function App() {
 
   return (
     <AuthProvider>
+      <ResetQueriesOnUserChange />
       <ThemeProvider>
         <Box sx={{ display: 'flex', minHeight: '100vh' }}>
           {/* REQUIREMENT: Modern responsive design */}
@@ -59,10 +74,30 @@ function App() {
                 <Route path='/series/:id' element={<SeriesDetail />} />
                 <Route path='/sources' element={<DataSources />} />
                 <Route path='/about' element={<About />} />
-                <Route path='/analysis/:id?' element={<ProfessionalAnalysis />} />
                 <Route path='/global' element={<GlobalAnalysis />} />
                 <Route path='/privacy' element={<PrivacyPolicy />} />
-                <Route path='/user-data-deletion' element={<UserDataDeletion />} />
+                <Route path={CALLBACK_PATH} element={<AuthCallback />} />
+                {FlagCanary && (
+                  <Route
+                    path='/flags/canary'
+                    element={
+                      <Suspense fallback={null}>
+                        <FlagCanary />
+                      </Suspense>
+                    }
+                  />
+                )}
+                {FinancialComponentsDemo && (
+                  <Route
+                    path='/financial-components-demo'
+                    element={
+                      <Suspense fallback={null}>
+                        <FinancialComponentsDemo />
+                      </Suspense>
+                    }
+                  />
+                )}
+                <Route path='*' element={<NotFound />} />
               </Routes>
             </Container>
           </Box>

@@ -10,9 +10,12 @@
 //! because `econ-graph-crawler` must not depend on the SEC crate.
 //!
 //! Environment: `DATABASE_URL` (required), `FRED_API_KEY` / `BLS_API_KEY` / `BEA_API_KEY` /
-//! `CENSUS_API_KEY` (optional), `RUST_LOG` (default `info`), `CRAWLER_DATA_DIR` (reference data
+//! `CENSUS_API_KEY` (the worker starts without them; FRED, BEA and Census jobs fail with `Auth`
+//! when their key is missing), `RUST_LOG` (default `info`), `CRAWLER_DATA_DIR` (reference data
 //! files such as `us_states.csv`; defaults to the crawler crate's `data/` directory in the source
-//! tree, and the image sets `/app/data`). Every flag can also be set through the `CRAWLER_*`
+//! tree, and the image sets `/app/data`), `REFERENCE_DATA_DIR` (shared reference data such as
+//! `countries.csv`; defaults to econ-graph-core's `data/` directory, and the image sets
+//! `/app/reference`). Every flag can also be set through the `CRAWLER_*`
 //! variable shown in `--help`.
 //!
 //! The worker does not run database migrations; the backend applies them at startup.
@@ -133,6 +136,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         data_dir = %econ_graph_crawler::reference::data_dir().display(),
         states = states.len(),
         "reference data loaded"
+    );
+    // Shared reference data ($REFERENCE_DATA_DIR), e.g. the country table.
+    let areas = econ_graph_core::reference::areas()?;
+    tracing::info!(
+        data_dir = %econ_graph_core::reference::data_dir().display(),
+        areas = areas.all().len(),
+        "shared reference data loaded"
     );
     // Built-in policies, overridden by whatever each registered adapter declares.
     let policies: HashMap<SourceId, SourcePolicy> = SourceId::ALL

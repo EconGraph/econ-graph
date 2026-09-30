@@ -23,8 +23,14 @@ spec:
         - containerPort: 3000
           name: http
         env:
+        # From the grafana-admin Secret, created out of band by
+        # scripts/deploy/create-secrets.sh. Grafana only applies it when its
+        # data volume is first initialised.
         - name: GF_SECURITY_ADMIN_PASSWORD
-          value: "admin123"
+          valueFrom:
+            secretKeyRef:
+              name: grafana-admin
+              key: admin-password
         - name: GF_USERS_ALLOW_SIGN_UP
           value: "false"
         resources:

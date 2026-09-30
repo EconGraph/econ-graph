@@ -364,20 +364,6 @@ impl From<async_graphql::Error> for AppError {
     }
 }
 
-/// Convert from JWT errors
-impl From<jsonwebtoken::errors::Error> for AppError {
-    fn from(err: jsonwebtoken::errors::Error) -> Self {
-        AppError::AuthenticationError(format!("JWT error: {}", err))
-    }
-}
-
-/// Convert from bcrypt errors
-impl From<bcrypt::BcryptError> for AppError {
-    fn from(err: bcrypt::BcryptError) -> Self {
-        AppError::AuthenticationError(format!("Password hashing error: {}", err))
-    }
-}
-
 /// Utility functions for common error scenarios
 impl AppError {
     pub fn not_found<T: std::fmt::Display>(resource: T) -> Self {

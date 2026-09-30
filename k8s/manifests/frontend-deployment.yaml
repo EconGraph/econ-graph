@@ -52,16 +52,6 @@ spec:
             configMapKeyRef:
               name: econ-graph-config
               key: REACT_APP_WS_URL
-        - name: REACT_APP_GOOGLE_CLIENT_ID
-          valueFrom:
-            configMapKeyRef:
-              name: econ-graph-config
-              key: REACT_APP_GOOGLE_CLIENT_ID
-        - name: REACT_APP_FACEBOOK_APP_ID
-          valueFrom:
-            configMapKeyRef:
-              name: econ-graph-config
-              key: REACT_APP_FACEBOOK_APP_ID
         - name: NODE_ENV
           valueFrom:
             configMapKeyRef:
