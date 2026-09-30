@@ -192,6 +192,52 @@ impl Query {
         Ok(sources.into_iter().map(DataSourceType::from).collect())
     }
 
+    /// List datasets, optionally only one source's, grouped by source id (in no particular
+    /// order across sources) and by code within a source. Unpaginated: sources publish a
+    /// handful of datasets each.
+    async fn datasets(
+        &self,
+        ctx: &Context<'_>,
+        source_id: Option<ID>,
+    ) -> Result<Vec<crate::graphql::datasets::DatasetType>> {
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+        use econ_graph_core::schema::datasets;
+
+        let pool = ctx.data::<DatabasePool>()?;
+        let mut query = datasets::table.into_boxed();
+        if let Some(source_id) = source_id {
+            let source_id = Uuid::parse_str(&source_id)
+                .map_err(|_| async_graphql::Error::new("invalid data source id"))?;
+            query = query.filter(datasets::source_id.eq(source_id));
+        }
+
+        let mut conn = pool.get().await?;
+        let rows = query
+            .order_by((datasets::source_id.asc(), datasets::code.asc()))
+            .select(models::Dataset::as_select())
+            .load::<models::Dataset>(&mut conn)
+            .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(crate::graphql::datasets::DatasetType)
+            .collect())
+    }
+
+    /// Get a dataset by ID
+    async fn dataset(
+        &self,
+        ctx: &Context<'_>,
+        id: ID,
+    ) -> Result<Option<crate::graphql::datasets::DatasetType>> {
+        let pool = ctx.data::<DatabasePool>()?;
+        let id =
+            Uuid::parse_str(&id).map_err(|_| async_graphql::Error::new("invalid dataset id"))?;
+        let dataset = models::Dataset::find_by_id(pool, id).await?;
+        Ok(dataset.map(crate::graphql::datasets::DatasetType))
+    }
+
     /// Get data points for a specific series with filtering and transformation, one page at a
     /// time in date order. `totalCount` counts every matching point; read the next page with
     /// `after: pageInfo.endCursor` until `pageInfo.hasNextPage` is false. A transformed page

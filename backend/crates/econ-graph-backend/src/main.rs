@@ -502,6 +502,20 @@ async fn main() -> AppResult<()> {
         areas.all().len()
     );
 
+    // GraphQL labels dataset dimension values from this too ($CRAWLER_DATA_DIR): fail at
+    // startup, not the first time a Census-shaped series is queried.
+    let us_states = econ_graph_crawler::reference::us_states().map_err(|e| {
+        let error = AppError::ConfigError(e.to_string());
+        error.log_with_context("Application startup reference data");
+        eprintln!("❌ {}", e);
+        error
+    })?;
+    info!(
+        "🇺🇸 Reference data loaded from {}: {} states",
+        econ_graph_crawler::reference::data_dir().display(),
+        us_states.len()
+    );
+
     // Sign-in through the identity provider: OIDC_ISSUER unset disables it (every caller is
     // anonymous); a malformed setting, or OIDC_REQUIRED=true without an issuer, stops startup.
     // Nothing is fetched from the provider here, so it may be down while the API starts.

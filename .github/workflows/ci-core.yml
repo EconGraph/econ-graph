@@ -620,9 +620,9 @@ jobs:
       working-directory: backend
 
     # Required: the crawler crate, crawler worker, all SEC crawler lib tests (no database
-    # needed; default build and with the xbrl-parser feature), the core financial ratio
-    # tests and the crawl_queue, dataset model, queue service and cross-section tests.
-    # These must pass for the job (and the PR) to go green.
+    # needed; default build and with the xbrl-parser feature), then the core financial ratio,
+    # crawl_queue, dataset model, dataset GraphQL, queue service and cross-section tests
+    # (against this job's Postgres). These must pass for the job (and the PR) to go green.
     # The long soak test (tests/soak.rs) is #[ignore]d and runs manually only; its fast
     # limiter-conformance tests run here.
     - name: Run crawler and queue tests (required)
@@ -642,6 +642,7 @@ jobs:
         cargo test -p econ-graph-core --features financial-ratios --lib financial_ratios -- --test-threads=1
         cargo test -p econ-graph-core crawl_queue -- --test-threads=1
         cargo test -p econ-graph-core --lib models::dataset -- --test-threads=1
+        cargo test -p econ-graph-graphql --lib graphql::datasets -- --test-threads=1
         cargo test -p econ-graph-services queue_service -- --test-threads=1
         cargo test -p econ-graph-services cross_section -- --test-threads=1
         cargo test -p econ-graph-graphql --lib cross_section -- --test-threads=1

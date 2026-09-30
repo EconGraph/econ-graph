@@ -17,10 +17,13 @@
 //! - Batch operations must be atomic and consistent
 //! - All DataLoaders must have comprehensive documentation
 
+use crate::graphql::datasets::{DatasetBatcher, SeriesDatasetFields, SeriesDatasetFieldsBatcher};
 use crate::imports::*;
 use crate::types::LatestObservationType;
 use dataloader::cached::Loader;
+use dataloader::non_cached::Loader as NonCachedLoader;
 use dataloader::BatchFn;
+use econ_graph_core::models::Dataset;
 use std::collections::HashMap;
 
 /// DataLoader batcher for efficiently loading data sources by ID
@@ -443,6 +446,16 @@ pub struct DataLoaders {
     pub series_by_source_loader: Loader<Uuid, Vec<EconomicSeries>, SeriesBySourceBatcher>,
     pub series_count_loader: Loader<Uuid, i32, SeriesCountBatcher>,
     pub user_loader: Loader<Uuid, Option<User>, UserBatcher>,
+    /// Non-caching, so dataset edits show on the next request.
+    pub dataset_loader: NonCachedLoader<Uuid, Option<Dataset>, DatasetBatcher>,
+    /// Non-caching, so series moving between datasets show on the next request.
+    pub series_dataset_fields_loader:
+        NonCachedLoader<Uuid, Option<SeriesDatasetFields>, SeriesDatasetFieldsBatcher>,
+    /// A non-caching data source loader for [`crate::graphql::datasets::DatasetType::source`].
+    /// `data_source_loader` above is cached for the schema's lifetime, so a dataset's source
+    /// resolver uses this one to keep faith with the "next request sees the edit" promise the
+    /// other two loaders make.
+    pub dataset_source_loader: NonCachedLoader<Uuid, Option<DataSource>, DataSourceBatcher>,
     /// Not cached: some callers (the MCP server, the security server) keep one schema, and so
     /// one `DataLoaders`, for the life of the process, and the latest observation changes
     /// whenever a crawl lands. The /graphql route builds a schema per request. It still
@@ -464,6 +477,20 @@ impl DataLoaders {
         let series_by_source_loader = Loader::new(SeriesBySourceBatcher { pool: pool.clone() });
         let series_count_loader = Loader::new(SeriesCountBatcher { pool: pool.clone() });
         let user_loader = Loader::new(UserBatcher { pool: pool.clone() });
+        // A page of datasets or search results can ask for `dataset`, `dimensions` and
+        // `defaultMeasure` on many series at once; each is a separate load, so raise the batch
+        // size well past the dataloader crate's default of 200 pending *requests* (not unique
+        // keys) to keep them in one query rather than splitting a single page's worth.
+        let dataset_loader =
+            NonCachedLoader::new(DatasetBatcher { pool: pool.clone() }).with_max_batch_size(2000);
+        let series_dataset_fields_loader =
+            NonCachedLoader::new(SeriesDatasetFieldsBatcher { pool: pool.clone() })
+                .with_max_batch_size(2000);
+        // Sources publish only a handful of datasets each, so a page of `datasets { source }`
+        // won't approach the default batch size; raised anyway for consistency with the loaders
+        // above.
+        let dataset_source_loader = NonCachedLoader::new(DataSourceBatcher { pool: pool.clone() })
+            .with_max_batch_size(2000);
         let latest_observation_loader =
             dataloader::non_cached::Loader::new(LatestObservationBatcher { pool: pool.clone() });
 
@@ -474,6 +501,9 @@ impl DataLoaders {
             series_by_source_loader,
             series_count_loader,
             user_loader,
+            dataset_loader,
+            series_dataset_fields_loader,
+            dataset_source_loader,
             latest_observation_loader,
         }
     }

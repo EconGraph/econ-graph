@@ -117,6 +117,9 @@ COPY --from=builder --chown=econuser:econuser /out/econ-graph-backend /app/econ-
 # Shared reference data (econ-graph-core) read at runtime (not compiled in), e.g. the country table.
 COPY --chown=econuser:econuser crates/econ-graph-core/data /app/reference
 ENV REFERENCE_DATA_DIR=/app/reference
+# The crawler's reference data too: GraphQL labels dataset codes from its U.S. states table.
+COPY --chown=econuser:econuser crates/econ-graph-crawler/data /app/data
+ENV CRAWLER_DATA_DIR=/app/data
 
 USER econuser
 

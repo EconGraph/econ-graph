@@ -7,6 +7,7 @@
 pub mod context;
 pub mod cross_section;
 pub mod dataloaders;
+pub mod datasets;
 pub mod global_analysis;
 pub mod mutation;
 pub mod query;
@@ -26,6 +27,9 @@ mod latest_observation_tests;
 pub mod n_plus_one_tests;
 #[cfg(test)]
 pub(crate) mod test_db;
+
+#[cfg(test)]
+mod datasets_db_tests;
 
 // Re-export commonly used types
 pub use mutation::Mutation;
