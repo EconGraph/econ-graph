@@ -5,10 +5,22 @@
 //! FRED (Federal Reserve Economic Data, St. Louis Fed) adapter.
 //!
 //! Endpoints used (all `GET`, all with `api_key` and `file_type=json`):
-//! - `{base}/series?series_id=ID` — series metadata (`seriess[0]`).
+//! - `{base}/series?series_id=ID` — series metadata (`seriess[0]`); used both by discovery (one
+//!   request per curated id) and by fetching.
 //! - `{base}/series/observations?series_id=ID&realtime_start=..&realtime_end=9999-12-31&limit=..&offset=..[&observation_start=YYYY-MM-DD]`
 //!   — observations with their vintages (ALFRED), paged. See [Vintages](#vintages).
-//! - `{base}/series/search?search_text=..&limit=..&offset=..` — discovery.
+//!
+//! # Discovery
+//!
+//! `discover()` looks up the live metadata for each id in [`crate::reference::fred_series`] (a
+//! curated headline list read from `data/fred_series.csv`), rather than walking
+//! `/series/search`. A search-term crawl has no bound on how many series it turns up (one
+//! "most popular" page plus several search terms, each paged to FRED's limit, can find tens of
+//! thousands of ids on the first run), and #214's per-series ALFRED vintage walk makes fetching
+//! all of them too slow to finish a first crawl in reasonable time. The curated list keeps
+//! discovery's own request count equal to its size (under two hundred, not unbounded), while still
+//! checking each series' live notes against [`is_copyright_restricted`] as a safety net before
+//! it is discovered.
 //!
 //! # Vintages
 //!
@@ -41,7 +53,6 @@
 //! Every series belongs to the one dimensionless dataset [`DATASET`] (defined in
 //! `data/datasets/fred.toml`) and keeps its FRED series id as its external id.
 
-use std::collections::HashSet;
 use std::str::FromStr;
 
 use async_trait::async_trait;
@@ -54,6 +65,7 @@ use crate::adapter::{
 };
 use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
+use crate::reference::fred_series;
 use crate::source::SourceId;
 
 /// The real FRED API root.
@@ -83,32 +95,48 @@ const OBSERVATIONS_PAGE_SIZE: usize = 100_000;
 /// can't page forever (10 million rows; daily series with every vintage stay far below this).
 const MAX_OBSERVATION_PAGES: usize = 100;
 
-/// Search terms walked by [`FredAdapter::discover`] (same list as the old series_discovery/fred.rs).
-const SEARCH_TERMS: &[&str] = &[
-    "GDP",
-    "unemployment",
-    "inflation",
-    "interest rate",
-    "employment",
-    "consumer price",
-    "producer price",
-    "retail sales",
-    "industrial production",
-    "housing",
-    "trade",
-    "balance",
-    "debt",
-    "revenue",
-    "expenditure",
+/// Lower-cased substrings of a series' `notes` known to mark it as copyright-restricted, e.g. the
+/// Coinbase `CBBTCUSD` family ("reproduction ... is prohibited except with prior written
+/// permission") or S&P/Case-Shiller ("Copyright, 2026, Standard & Poor's ... Reprinted with
+/// permission"). A series whose notes contain one of these known phrases is dropped by
+/// [`is_copyright_restricted`] rather than fetched and published; wording outside this list is
+/// not caught (a stopgap: `notes` is what discovery returns, and there's no adapter-visible tag
+/// to key on instead, since checking FRED's own `copyrighted` tag would need a live call against
+/// the real API, which the crawler's network policy blocks in this environment). Revisit with a
+/// tag-based check once that access exists (ECO-201).
+///
+/// This is deliberately broad, and over-drops on purpose: `copyright` and `reprinted with
+/// permission` also catch FRED's "citation required" third-party series (e.g. OECD, whose notes
+/// read "Copyright, 2026, OECD. Reprinted with permission."), which could legally be republished
+/// with a citation, not only its "pre-approval required" series (Coinbase, ICE, S&P/Case-Shiller,
+/// NAR). A note merely mentioning copyright without an actual restriction would be dropped too.
+/// ECO-201's tag-based check, once live API access exists, can recover the citation-required
+/// group and any other false positive; until then, losing a legally-reproducible series from
+/// discovery is the safer failure than publishing a restricted one.
+const COPYRIGHT_RESTRICTION_MARKERS: &[&str] = &[
+    "prior written permission",
+    "may not be reproduced",
+    "reproduction, retransmission, or other use is prohibited",
+    "all rights reserved",
+    "copyright",
+    "reprinted with permission",
+    "used with permission",
 ];
 
-/// Page size for search-term pages (FRED's maximum).
-const SEARCH_PAGE_SIZE: usize = 1000;
-/// Size of the single "most popular series" page requested first.
-const POPULAR_PAGE_SIZE: usize = 100;
-/// Upper bound on pages fetched per search term, so discovery stays bounded:
-/// at most `1 + SEARCH_TERMS.len() * MAX_PAGES_PER_TERM` requests (= 76).
-const MAX_PAGES_PER_TERM: usize = 5;
+/// Whether `notes` reads as a copyright/reproduction restriction (see
+/// [`COPYRIGHT_RESTRICTION_MARKERS`]). Whitespace (including line breaks) is normalised first, so
+/// a marker split across a line break in the source text still matches.
+fn is_copyright_restricted(notes: Option<&str>) -> bool {
+    let Some(notes) = notes else { return false };
+    let lower = notes
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    COPYRIGHT_RESTRICTION_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
 
 /// FRED adapter. See the module docs for endpoints and error mapping.
 #[derive(Debug, Clone)]
@@ -219,57 +247,84 @@ impl FredAdapter {
         )))
     }
 
-    /// One page of `/series/search`.
-    async fn search_page(
+    /// Looks up each of `ids`' live metadata, dropping copyright-restricted series (the
+    /// [`is_copyright_restricted`] safety net) and building a [`DiscoveredSeries`] from the rest.
+    /// A per-id lookup failure is logged and that id skipped, unless every id fails; `Auth` and
+    /// `RateLimited` errors abort immediately and discard every id already found in this call
+    /// (matching the old search-based `discover`'s behaviour: a retry starts over from the top of
+    /// the list rather than resuming, so a rate limit partway through is more of a delay here,
+    /// since the list is walked in full on every discovery run either way).
+    ///
+    /// A `Transient` skip (a timeout or 5xx) means the list is incomplete for a reason that
+    /// should clear up on retry, so it fails the whole call instead of quietly persisting a
+    /// partial discovery: otherwise a blip partway through the list would look, from the finished
+    /// count alone, like those ids simply don't exist. `NotFound`/`Parse`/`Permanent` skips (a bad
+    /// id, a malformed response) won't resolve on retry, so they stay skip-and-continue as before.
+    async fn discover_ids(
         &self,
         ctx: &CrawlCtx,
         api_key: &str,
-        extra: &[(&str, &str)],
-        limit: usize,
-        offset: usize,
-    ) -> Result<SearchResponse, CrawlError> {
-        let limit = limit.to_string();
-        let offset = offset.to_string();
-        let mut query: Vec<(&str, &str)> = vec![
-            ("api_key", api_key),
-            ("file_type", "json"),
-            ("limit", &limit),
-            ("offset", &offset),
-        ];
-        query.extend_from_slice(extra);
-        ctx.http
-            .get_json(SourceId::Fred, &self.url("/series/search"), &query)
-            .await
-            .map_err(classify_fred_error)
-    }
+        ids: &[String],
+    ) -> Result<Vec<DiscoveredSeries>, CrawlError> {
+        let mut found = Vec::with_capacity(ids.len());
+        let mut restricted_count = 0usize;
+        let mut skipped_ids = Vec::new();
+        let mut last_err = None;
+        let mut first_transient = None;
+        let mut any_ok = false;
 
-    /// All pages of `/series/search?search_text=term`, up to [`MAX_PAGES_PER_TERM`].
-    async fn search_term(
-        &self,
-        ctx: &CrawlCtx,
-        api_key: &str,
-        term: &str,
-    ) -> Result<Vec<FredSeriesInfo>, CrawlError> {
-        let mut out = Vec::new();
-        let mut offset = 0;
-        for _ in 0..MAX_PAGES_PER_TERM {
-            let page = self
-                .search_page(
-                    ctx,
-                    api_key,
-                    &[("search_text", term)],
-                    SEARCH_PAGE_SIZE,
-                    offset,
-                )
-                .await?;
-            let got = page.seriess.len();
-            out.extend(page.seriess);
-            offset += got;
-            if got == 0 || offset >= page.count {
-                break;
+        for id in ids {
+            match self.fetch_metadata(ctx, api_key, id).await {
+                Ok(meta) => {
+                    any_ok = true;
+                    if is_copyright_restricted(meta.description.as_deref()) {
+                        tracing::info!(id, "dropping copyright-restricted series");
+                        restricted_count += 1;
+                        continue;
+                    }
+                    found.push(DiscoveredSeries {
+                        external_id: id.clone(),
+                        title: meta.title,
+                        description: meta.description,
+                        units: meta.units,
+                        frequency: meta.frequency,
+                        data_url: Some(format!("{FRED_WEB_SERIES_URL}/{id}")),
+                        dataset: Some(fred_dataset()),
+                    });
+                }
+                Err(e) => {
+                    let e = skip_or_abort(e, id)?;
+                    if first_transient.is_none() && matches!(e, CrawlError::Transient(_)) {
+                        first_transient = Some(e.clone());
+                    }
+                    skipped_ids.push(id.as_str());
+                    last_err = Some(e);
+                }
             }
         }
-        Ok(out)
+
+        if !skipped_ids.is_empty() {
+            let sample: Vec<&str> = skipped_ids.iter().take(5).copied().collect();
+            tracing::warn!(
+                skipped = skipped_ids.len(),
+                sample = ?sample,
+                "FRED discovery: some curated ids failed lookup"
+            );
+        }
+
+        match (any_ok, last_err, first_transient) {
+            (false, Some(e), _) => Err(e),
+            (_, _, Some(transient)) => Err(transient),
+            _ => {
+                tracing::info!(
+                    series = found.len(),
+                    dropped_restricted = restricted_count,
+                    dropped_errors = skipped_ids.len(),
+                    "FRED discovery finished"
+                );
+                Ok(found)
+            }
+        }
     }
 }
 
@@ -289,65 +344,11 @@ impl SourceAdapter for FredAdapter {
         &[DATASET]
     }
 
-    /// Walks the most popular series (one page of [`POPULAR_PAGE_SIZE`]) and then each of
-    /// [`SEARCH_TERMS`] (up to [`MAX_PAGES_PER_TERM`] pages of [`SEARCH_PAGE_SIZE`]), de-duplicated
-    /// by series id in first-seen order.
-    ///
-    /// `Auth` and `RateLimited` errors abort discovery; other per-query failures are logged and
-    /// that query skipped (as the old implementation did), unless every query failed.
+    /// Looks up the curated list from [`crate::reference::fred_series`]. See the module docs.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         let api_key = self.api_key(ctx)?;
-        let mut seen = HashSet::new();
-        let mut found = Vec::new();
-        let mut last_err = None;
-        let mut any_ok = false;
-
-        let mut add = |infos: Vec<FredSeriesInfo>| {
-            for info in infos {
-                if seen.insert(info.id.clone()) {
-                    found.push(to_discovered(info));
-                }
-            }
-        };
-
-        let popular = self
-            .search_page(
-                ctx,
-                api_key,
-                &[
-                    ("search_text", "*"),
-                    ("order_by", "popularity"),
-                    ("sort_order", "desc"),
-                ],
-                POPULAR_PAGE_SIZE,
-                0,
-            )
-            .await;
-        match popular {
-            Ok(page) => {
-                any_ok = true;
-                add(page.seriess);
-            }
-            Err(e) => last_err = Some(skip_or_abort(e, "popular series")?),
-        }
-
-        for term in SEARCH_TERMS {
-            match self.search_term(ctx, api_key, term).await {
-                Ok(infos) => {
-                    any_ok = true;
-                    add(infos);
-                }
-                Err(e) => last_err = Some(skip_or_abort(e, term)?),
-            }
-        }
-
-        match (any_ok, last_err) {
-            (false, Some(e)) => Err(e),
-            _ => {
-                tracing::info!(series = found.len(), "FRED discovery finished");
-                Ok(found)
-            }
-        }
+        let ids = fred_series()?;
+        self.discover_ids(ctx, api_key, ids).await
     }
 
     /// `/series` (metadata), then every vintage of the observations on or after `since` from
@@ -407,7 +408,7 @@ fn skip_or_abort(err: CrawlError, what: &str) -> Result<CrawlError, CrawlError> 
     match err {
         CrawlError::Auth(_) | CrawlError::RateLimited { .. } => Err(err),
         e => {
-            tracing::warn!(query = what, error = %e, "FRED search failed; skipping");
+            tracing::warn!(series_id = what, error = %e, "FRED series lookup failed; skipping");
             Ok(e)
         }
     }
@@ -494,18 +495,6 @@ fn to_points(mut rows: Vec<VintageRow>, known_vintage: Option<NaiveDate>) -> Vec
     points
 }
 
-fn to_discovered(info: FredSeriesInfo) -> DiscoveredSeries {
-    DiscoveredSeries {
-        data_url: Some(format!("{FRED_WEB_SERIES_URL}/{}", info.id)),
-        external_id: info.id,
-        title: info.title,
-        description: non_empty(info.notes),
-        units: non_empty(info.units),
-        frequency: non_empty(info.frequency),
-        dataset: Some(fred_dataset()),
-    }
-}
-
 /// The dataset of every FRED series: [`DATASET`], with no dimension values.
 fn fred_dataset() -> SeriesDataset {
     SeriesDataset {
@@ -549,25 +538,6 @@ struct FredObservation {
     realtime_start: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct SearchResponse {
-    #[serde(default)]
-    count: usize,
-    seriess: Vec<FredSeriesInfo>,
-}
-
-#[derive(Debug, Deserialize)]
-struct FredSeriesInfo {
-    id: String,
-    title: String,
-    #[serde(default)]
-    notes: Option<String>,
-    #[serde(default)]
-    units: Option<String>,
-    #[serde(default)]
-    frequency: Option<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -581,9 +551,6 @@ mod tests {
         include_str!("../../tests/fixtures/fred/error_series_does_not_exist.json");
     const ERR_BAD_VARIABLE: &str =
         include_str!("../../tests/fixtures/fred/error_bad_variable.json");
-    const SEARCH_P1: &str = include_str!("../../tests/fixtures/fred/series_search_page1.json");
-    const SEARCH_P2: &str = include_str!("../../tests/fixtures/fred/series_search_page2.json");
-    const SEARCH_EMPTY: &str = include_str!("../../tests/fixtures/fred/series_search_empty.json");
 
     fn d(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
@@ -987,11 +954,9 @@ mod tests {
         assert_eq!(mock.received_requests().await.len(), 1);
     }
 
-    /// FRED answers an unknown `series_id` with HTTP 400 and a JSON error body.
-    ///
-    /// Ignored until `HttpFetcher` quotes the (redacted) response body in status errors: today
-    /// `CrawlError::from_status` only sees the status, so this 400 is indistinguishable from any
-    /// other 400 and comes back `Permanent`. `classify_fred_error` is ready for it (see
+    /// FRED answers an unknown `series_id` with HTTP 400 and a JSON error body; `HttpFetcher`
+    /// quotes the (redacted) response body in its error, so `classify_fred_error` recognises the
+    /// "series does not exist" message and turns this into `NotFound` (see
     /// `classify_recognises_series_does_not_exist`).
     #[tokio::test]
     async fn unknown_series_400_is_not_found() {
@@ -1047,125 +1012,289 @@ mod tests {
         assert_eq!(e.kind(), "not_found");
     }
 
-    #[tokio::test]
-    async fn discover_paginates_dedupes_and_walks_all_terms() {
-        let mock = MockSource::start().await;
-        // GDP: two pages (count 3; 2 + 1).
-        mock.mount_expect(
-            &Route::get("/series/search")
-                .query("search_text", "GDP")
-                .query("offset", "0"),
-            Reply::json_str(SEARCH_P1),
-            1,
-        )
-        .await;
-        mock.mount_expect(
-            &Route::get("/series/search")
-                .query("search_text", "GDP")
-                .query("offset", "2"),
-            Reply::json_str(SEARCH_P2),
-            1,
-        )
-        .await;
-        // Popular page returns page 1 again: duplicates must be dropped.
-        mock.mount_expect(
-            &Route::get("/series/search")
-                .query("search_text", "*")
-                .query("order_by", "popularity")
-                .query("limit", "100"),
-            Reply::json_str(SEARCH_P1),
-            1,
-        )
-        .await;
-        // One term fails with a 400: skipped, not fatal.
-        mock.mount(
-            &Route::get("/series/search").query("search_text", "housing"),
-            Reply::json_str(ERR_BAD_VARIABLE).with_status(400),
-        )
-        .await;
-        mock.mount(&Route::get("/series/search"), Reply::json_str(SEARCH_EMPTY))
-            .await;
+    /// A second series fixture (derived from [`SERIES_GDP`]) for tests that need more than one
+    /// distinct curated id.
+    fn series_fixture(id: &str, title: &str) -> String {
+        SERIES_GDP
+            .replace("\"id\": \"GDP\"", &format!("\"id\": \"{id}\""))
+            .replace(
+                "\"title\": \"Gross Domestic Product\"",
+                &format!("\"title\": \"{title}\""),
+            )
+    }
 
+    #[tokio::test]
+    async fn discover_ids_looks_up_each_curated_id() {
+        let mock = MockSource::start().await;
+        mock.mount_expect(
+            &Route::get("/series").query("series_id", "GDP"),
+            Reply::json_str(SERIES_GDP),
+            1,
+        )
+        .await;
+        mock.mount_expect(
+            &Route::get("/series").query("series_id", "GDPC1"),
+            Reply::json_str(series_fixture("GDPC1", "Real Gross Domestic Product")),
+            1,
+        )
+        .await;
+
+        let ctx = test_ctx();
+        let ids = ["GDP".to_string(), "GDPC1".to_string()];
         let found = FredAdapter::new(mock.base_url())
-            .discover(&test_ctx())
+            .discover_ids(&ctx, TEST_API_KEY, &ids)
             .await
             .unwrap();
-        let ids: Vec<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
-        assert_eq!(ids, ["GDP", "GDPC1", "A191RL1Q225SBEA"]);
+        let got: Vec<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
+        assert_eq!(got, ["GDP", "GDPC1"]);
         assert_eq!(found[0].title, "Gross Domestic Product");
+        assert_eq!(found[1].title, "Real Gross Domestic Product");
         assert_eq!(found[0].units.as_deref(), Some("Billions of Dollars"));
         assert_eq!(found[0].frequency.as_deref(), Some("Quarterly"));
-        assert_eq!(
-            found[0].description.as_deref(),
-            Some("BEA Account Code: A191RC")
-        );
+        assert!(found[0]
+            .description
+            .as_deref()
+            .unwrap()
+            .starts_with("BEA Account Code: A191RC"));
         assert_eq!(
             found[0].data_url.as_deref(),
             Some("https://fred.stlouisfed.org/series/GDP")
         );
-        assert_eq!(found[1].description, None);
-        assert_eq!(found[2].description, None, "empty notes -> None");
         for s in &found {
             let ds = s.dataset.as_ref().expect("every FRED series has a dataset");
             assert_eq!(ds.code, DATASET, "{}", s.external_id);
             assert!(ds.dimensions.0.is_empty(), "{}", s.external_id);
         }
-
-        // 1 popular + 2 GDP pages + 1 page for each of the other 14 terms.
-        let reqs = mock.received_requests().await;
-        assert_eq!(reqs.len(), 1 + 2 + (SEARCH_TERMS.len() - 1));
-        for r in &reqs {
-            let q: Vec<(String, String)> = r.url.query_pairs().into_owned().collect();
-            assert!(q.contains(&("api_key".into(), TEST_API_KEY.into())));
-            assert!(q.contains(&("file_type".into(), "json".into())));
-        }
         mock.server().verify().await;
     }
 
     #[tokio::test]
-    async fn discover_page_count_is_bounded() {
+    async fn discover_ids_drops_copyright_restricted_series_as_a_safety_net() {
         let mock = MockSource::start().await;
-        // Claims a huge count with 2 items per page, forever.
-        let endless = SEARCH_P1.replace("\"count\": 3", "\"count\": 1000000");
-        mock.mount(&Route::get("/series/search"), Reply::json_str(endless))
+        let notes_field = "\"notes\": \"BEA Account Code: A191RC\\n\\nGross domestic product \
+            (GDP), the featured measure of U.S. output, is the market value of the goods and \
+            services produced by labor and property located in the United States.\"";
+        let restricted = series_fixture("CBBTCUSD", "Coinbase Bitcoin").replace(
+            notes_field,
+            "\"notes\": \"Reproduction, retransmission, or other use is prohibited except \
+                      with prior written permission.\"",
+        );
+        mock.mount(
+            &Route::get("/series").query("series_id", "CBBTCUSD"),
+            Reply::json_str(restricted),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/series").query("series_id", "GDPC1"),
+            Reply::json_str(series_fixture("GDPC1", "Real Gross Domestic Product")),
+        )
+        .await;
+
+        let ctx = test_ctx();
+        let ids = ["CBBTCUSD".to_string(), "GDPC1".to_string()];
+        let found = FredAdapter::new(mock.base_url())
+            .discover_ids(&ctx, TEST_API_KEY, &ids)
+            .await
+            .unwrap();
+        let got: Vec<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
+        assert_eq!(got, ["GDPC1"], "restricted series must be dropped");
+    }
+
+    #[tokio::test]
+    async fn discover_ids_skips_a_failing_id_but_keeps_going() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/series").query("series_id", "NOPE"),
+            Reply::json_str(ERR_NO_SERIES).with_status(400),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/series").query("series_id", "GDP"),
+            Reply::json_str(SERIES_GDP),
+        )
+        .await;
+
+        let ctx = test_ctx();
+        let ids = ["NOPE".to_string(), "GDP".to_string()];
+        let found = FredAdapter::new(mock.base_url())
+            .discover_ids(&ctx, TEST_API_KEY, &ids)
+            .await
+            .unwrap();
+        let got: Vec<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
+        assert_eq!(got, ["GDP"]);
+    }
+
+    #[tokio::test]
+    async fn discover_ids_aborts_on_rate_limit_and_fails_if_everything_fails() {
+        let mock = MockSource::start().await;
+        mock.mount(&Route::get("/series"), Reply::status(429).retry_after(60))
+            .await;
+        let ctx = test_ctx();
+        let ids = ["GDP".to_string(), "GDPC1".to_string()];
+        let e = FredAdapter::new(mock.base_url())
+            .discover_ids(&ctx, TEST_API_KEY, &ids)
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind(), "rate_limited");
+        // Aborted on the first id: the second was never requested.
+        assert_eq!(mock.received_requests().await.len(), 1);
+
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/series"),
+            Reply::json_str(ERR_BAD_VARIABLE).with_status(400),
+        )
+        .await;
+        let e = FredAdapter::new(mock.base_url())
+            .discover_ids(&ctx, TEST_API_KEY, &ids)
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind(), "permanent");
+        assert_eq!(
+            mock.received_requests().await.len(),
+            2,
+            "both ids fail, so both are tried before giving up"
+        );
+    }
+
+    /// A rate limit partway through the list aborts immediately, without trying the remaining
+    /// ids, even though earlier ones already succeeded (a bug that skipped instead of aborting
+    /// once `any_ok` was true would still request the third id).
+    #[tokio::test]
+    async fn discover_ids_aborts_mid_list_on_rate_limit() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/series").query("series_id", "GDP"),
+            Reply::json_str(SERIES_GDP),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/series").query("series_id", "GDPC1"),
+            Reply::status(429).retry_after(60),
+        )
+        .await;
+        let ctx = test_ctx();
+        let ids = ["GDP".to_string(), "GDPC1".to_string(), "UNRATE".to_string()];
+        let e = FredAdapter::new(mock.base_url())
+            .discover_ids(&ctx, TEST_API_KEY, &ids)
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind(), "rate_limited");
+        assert_eq!(
+            mock.received_requests().await.len(),
+            2,
+            "the third id must never be requested"
+        );
+    }
+
+    /// A `Transient` skip (e.g. a 500) fails discovery even though every other id in the list
+    /// succeeded, instead of quietly persisting a partial list: a blip partway through should
+    /// retry, not look like the failed id simply doesn't exist. Unlike a rate limit or auth
+    /// failure, a transient error doesn't abort mid-list: the rest of the ids are still tried
+    /// before the call fails.
+    #[tokio::test]
+    async fn discover_ids_fails_on_a_transient_skip_even_if_others_succeeded() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/series").query("series_id", "GDP"),
+            Reply::json_str(SERIES_GDP),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/series").query("series_id", "GDPC1"),
+            Reply::status(500),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/series").query("series_id", "UNRATE"),
+            Reply::json_str(series_fixture("UNRATE", "Unemployment Rate")),
+        )
+        .await;
+        let ctx = test_ctx();
+        let ids = ["GDP".to_string(), "GDPC1".to_string(), "UNRATE".to_string()];
+        let e = FredAdapter::new(mock.base_url())
+            .discover_ids(&ctx, TEST_API_KEY, &ids)
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind(), "transient", "{e}");
+        assert_eq!(
+            mock.received_requests().await.len(),
+            5,
+            "GDPC1 costs 3 requests (HttpFetcher's in-process retries on a 5xx); \
+             a transient skip doesn't abort mid-list, unlike rate-limit/auth, so UNRATE is \
+             still tried"
+        );
+    }
+
+    /// A missing/invalid key (`Auth`) aborts discovery the same way a rate limit does.
+    #[tokio::test]
+    async fn discover_ids_aborts_on_auth_error() {
+        let mock = MockSource::start().await;
+        mock.mount(&Route::get("/series"), Reply::status(401)).await;
+        let ctx = test_ctx();
+        let ids = ["GDP".to_string(), "GDPC1".to_string()];
+        let e = FredAdapter::new(mock.base_url())
+            .discover_ids(&ctx, TEST_API_KEY, &ids)
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind(), "auth");
+        assert_eq!(mock.received_requests().await.len(), 1);
+    }
+
+    /// `discover()` reads the shipped curated list ([`crate::reference::fred_series`]) and looks
+    /// up every one of its ids; none of the shipped ids' fixture notes are restricted, so all of
+    /// them come back.
+    #[tokio::test]
+    async fn discover_reads_curated_list_from_reference_data() {
+        let mock = MockSource::start().await;
+        mock.mount(&Route::get("/series"), Reply::json_str(SERIES_GDP))
             .await;
         let found = FredAdapter::new(mock.base_url())
             .discover(&test_ctx())
             .await
             .unwrap();
-        assert_eq!(found.len(), 2);
-        assert_eq!(
-            mock.received_requests().await.len(),
-            1 + SEARCH_TERMS.len() * MAX_PAGES_PER_TERM
-        );
+        let want = crate::reference::fred_series().unwrap();
+        assert_eq!(found.len(), want.len());
+        let got: std::collections::HashSet<&str> =
+            found.iter().map(|s| s.external_id.as_str()).collect();
+        for id in want {
+            assert!(got.contains(id.as_str()), "{id} missing from discover()");
+        }
     }
 
-    #[tokio::test]
-    async fn discover_aborts_on_rate_limit_and_fails_if_everything_fails() {
-        let mock = MockSource::start().await;
-        mock.mount(
-            &Route::get("/series/search"),
-            Reply::status(429).retry_after(60),
-        )
-        .await;
-        let e = FredAdapter::new(mock.base_url())
-            .discover(&test_ctx())
-            .await
-            .unwrap_err();
-        assert_eq!(e.kind(), "rate_limited");
-        assert_eq!(mock.received_requests().await.len(), 1);
+    #[test]
+    fn markers_are_lower_case() {
+        assert!(COPYRIGHT_RESTRICTION_MARKERS
+            .iter()
+            .all(|m| *m == m.to_lowercase()));
+    }
 
-        let mock = MockSource::start().await;
-        mock.mount(
-            &Route::get("/series/search"),
-            Reply::json_str(ERR_BAD_VARIABLE).with_status(400),
-        )
-        .await;
-        let e = FredAdapter::new(mock.base_url())
-            .discover(&test_ctx())
-            .await
-            .unwrap_err();
-        assert_eq!(e.kind(), "permanent");
+    #[test]
+    fn is_copyright_restricted_matches_known_wording() {
+        assert!(is_copyright_restricted(Some(
+            "Reproduction of this data by third parties is prohibited except with prior \
+             written permission from Coinbase."
+        )));
+        assert!(is_copyright_restricted(Some(
+            "Reproduction of this information in any form is prohibited except with the \
+             prior\nwritten permission of ICE Data Indices, LLC.",
+        )));
+        assert!(is_copyright_restricted(Some("ALL RIGHTS RESERVED.")));
+        assert!(is_copyright_restricted(Some(
+            "Copyright, 2026, Standard & Poor's Financial Services LLC. Reprinted with permission."
+        )));
+        assert!(is_copyright_restricted(Some(
+            "Data used with permission of the National Association of Realtors."
+        )));
+        assert!(is_copyright_restricted(Some(
+            "Reproduction, retransmission, or other use is prohibited without written consent."
+        )));
+        assert!(
+            is_copyright_restricted(Some("All  rights\treserved.")),
+            "whitespace normalized"
+        );
+        assert!(!is_copyright_restricted(Some("BEA Account Code: A191RC")));
+        assert!(!is_copyright_restricted(None));
     }
 }
 
@@ -1188,9 +1317,9 @@ mod contract {
             .await;
         },
         discover: {
-            route: Route::get("/series/search"),
-            reply: Reply::json_str(include_str!("../../tests/fixtures/fred/series_search_page1.json")),
-            min_series: 2,
+            route: Route::get("/series"),
+            reply: Reply::json_str(include_str!("../../tests/fixtures/fred/series_gdp.json")),
+            min_series: 100,
         },
     }
 }
