@@ -1740,9 +1740,11 @@ impl SourceAdapter for LeaseGateAdapter {
     ) -> Result<crate::adapter::BatchFetch, CrawlError> {
         self.entered.wait().await;
         self.resume.wait().await;
-        Ok(external_ids.iter().map(|id| (id.clone(), self.result.clone())).collect())
+        Ok(external_ids
+            .iter()
+            .map(|id| (id.clone(), self.result.clone()))
+            .collect())
     }
-
 }
 
 fn lease_response(title: &str, value: i32) -> FetchedSeries {
@@ -1766,7 +1768,10 @@ fn lease_worker(pool: &DatabasePool, adapter: &Arc<LeaseGateAdapter>, id: &str) 
     registry.register(adapter.clone());
     let mut ctx = test_ctx_with(HashMap::from([(
         SRC,
-        SourcePolicy { max_batch: if adapter.batching { 2 } else { 1 }, ..slow_backoff(SRC) },
+        SourcePolicy {
+            max_batch: if adapter.batching { 2 } else { 1 },
+            ..slow_backoff(SRC)
+        },
     )]));
     ctx.pool = pool.clone();
     Worker::new(ctx, registry, config(id))
@@ -1894,8 +1899,11 @@ async fn expired_fetch_preserves_newer_result(
         "A attached a stale error to B's successful series: {error:?}"
     );
     drop(conn);
-    assert_eq!(attempts(pool, series_id).await, vec![(true, None, Some(1))],
-        "stale attempt must not be recorded");
+    assert_eq!(
+        attempts(pool, series_id).await,
+        vec![(true, None, Some(1))],
+        "stale attempt must not be recorded"
+    );
 }
 
 #[tokio::test]
@@ -1928,29 +1936,43 @@ async fn expired_fetch_failure_cannot_replace_newer_claims_success_status() {
     .expect("lease interleaving did not finish");
 }
 
-
-
 /// Force real maintenance expiry while an adapter is deliberately paused.
 async fn expire_lease_jobs(pool: &DatabasePool, ids: &[Uuid]) {
     let mut conn = pool.get().await.unwrap();
     diesel::update(crawl_queue::table.filter(crawl_queue::id.eq_any(ids)))
         .set(crawl_queue::locked_at.eq(Some(Utc::now() - chrono::Duration::hours(2))))
-        .execute(&mut conn).await.unwrap();
+        .execute(&mut conn)
+        .await
+        .unwrap();
     drop(conn);
-    assert_eq!(CrawlQueueItem::release_stuck(pool, Duration::from_secs(3600)).await.unwrap(), ids.len() as i64);
+    assert_eq!(
+        CrawlQueueItem::release_stuck(pool, Duration::from_secs(3600))
+            .await
+            .unwrap(),
+        ids.len() as i64
+    );
 }
 
 async fn expired_batch_preserves_newer_results(pool: &DatabasePool, stale_failure: bool) {
-    let result = if stale_failure { Err(CrawlError::Permanent("stale batch failure".into())) }
-        else { Ok(lease_response("Older batch", 111)) };
+    let result = if stale_failure {
+        Err(CrawlError::Permanent("stale batch failure".into()))
+    } else {
+        Ok(lease_response("Older batch", 111))
+    };
     let stale_error = result.as_ref().err().map(ToString::to_string);
     let old = Arc::new(LeaseGateAdapter {
-        entered: tokio::sync::Barrier::new(2), resume: tokio::sync::Barrier::new(2),
-        result, batching: true, catalog: None,
+        entered: tokio::sync::Barrier::new(2),
+        resume: tokio::sync::Barrier::new(2),
+        result,
+        batching: true,
+        catalog: None,
     });
     let newer = Arc::new(LeaseGateAdapter {
-        entered: tokio::sync::Barrier::new(2), resume: tokio::sync::Barrier::new(2),
-        result: Ok(lease_response("Newer batch", 222)), batching: true, catalog: None,
+        entered: tokio::sync::Barrier::new(2),
+        resume: tokio::sync::Barrier::new(2),
+        result: Ok(lease_response("Newer batch", 222)),
+        batching: true,
+        catalog: None,
     });
     let ids = ["t5_lease_batch_1", "t5_lease_batch_2"];
     let queue = enqueue_fetch(pool, &ids).await;
@@ -1959,7 +1981,9 @@ async fn expired_batch_preserves_newer_results(pool: &DatabasePool, stale_failur
     let a_task = tokio::spawn(async move { a.run_batch_once().await });
     old.entered.wait().await;
     let mut old_tokens = Vec::new();
-    for job in &queue { old_tokens.push(item(pool, *job).await.claim_token.expect("A token")); }
+    for job in &queue {
+        old_tokens.push(item(pool, *job).await.claim_token.expect("A token"));
+    }
     expire_lease_jobs(pool, &queue).await;
     let b_task = tokio::spawn(async move { b.run_batch_once().await });
     newer.entered.wait().await;
@@ -1971,18 +1995,32 @@ async fn expired_batch_preserves_newer_results(pool: &DatabasePool, stale_failur
     newer.resume.wait().await;
     let outcomes = b_task.await.unwrap().expect("B batch");
     assert_eq!(outcomes.len(), 2);
-    assert!(outcomes.iter().all(|o| matches!(o, JobOutcome::Completed(_))));
+    assert!(outcomes
+        .iter()
+        .all(|o| matches!(o, JobOutcome::Completed(_))));
     old.resume.wait().await;
     let outcomes = a_task.await.unwrap().expect("A batch");
-    assert_eq!(outcomes, vec![JobOutcome::LeaseLost { error: stale_error.clone() }; 2]);
+    assert_eq!(
+        outcomes,
+        vec![
+            JobOutcome::LeaseLost {
+                error: stale_error.clone()
+            };
+            2
+        ]
+    );
     for (external_id, job) in ids.iter().zip(queue) {
         assert_eq!(item(pool, job).await.status, "completed");
         let (series_id, _, title, _, _, _, status) = series_row(pool, external_id).await.unwrap();
         assert_eq!(title, "Newer batch");
         assert_eq!(status.as_deref(), Some("success"));
         let mut conn = pool.get().await.unwrap();
-        let values: Vec<Option<BigDecimal>> = data_points::table.filter(data_points::series_id.eq(series_id))
-            .select(data_points::value).load(&mut conn).await.unwrap();
+        let values: Vec<Option<BigDecimal>> = data_points::table
+            .filter(data_points::series_id.eq(series_id))
+            .select(data_points::value)
+            .load(&mut conn)
+            .await
+            .unwrap();
         assert_eq!(values, vec![Some(BigDecimal::from(222))]);
         drop(conn);
         assert_eq!(attempts(pool, series_id).await, vec![(true, None, Some(1))]);
@@ -1992,20 +2030,34 @@ async fn expired_batch_preserves_newer_results(pool: &DatabasePool, stale_failur
 #[tokio::test]
 async fn expired_batch_success_cannot_overwrite_newer_results() {
     let Some(db) = db().await else { return };
-    tokio::time::timeout(Duration::from_secs(30), expired_batch_preserves_newer_results(&db.pool, false))
-        .await.expect("batch interleaving timed out");
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        expired_batch_preserves_newer_results(&db.pool, false),
+    )
+    .await
+    .expect("batch interleaving timed out");
 }
 
 #[tokio::test]
 async fn expired_batch_failure_cannot_replace_newer_success_status() {
     let Some(db) = db().await else { return };
-    tokio::time::timeout(Duration::from_secs(30), expired_batch_preserves_newer_results(&db.pool, true))
-        .await.expect("batch interleaving timed out");
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        expired_batch_preserves_newer_results(&db.pool, true),
+    )
+    .await
+    .expect("batch interleaving timed out");
 }
 
 fn discovered(external_id: &str, title: &str) -> DiscoveredSeries {
-    DiscoveredSeries { external_id: external_id.into(), title: title.into(), description: None,
-        units: None, frequency: None, data_url: None }
+    DiscoveredSeries {
+        external_id: external_id.into(),
+        title: title.into(),
+        description: None,
+        units: None,
+        frequency: None,
+        data_url: None,
+    }
 }
 
 #[tokio::test]
@@ -2013,45 +2065,77 @@ async fn expired_discovery_cannot_overwrite_or_insert_stale_metadata() {
     let Some(db) = db().await else { return };
     tokio::time::timeout(Duration::from_secs(30), async {
         let old = Arc::new(LeaseGateAdapter {
-            entered: tokio::sync::Barrier::new(2), resume: tokio::sync::Barrier::new(2),
-            result: Ok(FetchedSeries::default()), batching: false,
-            catalog: Some(vec![discovered("t5_lease_catalog", "Older catalog"),
-                discovered("t5_lease_catalog_stale_only", "Stale only")]),
+            entered: tokio::sync::Barrier::new(2),
+            resume: tokio::sync::Barrier::new(2),
+            result: Ok(FetchedSeries::default()),
+            batching: false,
+            catalog: Some(vec![
+                discovered("t5_lease_catalog", "Older catalog"),
+                discovered("t5_lease_catalog_stale_only", "Stale only"),
+            ]),
         });
         let newer = Arc::new(LeaseGateAdapter {
-            entered: tokio::sync::Barrier::new(2), resume: tokio::sync::Barrier::new(2),
-            result: Ok(FetchedSeries::default()), batching: false,
+            entered: tokio::sync::Barrier::new(2),
+            resume: tokio::sync::Barrier::new(2),
+            result: Ok(FetchedSeries::default()),
+            batching: false,
             catalog: Some(vec![discovered("t5_lease_catalog", "Newer catalog")]),
         });
         let a = lease_worker(&db.pool, &old, "t5-discovery-a");
         let b = lease_worker(&db.pool, &newer, "t5-discovery-b");
-        let job = enqueue(&db.pool, SRC.as_str(), "t5_lease_discovery", JobKind::DiscoverCatalog, 5).await;
+        let job = enqueue(
+            &db.pool,
+            SRC.as_str(),
+            "t5_lease_discovery",
+            JobKind::DiscoverCatalog,
+            5,
+        )
+        .await;
         let a_task = tokio::spawn(async move { a.run_once().await });
         old.entered.wait().await;
         let old_token = item(&db.pool, job).await.claim_token.expect("A token");
         expire_lease_jobs(&db.pool, &[job]).await;
         let b_task = tokio::spawn(async move { b.run_once().await });
         newer.entered.wait().await;
-        assert_ne!(item(&db.pool, job).await.claim_token.expect("B token"), old_token);
+        assert_ne!(
+            item(&db.pool, job).await.claim_token.expect("B token"),
+            old_token
+        );
         newer.resume.wait().await;
-        assert!(matches!(b_task.await.unwrap(), Some(JobOutcome::Completed(_))));
+        assert!(matches!(
+            b_task.await.unwrap(),
+            Some(JobOutcome::Completed(_))
+        ));
         old.resume.wait().await;
-        assert_eq!(a_task.await.unwrap(), Some(JobOutcome::LeaseLost { error: None }));
+        assert_eq!(
+            a_task.await.unwrap(),
+            Some(JobOutcome::LeaseLost { error: None })
+        );
         assert_eq!(item(&db.pool, job).await.status, "completed");
         let mut conn = db.pool.get().await.unwrap();
         let metadata: Vec<(String, String)> = series_metadata::table
             .filter(series_metadata::external_id.like("t5_lease_catalog%"))
-            .select((series_metadata::external_id, series_metadata::title)).load(&mut conn).await.unwrap();
-        assert_eq!(metadata, vec![("t5_lease_catalog".into(), "Newer catalog".into())]);
-    }).await.expect("discovery interleaving timed out");
+            .select((series_metadata::external_id, series_metadata::title))
+            .load(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            metadata,
+            vec![("t5_lease_catalog".into(), "Newer catalog".into())]
+        );
+    })
+    .await
+    .expect("discovery interleaving timed out");
 }
 
 #[tokio::test]
 async fn result_transaction_rolls_back_if_queue_completion_fails() {
     let Some(db) = db().await else { return };
     let external_id = "t5_lease_rollback";
-    let original = persist::persist_series(&db.pool, SRC, external_id, &lease_response("Before", 111))
-        .await.unwrap();
+    let original =
+        persist::persist_series(&db.pool, SRC, external_id, &lease_response("Before", 111))
+            .await
+            .unwrap();
     let job = enqueue(&db.pool, SRC.as_str(), external_id, JobKind::FetchSeries, 5).await;
     // The test-only trigger fails after the worker has written data and its successful attempt.
     // It permits retry transitions, so the fresh guarded fallback can record the DB failure.
@@ -2063,27 +2147,47 @@ async fn result_transaction_rolls_back_if_queue_completion_fails() {
     )).execute(&mut conn).await.unwrap();
     diesel::sql_query(
         "CREATE TRIGGER t5_reject_lease_completion BEFORE UPDATE ON crawl_queue \
-         FOR EACH ROW EXECUTE FUNCTION pg_temp.t5_reject_lease_completion()"
-    ).execute(&mut conn).await.unwrap();
+         FOR EACH ROW EXECUTE FUNCTION pg_temp.t5_reject_lease_completion()",
+    )
+    .execute(&mut conn)
+    .await
+    .unwrap();
     drop(conn);
     let mock = MockSource::start().await;
-    mock.mount(&Route::get("/series/t5_lease_rollback"),
-        series_json("After", &[("2024-01-01", Some("222"))])).await;
-    let outcome = tokio::time::timeout(Duration::from_secs(30), worker(&db.pool, &mock).run_once()).await;
+    mock.mount(
+        &Route::get("/series/t5_lease_rollback"),
+        series_json("After", &[("2024-01-01", Some("222"))]),
+    )
+    .await;
+    let outcome =
+        tokio::time::timeout(Duration::from_secs(30), worker(&db.pool, &mock).run_once()).await;
     // Remove the shared-table trigger before inspecting/asserting the outcome.
     let mut conn = db.pool.get().await.unwrap();
     diesel::sql_query("DROP TRIGGER t5_reject_lease_completion ON crawl_queue")
-        .execute(&mut conn).await.unwrap();
+        .execute(&mut conn)
+        .await
+        .unwrap();
     let values: Vec<Option<BigDecimal>> = data_points::table
         .filter(data_points::series_id.eq(original.series_id))
-        .select(data_points::value).load(&mut conn).await.unwrap();
+        .select(data_points::value)
+        .load(&mut conn)
+        .await
+        .unwrap();
     drop(conn);
-    let outcome = outcome.expect("rollback scenario timed out").expect("claimed");
-    assert!(matches!(outcome, JobOutcome::Retrying { ref error, .. } if error.kind() == "transient"), "{outcome:?}");
+    let outcome = outcome
+        .expect("rollback scenario timed out")
+        .expect("claimed");
+    assert!(
+        matches!(outcome, JobOutcome::Retrying { ref error, .. } if error.kind() == "transient"),
+        "{outcome:?}"
+    );
     assert_eq!(values, vec![Some(BigDecimal::from(111))]);
     assert_eq!(series_row(&db.pool, external_id).await.unwrap().2, "Before");
-    assert_eq!(attempts(&db.pool, original.series_id).await,
-        vec![(false, Some("transient".into()), Some(0))], "successful attempt rolled back");
+    assert_eq!(
+        attempts(&db.pool, original.series_id).await,
+        vec![(false, Some("transient".into()), Some(0))],
+        "successful attempt rolled back"
+    );
     let queued = item(&db.pool, job).await;
     assert_eq!(queued.status, "retrying");
     assert_eq!(queued.retry_count, 1);

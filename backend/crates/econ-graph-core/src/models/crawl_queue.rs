@@ -510,7 +510,10 @@ impl CrawlQueueItem {
     }
 
     /// Connection form for callers composing an atomic result transaction.
-    pub async fn complete_conn(conn: &mut AsyncPgConnection, claim: &Self) -> AppResult<LeaseOutcome> {
+    pub async fn complete_conn(
+        conn: &mut AsyncPgConnection,
+        claim: &Self,
+    ) -> AppResult<LeaseOutcome> {
         let Some(lease) = claim.lease() else {
             return Ok(LeaseOutcome::LostLease);
         };
@@ -529,7 +532,11 @@ impl CrawlQueueItem {
     }
 
     /// Connection form for callers composing an atomic result transaction.
-    pub async fn fail_conn(conn: &mut AsyncPgConnection, claim: &Self, error: &str) -> AppResult<LeaseOutcome> {
+    pub async fn fail_conn(
+        conn: &mut AsyncPgConnection,
+        claim: &Self,
+        error: &str,
+    ) -> AppResult<LeaseOutcome> {
         let Some(lease) = claim.lease() else {
             return Ok(LeaseOutcome::LostLease);
         };
@@ -580,11 +587,10 @@ impl CrawlQueueItem {
 
     /// Locks a current claim for the caller's transaction. The lock must be held until
     /// result writes and the queue transition commit; a standalone check is not a fence.
-    pub async fn lock_current_claim(
-        conn: &mut AsyncPgConnection,
-        claim: &Self,
-    ) -> AppResult<bool> {
-        let Some(lease) = claim.lease() else { return Ok(false) };
+    pub async fn lock_current_claim(conn: &mut AsyncPgConnection, claim: &Self) -> AppResult<bool> {
+        let Some(lease) = claim.lease() else {
+            return Ok(false);
+        };
         Ok(crawl_queue::table
             .find(claim.id)
             .filter(crawl_queue::status.eq("processing"))
@@ -1074,4 +1080,3 @@ mod _inline_tests {
 
 #[cfg(test)]
 mod tests;
-

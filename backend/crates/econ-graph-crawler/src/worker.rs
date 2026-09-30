@@ -69,7 +69,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
-use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
+use diesel_async::AsyncPgConnection;
 use econ_graph_core::models::{CrawlQueueItem, JobKind, LeaseOutcome, QueueTransition};
 use econ_graph_core::{AppError, AppResult};
 use tokio::sync::watch;
@@ -557,7 +557,8 @@ impl Worker {
 
         self.record_breaker(source, result.as_ref().err());
 
-        self.finish_result(source, &item, result, started.elapsed()).await
+        self.finish_result(source, &item, result, started.elapsed())
+            .await
     }
 
     /// Fetches `items` (claimed `fetch_series` jobs of `source` sharing a batch key) with one
@@ -706,7 +707,9 @@ impl Worker {
                     Ok(outcome) => outcome,
                     Err(error) => {
                         tracing::error!(id = %item.id, %error, "recording database failure failed");
-                        JobOutcome::Failed { error: format!("result transaction failed: {error}") }
+                        JobOutcome::Failed {
+                            error: format!("result transaction failed: {error}"),
+                        }
                     }
                 }
             }
@@ -732,43 +735,50 @@ impl Worker {
         result: Fetched,
         duration: Duration,
     ) -> AppResult<JobOutcome> {
-        let mut conn = self.ctx.pool.get().await
-            .map_err(|e| AppError::DatabaseError(format!("Failed to get database connection: {e}")))?;
-        conn.transaction::<JobOutcome, AppError, _>(async move |conn| {
-            // Explicitly use READ COMMITTED even if a pool session's default was changed.
-            // FOR UPDATE rechecks the token after waiting and holds the row through commit.
-            diesel::sql_query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
-                .execute(&mut *conn).await?;
-            if item.locked_by.as_deref() != Some(self.config.worker_id.as_str())
-                || !CrawlQueueItem::lock_current_claim(conn, item).await? {
-                self.warn_lost_lease(item, "persist result", duration);
-                return Ok(JobOutcome::LeaseLost {
-                    error: result.err().map(|e| e.to_string()),
-                });
-            }
-            let result: Dispatched = match result {
-                Ok(JobWrite::Series(fetched)) => {
-                    let write = persist::persist_series_conn(conn, source, &item.series_id, &fetched).await?;
-                    Ok(JobStats {
-                        series_id: Some(write.series_id),
-                        points_written: write.points_upserted,
-                        new_points: write.points_new,
-                        latest_date: write.latest_date,
-                        metadata_written: 0,
-                    })
+        let mut conn = self.ctx.pool.get().await.map_err(|e| {
+            AppError::DatabaseError(format!("Failed to get database connection: {e}"))
+        })?;
+        // This pooled connection starts a fresh transaction. READ COMMITTED rechecks
+        // the token after a lock wait; the queue row stays locked through commit.
+        conn.build_transaction()
+            .read_committed()
+            .run::<JobOutcome, AppError, _>(async move |conn| {
+                if item.locked_by.as_deref() != Some(self.config.worker_id.as_str())
+                    || !CrawlQueueItem::lock_current_claim(conn, item).await?
+                {
+                    self.warn_lost_lease(item, "persist result", duration);
+                    return Ok(JobOutcome::LeaseLost {
+                        error: result.err().map(|e| e.to_string()),
+                    });
                 }
-                Ok(JobWrite::Discovery(found)) => Ok(JobStats {
-                    metadata_written: persist::persist_discovered_conn(conn, source, &found).await?,
-                    ..JobStats::default()
-                }),
-                Ok(JobWrite::Handler(stats)) => Ok(stats),
-                Err(error) => Err(error),
-            };
-            if item.job_kind() == JobKind::FetchSeries {
-                self.record_attempt_conn(conn, source, item, &result, duration).await?;
-            }
-            self.transition_conn(conn, source, item, result).await
-        }).await
+                let result: Dispatched = match result {
+                    Ok(JobWrite::Series(fetched)) => {
+                        let write =
+                            persist::persist_series_conn(conn, source, &item.series_id, &fetched)
+                                .await?;
+                        Ok(JobStats {
+                            series_id: Some(write.series_id),
+                            points_written: write.points_upserted,
+                            new_points: write.points_new,
+                            latest_date: write.latest_date,
+                            metadata_written: 0,
+                        })
+                    }
+                    Ok(JobWrite::Discovery(found)) => Ok(JobStats {
+                        metadata_written: persist::persist_discovered_conn(conn, source, &found)
+                            .await?,
+                        ..JobStats::default()
+                    }),
+                    Ok(JobWrite::Handler(stats)) => Ok(stats),
+                    Err(error) => Err(error),
+                };
+                if item.job_kind() == JobKind::FetchSeries {
+                    self.record_attempt_conn(conn, source, item, &result, duration)
+                        .await?;
+                }
+                self.transition_conn(conn, source, item, result).await
+            })
+            .await
     }
 
     fn record_breaker(&self, source: SourceId, error: Option<&CrawlError>) {
@@ -798,11 +808,12 @@ impl Worker {
     ) -> AppResult<()> {
         let series_id = match result {
             Ok(stats) => stats.series_id,
-            Err(_) => persist::find_series_id_conn(conn, source, &item.series_id)
-                .await?,
+            Err(_) => persist::find_series_id_conn(conn, source, &item.series_id).await?,
         };
         // crawl_attempts.series_id references economic_series; nothing to attach to yet.
-        let Some(series_id) = series_id else { return Ok(()) };
+        let Some(series_id) = series_id else {
+            return Ok(());
+        };
         let record = match result {
             Ok(stats) => AttemptRecord {
                 success: true,
@@ -840,7 +851,9 @@ impl Worker {
                 if CrawlQueueItem::complete_conn(conn, item).await? != LeaseOutcome::Applied {
                     // The lock was validated in this transaction; an unexpected mismatch
                     // must roll back the already-written result, not commit it as LeaseLost.
-                    return Err(AppError::InternalError("locked crawl claim changed before completion".into()));
+                    return Err(AppError::InternalError(
+                        "locked crawl claim changed before completion".into(),
+                    ));
                 }
                 return Ok(JobOutcome::Completed(stats));
             }
@@ -850,24 +863,33 @@ impl Worker {
         let attempt = u32::try_from(item.retry_count.max(0)).unwrap_or(0);
         let retry = match &error {
             CrawlError::RateLimited { retry_after } => Some((
-                retry_after.unwrap_or_else(|| policy.backoff(attempt)), false,
+                retry_after.unwrap_or_else(|| policy.backoff(attempt)),
+                false,
             )),
             CrawlError::Transient(_) => Some((policy.backoff(attempt), true)),
-            CrawlError::NotFound(_) | CrawlError::Auth(_) | CrawlError::Parse(_)
+            CrawlError::NotFound(_)
+            | CrawlError::Auth(_)
+            | CrawlError::Parse(_)
             | CrawlError::Permanent(_) => None,
         };
         let message = error.to_string();
         let outcome = if let Some((delay, count_attempt)) = retry {
-            match CrawlQueueItem::retry_later_conn(conn, item, &message, delay, count_attempt).await? {
+            match CrawlQueueItem::retry_later_conn(conn, item, &message, delay, count_attempt)
+                .await?
+            {
                 QueueTransition::Rescheduled { at } => JobOutcome::Retrying { error, at },
                 QueueTransition::Failed => JobOutcome::Failed { error: message },
-                QueueTransition::LostLease => return Err(AppError::InternalError(
-                    "locked crawl claim changed before retry".into(),
-                )),
+                QueueTransition::LostLease => {
+                    return Err(AppError::InternalError(
+                        "locked crawl claim changed before retry".into(),
+                    ))
+                }
             }
         } else {
             if CrawlQueueItem::fail_conn(conn, item, &message).await? != LeaseOutcome::Applied {
-                return Err(AppError::InternalError("locked crawl claim changed before failure".into()));
+                return Err(AppError::InternalError(
+                    "locked crawl claim changed before failure".into(),
+                ));
             }
             JobOutcome::Failed { error: message }
         };
@@ -992,4 +1014,3 @@ mod breaker_tests {
 
 #[cfg(test)]
 mod tests;
-

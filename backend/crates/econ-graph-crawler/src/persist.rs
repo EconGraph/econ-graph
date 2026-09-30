@@ -301,7 +301,7 @@ pub(crate) async fn persist_series_conn(
     }
     let latest_date = unique.keys().map(|k| k.0).max();
 
-            let row: UpsertedSeries = diesel::sql_query(
+    let row: UpsertedSeries = diesel::sql_query(
                 "INSERT INTO economic_series (source_id, external_id, title, description, units, \
                      frequency, seasonal_adjustment, is_active, first_discovered_at, last_crawled_at, \
                      last_updated, crawl_status, crawl_error_message) \
@@ -327,35 +327,35 @@ pub(crate) async fn persist_series_conn(
             .bind::<Nullable<Text>, _>(seasonal.as_deref())
             .get_result(&mut *conn)
             .await?;
-            let series_id = row.id;
+    let series_id = row.id;
 
-            let points: Vec<&FetchedPoint> = unique.values().copied().collect();
-            let (mut upserted, mut new) = (0usize, 0usize);
-            for chunk in points.chunks(INSERT_CHUNK) {
-                let written = upsert_points(conn, series_id, chunk).await?;
-                upserted += written.len();
-                new += written.iter().filter(|w| w.inserted).count();
-            }
+    let points: Vec<&FetchedPoint> = unique.values().copied().collect();
+    let (mut upserted, mut new) = (0usize, 0usize);
+    for chunk in points.chunks(INSERT_CHUNK) {
+        let written = upsert_points(conn, series_id, chunk).await?;
+        upserted += written.len();
+        new += written.iter().filter(|w| w.inserted).count();
+    }
 
-            if !points.is_empty() {
-                diesel::sql_query(
-                    "UPDATE economic_series SET \
+    if !points.is_empty() {
+        diesel::sql_query(
+            "UPDATE economic_series SET \
                          start_date = (SELECT MIN(date) FROM data_points WHERE series_id = $1), \
                          end_date = (SELECT MAX(date) FROM data_points WHERE series_id = $1) \
                      WHERE id = $1",
-                )
-                .bind::<SqlUuid, _>(series_id)
-                .execute(&mut *conn)
-                .await?;
-            }
+        )
+        .bind::<SqlUuid, _>(series_id)
+        .execute(&mut *conn)
+        .await?;
+    }
 
-            Ok(SeriesWrite {
-                series_id,
-                series_created: row.inserted,
-                points_upserted: upserted,
-                points_new: new,
-                latest_date,
-            })
+    Ok(SeriesWrite {
+        series_id,
+        series_created: row.inserted,
+        points_upserted: upserted,
+        points_new: new,
+        latest_date,
+    })
 }
 
 /// Upserts one `series_metadata` row per discovered series (key `(source_id, external_id)`), in
@@ -411,27 +411,27 @@ pub(crate) async fn persist_discovered_conn(
         })
         .collect();
 
-        let mut written = 0;
-        for chunk in rows.chunks(INSERT_CHUNK) {
-            let now = Utc::now();
-            written += diesel::insert_into(sm::series_metadata)
-                .values(chunk)
-                .on_conflict((sm::source_id, sm::external_id))
-                .do_update()
-                .set((
-                    sm::title.eq(excluded(sm::title)),
-                    sm::description.eq(excluded(sm::description)),
-                    sm::units.eq(excluded(sm::units)),
-                    sm::frequency.eq(excluded(sm::frequency)),
-                    sm::data_url.eq(excluded(sm::data_url)),
-                    sm::is_active.eq(true),
-                    sm::last_discovered_at.eq(now),
-                    sm::updated_at.eq(now),
-                ))
-                .execute(&mut *conn)
-                .await?;
-        }
-        Ok(written)
+    let mut written = 0;
+    for chunk in rows.chunks(INSERT_CHUNK) {
+        let now = Utc::now();
+        written += diesel::insert_into(sm::series_metadata)
+            .values(chunk)
+            .on_conflict((sm::source_id, sm::external_id))
+            .do_update()
+            .set((
+                sm::title.eq(excluded(sm::title)),
+                sm::description.eq(excluded(sm::description)),
+                sm::units.eq(excluded(sm::units)),
+                sm::frequency.eq(excluded(sm::frequency)),
+                sm::data_url.eq(excluded(sm::data_url)),
+                sm::is_active.eq(true),
+                sm::last_discovered_at.eq(now),
+                sm::updated_at.eq(now),
+            ))
+            .execute(&mut *conn)
+            .await?;
+    }
+    Ok(written)
 }
 
 /// Records one `crawl_attempts` row for `series_id` (the table requires an existing series) and,
@@ -544,4 +544,3 @@ mod tests {
         assert_eq!(data_source_template(SourceId::Sec).name, "SEC EDGAR");
     }
 }
-
