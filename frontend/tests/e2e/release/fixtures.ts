@@ -72,6 +72,15 @@ export const SEEDED = {
     externalId: 'bds/national..ESTAB',
     title: 'bds/national..ESTAB',
   },
+  beaGdp: {
+    source: 'BEA',
+    sourceName: 'Bureau of Economic Analysis (BEA)',
+    // BEA's own ids: NIPA table T10105, line 1 (GDP), quarterly.
+    externalId: 'bea_nipa/T10105.1.Q',
+    title: 'Gross domestic product (GDP, current dollars, quarterly)',
+    // UNIT_MULT 6 is applied, so values are in dollars, not millions.
+    units: 'Current Dollars',
+  },
   fhfaHpi: {
     source: 'FHFA',
     sourceName: 'Federal Housing Finance Agency (FHFA)',
