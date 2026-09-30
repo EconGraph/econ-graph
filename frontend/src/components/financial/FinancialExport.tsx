@@ -328,23 +328,27 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
               </select>
               <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
                 {exportFormats.map(format => (
-                  <div
+                  <button
+                    type='button'
+                    aria-pressed={exportOptions.format === format.id}
                     key={format.id}
-                    className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                    className={`w-full text-left focus-visible:outline focus-visible:outline-2 p-4 border rounded-lg cursor-pointer transition-colors ${
                       exportOptions.format === format.id
                         ? 'border-blue-500 bg-blue-50'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                     onClick={() => handleFormatChange(format.id)}
                   >
-                    <div className='flex items-center space-x-3'>
-                      <div className='text-blue-600'>{format.icon}</div>
-                      <div className='flex-1'>
-                        <h3 className='font-medium'>{format.name}</h3>
-                        <p className='text-sm text-muted-foreground'>{format.description}</p>
-                      </div>
-                    </div>
-                  </div>
+                    <span className='flex items-center space-x-3'>
+                      <span className='text-blue-600'>{format.icon}</span>
+                      <span className='flex-1'>
+                        <span className='block font-medium'>{format.name}</span>
+                        <span className='block text-sm text-muted-foreground'>
+                          {format.description}
+                        </span>
+                      </span>
+                    </span>
+                  </button>
                 ))}
               </div>
             </CardContent>
