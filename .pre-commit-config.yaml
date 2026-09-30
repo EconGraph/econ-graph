@@ -99,7 +99,7 @@ repos:
     rev: v0.38.0
     hooks:
       - id: markdownlint
-        args: ['--disable', 'MD013', 'MD041', 'MD022', 'MD032', 'MD031', 'MD034', 'MD040', 'MD026', 'MD009', 'MD029', 'MD033', 'MD036', 'MD047', 'MD024', 'MD012', 'MD051', '--']  # Disable common formatting rules
+        # Rules live in .markdownlint.json, shared with the Docs Checks workflow
         exclude: '^node_modules/'
 
   # Security checks

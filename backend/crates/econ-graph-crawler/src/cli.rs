@@ -533,6 +533,7 @@ mod tests {
         }
         assert!(out.contains("FRED_API_KEY set (required)"), "{out}");
         assert!(out.contains("BEA_API_KEY NOT SET (required)"), "{out}");
+        assert!(out.contains("CENSUS_API_KEY NOT SET (required)"), "{out}");
         assert!(!out.contains("secret-value"), "never print key values");
     }
 

@@ -314,6 +314,54 @@ impl diesel::Queryable<sql_types::AnnotationStatus, Pg> for AnnotationStatus {
     }
 }
 
+/// Visibility of a chart annotation: public annotations are visible to everyone, private
+/// ones only to their author. Two values only in train 1; no "unlisted" or similar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
+#[diesel(sql_type = sql_types::AnnotationVisibility)]
+pub enum AnnotationVisibility {
+    Private,
+    Public,
+}
+
+impl ToSql<sql_types::AnnotationVisibility, Pg> for AnnotationVisibility {
+    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
+        let value = match self {
+            AnnotationVisibility::Private => "private",
+            AnnotationVisibility::Public => "public",
+        };
+        <str as ToSql<Text, Pg>>::to_sql(value, out)
+    }
+}
+
+impl FromSql<sql_types::AnnotationVisibility, Pg> for AnnotationVisibility {
+    fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
+        let value = <String as FromSql<Text, Pg>>::from_sql(bytes)?;
+        match value.as_str() {
+            "private" => Ok(AnnotationVisibility::Private),
+            "public" => Ok(AnnotationVisibility::Public),
+            _ => Err(format!("Unknown annotation_visibility value: {}", value).into()),
+        }
+    }
+}
+
+impl diesel::Queryable<sql_types::AnnotationVisibility, Pg> for AnnotationVisibility {
+    type Row = Self;
+    fn build(row: Self::Row) -> deserialize::Result<Self> {
+        Ok(row)
+    }
+}
+
+impl AnnotationVisibility {
+    /// Maps the `isPublic` boolean onto the enum.
+    pub fn from_is_public(is_public: bool) -> Self {
+        if is_public {
+            AnnotationVisibility::Public
+        } else {
+            AnnotationVisibility::Private
+        }
+    }
+}
+
 /// Assignment types for team workflow
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, diesel::AsExpression)]
 #[diesel(sql_type = sql_types::AssignmentType)]

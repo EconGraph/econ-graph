@@ -92,6 +92,9 @@ COPY --from=frontend-builder /app/playwright.mobile.config.ts ./playwright.mobil
 
 # Copy built backend binary from backend-builder stage
 COPY --from=backend-builder /app/backend/target/release/econ-graph-backend ./backend/econ-graph-backend
+# Reference data the backend reads at runtime (econ-graph-core's data/).
+COPY backend/crates/econ-graph-core/data ./backend/reference
+ENV REFERENCE_DATA_DIR=/app/backend/reference
 
 # Copy Playwright configuration files (needed for E2E test configs)
 COPY frontend/ci/ ./ci/

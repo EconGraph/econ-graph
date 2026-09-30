@@ -66,6 +66,9 @@ cd ..
 
 ### Step 4: Apply Updated Manifests
 ```bash
+# ingress.yaml first: graphql-ingress.yaml sorts before it and would clash with
+# an older ingress.yaml that still routes /graphql
+kubectl apply -f k8s/manifests/ingress.yaml
 kubectl apply -f k8s/manifests/
 kubectl apply -f k8s/monitoring/
 ```
@@ -164,7 +167,7 @@ source ports.env
   - ✅ Service status monitoring
 
 - **Grafana**: http://localhost:${GRAFANA_NODEPORT}
-  - ✅ Monitoring dashboards (admin/admin123)
+  - ✅ Monitoring dashboards (user admin, password in Secret `grafana-admin`, see k8s/README.md)
 
 ---
 

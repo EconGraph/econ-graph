@@ -38,7 +38,7 @@ use async_graphql::{Request, Response, ServerError};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
-use crate::graphql::schema::{create_schema, GraphQLContext};
+use crate::graphql::schema::create_schema;
 use crate::security::{
     BlockReason, LoggingSecurityEventHandler, SecurityConfig, SecurityEvent, SecurityEventHandler,
     SecurityMetrics, SecurityMiddleware,
