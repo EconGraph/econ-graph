@@ -2164,47 +2164,71 @@ async fn discovered_series_are_fetched_after_a_scheduler_tick() {
         base_url: mock.base_url(),
     }));
     let w = Worker::new(ctx(p), registry, config("t5-fresh"));
-    {
+    #[derive(diesel::QueryableByName)]
+    struct WasEnabled {
+        #[diesel(sql_type = diesel::sql_types::Bool)]
+        was_enabled: bool,
+    }
+    let was_enabled = {
         let mut conn = p.get().await.unwrap();
         diesel::sql_query(
-            "UPDATE data_sources SET is_enabled = TRUE WHERE name = $1 AND NOT is_enabled",
+            "WITH prev AS (SELECT is_enabled FROM data_sources WHERE name = $1) \
+             UPDATE data_sources SET is_enabled = TRUE WHERE name = $1 \
+             RETURNING (SELECT is_enabled FROM prev) AS was_enabled",
         )
         .bind::<diesel::sql_types::Text, _>(persist::data_source_template(FETCHABLE).name)
-        .execute(&mut conn)
+        .get_result::<WasEnabled>(&mut conn)
         .await
-        .unwrap();
-    }
+        .unwrap()
+        .was_enabled
+    };
+    // Catch a mid-assertion panic so FHFA's original enabled state is always restored below,
+    // instead of leaking into other tests that share this database.
+    let assertions = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(async {
+        enqueue(
+            p,
+            FETCHABLE.as_str(),
+            "catalog",
+            JobKind::DiscoverCatalog,
+            5,
+        )
+        .await;
+        assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
+        assert!(series_row(p, "t5_new_a").await.is_none(), "discovery only");
 
-    enqueue(
-        p,
-        FETCHABLE.as_str(),
-        "catalog",
-        JobKind::DiscoverCatalog,
-        5,
-    )
-    .await;
-    assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
-    assert!(series_row(p, "t5_new_a").await.is_none(), "discovery only");
-
-    let scheduler = RefreshScheduler::new(
-        p.clone(),
-        vec![FETCHABLE],
-        SchedulerConfig {
-            batch_limit: 10_000,
-            ..SchedulerConfig::default()
-        },
-    );
-    scheduler.tick().await.unwrap();
-    // Other tests may leave FHFA series behind; their fetches 404 and fail, which is fine.
-    for _ in 0..1000 {
-        if w.run_once().await.is_none() {
-            break;
+        let scheduler = RefreshScheduler::new(
+            p.clone(),
+            vec![FETCHABLE],
+            SchedulerConfig {
+                batch_limit: 10_000,
+                ..SchedulerConfig::default()
+            },
+        );
+        scheduler.tick().await.unwrap();
+        // Other tests may leave FHFA series behind; their fetches 404 and fail, which is fine.
+        for _ in 0..1000 {
+            if w.run_once().await.is_none() {
+                break;
+            }
         }
+        for id in ["t5_new_a", "t5_new_b"] {
+            let (series_id, .., status) = series_row(p, id).await.expect("series row");
+            assert_eq!(status.as_deref(), Some("success"), "{id}");
+            assert_eq!(point_count(p, series_id).await, 2, "{id}");
+        }
+    }))
+    .await;
+    {
+        let mut conn = p.get().await.unwrap();
+        diesel::sql_query("UPDATE data_sources SET is_enabled = $2 WHERE name = $1")
+            .bind::<diesel::sql_types::Text, _>(persist::data_source_template(FETCHABLE).name)
+            .bind::<diesel::sql_types::Bool, _>(was_enabled)
+            .execute(&mut conn)
+            .await
+            .unwrap();
     }
-    for id in ["t5_new_a", "t5_new_b"] {
-        let (series_id, .., status) = series_row(p, id).await.expect("series row");
-        assert_eq!(status.as_deref(), Some("success"), "{id}");
-        assert_eq!(point_count(p, series_id).await, 2, "{id}");
+    if let Err(panic) = assertions {
+        std::panic::resume_unwind(panic);
     }
 }
 
