@@ -30,6 +30,16 @@
         "owner": "ECO-144",
         "remove_by": "train 4"
       }
+    },
+    "global_analysis_tabs": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "build",
+        "owner": "ECO-105",
+        "remove_by": "train 3"
+      }
     }
   }
 }
