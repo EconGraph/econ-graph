@@ -115,6 +115,13 @@ pub async fn cross_section(
         CrossSectionDate::Latest => None,
     };
 
+    // Raw SQL is intentional: Diesel 2.3 supports DISTINCT ON and JSONB operators, but has
+    // no query-builder API for joining a correlated LATERAL subquery. LEFT JOIN LATERAL
+    // selects at most one observation per series while retaining series with no value,
+    // without loading observation histories into Rust or issuing per-series queries.
+    // PostgreSQL may use one indexed lookup per series within this statement; that is not
+    // an application N+1 round trip. Keep both request modes covered by the query-count test.
+    //
     // Each series' dates are walked newest first (`d`, from the index alone), and each date's
     // current revision picked on its own (`cur`: newest `revision_date`, a revision before the
     // original release on the same day; `id DESC` only makes that order total, since the unique
