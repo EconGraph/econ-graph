@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use chrono::{NaiveDate, Utc};
 use diesel::prelude::*;
-use diesel::sql_types::{Array, Bool, Date, Nullable, Numeric, Text, Uuid as SqlUuid};
+use diesel::sql_types::{Array, Bool, Date, Integer, Nullable, Numeric, Text, Uuid as SqlUuid};
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use econ_graph_core::error::{AppError, AppResult};
 use econ_graph_core::models::{DataSource, NewCrawlAttempt, NewDataSource};
@@ -30,6 +30,16 @@ use uuid::Uuid;
 use crate::adapter::{DiscoveredSeries, FetchedPoint, FetchedSeries};
 use crate::series_id::stable_series_id;
 use crate::source::SourceId;
+
+diesel::define_sql_function! {
+    /// `substr(string, start, count)`, used by [`retire_unlisted`] to match a scope prefix
+    /// literally (unlike `LIKE`, which treats `%`/`_` in the prefix as wildcards).
+    fn substr(string: Text, start: Integer, count: Integer) -> Text;
+}
+diesel::define_sql_function! {
+    /// `length(string)`, used by [`retire_unlisted`] alongside [`substr`].
+    fn length(string: Text) -> Integer;
+}
 
 /// Rows per multi-row INSERT (keeps well under Postgres' 65535 bind-parameter limit).
 pub const INSERT_CHUNK: usize = 1000;
@@ -456,6 +466,10 @@ pub async fn retire_unlisted(
     listed: &[DiscoveredSeries],
     scope_prefix: Option<&str>,
 ) -> AppResult<Retirement> {
+    use diesel::dsl::not;
+    use econ_graph_core::schema::economic_series::dsl as es;
+    use series_metadata::dsl as sm;
+
     let ids: Vec<String> = listed
         .iter()
         .filter(|d| !d.external_id.trim().is_empty())
@@ -464,36 +478,46 @@ pub async fn retire_unlisted(
     if ids.is_empty() {
         return Ok(Retirement::default());
     }
-    // Matched with `substr(external_id, 1, length($3)) = $3` rather than LIKE, so a prefix
-    // containing '%' or '_' (SQL LIKE wildcards) is still matched literally. An empty prefix
-    // (the "whole source" case) matches every external_id, since substr(_, 1, 0) = ''.
+    // Matched with `substr(external_id, 1, length(prefix)) = prefix` rather than LIKE, so a
+    // prefix containing '%' or '_' (SQL LIKE wildcards) is still matched literally. An empty
+    // prefix (the "whole source" case) matches every external_id, since substr(_, 1, 0) = ''.
     let prefix = scope_prefix.unwrap_or("").to_string();
     let mut conn = pool.get().await.map_err(conn_err)?;
     let source_id = data_source_id_conn(&mut conn, source).await?;
     let retirement = conn
         .transaction::<Retirement, AppError, _>(async move |conn| {
-            let run = |sql: &'static str| {
-                diesel::sql_query(sql)
-                    .bind::<SqlUuid, _>(source_id)
-                    .bind::<Array<Text>, _>(ids.clone())
-                    .bind::<Text, _>(prefix.clone())
-            };
+            let sm_in_scope =
+                || substr(sm::external_id, 1, length(prefix.clone())).eq(prefix.clone());
+            let es_in_scope =
+                || substr(es::external_id, 1, length(prefix.clone())).eq(prefix.clone());
+            let metadata_retired = diesel::update(sm::series_metadata)
+                .filter(sm::source_id.eq(source_id))
+                .filter(sm::is_active)
+                .filter(not(sm::external_id.eq_any(ids.clone())))
+                .filter(sm_in_scope())
+                .set(sm::is_active.eq(false))
+                .execute(conn)
+                .await?;
+            let series_retired = diesel::update(es::economic_series)
+                .filter(es::source_id.eq(source_id))
+                .filter(es::is_active)
+                .filter(not(es::external_id.eq_any(ids.clone())))
+                .filter(es_in_scope())
+                .set(es::is_active.eq(false))
+                .execute(conn)
+                .await?;
+            let series_reactivated = diesel::update(es::economic_series)
+                .filter(es::source_id.eq(source_id))
+                .filter(not(es::is_active))
+                .filter(es::external_id.eq_any(ids.clone()))
+                .filter(es_in_scope())
+                .set(es::is_active.eq(true))
+                .execute(conn)
+                .await?;
             Ok(Retirement {
-                metadata_retired: run("UPDATE series_metadata SET is_active = FALSE \
-                     WHERE source_id = $1 AND is_active AND external_id <> ALL($2) \
-                     AND substr(external_id, 1, length($3)) = $3")
-                .execute(conn)
-                .await?,
-                series_retired: run("UPDATE economic_series SET is_active = FALSE \
-                     WHERE source_id = $1 AND is_active AND external_id <> ALL($2) \
-                     AND substr(external_id, 1, length($3)) = $3")
-                .execute(conn)
-                .await?,
-                series_reactivated: run("UPDATE economic_series SET is_active = TRUE \
-                     WHERE source_id = $1 AND NOT is_active AND external_id = ANY($2) \
-                     AND substr(external_id, 1, length($3)) = $3")
-                .execute(conn)
-                .await?,
+                metadata_retired,
+                series_retired,
+                series_reactivated,
             })
         })
         .await?;
