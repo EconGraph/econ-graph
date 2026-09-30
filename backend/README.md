@@ -4,10 +4,10 @@ The comprehensive backend system for the EconGraph economic data platform, provi
 
 ## Architecture Overview
 
-The EconGraph backend is built as a modular Rust workspace with 9 specialized crates, each serving a specific domain within the economic data ecosystem:
+The EconGraph backend is built as a modular Rust workspace with 11 specialized crates, each serving a specific domain within the economic data ecosystem:
 
 ```
-econ-graph-backend/
+backend/crates/
 ├── econ-graph-core/          # Core data models and database schema
 ├── econ-graph-auth/          # Authentication and authorization
 ├── econ-graph-metrics/       # Metrics collection and monitoring
@@ -17,7 +17,8 @@ econ-graph-backend/
 ├── econ-graph-crawler-worker/ # Deployed `crawler-worker` binary (worker + SEC handler)
 ├── econ-graph-sec-crawler/   # SEC EDGAR XBRL financial data crawling
 ├── econ-graph-mcp/           # Model Context Protocol for AI integration
-└── econ-graph-backend/       # Main application server and orchestration
+├── econ-graph-backend/       # Main application server and orchestration
+└── econ-graph-flags-build/   # Compile-time feature flag support
 ```
 
 ## Core Components
@@ -81,7 +82,8 @@ All data collection goes through the Postgres `crawl_queue`: jobs are enqueued (
 - Queue worker with retry/fail by error kind and per-source pause
 - `crawler discover|enqueue|status|sources|fetch` operator CLI
 
-See `crates/econ-graph-crawler/README.md` and `docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md`.
+See the [crawler README](crates/econ-graph-crawler/README.md) and
+[crawler deployment guide](../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md).
 
 ### **econ-graph-sec-crawler**
 Specialized SEC EDGAR XBRL crawler for financial data acquisition with advanced parsing and analysis capabilities.
@@ -115,50 +117,79 @@ Main backend application providing server infrastructure, metrics collection, an
 
 ## Development Workflow
 
-### **Getting Started**
+### **Local database and server**
+
+Run these commands from the repository root. Docker must be running.
 
 ```bash
-# Install dependencies
-cargo build
+docker run -d --name econ-graph-db \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_DB=econ_graph \
+  -p 127.0.0.1:5432:5432 postgres:18
 
-# Run tests
-cargo test
+# Wait until this reports "accepting connections" before starting the server.
+docker exec econ-graph-db pg_isready -U postgres -d econ_graph
 
-# Run specific crate tests
-cargo test -p econ-graph-core
-cargo test -p econ-graph-services
-
-# Run integration tests
-cargo test --test integration
-```
-
-### **Database Setup**
-
-```bash
-# Start PostgreSQL (using Docker)
-docker run -d --name econ-graph-db -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:18
-
-# Run migrations
 cd backend
-cargo run --bin econ-graph-backend -- --migrate
-
-# Or use diesel CLI
-diesel migration run
+export DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph
+cargo run -p econ-graph-backend --bin econ-graph-backend
 ```
+
+The server applies pending migrations during startup and listens on port **9876**
+unless `BACKEND_PORT` overrides it. Verify startup with
+`curl --fail http://localhost:9876/health`. The database is initially empty;
+see the [crawler deployment guide](../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md)
+for data loading.
+
+For the public frontend, open a second terminal at the repository root:
+
+```bash
+cd frontend
+npm ci
+BACKEND_URL=http://localhost:9876 npm run dev
+```
+
+Vite serves the frontend at `http://localhost:3000`. Its explicit `BACKEND_URL`
+override aligns the proxy with the backend's default port.
 
 ### **Environment Configuration**
 
+The backend reads exported variables and optionally loads a `.env` file.
+There is no checked-in `.env.example`; the exported `DATABASE_URL` above is sufficient
+for the local anonymous server.
+
+To enable sign-in, first configure a reachable Keycloak realm and API audience,
+then export these settings before starting the backend:
+
 ```bash
-# Copy environment template
-cp .env.example .env
+export OIDC_ISSUER=http://localhost:8081/realms/econ-graph
+export OIDC_AUDIENCE=econ-graph-api
+export OIDC_JWKS_URL=http://localhost:8081/realms/econ-graph/protocol/openid-connect/certs
+```
 
-# Configure database connection
-DATABASE_URL=postgresql://username:password@localhost/econ_graph
+These URLs are example identity-provider settings, not a Keycloak installation.
+The backend verifies provider access tokens and does not issue its own.
+With `OIDC_ISSUER` unset, callers are anonymous and protected operations remain
+unavailable.
 
-# Configure authentication: the backend verifies Keycloak access tokens, it doesn't issue its own
-OIDC_ISSUER=http://localhost/idp/realms/econ-graph
-OIDC_AUDIENCE=econ-graph-api
-OIDC_JWKS_URL=http://localhost/idp/realms/econ-graph/protocol/openid-connect/certs
+### **Build and test**
+
+Run from `backend/` with the `econ-graph-db` container above running and Docker
+available. Create a separate, disposable test database once. Database-backed tests
+**drop and recreate its public schema**, so never point them at application data.
+The subshell below keeps the application's exported `DATABASE_URL` unchanged.
+
+```bash
+cargo build --workspace
+# One-time creation; skip this command if econ_graph_test already exists.
+docker exec econ-graph-db createdb -U postgres econ_graph_test
+(
+  export DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph_test
+  cargo test --workspace
+  cargo test -p econ-graph-core
+  cargo test -p econ-graph-services
+)
 ```
 
 ## Testing Strategy
@@ -183,36 +214,29 @@ The backend employs a comprehensive testing strategy across all crates:
 ### **GraphQL API**
 The primary API is exposed through GraphQL with comprehensive schema documentation:
 
-```graphql
-# Query economic data
-query GetEconomicSeries($symbol: String!) {
-  economicSeries(symbol: $symbol) {
-    id
-    name
-    dataPoints {
-      date
-      value
-    }
-  }
-}
+Enable the explorer with `ENABLE_GRAPHQL_PLAYGROUND=true` when starting the server,
+then visit `http://localhost:9876/playground` to inspect the current schema.
 
-# Search for companies
-query SearchCompanies($query: String!) {
-  searchCompanies(query: $query) {
-    id
-    name
-    ticker
-  }
+A minimal connectivity query:
+
+```graphql
+query {
+  __typename
 }
 ```
+
+See the [GraphQL API reference](../docs/api/GRAPHQL_API.md) for data queries.
+
 
 ### **REST Endpoints**
 Additional REST endpoints for specific functionality:
 
 - `GET /health` - System health check
 - `GET /metrics` - Prometheus metrics
-- `POST /auth/login` - User authentication
-- `GET /api/v1/series` - Economic data series
+- `GET /playground` - GraphQL explorer, only when `ENABLE_GRAPHQL_PLAYGROUND=true`
+
+Economic series queries use `POST /graphql`; authentication uses identity-provider
+access tokens. This server does not expose `/auth/login` or `/api/v1/series`.
 
 ## Monitoring and Observability
 
@@ -253,26 +277,30 @@ Additional REST endpoints for specific functionality:
 # Build backend image
 docker build -t econ-graph-backend .
 
-# Run with Docker Compose
-docker-compose up -d
+# Run the repository's Compose configuration (from backend/)
+docker compose -f ../docker-compose.yml up -d
 ```
 
 ### **Kubernetes Deployment**
 ```bash
-# Deploy to Kubernetes
-kubectl apply -f k8s/manifests/
+# Deploy to Kubernetes (from backend/)
+kubectl apply -f ../k8s/manifests/
 
 # Monitor deployment
 kubectl get pods -l app=econ-graph-backend
 ```
 
 ### **Database Migrations**
-```bash
-# Run migrations
-cargo run --bin econ-graph-backend -- --migrate
 
-# Rollback migrations
-diesel migration redo
+From `backend/`, with `DATABASE_URL` exported as above. Normal server startup applies
+pending migrations automatically; there is no `--migrate` server mode.
+
+```bash
+# Apply pending migrations without starting the server (requires diesel CLI)
+diesel migration run
+
+# Undo the latest migration (destructive; use only on disposable development data)
+diesel migration revert
 ```
 
 ## Contributing
@@ -297,3 +325,5 @@ This project is licensed under the Microsoft Reference Source License (MS-RSL). 
 ## Support
 
 For technical support, feature requests, or bug reports, please refer to the project documentation or contact the development team.
+
+

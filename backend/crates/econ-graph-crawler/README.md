@@ -35,8 +35,14 @@ crawler sources                                                        # sources
 crawler fetch    --source FRED --series GDP [--full]                   # one fetch now, bypassing the queue
 ```
 
-From the repo: `cargo run -p econ-graph-crawler --bin crawler -- <command>`; the worker:
+Run from `backend/` (use `cd backend` from the repository root):
+`cargo run -p econ-graph-crawler --bin crawler -- <command>`; the worker:
 `cargo run -p econ-graph-crawler-worker --bin crawler-worker`.
+
+Before queue commands or worker startup, export `DATABASE_URL` and apply migrations
+by starting the backend, as shown in the [local setup](../../README.md#development-workflow).
+The worker does not apply migrations. Export the relevant provider API keys in the
+worker's environment as well as in the CLI's environment for direct `fetch` calls.
 
 ## Development-only static catalogs
 
@@ -60,3 +66,5 @@ Adapters are tested against a local mock upstream (`testkit`, see `src/testkit`)
 ## License
 
 This project is licensed under the Microsoft Reference Source License (MS-RSL). See the LICENSE file for complete terms and conditions.
+
+

@@ -182,7 +182,7 @@ and [dashboard browser tests](../../frontend/tests/e2e/dashboard.spec.ts).
 - **UI Library**: Material-UI components
 - **Charts**: Chart.js with custom extensions
 - **State Management**: Context API and hooks
-- **Testing**: Jest and React Testing Library
+- **Testing**: Vitest and React Testing Library
 
 ### Infrastructure
 - **Containerization**: Docker with multi-stage builds
@@ -303,4 +303,5 @@ The platform is positioned to capture significant market share in the $8.2B econ
 *Last Updated: September 2025*
 *Document Version: 1.0*
 *Prepared by: Product Manager*
+
 

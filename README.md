@@ -3,7 +3,7 @@
 > **Democratizing economic intelligence through modern, affordable, open-source technology that delivers 90% cost savings vs. Bloomberg Terminal**
 
 [![Tests](https://img.shields.io/badge/Tests-Unit%20%7C%20Integration%20%7C%20E2E-blue)](https://github.com/jmalicki/econ-graph/actions)
-[![Backend](https://img.shields.io/badge/Backend-Rust%20%2B%20Axum-orange)](https://github.com/jmalicki/econ-graph/tree/main/backend)
+[![Backend](https://img.shields.io/badge/Backend-Rust%20%2B%20Warp-orange)](https://github.com/jmalicki/econ-graph/tree/main/backend)
 [![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-blue)](https://github.com/jmalicki/econ-graph/tree/main/frontend)
 [![License](https://img.shields.io/badge/License-MS--RSL-red.svg)](LICENSE)
 
@@ -62,7 +62,7 @@ EconGraph is an **economic data intelligence platform** that transforms how econ
 
 ### 🎯 **Major Achievements with AI Assistance**
 - **Frontend**: Complete React/TypeScript app with Material-UI, Chart.js, routing
-- **Backend**: Rust/Axum server with GraphQL, PostgreSQL, Diesel ORM, Docker
+- **Backend**: Rust/Warp server with GraphQL, PostgreSQL, Diesel ORM, Docker
 - **Testing**: Unit, integration, and browser E2E tests
 - **CI/CD**: GitHub Actions workflows with security scanning, formatting, linting
 - **Documentation**: Google-style comments, comprehensive README, investor pitch
@@ -198,7 +198,7 @@ the architecture alone does not establish a capacity benchmark or uptime guarant
 ### **🚀 Modern Architecture Advantages**
 
 #### **Backend Performance & Reliability**
-- **Rust + Axum**: Memory-safe language with asynchronous request handling
+- **Rust + Warp**: Memory-safe language with asynchronous request handling
 - **PostgreSQL + Diesel**: Enterprise-grade database with type-safe operations and ACID compliance
 - **GraphQL API**: Clients select the fields they need in each request
 - **Async Processing**: Non-blocking operations provide a foundation for handling concurrent requests
@@ -245,32 +245,48 @@ the architecture alone does not establish a capacity benchmark or uptime guarant
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/jmalicki/econ-graph.git
+   git clone https://github.com/EconGraph/econ-graph.git
    cd econ-graph
    ```
 
 2. **Start the database**
    ```bash
    docker run -d --name econ-postgres \
+     -e POSTGRES_USER=postgres \
      -e POSTGRES_PASSWORD=password \
-     -p 5432:5432 postgres:18
+     -e POSTGRES_DB=econ_graph \
+     -p 127.0.0.1:5432:5432 postgres:18
+   # Wait for "accepting connections" before launching the backend.
+   docker exec econ-postgres pg_isready -U postgres -d econ_graph
    ```
 
 3. **Launch the backend**
    ```bash
    cd backend
-   cargo run
-   # Backend running on http://localhost:8000
+   export DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph
+   cargo run -p econ-graph-backend --bin econ-graph-backend
+   # Startup applies migrations; backend runs on http://localhost:9876
    ```
 
-4. **Start the frontend**
+4. **Start the frontend in a second terminal** (from the repository root)
    ```bash
    cd frontend
-   npm install && npm start
+   npm ci
+   BACKEND_URL=http://localhost:9876 npm run dev
    # Frontend running on http://localhost:3000
    ```
 
 5. **🎉 Open your browser** to `http://localhost:3000`
+
+This starts an empty local database. The backend treats callers as anonymous while
+`OIDC_ISSUER` is unset; protected operations require a configured identity provider.
+Vite's development frontend defaults to the Keycloak realm at
+`http://localhost:8081/realms/econ-graph`. Sign-in requires that realm to be reachable
+and matching frontend (`VITE_OIDC_ISSUER`, `VITE_OIDC_CLIENT_ID`) and backend
+(`OIDC_ISSUER`, `OIDC_AUDIENCE`, optionally `OIDC_JWKS_URL`) settings. See the
+[backend development setup](backend/README.md#development-workflow) for configuration
+and the [crawler deployment guide](docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md) to load data.
+The explicit `BACKEND_URL` aligns Vite's proxy with the backend's default port.
 
 ---
 
@@ -303,7 +319,7 @@ the architecture alone does not establish a capacity benchmark or uptime guarant
 
 ### 🎯 **Major Achievements with AI Assistance**
 - **Frontend**: Complete React/TypeScript app with Material-UI, Chart.js, routing
-- **Backend**: Rust/Axum server with GraphQL, PostgreSQL, Diesel ORM, Docker
+- **Backend**: Rust/Warp server with GraphQL, PostgreSQL, Diesel ORM, Docker
 - **Testing**: Unit, integration, and browser E2E tests
 - **CI/CD**: GitHub Actions workflows with security scanning, formatting, linting
 - **Documentation**: Google-style comments, comprehensive README, investor pitch
@@ -327,14 +343,11 @@ econ-graph/
 │   ├── testing/             # Testing strategies and reports
 │   └── monitoring/          # Monitoring and observability setup
 │
-├── 🦀 backend/              # Rust backend with Axum + PostgreSQL
-│   ├── src/
-│   │   ├── graphql/         # GraphQL schema and resolvers
-│   │   ├── models/          # Database models with Diesel ORM
-│   │   ├── services/        # Business logic and data processing
-│   │   └── handlers/        # HTTP request handlers
+├── 🦀 backend/              # Rust backend with Warp + PostgreSQL
+│   ├── crates/              # Rust workspace: core, services, GraphQL, auth, crawlers
+│   │   └── econ-graph-backend/src/main.rs  # HTTP server and routes
 │   ├── migrations/          # Database schema migrations
-│   └── tests/               # Integration and unit tests
+│   └── Cargo.toml           # Workspace members and shared dependencies
 │
 ├── ⚛️ frontend/             # React frontend with TypeScript
 │   ├── src/
@@ -461,4 +474,5 @@ This project is licensed under the Microsoft Reference Source License (MS-RSL) -
 # Trigger CI test
 # Package-lock.json sync fix
 # CI Trigger
+
 

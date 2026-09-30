@@ -26,14 +26,22 @@ The crate includes comprehensive tests to ensure business logic correctness, and
 
 ### Running Tests
 
-```bash
-# Run all tests
-cargo test
+Run from `backend/` (use `cd backend` from the repository root); `-p` selects this
+crate rather than every default workspace member. First create the disposable
+`econ_graph_test` database using the [backend test setup](../../README.md#build-and-test).
+Database-backed tests drop and recreate its public schema. Keep Docker available;
+the subshell below leaves the application's exported `DATABASE_URL` unchanged.
 
-# Run specific test modules
-cargo test services::search
-cargo test services::queue_service
-cargo test integration
+```bash
+(
+  export DATABASE_URL=postgresql://postgres:password@localhost:5432/econ_graph_test
+  # Run this crate's tests
+  cargo test -p econ-graph-services
+
+  # Filter by existing service module names
+  cargo test -p econ-graph-services services::search_service
+  cargo test -p econ-graph-services services::queue_service
+)
 ```
 
 ### Test Infrastructure
@@ -44,3 +52,5 @@ cargo test integration
 ## License
 
 This project is licensed under the Microsoft Reference Source License (MS-RSL). See the LICENSE file for complete terms and conditions.
+
+
