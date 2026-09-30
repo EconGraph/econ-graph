@@ -182,7 +182,7 @@ async fn data_source_id_conn(conn: &mut AsyncPgConnection, source: SourceId) -> 
         .values(&template)
         .on_conflict(dsl::name)
         .do_nothing()
-        .execute(conn)
+        .execute(&mut *conn)
         .await?;
     Ok(dsl::data_sources
         .filter(dsl::name.eq(&template.name))
@@ -278,14 +278,23 @@ pub async fn find_series_id(
     source: SourceId,
     external_id: &str,
 ) -> AppResult<Option<Uuid>> {
-    use econ_graph_core::schema::economic_series::dsl as es;
     let mut conn = pool.get().await.map_err(conn_err)?;
-    let source_id = data_source_id_conn(&mut conn, source).await?;
+    find_series_id_conn(&mut conn, source, external_id).await
+}
+
+/// Read-only connection lookup; fetching must not create a source before lease validation.
+pub(crate) async fn find_series_id_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    external_id: &str,
+) -> AppResult<Option<Uuid>> {
+    use econ_graph_core::schema::economic_series::dsl as es;
     Ok(es::economic_series
-        .filter(es::source_id.eq(source_id))
+        .inner_join(data_sources::table)
+        .filter(data_sources::name.eq(data_source_template(source).name))
         .filter(es::external_id.eq(external_id))
         .select(es::id)
-        .first::<Uuid>(&mut conn)
+        .first::<Uuid>(conn)
         .await
         .optional()?)
 }
@@ -409,7 +418,20 @@ pub async fn persist_series(
     fetched: &FetchedSeries,
 ) -> AppResult<SeriesWrite> {
     let mut conn = pool.get().await.map_err(conn_err)?;
-    let source_id = data_source_id_conn(&mut conn, source).await?;
+    conn.transaction::<SeriesWrite, AppError, _>(async move |conn| {
+        persist_series_conn(conn, source, external_id, fetched).await
+    })
+    .await
+}
+
+/// Connection form; caller must wrap all related writes in a transaction.
+pub(crate) async fn persist_series_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    external_id: &str,
+    fetched: &FetchedSeries,
+) -> AppResult<SeriesWrite> {
+    let source_id = data_source_id_conn(conn, source).await?;
     let meta = fetched.metadata.as_ref();
     let title = meta.and_then(|m| clip_opt(Some(&m.title), 500));
     let description = meta.and_then(|m| clip_opt(m.description.as_deref(), 2000));
@@ -426,12 +448,14 @@ pub async fn persist_series(
     }
     let latest_date = unique.keys().map(|k| k.0).max();
 
-    conn.transaction::<SeriesWrite, AppError, _>(async move |conn| {
-            let codes = dataset_codes([fetched.dataset.as_ref()]);
-            let ids = dataset_ids(conn, source, source_id, &codes).await?;
-            let dataset = fetched.dataset.as_ref().map(|d| (ids[&d.code], &d.dimensions));
-            let row: UpsertedSeries = diesel::sql_query(
-                "INSERT INTO economic_series (id, source_id, external_id, title, description, units, \
+    let codes = dataset_codes([fetched.dataset.as_ref()]);
+    let ids = dataset_ids(&mut *conn, source, source_id, &codes).await?;
+    let dataset = fetched
+        .dataset
+        .as_ref()
+        .map(|d| (ids[&d.code], &d.dimensions));
+    let row: UpsertedSeries = diesel::sql_query(
+        "INSERT INTO economic_series (id, source_id, external_id, title, description, units, \
                      frequency, seasonal_adjustment, is_active, first_discovered_at, last_crawled_at, \
                      last_updated, crawl_status, crawl_error_message, dataset_id, dimensions) \
                  VALUES ($9, $1, $2, COALESCE($3, $2), $4, $5, COALESCE($6, $7), $8, TRUE, NOW(), \
@@ -447,51 +471,49 @@ pub async fn persist_series(
                      last_crawled_at = NOW(), last_updated = NOW(), \
                      crawl_status = 'success', crawl_error_message = NULL \
                  RETURNING id, (old.id IS NULL) AS inserted",
-            )
-            .bind::<SqlUuid, _>(source_id)
-            .bind::<Text, _>(&external_id)
-            .bind::<Nullable<Text>, _>(title.as_deref())
-            .bind::<Nullable<Text>, _>(description.as_deref())
-            .bind::<Nullable<Text>, _>(units.as_deref())
-            .bind::<Nullable<Text>, _>(frequency.as_deref())
-            .bind::<Text, _>(UNKNOWN_FREQUENCY)
-            .bind::<Nullable<Text>, _>(seasonal.as_deref())
-            .bind::<SqlUuid, _>(id)
-            .bind::<Nullable<SqlUuid>, _>(dataset.map(|d| d.0))
-            .bind::<Nullable<Jsonb>, _>(dataset.map(|d| d.1))
-            .get_result(conn)
-            .await?;
-            let series_id = row.id;
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(&external_id)
+    .bind::<Nullable<Text>, _>(title.as_deref())
+    .bind::<Nullable<Text>, _>(description.as_deref())
+    .bind::<Nullable<Text>, _>(units.as_deref())
+    .bind::<Nullable<Text>, _>(frequency.as_deref())
+    .bind::<Text, _>(UNKNOWN_FREQUENCY)
+    .bind::<Nullable<Text>, _>(seasonal.as_deref())
+    .bind::<SqlUuid, _>(id)
+    .bind::<Nullable<SqlUuid>, _>(dataset.map(|d| d.0))
+    .bind::<Nullable<Jsonb>, _>(dataset.map(|d| d.1))
+    .get_result(&mut *conn)
+    .await?;
+    let series_id = row.id;
 
-            let points: Vec<&FetchedPoint> = unique.values().copied().collect();
-            let (mut upserted, mut new) = (0usize, 0usize);
-            for chunk in points.chunks(INSERT_CHUNK) {
-                let written = upsert_points(conn, series_id, chunk).await?;
-                upserted += written.len();
-                new += written.iter().filter(|w| w.inserted).count();
-            }
+    let points: Vec<&FetchedPoint> = unique.values().copied().collect();
+    let (mut upserted, mut new) = (0usize, 0usize);
+    for chunk in points.chunks(INSERT_CHUNK) {
+        let written = upsert_points(conn, series_id, chunk).await?;
+        upserted += written.len();
+        new += written.iter().filter(|w| w.inserted).count();
+    }
 
-            if !points.is_empty() {
-                diesel::sql_query(
-                    "UPDATE economic_series SET \
+    if !points.is_empty() {
+        diesel::sql_query(
+            "UPDATE economic_series SET \
                          start_date = (SELECT MIN(date) FROM data_points WHERE series_id = $1), \
                          end_date = (SELECT MAX(date) FROM data_points WHERE series_id = $1) \
                      WHERE id = $1",
-                )
-                .bind::<SqlUuid, _>(series_id)
-                .execute(conn)
-                .await?;
-            }
+        )
+        .bind::<SqlUuid, _>(series_id)
+        .execute(&mut *conn)
+        .await?;
+    }
 
-            Ok(SeriesWrite {
-                series_id,
-                series_created: row.inserted,
-                points_upserted: upserted,
-                points_new: new,
-                latest_date,
-            })
+    Ok(SeriesWrite {
+        series_id,
+        series_created: row.inserted,
+        points_upserted: upserted,
+        points_new: new,
+        latest_date,
     })
-    .await
 }
 
 /// Upserts one `series_metadata` row per discovered series (key `(source_id, external_id)`), in
@@ -506,13 +528,25 @@ pub async fn persist_discovered(
     source: SourceId,
     discovered: &[DiscoveredSeries],
 ) -> AppResult<usize> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    conn.transaction::<usize, AppError, _>(async move |conn| {
+        persist_discovered_conn(conn, source, discovered).await
+    })
+    .await
+}
+
+/// Connection form; caller must wrap all related writes in a transaction.
+pub(crate) async fn persist_discovered_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    discovered: &[DiscoveredSeries],
+) -> AppResult<usize> {
     use diesel::dsl::sql;
     use diesel::upsert::excluded;
     use econ_graph_core::models::NewSeriesMetadata;
     use series_metadata::dsl as sm;
 
-    let mut conn = pool.get().await.map_err(conn_err)?;
-    let source_id = data_source_id_conn(&mut conn, source).await?;
+    let source_id = data_source_id_conn(conn, source).await?;
 
     // Keyed by the stored (clipped) id: one INSERT can't touch a row twice.
     let mut unique = BTreeMap::new();
@@ -522,72 +556,68 @@ pub async fn persist_discovered(
         }
     }
     let codes = dataset_codes(unique.values().map(|d| d.dataset.as_ref()));
-
-    conn.transaction::<usize, AppError, _>(async move |conn| {
-        let ids = dataset_ids(conn, source, source_id, &codes).await?;
-        let rows: Vec<_> = unique
-            .into_iter()
-            .map(|(external_id, d)| {
-                let id = sm::id.eq(stable_series_id(source, &external_id));
-                (
-                    id,
-                    NewSeriesMetadata {
-                        source_id,
-                        title: clip_opt(Some(&d.title), 500)
-                            .unwrap_or_else(|| clip(&d.external_id, 500)),
-                        description: clip_opt(d.description.as_deref(), usize::MAX),
-                        units: clip_opt(d.units.as_deref(), 100),
-                        frequency: clip_opt(d.frequency.as_deref(), 50),
-                        geographic_level: None,
-                        data_url: clip_opt(d.data_url.as_deref(), usize::MAX),
-                        api_endpoint: None,
-                        is_active: true,
-                        dataset_id: d.dataset.as_ref().map(|ds| ids[&ds.code]),
-                        dimensions: d
-                            .dataset
-                            .as_ref()
-                            .map(|ds| ds.dimensions.clone())
-                            .unwrap_or_default(),
-                        default_measure: None,
-                        external_id,
-                    },
-                )
-            })
-            .collect();
-        let mut written = 0;
-        for chunk in rows.chunks(INSERT_CHUNK) {
-            let now = Utc::now();
-            written += diesel::insert_into(sm::series_metadata)
-                .values(chunk)
-                .on_conflict((sm::source_id, sm::external_id))
-                .do_update()
-                .set((
-                    // Nothing references series_metadata.id, so a row created before stable ids
-                    // (the seeds, an older database) is moved onto its stable id here.
-                    sm::id.eq(excluded(sm::id)),
-                    sm::title.eq(excluded(sm::title)),
-                    sm::description.eq(excluded(sm::description)),
-                    sm::units.eq(excluded(sm::units)),
-                    sm::frequency.eq(excluded(sm::frequency)),
-                    sm::data_url.eq(excluded(sm::data_url)),
-                    // A series discovered without a dataset keeps the stored one.
-                    sm::dataset_id.eq(sql::<Nullable<SqlUuid>>(
-                        "COALESCE(EXCLUDED.dataset_id, series_metadata.dataset_id)",
-                    )),
-                    sm::dimensions.eq(sql::<Jsonb>(
-                        "CASE WHEN EXCLUDED.dataset_id IS NULL THEN series_metadata.dimensions \
-                         ELSE EXCLUDED.dimensions END",
-                    )),
-                    sm::is_active.eq(true),
-                    sm::last_discovered_at.eq(now),
-                    sm::updated_at.eq(now),
-                ))
-                .execute(conn)
-                .await?;
-        }
-        Ok(written)
-    })
-    .await
+    let ids = dataset_ids(&mut *conn, source, source_id, &codes).await?;
+    let rows: Vec<_> = unique
+        .into_iter()
+        .map(|(external_id, d)| {
+            let id = sm::id.eq(stable_series_id(source, &external_id));
+            (
+                id,
+                NewSeriesMetadata {
+                    source_id,
+                    title: clip_opt(Some(&d.title), 500)
+                        .unwrap_or_else(|| clip(&d.external_id, 500)),
+                    description: clip_opt(d.description.as_deref(), usize::MAX),
+                    units: clip_opt(d.units.as_deref(), 100),
+                    frequency: clip_opt(d.frequency.as_deref(), 50),
+                    geographic_level: None,
+                    data_url: clip_opt(d.data_url.as_deref(), usize::MAX),
+                    api_endpoint: None,
+                    is_active: true,
+                    dataset_id: d.dataset.as_ref().map(|ds| ids[&ds.code]),
+                    dimensions: d
+                        .dataset
+                        .as_ref()
+                        .map(|ds| ds.dimensions.clone())
+                        .unwrap_or_default(),
+                    default_measure: None,
+                    external_id,
+                },
+            )
+        })
+        .collect();
+    let mut written = 0;
+    for chunk in rows.chunks(INSERT_CHUNK) {
+        let now = Utc::now();
+        written += diesel::insert_into(sm::series_metadata)
+            .values(chunk)
+            .on_conflict((sm::source_id, sm::external_id))
+            .do_update()
+            .set((
+                // Nothing references series_metadata.id, so a row created before stable ids
+                // (the seeds, an older database) is moved onto its stable id here.
+                sm::id.eq(excluded(sm::id)),
+                sm::title.eq(excluded(sm::title)),
+                sm::description.eq(excluded(sm::description)),
+                sm::units.eq(excluded(sm::units)),
+                sm::frequency.eq(excluded(sm::frequency)),
+                sm::data_url.eq(excluded(sm::data_url)),
+                // A series discovered without a dataset keeps the stored one.
+                sm::dataset_id.eq(sql::<Nullable<SqlUuid>>(
+                    "COALESCE(EXCLUDED.dataset_id, series_metadata.dataset_id)",
+                )),
+                sm::dimensions.eq(sql::<Jsonb>(
+                    "CASE WHEN EXCLUDED.dataset_id IS NULL THEN series_metadata.dimensions \
+                     ELSE EXCLUDED.dimensions END",
+                )),
+                sm::is_active.eq(true),
+                sm::last_discovered_at.eq(now),
+                sm::updated_at.eq(now),
+            ))
+            .execute(&mut *conn)
+            .await?;
+    }
+    Ok(written)
 }
 
 /// Result of [`retire_unlisted`].
@@ -622,6 +652,23 @@ pub async fn retire_unlisted(
     listed: &[DiscoveredSeries],
     scope_prefix: Option<&str>,
 ) -> AppResult<Retirement> {
+    if !listed.iter().any(|d| !d.external_id.trim().is_empty()) {
+        return Ok(Retirement::default());
+    }
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    conn.transaction::<Retirement, AppError, _>(async move |conn| {
+        retire_unlisted_conn(conn, source, listed, scope_prefix).await
+    })
+    .await
+}
+
+/// Connection form; caller must wrap catalog writes and retirement in a transaction.
+pub(crate) async fn retire_unlisted_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    listed: &[DiscoveredSeries],
+    scope_prefix: Option<&str>,
+) -> AppResult<Retirement> {
     use diesel::dsl::not;
     use econ_graph_core::schema::economic_series::dsl as es;
     use series_metadata::dsl as sm;
@@ -638,45 +685,38 @@ pub async fn retire_unlisted(
     // prefix containing '%' or '_' (SQL LIKE wildcards) is still matched literally. An empty
     // prefix (the "whole source" case) matches every external_id, since substr(_, 1, 0) = ''.
     let prefix = scope_prefix.unwrap_or("").to_string();
-    let mut conn = pool.get().await.map_err(conn_err)?;
-    let source_id = data_source_id_conn(&mut conn, source).await?;
-    let retirement = conn
-        .transaction::<Retirement, AppError, _>(async move |conn| {
-            let sm_in_scope =
-                || substr(sm::external_id, 1, length(prefix.clone())).eq(prefix.clone());
-            let es_in_scope =
-                || substr(es::external_id, 1, length(prefix.clone())).eq(prefix.clone());
-            let metadata_retired = diesel::update(sm::series_metadata)
-                .filter(sm::source_id.eq(source_id))
-                .filter(sm::is_active)
-                .filter(not(sm::external_id.eq_any(ids.clone())))
-                .filter(sm_in_scope())
-                .set(sm::is_active.eq(false))
-                .execute(conn)
-                .await?;
-            let series_retired = diesel::update(es::economic_series)
-                .filter(es::source_id.eq(source_id))
-                .filter(es::is_active)
-                .filter(not(es::external_id.eq_any(ids.clone())))
-                .filter(es_in_scope())
-                .set(es::is_active.eq(false))
-                .execute(conn)
-                .await?;
-            let series_reactivated = diesel::update(es::economic_series)
-                .filter(es::source_id.eq(source_id))
-                .filter(not(es::is_active))
-                .filter(es::external_id.eq_any(ids.clone()))
-                .filter(es_in_scope())
-                .set(es::is_active.eq(true))
-                .execute(conn)
-                .await?;
-            Ok(Retirement {
-                metadata_retired,
-                series_retired,
-                series_reactivated,
-            })
-        })
+    let source_id = data_source_id_conn(conn, source).await?;
+    let sm_in_scope = || substr(sm::external_id, 1, length(prefix.clone())).eq(prefix.clone());
+    let es_in_scope = || substr(es::external_id, 1, length(prefix.clone())).eq(prefix.clone());
+    let metadata_retired = diesel::update(sm::series_metadata)
+        .filter(sm::source_id.eq(source_id))
+        .filter(sm::is_active)
+        .filter(not(sm::external_id.eq_any(ids.clone())))
+        .filter(sm_in_scope())
+        .set(sm::is_active.eq(false))
+        .execute(&mut *conn)
         .await?;
+    let series_retired = diesel::update(es::economic_series)
+        .filter(es::source_id.eq(source_id))
+        .filter(es::is_active)
+        .filter(not(es::external_id.eq_any(ids.clone())))
+        .filter(es_in_scope())
+        .set(es::is_active.eq(false))
+        .execute(&mut *conn)
+        .await?;
+    let series_reactivated = diesel::update(es::economic_series)
+        .filter(es::source_id.eq(source_id))
+        .filter(not(es::is_active))
+        .filter(es::external_id.eq_any(ids.clone()))
+        .filter(es_in_scope())
+        .set(es::is_active.eq(true))
+        .execute(&mut *conn)
+        .await?;
+    let retirement = Retirement {
+        metadata_retired,
+        series_retired,
+        series_reactivated,
+    };
     if retirement != Retirement::default() {
         tracing::info!(%source, ?retirement, "applied complete catalog");
     }
@@ -687,6 +727,19 @@ pub async fn retire_unlisted(
 /// on failure, sets `economic_series.crawl_status = 'failed'` with the error message.
 pub async fn record_attempt(
     pool: &DatabasePool,
+    series_id: Uuid,
+    attempt: &AttemptRecord,
+) -> AppResult<()> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    conn.transaction::<(), AppError, _>(async move |conn| {
+        record_attempt_conn(conn, series_id, attempt).await
+    })
+    .await
+}
+
+/// Connection form; caller must wrap all related writes in a transaction.
+pub(crate) async fn record_attempt_conn(
+    conn: &mut AsyncPgConnection,
     series_id: Uuid,
     attempt: &AttemptRecord,
 ) -> AppResult<()> {
@@ -716,10 +769,9 @@ pub async fn record_attempt(
         request_headers: None,
         response_headers: None,
     };
-    let mut conn = pool.get().await.map_err(conn_err)?;
     diesel::insert_into(crawl_attempts::table)
         .values(&row)
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
     if !attempt.success {
         diesel::sql_query(
@@ -728,7 +780,7 @@ pub async fn record_attempt(
         )
         .bind::<SqlUuid, _>(series_id)
         .bind::<Nullable<Text>, _>(attempt.error_message.as_deref())
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
     }
     Ok(())
