@@ -269,14 +269,14 @@ access tokens. This server does not expose `/auth/login` or `/api/v1/series`.
 # Build backend image
 docker build -t econ-graph-backend .
 
-# Run with Docker Compose
-docker-compose up -d
+# Run the repository's Compose configuration (from backend/)
+docker compose -f ../docker-compose.yml up -d
 ```
 
 ### **Kubernetes Deployment**
 ```bash
-# Deploy to Kubernetes
-kubectl apply -f k8s/manifests/
+# Deploy to Kubernetes (from backend/)
+kubectl apply -f ../k8s/manifests/
 
 # Monitor deployment
 kubectl get pods -l app=econ-graph-backend
