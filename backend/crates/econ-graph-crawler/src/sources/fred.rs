@@ -193,6 +193,12 @@ impl FredAdapter {
     /// (matching the old search-based `discover`'s behaviour: a retry starts over from the top of
     /// the list rather than resuming, so a rate limit partway through is more of a delay here,
     /// since the list is walked in full on every discovery run either way).
+    ///
+    /// A `Transient` skip (a timeout or 5xx) means the list is incomplete for a reason that
+    /// should clear up on retry, so it fails the whole call instead of quietly persisting a
+    /// partial discovery: otherwise a blip partway through the list would look, from the finished
+    /// count alone, like those ids simply don't exist. `NotFound`/`Parse`/`Permanent` skips (a bad
+    /// id, a malformed response) won't resolve on retry, so they stay skip-and-continue as before.
     async fn discover_ids(
         &self,
         ctx: &CrawlCtx,
@@ -201,8 +207,9 @@ impl FredAdapter {
     ) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         let mut found = Vec::with_capacity(ids.len());
         let mut restricted_count = 0usize;
-        let mut skipped_count = 0usize;
+        let mut skipped_ids = Vec::new();
         let mut last_err = None;
+        let mut first_transient = None;
         let mut any_ok = false;
 
         for id in ids {
@@ -225,19 +232,33 @@ impl FredAdapter {
                     });
                 }
                 Err(e) => {
-                    last_err = Some(skip_or_abort(e, id)?);
-                    skipped_count += 1;
+                    let e = skip_or_abort(e, id)?;
+                    if first_transient.is_none() && matches!(e, CrawlError::Transient(_)) {
+                        first_transient = Some(e.clone());
+                    }
+                    skipped_ids.push(id.as_str());
+                    last_err = Some(e);
                 }
             }
         }
 
-        match (any_ok, last_err) {
-            (false, Some(e)) => Err(e),
+        if !skipped_ids.is_empty() {
+            let sample: Vec<&str> = skipped_ids.iter().take(5).copied().collect();
+            tracing::warn!(
+                skipped = skipped_ids.len(),
+                sample = ?sample,
+                "FRED discovery: some curated ids failed lookup"
+            );
+        }
+
+        match (any_ok, last_err, first_transient) {
+            (false, Some(e), _) => Err(e),
+            (_, _, Some(transient)) => Err(transient),
             _ => {
                 tracing::info!(
                     series = found.len(),
                     dropped_restricted = restricted_count,
-                    dropped_errors = skipped_count,
+                    dropped_errors = skipped_ids.len(),
                     "FRED discovery finished"
                 );
                 Ok(found)
@@ -599,11 +620,9 @@ mod tests {
         assert_eq!(mock.received_requests().await.len(), 1);
     }
 
-    /// FRED answers an unknown `series_id` with HTTP 400 and a JSON error body.
-    ///
-    /// Ignored until `HttpFetcher` quotes the (redacted) response body in status errors: today
-    /// `CrawlError::from_status` only sees the status, so this 400 is indistinguishable from any
-    /// other 400 and comes back `Permanent`. `classify_fred_error` is ready for it (see
+    /// FRED answers an unknown `series_id` with HTTP 400 and a JSON error body; `HttpFetcher`
+    /// quotes the (redacted) response body in its error, so `classify_fred_error` recognises the
+    /// "series does not exist" message and turns this into `NotFound` (see
     /// `classify_recognises_series_does_not_exist`).
     #[tokio::test]
     async fn unknown_series_400_is_not_found() {
@@ -831,6 +850,45 @@ mod tests {
             mock.received_requests().await.len(),
             2,
             "the third id must never be requested"
+        );
+    }
+
+    /// A `Transient` skip (e.g. a 500) fails discovery even though every other id in the list
+    /// succeeded, instead of quietly persisting a partial list: a blip partway through should
+    /// retry, not look like the failed id simply doesn't exist. Unlike a rate limit or auth
+    /// failure, a transient error doesn't abort mid-list: the rest of the ids are still tried
+    /// before the call fails.
+    #[tokio::test]
+    async fn discover_ids_fails_on_a_transient_skip_even_if_others_succeeded() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/series").query("series_id", "GDP"),
+            Reply::json_str(SERIES_GDP),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/series").query("series_id", "GDPC1"),
+            Reply::status(500),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/series").query("series_id", "UNRATE"),
+            Reply::json_str(series_fixture("UNRATE", "Unemployment Rate")),
+        )
+        .await;
+        let ctx = test_ctx();
+        let ids = ["GDP".to_string(), "GDPC1".to_string(), "UNRATE".to_string()];
+        let e = FredAdapter::new(mock.base_url())
+            .discover_ids(&ctx, TEST_API_KEY, &ids)
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind(), "transient", "{e}");
+        assert_eq!(
+            mock.received_requests().await.len(),
+            5,
+            "GDPC1 costs 3 requests (HttpFetcher's in-process retries on a 5xx); \
+             a transient skip doesn't abort mid-list, unlike rate-limit/auth, so UNRATE is \
+             still tried"
         );
     }
 
