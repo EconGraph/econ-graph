@@ -122,3 +122,4 @@ When adding new documentation:
 
 *This documentation structure provides organized access to all EconGraph documentation. Each category contains relevant documents for different audiences and use cases.*
 
+

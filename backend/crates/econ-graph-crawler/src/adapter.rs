@@ -159,6 +159,25 @@ pub trait SourceAdapter: Send + Sync {
     /// Lists the series this source offers.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError>;
 
+    /// Whether a successful [`discover`](Self::discover) lists every series this adapter crawls,
+    /// so a series it no longer lists has been retired by the source. The worker then marks such
+    /// series inactive (see [`persist::retire_unlisted`](crate::persist::retire_unlisted)); they
+    /// are never deleted. Defaults to `false`, for discoveries that return a sample (FRED by
+    /// popularity, World Bank by topic) or tolerate partial failure.
+    fn discovery_is_complete(&self) -> bool {
+        false
+    }
+
+    /// Restricts [`discovery_is_complete`](Self::discovery_is_complete) retirement to
+    /// `external_id`s starting with this prefix, when this adapter isn't the only thing that
+    /// writes series under its [`SourceId`] (for example Census, whose BDS discovery is complete
+    /// but whose data source also holds ACS series seeded outside the crawler). `None` (the
+    /// default) scopes retirement to the whole source, which is correct whenever the adapter owns
+    /// it exclusively.
+    fn retirement_scope_prefix(&self) -> Option<&str> {
+        None
+    }
+
     /// Fetches observations for `external_id`, only those on or after `since` when given
     /// (adapters may return more if the source can't filter).
     async fn fetch_series(

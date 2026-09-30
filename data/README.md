@@ -33,3 +33,4 @@ The scheduled workflow validates generation and proposes output changes through 
 pull request. The legacy webhook entry point invokes the same updater; it does not
 produce a separate summary.
 
+

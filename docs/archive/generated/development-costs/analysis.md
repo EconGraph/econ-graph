@@ -54,3 +54,4 @@ Tracked files are not guaranteed to be manually written.
 
 This report and data/cost-analysis.json are the updater's only publication
 outputs. Product documentation is not updated by this calculation.
+

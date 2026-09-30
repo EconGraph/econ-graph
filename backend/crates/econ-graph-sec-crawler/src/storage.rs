@@ -244,34 +244,26 @@ impl XbrlStorage {
 
         let mut conn = self.pool.get().await?;
 
-        // Count total files
-        let total_files: i64 = financial_statements
-            .count()
+        // All aggregates share one PostgreSQL statement snapshot, so inserts/deletes cannot
+        // make the compression count exceed the total used for subtraction below.
+        let (total_files, total_size, bytea_count, compressed_count): (
+            i64,
+            Option<BigDecimal>,
+            i64,
+            i64,
+        ) = financial_statements
+            .select((
+                diesel::dsl::count_star(),
+                diesel::dsl::sum(xbrl_file_size_bytes),
+                diesel::dsl::count(xbrl_file_content),
+                diesel::dsl::count(diesel::dsl::case_when::<_, _, diesel::sql_types::Integer>(
+                    xbrl_file_compressed.eq(true),
+                    1_i32,
+                )),
+            ))
             .get_result(&mut conn)
             .await
-            .context("Failed to count total files")?;
-
-        // Calculate total size
-        let total_size: Option<bigdecimal::BigDecimal> = financial_statements
-            .select(diesel::dsl::sum(xbrl_file_size_bytes))
-            .first(&mut conn)
-            .await
-            .context("Failed to calculate total size")?;
-
-        let bytea_count: i64 = financial_statements
-            .filter(xbrl_file_content.is_not_null())
-            .count()
-            .get_result(&mut conn)
-            .await
-            .context("Failed to count bytea files")?;
-
-        // Count by compression type
-        let compressed_count: i64 = financial_statements
-            .filter(xbrl_file_compressed.eq(true))
-            .count()
-            .get_result(&mut conn)
-            .await
-            .context("Failed to count compressed files")?;
+            .context("Failed to query XBRL storage statistics")?;
 
         Ok(XbrlStorageStats {
             total_files: total_files as u64,
@@ -314,16 +306,16 @@ impl XbrlStorage {
         download_url: &str,
         statement_id: &Uuid,
     ) -> Result<()> {
+        use diesel_async::AsyncConnection;
         use econ_graph_core::enums::{TaxonomyFileType, TaxonomySourceType};
         use econ_graph_core::models::XbrlTaxonomySchema;
         use sha2::{Digest, Sha256};
 
-        let mut conn = self.pool.get().await?;
-
         // Calculate file hash
         let mut hasher = Sha256::new();
         hasher.update(content);
-        let file_hash = format!("sha256:{}", hex::encode(hasher.finalize()));
+        // The database hash column holds the 64 hex digits, without an algorithm prefix.
+        let file_hash = hex::encode(hasher.finalize());
 
         // Determine file type and source type
         let file_type = if reference.reference_type == "schemaRef" {
@@ -367,31 +359,31 @@ impl XbrlStorage {
             updated_at: Utc::now(),
         };
 
-        // Insert the taxonomy schema
-        diesel::insert_into(econ_graph_core::schema::xbrl_taxonomy_schemas::table)
-            .values(&taxonomy_schema)
-            .execute(&mut conn)
-            .await
-            .context("Failed to insert taxonomy schema")?;
+        // Hold one connection only for the writes, and roll back the schema if its
+        // DTS reference cannot be stored.
+        let mut conn = self.pool.get().await?;
+        conn.transaction::<(), anyhow::Error, _>(async move |conn| {
+            diesel::insert_into(econ_graph_core::schema::xbrl_taxonomy_schemas::table)
+                .values(&taxonomy_schema)
+                .execute(conn)
+                .await
+                .context("Failed to insert taxonomy schema")?;
 
-        // Store DTS reference
-        self.store_dts_reference(reference, statement_id, &taxonomy_schema.id, download_url)
-            .await?;
-
-        Ok(())
+            self.store_dts_reference(conn, reference, statement_id, &taxonomy_schema.id)
+                .await
+        })
+        .await
     }
 
     /// Store DTS reference in the database
     async fn store_dts_reference(
         &self,
+        conn: &mut AsyncPgConnection,
         reference: &crate::models::DtsReference,
         statement_id: &Uuid,
         resolved_schema_id: &Uuid,
-        download_url: &str,
     ) -> Result<()> {
         use econ_graph_core::schema::xbrl_instance_dts_references;
-
-        let mut conn = self.pool.get().await?;
 
         let dts_reference = (
             xbrl_instance_dts_references::statement_id.eq(statement_id),
@@ -407,7 +399,7 @@ impl XbrlStorage {
 
         diesel::insert_into(xbrl_instance_dts_references::table)
             .values(dts_reference)
-            .execute(&mut conn)
+            .execute(conn)
             .await
             .context("Failed to insert DTS reference")?;
 
@@ -458,6 +450,97 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "requires a PostgreSQL DATABASE_URL"]
+    async fn storage_stats_handle_empty_mixed_and_large_totals() {
+        use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+
+        // One pooled connection keeps the temporary table private to this test while calling
+        // the public API. No migrations or writes to the real financial_statements table.
+        let pool = DatabasePool::builder()
+            .max_size(1)
+            .build(AsyncDieselConnectionManager::<AsyncPgConnection>::new(
+                std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
+            ))
+            .await
+            .unwrap();
+        {
+            let mut conn = pool.get().await.unwrap();
+            diesel::sql_query(
+                "CREATE TEMPORARY TABLE financial_statements (
+                    xbrl_file_size_bytes bigint,
+                    xbrl_file_content bytea,
+                    xbrl_file_compressed boolean NOT NULL
+                )",
+            )
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        }
+        let storage = XbrlStorage::new(pool.clone(), XbrlStorageConfig::default());
+        let empty = storage.get_storage_stats().await.unwrap();
+        assert_eq!(empty.total_files, 0);
+        assert_eq!(empty.total_size_bytes, 0);
+        assert_eq!(empty.bytea_files, 0);
+        assert_eq!(empty.compressed_files, 0);
+        assert_eq!(empty.uncompressed_files, 0);
+
+        {
+            let mut conn = pool.get().await.unwrap();
+            diesel::sql_query(
+                "INSERT INTO financial_statements VALUES
+                    (100, decode('01', 'hex'), true),
+                    (200, NULL, false),
+                    (NULL, NULL, true),
+                    (0, decode('', 'hex'), false)",
+            )
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        }
+        let mixed = storage.get_storage_stats().await.unwrap();
+        assert_eq!(mixed.total_files, 4);
+        assert_eq!(mixed.total_size_bytes, 300);
+        assert_eq!(mixed.bytea_files, 2);
+        assert_eq!(mixed.compressed_files, 2);
+        assert_eq!(mixed.uncompressed_files, 2);
+
+        {
+            let mut conn = pool.get().await.unwrap();
+            diesel::sql_query("TRUNCATE financial_statements")
+                .execute(&mut conn)
+                .await
+                .unwrap();
+            diesel::sql_query("INSERT INTO financial_statements VALUES (NULL, NULL, false)")
+                .execute(&mut conn)
+                .await
+                .unwrap();
+        }
+        let null_size = storage.get_storage_stats().await.unwrap();
+        assert_eq!(null_size.total_files, 1);
+        assert_eq!(null_size.total_size_bytes, 0);
+        assert_eq!(null_size.uncompressed_files, 1);
+
+        {
+            let mut conn = pool.get().await.unwrap();
+            diesel::sql_query(
+                "INSERT INTO financial_statements VALUES
+                    (9223372036854775807, NULL, true),
+                    (9223372036854775807, NULL, true)",
+            )
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        }
+        let large = storage.get_storage_stats().await.unwrap();
+        assert_eq!(large.total_size_bytes, u64::MAX - 1);
+        assert_eq!(large.total_files, 3);
+        assert_eq!(
+            large.compressed_files + large.uncompressed_files,
+            large.total_files
+        );
+    }
+
+    #[tokio::test]
     async fn oversized_file_is_rejected_before_touching_the_database() {
         // The pool has no database behind it (or, with DATABASE_URL set, `comp_id` names no
         // company): any attempt to store would fail with a different error.
@@ -494,5 +577,152 @@ mod tests {
             })
         );
         assert!(err.to_string().contains("too large, not stored"));
+    }
+
+    #[cfg(feature = "xbrl-parser")]
+    mod taxonomy {
+        use super::*;
+        use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+        use econ_graph_core::schema::{
+            companies, xbrl_instance_dts_references, xbrl_taxonomy_schemas,
+        };
+        use econ_graph_core::test_utils::TestContainer;
+        use std::time::Duration;
+
+        fn reference() -> crate::models::DtsReference {
+            crate::models::DtsReference {
+                reference_type: "schemaRef".to_string(),
+                reference_role: None,
+                reference_href: "https://example.com/atomic-storage.xsd".to_string(),
+                reference_arcrole: None,
+            }
+        }
+
+        #[tokio::test]
+        #[serial_test::serial]
+        async fn taxonomy_schema_rolls_back_when_reference_insert_fails() {
+            let container = TestContainer::new().await;
+            container.clean_database().await.unwrap();
+            let pool = container.pool().clone();
+            let storage = XbrlStorage::new(pool.clone(), XbrlStorageConfig::default());
+            let reference = reference();
+
+            // No statement exists for this ID: only the second insert should fail.
+            let error = storage
+                .store_taxonomy_component(
+                    &reference,
+                    b"<schema/>",
+                    &reference.reference_href,
+                    &Uuid::new_v4(),
+                )
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("Failed to insert DTS reference"));
+            assert!(matches!(
+                error.downcast_ref::<diesel::result::Error>(),
+                Some(diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+                    _
+                ))
+            ));
+
+            let mut conn = pool.get().await.unwrap();
+            let schemas: i64 = xbrl_taxonomy_schemas::table
+                .count()
+                .get_result(&mut conn)
+                .await
+                .unwrap();
+            let references: i64 = xbrl_instance_dts_references::table
+                .count()
+                .get_result(&mut conn)
+                .await
+                .unwrap();
+            assert_eq!(
+                schemas, 0,
+                "failed reference must not leave an orphan schema"
+            );
+            assert_eq!(references, 0);
+        }
+
+        #[tokio::test]
+        #[serial_test::serial]
+        async fn taxonomy_storage_succeeds_with_one_pool_connection() {
+            let container = TestContainer::new().await;
+            container.clean_database().await.unwrap();
+            let database_url = std::env::var("DATABASE_URL")
+                .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+            let pool = DatabasePool::builder()
+                .max_size(1)
+                .connection_timeout(Duration::from_secs(2))
+                .build(AsyncDieselConnectionManager::<AsyncPgConnection>::new(
+                    database_url,
+                ))
+                .await
+                .unwrap();
+            let company_id = Uuid::new_v4();
+            {
+                let mut conn = pool.get().await.unwrap();
+                diesel::insert_into(companies::table)
+                    .values((
+                        companies::id.eq(company_id),
+                        companies::cik.eq("0009999901"),
+                        companies::name.eq("Taxonomy storage test"),
+                        companies::is_active.eq(true),
+                        companies::created_at.eq(Utc::now()),
+                        companies::updated_at.eq(Utc::now()),
+                    ))
+                    .execute(&mut conn)
+                    .await
+                    .unwrap();
+            }
+            let storage = XbrlStorage::new(pool.clone(), XbrlStorageConfig::default());
+            let now = Utc::now();
+            let statement = storage
+                .store_xbrl_file(
+                    "0009999901-24-000001",
+                    b"<xbrl/>",
+                    company_id,
+                    now,
+                    now,
+                    2024,
+                    None,
+                    Some("10-K"),
+                    None,
+                )
+                .await
+                .unwrap();
+            let reference = reference();
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                storage.store_taxonomy_component(
+                    &reference,
+                    b"<schema/>",
+                    &reference.reference_href,
+                    &statement.id,
+                ),
+            )
+            .await
+            .expect("taxonomy storage must not wait for a second pool connection")
+            .unwrap();
+
+            let mut conn = pool.get().await.unwrap();
+            let (schema_id, file_hash): (Uuid, String) = xbrl_taxonomy_schemas::table
+                .select((xbrl_taxonomy_schemas::id, xbrl_taxonomy_schemas::file_hash))
+                .get_result(&mut conn)
+                .await
+                .unwrap();
+            assert_eq!(file_hash.len(), 64);
+            assert_eq!(file_hash, hex::encode(Sha256::digest(b"<schema/>")));
+            let resolved: (Option<Uuid>, bool) = xbrl_instance_dts_references::table
+                .filter(xbrl_instance_dts_references::statement_id.eq(statement.id))
+                .select((
+                    xbrl_instance_dts_references::resolved_schema_id,
+                    xbrl_instance_dts_references::is_resolved,
+                ))
+                .get_result(&mut conn)
+                .await
+                .unwrap();
+            assert_eq!(resolved, (Some(schema_id), true));
+        }
     }
 }

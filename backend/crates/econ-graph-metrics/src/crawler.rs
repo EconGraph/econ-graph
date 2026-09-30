@@ -30,7 +30,7 @@
 use crate::DEFAULT_REGISTRY;
 use once_cell::sync::Lazy;
 use prometheus::{
-    GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts, Registry,
+    Gauge, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts, Registry,
 };
 
 /// Comprehensive metrics collection for web crawlers
@@ -311,6 +311,7 @@ pub static CRAWLER_METRICS: Lazy<CrawlerMetrics> = Lazy::new(|| {
 ///   `processing` or `retrying` (polled from the database).
 /// - `crawler_queue_failed_24h{source}`: rows that became `failed` in the last 24 hours.
 /// - `crawler_last_success_timestamp_seconds{source}`: Unix time of the latest `completed` row.
+/// - `crawler_last_failure_timestamp_seconds{source}`: Unix time of the latest `failed` row.
 pub struct CrawlerQueueMetrics {
     /// Jobs finished by the worker, by source, job kind and outcome.
     pub jobs_total: IntCounterVec,
@@ -320,6 +321,8 @@ pub struct CrawlerQueueMetrics {
     pub queue_failed_24h: IntGaugeVec,
     /// Unix timestamp of the latest completed row, by source.
     pub last_success_timestamp_seconds: GaugeVec,
+    /// Unix timestamp of the latest failed row, by source.
+    pub last_failure_timestamp_seconds: GaugeVec,
 }
 
 impl CrawlerQueueMetrics {
@@ -365,11 +368,21 @@ impl CrawlerQueueMetrics {
         )?;
         registry.register(Box::new(last_success_timestamp_seconds.clone()))?;
 
+        let last_failure_timestamp_seconds = GaugeVec::new(
+            Opts::new(
+                "crawler_last_failure_timestamp_seconds",
+                "Unix time of the latest crawl_queue row that became failed, by source",
+            ),
+            &["source"],
+        )?;
+        registry.register(Box::new(last_failure_timestamp_seconds.clone()))?;
+
         Ok(Self {
             jobs_total,
             queue_items,
             queue_failed_24h,
             last_success_timestamp_seconds,
+            last_failure_timestamp_seconds,
         })
     }
 
@@ -390,6 +403,93 @@ pub static CRAWLER_QUEUE_METRICS: Lazy<CrawlerQueueMetrics> = Lazy::new(|| {
     CrawlerQueueMetrics::new(&DEFAULT_REGISTRY).expect("Failed to initialize crawler queue metrics")
 });
 
+/// Per-source data coverage and freshness, served by `crawler-worker` (polled from the database
+/// by `econ_graph_crawler::coverage::crawl_coverage`).
+///
+/// - `crawler_coverage_series_discovered{source}`: series discovered (catalog or fetched).
+/// - `crawler_coverage_series_with_data{source}`: series with at least one data point.
+/// - `crawler_coverage_ratio{source}`: with data / discovered, 0 when nothing is discovered.
+/// - `crawler_coverage_series_overdue{source}`: series with data whose last successful crawl is
+///   older than twice their refresh interval.
+/// - `crawler_coverage_oldest_success_timestamp_seconds{source}`: Unix time of the earliest last
+///   successful crawl among the source's series (absent when none was ever crawled).
+/// - `crawler_coverage_last_refresh_timestamp_seconds`: Unix time the gauges above were last
+///   refreshed successfully, so stale values (a failing coverage query) can be alerted on.
+pub struct CrawlerCoverageMetrics {
+    /// Series discovered, by source.
+    pub series_discovered: IntGaugeVec,
+    /// Series with data, by source.
+    pub series_with_data: IntGaugeVec,
+    /// Coverage ratio in `[0, 1]`, by source.
+    pub ratio: GaugeVec,
+    /// Series overdue for refresh, by source.
+    pub series_overdue: IntGaugeVec,
+    /// Oldest last successful crawl, by source.
+    pub oldest_success_timestamp_seconds: GaugeVec,
+    /// Unix time of the last successful coverage refresh (not per source).
+    pub last_refresh_timestamp_seconds: Gauge,
+}
+
+impl CrawlerCoverageMetrics {
+    /// Creates the coverage metrics and registers them with `registry`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any metric fails to register with the provided registry
+    pub fn new(registry: &Registry) -> anyhow::Result<Self> {
+        let int_gauge = |name: &str, help: &str| -> anyhow::Result<IntGaugeVec> {
+            let g = IntGaugeVec::new(Opts::new(name, help), &["source"])?;
+            registry.register(Box::new(g.clone()))?;
+            Ok(g)
+        };
+        let gauge = |name: &str, help: &str| -> anyhow::Result<GaugeVec> {
+            let g = GaugeVec::new(Opts::new(name, help), &["source"])?;
+            registry.register(Box::new(g.clone()))?;
+            Ok(g)
+        };
+        Ok(Self {
+            series_discovered: int_gauge(
+                "crawler_coverage_series_discovered",
+                "Series discovered (catalog or fetched), by source",
+            )?,
+            series_with_data: int_gauge(
+                "crawler_coverage_series_with_data",
+                "Series with at least one data point, by source",
+            )?,
+            ratio: gauge(
+                "crawler_coverage_ratio",
+                "Series with data / series discovered (0 when nothing is discovered), by source",
+            )?,
+            series_overdue: int_gauge(
+                "crawler_coverage_series_overdue",
+                "Series with data not refreshed within twice their refresh interval, by source",
+            )?,
+            oldest_success_timestamp_seconds: gauge(
+                "crawler_coverage_oldest_success_timestamp_seconds",
+                "Unix time of the oldest last successful crawl among a source's series",
+            )?,
+            last_refresh_timestamp_seconds: {
+                let g = Gauge::with_opts(Opts::new(
+                    "crawler_coverage_last_refresh_timestamp_seconds",
+                    "Unix time of the last successful refresh of the crawler_coverage_* gauges",
+                ))?;
+                registry.register(Box::new(g.clone()))?;
+                g
+            },
+        })
+    }
+}
+
+/// Global coverage metrics, registered with [`DEFAULT_REGISTRY`].
+///
+/// # Panics
+///
+/// Panics if the metrics fail to initialize during lazy initialization
+pub static CRAWLER_COVERAGE_METRICS: Lazy<CrawlerCoverageMetrics> = Lazy::new(|| {
+    CrawlerCoverageMetrics::new(&DEFAULT_REGISTRY)
+        .expect("Failed to initialize crawler coverage metrics")
+});
+
 #[cfg(test)]
 mod queue_metrics_tests {
     use super::*;
@@ -407,5 +507,32 @@ mod queue_metrics_tests {
             .collect();
         assert!(names.contains(&"crawler_jobs_total".to_string()));
         assert!(names.contains(&"crawler_queue_items".to_string()));
+    }
+
+    #[test]
+    fn coverage_metrics_register() {
+        let registry = Registry::new();
+        let m = CrawlerCoverageMetrics::new(&registry).unwrap();
+        m.series_discovered.with_label_values(&["FRED"]).set(10);
+        m.ratio.with_label_values(&["FRED"]).set(0.9);
+        m.series_overdue.with_label_values(&["FRED"]).set(1);
+        m.series_with_data.with_label_values(&["FRED"]).set(9);
+        m.oldest_success_timestamp_seconds
+            .with_label_values(&["FRED"])
+            .set(1.0);
+        let names: Vec<String> = registry
+            .gather()
+            .iter()
+            .map(|f| f.name().to_string())
+            .collect();
+        for n in [
+            "crawler_coverage_series_discovered",
+            "crawler_coverage_series_with_data",
+            "crawler_coverage_ratio",
+            "crawler_coverage_series_overdue",
+            "crawler_coverage_oldest_success_timestamp_seconds",
+        ] {
+            assert!(names.contains(&n.to_string()), "{n} missing: {names:?}");
+        }
     }
 }
