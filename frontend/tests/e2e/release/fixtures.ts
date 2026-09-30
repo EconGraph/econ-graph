@@ -84,8 +84,8 @@ export const SEEDED = {
   fhfaHpi: {
     source: 'FHFA',
     sourceName: 'Federal Housing Finance Agency (FHFA)',
-    externalId: 'USHPI',
-    title: 'U.S. House Price Index',
+    externalId: 'fhfa_hpi/traditional.purchase-only.monthly.usa-or-census-division.USA.sa',
+    title: 'United States House Price Index: Purchase-Only, Monthly, Seasonally Adjusted',
   },
   wdiGdpPerCapitaUsa: {
     source: 'WORLD_BANK',
