@@ -304,7 +304,10 @@ mod tests {
             SourceId::Fred,
             SourceId::WorldBank,
         ]);
-        assert_eq!(got, vec![SourceId::Fred, SourceId::Bls]);
+        assert_eq!(
+            got,
+            vec![SourceId::Fred, SourceId::Bls, SourceId::WorldBank]
+        );
     }
 
     #[test]

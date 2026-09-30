@@ -5,29 +5,327 @@
       "source": "FRED",
       "external_id": "GDP",
       "routes": [
-        { "method": "GET", "path": "/series", "fixture": "fred/series_gdp.json" },
-        { "method": "GET", "path": "/series/observations", "fixture": "fred/observations_gdp.json" }
+        {
+          "method": "GET",
+          "path": "/series",
+          "fixture": "fred/series_gdp.json"
+        },
+        {
+          "method": "GET",
+          "path": "/series/observations",
+          "fixture": "fred/observations_gdp.json"
+        }
       ]
     },
     {
       "source": "BLS",
       "external_id": "CUUR0000SA0",
       "routes": [
-        { "method": "POST", "path": "/timeseries/data/", "fixture": "bls/cpi_monthly.json" }
+        {
+          "method": "POST",
+          "path": "/timeseries/data/",
+          "fixture": "bls/cpi_monthly.json"
+        }
       ]
     },
     {
       "source": "CENSUS",
-      "external_id": "CENSUS_BDS_ESTAB_us",
+      "external_id": "bds/national..ESTAB",
       "routes": [
-        { "method": "GET", "path": "/timeseries/bds", "fixture": "census/bds_estab_us.json" }
+        {
+          "method": "GET",
+          "path": "/timeseries/bds",
+          "fixture": "census/bds_estab_us.json"
+        }
+      ]
+    },
+    {
+      "source": "BEA",
+      "external_id": "bea_nipa/T10105.1.Q",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/",
+          "query": { "method": "GetData", "DatasetName": "NIPA", "TableName": "T10105", "Frequency": "Q" },
+          "fixture": "bea/nipa_t10105_q.json"
+        }
       ]
     },
     {
       "source": "FHFA",
-      "external_id": "USHPI",
+      "external_id": "fhfa_hpi/traditional.purchase-only.monthly.usa-or-census-division.USA.sa",
       "routes": [
-        { "method": "GET", "path": "/v1/house-price-index/national", "fixture": "fhfa/hpi_national.json" }
+        { "method": "GET", "path": "/hpi/download/monthly/hpi_master.csv", "fixture": "fhfa/hpi_master.csv" }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/NY.GDP.PCAP.CD.USA",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/NY.GDP.PCAP.CD",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/gdp_per_capita.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/NY.GDP.PCAP.CD.CHN",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/NY.GDP.PCAP.CD",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/gdp_per_capita.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/NY.GDP.PCAP.CD.DEU",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/NY.GDP.PCAP.CD",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/gdp_per_capita.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/NY.GDP.PCAP.CD.JPN",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/NY.GDP.PCAP.CD",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/gdp_per_capita.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/NY.GDP.PCAP.CD.IND",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/NY.GDP.PCAP.CD",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/gdp_per_capita.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/NY.GDP.PCAP.CD.BRA",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/NY.GDP.PCAP.CD",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/gdp_per_capita.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/SP.POP.TOTL.USA",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/SP.POP.TOTL",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/population.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/SP.POP.TOTL.CHN",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/SP.POP.TOTL",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/population.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/SP.POP.TOTL.DEU",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/SP.POP.TOTL",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/population.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/SP.POP.TOTL.JPN",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/SP.POP.TOTL",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/population.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/SP.POP.TOTL.IND",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/SP.POP.TOTL",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/population.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/SP.POP.TOTL.BRA",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/SP.POP.TOTL",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/population.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/FP.CPI.TOTL.ZG.USA",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/FP.CPI.TOTL.ZG",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/inflation.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/FP.CPI.TOTL.ZG.CHN",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/FP.CPI.TOTL.ZG",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/inflation.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/FP.CPI.TOTL.ZG.DEU",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/FP.CPI.TOTL.ZG",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/inflation.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/FP.CPI.TOTL.ZG.JPN",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/FP.CPI.TOTL.ZG",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/inflation.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/FP.CPI.TOTL.ZG.IND",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/FP.CPI.TOTL.ZG",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/inflation.json"
+        }
+      ]
+    },
+    {
+      "source": "WORLD_BANK",
+      "external_id": "wdi/FP.CPI.TOTL.ZG.BRA",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/country/all/indicator/FP.CPI.TOTL.ZG",
+          "query": {
+            "format": "json",
+            "per_page": "20000"
+          },
+          "fixture": "world_bank/inflation.json"
+        }
       ]
     }
   ]

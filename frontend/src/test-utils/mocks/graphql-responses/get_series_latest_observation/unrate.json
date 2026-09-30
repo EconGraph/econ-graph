@@ -1,0 +1,13 @@
+{
+  "data": {
+    "seriesByExternalId": {
+      "id": "0192f0a1-0000-7000-8000-000000000002",
+      "units": "Percent",
+      "latestObservation": {
+        "date": "2025-02-01",
+        "value": "4.100000",
+        "revisionDate": "2025-03-07"
+      }
+    }
+  }
+}

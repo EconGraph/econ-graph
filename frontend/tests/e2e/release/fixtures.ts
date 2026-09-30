@@ -69,13 +69,88 @@ export const SEEDED = {
   censusEstablishments: {
     source: 'CENSUS',
     sourceName: 'U.S. Census Bureau',
-    externalId: 'CENSUS_BDS_ESTAB_us',
-    title: 'CENSUS_BDS_ESTAB_us',
+    externalId: 'bds/national..ESTAB',
+    title: 'bds/national..ESTAB',
+  },
+  beaGdp: {
+    source: 'BEA',
+    sourceName: 'Bureau of Economic Analysis (BEA)',
+    // BEA's own ids: NIPA table T10105, line 1 (GDP), quarterly.
+    externalId: 'bea_nipa/T10105.1.Q',
+    title: 'Gross domestic product (GDP, current dollars, quarterly)',
+    // UNIT_MULT 6 is applied, so values are in dollars, not millions.
+    units: 'Current Dollars',
   },
   fhfaHpi: {
     source: 'FHFA',
     sourceName: 'Federal Housing Finance Agency (FHFA)',
-    externalId: 'USHPI',
-    title: 'U.S. House Price Index',
+    externalId: 'fhfa_hpi/traditional.purchase-only.monthly.usa-or-census-division.USA.sa',
+    title: 'United States House Price Index: Purchase-Only, Monthly, Seasonally Adjusted',
   },
+  wdiGdpPerCapitaUsa: {
+    source: 'WORLD_BANK',
+    sourceName: 'World Bank Open Data',
+    externalId: 'wdi/NY.GDP.PCAP.CD.USA',
+    title: 'GDP per capita (current US$): United States',
+  },
+} as const;
+
+/**
+ * World Development Indicators seeded for the world map (MAP-7) and REL-4: three indicators for
+ * the countries below, from backend/crates/econ-graph-crawler/tests/fixtures/world_bank/. Series
+ * ids are `wdi/{indicator}.{area}` and titles `{indicator name}: {country name}`. `latest`
+ * is each country's latest non-null value (India has no 2023 inflation value in the fixture).
+ */
+export const SEEDED_WDI = {
+  source: 'WORLD_BANK',
+  dataset: 'wdi',
+  countries: {
+    USA: 'United States',
+    CHN: 'China',
+    DEU: 'Germany',
+    JPN: 'Japan',
+    IND: 'India',
+    BRA: 'Brazil',
+  },
+  indicators: [
+    {
+      code: 'NY.GDP.PCAP.CD',
+      name: 'GDP per capita (current US$)',
+      unit: 'current US$',
+      latest: {
+        USA: { date: '2023-01-01', value: 82769.4 },
+        CHN: { date: '2023-01-01', value: 12614.1 },
+        DEU: { date: '2023-01-01', value: 54343.2 },
+        JPN: { date: '2023-01-01', value: 33834.4 },
+        IND: { date: '2023-01-01', value: 2480.8 },
+        BRA: { date: '2023-01-01', value: 10043.6 },
+      },
+    },
+    {
+      code: 'SP.POP.TOTL',
+      name: 'Population, total',
+      unit: 'persons',
+      latest: {
+        USA: { date: '2023-01-01', value: 334914895 },
+        CHN: { date: '2023-01-01', value: 1410710000 },
+        DEU: { date: '2023-01-01', value: 84482267 },
+        JPN: { date: '2023-01-01', value: 124516650 },
+        IND: { date: '2023-01-01', value: 1438069596 },
+        BRA: { date: '2023-01-01', value: 216422446 },
+      },
+    },
+    {
+      code: 'FP.CPI.TOTL.ZG',
+      name: 'Inflation, consumer prices (annual %)',
+      unit: '% change',
+      latest: {
+        USA: { date: '2023-01-01', value: 4.1 },
+        CHN: { date: '2023-01-01', value: 0.2 },
+        DEU: { date: '2023-01-01', value: 5.9 },
+        JPN: { date: '2023-01-01', value: 3.3 },
+        IND: { date: '2022-01-01', value: 6.7 },
+        BRA: { date: '2023-01-01', value: 4.6 },
+      },
+    },
+  ],
 } as const;

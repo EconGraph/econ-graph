@@ -19,35 +19,4 @@ export interface AllowlistEntry {
   reason: string;
 }
 
-export const ALLOWLIST: readonly AllowlistEntry[] = [
-  {
-    route: '/',
-    role: 'button',
-    name: 'Employment Data',
-    reason: 'Opens /explore?category=..., which the explorer ignores. ECO-246.',
-  },
-  {
-    route: '/',
-    role: 'button',
-    name: 'Inflation Indicators',
-    reason: 'Opens /explore?category=..., which the explorer ignores. ECO-246.',
-  },
-  {
-    route: '/',
-    role: 'button',
-    name: 'GDP & Growth',
-    reason: 'Opens /explore?category=..., which the explorer ignores. ECO-246.',
-  },
-  {
-    route: '/',
-    role: 'button',
-    name: 'refresh data',
-    reason: 'Recent Data Releases refresh icon has no handler. ECO-246.',
-  },
-  {
-    route: '/',
-    role: 'button',
-    name: 'view details',
-    reason: 'Recent Data Releases row icons have no handler. ECO-246.',
-  },
-];
+export const ALLOWLIST: readonly AllowlistEntry[] = [];

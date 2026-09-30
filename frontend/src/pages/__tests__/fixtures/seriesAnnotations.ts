@@ -31,6 +31,7 @@ export const gdpLevels = {
       { date: '2020-07-01', value: '18560.8', revisionDate: '2020-10-29', isOriginalRelease: true },
     ],
     totalCount: 4,
+    pageInfo: { hasNextPage: false, endCursor: null },
   },
 };
 

@@ -1,0 +1,229 @@
+# Curated FRED (St. Louis Fed) discovery list, read at runtime by the FRED adapter's discover().
+# Columns: series_id (FRED's own identifier, e.g. GDP). Lines starting with # are comments.
+# The crawler looks for this file in $CRAWLER_DATA_DIR (the crawler-worker image sets /app/data).
+#
+# Why a curated list instead of FRED's /series/search: an unbounded search-term crawl can turn up
+# tens of thousands of series on the first run (one "most popular" page plus several search terms,
+# each paged to FRED's limit), and #214's per-series ALFRED vintage walk makes fetching all of them
+# too slow to finish a first crawl in reasonable time. This list is deliberately under two hundred
+# headline series: enough to cover the major indicators research relies on, small enough that a
+# first crawl (discovery's one /series metadata request per id, plus fetch's metadata +
+# observations + vintage requests) stays bounded and predictable.
+#
+# Every id below was taken from public FRED documentation and series-list pages, not verified
+# against the live API (api.stlouisfed.org is blocked by this environment's network policy).
+# Treat all of them as unverified until checked live during the QA phase; #252's copyright/
+# restriction-notes filter still runs on each one's live metadata as a safety net before it is
+# discovered, in case a bad id slipped in here or FRED has since restricted it.
+series_id
+#
+# --- GDP and national accounts ---
+GDP
+GDPC1
+GDPPOT
+NGDPPOT
+A191RL1Q225SBEA
+PCEC
+PCECC96
+PCEDG
+PCEND
+PCES
+GPDI
+GPDIC1
+GCE
+GCEC1
+NETEXP
+NETEXC
+GNP
+DPIC96
+DSPIC96
+PSAVERT
+CP
+A939RX0Q048SBEA
+#
+# --- Prices: CPI, PCE, PPI ---
+CPIAUCSL
+CPIAUCNS
+CPILFESL
+CPILFENS
+CPIENGSL
+CPIUFDSL
+CPIHOSSL
+CPITRNSL
+CPIMEDSL
+PCEPI
+PCEPILFE
+PPIACO
+PPIFIS
+PPIFGS
+WPU00000000
+T10YIE
+T5YIE
+T5YIFR
+# University of Michigan Surveys of Consumers series carry a "used with permission"/copyright
+# notice on FRED; the copyright-notes safety net (is_copyright_restricted) may drop this one as
+# an over-inclusive false positive until ECO-201's tag-based check lands. Kept curated so it's
+# picked up once that check is more precise.
+MICH
+#
+# --- Employment and labor ---
+UNRATE
+UNRATENSA
+U6RATE
+CIVPART
+EMRATIO
+PAYEMS
+USPRIV
+MANEMP
+USCONS
+USGOVT
+ICSA
+CCSA
+IC4WSA
+JTSJOL
+JTSQUR
+JTSHIR
+JTSLDR
+AHETPI
+CES0500000003
+LNS12300060
+CLF16OV
+CE16OV
+UNEMPLOY
+LNS11300012
+NROU
+#
+# --- Interest rates, monetary policy, Treasury yields ---
+FEDFUNDS
+DFF
+DFEDTARU
+DFEDTARL
+EFFR
+DGS1MO
+DGS3MO
+DGS6MO
+DGS1
+DGS2
+DGS3
+DGS5
+DGS7
+DGS10
+DGS20
+DGS30
+GS10
+GS2
+T10Y2Y
+T10Y3M
+T10YFF
+TB3MS
+# The next five (Freddie Mac mortgage rates, Moody's corporate bond yields) also carry
+# copyright/attribution notices on FRED; see the MICH comment above for why they're still
+# curated even though the safety net may currently drop them.
+MORTGAGE30US
+MORTGAGE15US
+AAA
+BAA
+BAA10Y
+DPRIME
+#
+# --- Money supply and Federal Reserve balance sheet ---
+M1SL
+M2SL
+M2V
+BOGMBASE
+WALCL
+TOTRESNS
+CURRCIR
+#
+# --- Housing ---
+HOUST
+HOUST1F
+PERMIT
+MSPUS
+MSPNHSUS
+# NAR (National Association of Realtors) series carry a "used with permission" notice on FRED;
+# see the MICH comment above for why it's still curated even though the safety net may currently
+# drop it.
+EXHOSLUSM495S
+MSACSR
+RRVRUSQ156N
+USSTHPI
+#
+# --- Trade and balance of payments ---
+BOPGSTB
+EXPGS
+IMPGS
+BOPGEXP
+BOPGIMP
+IEABC
+#
+# --- Debt and fiscal ---
+GFDEBTN
+GFDEGDQ188S
+FYFSD
+FYONET
+FDHBFIN
+#
+# --- Industrial production and manufacturing ---
+INDPRO
+IPMAN
+TCU
+CAPUTLG2211S1
+DGORDER
+BUSINV
+RETAILSMSA
+RSAFS
+RSXFS
+#
+# --- Regional headline: state unemployment rate (seasonally adjusted), one per state and DC ---
+ALUR
+AKUR
+AZUR
+ARUR
+CAUR
+COUR
+CTUR
+DEUR
+DCUR
+FLUR
+GAUR
+HIUR
+IDUR
+ILUR
+INUR
+IAUR
+KSUR
+KYUR
+LAUR
+MEUR
+MDUR
+MAUR
+MIUR
+MNUR
+MSUR
+MOUR
+MTUR
+NEUR
+NVUR
+NHUR
+NJUR
+NMUR
+NYUR
+NCUR
+NDUR
+OHUR
+OKUR
+ORUR
+PAUR
+RIUR
+SCUR
+SDUR
+TNUR
+TXUR
+UTUR
+VTUR
+VAUR
+WAUR
+WVUR
+WIUR
+WYUR

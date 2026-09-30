@@ -1,0 +1,69 @@
+# FHFA House Price Index, from FHFA's HPI master CSV (see src/sources/fhfa.rs).
+[[dataset]]
+code = "fhfa_hpi"
+name = "FHFA House Price Index"
+description = "FHFA repeat-sales house price indexes from the HPI master file. Train 1 covers the traditional purchase-only and all-transactions indexes for the United States, census divisions and states."
+
+# Canonical id: fhfa_hpi/{hpi_type}.{hpi_flavor}.{frequency}.{level}.{place_id}.{seasonal_adjustment},
+# for example fhfa_hpi/traditional.purchase-only.monthly.usa-or-census-division.USA.sa
+[[dataset.dimensions]]
+name = "hpi_type"
+label = "Index type"
+codes = [
+  { code = "traditional", label = "Traditional" },
+]
+
+[[dataset.dimensions]]
+name = "hpi_flavor"
+label = "Transactions"
+codes = [
+  { code = "purchase-only", label = "Purchase-only" },
+  { code = "all-transactions", label = "All-transactions" },
+]
+
+[[dataset.dimensions]]
+name = "frequency"
+label = "Frequency"
+codes = [
+  { code = "monthly", label = "Monthly" },
+  { code = "quarterly", label = "Quarterly" },
+]
+
+# The file's `level` column, lowercased with spaces as '-' so it fits in an id (one way:
+# ids are never parsed back into values).
+[[dataset.dimensions]]
+name = "level"
+label = "Geographic level"
+codes = [
+  { code = "usa-or-census-division", label = "USA or Census Division" },
+  { code = "state", label = "State" },
+]
+
+# The file's `place_id` column: USA, a census division (DV_*) or a state's USPS code. State
+# codes are USPS codes, not the FIPS codes of the us_states codelist, so only the national and
+# division ids are labelled here.
+[[dataset.dimensions]]
+name = "place_id"
+label = "Place"
+codes = [
+  { code = "USA", label = "United States" },
+  { code = "DV_ENC", label = "East North Central Division" },
+  { code = "DV_ESC", label = "East South Central Division" },
+  { code = "DV_MA", label = "Middle Atlantic Division" },
+  { code = "DV_MT", label = "Mountain Division" },
+  { code = "DV_NE", label = "New England Division" },
+  { code = "DV_PAC", label = "Pacific Division" },
+  { code = "DV_SA", label = "South Atlantic Division" },
+  { code = "DV_WNC", label = "West North Central Division" },
+  { code = "DV_WSC", label = "West South Central Division" },
+]
+
+# The file has two value columns, index_nsa and index_sa. Train 1 stores one value per
+# observation, so each column is its own series.
+[[dataset.dimensions]]
+name = "seasonal_adjustment"
+label = "Seasonal adjustment"
+codes = [
+  { code = "nsa", label = "Not seasonally adjusted (index_nsa)" },
+  { code = "sa", label = "Seasonally adjusted (index_sa)" },
+]
