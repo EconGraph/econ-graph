@@ -38,6 +38,24 @@ A flag with `"state": "DISABLED"` is left out, which flagd treats as absent.
 Each key will map to a name in code: `world_map` becomes `__FLAGS__.world_map` in
 the frontend and `cfg(flag_world_map)` in the backend.
 
+## How the backend reads it
+
+`econ-graph-backend`'s `build.rs` calls `econ_graph_flags_build::emit()`, which reads
+`FLAGS_PROFILE` (`release` when unset, or `dev`), finds `backend/flags/<profile>.json`,
+and turns each `build` flag that is on there into `cargo::rustc-cfg=flag_<key>` — so
+`#[cfg(flag_world_map)]` gates the module or route, the same way for every crate in the
+workspace. `backend/.cargo/config.toml` sets `FLAGS_PROFILE=dev` for local builds and
+tests (an exported `FLAGS_PROFILE` wins over it); `backend/Dockerfile` sets it to
+`release` and does not copy that file in, so images always build what ships. Note that
+`cargo build --release` selects cargo's own release *profile* (optimizations) and has
+no effect on `FLAGS_PROFILE` — the two are unrelated knobs.
+
+A flag gating a whole route (like `mcp`) needs two things compiled out together: the
+route's module behind `#[cfg(flag_<key>)]`, and a `#[cfg(not(flag_<key>))]` stand-in
+with the same signature that always 404s, so the code that wires up routes doesn't
+itself need a `#[cfg]`. A flag gating one field of a larger GraphQL type follows the
+same pattern with two `#[cfg]`-gated `MergedObject` roots instead of one.
+
 ## Adding a flag
 
 1. Add it to `flags.flagd.json`, with a snake_case key, `"state": "ENABLED"`,

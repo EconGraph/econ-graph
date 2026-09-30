@@ -545,6 +545,9 @@ mod tests {
                 start_date: Some(NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()),
                 end_date: Some(NaiveDate::from_ymd_opt(2024, 12, 31).unwrap()),
                 is_active: true,
+                dataset_id: None,
+                dimensions: Default::default(),
+                default_measure: None,
             },
         )
         .await

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
+use crate::models::dataset::SeriesDimensions;
 use crate::schema::economic_series;
 
 /// Economic time series model
@@ -31,6 +32,12 @@ pub struct EconomicSeries {
     pub first_missing_date: Option<NaiveDate>,
     pub crawl_status: Option<String>,
     pub crawl_error_message: Option<String>,
+    /// Dataset this series belongs to, once its adapter declares one.
+    pub dataset_id: Option<Uuid>,
+    /// Dimension values within the dataset; empty when it has none.
+    pub dimensions: SeriesDimensions,
+    /// Overrides the dataset's default measure; `None` uses the dataset's.
+    pub default_measure: Option<String>,
 }
 
 /// New economic series for insertion
@@ -59,6 +66,13 @@ pub struct NewEconomicSeries {
     #[validate(length(max = 50))]
     pub crawl_status: Option<String>,
     pub crawl_error_message: Option<String>,
+    #[serde(default)]
+    pub dataset_id: Option<Uuid>,
+    #[serde(default)]
+    pub dimensions: SeriesDimensions,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 100))]
+    pub default_measure: Option<String>,
 }
 
 /// Economic series update model
@@ -149,6 +163,9 @@ impl Default for NewEconomicSeries {
             first_missing_date: None,
             crawl_status: None,
             crawl_error_message: None,
+            dataset_id: None,
+            dimensions: SeriesDimensions::default(),
+            default_measure: None,
         }
     }
 }

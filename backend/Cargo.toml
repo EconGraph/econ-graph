@@ -10,6 +10,7 @@ members = [
     "crates/econ-graph-mcp",
     "crates/econ-graph-backend",
     "crates/econ-graph-metrics",
+    "crates/econ-graph-flags-build",
 ]
 resolver = "2"
 

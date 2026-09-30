@@ -34,7 +34,7 @@ The script does five things:
    in `backend/crates/econ-graph-crawler/tests/fixtures/e2e-seed.json`.
 5. It runs Playwright. Playwright starts the backend on port 18080, pointed at
    Keycloak through `OIDC_ISSUER`/`OIDC_AUDIENCE`. It also builds the frontend
-   with `FLAG_PROFILE=release` and `VITE_OIDC_ISSUER` set, and serves it with
+   with `FLAGS_PROFILE=release` and `VITE_OIDC_ISSUER` set, and serves it with
    `vite preview` on port 18081, which proxies `/graphql` and `/api` to the
    backend. The auth REST calls go straight to the backend through
    `VITE_API_URL`.
@@ -147,8 +147,6 @@ Put them in `tests/e2e/release/<area>/`, for example
 
 ## Not in the stack yet
 
-- **Release flags.** `FLAG_PROFILE=release` has no effect until the build-time
-  flag switch lands. The frontend build already sets it.
 - **Test-only code in the backend binary.** The e2e backend is a debug build
   that shares one cargo invocation with `seed-fixtures`. That means it links the
   crawler's `testkit` feature. It is not the deployed image.
