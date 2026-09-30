@@ -37,8 +37,11 @@ The manual artifact is a checklist, not evidence of completed testing.
 
 ## Findings exposed by the repaired checks
 
-Validation against main `1dbb3ce` found these existing defects; the assertions
-remain failing until the markup is repaired:
+Validation against main `1dbb3ce` exposed the defects below. The follow-up
+application fixes replace clickable containers with native buttons, remove login
+autofocus, correct heading semantics while retaining typography, and add admin
+landmarks and progress labels. Both static audits and all four App axe tests now
+pass with the original rules and assertions:
 
 - Public static audit: six errors across `FinancialDashboard.tsx`,
   `FinancialExport.tsx`, and `FinancialMobile.tsx`: clickable non-interactive

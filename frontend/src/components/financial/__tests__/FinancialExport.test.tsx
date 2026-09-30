@@ -1,6 +1,7 @@
 import { vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { FinancialExport } from '../FinancialExport';
 import { FinancialStatement, Company, FinancialRatio } from '../../../types/financial';
@@ -79,6 +80,29 @@ describe('FinancialExport', () => {
   afterEach(() => {
     // Clear all timers to prevent window errors
     vi.clearAllTimers();
+  });
+
+  it('selects export formats with Space and Enter from the keyboard', async () => {
+    const user = userEvent.setup();
+    render(
+      <FinancialExport
+        company={mockCompany}
+        statements={mockFinancialStatements}
+        ratios={mockFinancialRatios}
+      />
+    );
+
+    const excel = screen.getByRole('button', { name: /^Excel/ });
+    const pdf = screen.getByRole('button', { name: /^PDF/ });
+    excel.focus();
+    await user.keyboard(' ');
+    expect(excel).toHaveAttribute('aria-pressed', 'true');
+    expect(pdf).toHaveAttribute('aria-pressed', 'false');
+
+    pdf.focus();
+    await user.keyboard('{Enter}');
+    expect(pdf).toHaveAttribute('aria-pressed', 'true');
+    expect(excel).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('renders the financial export component', () => {
