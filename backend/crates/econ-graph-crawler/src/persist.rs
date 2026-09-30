@@ -37,7 +37,7 @@ diesel::define_sql_function! {
     fn substr(string: Text, start: Integer, count: Integer) -> Text;
 }
 diesel::define_sql_function! {
-    /// `length(string)`, used by [`retire_unlisted`] alongside [`substr`].
+    /// `length(string)`, used by [`retire_unlisted`] alongside [`substr()`].
     fn length(string: Text) -> Integer;
 }
 
