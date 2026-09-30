@@ -165,6 +165,16 @@ pub trait SourceAdapter: Send + Sync {
         false
     }
 
+    /// Restricts [`discovery_is_complete`](Self::discovery_is_complete) retirement to
+    /// `external_id`s starting with this prefix, when this adapter isn't the only thing that
+    /// writes series under its [`SourceId`] (for example Census, whose BDS discovery is complete
+    /// but whose data source also holds ACS series seeded outside the crawler). `None` (the
+    /// default) scopes retirement to the whole source, which is correct whenever the adapter owns
+    /// it exclusively.
+    fn retirement_scope_prefix(&self) -> Option<&str> {
+        None
+    }
+
     /// Fetches observations for `external_id`, only those on or after `since` when given
     /// (adapters may return more if the source can't filter).
     async fn fetch_series(

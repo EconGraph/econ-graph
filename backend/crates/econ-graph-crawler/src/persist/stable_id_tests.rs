@@ -280,12 +280,12 @@ async fn unlisted_series_are_retired_not_deleted_and_come_back() {
     let (before, _) = ids(p).await;
 
     // An empty catalog is ignored.
-    let none = retire_unlisted(p, SourceId::Fred, &[]).await.unwrap();
+    let none = retire_unlisted(p, SourceId::Fred, &[], None).await.unwrap();
     assert_eq!(none, Retirement::default());
     assert_eq!(active(p, "GDP").await, (Some(true), Some(true)));
 
     // The source stops listing PAYEMS (and never listed UNDISCOVERED).
-    let retired = retire_unlisted(p, SourceId::Fred, &listed(&["GDP"]))
+    let retired = retire_unlisted(p, SourceId::Fred, &listed(&["GDP"]), None)
         .await
         .unwrap();
     // Seeded FRED metadata (UNRATE, CPIAUCSL) isn't listed either.
@@ -311,7 +311,7 @@ async fn unlisted_series_are_retired_not_deleted_and_come_back() {
     persist_discovered(p, SourceId::Fred, &listed(&["GDP", "PAYEMS"]))
         .await
         .unwrap();
-    let back = retire_unlisted(p, SourceId::Fred, &listed(&["GDP", "PAYEMS"]))
+    let back = retire_unlisted(p, SourceId::Fred, &listed(&["GDP", "PAYEMS"]), None)
         .await
         .unwrap();
     assert_eq!(back.series_reactivated, 1);
@@ -319,4 +319,49 @@ async fn unlisted_series_are_retired_not_deleted_and_come_back() {
     let (again, _) = ids(p).await;
     db.drop().await;
     assert_eq!(before, again);
+}
+
+/// Regression for the review finding on #219: Census discovery only ever lists `CENSUS_BDS_*`
+/// series, but the Census data source also holds ACS `series_metadata` rows seeded by the initial
+/// migration (`B01001001`, `B19013_001E`). A complete-catalog retirement for Census must not
+/// retire those, and `CensusAdapter::retirement_scope_prefix` (`ID_PREFIX`, `"CENSUS_BDS_"`)
+/// exists to stop it. See `unlisted_series_are_retired_not_deleted_and_come_back` for the
+/// unscoped (whole-source) case this specializes.
+#[tokio::test]
+async fn census_retirement_is_scoped_to_bds_and_never_touches_seeded_acs_rows() {
+    use crate::sources::census::CensusAdapter;
+
+    let Some(url) = database_url() else { return };
+    let db = FreshDb::create(&url, "econ_graph_test_stable_ids_census_scope").await;
+    let p = &db.pool;
+    let adapter = CensusAdapter::default();
+    assert!(adapter.discovery_is_complete());
+    let scope = adapter.retirement_scope_prefix();
+    assert_eq!(scope, Some("CENSUS_BDS_"));
+
+    // The seeded ACS rows exist and are active before any Census discovery runs.
+    assert_eq!(active(p, "B01001001").await, (None, Some(true)));
+    assert_eq!(active(p, "B19013_001E").await, (None, Some(true)));
+
+    // A BDS discovery that lists one national series and nothing else.
+    let bds = listed(&["CENSUS_BDS_ESTAB_us"]);
+    persist_discovered(p, SourceId::Census, &bds).await.unwrap();
+    let retired = retire_unlisted(p, SourceId::Census, &bds, scope)
+        .await
+        .unwrap();
+
+    // Nothing BDS doesn't own is touched, however unlisted it is.
+    assert_eq!(retired.metadata_retired, 0, "{retired:?}");
+    assert_eq!(retired.series_retired, 0, "{retired:?}");
+    assert_eq!(active(p, "B01001001").await, (None, Some(true)));
+    assert_eq!(active(p, "B19013_001E").await, (None, Some(true)));
+    assert_eq!(active(p, "CENSUS_BDS_ESTAB_us").await, (None, Some(true)));
+
+    // An unscoped call (as if the adapter forgot to scope itself) would retire them: proves the
+    // scope parameter, not some other accident, is what protects the ACS rows above.
+    let unscoped = retire_unlisted(p, SourceId::Census, &bds, None)
+        .await
+        .unwrap();
+    assert_eq!(unscoped.metadata_retired, 2, "{unscoped:?}");
+    db.drop().await;
 }

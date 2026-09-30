@@ -437,14 +437,21 @@ pub struct Retirement {
 /// inactive, and its inactive `economic_series` rows that `listed` contains are marked active
 /// again. Nothing is deleted, so a retired series keeps its id and its data points.
 ///
+/// `scope_prefix` (see [`SourceAdapter::retirement_scope_prefix`]) restricts every check to
+/// `external_id`s starting with it, so an adapter that doesn't own its whole `SourceId` (Census
+/// BDS alongside seeded ACS rows) never retires or reactivates rows it didn't discover. `None`
+/// scopes to the whole source.
+///
 /// Does nothing when `listed` is empty: a source that suddenly lists nothing is far more likely
 /// broken than retired.
 ///
 /// [`SourceAdapter::discovery_is_complete`]: crate::adapter::SourceAdapter::discovery_is_complete
+/// [`SourceAdapter::retirement_scope_prefix`]: crate::adapter::SourceAdapter::retirement_scope_prefix
 pub async fn retire_unlisted(
     pool: &DatabasePool,
     source: SourceId,
     listed: &[DiscoveredSeries],
+    scope_prefix: Option<&str>,
 ) -> AppResult<Retirement> {
     let ids: Vec<String> = listed
         .iter()
@@ -454,6 +461,10 @@ pub async fn retire_unlisted(
     if ids.is_empty() {
         return Ok(Retirement::default());
     }
+    // Matched with `substr(external_id, 1, length($3)) = $3` rather than LIKE, so a prefix
+    // containing '%' or '_' (SQL LIKE wildcards) is still matched literally. An empty prefix
+    // (the "whole source" case) matches every external_id, since substr(_, 1, 0) = ''.
+    let prefix = scope_prefix.unwrap_or("").to_string();
     let mut conn = pool.get().await.map_err(conn_err)?;
     let source_id = data_source_id_conn(&mut conn, source).await?;
     let retirement = conn
@@ -462,18 +473,22 @@ pub async fn retire_unlisted(
                 diesel::sql_query(sql)
                     .bind::<SqlUuid, _>(source_id)
                     .bind::<Array<Text>, _>(ids.clone())
+                    .bind::<Text, _>(prefix.clone())
             };
             Ok(Retirement {
                 metadata_retired: run("UPDATE series_metadata SET is_active = FALSE \
-                     WHERE source_id = $1 AND is_active AND external_id <> ALL($2)")
+                     WHERE source_id = $1 AND is_active AND external_id <> ALL($2) \
+                     AND substr(external_id, 1, length($3)) = $3")
                 .execute(conn)
                 .await?,
                 series_retired: run("UPDATE economic_series SET is_active = FALSE \
-                     WHERE source_id = $1 AND is_active AND external_id <> ALL($2)")
+                     WHERE source_id = $1 AND is_active AND external_id <> ALL($2) \
+                     AND substr(external_id, 1, length($3)) = $3")
                 .execute(conn)
                 .await?,
                 series_reactivated: run("UPDATE economic_series SET is_active = TRUE \
-                     WHERE source_id = $1 AND NOT is_active AND external_id = ANY($2)")
+                     WHERE source_id = $1 AND NOT is_active AND external_id = ANY($2) \
+                     AND substr(external_id, 1, length($3)) = $3")
                 .execute(conn)
                 .await?,
             })

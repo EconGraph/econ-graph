@@ -134,11 +134,17 @@ impl SourceAdapter for CensusAdapter {
     }
 
     /// Discovery crosses the dataset's full variable and geography metadata, and fails rather
-    /// than returning part of it. Retirement applies to every series of the Census data source,
-    /// so rows this adapter doesn't produce (the ACS rows seeded by the initial migration) go
-    /// inactive too. Scope it to the BDS dataset once series carry a dataset (datasets DS-3).
+    /// than returning part of it (a malformed `variables.json`/`geography.json` entry fails the
+    /// parse, per [`parse_variables`]/[`parse_geographies`], instead of being silently dropped
+    /// from a still-successful discovery).
     fn discovery_is_complete(&self) -> bool {
         true
+    }
+
+    /// This adapter only ever produces `CENSUS_BDS_*` ids; the Census data source also holds ACS
+    /// rows seeded by the initial migration, which retirement must not touch.
+    fn retirement_scope_prefix(&self) -> Option<&str> {
+        Some(ID_PREFIX)
     }
 
     /// One series per economic variable for the nation and for each state and DC, limited to the
@@ -381,17 +387,20 @@ struct BdsGeography {
     name: String,
 }
 
-/// The variables in `variables.json`.
+/// The variables in `variables.json`. Discovery feeds a complete-catalog retirement
+/// ([`CensusAdapter::discovery_is_complete`]), so a malformed entry fails the whole parse instead
+/// of being silently dropped: a partial catalog must never look like a smaller real one.
 fn parse_variables(body: &Value) -> Result<Vec<BdsVariable>, CrawlError> {
     let vars = body
         .get("variables")
         .and_then(Value::as_object)
         .ok_or_else(|| CrawlError::Parse("Census variables.json: no 'variables' object".into()))?;
-    Ok(vars
-        .iter()
-        .filter_map(|(name, v)| {
-            let obj = v.as_object()?;
-            Some(BdsVariable {
+    vars.iter()
+        .map(|(name, v)| {
+            let obj = v.as_object().ok_or_else(|| {
+                CrawlError::Parse(format!("Census variables.json: {name:?} is not an object"))
+            })?;
+            Ok(BdsVariable {
                 name: name.clone(),
                 label: obj
                     .get("label")
@@ -400,23 +409,38 @@ fn parse_variables(body: &Value) -> Result<Vec<BdsVariable>, CrawlError> {
                     .to_string(),
             })
         })
-        .collect())
+        .collect()
 }
 
-/// The geography levels in `geography.json`, skipping entries without a name.
+/// The geography levels in `geography.json`. An entry with an empty (or absent-after-trim) name
+/// is deliberately skipped, as the old code did; anything else malformed (not an object, or a
+/// `name` field that isn't a string) fails the whole parse, for the reason [`parse_variables`]
+/// gives.
 fn parse_geographies(body: &Value) -> Result<Vec<BdsGeography>, CrawlError> {
     let fips = body
         .get("fips")
         .and_then(Value::as_array)
         .ok_or_else(|| CrawlError::Parse("Census geography.json: no 'fips' array".into()))?;
-    Ok(fips
-        .iter()
-        .filter_map(|g| {
-            let obj = g.as_object()?;
-            let name = obj.get("name").and_then(Value::as_str)?.trim().to_string();
-            (!name.is_empty()).then_some(BdsGeography { name })
-        })
-        .collect())
+    let mut out = Vec::with_capacity(fips.len());
+    for (i, g) in fips.iter().enumerate() {
+        let obj = g.as_object().ok_or_else(|| {
+            CrawlError::Parse(format!("Census geography.json: fips[{i}] is not an object"))
+        })?;
+        let name = obj
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                CrawlError::Parse(format!(
+                    "Census geography.json: fips[{i}] has no string 'name'"
+                ))
+            })?
+            .trim()
+            .to_string();
+        if !name.is_empty() {
+            out.push(BdsGeography { name });
+        }
+    }
+    Ok(out)
 }
 
 /// The old `filter_economic_indicators` rules.
@@ -471,6 +495,80 @@ mod tests {
         assert_eq!(CensusAdapter::default().base_url, DEFAULT_BASE_URL);
         assert_eq!(CensusAdapter::new("http://x/").base_url, "http://x");
         assert_eq!(CensusAdapter::default().id(), SourceId::Census);
+    }
+
+    /// Regression for the review finding on #219: a malformed (but non-empty) `variables.json`
+    /// must fail discovery, not silently drop the bad entries and let a partial catalog trigger
+    /// [`SourceAdapter::retirement_scope_prefix`]-scoped retirement of the ids it left out.
+    #[test]
+    fn parse_variables_rejects_non_object_entry() {
+        let body = serde_json::json!({
+            "variables": {
+                "ESTAB": {"label": "Number of establishments"},
+                "BROKEN": "not an object",
+            }
+        });
+        let err = parse_variables(&body).unwrap_err();
+        assert!(matches!(err, CrawlError::Parse(_)), "{err:?}");
+    }
+
+    #[test]
+    fn parse_variables_rejects_missing_variables_object() {
+        let body = serde_json::json!({"nope": {}});
+        let err = parse_variables(&body).unwrap_err();
+        assert!(matches!(err, CrawlError::Parse(_)), "{err:?}");
+    }
+
+    #[test]
+    fn parse_variables_accepts_well_formed_entries() {
+        let body = serde_json::json!({
+            "variables": {"ESTAB": {"label": "Number of establishments"}}
+        });
+        let vars = parse_variables(&body).unwrap();
+        assert_eq!(vars.len(), 1);
+        assert_eq!(vars[0].name, "ESTAB");
+        assert_eq!(vars[0].label, "Number of establishments");
+    }
+
+    /// Same reasoning as `parse_variables_rejects_non_object_entry`, for `geography.json`.
+    #[test]
+    fn parse_geographies_rejects_non_object_entry() {
+        let body = serde_json::json!({"fips": [{"name": "us"}, "not an object"]});
+        let err = parse_geographies(&body).unwrap_err();
+        assert!(matches!(err, CrawlError::Parse(_)), "{err:?}");
+    }
+
+    #[test]
+    fn parse_geographies_rejects_non_string_name() {
+        let body = serde_json::json!({"fips": [{"name": 123}]});
+        let err = parse_geographies(&body).unwrap_err();
+        assert!(matches!(err, CrawlError::Parse(_)), "{err:?}");
+    }
+
+    #[test]
+    fn parse_geographies_rejects_missing_name_field() {
+        let body = serde_json::json!({"fips": [{"geoLevelDisplay": "us"}]});
+        let err = parse_geographies(&body).unwrap_err();
+        assert!(matches!(err, CrawlError::Parse(_)), "{err:?}");
+    }
+
+    #[test]
+    fn parse_geographies_rejects_missing_fips_array() {
+        let body = serde_json::json!({"nope": []});
+        let err = parse_geographies(&body).unwrap_err();
+        assert!(matches!(err, CrawlError::Parse(_)), "{err:?}");
+    }
+
+    /// An empty (or whitespace-only) name is deliberately skipped, not an error: this is
+    /// unchanged behavior from before the malformed-entry hardening above.
+    #[test]
+    fn parse_geographies_skips_blank_names_without_erroring() {
+        let body = serde_json::json!({
+            "fips": [{"name": "us"}, {"name": "   "}, {"name": ""}]
+        });
+        let geos = parse_geographies(&body).unwrap();
+        assert_eq!(geos.len(), 1);
+        assert_eq!(geos[0].name, "us");
     }
 
     /// Every economic variable gets a national series and one per state and DC.
