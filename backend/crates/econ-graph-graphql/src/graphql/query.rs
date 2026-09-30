@@ -20,6 +20,8 @@
 use crate::imports::*;
 use crate::types::*;
 
+use crate::graphql::cross_section::{self, CrossSectionEntry, DimensionFilterInput};
+
 /// Root query object
 pub struct Query;
 
@@ -136,6 +138,28 @@ impl Query {
             .optional()?;
 
         Ok(source.map(|s| s.into()))
+    }
+
+    /// One measure of one dataset, for every value of one dimension, at one date.
+    ///
+    /// `filter` pins every dataset dimension except `across`, e.g.
+    /// `crossSection(datasetId: $wdi, filter: [{dimension: "indicator", value:
+    /// "NY.GDP.PCAP.CD"}], across: "area", latest: true)`. Give exactly one of `date` and
+    /// `latest: true`; `latest` returns each key's most recent non-null value with its own
+    /// date. `measure` defaults to the dataset's default measure. Every active matching series
+    /// is returned, ordered by key, with a null value where it has none.
+    #[allow(clippy::too_many_arguments)]
+    async fn cross_section(
+        &self,
+        ctx: &Context<'_>,
+        dataset_id: ID,
+        measure: Option<String>,
+        #[graphql(default)] filter: Vec<DimensionFilterInput>,
+        across: String,
+        date: Option<chrono::NaiveDate>,
+        latest: Option<bool>,
+    ) -> Result<Vec<CrossSectionEntry>> {
+        cross_section::resolve(ctx, dataset_id, measure, filter, across, date, latest).await
     }
 
     /// List all data sources
