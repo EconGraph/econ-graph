@@ -74,6 +74,49 @@ const POPULAR_PAGE_SIZE: usize = 100;
 /// at most `1 + SEARCH_TERMS.len() * MAX_PAGES_PER_TERM` requests (= 76).
 const MAX_PAGES_PER_TERM: usize = 5;
 
+/// Lower-cased substrings of a series' `notes` known to mark it as copyright-restricted, e.g. the
+/// Coinbase `CBBTCUSD` family ("reproduction ... is prohibited except with prior written
+/// permission") or S&P/Case-Shiller ("Copyright, 2026, Standard & Poor's ... Reprinted with
+/// permission"). A series whose notes contain one of these known phrases is dropped by
+/// [`is_copyright_restricted`] rather than fetched and published; wording outside this list is
+/// not caught (a stopgap: `notes` is what discovery returns, and there's no adapter-visible tag
+/// to key on instead, since checking FRED's own `copyrighted` tag would need a live call against
+/// the real API, which the crawler's network policy blocks in this environment). Revisit with a
+/// tag-based check once that access exists (ECO-201).
+///
+/// This is deliberately broad, and over-drops on purpose: `copyright` and `reprinted with
+/// permission` also catch FRED's "citation required" third-party series (e.g. OECD, whose notes
+/// read "Copyright, 2026, OECD. Reprinted with permission."), which could legally be republished
+/// with a citation, not only its "pre-approval required" series (Coinbase, ICE, S&P/Case-Shiller,
+/// NAR). A note merely mentioning copyright without an actual restriction would be dropped too.
+/// ECO-201's tag-based check, once live API access exists, can recover the citation-required
+/// group and any other false positive; until then, losing a legally-reproducible series from
+/// discovery is the safer failure than publishing a restricted one.
+const COPYRIGHT_RESTRICTION_MARKERS: &[&str] = &[
+    "prior written permission",
+    "may not be reproduced",
+    "reproduction, retransmission, or other use is prohibited",
+    "all rights reserved",
+    "copyright",
+    "reprinted with permission",
+    "used with permission",
+];
+
+/// Whether `notes` reads as a copyright/reproduction restriction (see
+/// [`COPYRIGHT_RESTRICTION_MARKERS`]). Whitespace (including line breaks) is normalised first, so
+/// a marker split across a line break in the source text still matches.
+fn is_copyright_restricted(notes: Option<&str>) -> bool {
+    let Some(notes) = notes else { return false };
+    let lower = notes
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    COPYRIGHT_RESTRICTION_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
 /// FRED adapter. See the module docs for endpoints and error mapping.
 #[derive(Debug, Clone)]
 pub struct FredAdapter {
@@ -241,11 +284,18 @@ impl SourceAdapter for FredAdapter {
         let mut last_err = None;
         let mut any_ok = false;
 
+        let mut restricted_count = 0usize;
         let mut add = |infos: Vec<FredSeriesInfo>| {
             for info in infos {
-                if seen.insert(info.id.clone()) {
-                    found.push(to_discovered(info));
+                if !seen.insert(info.id.clone()) {
+                    continue;
                 }
+                if is_copyright_restricted(info.notes.as_deref()) {
+                    tracing::debug!(id = %info.id, "dropping copyright-restricted series");
+                    restricted_count += 1;
+                    continue;
+                }
+                found.push(to_discovered(info));
             }
         };
 
@@ -283,7 +333,11 @@ impl SourceAdapter for FredAdapter {
         match (any_ok, last_err) {
             (false, Some(e)) => Err(e),
             _ => {
-                tracing::info!(series = found.len(), "FRED discovery finished");
+                tracing::info!(
+                    series = found.len(),
+                    dropped_restricted = restricted_count,
+                    "FRED discovery finished"
+                );
                 Ok(found)
             }
         }
@@ -786,6 +840,63 @@ mod tests {
             assert!(q.contains(&("file_type".into(), "json".into())));
         }
         mock.server().verify().await;
+    }
+
+    #[test]
+    fn markers_are_lower_case() {
+        assert!(COPYRIGHT_RESTRICTION_MARKERS
+            .iter()
+            .all(|m| *m == m.to_lowercase()));
+    }
+
+    #[test]
+    fn is_copyright_restricted_matches_known_wording() {
+        assert!(is_copyright_restricted(Some(
+            "Reproduction of this data by third parties is prohibited except with prior \
+             written permission from Coinbase."
+        )));
+        assert!(is_copyright_restricted(Some(
+            "Reproduction of this information in any form is prohibited except with the \
+             prior\nwritten permission of ICE Data Indices, LLC.",
+        )));
+        assert!(is_copyright_restricted(Some("ALL RIGHTS RESERVED.")));
+        assert!(is_copyright_restricted(Some(
+            "Copyright, 2026, Standard & Poor's Financial Services LLC. Reprinted with permission."
+        )));
+        assert!(is_copyright_restricted(Some(
+            "Data used with permission of the National Association of Realtors."
+        )));
+        assert!(is_copyright_restricted(Some(
+            "Reproduction, retransmission, or other use is prohibited without written consent."
+        )));
+        assert!(
+            is_copyright_restricted(Some("All  rights\treserved.")),
+            "whitespace normalized"
+        );
+        assert!(!is_copyright_restricted(Some("BEA Account Code: A191RC")));
+        assert!(!is_copyright_restricted(None));
+    }
+
+    #[tokio::test]
+    async fn discover_drops_copyright_restricted_series() {
+        let mock = MockSource::start().await;
+        let restricted = SEARCH_P1.replace(
+            "\"notes\": \"BEA Account Code: A191RC\"",
+            "\"notes\": \"Reproduction, retransmission, or other use is prohibited except \
+                      with prior written permission.\"",
+        );
+        mock.mount(&Route::get("/series/search"), Reply::json_str(restricted))
+            .await;
+        let found = FredAdapter::new(mock.base_url())
+            .discover(&test_ctx())
+            .await
+            .unwrap();
+        let ids: Vec<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
+        assert!(!ids.contains(&"GDP"), "{ids:?}");
+        assert!(
+            ids.contains(&"GDPC1"),
+            "unrestricted series still discovered: {ids:?}"
+        );
     }
 
     #[tokio::test]
