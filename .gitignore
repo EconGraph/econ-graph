@@ -114,3 +114,5 @@ demo-videos/
 
 # Python bytecode
 __pycache__/
+/frontend/test-results-layout/
+/frontend/playwright-report-layout/
