@@ -18,7 +18,7 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
 }));
 
-const hooks = vi.hoisted(() => ({ isPreviousData: false }));
+const hooks = vi.hoisted(() => ({ isPreviousData: false, transformation: 'YEAR_OVER_YEAR' }));
 
 vi.mock('../../hooks/useSeriesData', () => ({
   useSeriesDetail: () => ({
@@ -45,7 +45,7 @@ vi.mock('../../hooks/useSeriesData', () => ({
     isPreviousData: hooks.isPreviousData,
     dataUpdatedAt: RETRIEVED_AT,
     data: {
-      transformation: 'YEAR_OVER_YEAR',
+      transformation: hooks.transformation,
       points: [
         { date: '2024-03-01', value: 3.5, revisionDate: '2024-04-10', isOriginalRelease: true },
         { date: '2024-01-01', value: 3.1, revisionDate: '2024-02-13', isOriginalRelease: true },
@@ -80,6 +80,7 @@ describe('SeriesDetail CSV download', () => {
 
   beforeEach(() => {
     hooks.isPreviousData = false;
+    hooks.transformation = 'YEAR_OVER_YEAR';
     blobs = [];
     clicked = [];
     URL.createObjectURL = vi.fn((blob: Blob) => {
@@ -137,6 +138,16 @@ describe('SeriesDetail CSV download', () => {
 
     const rows = (await readBlob(blobs[0])).split('\r\n').slice(6);
     expect(rows).toEqual(['2024-02-01,', '2024-03-01,3.5', '']);
+  });
+
+  it('exports log difference with dimensionless units, not the series percent unit', async () => {
+    hooks.transformation = 'LOG_DIFFERENCE';
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /download csv/i }));
+
+    const text = await readBlob(blobs[0]);
+    expect(text.split('\r\n')).toContain('Units,');
+    expect(text.split('\r\n')).not.toContain('Units,%');
   });
 });
 
