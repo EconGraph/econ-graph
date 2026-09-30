@@ -29,6 +29,7 @@ use crate::adapter::{
     AdapterRegistry, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
     NewSeriesMetadataLite, SourceAdapter,
 };
+use crate::dataset::{parse_dataset_file, DatasetCatalog, SeriesDataset};
 use crate::persist;
 use crate::policy::SourcePolicy;
 use crate::testkit::{fast_policy, test_ctx_with, MockSource, Reply, Route};
@@ -51,6 +52,7 @@ async fn db() -> Option<Db> {
             "DELETE FROM crawl_queue",
             "DELETE FROM series_metadata WHERE external_id LIKE 't5\\_%'",
             "DELETE FROM economic_series WHERE external_id LIKE 't5\\_%'",
+            "DELETE FROM datasets WHERE code LIKE 't5\\_%'",
         ] {
             diesel::sql_query(sql).execute(&mut conn).await.unwrap();
         }
@@ -83,10 +85,63 @@ struct CatalogBody {
     series: Vec<(String, String)>,
 }
 
+/// Dataset the test adapter declares: dimensions `indicator` and `area`.
+const DATASET: &str = "t5_ds";
+
+const DATASET_TOML: &str = r#"
+[[dataset]]
+code = "t5_ds"
+name = "Test dataset"
+
+[[dataset.dimensions]]
+name = "indicator"
+label = "Indicator"
+
+[[dataset.dimensions]]
+name = "area"
+label = "Area"
+"#;
+
+/// The dataset the test adapter attaches to `external_id`, chosen by its prefix:
+/// - `t5_ds/{indicator}.{area}` is in [`DATASET`] under its canonical id;
+/// - `t5_badkeys_*` has the wrong dimension keys;
+/// - `t5_undeclared_*` names a dataset the adapter does not declare;
+/// - anything else has none.
+fn test_dataset(external_id: &str) -> Option<SeriesDataset> {
+    if let Some((indicator, area)) = external_id
+        .strip_prefix("t5_ds/")
+        .and_then(|rest| rest.rsplit_once('.'))
+    {
+        Some(SeriesDataset::new(
+            DATASET,
+            [("indicator", indicator), ("area", area)],
+        ))
+    } else if external_id.starts_with("t5_badkeys_") {
+        Some(SeriesDataset::new(DATASET, [("indicator", external_id)]))
+    } else if external_id.starts_with("t5_undeclared_") {
+        Some(SeriesDataset::new("t5_other", [("indicator", external_id)]))
+    } else {
+        None
+    }
+}
+
+fn test_catalog() -> DatasetCatalog {
+    let mut c = DatasetCatalog::empty();
+    for id in [SRC, OTHER] {
+        c.insert(id, &[DATASET], parse_dataset_file(DATASET_TOML).unwrap())
+            .unwrap();
+    }
+    c
+}
+
 #[async_trait]
 impl SourceAdapter for TestAdapter {
     fn id(&self) -> SourceId {
         self.id
+    }
+
+    fn datasets(&self) -> &[&str] {
+        &[DATASET]
     }
 
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
@@ -98,6 +153,7 @@ impl SourceAdapter for TestAdapter {
             .series
             .into_iter()
             .map(|(id, title)| DiscoveredSeries {
+                dataset: test_dataset(&id),
                 data_url: Some(format!("{}/series/{id}", self.base_url)),
                 external_id: id,
                 title,
@@ -139,6 +195,7 @@ impl SourceAdapter for TestAdapter {
                 ..Default::default()
             }),
             points,
+            dataset: test_dataset(external_id),
         })
     }
 }
@@ -185,7 +242,7 @@ fn config(worker_id: &str) -> WorkerConfig {
 }
 
 fn worker(pool: &DatabasePool, mock: &MockSource) -> Worker {
-    Worker::new(ctx(pool), registry(mock), config("t5-worker"))
+    Worker::new(ctx(pool), registry(mock), config("t5-worker")).with_datasets(test_catalog())
 }
 
 async fn enqueue(
@@ -487,6 +544,7 @@ async fn revision_filter_picks_latest_and_as_of_revisions() {
                 revision("2024-02-01", "5", "2024-05-01", true),
                 revision("2024-01-01", "2", "2024-03-01", false),
             ],
+            dataset: None,
         },
     )
     .await
@@ -570,6 +628,7 @@ async fn revision_filter_breaks_same_day_ties_and_pages_after_filtering() {
                 revision("2024-02-01", "21", "2024-04-01", false),
                 revision("2024-03-01", "30", "2024-04-01", true),
             ],
+            dataset: None,
         },
     )
     .await
@@ -698,7 +757,7 @@ async fn unknown_source_and_missing_adapter_fail() {
     let bogus = enqueue(&db.pool, "NOT_A_SOURCE", "t5_x", JobKind::FetchSeries, 9).await;
     let unregistered = enqueue(
         &db.pool,
-        SourceId::Oecd.as_str(),
+        SourceId::Imf.as_str(),
         "t5_y",
         JobKind::FetchSeries,
         5,
@@ -795,6 +854,294 @@ async fn discover_job_upserts_series_metadata() {
         .await
         .unwrap();
     assert_eq!(titles, vec!["Series A v2", "Series B renamed"]);
+}
+
+#[derive(QueryableByName, Debug, PartialEq)]
+struct DatasetColumnsRow {
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Uuid>)]
+    dataset_id: Option<Uuid>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Jsonb>)]
+    dimensions: Option<serde_json::Value>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+    default_measure: Option<String>,
+}
+
+/// `dataset_id`, `dimensions` and `default_measure` of `external_id` in `table`.
+async fn dataset_columns(pool: &DatabasePool, table: &str, external_id: &str) -> DatasetColumnsRow {
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query(format!(
+        "SELECT dataset_id, dimensions, default_measure FROM {table} WHERE external_id = $1"
+    ))
+    .bind::<diesel::sql_types::Text, _>(external_id)
+    .get_result(&mut conn)
+    .await
+    .unwrap()
+}
+
+#[derive(QueryableByName)]
+struct DatasetRowTest {
+    #[diesel(sql_type = diesel::sql_types::Uuid)]
+    id: Uuid,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    name: String,
+    #[diesel(sql_type = diesel::sql_types::Jsonb)]
+    dimensions: serde_json::Value,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    default_measure: String,
+    #[diesel(sql_type = diesel::sql_types::Timestamptz)]
+    updated_at: chrono::DateTime<Utc>,
+}
+
+async fn dataset_row(pool: &DatabasePool, source: SourceId) -> Vec<DatasetRowTest> {
+    let source_id = persist::data_source_id(pool, source).await.unwrap();
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query(
+        "SELECT id, name, dimensions, default_measure, updated_at FROM datasets \
+         WHERE source_id = $1 AND code = $2",
+    )
+    .bind::<diesel::sql_types::Uuid, _>(source_id)
+    .bind::<diesel::sql_types::Text, _>(DATASET)
+    .load(&mut conn)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn sync_datasets_upserts_rows() {
+    let Some(db) = db().await else { return };
+    let mut catalog = test_catalog();
+    assert_eq!(persist::sync_datasets(&db.pool, &catalog).await.unwrap(), 2);
+    let first = dataset_row(&db.pool, SRC).await;
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].name, "Test dataset");
+    assert_eq!(first[0].default_measure, "value");
+    assert_eq!(
+        first[0].dimensions,
+        serde_json::json!([
+            {"name": "indicator", "label": "Indicator", "type": "string"},
+            {"name": "area", "label": "Area", "type": "string"}
+        ])
+    );
+    assert_eq!(dataset_row(&db.pool, OTHER).await.len(), 1);
+
+    // A changed definition updates the row in place, keeping its id.
+    catalog
+        .insert(
+            SRC,
+            &[DATASET],
+            parse_dataset_file(&DATASET_TOML.replace("Test dataset", "Renamed")).unwrap(),
+        )
+        .unwrap();
+    persist::sync_datasets(&db.pool, &catalog).await.unwrap();
+    let second = dataset_row(&db.pool, SRC).await;
+    assert_eq!(second[0].id, first[0].id);
+    assert_eq!(second[0].name, "Renamed");
+
+    // Syncing the same definition again is a no-op: `updated_at` does not move.
+    persist::sync_datasets(&db.pool, &catalog).await.unwrap();
+    let third = dataset_row(&db.pool, SRC).await;
+    assert_eq!(third[0].updated_at, second[0].updated_at);
+}
+
+#[tokio::test]
+async fn dataset_series_persist_dataset_id_and_dimensions() {
+    let Some(db) = db().await else { return };
+    persist::sync_datasets(&db.pool, &test_catalog())
+        .await
+        .unwrap();
+    let dataset_id = dataset_row(&db.pool, SRC).await[0].id;
+    let mock = MockSource::start().await;
+    mock.mount(
+        &Route::get("/catalog"),
+        Reply::json(serde_json::json!({"series": [["t5_ds/a.USA", "A"], ["t5_plain", "Plain"]]})),
+    )
+    .await;
+    mock.mount(
+        &Route::get("/series/t5_ds/a.USA"),
+        series_json("A", &[("2024-01-01", Some("1"))]),
+    )
+    .await;
+    let w = worker(&db.pool, &mock);
+    let expected = DatasetColumnsRow {
+        dataset_id: Some(dataset_id),
+        dimensions: Some(serde_json::json!({"indicator": "a", "area": "USA"})),
+        // A per-series override; the dataset's default measure applies.
+        default_measure: None,
+    };
+
+    enqueue(
+        &db.pool,
+        SRC.as_str(),
+        "catalog",
+        JobKind::DiscoverCatalog,
+        5,
+    )
+    .await;
+    assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
+    assert_eq!(
+        dataset_columns(&db.pool, "series_metadata", "t5_ds/a.USA").await,
+        expected
+    );
+    let none = DatasetColumnsRow {
+        dataset_id: None,
+        dimensions: Some(serde_json::json!({})),
+        default_measure: None,
+    };
+    assert_eq!(
+        dataset_columns(&db.pool, "series_metadata", "t5_plain").await,
+        none
+    );
+
+    // Rediscovering it without a dataset keeps the stored one.
+    let bare = DiscoveredSeries {
+        external_id: "t5_ds/a.USA".into(),
+        title: "A".into(),
+        description: None,
+        units: None,
+        frequency: None,
+        data_url: None,
+        dataset: None,
+    };
+    persist::persist_discovered(&db.pool, SRC, &[bare])
+        .await
+        .unwrap();
+    assert_eq!(
+        dataset_columns(&db.pool, "series_metadata", "t5_ds/a.USA").await,
+        expected
+    );
+
+    enqueue(
+        &db.pool,
+        SRC.as_str(),
+        "t5_ds/a.USA",
+        JobKind::FetchSeries,
+        5,
+    )
+    .await;
+    assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
+    assert_eq!(
+        dataset_columns(&db.pool, "economic_series", "t5_ds/a.USA").await,
+        expected
+    );
+
+    // A fetch without a dataset keeps the stored one.
+    let fetched = FetchedSeries::default();
+    persist::persist_series(&db.pool, SRC, "t5_ds/a.USA", &fetched)
+        .await
+        .unwrap();
+    assert_eq!(
+        dataset_columns(&db.pool, "economic_series", "t5_ds/a.USA").await,
+        expected
+    );
+
+    // A rediscovery or fetch with new dimension values replaces the stored ones on both tables.
+    let moved = SeriesDataset::new("t5_ds", [("indicator", "a"), ("area", "FRA")]);
+    let expected_moved = DatasetColumnsRow {
+        dataset_id: Some(dataset_id),
+        dimensions: Some(serde_json::json!({"indicator": "a", "area": "FRA"})),
+        default_measure: None,
+    };
+    let rediscovered = DiscoveredSeries {
+        external_id: "t5_ds/a.USA".into(),
+        title: "A".into(),
+        description: None,
+        units: None,
+        frequency: None,
+        data_url: None,
+        dataset: Some(moved.clone()),
+    };
+    persist::persist_discovered(&db.pool, SRC, &[rediscovered])
+        .await
+        .unwrap();
+    assert_eq!(
+        dataset_columns(&db.pool, "series_metadata", "t5_ds/a.USA").await,
+        expected_moved
+    );
+    let refetched = FetchedSeries {
+        dataset: Some(moved),
+        ..FetchedSeries::default()
+    };
+    persist::persist_series(&db.pool, SRC, "t5_ds/a.USA", &refetched)
+        .await
+        .unwrap();
+    assert_eq!(
+        dataset_columns(&db.pool, "economic_series", "t5_ds/a.USA").await,
+        expected_moved
+    );
+}
+
+#[tokio::test]
+async fn undeclared_dataset_or_wrong_keys_fail_before_writing() {
+    let Some(db) = db().await else { return };
+    persist::sync_datasets(&db.pool, &test_catalog())
+        .await
+        .unwrap();
+    let mock = MockSource::start().await;
+    for id in ["t5_badkeys_x", "t5_undeclared_y"] {
+        mock.mount(
+            &Route::get(format!("/series/{id}")),
+            series_json("X", &[("2024-01-01", Some("1"))]),
+        )
+        .await;
+    }
+    let w = worker(&db.pool, &mock);
+    for (id, needle) in [
+        ("t5_badkeys_x", "wrong dimension keys"),
+        ("t5_undeclared_y", "dataset t5_other is not declared"),
+    ] {
+        let job = enqueue(&db.pool, SRC.as_str(), id, JobKind::FetchSeries, 5).await;
+        assert!(matches!(
+            w.run_once().await,
+            Some(JobOutcome::Failed { .. })
+        ));
+        let it = item(&db.pool, job).await;
+        assert_eq!(it.status, "failed");
+        assert!(it.error_message.unwrap().contains(needle));
+        assert!(series_row(&db.pool, id).await.is_none());
+    }
+
+    // Discovery rejects the whole catalog, writing nothing.
+    mock.mount(
+        &Route::get("/catalog"),
+        Reply::json(
+            serde_json::json!({"series": [["t5_ds/ok.USA", "Ok"], ["t5_badkeys_z", "Bad"]]}),
+        ),
+    )
+    .await;
+    enqueue(
+        &db.pool,
+        SRC.as_str(),
+        "catalog",
+        JobKind::DiscoverCatalog,
+        5,
+    )
+    .await;
+    assert!(matches!(
+        w.run_once().await,
+        Some(JobOutcome::Failed { .. })
+    ));
+    let mut conn = db.pool.get().await.unwrap();
+    let n: i64 = series_metadata::table
+        .filter(series_metadata::external_id.like("t5\\_%"))
+        .count()
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(n, 0);
+}
+
+#[tokio::test]
+async fn persist_rejects_a_dataset_that_was_not_synced() {
+    let Some(db) = db().await else { return };
+    let fetched = FetchedSeries {
+        dataset: test_dataset("t5_ds/unsynced.USA"),
+        ..FetchedSeries::default()
+    };
+    let e = persist::persist_series(&db.pool, SRC, "t5_ds/unsynced.USA", &fetched)
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("sync_datasets"), "{e}");
+    assert!(series_row(&db.pool, "t5_ds/unsynced.USA").await.is_none());
 }
 
 async fn wait_until_completed(pool: &DatabasePool, n: i64) {
@@ -1249,6 +1596,116 @@ async fn release_stuck_runs_on_start() {
     assert_eq!(item(&db.pool, id).await.status, "completed");
 }
 
+#[test]
+fn db_error_fails_unsynced_datasets_permanently_and_retries_the_rest() {
+    let e = db_error(econ_graph_core::AppError::ValidationError(
+        "BEA dataset x is not in the datasets table".into(),
+    ));
+    assert_eq!(e.kind(), "permanent");
+    let e = db_error(econ_graph_core::AppError::Database(
+        diesel::result::Error::NotFound,
+    ));
+    assert_eq!(e.kind(), "transient");
+}
+
+/// A `(dataset_id, dimensions)` collision is permanent (the same series would collide again);
+/// any other unique violation is retried.
+#[test]
+fn db_error_fails_dataset_key_collisions_permanently() {
+    use diesel::result::{DatabaseErrorInformation, DatabaseErrorKind, Error};
+
+    struct Info(&'static str);
+    impl DatabaseErrorInformation for Info {
+        fn message(&self) -> &str {
+            "duplicate key value violates unique constraint"
+        }
+        fn details(&self) -> Option<&str> {
+            None
+        }
+        fn hint(&self) -> Option<&str> {
+            None
+        }
+        fn table_name(&self) -> Option<&str> {
+            None
+        }
+        fn column_name(&self) -> Option<&str> {
+            None
+        }
+        fn constraint_name(&self) -> Option<&str> {
+            Some(self.0)
+        }
+        fn statement_position(&self) -> Option<i32> {
+            None
+        }
+    }
+    let unique = |constraint| {
+        db_error(econ_graph_core::AppError::Database(Error::DatabaseError(
+            DatabaseErrorKind::UniqueViolation,
+            Box::new(Info(constraint)),
+        )))
+    };
+    for constraint in [
+        "uq_economic_series_dataset_dimensions",
+        "uq_series_metadata_dataset_dimensions",
+    ] {
+        let e = unique(constraint);
+        assert_eq!(e.kind(), "permanent", "{constraint}");
+        assert!(
+            e.to_string()
+                .contains("already has this dataset and dimension values"),
+            "{e}"
+        );
+    }
+    assert_eq!(
+        unique("economic_series_source_id_external_id_key").kind(),
+        "transient"
+    );
+}
+
+/// The database, not just `check_all`, refuses a second series with the same dataset and
+/// dimension values: two `persist_discovered` calls (so `check_all` never sees both ids at
+/// once) collide on `uq_series_metadata_dataset_dimensions`, and `db_error` maps it to a
+/// `Permanent` failure naming the collision.
+#[tokio::test]
+async fn persist_discovered_rejects_a_dataset_key_collision_across_calls() {
+    let Some(db) = db().await else { return };
+    persist::sync_datasets(&db.pool, &test_catalog())
+        .await
+        .unwrap();
+    let first = DiscoveredSeries {
+        external_id: "t5_ds/a.USA".into(),
+        title: "A".into(),
+        description: None,
+        units: None,
+        frequency: None,
+        data_url: None,
+        dataset: test_dataset("t5_ds/a.USA"),
+    };
+    persist::persist_discovered(&db.pool, SRC, &[first])
+        .await
+        .unwrap();
+
+    // A different external id, same dataset and dimension values.
+    let second = DiscoveredSeries {
+        external_id: "t5_dup/a.USA".into(),
+        title: "A dup".into(),
+        description: None,
+        units: None,
+        frequency: None,
+        data_url: None,
+        dataset: test_dataset("t5_ds/a.USA"),
+    };
+    let e = persist::persist_discovered(&db.pool, SRC, &[second])
+        .await
+        .unwrap_err();
+    let e = db_error(e);
+    assert_eq!(e.kind(), "permanent");
+    assert!(
+        e.to_string()
+            .contains("already has this dataset and dimension values"),
+        "{e}"
+    );
+}
 // ---------------------------------------------------------------------------
 // Batch fetching
 // ---------------------------------------------------------------------------
@@ -1289,6 +1746,7 @@ impl BatchAdapter {
                 revision_date: date,
                 is_original_release: true,
             }],
+            dataset: None,
         })
     }
 
@@ -1676,4 +2134,566 @@ async fn breaker_counts_one_result_per_batch_call() {
     assert_eq!(w.run_batch_once().await.expect("claimed").len(), 2);
     assert_eq!(w.paused_sources(), vec![SRC]);
     assert_eq!(adapter.batch_calls().len(), 2);
+}
+
+// ---------------------------------------------------------------------------
+// Expired fetches must not mutate data owned by a newer claim.
+// Adapter calls pause explicitly so expiry and reclaim have a deterministic order.
+// ---------------------------------------------------------------------------
+
+/// Both workers stop inside fetch, before any result reaches worker persistence.
+/// Separate gates let the test step through A -> expiry -> B -> A without sleeps.
+struct LeaseGateAdapter {
+    entered: tokio::sync::Barrier,
+    resume: tokio::sync::Barrier,
+    result: Result<FetchedSeries, CrawlError>,
+    batching: bool,
+    catalog: Option<Vec<DiscoveredSeries>>,
+}
+
+impl LeaseGateAdapter {
+    fn new(result: Result<FetchedSeries, CrawlError>) -> Arc<Self> {
+        Arc::new(Self {
+            entered: tokio::sync::Barrier::new(2),
+            resume: tokio::sync::Barrier::new(2),
+            result,
+            batching: false,
+            catalog: None,
+        })
+    }
+}
+
+#[async_trait]
+impl SourceAdapter for LeaseGateAdapter {
+    fn id(&self) -> SourceId {
+        SRC
+    }
+
+    fn discovery_is_complete(&self) -> bool {
+        self.catalog.is_some()
+    }
+
+    fn retirement_scope_prefix(&self) -> Option<&str> {
+        Some("t5_lease_catalog")
+    }
+
+    async fn discover(&self, _: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
+        self.entered.wait().await;
+        self.resume.wait().await;
+        Ok(self.catalog.clone().expect("discovery response"))
+    }
+
+    async fn fetch_series(
+        &self,
+        _: &CrawlCtx,
+        _: &str,
+        _: Option<NaiveDate>,
+    ) -> Result<FetchedSeries, CrawlError> {
+        self.entered.wait().await;
+        self.resume.wait().await;
+        self.result.clone()
+    }
+
+    fn batch_key(&self, _: &str) -> Option<String> {
+        self.batching.then(|| "lease-batch".into())
+    }
+
+    async fn fetch_batch(
+        &self,
+        _: &CrawlCtx,
+        external_ids: &[String],
+        _: Option<NaiveDate>,
+    ) -> Result<crate::adapter::BatchFetch, CrawlError> {
+        self.entered.wait().await;
+        self.resume.wait().await;
+        Ok(external_ids
+            .iter()
+            .map(|id| (id.clone(), self.result.clone()))
+            .collect())
+    }
+}
+
+fn lease_response(title: &str, value: i32) -> FetchedSeries {
+    FetchedSeries {
+        metadata: Some(NewSeriesMetadataLite {
+            title: title.into(),
+            ..Default::default()
+        }),
+        // Identical upsert keys make an older response overwrite the same observation.
+        points: vec![FetchedPoint {
+            date: d("2024-01-01"),
+            value: Some(BigDecimal::from(value)),
+            revision_date: d("2024-06-01"),
+            is_original_release: true,
+        }],
+        dataset: None,
+    }
+}
+
+fn lease_worker(pool: &DatabasePool, adapter: &Arc<LeaseGateAdapter>, id: &str) -> Worker {
+    let mut registry = AdapterRegistry::new();
+    registry.register(adapter.clone());
+    let mut ctx = test_ctx_with(HashMap::from([(
+        SRC,
+        SourcePolicy {
+            max_batch: if adapter.batching { 2 } else { 1 },
+            ..slow_backoff(SRC)
+        },
+    )]));
+    ctx.pool = pool.clone();
+    Worker::new(ctx, registry, config(id))
+}
+
+async fn expired_fetch_preserves_newer_result(
+    pool: &DatabasePool,
+    external_id: &str,
+    stale_result: Result<FetchedSeries, CrawlError>,
+) {
+    let stale_error = stale_result.as_ref().err().map(ToString::to_string);
+    let old = LeaseGateAdapter::new(stale_result);
+    let newer = LeaseGateAdapter::new(Ok(lease_response("Newer response", 222)));
+    let a = lease_worker(pool, &old, "t5-lease-a");
+    let b = lease_worker(pool, &newer, "t5-lease-b");
+    let id = enqueue(pool, SRC.as_str(), external_id, JobKind::FetchSeries, 5).await;
+
+    // A owns the initial claim and is suspended before returning its fetched result.
+    let a_task = tokio::spawn(async move { a.run_once().await });
+    old.entered.wait().await;
+    let a_claim = item(pool, id).await;
+    assert_eq!(a_claim.status, "processing");
+    assert_eq!(a_claim.locked_by.as_deref(), Some("t5-lease-a"));
+    let a_token = a_claim.claim_token.expect("A claim token");
+
+    // Only age this claim; release_stuck performs the real maintenance transition.
+    {
+        let mut conn = pool.get().await.unwrap();
+        let changed = diesel::sql_query(
+            "UPDATE crawl_queue SET locked_at = NOW() - INTERVAL '2 hours' WHERE id = $1",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(id)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        assert_eq!(changed, 1);
+    }
+    assert_eq!(
+        CrawlQueueItem::release_stuck(pool, Duration::from_secs(3600))
+            .await
+            .unwrap(),
+        1
+    );
+    let released = item(pool, id).await;
+    assert_eq!(released.status, "pending");
+    assert!(released.claim_token.is_none());
+    assert_eq!(released.retry_count, 1);
+
+    // B reclaims the same queue row, with a fresh token, while A remains suspended.
+    let b_task = tokio::spawn(async move { b.run_once().await });
+    newer.entered.wait().await;
+    let b_claim = item(pool, id).await;
+    assert_eq!(b_claim.id, a_claim.id);
+    assert_eq!(b_claim.locked_by.as_deref(), Some("t5-lease-b"));
+    assert_eq!(b_claim.status, "processing");
+    assert_ne!(a_token, b_claim.claim_token.expect("B claim token"));
+
+    newer.resume.wait().await;
+    let b_outcome = b_task.await.expect("B task").expect("B claimed");
+    assert!(
+        matches!(b_outcome, JobOutcome::Completed(_)),
+        "{b_outcome:?}"
+    );
+    let completed = item(pool, id).await;
+    assert_eq!(completed.status, "completed");
+    let (series_id, ..) = series_row(pool, external_id)
+        .await
+        .expect("B persisted series");
+    let baseline = series_row(pool, external_id).await.unwrap();
+    assert_eq!(baseline.2, "Newer response");
+    assert_eq!(baseline.6.as_deref(), Some("success"));
+    {
+        let mut conn = pool.get().await.unwrap();
+        let values: Vec<Option<BigDecimal>> = data_points::table
+            .filter(data_points::series_id.eq(series_id))
+            .select(data_points::value)
+            .load(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(values, vec![Some(BigDecimal::from(222))]);
+    }
+
+    // A now returns its older value or error. Queue fencing reports LeaseLost;
+    // the regression additionally requires fencing all associated data writes.
+    old.resume.wait().await;
+    let a_outcome = a_task.await.expect("A task").expect("A claimed");
+    assert_eq!(a_outcome, JobOutcome::LeaseLost { error: stale_error });
+    let after = item(pool, id).await;
+    assert_eq!(after.status, "completed");
+    assert_eq!(after.finished_at, completed.finished_at);
+    assert_eq!(after.retry_count, completed.retry_count);
+    assert_eq!(after.error_message, completed.error_message);
+    assert!(after.locked_by.is_none() && after.claim_token.is_none());
+
+    let mut conn = pool.get().await.unwrap();
+    let values: Vec<Option<BigDecimal>> = data_points::table
+        .filter(data_points::series_id.eq(series_id))
+        .select(data_points::value)
+        .load(&mut conn)
+        .await
+        .unwrap();
+    let (title, status, error): (String, Option<String>, Option<String>) = economic_series::table
+        .find(series_id)
+        .select((
+            economic_series::title,
+            economic_series::crawl_status,
+            economic_series::crawl_error_message,
+        ))
+        .first(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(
+        values,
+        vec![Some(BigDecimal::from(222))],
+        "A overwrote B's observation"
+    );
+    assert_eq!(title, "Newer response", "A overwrote B's metadata");
+    assert_eq!(
+        status.as_deref(),
+        Some("success"),
+        "A replaced B's success status"
+    );
+    assert!(
+        error.is_none(),
+        "A attached a stale error to B's successful series: {error:?}"
+    );
+    drop(conn);
+    assert_eq!(
+        attempts(pool, series_id).await,
+        vec![(true, None, Some(1))],
+        "stale attempt must not be recorded"
+    );
+}
+
+#[tokio::test]
+async fn expired_fetch_success_cannot_overwrite_newer_claims_observation() {
+    let Some(db) = db().await else { return };
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        expired_fetch_preserves_newer_result(
+            &db.pool,
+            "t5_lease_stale_success",
+            Ok(lease_response("Older response", 111)),
+        ),
+    )
+    .await
+    .expect("lease interleaving did not finish");
+}
+
+#[tokio::test]
+async fn expired_fetch_failure_cannot_replace_newer_claims_success_status() {
+    let Some(db) = db().await else { return };
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        expired_fetch_preserves_newer_result(
+            &db.pool,
+            "t5_lease_stale_failure",
+            Err(CrawlError::Permanent("older fetch failed".into())),
+        ),
+    )
+    .await
+    .expect("lease interleaving did not finish");
+}
+
+/// Force real maintenance expiry while an adapter is deliberately paused.
+async fn expire_lease_jobs(pool: &DatabasePool, ids: &[Uuid]) {
+    let mut conn = pool.get().await.unwrap();
+    diesel::update(crawl_queue::table.filter(crawl_queue::id.eq_any(ids)))
+        .set(crawl_queue::locked_at.eq(Some(Utc::now() - chrono::Duration::hours(2))))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    drop(conn);
+    assert_eq!(
+        CrawlQueueItem::release_stuck(pool, Duration::from_secs(3600))
+            .await
+            .unwrap(),
+        ids.len() as i64
+    );
+}
+
+async fn expired_batch_preserves_newer_results(pool: &DatabasePool, stale_failure: bool) {
+    let result = if stale_failure {
+        Err(CrawlError::Permanent("stale batch failure".into()))
+    } else {
+        Ok(lease_response("Older batch", 111))
+    };
+    let stale_error = result.as_ref().err().map(ToString::to_string);
+    let old = Arc::new(LeaseGateAdapter {
+        entered: tokio::sync::Barrier::new(2),
+        resume: tokio::sync::Barrier::new(2),
+        result,
+        batching: true,
+        catalog: None,
+    });
+    let newer = Arc::new(LeaseGateAdapter {
+        entered: tokio::sync::Barrier::new(2),
+        resume: tokio::sync::Barrier::new(2),
+        result: Ok(lease_response("Newer batch", 222)),
+        batching: true,
+        catalog: None,
+    });
+    let ids = ["t5_lease_batch_1", "t5_lease_batch_2"];
+    let queue = enqueue_fetch(pool, &ids).await;
+    let a = lease_worker(pool, &old, "t5-batch-a");
+    let b = lease_worker(pool, &newer, "t5-batch-b");
+    let a_task = tokio::spawn(async move { a.run_batch_once().await });
+    old.entered.wait().await;
+    let mut old_tokens = Vec::new();
+    for job in &queue {
+        old_tokens.push(item(pool, *job).await.claim_token.expect("A token"));
+    }
+    expire_lease_jobs(pool, &queue).await;
+    let b_task = tokio::spawn(async move { b.run_batch_once().await });
+    newer.entered.wait().await;
+    for (job, token) in queue.iter().zip(old_tokens) {
+        let claim = item(pool, *job).await;
+        assert_eq!(claim.locked_by.as_deref(), Some("t5-batch-b"));
+        assert_ne!(claim.claim_token.expect("B token"), token);
+    }
+    newer.resume.wait().await;
+    let outcomes = b_task.await.unwrap().expect("B batch");
+    assert_eq!(outcomes.len(), 2);
+    assert!(outcomes
+        .iter()
+        .all(|o| matches!(o, JobOutcome::Completed(_))));
+    old.resume.wait().await;
+    let outcomes = a_task.await.unwrap().expect("A batch");
+    assert_eq!(
+        outcomes,
+        vec![
+            JobOutcome::LeaseLost {
+                error: stale_error.clone()
+            };
+            2
+        ]
+    );
+    for (external_id, job) in ids.iter().zip(queue) {
+        assert_eq!(item(pool, job).await.status, "completed");
+        let (series_id, _, title, _, _, _, status) = series_row(pool, external_id).await.unwrap();
+        assert_eq!(title, "Newer batch");
+        assert_eq!(status.as_deref(), Some("success"));
+        let mut conn = pool.get().await.unwrap();
+        let values: Vec<Option<BigDecimal>> = data_points::table
+            .filter(data_points::series_id.eq(series_id))
+            .select(data_points::value)
+            .load(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(values, vec![Some(BigDecimal::from(222))]);
+        drop(conn);
+        assert_eq!(attempts(pool, series_id).await, vec![(true, None, Some(1))]);
+    }
+}
+
+#[tokio::test]
+async fn expired_batch_success_cannot_overwrite_newer_results() {
+    let Some(db) = db().await else { return };
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        expired_batch_preserves_newer_results(&db.pool, false),
+    )
+    .await
+    .expect("batch interleaving timed out");
+}
+
+#[tokio::test]
+async fn expired_batch_failure_cannot_replace_newer_success_status() {
+    let Some(db) = db().await else { return };
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        expired_batch_preserves_newer_results(&db.pool, true),
+    )
+    .await
+    .expect("batch interleaving timed out");
+}
+
+fn discovered(external_id: &str, title: &str) -> DiscoveredSeries {
+    DiscoveredSeries {
+        external_id: external_id.into(),
+        title: title.into(),
+        description: None,
+        units: None,
+        frequency: None,
+        data_url: None,
+        dataset: None,
+    }
+}
+
+#[tokio::test]
+async fn expired_discovery_cannot_overwrite_or_insert_stale_metadata() {
+    let Some(db) = db().await else { return };
+    tokio::time::timeout(Duration::from_secs(30), async {
+        // B's complete catalog retires the stale-only series and keeps its own series active.
+        // A must neither reactivate the former nor retire the latter when it resumes.
+        for id in ["t5_lease_catalog_stale_only", "t5_lease_catalog_newer_only"] {
+            persist::persist_series(&db.pool, SRC, id, &FetchedSeries::default())
+                .await
+                .unwrap();
+        }
+        let old = Arc::new(LeaseGateAdapter {
+            entered: tokio::sync::Barrier::new(2),
+            resume: tokio::sync::Barrier::new(2),
+            result: Ok(FetchedSeries::default()),
+            batching: false,
+            catalog: Some(vec![
+                discovered("t5_lease_catalog", "Older catalog"),
+                discovered("t5_lease_catalog_stale_only", "Stale only"),
+            ]),
+        });
+        let newer = Arc::new(LeaseGateAdapter {
+            entered: tokio::sync::Barrier::new(2),
+            resume: tokio::sync::Barrier::new(2),
+            result: Ok(FetchedSeries::default()),
+            batching: false,
+            catalog: Some(vec![
+                discovered("t5_lease_catalog", "Newer catalog"),
+                discovered("t5_lease_catalog_newer_only", "Newer only"),
+            ]),
+        });
+        let a = lease_worker(&db.pool, &old, "t5-discovery-a");
+        let b = lease_worker(&db.pool, &newer, "t5-discovery-b");
+        let job = enqueue(
+            &db.pool,
+            SRC.as_str(),
+            "t5_lease_discovery",
+            JobKind::DiscoverCatalog,
+            5,
+        )
+        .await;
+        let a_task = tokio::spawn(async move { a.run_once().await });
+        old.entered.wait().await;
+        let old_token = item(&db.pool, job).await.claim_token.expect("A token");
+        expire_lease_jobs(&db.pool, &[job]).await;
+        let b_task = tokio::spawn(async move { b.run_once().await });
+        newer.entered.wait().await;
+        assert_ne!(
+            item(&db.pool, job).await.claim_token.expect("B token"),
+            old_token
+        );
+        newer.resume.wait().await;
+        assert!(matches!(
+            b_task.await.unwrap(),
+            Some(JobOutcome::Completed(_))
+        ));
+        old.resume.wait().await;
+        assert_eq!(
+            a_task.await.unwrap(),
+            Some(JobOutcome::LeaseLost { error: None })
+        );
+        assert_eq!(item(&db.pool, job).await.status, "completed");
+        let mut conn = db.pool.get().await.unwrap();
+        let metadata: Vec<(String, String, bool)> = series_metadata::table
+            .filter(series_metadata::external_id.like("t5_lease_catalog%"))
+            .select((
+                series_metadata::external_id,
+                series_metadata::title,
+                series_metadata::is_active,
+            ))
+            .order(series_metadata::external_id.asc())
+            .load(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            metadata,
+            vec![
+                ("t5_lease_catalog".into(), "Newer catalog".into(), true),
+                (
+                    "t5_lease_catalog_newer_only".into(),
+                    "Newer only".into(),
+                    true
+                ),
+            ]
+        );
+        let active: Vec<(String, bool)> = economic_series::table
+            .filter(economic_series::external_id.like("t5_lease_catalog%"))
+            .select((economic_series::external_id, economic_series::is_active))
+            .order(economic_series::external_id.asc())
+            .load(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            active,
+            vec![
+                ("t5_lease_catalog_newer_only".into(), true),
+                ("t5_lease_catalog_stale_only".into(), false),
+            ]
+        );
+    })
+    .await
+    .expect("discovery interleaving timed out");
+}
+
+#[tokio::test]
+async fn result_transaction_rolls_back_if_queue_completion_fails() {
+    let Some(db) = db().await else { return };
+    let external_id = "t5_lease_rollback";
+    let original =
+        persist::persist_series(&db.pool, SRC, external_id, &lease_response("Before", 111))
+            .await
+            .unwrap();
+    let job = enqueue(&db.pool, SRC.as_str(), external_id, JobKind::FetchSeries, 5).await;
+    // The test-only trigger fails after the worker has written data and its successful attempt.
+    // It permits retry transitions, so the fresh guarded fallback can record the DB failure.
+    let mut conn = db.pool.get().await.unwrap();
+    diesel::sql_query(format!(
+        "CREATE FUNCTION pg_temp.t5_reject_lease_completion() RETURNS trigger LANGUAGE plpgsql AS $$ \
+         BEGIN IF NEW.id = '{job}'::uuid AND NEW.status = 'completed' THEN \
+         RAISE EXCEPTION 'test rejects lease completion'; END IF; RETURN NEW; END $$"
+    )).execute(&mut conn).await.unwrap();
+    diesel::sql_query(
+        "CREATE TRIGGER t5_reject_lease_completion BEFORE UPDATE ON crawl_queue \
+         FOR EACH ROW EXECUTE FUNCTION pg_temp.t5_reject_lease_completion()",
+    )
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    drop(conn);
+    let mock = MockSource::start().await;
+    mock.mount(
+        &Route::get("/series/t5_lease_rollback"),
+        series_json("After", &[("2024-01-01", Some("222"))]),
+    )
+    .await;
+    let outcome =
+        tokio::time::timeout(Duration::from_secs(30), worker(&db.pool, &mock).run_once()).await;
+    // Remove the shared-table trigger before inspecting/asserting the outcome.
+    let mut conn = db.pool.get().await.unwrap();
+    diesel::sql_query("DROP TRIGGER t5_reject_lease_completion ON crawl_queue")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let values: Vec<Option<BigDecimal>> = data_points::table
+        .filter(data_points::series_id.eq(original.series_id))
+        .select(data_points::value)
+        .load(&mut conn)
+        .await
+        .unwrap();
+    drop(conn);
+    let outcome = outcome
+        .expect("rollback scenario timed out")
+        .expect("claimed");
+    assert!(
+        matches!(outcome, JobOutcome::Retrying { ref error, .. } if error.kind() == "transient"),
+        "{outcome:?}"
+    );
+    assert_eq!(values, vec![Some(BigDecimal::from(111))]);
+    assert_eq!(series_row(&db.pool, external_id).await.unwrap().2, "Before");
+    assert_eq!(
+        attempts(&db.pool, original.series_id).await,
+        vec![(false, Some("transient".into()), Some(0))],
+        "successful attempt rolled back"
+    );
+    let queued = item(&db.pool, job).await;
+    assert_eq!(queued.status, "retrying");
+    assert_eq!(queued.retry_count, 1);
+    assert!(queued.claim_token.is_none());
 }

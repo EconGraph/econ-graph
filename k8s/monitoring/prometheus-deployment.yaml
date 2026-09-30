@@ -31,6 +31,8 @@ spec:
         volumeMounts:
         - name: prometheus-config
           mountPath: /etc/prometheus
+        - name: prometheus-rules-crawler
+          mountPath: /etc/prometheus/rules
         - name: prometheus-storage
           mountPath: /prometheus
         resources:
@@ -54,5 +56,8 @@ spec:
       - name: prometheus-config
         configMap:
           name: prometheus-config
+      - name: prometheus-rules-crawler
+        configMap:
+          name: prometheus-rules-crawler
       - name: prometheus-storage
         emptyDir: {}

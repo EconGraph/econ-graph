@@ -5,6 +5,7 @@
 
 use crate::database::DatabasePool;
 use crate::error::AppResult;
+use crate::models::dataset::SeriesDimensions;
 use crate::schema::series_metadata;
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
@@ -45,6 +46,12 @@ pub struct SeriesMetadata {
     pub created_at: Option<DateTime<Utc>>,
     /// Last update timestamp
     pub updated_at: Option<DateTime<Utc>>,
+    /// Dataset this series belongs to, once its adapter declares one
+    pub dataset_id: Option<Uuid>,
+    /// Dimension values within the dataset; empty when it has none
+    pub dimensions: SeriesDimensions,
+    /// Overrides the dataset's default measure; `None` uses the dataset's
+    pub default_measure: Option<String>,
 }
 
 /// New series metadata for insertion
@@ -71,6 +78,15 @@ pub struct NewSeriesMetadata {
     pub api_endpoint: Option<String>,
     /// Whether this series is currently active
     pub is_active: bool,
+    /// Dataset this series belongs to
+    #[serde(default)]
+    pub dataset_id: Option<Uuid>,
+    /// Dimension values within the dataset
+    #[serde(default)]
+    pub dimensions: SeriesDimensions,
+    /// Overrides the dataset's default measure
+    #[serde(default)]
+    pub default_measure: Option<String>,
 }
 
 /// Update series metadata
@@ -95,10 +111,20 @@ pub struct UpdateSeriesMetadata {
     pub last_discovered_at: Option<DateTime<Utc>>,
     /// Whether this series is currently active
     pub is_active: bool,
+    /// Dataset this series belongs to; `None` leaves it unchanged, `Some(None)` clears it
+    pub dataset_id: Option<Option<Uuid>>,
+    /// Dimension values within the dataset; `None` leaves them unchanged
+    pub dimensions: Option<SeriesDimensions>,
+    /// Overrides the dataset's default measure; `None` leaves it unchanged, `Some(None)`
+    /// clears it
+    pub default_measure: Option<Option<String>>,
 }
 
 impl SeriesMetadata {
     /// Get or create series metadata
+    ///
+    /// Uses a generated id. Crawled series get stable ids from `econ_graph_crawler::persist`;
+    /// don't use this for them.
     pub async fn get_or_create(
         pool: &DatabasePool,
         source_id: Uuid,
@@ -134,6 +160,9 @@ impl SeriesMetadata {
                 api_endpoint: new_metadata.api_endpoint.clone(),
                 last_discovered_at: Some(Utc::now()),
                 is_active: new_metadata.is_active,
+                dataset_id: Some(new_metadata.dataset_id),
+                dimensions: Some(new_metadata.dimensions.clone()),
+                default_measure: Some(new_metadata.default_measure.clone()),
             };
 
             let updated = diesel::update(dsl::series_metadata.filter(dsl::id.eq(existing.id)))
@@ -304,6 +333,9 @@ mod tests {
             data_url: Some("https://api.test.com/data/TEST_SERIES_001".to_string()),
             api_endpoint: Some("https://api.test.com/v1/series/TEST_SERIES_001".to_string()),
             is_active: true,
+            dataset_id: None,
+            dimensions: Default::default(),
+            default_measure: None,
         };
 
         // Test creation
@@ -376,6 +408,9 @@ mod tests {
             data_url: Some("https://api.test2.com/data/TEST_SERIES_002".to_string()),
             api_endpoint: Some("https://api.test2.com/v1/series/TEST_SERIES_002".to_string()),
             is_active: true,
+            dataset_id: None,
+            dimensions: Default::default(),
+            default_measure: None,
         };
 
         let created =

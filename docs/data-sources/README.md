@@ -33,7 +33,7 @@ state fixture and one World Bank row).
 | BEA | [bea.md](bea.md) | Discovery only (hard-coded list) | Catalog recorded, data from public docs |
 | FHFA HPI | [fhfa.md](fhfa.md) | Static catalog and fetch against an unverified API | Fixture shape unverified; files from public docs |
 | World Bank | [world-bank.md](world-bank.md) | Discovery only | Recorded (one data row) |
-| IMF | [imf.md](imf.md) | Discovery only (hard-coded list) | Catalog recorded, data from public docs |
+| IMF | [imf.md](imf.md) | No adapter (removed in #217) | n/a |
 | SEC XBRL | [sec-xbrl.md](sec-xbrl.md) | Separate crawler (`econ-graph-sec-crawler`) | From public docs |
 
 Each page describes the adapter on `main`. Release 1 changes that are still in open pull

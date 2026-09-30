@@ -65,14 +65,15 @@ const webServer: PlaywrightTestConfig['webServer'] = [
   {
     // The release build, served by `vite preview`, which proxies /graphql and /api to the
     // backend (vite.config.ts). The auth REST calls (AuthContext) go straight to
-    // VITE_API_URL instead. FLAG_PROFILE=release selects release flags once the build-time
-    // flag switch lands; until then the build ignores it.
+    // VITE_API_URL instead. `npm run build` already defaults to the release flag profile
+    // (flags.config.ts); FLAGS_PROFILE is set explicitly so this stays release even if that
+    // default ever changes.
     command: `npm run build && npx vite preview --port ${frontendPort} --strictPort`,
     url: frontendUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 5 * 60 * 1000,
     env: {
-      FLAG_PROFILE: 'release',
+      FLAGS_PROFILE: 'release',
       BACKEND_URL: backendUrl,
       VITE_API_URL: backendUrl,
       // Read by AUTH-7's sign-in UI (oidc-client-ts). AUTH-10's real sign-in spec uses it too.

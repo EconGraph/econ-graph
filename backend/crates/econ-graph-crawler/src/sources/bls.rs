@@ -88,6 +88,14 @@
 //!
 //! BLS keeps no vintages, so every point has `revision_date = date` and
 //! `is_original_release = true` (as the old services did); re-crawls overwrite in place.
+//!
+//! # Datasets
+//!
+//! Each survey with a layout in [`SERIES_ID_LAYOUTS`] is one dataset, coded by its two-letter
+//! series id prefix and defined in `data/datasets/bls.toml`. A series id is that prefix followed
+//! by fixed-width fields, which [`series_dataset`] splits into the dataset's dimensions. Series
+//! keep their BLS ids as external ids, since the API takes those. A series of any other survey,
+//! or whose id does not fit its survey's layout, is written without a dataset.
 
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
@@ -102,6 +110,7 @@ use crate::adapter::{
     ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
     NewSeriesMetadataLite, SourceAdapter,
 };
+use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
 use crate::policy::SourcePolicy;
 use crate::reference::{bls_series, BlsSeries};
@@ -133,6 +142,31 @@ const DOES_NOT_EXIST: &str = "series does not exist for series ";
 
 /// Prefix of BLS's informational "no data" message; the series id follows it.
 const NO_DATA_FOR_SERIES: &str = "no data available for series ";
+
+/// Series id layouts of the surveys that are datasets: the two-letter prefix (also the dataset
+/// code), then each dimension's name and width in id order. A width of 0 takes the rest of the
+/// id and is only used last. See <https://www.bls.gov/help/hlpforma.htm>.
+pub const SERIES_ID_LAYOUTS: &[(&str, &[(&str, usize)])] = &[
+    // CPI-U: CUUR0000SA0.
+    (
+        "CU",
+        &[
+            ("seasonal", 1),
+            ("periodicity", 1),
+            ("area", 4),
+            ("item", 0),
+        ],
+    ),
+    // CES national: CES0000000001.
+    ("CE", &[("seasonal", 1), ("industry", 8), ("data_type", 2)]),
+    // CPS: LNS14000000.
+    ("LN", &[("seasonal", 1), ("series_code", 8)]),
+    // LAUS: LASST060000000000003.
+    ("LA", &[("seasonal", 1), ("area", 15), ("measure", 2)]),
+];
+
+/// The codes in [`SERIES_ID_LAYOUTS`], for [`SourceAdapter::datasets`].
+const DATASET_CODES: &[&str] = &["CU", "CE", "LN", "LA"];
 
 /// BLS adapter. See the module docs for request shape, batching, windowing and error mapping.
 #[derive(Debug, Clone)]
@@ -373,6 +407,30 @@ fn year_windows(start: i32, end: i32, span: i32) -> Vec<(i32, i32)> {
     windows
 }
 
+/// The dataset and dimension values of BLS series `series_id`, split by its survey's layout in
+/// [`SERIES_ID_LAYOUTS`]. `None` for a survey without a layout, an id whose length does not fit
+/// the layout, or an id with characters other than ASCII letters and digits.
+pub fn series_dataset(series_id: &str) -> Option<SeriesDataset> {
+    if !series_id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let prefix = series_id.get(..2)?;
+    let (code, layout) = SERIES_ID_LAYOUTS.iter().find(|(p, _)| *p == prefix)?;
+    let mut rest = &series_id[2..];
+    let mut dimensions = Vec::with_capacity(layout.len());
+    for &(name, width) in *layout {
+        let width = if width == 0 { rest.len() } else { width };
+        if width == 0 || rest.len() < width {
+            return None;
+        }
+        let (value, tail) = rest.split_at(width);
+        dimensions.push((name, value));
+        rest = tail;
+    }
+    rest.is_empty()
+        .then(|| SeriesDataset::new(*code, dimensions))
+}
+
 /// Removes `secret` from `text`.
 fn scrub(text: &str, secret: Option<&str>) -> String {
     match secret {
@@ -576,7 +634,11 @@ fn build_series(
         }),
         (None, None) => None,
     };
-    Ok(FetchedSeries { metadata, points })
+    Ok(FetchedSeries {
+        metadata,
+        points,
+        dataset: series_dataset(external_id),
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -786,6 +848,10 @@ impl SourceAdapter for BlsAdapter {
         policy(ApiKeys::from_env().bls.is_some())
     }
 
+    fn datasets(&self) -> &[&str] {
+        DATASET_CODES
+    }
+
     /// The series in `bls_series.csv`. No request is made.
     async fn discover(&self, _ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         Ok(bls_series()?
@@ -797,6 +863,7 @@ impl SourceAdapter for BlsAdapter {
                 units: Some(s.units.clone()),
                 frequency: Some(s.frequency.clone()),
                 data_url: Some(format!("{}/timeseries/data/{}", self.base_url, s.id)),
+                dataset: series_dataset(&s.id),
             })
             .collect())
     }
@@ -1082,6 +1149,20 @@ mod tests {
             m.description.as_deref(),
             Some("CPI for All Urban Consumers (CPI-U)")
         );
+        let ds = s.dataset.unwrap();
+        assert_eq!(ds.code, "CU");
+        assert_eq!(
+            ds.dimensions.0,
+            [
+                ("area", "0000"),
+                ("item", "SA0"),
+                ("periodicity", "R"),
+                ("seasonal", "U")
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect::<std::collections::BTreeMap<_, _>>()
+        );
     }
 
     #[tokio::test]
@@ -1099,6 +1180,8 @@ mod tests {
             vec![d(2023, 7, 1), d(2023, 10, 1), d(2024, 1, 1), d(2024, 4, 1)]
         );
         assert!(s.metadata.is_none());
+        // ECI (CI) has no dataset layout yet.
+        assert_eq!(s.dataset, None);
 
         // A listed series without a catalog (keyless) takes its metadata from the list.
         mock.reset().await;
@@ -1420,6 +1503,8 @@ mod tests {
         );
         assert_eq!(cpi.frequency.as_deref(), Some("Monthly"));
         assert_eq!(cpi.units.as_deref(), Some("Index 1982-1984=100"));
+        let ds = cpi.dataset.as_ref().expect("CPI series has a dataset");
+        assert_eq!(ds.code, "CU");
     }
 
     #[test]
@@ -1542,6 +1627,115 @@ mod tests {
         }))
         .unwrap();
         assert!(body.data.is_empty());
+    }
+
+    #[test]
+    fn series_dataset_splits_fixed_width_ids() {
+        let dims = |id: &str| {
+            let ds = series_dataset(id).unwrap();
+            (ds.code, ds.dimensions.0.into_iter().collect::<Vec<_>>())
+        };
+        let pairs = |v: &[(&str, &str)]| {
+            v.iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            dims("LASST060000000000003"),
+            (
+                "LA".to_string(),
+                pairs(&[
+                    ("area", "ST0600000000000"),
+                    ("measure", "03"),
+                    ("seasonal", "S")
+                ])
+            )
+        );
+        assert_eq!(
+            dims("CUSR0000SEHA"),
+            (
+                "CU".to_string(),
+                pairs(&[
+                    ("area", "0000"),
+                    ("item", "SEHA"),
+                    ("periodicity", "R"),
+                    ("seasonal", "S")
+                ])
+            )
+        );
+        assert_eq!(
+            dims("CEU0500000003"),
+            (
+                "CE".to_string(),
+                pairs(&[
+                    ("data_type", "03"),
+                    ("industry", "05000000"),
+                    ("seasonal", "U")
+                ])
+            )
+        );
+        assert_eq!(
+            dims("LNU04000000"),
+            (
+                "LN".to_string(),
+                pairs(&[("seasonal", "U"), ("series_code", "04000000")])
+            )
+        );
+        for bad in [
+            "",
+            "C",
+            "CU",
+            "CUUR0000",       // no item
+            "CES000000000",   // one short
+            "CES00000000011", // one long
+            "LNS1400000",     // one short
+            "LASST06000000000003",
+            "CIU1010000000000A", // no layout for ECI
+            "cuur0000SA0",       // prefixes are uppercase
+            "CUUR 0000SA0",
+            "CUUR0000SÄ0",
+        ] {
+            assert_eq!(series_dataset(bad), None, "{bad:?}");
+        }
+    }
+
+    /// The layouts and `data/datasets/bls.toml` list the same datasets and dimensions, in the same
+    /// order, so the id splits into exactly the declared keys.
+    #[test]
+    fn layouts_match_dataset_definitions() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/datasets/bls.toml");
+        let defs =
+            crate::dataset::parse_dataset_file(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let from_file: Vec<(&str, Vec<&str>)> = defs
+            .iter()
+            .map(|d| (d.code.as_str(), d.dimension_names().collect()))
+            .collect();
+        let from_layouts: Vec<(&str, Vec<&str>)> = SERIES_ID_LAYOUTS
+            .iter()
+            .map(|(code, layout)| (*code, layout.iter().map(|(name, _)| *name).collect()))
+            .collect();
+        assert_eq!(from_file, from_layouts);
+        assert_eq!(
+            DATASET_CODES,
+            SERIES_ID_LAYOUTS
+                .iter()
+                .map(|(c, _)| *c)
+                .collect::<Vec<_>>()
+        );
+        for ((code, layout), def) in SERIES_ID_LAYOUTS.iter().zip(&defs) {
+            assert!(
+                layout.iter().rev().skip(1).all(|(_, w)| *w > 0),
+                "{code}: only the last dimension may take the rest"
+            );
+            // Labelled codes have their field's width, so a mistyped key cannot hide.
+            for (&(name, width), dim) in layout.iter().zip(&def.dimensions) {
+                if width > 0 {
+                    for c in dim.codes.iter().flatten() {
+                        assert_eq!(c.code.len(), width, "{code}.{name}: code {:?}", c.code);
+                    }
+                }
+            }
+        }
     }
 
     #[tokio::test]

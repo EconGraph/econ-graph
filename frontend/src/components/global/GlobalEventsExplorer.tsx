@@ -236,6 +236,9 @@ const GlobalEventsExplorer: React.FC = () => {
 
   return (
     <Box sx={{ p: 3 }}>
+      {/* Behind the global_analysis_tabs flag (ECO-105); scripts/check-flag-bundle.mjs looks
+          for this marker to prove the release bundle leaves this component out. */}
+      <span hidden>econgraph-flag-global-analysis-tabs-events-7c2f4a</span>
       <Typography variant='h4' gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         🌍 Global Economic Events Explorer
         <TimelineIcon />

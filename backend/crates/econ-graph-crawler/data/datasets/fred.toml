@@ -1,0 +1,10 @@
+# FRED dataset definitions. See README.md in this directory for the format.
+#
+# FRED series ids (GDP, UNRATE, CPIAUCSL) are opaque keys chosen by the St. Louis Fed, not
+# combinations of dimension values, so FRED is one dataset with no dimensions and every series
+# keeps its FRED id as its external id.
+
+[[dataset]]
+code = "FRED"
+name = "FRED"
+description = "Federal Reserve Economic Data, published by the Federal Reserve Bank of St. Louis"

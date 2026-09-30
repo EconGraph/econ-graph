@@ -67,6 +67,7 @@ export default [
 
         // Vite globals
         import: 'readonly',
+        __FLAGS__: 'readonly', // build-time flags, see src/flags.ts
         importMeta: 'readonly',
 
         // Vitest globals
@@ -328,6 +329,52 @@ export default [
       ],
       // Allow unused imports in stories (they might be used in controls)
       '@typescript-eslint/no-unused-vars': 'off',
+    },
+  },
+  // Build-time flags (src/flags.ts): the flag files are read only by the Vite config at
+  // build time (src/flags.ts imports only their type), and `__FLAGS__` is only ever read as
+  // `__FLAGS__.<name>`, which the build replaces with a constant so flagged-off code is
+  // dropped.
+  {
+    files: ['src/**/*.{ts,tsx,js,jsx}'],
+    // flags.test.ts holds the probe strings that test these rules.
+    ignores: ['src/flags.ts', 'src/__tests__/flags.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/config/flags',
+                '**/config/flags/**',
+                '**/*.flagd.json',
+                '**/flags/release.json',
+                '**/flags/dev.json',
+              ],
+              message:
+                'Flag files are read at build time only. Use __FLAGS__.<name> (src/flags.ts).',
+            },
+          ],
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Literal[value=/config\\/flags|\\.flagd\\.json|flags\\/(release|dev)\\.json/]',
+          message: 'Flag files are read at build time only. Use __FLAGS__.<name> (src/flags.ts).',
+        },
+        {
+          selector:
+            'TemplateElement[value.raw=/config\\/flags|\\.flagd\\.json|flags\\/(release|dev)\\.json/]',
+          message: 'Flag files are read at build time only. Use __FLAGS__.<name> (src/flags.ts).',
+        },
+        {
+          selector: "Identifier[name='__FLAGS__']:not(MemberExpression[computed=false] > .object)",
+          message:
+            'Read build flags as __FLAGS__.<name>; __FLAGS__ itself does not exist in a build.',
+        },
+      ],
     },
   },
   // Enhanced import validation

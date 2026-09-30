@@ -61,6 +61,40 @@ enum AnnotationVisibilityEnum {
 }
 
 """
+A country or aggregate from the shared countries reference file.
+"""
+type Area {
+	"""
+	Display name, e.g. `United States`.
+	"""
+	name: String!
+	"""
+	ISO 3166-1 alpha-3, e.g. `USA`; null for aggregates.
+	"""
+	iso3: String
+	"""
+	ISO 3166-1 numeric, e.g. `840` (world-atlas feature ids are this, zero-padded to
+	three digits); null for aggregates and Kosovo.
+	"""
+	isoNumeric: Int
+	kind: AreaKindType!
+}
+
+"""
+Whether an area is a country or an aggregate of countries.
+"""
+enum AreaKindType {
+	"""
+	An ISO 3166-1 country or territory, or Kosovo.
+	"""
+	COUNTRY
+	"""
+	A group of countries published as one area, e.g. `WLD` (World).
+	"""
+	AGGREGATE
+}
+
+"""
 GraphQL connection for audit logs
 """
 type AuditLogConnection {
@@ -345,6 +379,34 @@ input CreateAnnotationInput {
 	isPublic: Boolean
 }
 
+"""
+One key of a cross-section.
+"""
+type CrossSectionEntry {
+	"""
+	The series' value of the `across` dimension, e.g. `USA`.
+	"""
+	key: String!
+	"""
+	The area for `key` when `across` uses the countries code list; otherwise null.
+	"""
+	area: Area
+	seriesId: ID!
+	"""
+	The requested date, or with `latest` the date of the key's latest non-null value
+	(null when it has none).
+	"""
+	date: NaiveDate
+	"""
+	Null when the series has no value at the date.
+	"""
+	value: BigDecimal
+	"""
+	Observation attributes. Always empty until datasets store attributes.
+	"""
+	flags: [ObservationFlag!]!
+}
+
 input DataFilter {
 	startDate: NaiveDate
 	endDate: NaiveDate
@@ -428,6 +490,14 @@ input DeleteAnnotationInput {
 	annotationId: ID!
 }
 
+"""
+One dimension pinned to a value, e.g. `{dimension: "indicator", value: "NY.GDP.PCAP.CD"}`.
+"""
+input DimensionFilterInput {
+	dimension: String!
+	value: String!
+}
+
 type EconomicSeriesType {
 	id: ID!
 	sourceId: ID!
@@ -456,9 +526,35 @@ type EconomicSeriesType {
 	"""
 	dataPointCount: Int!
 	"""
+	The series' newest observation: its latest date, at the newest revision of that date.
+	
+	Returns null when the series has no data points. The value itself can be null when the
+	source published the date without a number. Batched with a dataloader, so a list of
+	series costs one query per batch of up to 200 series.
+	"""
+	latestObservation: LatestObservation
+	"""
 	Fetch data points with filters using a custom DataLoader
 	"""
 	dataPoints(filter: DataFilter, transformation: DataTransformation): [DataPoint!]!
+}
+
+"""
+The newest observation of a series: its latest date, at the newest revision of that date
+"""
+type LatestObservation {
+	"""
+	Observation date
+	"""
+	date: NaiveDate!
+	"""
+	Value at the newest revision; null when the source published the date without a number
+	"""
+	value: BigDecimal
+	"""
+	Publication date of the revision the value comes from
+	"""
+	revisionDate: NaiveDate!
 }
 
 type Mutation {
@@ -523,6 +619,14 @@ Format: %Y-%m-%d
 scalar NaiveDate
 
 """
+An observation attribute, e.g. `{name: "obs_status", value: "E"}`.
+"""
+type ObservationFlag {
+	name: String!
+	value: String!
+}
+
+"""
 Page information for pagination
 """
 type PageInfo {
@@ -545,6 +649,14 @@ type Query {
 	"""
 	series(id: ID!): EconomicSeriesType
 	"""
+	Get an economic series by its source's name and the source's own id for it
+	
+	`sourceName` is the data source's `name` exactly as `dataSources` returns it (for
+	example "Federal Reserve Economic Data (FRED)"), and `externalId` is the source's series
+	id (for example "GDP"). Returns null when no such series exists.
+	"""
+	seriesByExternalId(sourceName: String!, externalId: String!): EconomicSeriesType
+	"""
 	List economic series with filtering and pagination
 	"""
 	seriesList(filter: SeriesFilter, pagination: PaginationInput): SeriesConnection!
@@ -553,13 +665,36 @@ type Query {
 	"""
 	dataSource(id: ID!): DataSourceType
 	"""
+	One measure of one dataset, for every value of one dimension, at one date.
+	
+	`filter` pins every dataset dimension except `across`, e.g.
+	`crossSection(datasetId: $wdi, filter: [{dimension: "indicator", value:
+	"NY.GDP.PCAP.CD"}], across: "area", latest: true)`. Give exactly one of `date` and
+	`latest: true`; `latest` returns each key's most recent non-null value with its own
+	date. `measure` defaults to the dataset's default measure. Every active matching series
+	is returned, ordered by key, with a null value where it has none.
+	"""
+	crossSection(datasetId: ID!, measure: String, filter: [DimensionFilterInput!]! = [], across: String!, date: NaiveDate, latest: Boolean): [CrossSectionEntry!]!
+	"""
 	List all data sources
 	"""
 	dataSources: [DataSourceType!]!
 	"""
-	Get data points for a specific series with filtering and transformation
+	Get data points for a specific series with filtering and transformation, one page at a
+	time in date order. `totalCount` counts every matching point; read the next page with
+	`after: pageInfo.endCursor` until `pageInfo.hasNextPage` is false. A transformed page
+	has the values it would have in the whole series.
 	"""
-	seriesData(seriesId: ID!, filter: DataFilter, transformation: DataTransformation, first: Int, after: String): DataPointConnection!
+	seriesData(		seriesId: ID!,		filter: DataFilter,		transformation: DataTransformation,
+		"""
+		Page size. Defaults to and is capped at 10000; must not be negative.
+		"""
+		first: Int,
+		"""
+		Start after this cursor (a previous page's endCursor). A cursor is the number of points up to and including the one it names.
+		"""
+		after: String
+	): DataPointConnection!
 	"""
 	Crawler status, derived from the crawl queue (workers keep no other state).
 	"""

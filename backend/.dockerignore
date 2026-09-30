@@ -1,5 +1,5 @@
-# Build context for backend/Dockerfile. Only Cargo.toml, Cargo.lock, crates/
-# and migrations/ are used.
+# Build context for backend/Dockerfile. Only Cargo.toml, Cargo.lock, crates/,
+# migrations/ and flags/ are used.
 
 # Rust build artifacts
 target/

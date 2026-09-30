@@ -7,6 +7,7 @@ pub mod crawl_attempt;
 pub mod crawl_queue;
 pub mod data_point;
 pub mod data_source;
+pub mod dataset;
 pub mod economic_series;
 pub mod educational_content;
 pub mod financial_annotation;
@@ -28,6 +29,7 @@ pub use crawl_attempt::*;
 pub use crawl_queue::*;
 pub use data_point::*;
 pub use data_source::*;
+pub use dataset::*;
 pub use economic_series::*;
 pub use educational_content::{
     AssessmentQuestion, ContentSection, EducationalModule, EducationalResource, ExpertInsight,

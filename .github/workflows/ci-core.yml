@@ -38,11 +38,9 @@ on:
           - all
           - core
           - global-analysis
-          - professional-analysis
           - comprehensive
           - mobile-core
           - mobile-global-analysis
-          - mobile-professional-analysis
           - mobile-comprehensive
       branch:
         description: 'Branch to run CI on (leave empty for current branch)'
@@ -70,21 +68,32 @@ env:
   # From the release's diesel_cli-x86_64-unknown-linux-gnu.tar.xz.sha256
   DIESEL_SHA256: cecfdb4f840e48ad230f77719fedc9720df351ab217de32bd1dd75cfe906b957
   DATABASE_URL: postgresql://postgres:password@localhost:5432/econ_graph_test
+  # promtool for the Prometheus rule checks, from the release tarball
+  PROMETHEUS_VERSION: 3.5.0
+  # From the release's sha256sums.txt (prometheus-3.5.0.linux-amd64.tar.gz)
+  PROMETHEUS_SHA256: e811827af26d822afb09a4f28314f61b618b12cff5369835a67f674d8b46f39a
 
 jobs:
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
-    if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' && !startsWith(github.ref, 'refs/heads/release/')
+    # This job must succeed even when filtering is unnecessary: a skipped job
+    # propagates through needs to backend/frontend tests after the cache build.
     outputs:
       # A change to neither side (or to a shared path) runs everything
       frontend_only: ${{ steps.filter.outputs.frontend == 'true' && steps.filter.outputs.backend == 'false' && steps.filter.outputs.shared == 'false' }}
       backend_only: ${{ steps.filter.outputs.backend == 'true' && steps.filter.outputs.frontend == 'false' && steps.filter.outputs.shared == 'false' }}
+      # Jobs that only check one kind of file run when that kind changed
+      deps: ${{ steps.filter.outputs.deps }}
+      docker: ${{ steps.filter.outputs.docker }}
+      migrations: ${{ steps.filter.outputs.migrations }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     - uses: dorny/paths-filter@v3
       id: filter
+      # Protected-branch pushes run the ordinary suite without path filtering.
+      if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' && !startsWith(github.ref, 'refs/heads/release/')
       with:
         base: main
         filters: |
@@ -101,6 +110,7 @@ jobs:
             - '.github/**'
             - 'scripts/**'
             - 'config/keycloak/**'
+            - 'config/flags/**'
             - 'docker-compose.yml'
             - 'package.json'
             - 'k8s/**'
@@ -109,12 +119,56 @@ jobs:
             # this file; a backend-only PR that regenerates it must still run
             # Frontend Tests, not just the backend side.
             - 'backend/crates/econ-graph-graphql/schema.graphql'
+            # Docker Build Test needs the backend build, so a change to either
+            # image it actually builds runs both. Only backend/ and frontend/
+            # have a Dockerfile that job builds; the ci/, admin-frontend/ and
+            # chart-api-service/ Dockerfiles are unrelated to it.
+            - 'backend/Dockerfile'
+            - 'backend/.dockerignore'
+            - 'frontend/Dockerfile'
+            - 'frontend/.dockerignore'
+            - 'frontend/nginx.conf'
+          # Each gated job also runs when this workflow changes, so a broken
+          # job definition shows up on the PR rather than on main.
+          deps:
+            - '.github/workflows/ci-core.yml'
+            - 'backend/Cargo.toml'
+            - 'backend/**/Cargo.toml'
+            - 'backend/Cargo.lock'
+            - 'backend/deny.toml'
+            - 'backend/.cargo/audit.toml'
+            - 'rust-toolchain.toml'
+            - 'frontend/package.json'
+            - 'frontend/package-lock.json'
+            - 'frontend/.license-checker.json'
+            - 'admin-frontend/package.json'
+            - 'admin-frontend/package-lock.json'
+          # Docker Build Test builds the whole backend and frontend inside the
+          # image, so a dependency or toolchain bump can break it with no
+          # Dockerfile touched (a new -sys crate needing a system library, an
+          # npm package with a native build step, an MSRV bump).
+          docker:
+            - '.github/workflows/ci-core.yml'
+            - 'backend/Dockerfile'
+            - 'backend/.dockerignore'
+            - 'frontend/Dockerfile'
+            - 'frontend/.dockerignore'
+            - 'frontend/nginx.conf'
+            - 'backend/**/Cargo.toml'
+            - 'backend/Cargo.lock'
+            - 'rust-toolchain.toml'
+            - 'frontend/package.json'
+            - 'frontend/package-lock.json'
+          migrations:
+            - '.github/workflows/ci-core.yml'
+            - 'backend/migrations/**'
+            - 'backend/scripts/check_migration_order.py'
   backend-build-cache:
     name: Backend Build Cache
     runs-on: ubuntu-latest
     needs: [changes]
-    # `changes` is skipped on main/develop/release/**; !cancelled() keeps that
-    # skip from skipping this job and every backend test job that needs it.
+    # Only the filter step is skipped on main/develop/release/**; changes succeeds.
+    # Keep the explicit selection and failure/cancellation gate for feature refs.
     if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/release/') || needs.changes.outputs.frontend_only != 'true') }}
     timeout-minutes: 90
 
@@ -145,10 +199,36 @@ jobs:
         cargo build --verbose --all-targets
       working-directory: backend
 
+  prometheus-rules:
+    name: Prometheus Rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install promtool
+      run: |
+        tarball="prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+        curl -sSfL -o "$tarball" "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/${tarball}"
+        echo "${PROMETHEUS_SHA256}  ${tarball}" | sha256sum -c -
+        tar xzf "$tarball" --strip-components=1 "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+        sudo install promtool /usr/local/bin/promtool
+
+    - name: Check rules and run rule tests
+      run: |
+        python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+        k8s/monitoring/check-prometheus-rules.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: [changes]
+    # Only when migrations changed; every push to main and manual run still gets
+    # it. Stop if selection failed or the run was cancelled.
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.migrations == 'true') }}
 
     steps:
     - name: Checkout code
@@ -242,6 +322,22 @@ jobs:
       working-directory: backend
       env:
         RUST_LOG: warn
+
+    # Deployed images build with FLAGS_PROFILE=release (config/flags/README.md), which
+    # compiles /mcp out of econ-graph-backend; backend/.cargo/config.toml defaults local
+    # builds and the step above to the dev profile instead. Lint and test the release
+    # profile too, so a flagged-off route isn't only ever compiled in CI.
+    - name: Check the release flag profile
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        set -o pipefail
+        cargo clippy -p econ-graph-backend --all-targets -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
+        cargo test -p econ-graph-backend --bin econ-graph-backend -- --test-threads=4 --nocapture mcp_flag_off_tests:: root_page_tests:: | tee /tmp/release-flag-tests.log
+        grep -q "test result: ok. 2 passed" /tmp/release-flag-tests.log
+      working-directory: backend
+      env:
+        RUST_LOG: warn
+        FLAGS_PROFILE: release
 
     # The frontend validates its GraphQL operations against the committed
     # schema.graphql, so the file must match what the backend serves. To
@@ -490,6 +586,29 @@ jobs:
         diesel migration run
       working-directory: backend
 
+    # Fail closed: only the focused user-admin regressions become required, while
+    # the unrelated full GraphQL/workspace suite below remains advisory.
+    - name: Run user administration authorization regressions (required)
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        : "${DATABASE_URL:?DATABASE_URL is required for authorization regressions}"
+        for test in \
+          narrow_role_cannot_act_on_another_user \
+          full_staff_set_can_act_on_another_user \
+          narrow_role_can_act_on_self \
+          narrow_role_denial_does_not_leak_whether_the_target_exists \
+          self_access_still_requires_named_operation_roles \
+          update_user_email_conflict_leaves_other_fields_unchanged; do
+          name="graphql::authorization_tests::$test"
+          log="$RUNNER_TEMP/$test.log"
+          cargo test -p econ-graph-graphql --lib "$name" -- --exact --test-threads=1 --nocapture | tee "$log"
+          # A renamed, ignored or empty filter must fail, even if cargo exits zero.
+          grep -Fq "test $name ... ok" "$log"
+          grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$log"
+        done
+      working-directory: backend
+
     # No lint exemptions for the new crawler crate (the workspace-wide clippy in
     # backend-smoke-tests still carries ~23 -A exemptions for legacy code).
     # --no-deps keeps -D warnings scoped to the crawler crates; without it the
@@ -502,21 +621,52 @@ jobs:
 
     # Required: the crawler crate, crawler worker, all SEC crawler lib tests (no database
     # needed; default build and with the xbrl-parser feature), the core financial ratio
-    # tests and the crawl_queue model / queue service tests. These must pass for the job
-    # (and the PR) to go green.
+    # tests and the crawl_queue, dataset model, queue service and cross-section tests.
+    # These must pass for the job (and the PR) to go green.
     # The long soak test (tests/soak.rs) is #[ignore]d and runs manually only; its fast
     # limiter-conformance tests run here.
     - name: Run crawler and queue tests (required)
       run: |
+        set -euo pipefail
         export PATH="$HOME/.cargo/bin:$PATH"
         cargo test -p econ-graph-crawler --all-features -- --test-threads=1
         cargo test -p econ-graph-crawler-worker -- --test-threads=1
         cargo test -p econ-graph-sec-crawler --lib -- --test-threads=1
+        # Keep this database regression opt-in locally, but require it against this job's Postgres.
+        # --exact plus the result check prevents a renamed/missing test from silently passing.
+        cargo test -p econ-graph-sec-crawler --lib storage::tests::storage_stats_handle_empty_mixed_and_large_totals -- --exact --ignored --test-threads=1 | tee /tmp/xbrl-storage-stats-test.log
+        grep -Fq "test storage::tests::storage_stats_handle_empty_mixed_and_large_totals ... ok" /tmp/xbrl-storage-stats-test.log
+        grep -Fq "test result: ok. 1 passed; 0 failed; 0 ignored;" /tmp/xbrl-storage-stats-test.log
         # The XBRL parser is compiled out by default (feature xbrl-parser); test it here too.
         cargo test -p econ-graph-sec-crawler --features xbrl-parser --lib -- --test-threads=1
         cargo test -p econ-graph-core --features financial-ratios --lib financial_ratios -- --test-threads=1
         cargo test -p econ-graph-core crawl_queue -- --test-threads=1
+        cargo test -p econ-graph-core --lib models::dataset -- --test-threads=1
         cargo test -p econ-graph-services queue_service -- --test-threads=1
+        cargo test -p econ-graph-services cross_section -- --test-threads=1
+        cargo test -p econ-graph-graphql --lib cross_section -- --test-threads=1
+      working-directory: backend
+
+    # A plain `cargo test` (dev profile) still carries the dev-only static catalogs via
+    # debug_assertions, so only a real --release build proves a release image leaves them out.
+    - name: Crawler CLI in release mode registers only the live sources
+      run: |
+        set -euo pipefail
+        cargo build --release -p econ-graph-crawler --bin crawler
+        release_sources="$(target/release/crawler sources)"
+        echo "$release_sources"
+        for live in FRED BLS BEA CENSUS WORLD_BANK FHFA; do
+          if ! echo "$release_sources" | grep -qE "^$live\b.*\byes\b"; then
+            echo "::error::$live has no adapter in a release build"
+            exit 1
+          fi
+        done
+        for gone in IMF ECB OECD BOE BOJ BOC RBA SNB UN_STATS ILO WTO; do
+          if echo "$release_sources" | grep -qE "^$gone\b.*\byes\b"; then
+            echo "::error::$gone has an adapter in a release build"
+            exit 1
+          fi
+        done
       working-directory: backend
 
     # Allowed to fail (owner decision): the full workspace run still has known
@@ -697,7 +847,7 @@ jobs:
     timeout-minutes: 60
     needs: [changes]
     # Skipped on backend-only PRs; a manual run always gets it. See
-    # backend-build-cache for the !cancelled() pattern
+    # backend-build-cache for the failure/cancellation gate
     if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changes.outputs.backend_only != 'true')) }}
 
     steps:
@@ -743,7 +893,7 @@ jobs:
     needs: [changes]
     # Skipped on backend-only PRs (and frontend-integration-tests with it);
     # pushes and manual runs always get it, so a manual E2E run is never
-    # skipped. See backend-build-cache for the !cancelled() pattern
+    # skipped. See backend-build-cache for the failure/cancellation gate
     if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.backend_only != 'true') }}
 
     steps:
@@ -773,6 +923,10 @@ jobs:
       env:
         CI: true
         NODE_OPTIONS: --max-old-space-size=4096
+
+    - name: Check build flags compile code out
+      working-directory: frontend
+      run: npm run check:flag-bundle
 
 
   quality-checks:
@@ -848,6 +1002,10 @@ jobs:
     name: Security Audit
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    needs: [changes]
+    # Only when dependency manifests or lockfiles changed; every push to main and
+    # manual run still gets it (security.yml also audits daily).
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.deps == 'true') }}
 
     steps:
     - name: Checkout code
@@ -904,6 +1062,10 @@ jobs:
     name: License Compliance Check
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    needs: [changes]
+    # Only when dependency manifests or lockfiles changed; every push to main and
+    # manual run still gets it.
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.deps == 'true') }}
 
     steps:
     - name: Checkout code
@@ -1493,206 +1655,6 @@ jobs:
         docker stop backend-server || true
         docker stop frontend-server || true
 
-  e2e-professional-analysis-tests:
-    name: E2E Professional Analysis Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
-    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'professional-analysis' || github.event.inputs.e2e_test_suite == '') }}
-
-    services:
-      postgres:
-        image: *postgres_image
-        env:
-          POSTGRES_PASSWORD: password
-          POSTGRES_USER: postgres
-          POSTGRES_DB: econ_graph_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.branch || github.ref }}
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
-
-    - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
-      with:
-        workspaces: backend
-        shared-key: backend
-        # Keyed on Cargo.lock and the toolchain; only the build job saves it
-        save-if: ${{ github.job == 'backend-build-cache' }}
-
-    - name: Install diesel CLI
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        archive="$RUNNER_TEMP/diesel_cli.tar.xz"
-        curl -sSfL -o "$archive" "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz"
-        echo "${DIESEL_SHA256}  ${archive}" | sha256sum -c -
-        tar -xJf "$archive" -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
-        diesel --version
-      working-directory: backend
-
-    - name: Setup database
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        diesel setup
-        diesel migration run
-      working-directory: backend
-
-    - name: Wait for PostgreSQL to be ready
-      run: |
-        echo "🔍 Waiting for PostgreSQL to be ready..."
-        for i in {1..30}; do
-          if pg_isready -h localhost -p 5432 -U postgres; then
-            echo "✅ PostgreSQL is ready!"
-            break
-          fi
-          echo "⏳ Attempt $i/30: PostgreSQL not ready yet, waiting 2 seconds..."
-          sleep 2
-        done
-
-        # Additional verification with a simple query
-        echo "🔍 Verifying PostgreSQL is fully functional..."
-        PGPASSWORD=password psql -h localhost -p 5432 -U postgres -d econ_graph_test -c "SELECT 1;" || {
-          echo "❌ PostgreSQL health check failed"
-          exit 1
-        }
-        echo "✅ PostgreSQL is fully functional!"
-
-    - name: Download optimized E2E containers
-      uses: actions/download-artifact@v4
-      with:
-        name: e2e-containers-optimized
-
-    - name: Load optimized E2E containers
-      run: |
-        docker load < e2e-container-optimized.tar.gz
-        docker load < e2e-mobile-container-optimized.tar.gz
-
-    - name: Start services with health checks
-      run: |
-        # Start both frontend and backend services with proper health checks
-        chmod +x scripts/start-services-with-health-checks.sh
-        ./scripts/start-services-with-health-checks.sh
-
-        # Wait for frontend to be ready
-        for i in {1..30}; do
-          if curl -f http://localhost:3000 2>/dev/null; then
-            echo "Frontend is ready!"
-            break
-          fi
-          echo "Waiting for frontend... ($i/30)"
-          sleep 2
-        done
-
-    - name: Run Professional Analysis E2E Tests
-      run: |
-        # Verify frontend connectivity and capture both backend and frontend logs during test execution
-        chmod +x scripts/verify-frontend-connectivity.sh
-        chmod +x scripts/run-e2e-with-backend-logs.sh
-        chmod +x scripts/run-e2e-with-frontend-logs.sh
-        # Execute E2E tests with proper exit code propagation
-        set -e  # Exit on any command failure
-        ./scripts/verify-frontend-connectivity.sh ./scripts/run-e2e-with-frontend-logs.sh ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
-          --network host \
-          -w /app/frontend \
-          -e BASE_URL=http://localhost:3000 \
-          econ-graph-e2e-optimized:latest \
-          npm run test:e2e:professional-analysis
-
-    - name: Copy Playwright test artifacts from runner filesystem
-      if: always()
-      run: |
-        echo "📋 Copying Playwright test artifacts from runner filesystem..."
-        echo "⚠️  FIXED: Playwright artifacts are on the runner, not in containers!"
-
-        # Playwright artifacts are on the runner, not in containers
-        # They should be in the frontend directory after the test run
-        echo "📋 Current working directory: $(pwd)"
-        echo "📋 Contents of current directory:"
-        ls -la
-
-        echo "📋 Contents of frontend directory:"
-        ls -la frontend/ || echo "No frontend directory found"
-
-        echo "📋 COMPREHENSIVE ARTIFACT SEARCH:"
-        echo "================================="
-
-        # Search in frontend directory
-        echo "📋 Searching for test-results in frontend directory:"
-        find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
-
-        echo "📋 Searching for playwright-report in frontend directory:"
-        find frontend -name "playwright-report" -type d 2>/dev/null || echo "No playwright-report directory found"
-
-        # Search for individual Playwright files
-        echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
-        find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
-
-        # COMPREHENSIVE SEARCH: Look everywhere on the runner
-        echo "📋 COMPREHENSIVE SEARCH - Looking for test-results anywhere on runner:"
-        find / -type d -name "test-results" 2>/dev/null | head -20 || echo "No test-results directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for playwright-report anywhere on runner:"
-        find / -type d -name "playwright-report" 2>/dev/null | head -20 || echo "No playwright-report directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for any Playwright files anywhere on runner:"
-        find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -20 || echo "No Playwright files found anywhere"
-
-        # Search in Docker containers
-        echo "📋 DOCKER CONTAINER SEARCH:"
-        echo "=========================="
-        for container in $(docker ps --format "{{.Names}}"); do
-          echo "📋 Searching in container: $container"
-          echo "  - Looking for test-results:"
-          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
-          echo "  - Looking for playwright-report:"
-          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
-          echo "  - Looking for Playwright files:"
-          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
-        done
-
-        # Copy artifacts to the root for upload
-        if [ -d "frontend/test-results" ]; then
-          echo "✅ Copying test-results from frontend/test-results"
-          cp -r frontend/test-results ./
-        fi
-
-        if [ -d "frontend/playwright-report" ]; then
-          echo "✅ Copying playwright-report from frontend/playwright-report"
-          cp -r frontend/playwright-report ./
-        fi
-
-        # List what we actually copied
-        echo "📋 Final artifact directories on host:"
-        ls -la test-results* playwright-report* 2>/dev/null || echo "No artifacts found"
-
-    - name: Upload Playwright test artifacts
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: playwright-test-results-e2e-professional-analysis
-        path: |
-          test-results/
-          playwright-report/
-        retention-days: 7
-
-    - name: Stop services
-      if: always()
-      run: |
-        docker stop backend-server || true
-        docker stop frontend-server || true
-
   e2e-comprehensive-tests:
     name: E2E Comprehensive Tests
     runs-on: ubuntu-latest
@@ -2103,214 +2065,6 @@ jobs:
         docker stop backend-server || true
         docker stop frontend-server || true
 
-  mobile-e2e-professional-analysis-tests:
-    name: Mobile Professional Analysis E2E Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    needs: [backend-smoke-tests, frontend-integration-tests, backend-integration-tests, e2e-container-build-optimized]
-    if: ${{ github.event.inputs.run_e2e_tests == true && (github.event.inputs.e2e_test_suite == 'all' || github.event.inputs.e2e_test_suite == 'mobile-professional-analysis' || github.event.inputs.e2e_test_suite == '') }}
-
-    services:
-      postgres:
-        image: *postgres_image
-        env:
-          POSTGRES_PASSWORD: password
-          POSTGRES_USER: postgres
-          POSTGRES_DB: econ_graph_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.branch || github.ref }}
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.98.1
-      with:
-        components: rustfmt, clippy
-
-    - name: Cache cargo registry
-      uses: Swatinem/rust-cache@v2
-      with:
-        workspaces: backend
-        shared-key: backend
-        # Keyed on Cargo.lock and the toolchain; only the build job saves it
-        save-if: ${{ github.job == 'backend-build-cache' }}
-
-    - name: Install diesel CLI
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        archive="$RUNNER_TEMP/diesel_cli.tar.xz"
-        curl -sSfL -o "$archive" "https://github.com/diesel-rs/diesel/releases/download/v${DIESEL_VERSION}/diesel_cli-x86_64-unknown-linux-gnu.tar.xz"
-        echo "${DIESEL_SHA256}  ${archive}" | sha256sum -c -
-        tar -xJf "$archive" -C "$HOME/.cargo/bin" --strip-components=1 diesel_cli-x86_64-unknown-linux-gnu/diesel
-        diesel --version
-      working-directory: backend
-
-    - name: Setup database
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        diesel setup
-        diesel migration run
-      working-directory: backend
-
-    - name: Wait for PostgreSQL to be ready
-      run: |
-        echo "🔍 Waiting for PostgreSQL to be ready..."
-        for i in {1..30}; do
-          if pg_isready -h localhost -p 5432 -U postgres; then
-            echo "✅ PostgreSQL is ready!"
-            break
-          fi
-          echo "⏳ Attempt $i/30: PostgreSQL not ready yet, waiting 2 seconds..."
-          sleep 2
-        done
-
-        # Additional verification with a simple query
-        echo "🔍 Verifying PostgreSQL is fully functional..."
-        PGPASSWORD=password psql -h localhost -p 5432 -U postgres -d econ_graph_test -c "SELECT 1;" || {
-          echo "❌ PostgreSQL health check failed"
-          exit 1
-        }
-        echo "✅ PostgreSQL is fully functional!"
-
-    - name: Download optimized E2E containers
-      uses: actions/download-artifact@v4
-      with:
-        name: e2e-containers-optimized
-
-    - name: Load optimized E2E containers
-      run: |
-        docker load < e2e-container-optimized.tar.gz
-        docker load < e2e-mobile-container-optimized.tar.gz
-
-    - name: Start backend service
-      run: |
-        # Use comprehensive debugging script to diagnose all possible backend startup issues
-        chmod +x scripts/debug-backend-startup.sh
-        ./scripts/debug-backend-startup.sh
-
-    - name: Start frontend service
-      run: |
-        # Use the pre-built frontend from the container
-        docker run --rm -d --name frontend-server \
-          --network host \
-          econ-graph-e2e-mobile-optimized:latest \
-          npx serve -s build -l 3000
-
-        # Wait for frontend to be ready
-        for i in {1..30}; do
-          if curl -f http://localhost:3000 2>/dev/null; then
-            echo "Frontend is ready!"
-            break
-          fi
-          echo "Waiting for frontend... ($i/30)"
-          sleep 2
-        done
-
-    - name: Run Mobile Professional Analysis E2E Tests
-      run: |
-        # Use our log tailing script to capture backend logs during test execution
-        # Ensure proper exit code propagation from Playwright tests
-        set -e  # Exit on any command failure
-        chmod +x scripts/run-e2e-with-backend-logs.sh
-        ./scripts/run-e2e-with-backend-logs.sh docker run --rm \
-          --network host \
-          -w /app/frontend \
-          -e BASE_URL=http://localhost:3000 \
-          econ-graph-e2e-mobile-optimized:latest \
-          npm run test:e2e:mobile:professional-analysis
-
-    - name: Copy Playwright test artifacts from runner filesystem
-      if: always()
-      run: |
-        echo "📋 Copying Playwright test artifacts from runner filesystem..."
-        echo "⚠️  FIXED: Playwright artifacts are on the runner, not in containers!"
-
-        # Playwright artifacts are on the runner, not in containers
-        # They should be in the frontend directory after the test run
-        echo "📋 Current working directory: $(pwd)"
-        echo "📋 Contents of current directory:"
-        ls -la
-
-        echo "📋 Contents of frontend directory:"
-        ls -la frontend/ || echo "No frontend directory found"
-
-        echo "📋 COMPREHENSIVE ARTIFACT SEARCH:"
-        echo "================================="
-
-        # Search in frontend directory
-        echo "📋 Searching for test-results in frontend directory:"
-        find frontend -name "test-results" -type d 2>/dev/null || echo "No test-results directory found"
-
-        echo "📋 Searching for playwright-report in frontend directory:"
-        find frontend -name "playwright-report" -type d 2>/dev/null || echo "No playwright-report directory found"
-
-        # Search for individual Playwright files
-        echo "📋 Searching for Playwright files (*.webm, *.png, *.md) in frontend directory:"
-        find frontend -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | head -10 || echo "No Playwright files found"
-
-        # COMPREHENSIVE SEARCH: Look everywhere on the runner
-        echo "📋 COMPREHENSIVE SEARCH - Looking for test-results anywhere on runner:"
-        find / -type d -name "test-results" 2>/dev/null | head -20 || echo "No test-results directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for playwright-report anywhere on runner:"
-        find / -type d -name "playwright-report" 2>/dev/null | head -20 || echo "No playwright-report directories found anywhere"
-
-        echo "📋 COMPREHENSIVE SEARCH - Looking for any Playwright files anywhere on runner:"
-        find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -20 || echo "No Playwright files found anywhere"
-
-        # Search in Docker containers
-        echo "📋 DOCKER CONTAINER SEARCH:"
-        echo "=========================="
-        for container in $(docker ps --format "{{.Names}}"); do
-          echo "📋 Searching in container: $container"
-          echo "  - Looking for test-results:"
-          docker exec $container find / -type d -name "test-results" 2>/dev/null | head -10 || echo "    No test-results found"
-          echo "  - Looking for playwright-report:"
-          docker exec $container find / -type d -name "playwright-report" 2>/dev/null | head -10 || echo "    No playwright-report found"
-          echo "  - Looking for Playwright files:"
-          docker exec $container find / -name "*.webm" -o -name "*.png" -o -name "*.md" 2>/dev/null | grep -E "(test-results|playwright)" | head -10 || echo "    No Playwright files found"
-        done
-
-        # Copy artifacts to the root for upload
-        if [ -d "frontend/test-results" ]; then
-          echo "✅ Copying test-results from frontend/test-results"
-          cp -r frontend/test-results ./
-        fi
-
-        if [ -d "frontend/playwright-report" ]; then
-          echo "✅ Copying playwright-report from frontend/playwright-report"
-          cp -r frontend/playwright-report ./
-        fi
-
-        # List what we actually copied
-        echo "📋 Final artifact directories on host:"
-        ls -la test-results* playwright-report* 2>/dev/null || echo "No artifacts found"
-
-    - name: Upload Playwright test artifacts
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: playwright-test-results-mobile-e2e-professional-analysis
-        path: |
-          test-results/
-          playwright-report/
-        retention-days: 7
-
-    - name: Stop services
-      if: always()
-      run: |
-        docker stop backend-server || true
-        docker stop frontend-server || true
-
   mobile-e2e-tests:
     name: Mobile End-to-End Tests
     runs-on: ubuntu-latest
@@ -2523,7 +2277,12 @@ jobs:
     name: Docker Build Test
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    needs: [backend-smoke-tests]
+    needs: [changes, backend-smoke-tests]
+    # Only when a Dockerfile or .dockerignore changed; every push to main and
+    # manual run still gets it. Smoke tests must have passed if they ran; a
+    # frontend-only PR skips backend-build-cache and backend-smoke-tests
+    # entirely (frontend_only), which this job doesn't need in that case.
+    if: ${{ !cancelled() && (needs.backend-smoke-tests.result == 'success' || (needs.backend-smoke-tests.result == 'skipped' && needs.changes.outputs.frontend_only == 'true')) && (github.event_name != 'pull_request' || needs.changes.outputs.docker == 'true') }}
 
     services:
       postgres:
@@ -2630,3 +2389,4 @@ jobs:
 # Updated Wed Sep 17 08:11:38 PDT 2025
 
 # Workflow cache refresh: 2025-09-17 08:25:07 PDT
+
