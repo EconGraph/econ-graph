@@ -63,14 +63,35 @@ test.describe('download CSV', () => {
     } else {
       // Deployed mode: live GDP has decades of observations, so check structure instead of
       // exact values — strictly ascending dates, every value numeric or missing, and the export
-      // ends on the same point the page itself shows as latest.
+      // has the same latest non-missing point as the page's Recent Data table.
       expect(rows.length).toBeGreaterThan(0);
       for (let i = 1; i < rows.length; i++) {
-        expect(rows[i].date >= rows[i - 1].date).toBe(true);
+        expect(rows[i].date > rows[i - 1].date).toBe(true);
       }
       for (const row of rows) {
         expect(row.value === null || Number.isFinite(row.value)).toBe(true);
       }
+
+      const latest = [...rows].reverse().find(row => row.value !== null);
+      if (!latest || latest.value === null) {
+        throw new Error('CSV has no non-missing observations');
+      }
+      const latestRow = page
+        .getByRole('table', { name: 'Recent observations' })
+        .getByRole('row')
+        .nth(1);
+      const expectedDate = new Date(`${latest.date}T00:00:00Z`).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        timeZone: 'UTC',
+      });
+      const expectedValue = latest.value.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+      await expect(latestRow.getByRole('cell').nth(0)).toHaveText(expectedDate);
+      await expect(latestRow.getByRole('cell').nth(1)).toHaveText(expectedValue);
     }
   });
 });
