@@ -156,7 +156,7 @@ async fn data_source_id_conn(conn: &mut AsyncPgConnection, source: SourceId) -> 
         .values(&template)
         .on_conflict(dsl::name)
         .do_nothing()
-        .execute(conn)
+        .execute(&mut *conn)
         .await?;
     Ok(dsl::data_sources
         .filter(dsl::name.eq(&template.name))
@@ -171,14 +171,23 @@ pub async fn find_series_id(
     source: SourceId,
     external_id: &str,
 ) -> AppResult<Option<Uuid>> {
-    use econ_graph_core::schema::economic_series::dsl as es;
     let mut conn = pool.get().await.map_err(conn_err)?;
-    let source_id = data_source_id_conn(&mut conn, source).await?;
+    find_series_id_conn(&mut conn, source, external_id).await
+}
+
+/// Read-only connection lookup; fetching must not create a source before lease validation.
+pub(crate) async fn find_series_id_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    external_id: &str,
+) -> AppResult<Option<Uuid>> {
+    use econ_graph_core::schema::economic_series::dsl as es;
     Ok(es::economic_series
-        .filter(es::source_id.eq(source_id))
+        .inner_join(data_sources::table)
+        .filter(data_sources::name.eq(data_source_template(source).name))
         .filter(es::external_id.eq(external_id))
         .select(es::id)
-        .first::<Uuid>(&mut conn)
+        .first::<Uuid>(conn)
         .await
         .optional()?)
 }
@@ -263,7 +272,20 @@ pub async fn persist_series(
     fetched: &FetchedSeries,
 ) -> AppResult<SeriesWrite> {
     let mut conn = pool.get().await.map_err(conn_err)?;
-    let source_id = data_source_id_conn(&mut conn, source).await?;
+    conn.transaction::<SeriesWrite, AppError, _>(async move |conn| {
+        persist_series_conn(conn, source, external_id, fetched).await
+    })
+    .await
+}
+
+/// Connection form; caller must wrap all related writes in a transaction.
+pub(crate) async fn persist_series_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    external_id: &str,
+    fetched: &FetchedSeries,
+) -> AppResult<SeriesWrite> {
+    let source_id = data_source_id_conn(conn, source).await?;
     let meta = fetched.metadata.as_ref();
     let title = meta.and_then(|m| clip_opt(Some(&m.title), 500));
     let description = meta.and_then(|m| clip_opt(m.description.as_deref(), 2000));
@@ -279,7 +301,6 @@ pub async fn persist_series(
     }
     let latest_date = unique.keys().map(|k| k.0).max();
 
-    conn.transaction::<SeriesWrite, AppError, _>(async move |conn| {
             let row: UpsertedSeries = diesel::sql_query(
                 "INSERT INTO economic_series (source_id, external_id, title, description, units, \
                      frequency, seasonal_adjustment, is_active, first_discovered_at, last_crawled_at, \
@@ -304,7 +325,7 @@ pub async fn persist_series(
             .bind::<Nullable<Text>, _>(frequency.as_deref())
             .bind::<Text, _>(UNKNOWN_FREQUENCY)
             .bind::<Nullable<Text>, _>(seasonal.as_deref())
-            .get_result(conn)
+            .get_result(&mut *conn)
             .await?;
             let series_id = row.id;
 
@@ -324,7 +345,7 @@ pub async fn persist_series(
                      WHERE id = $1",
                 )
                 .bind::<SqlUuid, _>(series_id)
-                .execute(conn)
+                .execute(&mut *conn)
                 .await?;
             }
 
@@ -335,8 +356,6 @@ pub async fn persist_series(
                 points_new: new,
                 latest_date,
             })
-    })
-    .await
 }
 
 /// Upserts one `series_metadata` row per discovered series (key `(source_id, external_id)`), in
@@ -348,12 +367,24 @@ pub async fn persist_discovered(
     source: SourceId,
     discovered: &[DiscoveredSeries],
 ) -> AppResult<usize> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    conn.transaction::<usize, AppError, _>(async move |conn| {
+        persist_discovered_conn(conn, source, discovered).await
+    })
+    .await
+}
+
+/// Connection form; caller must wrap all related writes in a transaction.
+pub(crate) async fn persist_discovered_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    discovered: &[DiscoveredSeries],
+) -> AppResult<usize> {
     use diesel::upsert::excluded;
     use econ_graph_core::models::NewSeriesMetadata;
     use series_metadata::dsl as sm;
 
-    let mut conn = pool.get().await.map_err(conn_err)?;
-    let source_id = data_source_id_conn(&mut conn, source).await?;
+    let source_id = data_source_id_conn(conn, source).await?;
 
     let mut unique = BTreeMap::new();
     for d in discovered {
@@ -380,7 +411,6 @@ pub async fn persist_discovered(
         })
         .collect();
 
-    conn.transaction::<usize, AppError, _>(async move |conn| {
         let mut written = 0;
         for chunk in rows.chunks(INSERT_CHUNK) {
             let now = Utc::now();
@@ -398,18 +428,29 @@ pub async fn persist_discovered(
                     sm::last_discovered_at.eq(now),
                     sm::updated_at.eq(now),
                 ))
-                .execute(conn)
+                .execute(&mut *conn)
                 .await?;
         }
         Ok(written)
-    })
-    .await
 }
 
 /// Records one `crawl_attempts` row for `series_id` (the table requires an existing series) and,
 /// on failure, sets `economic_series.crawl_status = 'failed'` with the error message.
 pub async fn record_attempt(
     pool: &DatabasePool,
+    series_id: Uuid,
+    attempt: &AttemptRecord,
+) -> AppResult<()> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    conn.transaction::<(), AppError, _>(async move |conn| {
+        record_attempt_conn(conn, series_id, attempt).await
+    })
+    .await
+}
+
+/// Connection form; caller must wrap all related writes in a transaction.
+pub(crate) async fn record_attempt_conn(
+    conn: &mut AsyncPgConnection,
     series_id: Uuid,
     attempt: &AttemptRecord,
 ) -> AppResult<()> {
@@ -439,10 +480,9 @@ pub async fn record_attempt(
         request_headers: None,
         response_headers: None,
     };
-    let mut conn = pool.get().await.map_err(conn_err)?;
     diesel::insert_into(crawl_attempts::table)
         .values(&row)
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
     if !attempt.success {
         diesel::sql_query(
@@ -451,7 +491,7 @@ pub async fn record_attempt(
         )
         .bind::<SqlUuid, _>(series_id)
         .bind::<Nullable<Text>, _>(attempt.error_message.as_deref())
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
     }
     Ok(())
@@ -504,3 +544,4 @@ mod tests {
         assert_eq!(data_source_template(SourceId::Sec).name, "SEC EDGAR");
     }
 }
+
