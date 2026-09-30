@@ -30,9 +30,12 @@ The filtered `EconomicSeriesType.dataPoints` resolver queries the database direc
 each series. Selecting it across several series therefore performs per-series queries;
 there is no filtered-date-range loader.
 
-Cached loaders are created with the schema and stored in its shared `SchemaResources`.
-Their cache scope is shared across requests using that schema, rather than per-request.
-The latest-observation loader is explicitly non-cached.
+Cached loaders are created with the schema and stored in its `SchemaResources`, so
+cache lifetime follows schema lifetime. The backend's [`/graphql` route](../../backend/crates/econ-graph-backend/src/main.rs)
+builds a fresh schema for every HTTP request, making those caches request-scoped.
+Callers that retain a schema, such as the MCP and security servers, retain its cached
+loaders across requests. The latest-observation loader is explicitly non-cached so
+retained schemas can read observations updated by a crawl.
 
 ## GraphQL Schema
 
@@ -189,7 +192,7 @@ query GetMultipleSeries($sourceId: ID!) {
 
 1. **Batched Database Queries** - Selected relationship fields use DataLoaders; filtered `dataPoints` remains a direct per-series query
 2. **Query Complexity Analysis** - Built-in protection against expensive queries
-3. **Caching** - Cached loaders are shared for the schema's lifetime; latest-observation loading is non-cached
+3. **Caching** - Cache lifetime follows schema lifetime: request-scoped on the backend `/graphql` route, retained when callers reuse a schema; latest-observation loading is non-cached
 4. **Efficient Pagination** - Cursor-based pagination for large result sets
 5. **Selective Field Loading** - Only requested fields are processed
 6. **Schema Reference** - The generated SDL and snapshot test keep the full API reference aligned with runtime types
