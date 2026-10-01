@@ -155,7 +155,7 @@ async fn seed() -> Seeded {
                 external_id: format!("{indicator}.{area}"),
                 title: format!("{indicator} {area}"),
                 frequency: "Annual".to_string(),
-                dataset_id: Some(dataset.id),
+                dataset_id: dataset.id,
                 dimensions: [("indicator", indicator), ("area", area)]
                     .into_iter()
                     .collect::<SeriesDimensions>(),
@@ -176,7 +176,7 @@ async fn seed() -> Seeded {
             external_id: "GDP.CAN".to_string(),
             title: "GDP CAN (inactive)".to_string(),
             frequency: "Annual".to_string(),
-            dataset_id: Some(dataset.id),
+            dataset_id: dataset.id,
             dimensions: [("indicator", "GDP"), ("area", "CAN")]
                 .into_iter()
                 .collect::<SeriesDimensions>(),
@@ -193,7 +193,7 @@ async fn seed() -> Seeded {
             external_id: "GDP.no-area".to_string(),
             title: "GDP with no area dimension".to_string(),
             frequency: "Annual".to_string(),
-            dataset_id: Some(dataset.id),
+            dataset_id: dataset.id,
             dimensions: [("indicator", "GDP")]
                 .into_iter()
                 .collect::<SeriesDimensions>(),
@@ -258,6 +258,7 @@ fn request(seeded: &Seeded, indicator: &str, date: CrossSectionDate) -> CrossSec
             .collect(),
         across: "area".to_string(),
         date,
+        as_of: None,
     }
 }
 
@@ -350,6 +351,175 @@ async fn fixed_date_returns_that_date_with_missing_values_as_none() {
 }
 
 #[tokio::test]
+async fn as_of_reads_the_revision_known_on_that_day() {
+    let seeded = seed().await;
+    let mut conn = connect().await;
+
+    // Before USA's 2023 revision (revision_date 2024-12-31): still the original 105.
+    let mut req = request(&seeded, "GDP", CrossSectionDate::On(d(2023)));
+    req.as_of = Some(d(2023));
+    let rows = cross_section(&mut conn, areas(), &req).await.unwrap();
+    let usa = rows.iter().find(|r| r.key == "USA").unwrap();
+    assert_eq!(usa.value, Some(dec("105")));
+
+    // On or after the revision: the revised 110.
+    req.as_of = Some(d(2024));
+    let rows = cross_section(&mut conn, areas(), &req).await.unwrap();
+    let usa = rows.iter().find(|r| r.key == "USA").unwrap();
+    assert_eq!(usa.value, Some(dec("110")));
+}
+
+#[tokio::test]
+async fn as_of_same_revision_date_a_revision_beats_the_original() {
+    let seeded = seed().await;
+    let mut conn = connect().await;
+
+    // JPN 2021: original 30 and revision 35 share revision_date 2021-12-31.
+    let mut req = request(&seeded, "GDP", CrossSectionDate::On(d(2021)));
+    req.as_of = Some(d(2021));
+    let rows = cross_section(&mut conn, areas(), &req).await.unwrap();
+    let jpn = rows.iter().find(|r| r.key == "JPN").unwrap();
+    assert_eq!(jpn.value, Some(dec("35")));
+
+    // Before that revision_date, nothing was published yet.
+    req.as_of = Some(NaiveDate::from_ymd_opt(2021, 1, 1).unwrap());
+    let rows = cross_section(&mut conn, areas(), &req).await.unwrap();
+    let jpn = rows.iter().find(|r| r.key == "JPN").unwrap();
+    assert_eq!(jpn.value, None);
+}
+
+#[tokio::test]
+async fn as_of_with_latest_uses_what_was_known_on_that_day() {
+    let seeded = seed().await;
+    let mut conn = connect().await;
+
+    // BRA 2023 was originally 20; only a later revision (revision_date 2024-12-31)
+    // superseded it to null. As of 2023, the 20 was still the latest known value.
+    let mut req = request(&seeded, "GDP", CrossSectionDate::Latest);
+    req.as_of = Some(d(2023));
+    let rows = cross_section(&mut conn, areas(), &req).await.unwrap();
+    let bra = rows.iter().find(|r| r.key == "BRA").unwrap();
+    assert_eq!(bra.date, Some(d(2023)));
+    assert_eq!(bra.value, Some(dec("20")));
+
+    // Without asOf, the current value (superseded to null) wins instead.
+    let rows = cross_section(
+        &mut conn,
+        areas(),
+        &request(&seeded, "GDP", CrossSectionDate::Latest),
+    )
+    .await
+    .unwrap();
+    let bra = rows.iter().find(|r| r.key == "BRA").unwrap();
+    assert_eq!(bra.value, None);
+}
+
+#[tokio::test]
+async fn as_of_excludes_a_pre_vintage_legacy_row() {
+    // A series crawled before this crate tracked vintages has a row tagged as its own
+    // original release but really meaning "current value as of that old crawl" (PR #184's
+    // `exclude_synthetic_legacy_rows`). `asOf` must not let it stand in for "known on this
+    // day" once real vintages exist for the same date.
+    let pool = create_pool(&migrated_url().await).await.expect("pool");
+    let source = DataSource::create(
+        &pool,
+        NewDataSource {
+            name: format!("Cross-section Legacy Row Test Source {}", Uuid::new_v4()),
+            description: None,
+            base_url: "https://cross-section.example.com/api".to_string(),
+            api_key_required: false,
+            rate_limit_per_minute: 100,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: None,
+            api_key_name: None,
+        },
+    )
+    .await
+    .expect("create data source");
+    let area = DatasetComponent::new("area", "Area", ComponentType::String);
+    let dataset = Dataset::create(
+        &pool,
+        &NewDataset::long(source.id, "legacy", "Legacy Row Test Dataset", vec![area]),
+    )
+    .await
+    .expect("create dataset");
+    let series = EconomicSeries::create(
+        &pool,
+        &NewEconomicSeries {
+            source_id: source.id,
+            external_id: "VAL.XXX".to_string(),
+            title: "VAL XXX".to_string(),
+            frequency: "Annual".to_string(),
+            dataset_id: dataset.id,
+            dimensions: [("area", "XXX")].into_iter().collect::<SeriesDimensions>(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create series");
+
+    let obs_date = d(2025);
+    let rows = [
+        // Legacy row: revision_date == date, tagged original.
+        (obs_date, dec("30"), d(2025), true),
+        // Real vintage, found much later, also tagged as the date's original release.
+        (
+            obs_date,
+            dec("31"),
+            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+            true,
+        ),
+        (
+            obs_date,
+            dec("32"),
+            NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            false,
+        ),
+    ]
+    .into_iter()
+    .map(|(date, value, revision_date, original)| {
+        (
+            data_points::series_id.eq(series.id),
+            data_points::date.eq(date),
+            data_points::value.eq(Some(value)),
+            data_points::revision_date.eq(revision_date),
+            data_points::is_original_release.eq(original),
+        )
+    })
+    .collect::<Vec<_>>();
+    let mut conn = pool.get().await.expect("connection");
+    diesel::insert_into(data_points::table)
+        .values(&rows)
+        .execute(&mut conn)
+        .await
+        .expect("insert data points");
+
+    let mut conn = connect().await;
+    let mut req = CrossSectionRequest {
+        dataset_id: dataset.id,
+        measure: None,
+        filter: BTreeMap::new(),
+        across: "area".to_string(),
+        date: CrossSectionDate::On(obs_date),
+        as_of: Some(NaiveDate::from_ymd_opt(2026, 7, 1).unwrap()),
+    };
+    let result = cross_section(&mut conn, areas(), &req).await.unwrap();
+    // As of 2026-07-01, the real vintage known then (31) already beats the legacy row on
+    // revision_date, exclusion or not.
+    assert_eq!(result[0].value, Some(dec("31")));
+
+    // As of the legacy row's own revision_date, no real vintage is visible yet, so without
+    // exclusion the legacy row would be the only candidate and would win. Exclusion must drop
+    // it rather than let it stand in for "known on this day".
+    req.as_of = Some(obs_date);
+    let result = cross_section(&mut conn, areas(), &req).await.unwrap();
+    assert_eq!(result[0].value, None);
+}
+
+#[tokio::test]
 async fn areas_come_from_the_reference_file_with_aggregates_marked() {
     let seeded = seed().await;
     let mut conn = connect().await;
@@ -392,6 +562,7 @@ async fn area_is_none_when_across_is_not_the_countries_codelist() {
                 .collect(),
             across: "indicator".to_string(),
             date: CrossSectionDate::Latest,
+            as_of: None,
         },
     )
     .await
@@ -419,6 +590,7 @@ async fn unknown_dataset_is_not_found() {
             filter: BTreeMap::new(),
             across: "area".to_string(),
             date: CrossSectionDate::Latest,
+            as_of: None,
         },
     )
     .await
@@ -517,6 +689,7 @@ async fn a_declared_measure_other_than_value_is_a_bad_request() {
             filter: BTreeMap::new(),
             across: "area".to_string(),
             date: CrossSectionDate::Latest,
+            as_of: None,
         },
     )
     .await

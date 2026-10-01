@@ -609,7 +609,8 @@ type EconomicSeriesType {
 	createdAt: DateTime!
 	updatedAt: DateTime!
 	"""
-	The dataset this series belongs to. Null until its adapter declares one.
+	The dataset this series belongs to. Every series has one; null only if the series or its
+	dataset can no longer be found.
 	"""
 	dataset: Dataset
 	"""
@@ -783,8 +784,13 @@ type Query {
 	`latest: true`; `latest` returns each key's most recent non-null value with its own
 	date. `measure` defaults to the dataset's default measure. Every active matching series
 	is returned, ordered by key, with a null value where it has none.
+	
+	`asOf` reads each series as it was known on that day: its newest revision published on
+	or before it, as data-point vintages record (see the series `asOf` filter). Observations
+	first published after `asOf` are treated as not yet known. Omit it to read the current
+	revision.
 	"""
-	crossSection(datasetId: ID!, measure: String, filter: [DimensionFilterInput!]! = [], across: String!, date: NaiveDate, latest: Boolean): [CrossSectionEntry!]!
+	crossSection(datasetId: ID!, measure: String, filter: [DimensionFilterInput!]! = [], across: String!, date: NaiveDate, latest: Boolean, asOf: NaiveDate): [CrossSectionEntry!]!
 	"""
 	List all data sources
 	"""

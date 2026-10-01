@@ -150,6 +150,11 @@ impl Query {
     /// `latest: true`; `latest` returns each key's most recent non-null value with its own
     /// date. `measure` defaults to the dataset's default measure. Every active matching series
     /// is returned, ordered by key, with a null value where it has none.
+    ///
+    /// `asOf` reads each series as it was known on that day: its newest revision published on
+    /// or before it, as data-point vintages record (see the series `asOf` filter). Observations
+    /// first published after `asOf` are treated as not yet known. Omit it to read the current
+    /// revision.
     #[allow(clippy::too_many_arguments)]
     async fn cross_section(
         &self,
@@ -160,8 +165,12 @@ impl Query {
         across: String,
         date: Option<chrono::NaiveDate>,
         latest: Option<bool>,
+        as_of: Option<chrono::NaiveDate>,
     ) -> Result<Vec<CrossSectionEntry>> {
-        cross_section::resolve(ctx, dataset_id, measure, filter, across, date, latest).await
+        cross_section::resolve(
+            ctx, dataset_id, measure, filter, across, date, latest, as_of,
+        )
+        .await
     }
 
     /// List all data sources
@@ -1096,7 +1105,7 @@ mod empty_series_tests {
     use crate::graphql::schema::create_schema;
     use async_graphql::Request;
     use econ_graph_core::models::{DataSource, EconomicSeries, NewDataSource, NewEconomicSeries};
-    use econ_graph_core::test_utils::get_test_db;
+    use econ_graph_core::test_utils::{get_test_db, test_dataset_id};
     use serial_test::serial;
     use uuid::Uuid;
 
@@ -1125,6 +1134,8 @@ mod empty_series_tests {
         )
         .await
         .expect("create data source");
+        let dataset_id =
+            test_dataset_id(&mut pool.get().await.expect("connection"), source.id).await;
 
         let with_data = EconomicSeries::create(
             pool,
@@ -1144,7 +1155,7 @@ mod empty_series_tests {
                 first_missing_date: None,
                 crawl_status: None,
                 crawl_error_message: None,
-                dataset_id: None,
+                dataset_id,
                 dimensions: Default::default(),
                 default_measure: None,
             },
@@ -1170,7 +1181,7 @@ mod empty_series_tests {
                 first_missing_date: None,
                 crawl_status: None,
                 crawl_error_message: None,
-                dataset_id: None,
+                dataset_id,
                 dimensions: Default::default(),
                 default_measure: None,
             },
@@ -1262,6 +1273,8 @@ mod empty_series_tests {
         )
         .await
         .expect("create empty data source");
+        let dataset_id =
+            test_dataset_id(&mut pool.get().await.expect("connection"), empty_source.id).await;
         EconomicSeries::create(
             &pool,
             &NewEconomicSeries {
@@ -1280,7 +1293,7 @@ mod empty_series_tests {
                 first_missing_date: None,
                 crawl_status: None,
                 crawl_error_message: None,
-                dataset_id: None,
+                dataset_id,
                 dimensions: Default::default(),
                 default_measure: None,
             },

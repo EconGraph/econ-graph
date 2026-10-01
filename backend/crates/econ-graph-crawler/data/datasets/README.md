@@ -5,9 +5,11 @@ One `<source>.toml` per source, named after the lowercase source id
 startup, checks them against the dataset codes each adapter declares in
 `SourceAdapter::datasets()`, and upserts them into the `datasets` table.
 
-A declared code without a definition, or a definition that no adapter declares, stops
-the worker at startup. At crawl time, a series that names an undeclared dataset, or whose
-dimension keys differ from the definition, fails its job before anything is written.
+Every series belongs to a dataset (`economic_series.dataset_id` is `NOT NULL`), so every
+adapter declares at least one. An adapter that declares none, a declared code without a
+definition, or a definition that no adapter declares, stops the worker at startup. At crawl
+time, a series that names an undeclared dataset, or whose dimension keys differ from the
+definition, fails its job before anything is written.
 
 ```toml
 [[dataset]]

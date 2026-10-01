@@ -54,7 +54,7 @@ mod simple_tests {
             first_missing_date: None,
             crawl_status: None,
             crawl_error_message: None,
-            dataset_id: None,
+            dataset_id: Uuid::new_v4(),
             dimensions: Default::default(),
             default_measure: None,
         };

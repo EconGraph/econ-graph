@@ -260,7 +260,8 @@ pub struct Worker {
     /// Settings.
     pub config: WorkerConfig,
     /// Dataset definitions the adapters' series are checked against before they are written.
-    /// Empty unless set with [`with_datasets`](Self::with_datasets).
+    /// Empty unless set with [`with_datasets`](Self::with_datasets), and an empty catalog rejects
+    /// every series, since every series needs a dataset.
     pub datasets: DatasetCatalog,
     handlers: HashMap<(SourceId, JobKind), Arc<dyn JobHandler>>,
     breaker: Mutex<Breaker>,
@@ -656,7 +657,7 @@ impl Worker {
                     Ok(map) => match map.remove(&item.series_id) {
                         Some(Ok(series)) => self
                             .datasets
-                            .check(source, &item.series_id, series.dataset.as_ref())
+                            .check(source, &item.series_id, &series.dataset)
                             .map(|_| JobWrite::Series(series)),
                         Some(Err(e)) => Err(e),
                         None => Err(CrawlError::NotFound(format!(
@@ -725,8 +726,7 @@ impl Worker {
                 .await
         })
         .await?;
-        self.datasets
-            .check(source, external_id, fetched.dataset.as_ref())?;
+        self.datasets.check(source, external_id, &fetched.dataset)?;
         Ok(JobWrite::Series(fetched))
     }
 
@@ -741,9 +741,7 @@ impl Worker {
         let found = guarded(async move { adapter.discover(&ctx).await }).await?;
         self.datasets.check_all(
             source,
-            found
-                .iter()
-                .map(|d| (d.external_id.as_str(), d.dataset.as_ref())),
+            found.iter().map(|d| (d.external_id.as_str(), &d.dataset)),
         )?;
         Ok(JobWrite::Discovery {
             found,

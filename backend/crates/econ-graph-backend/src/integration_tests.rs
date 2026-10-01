@@ -48,6 +48,11 @@ mod tests {
             .expect("Should create data source");
 
         // Create test economic series
+        let dataset_id = econ_graph_core::test_utils::test_dataset_id(
+            &mut pool.get().await.expect("connection"),
+            created_source.id,
+        )
+        .await;
         let new_series = NewEconomicSeries {
             source_id: created_source.id,
             external_id: "TEST_SERIES_001".to_string(),
@@ -64,7 +69,7 @@ mod tests {
             first_missing_date: None,
             crawl_status: None,
             crawl_error_message: None,
-            dataset_id: None,
+            dataset_id,
             dimensions: Default::default(),
             default_measure: None,
         };
@@ -138,7 +143,7 @@ mod tests {
             first_missing_date: None,
             crawl_status: None,
             crawl_error_message: None,
-            dataset_id: None,
+            dataset_id,
             dimensions: Default::default(),
             default_measure: None,
         };

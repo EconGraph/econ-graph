@@ -172,6 +172,9 @@ impl SourceAdapter for Tracking {
     fn id(&self) -> SourceId {
         self.inner.id()
     }
+    fn datasets(&self) -> &[&str] {
+        self.inner.datasets()
+    }
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         self.inner.discover(ctx).await
     }
