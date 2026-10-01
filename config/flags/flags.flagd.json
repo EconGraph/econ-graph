@@ -41,6 +41,16 @@
         "remove_by": "train 3"
       }
     },
+    "technical_analysis": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "build",
+        "owner": "ECO-57",
+        "remove_by": "unscheduled"
+      }
+    },
     "static_catalogs": {
       "state": "ENABLED",
       "variants": { "on": true, "off": false },
