@@ -134,6 +134,12 @@ jobs:
           fi
         done
 
+    # flavor: latest=false is belt-and-suspenders here, not load-bearing: the
+    # only tag type configured is type=raw, and metadata-action's latest=auto
+    # only auto-adds `latest` for type=ref,event=tag / type=semver / type=pep440
+    # / type=match, none of which are in use. It's kept explicit anyway so a
+    # future tag type added to these steps doesn't silently start moving
+    # `latest` from an rc build.
     - name: Metadata for backend image
       id: meta-backend
       if: steps.check.outputs.econ_graph_backend != 'true'
@@ -141,6 +147,7 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-backend
         tags: type=raw,value=sha-${{ steps.sha.outputs.sha }}
+        flavor: latest=false
 
     - name: Metadata for crawler-worker image
       id: meta-crawler-worker
@@ -149,6 +156,7 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-crawler-worker
         tags: type=raw,value=sha-${{ steps.sha.outputs.sha }}
+        flavor: latest=false
 
     - name: Metadata for frontend image
       id: meta-frontend
@@ -157,6 +165,7 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-frontend
         tags: type=raw,value=sha-${{ steps.sha.outputs.sha }}
+        flavor: latest=false
 
     - name: Build and push backend image
       if: steps.check.outputs.econ_graph_backend != 'true'
