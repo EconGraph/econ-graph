@@ -1,113 +1,155 @@
 /**
  * InteractiveWorldMap Component.
  *
- * A D3.js-powered interactive world map component for global economic analysis.
- * Features include country selection, zoom/pan, economic data visualization,
- * and responsive design.
+ * A D3.js choropleth of one indicator's value per country. Values are joined to the outline's
+ * features on the ISO 3166-1 numeric code, which world-atlas uses as feature id. Hovering shows a tooltip;
+ * clicking a country with a value calls `onCountryClick`. The map can be zoomed and panned.
+ *
+ * The SVG is built once per outline, projection and size. New values or a new color scale only
+ * restyle the existing country paths, and hovering only updates the tooltip, so neither rebuilds
+ * the map.
  */
 
-import React, { useRef, useEffect, Suspense } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState, useCallback, Suspense } from 'react';
 import * as d3 from 'd3';
 import * as topojson from 'topojson-client';
-import { Alert, Box, Button, CircularProgress } from '@mui/material';
+import {
+  Alert,
+  Box,
+  Button,
+  CircularProgress,
+  IconButton,
+  Tooltip,
+  Typography,
+} from '@mui/material';
+import { Add, Remove, CenterFocusStrong } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
-import { CountryData, MapViewState } from '../../types/globalAnalysis';
-import { useWorldMap } from './hooks/useWorldMap';
-import { useCountryData } from './hooks/useCountryData';
-import { loadWorldAtlas } from './worldAtlas';
+import { useWorldMap, MAX_ZOOM, MIN_ZOOM } from './hooks/useWorldMap';
+import type { MapCountryValue } from './hooks/useWorldMapData';
+import { worldAtlasQuery } from './worldAtlas';
+import CountryTooltip from './CountryTooltip';
+import { NO_DATA_FILL } from './mapFormat';
 
-interface InteractiveWorldMapProps {
-  /** Array of country data to display on the map. */
-  data: CountryData[];
-  /** Currently selected economic indicator. */
-  selectedIndicator: string;
-  /** Time range for data visualization. */
-  timeRange: { start: Date; end: Date };
-  /** Callback when a country is clicked. */
-  onCountryClick: (country: CountryData) => void;
-  /** Callback when a country is hovered. */
-  onCountryHover: (country: CountryData | null) => void;
-  /** Current map view state. */
-  mapView: MapViewState;
-  /** Callback when map view changes. */
-  onMapViewChange: (view: Partial<MapViewState>) => void;
-  /** Whether animation is enabled. */
-  animationEnabled?: boolean;
+/** Zoom factor of one press of the zoom buttons. */
+const ZOOM_STEP = 1.5;
+
+export interface InteractiveWorldMapProps {
+  /** Values to show, keyed by ISO numeric code. */
+  valuesByIsoNumeric: ReadonlyMap<number, MapCountryValue>;
+  /** Maps a value to its fill. */
+  colorScale: (value: number) => string;
+  /** Unit of the values, for the tooltip. */
+  unit?: string | null;
+  /** Series frequency, e.g. `Annual`, for formatting dates in the tooltip. */
+  frequency?: string | null;
+  /** Called when a country with a value is clicked. */
+  onCountryClick?: (country: MapCountryValue) => void;
   /** Whether to show country borders. */
   showBorders?: boolean;
   /** Whether to show country labels. */
   showLabels?: boolean;
   /** Size of country labels. */
   labelSize?: number;
-  /** Width of the map container. */
+  /** Drawing width; the map scales down to fit a narrower container. */
   width: number;
-  /** Height of the map container. */
+  /** Drawing height. */
   height: number;
-  /** Map projection type. */
+  /** Map projection type, a key of `PROJECTIONS`. */
   projection?: string;
-  /** Color scheme for data visualization. */
-  colorScheme?: string;
 }
 
-// Load the bundled world atlas using React Query
-const useWorldAtlasData = () => {
-  return useQuery({
-    queryKey: ['world-atlas'],
-    queryFn: loadWorldAtlas,
-    staleTime: Infinity, // Atlas data never changes
-    cacheTime: Infinity,
-    suspense: true,
-    // Show a load failure (e.g. a stale chunk after a deploy) in place of the map
-    // instead of throwing it past the Suspense boundary.
-    useErrorBoundary: false,
-    // Retry once for a transient network error rather than the default three;
-    // a chunk that is really missing needs a reload.
-    retry: 1,
-  });
+/** The country under the pointer. */
+interface HoverState {
+  isoNumeric: number | null;
+  name: string;
+  /** Pointer position within the map's box, in pixels. */
+  x: number;
+  y: number;
+  /** The map box's size, to keep the tooltip inside it. */
+  boxWidth: number;
+  boxHeight: number;
+}
+
+// Load the bundled world atlas, suspending until it is in
+const useWorldAtlasData = () => useQuery({ ...worldAtlasQuery, suspense: true });
+
+/**
+ * The ISO numeric code of a world-atlas feature.
+ * @param feature - A country feature; its id is the code as a zero-padded string, e.g. `"040"`.
+ * @returns The code, or null for the few features without one.
+ */
+const featureIsoNumeric = (feature: any): number | null => {
+  if (feature.id === undefined || feature.id === null || feature.id === '') return null;
+  const code = Number(feature.id);
+  return Number.isInteger(code) ? code : null;
 };
 
 // Main map content component - assumes data is loaded
 const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
-  data,
-  selectedIndicator,
-  timeRange: _timeRange,
+  valuesByIsoNumeric,
+  colorScale,
+  unit = null,
+  frequency = null,
   onCountryClick,
-  onCountryHover,
-  mapView: _mapView,
-  onMapViewChange: _onMapViewChange,
-  animationEnabled: _animationEnabled = true,
   showBorders = true,
   showLabels = false,
   labelSize = 12,
   width,
   height,
   projection = 'naturalEarth',
-  colorScheme = 'viridis',
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<HoverState | null>(null);
+  // How the last press on a country was made ('mouse', 'touch' or 'pen'), and the country
+  // last tapped, so that a tap can show the tooltip before a second one opens the country.
+  const lastPointerType = useRef<string | null>(null);
+  const tappedIsoNumeric = useRef<number | null>(null);
 
   // Load world atlas data with Suspense
   const { data: worldData, isError } = useWorldAtlasData();
 
-  // Custom hooks for map logic
-  const { path, zoomBehavior } = useWorldMap(svgRef, projection, [width, height]);
-  const { processedData, colorScale } = useCountryData(data, selectedIndicator, colorScheme);
+  const { path, zoomBehavior, zoomLevel, isTransformed, zoomBy, resetZoom } = useWorldMap(
+    svgRef,
+    projection,
+    [width, height]
+  );
 
-  // Initialize D3 map
+  // The SVG's event handlers read the latest values and callback from here, so new values or a
+  // new callback don't need new handlers, and the map isn't rebuilt for them.
+  const latest = useRef({ valuesByIsoNumeric, colorScale, onCountryClick });
+  // A layout effect runs before the effects below, so they see this render's props.
+  useLayoutEffect(() => {
+    latest.current = { valuesByIsoNumeric, colorScale, onCountryClick };
+  });
+
+  // Color each country path by its value.
+  const applyFills = useCallback(() => {
+    if (!svgRef.current) return;
+    const { valuesByIsoNumeric: values, colorScale: scale } = latest.current;
+    d3.select(svgRef.current)
+      .selectAll('path.country')
+      .each(function (d: any) {
+        const isoNumeric = featureIsoNumeric(d);
+        const entry = isoNumeric === null ? undefined : values.get(isoNumeric);
+        d3.select(this as SVGElement)
+          .attr('data-has-data', entry ? 'true' : 'false')
+          .style('fill', entry ? scale(entry.numericValue) : NO_DATA_FILL)
+          .style('cursor', entry ? 'pointer' : 'default');
+      });
+  }, []);
+
+  // Build the map
   useEffect(() => {
     if (!worldData || !svgRef.current) return;
 
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove(); // Clear previous content
 
-    // Set up SVG dimensions
     svg
-      .attr('width', width)
-      .attr('height', height)
       .attr('viewBox', `0 0 ${width} ${height}`)
       .style('background-color', '#f5f5f5')
-      .style('border-radius', '8px')
-      .style('box-shadow', '0 2px 8px rgba(0,0,0,0.1)');
+      .style('border-radius', '8px');
 
     // Create map container, keeping any zoom the user already applied
     const mapContainer = svg
@@ -115,72 +157,71 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
       .attr('class', 'map-container')
       .attr('transform', d3.zoomTransform(svg.node() as SVGSVGElement).toString());
 
-    // Create countries group
     const countriesGroup = mapContainer.append('g').attr('class', 'countries');
-
-    // Create borders group
     const bordersGroup = mapContainer.append('g').attr('class', 'borders');
 
-    // Create labels group
-    // const labelsGroup = mapContainer.append('g').attr('class', 'labels');
-
-    // Render world map
     const countries = worldData.objects.countries;
     const countriesPath = topojson.feature(worldData, countries) as any;
 
-    // Draw countries
+    const borderStroke = showBorders ? '#ffffff' : '#cccccc';
+    const borderWidth = showBorders ? '1' : '0.5';
+
+    const pointerIn = (event: MouseEvent, d: any) => {
+      const box = boxRef.current?.getBoundingClientRect();
+      setHover({
+        isoNumeric: featureIsoNumeric(d),
+        name: d.properties?.name ?? '',
+        x: box ? event.clientX - box.left : 0,
+        y: box ? event.clientY - box.top : 0,
+        boxWidth: box?.width ?? 0,
+        boxHeight: box?.height ?? 0,
+      });
+      d3.select(event.currentTarget as SVGElement)
+        .style('stroke', '#1976d2')
+        .style('stroke-width', '2');
+    };
+
     countriesGroup
       .selectAll('path.country')
       .data(countriesPath.features)
       .enter()
       .append('path')
       .attr('class', 'country')
+      .attr('data-iso-numeric', (d: any) => featureIsoNumeric(d) ?? '')
+      .attr('data-name', (d: any) => d.properties?.name ?? '')
       .attr('d', (d: any) => path(d))
-      .style('fill', (d: any) => {
-        const countryCode = d.properties.ISO_A2;
-        const countryData = processedData.find(c => c.isoAlpha2 === countryCode);
-
-        if (countryData && countryData.economicIndicators) {
-          const indicator = countryData.economicIndicators.find(
-            ind => ind.name === selectedIndicator
-          );
-          return indicator ? colorScale(indicator.value) : '#d0d0d0';
-        }
-        return '#d0d0d0';
-      })
-      .style('stroke', showBorders ? '#ffffff' : '#cccccc')
-      .style('stroke-width', showBorders ? '1' : '0.5')
+      .style('stroke', borderStroke)
+      .style('stroke-width', borderWidth)
+      .style('vector-effect', 'non-scaling-stroke')
       .style('opacity', '0.9')
-      .style('cursor', 'pointer')
-      .on('click', (event: MouseEvent, d: any) => {
-        const countryCode = d.properties.ISO_A2;
-        const countryData = processedData.find(c => c.isoAlpha2 === countryCode);
-        if (countryData) {
-          onCountryClick(countryData);
-        }
+      .on('pointerdown', (event: { pointerType: string }) => {
+        lastPointerType.current = event.pointerType;
       })
-      .on('mouseover', (event: MouseEvent, d: any) => {
-        const countryCode = d.properties.ISO_A2;
-        const countryData = processedData.find(c => c.isoAlpha2 === countryCode);
-        if (countryData) {
-          onCountryHover(countryData);
-          d3.select(event.currentTarget as SVGElement)
-            .style('stroke', '#1976d2')
-            .style('stroke-width', '3')
-            .style('opacity', '1')
-            .style('filter', 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))');
+      .on('click', (_event: MouseEvent, d: any) => {
+        const isoNumeric = featureIsoNumeric(d);
+        const entry =
+          isoNumeric === null ? undefined : latest.current.valuesByIsoNumeric.get(isoNumeric);
+        // A tap is also the touch hover: the first tap on a country shows its tooltip and
+        // a second tap opens it.
+        if (lastPointerType.current === 'touch' && tappedIsoNumeric.current !== isoNumeric) {
+          tappedIsoNumeric.current = isoNumeric;
+          return;
         }
+        if (!entry) return;
+        tappedIsoNumeric.current = null;
+        latest.current.onCountryClick?.(entry);
       })
+      .on('mouseover', pointerIn)
+      .on('mousemove', pointerIn)
       .on('mouseout', (event: MouseEvent) => {
-        onCountryHover(null);
+        setHover(null);
         d3.select(event.currentTarget as SVGElement)
-          .style('stroke', showBorders ? '#ffffff' : '#cccccc')
-          .style('stroke-width', showBorders ? '1' : '0.5')
-          .style('opacity', '0.9')
-          .style('filter', 'none');
+          .style('stroke', borderStroke)
+          .style('stroke-width', borderWidth);
       });
 
-    // Draw country borders
+    applyFills();
+
     if (showBorders) {
       bordersGroup
         .append('path')
@@ -190,10 +231,11 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
         .style('fill', 'none')
         .style('stroke', '#ffffff')
         .style('stroke-width', '1')
-        .style('opacity', '0.8');
+        .style('vector-effect', 'non-scaling-stroke')
+        .style('opacity', '0.8')
+        .style('pointer-events', 'none');
     }
 
-    // Add country labels
     if (showLabels) {
       countriesGroup
         .selectAll('text.country-label')
@@ -201,14 +243,8 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
         .enter()
         .append('text')
         .attr('class', 'country-label')
-        .attr('x', (d: any) => {
-          const centroid = path.centroid(d);
-          return centroid[0];
-        })
-        .attr('y', (d: any) => {
-          const centroid = path.centroid(d);
-          return centroid[1];
-        })
+        .attr('x', (d: any) => path.centroid(d)[0])
+        .attr('y', (d: any) => path.centroid(d)[1])
         .attr('text-anchor', 'middle')
         .attr('font-size', labelSize)
         .attr('font-family', 'Arial, sans-serif')
@@ -226,9 +262,6 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
     }
   }, [
     worldData,
-    processedData,
-    selectedIndicator,
-    colorScale,
     width,
     height,
     showBorders,
@@ -236,9 +269,13 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
     labelSize,
     path,
     zoomBehavior,
-    onCountryClick,
-    onCountryHover,
+    applyFills,
   ]);
+
+  // Restyle, without rebuilding, when the values or the color scale change.
+  useEffect(() => {
+    applyFills();
+  }, [valuesByIsoNumeric, colorScale, applyFills]);
 
   if (isError) {
     return (
@@ -257,25 +294,97 @@ const WorldMapContent: React.FC<InteractiveWorldMapProps> = ({
     );
   }
 
+  const hoveredEntry =
+    hover && hover.isoNumeric !== null ? valuesByIsoNumeric.get(hover.isoNumeric) : undefined;
+
   return (
     <Box
-      width={width}
-      height={height}
+      ref={boxRef}
+      position='relative'
+      width='100%'
+      maxWidth={width}
       border='2px solid #e0e0e0'
       borderRadius={2}
       overflow='hidden'
-      boxShadow='0 4px 12px rgba(0,0,0,0.15)'
       bgcolor='#fafafa'
+      data-testid='world-map'
     >
       <svg
         ref={svgRef}
-        width={width}
-        height={height}
+        role='img'
+        aria-label='World map'
         style={{
           display: 'block',
-          borderRadius: '6px',
+          width: '100%',
+          height: 'auto',
+          aspectRatio: `${width} / ${height}`,
         }}
       />
+      <Box
+        sx={{
+          position: 'absolute',
+          top: 8,
+          right: 8,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.5,
+          bgcolor: 'rgba(255,255,255,0.85)',
+          borderRadius: 1,
+          px: 0.5,
+        }}
+      >
+        <Typography variant='caption' aria-live='polite' sx={{ minWidth: 40, textAlign: 'right' }}>
+          {Math.round(zoomLevel * 100)}%
+        </Typography>
+        <Tooltip title='Zoom in'>
+          <span>
+            <IconButton
+              size='small'
+              aria-label='Zoom in'
+              onClick={() => zoomBy(ZOOM_STEP)}
+              disabled={zoomLevel >= MAX_ZOOM}
+            >
+              <Add fontSize='small' />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title='Zoom out'>
+          <span>
+            <IconButton
+              size='small'
+              aria-label='Zoom out'
+              onClick={() => zoomBy(1 / ZOOM_STEP)}
+              disabled={zoomLevel <= MIN_ZOOM}
+            >
+              <Remove fontSize='small' />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title='Reset zoom'>
+          <span>
+            <IconButton
+              size='small'
+              aria-label='Reset zoom'
+              onClick={resetZoom}
+              disabled={!isTransformed}
+            >
+              <CenterFocusStrong fontSize='small' />
+            </IconButton>
+          </span>
+        </Tooltip>
+      </Box>
+      {hover && (
+        <CountryTooltip
+          name={hoveredEntry?.name ?? hover.name}
+          entry={hoveredEntry}
+          unit={unit}
+          frequency={frequency}
+          x={hover.x}
+          y={hover.y}
+          boxWidth={hover.boxWidth}
+          boxHeight={hover.boxHeight}
+        />
+      )}
     </Box>
   );
 };
@@ -290,7 +399,8 @@ const InteractiveWorldMap: React.FC<InteractiveWorldMapProps> = props => {
           justifyContent='center'
           alignItems='center'
           height={props.height}
-          width={props.width}
+          width='100%'
+          maxWidth={props.width}
         >
           <CircularProgress />
         </Box>

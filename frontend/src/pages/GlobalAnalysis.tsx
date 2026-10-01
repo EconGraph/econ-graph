@@ -8,7 +8,6 @@ import {
   Paper,
   Breadcrumbs,
   Link,
-  Alert,
   Fade,
   useTheme,
   useMediaQuery,
@@ -16,11 +15,10 @@ import {
 import { Public, Timeline, CompareArrows, Assessment, Home } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 
-// Import our new global analysis components
-import GlobalAnalysisDemo from './GlobalAnalysisDemo';
+import WorldMapTab from '../components/global/WorldMapTab';
 
-// The comparison and events tabs aren't on real data yet (MAP-6, train 1); compiled out of the
-// release build until then (docs/build-flags.md). ECO-105.
+// The comparison and events tabs aren't on real data; compiled out of the release build until
+// they are (docs/build-flags.md). ECO-105.
 const MultiCountryDashboard = __FLAGS__.global_analysis_tabs
   ? lazy(() => import('../components/global/MultiCountryDashboard'))
   : null;
@@ -101,19 +99,12 @@ const GlobalAnalysis: React.FC = () => {
             fontWeight: 'bold',
           }}
         >
-          🌍 Global Economic Network Analysis
+          Global Analysis
         </Typography>
 
         <Typography variant='h6' color='text.secondary' paragraph>
-          Explore economic interconnections, cross-country correlations, and global event impacts
-          across the world's major economies in real-time.
+          Compare countries on World Bank development indicators.
         </Typography>
-
-        <Alert severity='info' sx={{ mb: 3 }}>
-          <strong>Bloomberg Terminal-Level Analysis:</strong> This platform provides
-          institutional-grade global economic network analysis, correlation mapping, and
-          cross-country impact assessment typically found only in premium financial terminals.
-        </Alert>
       </Box>
 
       {/* Navigation Tabs */}
@@ -127,7 +118,7 @@ const GlobalAnalysis: React.FC = () => {
         >
           <Tab
             value='map'
-            label='Network Map'
+            label='World Map'
             icon={<Public />}
             iconPosition='start'
             {...a11yProps('map')}
@@ -175,15 +166,14 @@ const GlobalAnalysis: React.FC = () => {
             sx={{ display: 'flex', alignItems: 'center', gap: 1 }}
           >
             <Public color='primary' />
-            Interactive Global Economic Network Map
+            World Map
           </Typography>
           <Typography variant='body1' color='text.secondary' paragraph>
-            Visualize economic correlations between countries as an interactive network. Node size
-            represents economic centrality, colors indicate economic health, and connections show
-            correlation strength between countries.
+            Each country is colored by its latest value of the chosen indicator. Countries differ in
+            how recent their latest value is; the legend gives the range of dates.
           </Typography>
         </Box>
-        <GlobalAnalysisDemo />
+        <WorldMapTab />
       </TabPanel>
 
       {MultiCountryDashboard && (
@@ -290,15 +280,6 @@ const GlobalAnalysis: React.FC = () => {
           </Paper>
         </TabPanel>
       )}
-
-      {/* Footer */}
-      <Box sx={{ mt: 6, pt: 3, borderTop: '1px solid', borderColor: 'divider' }}>
-        <Typography variant='body2' color='text.secondary' align='center'>
-          <strong>EconGraph Global Analysis Platform</strong> - Professional-grade economic network
-          analysis and cross-country correlation tools for institutional research and policy
-          analysis.
-        </Typography>
-      </Box>
     </Container>
   );
 };

@@ -1,49 +1,96 @@
 /**
  * MapLegend Component.
  *
- * Legend component for displaying color scale and value ranges
- * for the world map visualization.
+ * The world map's legend: the indicator and its unit, the color scale with the value range, the
+ * fill of countries without data, and the dates the values come from. Each country shows its
+ * own latest value, so the dates can differ between countries; the legend says so.
  */
 
 import React from 'react';
 import { Box, Typography, Paper } from '@mui/material';
 import * as d3 from 'd3';
-import { EconomicIndicator } from '../../types/globalAnalysis';
+import { formatMapDate, NO_DATA_FILL } from './mapFormat';
 
 interface MapLegendProps {
-  colorScale: d3.ScaleSequential<string, never>;
-  indicator: EconomicIndicator;
+  colorScale: (value: number) => string;
+  /** Indicator name. */
+  indicator: string;
+  unit: string | null;
+  frequency: string | null;
   dataRange: { min: number; max: number };
+  /** Earliest and latest value dates; null when no country has a value. */
+  dateRange: { earliest: string; latest: string } | null;
+  /** Number of countries with a value on the map. */
+  countryCount: number;
+  /** Number of countries with a value but no shape on the map, such as Kosovo. */
+  undrawnCount: number;
 }
 
-const MapLegend: React.FC<MapLegendProps> = ({ colorScale, indicator, dataRange }) => {
-  const numSegments = 100;
-  const segmentWidth = 100 / numSegments;
+const formatBound = (value: number) => value.toLocaleString('en-US', { maximumFractionDigits: 2 });
 
-  const gradientStops = d3.range(numSegments).map(i => {
+const MapLegend: React.FC<MapLegendProps> = ({
+  colorScale,
+  indicator,
+  unit,
+  frequency,
+  dataRange,
+  dateRange,
+  countryCount,
+  undrawnCount,
+}) => {
+  const numSegments = 20;
+  const gradientStops = d3.range(numSegments + 1).map(i => {
     const value = dataRange.min + (i / numSegments) * (dataRange.max - dataRange.min);
-    return { offset: `${i * segmentWidth}%`, color: colorScale(value) };
+    return `${colorScale(value)} ${(i / numSegments) * 100}%`;
   });
 
+  let datesNote: string | null = null;
+  if (dateRange) {
+    const earliest = formatMapDate(dateRange.earliest, frequency);
+    const latest = formatMapDate(dateRange.latest, frequency);
+    datesNote =
+      earliest === latest
+        ? `Latest values, all for ${latest}.`
+        : `Each country's latest value, so dates differ: ${earliest} to ${latest}.`;
+  }
+
   return (
-    <Paper sx={{ p: 2, mt: 2, width: '100%', maxWidth: 300 }}>
-      <Typography variant='subtitle2' gutterBottom>
-        {indicator}
-      </Typography>
-      <Box
-        sx={{
-          width: '100%',
-          height: 20,
-          background: `linear-gradient(to right, ${gradientStops.map(s => `${s.color} ${s.offset}`).join(', ')})`,
-          borderRadius: 1,
-          mb: 1,
-        }}
-      />
-      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-        <Typography variant='caption'>{dataRange.min.toFixed(2)}</Typography>
-        <Typography variant='caption'>{dataRange.max.toFixed(2)}</Typography>
+    <Paper variant='outlined' sx={{ p: 2 }} data-testid='map-legend'>
+      <Typography variant='subtitle2'>{indicator}</Typography>
+      {unit && (
+        <Typography variant='caption' color='text.secondary' component='div'>
+          Unit: {unit}
+        </Typography>
+      )}
+      {countryCount > 0 ? (
+        <>
+          <Box
+            sx={{
+              mt: 1,
+              height: 16,
+              background: `linear-gradient(to right, ${gradientStops.join(', ')})`,
+              borderRadius: 1,
+            }}
+          />
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+            <Typography variant='caption'>{formatBound(dataRange.min)}</Typography>
+            <Typography variant='caption'>{formatBound(dataRange.max)}</Typography>
+          </Box>
+        </>
+      ) : null}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+        <Box
+          sx={{ width: 16, height: 12, bgcolor: NO_DATA_FILL, borderRadius: 0.5, flexShrink: 0 }}
+        />
+        <Typography variant='caption'>No data</Typography>
       </Box>
-      {/* Future: Add interactive slider for filtering or highlighting */}
+      <Typography variant='caption' color='text.secondary' component='div' sx={{ mt: 1 }}>
+        {countryCount === 1 ? '1 country' : `${countryCount} countries`} with data.
+        {datesNote ? ` ${datesNote}` : ''}
+        {undrawnCount > 0
+          ? ` ${undrawnCount === 1 ? '1 more has' : `${undrawnCount} more have`} no shape on the map; see the table.`
+          : ''}
+      </Typography>
     </Paper>
   );
 };
