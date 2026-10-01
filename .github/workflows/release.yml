@@ -53,6 +53,14 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.ref_name, '-rc.'))
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Shared across every ref (a main-branch workflow_dispatch and an rc tag
+    # push for the same commit use different github.ref values, so the
+    # top-level group wouldn't serialize them against each other), so two
+    # runs for the same commit can never both pass the "already exists"
+    # check before either has pushed.
+    concurrency:
+      group: ${{ github.workflow }}-candidate-build
+      cancel-in-progress: false
 
     steps:
     - name: Checkout code
@@ -110,11 +118,19 @@ jobs:
         for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend; do
           ref="${REGISTRY}/${owner}/${image}:${sha_tag}"
           key="$(echo "${image}" | tr '-' '_')"
-          if docker buildx imagetools inspect "${ref}" >/dev/null 2>&1; then
+          if inspect_err="$(docker buildx imagetools inspect "${ref}" 2>&1 >/dev/null)"; then
             echo "${ref} already exists; will not rebuild it."
             echo "${key}=true" >> "$GITHUB_OUTPUT"
-          else
+          elif echo "${inspect_err}" | grep -qiE 'manifest unknown|not found'; then
+            echo "${ref} doesn't exist yet; will build it."
             echo "${key}=false" >> "$GITHUB_OUTPUT"
+          else
+            # Anything else (auth, network, registry outage) is not the same
+            # as "doesn't exist" - treating it as missing could build and
+            # push a duplicate of an image that's actually already there.
+            echo "release.yml: couldn't check whether ${ref} exists:" >&2
+            echo "${inspect_err}" >&2
+            exit 1
           fi
         done
 
@@ -219,10 +235,15 @@ jobs:
     # (e.g. v4.0.0 and a same-day v4.0.1 patch) must never resolve "newest
     # release" and retag concurrently, since each decides and writes `latest`
     # from a read of the same tag list. Serializing (never cancelling) makes
-    # that read-then-write race impossible instead of just unlikely.
+    # that read-then-write race impossible instead of just unlikely. `queue:
+    # max` (default is `single`) lets more than one publish run wait its
+    # turn instead of a newer tag push cancelling an already-queued one -
+    # release tags are pushed one at a time by tag.sh, so this is mostly
+    # belt-and-suspenders, not a case that comes up in practice.
     concurrency:
       group: ${{ github.workflow }}-publish
       cancel-in-progress: false
+      queue: max
 
     steps:
     - name: Checkout code
