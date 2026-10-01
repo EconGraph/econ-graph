@@ -370,6 +370,36 @@ pub fn revision_filter(
     }
 }
 
+/// Excludes synthetic legacy rows from `asOf`/`originalOnly` reads, without deleting or rewriting
+/// any row.
+///
+/// Before this crate tracked vintages, sources like FRED were crawled current-values-only and
+/// stored with `revision_date = date` and `is_original_release = true` — a legacy row that really
+/// means "current value as of the crawl", not "known on this observation date". A genuine same-day
+/// original release is common and must stay (a source can really publish on the observation
+/// date), so this can't just exclude every `revision_date = date` original: it only excludes one
+/// when the *same date* also carries another row also tagged `is_original_release` at a
+/// *different* `revision_date` — two rows both claiming to be the date's original release, which
+/// only happens when a legacy row (`revision_date = date`) sits alongside the real earliest
+/// vintage the crawler has since found, at its own later `revision_date` (adapters mark a date's
+/// earliest fetched vintage as its original release). A date with exactly one
+/// `is_original_release` row, at any `revision_date`, is untouched.
+pub fn exclude_synthetic_legacy_rows(
+) -> Box<dyn BoxableExpression<data_points::table, diesel::pg::Pg, SqlType = Bool>> {
+    Box::new(sql::<Bool>(
+        "NOT (\
+           data_points.revision_date = data_points.date AND data_points.is_original_release \
+           AND EXISTS (\
+             SELECT 1 FROM data_points other_original \
+             WHERE other_original.series_id = data_points.series_id \
+             AND other_original.date = data_points.date \
+             AND other_original.is_original_release \
+             AND other_original.revision_date <> data_points.date\
+           )\
+         )",
+    ))
+}
+
 /// **DataTransformation Enum**
 ///
 /// Defines the mathematical transformations that can be applied to economic time series data.

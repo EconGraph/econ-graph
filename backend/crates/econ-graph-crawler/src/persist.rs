@@ -14,6 +14,7 @@
 //! - [`retire_unlisted`]: marks series a complete catalog no longer lists inactive (never deletes).
 //! - [`record_attempt`]: one `crawl_attempts` row per processed job (when the series exists).
 //! - [`latest_point_date`]: the `since` bound for incremental fetches.
+//! - [`latest_revision_date`]: the known-vintage bound for sources that track vintages.
 //!
 //! A series that names a dataset ([`SeriesDataset`]) is written with the dataset's id and its
 //! dimension values. `default_measure` on a series is an override of the dataset's and is not
@@ -68,7 +69,10 @@ pub struct SeriesWrite {
     pub points_upserted: usize,
     /// Data points that did not exist before (`points_upserted` minus revisions of existing rows).
     pub points_new: usize,
-    /// Latest observation date in the input, if any.
+    /// Latest observation date in the input, if any. For an incremental fetch from a
+    /// vintage-tracking adapter this is only the input's latest date, which may be an old date
+    /// (a revision) or absent, not the series' overall latest date; read
+    /// `economic_series.end_date` for that.
     pub latest_date: Option<NaiveDate>,
 }
 
@@ -306,6 +310,41 @@ pub async fn latest_point_date(
         return Ok(None);
     };
     latest_point_date_by_id(pool, series_id).await
+}
+
+/// Newest stored `revision_date` for `(source, external_id)`; `None` if the series or its points
+/// don't exist. The known-vintage bound for sources that
+/// [track vintages](crate::SourceAdapter::tracks_vintages).
+///
+/// Rows with `revision_date = date` that are original releases are ignored. FRED used to store
+/// every point that way (current values, no vintages), and counting them would pass the newest
+/// observation date off as a known vintage, so the first vintage fetch would skip all history.
+/// A real vintage published on its own observation date is ignored too; that only makes the
+/// bound earlier, which re-reads vintages the upsert already has. A series whose every vintage
+/// is published on its own observation date never gets a bound and is fetched in full on every
+/// crawl: correct, just costly, and rare on FRED.
+pub async fn latest_revision_date(
+    pool: &DatabasePool,
+    source: SourceId,
+    external_id: &str,
+) -> AppResult<Option<NaiveDate>> {
+    let Some(series_id) = find_series_id(pool, source, external_id).await? else {
+        return Ok(None);
+    };
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    #[derive(QueryableByName)]
+    struct MaxRow {
+        #[diesel(sql_type = Nullable<Date>)]
+        d: Option<NaiveDate>,
+    }
+    let row: MaxRow = diesel::sql_query(
+        "SELECT MAX(revision_date) AS d FROM data_points \
+         WHERE series_id = $1 AND NOT (revision_date = date AND is_original_release)",
+    )
+    .bind::<SqlUuid, _>(series_id)
+    .get_result(&mut conn)
+    .await?;
+    Ok(row.d)
 }
 
 #[derive(QueryableByName)]

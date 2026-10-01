@@ -27,7 +27,8 @@ pub struct SourcePolicy {
     pub needs_api_key: bool,
     /// How far before the latest stored observation an incremental fetch starts, so recent
     /// revisions are re-fetched (`since = latest - revision_lookback`). Zero re-fetches only
-    /// from the latest stored date.
+    /// from the latest stored date. Unused for sources whose adapter
+    /// [tracks vintages](crate::SourceAdapter::tracks_vintages): they fetch by vintage instead.
     pub revision_lookback: Duration,
     /// Most `fetch_series` jobs the worker claims and fetches together in one
     /// [`SourceAdapter::fetch_batch`](crate::SourceAdapter::fetch_batch) call. Only applies to

@@ -297,7 +297,14 @@ async fn fetch_one(
         pool: pool.clone(),
         keys: ApiKeys::from_env(),
     };
-    let since = if full {
+    let known_vintage = if full || !adapter.tracks_vintages() {
+        None
+    } else {
+        persist::latest_revision_date(&pool, source, external_id).await?
+    };
+    // A vintage-tracking adapter gets no `since`: with a known vintage it ignores it, and
+    // without one it must fetch every date's history.
+    let since = if full || adapter.tracks_vintages() {
         None
     } else {
         persist::latest_point_date(&pool, source, external_id)
@@ -307,8 +314,10 @@ async fn fetch_one(
     let mut datasets = DatasetCatalog::empty();
     datasets.load_adapter(&*adapter)?;
     persist::sync_datasets(&pool, &datasets).await?;
-    tracing::info!(%source, series_id = external_id, ?since, "fetching");
-    let fetched = adapter.fetch_series(&ctx, external_id, since).await?;
+    tracing::info!(%source, series_id = external_id, ?since, ?known_vintage, "fetching");
+    let fetched = adapter
+        .fetch_series_incremental(&ctx, external_id, since, known_vintage)
+        .await?;
     datasets.check(source, external_id, fetched.dataset.as_ref())?;
     let write = persist::persist_series(&pool, source, external_id, &fetched).await?;
     Ok(format!(

@@ -27,21 +27,26 @@
 //! Handler-owned persistence is outside this fence; see [`JobHandler`].
 //!
 //! Dispatch by `kind`: a [`JobHandler`] registered for `(source, kind)` wins; otherwise
-//! `fetch_series` calls [`SourceAdapter::fetch_series`] with
-//! `since` = the latest stored observation date minus the source's
+//! `fetch_series` calls
+//! [`SourceAdapter::fetch_series_incremental`].
+//! Most adapters get `since` = the latest stored observation date minus the source's
 //! [`revision_lookback`](crate::SourcePolicy::revision_lookback) (so recent revisions are
-//! re-fetched; `None` for a series with no stored points) and `discover_catalog` calls
+//! re-fetched; `None` for a series with no stored points). Adapters that
+//! [track vintages](crate::SourceAdapter::tracks_vintages) get no `since` and the newest stored
+//! `revision_date` as the known vintage instead. `discover_catalog` calls
 //! [`SourceAdapter::discover`]. Adapter and handler calls run in
 //! their own task, so a panic becomes a `Transient` error instead of killing the worker.
 //!
-//! Batching: when the claimed item is a `fetch_series` job with no registered handler, its
-//! source's [`max_batch`](crate::SourcePolicy::max_batch) is above 1 and the adapter gives its
+//! Batching: when the claimed item is a `fetch_series` job with no registered handler, the
+//! adapter doesn't [track vintages](crate::SourceAdapter::tracks_vintages), its source's
+//! [`max_batch`](crate::SourcePolicy::max_batch) is above 1 and the adapter gives its
 //! series a [`batch_key`](crate::SourceAdapter::batch_key), the worker also claims up to
 //! `max_batch - 1` other due `fetch_series` jobs of that source with the same key (looking at the
 //! next `max_batch * `[`BATCH_SCAN_PER_SLOT`] due jobs of the source, at most [`BATCH_SCAN_MAX`])
 //! and fetches them all with one [`SourceAdapter::fetch_batch`]
 //! call, passing the earliest `since` of the batch. A keyed item that finds no mates is fetched
-//! alone through `fetch_series`. Each job then keeps its own result: its own persistence, its own
+//! alone through the single-item path (`fetch_series_incremental`). Each job then keeps its own
+//! result: its own persistence, its own
 //! `crawl_attempts` row and its own transition from the table above, so one bad series fails
 //! only its own job. An error for the whole call applies to every job in the batch. The breaker
 //! below counts each batch call as one result: the call's error, else any per-series
@@ -507,6 +512,12 @@ impl Worker {
             return None;
         }
         let adapter = self.registry.get(source)?;
+        // A vintage-tracking adapter's `fetch_batch` default would drop `known_vintage` and
+        // fall back to `since`, silently losing vintage handling; batching such an adapter
+        // needs a batch method that forwards it.
+        if adapter.tracks_vintages() {
+            return None;
+        }
         let key = adapter.batch_key(&lead.series_id)?;
         let candidates = match CrawlQueueItem::due_candidates(
             &self.ctx.pool,
@@ -689,13 +700,31 @@ impl Worker {
             .registry
             .get(source)
             .ok_or_else(|| CrawlError::Permanent(format!("no adapter registered for {source}")))?;
-        let latest = persist::latest_point_date(&self.ctx.pool, source, external_id)
-            .await
-            .map_err(db_error)?;
-        let since = latest.and_then(|d| incremental_since(d, self.ctx.http.policy(source)));
+        let known_vintage = if adapter.tracks_vintages() {
+            persist::latest_revision_date(&self.ctx.pool, source, external_id)
+                .await
+                .map_err(db_error)?
+        } else {
+            None
+        };
+        // A vintage-tracking adapter gets no `since`: with a known vintage it ignores it, and
+        // without one it must fetch every date's history.
+        let since = if adapter.tracks_vintages() {
+            None
+        } else {
+            persist::latest_point_date(&self.ctx.pool, source, external_id)
+                .await
+                .map_err(db_error)?
+                .and_then(|d| incremental_since(d, self.ctx.http.policy(source)))
+        };
         let ctx = self.ctx.clone();
         let id = external_id.to_string();
-        let fetched = guarded(async move { adapter.fetch_series(&ctx, &id, since).await }).await?;
+        let fetched = guarded(async move {
+            adapter
+                .fetch_series_incremental(&ctx, &id, since, known_vintage)
+                .await
+        })
+        .await?;
         self.datasets
             .check(source, external_id, fetched.dataset.as_ref())?;
         Ok(JobWrite::Series(fetched))

@@ -201,6 +201,32 @@ pub trait SourceAdapter: Send + Sync {
         since: Option<NaiveDate>,
     ) -> Result<FetchedSeries, CrawlError>;
 
+    /// Whether this source publishes vintages (each observation's revisions, with real
+    /// publication dates). The worker then passes the newest stored `revision_date` to
+    /// [`fetch_series_incremental`](Self::fetch_series_incremental).
+    fn tracks_vintages(&self) -> bool {
+        false
+    }
+
+    /// Incremental fetch for a series already stored. `since` is as for
+    /// [`fetch_series`](Self::fetch_series). `known_vintage` is the newest `revision_date` already
+    /// stored for the series, given only when [`tracks_vintages`](Self::tracks_vintages) is true:
+    /// every vintage published on or before it is stored, so the adapter asks only for later ones.
+    ///
+    /// The default ignores `known_vintage`. An adapter that wraps another must forward this and
+    /// [`tracks_vintages`](Self::tracks_vintages), or the wrapped adapter's vintage handling is
+    /// bypassed.
+    async fn fetch_series_incremental(
+        &self,
+        ctx: &CrawlCtx,
+        external_id: &str,
+        since: Option<NaiveDate>,
+        known_vintage: Option<NaiveDate>,
+    ) -> Result<FetchedSeries, CrawlError> {
+        let _ = known_vintage;
+        self.fetch_series(ctx, external_id, since).await
+    }
+
     /// Groups series that one upstream request can fetch together: the worker only batches
     /// `fetch_series` jobs whose ids return the same key (up to the policy's
     /// [`max_batch`](SourcePolicy::max_batch)). `None`, the default, never batches the series.

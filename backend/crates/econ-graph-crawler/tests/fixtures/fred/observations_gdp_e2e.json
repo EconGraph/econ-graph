@@ -8,7 +8,7 @@
   "file_type": "json",
   "order_by": "observation_date",
   "sort_order": "asc",
-  "count": 6,
+  "count": 8,
   "offset": 0,
   "limit": 100000,
   "observations": [
@@ -17,6 +17,8 @@
     {"realtime_start": "2025-09-25", "realtime_end": "9999-12-31", "date": "2025-04-01", "value": "30485.729"},
     {"realtime_start": "2025-10-30", "realtime_end": "2025-12-22", "date": "2025-07-01", "value": "."},
     {"realtime_start": "2025-12-23", "realtime_end": "9999-12-31", "date": "2025-07-01", "value": "31095.089"},
-    {"realtime_start": "2026-04-29", "realtime_end": "9999-12-31", "date": "2026-01-01", "value": "31722.514"}
+    {"realtime_start": "2026-01-30", "realtime_end": "9999-12-31", "date": "2025-10-01", "value": "."},
+    {"realtime_start": "2026-04-29", "realtime_end": "9999-12-31", "date": "2026-01-01", "value": "31722.514"},
+    {"realtime_start": "2026-07-30", "realtime_end": "9999-12-31", "date": "2026-04-01", "value": "32101.6"}
   ]
 }
