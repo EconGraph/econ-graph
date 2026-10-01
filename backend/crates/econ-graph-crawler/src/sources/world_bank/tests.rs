@@ -235,7 +235,7 @@ async fn fetch_batch_one_request_for_every_area() {
     assert_eq!(meta.title, "GDP per capita (current US$): United States");
     assert_eq!(meta.units.as_deref(), Some("current US$"));
     assert_eq!(meta.frequency.as_deref(), Some("Annual"));
-    let ds = usa.dataset.as_ref().unwrap();
+    let ds = &usa.dataset;
     assert_eq!(ds.code, DATASET);
     assert_eq!(
         serde_json::to_value(&ds.dimensions).unwrap(),
@@ -446,7 +446,7 @@ async fn discover_lists_areas_with_values_indicator_by_indicator() {
         found
             .iter()
             .filter_map(|s| {
-                let d = &s.dataset.as_ref()?.dimensions.0;
+                let d = &s.dataset.dimensions.0;
                 (d["indicator"] == ind).then(|| d["area"].clone())
             })
             .collect()
@@ -466,7 +466,7 @@ async fn discover_lists_areas_with_values_indicator_by_indicator() {
     let position = |id: &str| indicators.iter().position(|i| i.id == id).unwrap();
     let order: Vec<usize> = found
         .iter()
-        .map(|s| position(&s.dataset.as_ref().unwrap().dimensions.0["indicator"]))
+        .map(|s| position(&s.dataset.dimensions.0["indicator"]))
         .collect();
     assert!(order.windows(2).all(|w| w[0] <= w[1]), "{order:?}");
 

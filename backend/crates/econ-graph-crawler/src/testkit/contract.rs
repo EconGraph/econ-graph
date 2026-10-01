@@ -60,7 +60,7 @@ pub async fn assert_fetch_ok(
             p.revision_date
         );
     }
-    assert_series_datasets(adapter, [(external_id, series.dataset.as_ref())]);
+    assert_series_datasets(adapter, [(external_id, &series.dataset)]);
     series
 }
 
@@ -188,9 +188,7 @@ pub async fn assert_discover_ok(
     }
     assert_series_datasets(
         adapter,
-        found
-            .iter()
-            .map(|s| (s.external_id.as_str(), s.dataset.as_ref())),
+        found.iter().map(|s| (s.external_id.as_str(), &s.dataset)),
     );
     found
 }
@@ -200,7 +198,7 @@ pub async fn assert_discover_ok(
 /// against them with [`assert_series_datasets_in`].
 pub fn assert_series_datasets<'a>(
     adapter: &dyn SourceAdapter,
-    series: impl IntoIterator<Item = (&'a str, Option<&'a SeriesDataset>)>,
+    series: impl IntoIterator<Item = (&'a str, &'a SeriesDataset)>,
 ) {
     let mut catalog = DatasetCatalog::empty();
     catalog
@@ -209,13 +207,13 @@ pub fn assert_series_datasets<'a>(
     assert_series_datasets_in(&catalog, adapter, series);
 }
 
-/// Panics unless every series in `series` passes [`DatasetCatalog::check_all`]: its dataset (if
-/// any) is declared by `adapter`, its dimension keys match the definition, and no two series share
-/// a dataset and dimension values.
+/// Panics unless every series in `series` passes [`DatasetCatalog::check_all`]: its dataset is
+/// declared by `adapter`, its dimension keys match the definition, and no two series share a
+/// dataset and dimension values.
 pub fn assert_series_datasets_in<'a>(
     catalog: &DatasetCatalog,
     adapter: &dyn SourceAdapter,
-    series: impl IntoIterator<Item = (&'a str, Option<&'a SeriesDataset>)>,
+    series: impl IntoIterator<Item = (&'a str, &'a SeriesDataset)>,
 ) {
     if let Err(e) = catalog.check_all(adapter.id(), series) {
         panic!("{:?} dataset contract: {e}", adapter.id());

@@ -159,6 +159,37 @@ impl DatabaseTestExt for TestContainer {
     }
 }
 
+/// Code of the dataset [`test_dataset_id`] creates.
+pub const TEST_DATASET: &str = "test";
+
+/// Id of `source_id`'s [`TEST_DATASET`] dataset (no dimensions), created if missing. For tests
+/// that insert series by hand: every series needs a dataset of its own source.
+///
+/// Panics if the query fails.
+pub async fn test_dataset_id(
+    conn: &mut diesel_async::AsyncPgConnection,
+    source_id: uuid::Uuid,
+) -> uuid::Uuid {
+    use diesel_async::RunQueryDsl;
+
+    #[derive(diesel::QueryableByName)]
+    struct Row {
+        #[diesel(sql_type = diesel::sql_types::Uuid)]
+        id: uuid::Uuid,
+    }
+    // DO UPDATE (a no-op) rather than DO NOTHING, so RETURNING also yields an existing row.
+    diesel::sql_query(
+        "INSERT INTO datasets (source_id, code, name) VALUES ($1, $2, 'Test dataset') \
+         ON CONFLICT (source_id, code) DO UPDATE SET code = EXCLUDED.code RETURNING id",
+    )
+    .bind::<diesel::sql_types::Uuid, _>(source_id)
+    .bind::<diesel::sql_types::Text, _>(TEST_DATASET)
+    .get_result::<Row>(conn)
+    .await
+    .expect("creating the test dataset")
+    .id
+}
+
 /// Global test database instance
 static TEST_DB: OnceCell<Arc<TestContainer>> = OnceCell::const_new();
 

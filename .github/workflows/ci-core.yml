@@ -339,6 +339,13 @@ jobs:
         RUST_LOG: warn
         FLAGS_PROFILE: release
 
+    # REL-3 "nothing fake" check, backend half: a release build's default feature set must
+    # not include the unfinished xbrl-parser or dev-only static-catalogs features.
+    - name: Check release build default features
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        ./scripts/check-release-features.sh
+
     # The frontend validates its GraphQL operations against the committed
     # schema.graphql, so the file must match what the backend serves. To
     # regenerate it: UPDATE_SCHEMA=1 cargo test -p econ-graph-graphql --test schema_snapshot
@@ -928,6 +935,10 @@ jobs:
     - name: Check build flags compile code out
       working-directory: frontend
       run: npm run check:flag-bundle
+
+    - name: Check the release bundle has no fake/placeholder content
+      working-directory: frontend
+      run: npm run check:release-authenticity
 
 
   quality-checks:
