@@ -304,20 +304,27 @@ mod db_tests {
             "INSERT INTO data_sources (name, description, base_url)
              VALUES ('search-test', 'search tests', 'http://localhost')
              ON CONFLICT (name) DO NOTHING",
+            // Every series needs a dataset of its source.
+            "INSERT INTO datasets (source_id, code, name)
+             SELECT id, 'test', 'Test dataset' FROM data_sources WHERE name = 'search-test'
+             ON CONFLICT (source_id, code) DO NOTHING",
             "INSERT INTO economic_series
-                 (source_id, external_id, title, description, frequency, end_date)
-             SELECT id, v.e, v.t, v.d, 'Monthly', '2020-01-01'::date FROM data_sources,
+                 (source_id, external_id, title, description, frequency, end_date, dataset_id)
+             SELECT ds.id, v.e, v.t, v.d, 'Monthly', '2020-01-01'::date, d.id
+             FROM data_sources ds JOIN datasets d ON d.source_id = ds.id AND d.code = 'test',
              (VALUES ('srch_UNRATE', 'Unemployment Rate',
                       'Unemployed persons as a share of the labor force'),
                      ('srch_CPI', 'Consumer Price Index for All Urban Consumers',
                       'Measure of inflation in prices paid by urban consumers'),
                      ('srch_HOUSES', 'New Dwellings Begun', NULL)) v(e, t, d)
-             WHERE name = 'search-test'",
+             WHERE ds.name = 'search-test'",
             // A discovered series with no data yet (e.g. its source adapter was removed before
             // ever crawling it): must never appear in search results.
-            "INSERT INTO economic_series (source_id, external_id, title, description, frequency)
-             SELECT id, 'srch_NODATA', 'Unemployment No Data Series', NULL, 'Monthly'
-             FROM data_sources WHERE name = 'search-test'",
+            "INSERT INTO economic_series
+                 (source_id, external_id, title, description, frequency, dataset_id)
+             SELECT ds.id, 'srch_NODATA', 'Unemployment No Data Series', NULL, 'Monthly', d.id
+             FROM data_sources ds JOIN datasets d ON d.source_id = ds.id AND d.code = 'test'
+             WHERE ds.name = 'search-test'",
         ] {
             diesel::sql_query(sql).execute(&mut conn).await.unwrap();
         }

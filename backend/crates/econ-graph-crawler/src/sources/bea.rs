@@ -563,7 +563,7 @@ impl BeaAdapter {
                     units: meta.units,
                     frequency: meta.frequency,
                     data_url: None,
-                    dataset: Some(dataset),
+                    dataset,
                 });
             }
         }
@@ -608,7 +608,7 @@ impl BeaAdapter {
                     units: None,
                     frequency: Some(Frequency::Annual.label().into()),
                     data_url: None,
-                    dataset: Some(dataset),
+                    dataset,
                 });
             }
         }
@@ -683,13 +683,14 @@ impl BeaAdapter {
                     "BEA {id}: no line {line} in {table_name} ({})",
                     frequency.code()
                 ))),
-                Some(rows) => nipa_series(table, frequency, rows, &repeated).map(|mut s| {
-                    if stale_table {
-                        s.metadata = None;
-                    }
-                    s.dataset = Some(series.dataset());
-                    s
-                }),
+                Some(rows) => {
+                    nipa_series(table, frequency, rows, &repeated, series.dataset()).map(|mut s| {
+                        if stale_table {
+                            s.metadata = None;
+                        }
+                        s
+                    })
+                }
             };
             out.insert((*id).clone(), result);
         }
@@ -756,13 +757,13 @@ impl BeaAdapter {
                 None => Err(CrawlError::NotFound(format!(
                     "BEA {id}: no data for area {geo} in {table_name} line {line}"
                 ))),
-                Some(rows) => regional_series(table, &line_desc, line, geo, rows).map(|mut s| {
-                    if stale_table || stale_line {
-                        s.metadata = None;
-                    }
-                    s.dataset = Some(series.dataset());
-                    s
-                }),
+                Some(rows) => regional_series(table, &line_desc, line, geo, rows, series.dataset())
+                    .map(|mut s| {
+                        if stale_table || stale_line {
+                            s.metadata = None;
+                        }
+                        s
+                    }),
             };
             out.insert((*id).clone(), result);
         }
@@ -1033,6 +1034,7 @@ fn nipa_series(
     frequency: Frequency,
     rows: &[&NipaRow],
     repeated: &HashSet<&str>,
+    dataset: SeriesDataset,
 ) -> Result<FetchedSeries, CrawlError> {
     let first = rows[0];
     let repeated = repeated.contains(first.line_description.trim());
@@ -1044,7 +1046,7 @@ fn nipa_series(
     Ok(FetchedSeries {
         metadata: Some(metadata),
         points,
-        dataset: None,
+        dataset,
     })
 }
 
@@ -1054,6 +1056,7 @@ fn regional_series(
     line: &str,
     geo: &str,
     rows: &[&RegionalRow],
+    dataset: SeriesDataset,
 ) -> Result<FetchedSeries, CrawlError> {
     let first = rows[0];
     let mult = unit_mult(first.unit_mult.as_deref())?;
@@ -1071,7 +1074,7 @@ fn regional_series(
     Ok(FetchedSeries {
         metadata: Some(metadata),
         points,
-        dataset: None,
+        dataset,
     })
 }
 
@@ -1588,14 +1591,14 @@ mod tests {
         );
         assert_eq!(
             gdp.dataset,
-            Some(SeriesDataset::new(
+            SeriesDataset::new(
                 NIPA_DATASET,
                 [
                     ("table_name", "T10105"),
                     ("line_number", "1"),
                     ("frequency", "Q")
                 ]
-            ))
+            )
         );
         assert_eq!(
             by_id("bea_nipa/T10101.1.A").units.as_deref(),
@@ -1677,7 +1680,7 @@ mod tests {
             .iter()
             .all(|p| p.revision_date == p.date && p.is_original_release));
         assert_eq!(
-            s.dataset.unwrap(),
+            s.dataset,
             nipa_dimensions("T10105", "1", Frequency::Quarterly)
         );
         mock.server().verify().await;
@@ -1914,10 +1917,7 @@ mod tests {
         assert_eq!(ca.points.len(), 3);
         assert_eq!(ca.points[0].date, d("2021-01-01"));
         assert_eq!(ca.points[0].value, dec("3598103000000"));
-        assert_eq!(
-            ca.dataset.as_ref().unwrap(),
-            &regional_dimensions("SAGDP2N", "1", "06000")
-        );
+        assert_eq!(&ca.dataset, &regional_dimensions("SAGDP2N", "1", "06000"));
         // `(D)` (suppressed) is a point without a value.
         let wy = out["bea_regional/SAGDP2N.1.56000"].as_ref().unwrap();
         assert_eq!(wy.points.len(), 1);

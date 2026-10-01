@@ -1,110 +1,69 @@
 /**
  * WorldMapControls Component.
  *
- * Control panel for the interactive world map including zoom controls,
- * projection selection, and color scheme options.
+ * Projection and color scheme pickers for the world map. Zoom controls sit on the map itself.
  */
 
 import React from 'react';
-import {
-  Box,
-  Button,
-  ButtonGroup,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Typography,
-} from '@mui/material';
-import { Add, Remove, Public, Explore, TravelExplore } from '@mui/icons-material';
-import { useGlobalAnalysis } from '../../contexts/GlobalAnalysisContext';
-// Note: ProjectionType and ColorScheme types are used by the context, not directly in this component
+import { Box, FormControl, InputLabel, Select, MenuItem } from '@mui/material';
+import { PROJECTIONS } from './hooks/useWorldMap';
+import { COLOR_SCHEMES } from './hooks/useCountryData';
 
-const WorldMapControls: React.FC = () => {
-  const { state, actions } = useGlobalAnalysis();
+interface WorldMapControlsProps {
+  /** A key of `PROJECTIONS`. */
+  projection: string;
+  onProjectionChange: (projection: string) => void;
+  /** A key of `COLOR_SCHEMES`. */
+  colorScheme: string;
+  onColorSchemeChange: (colorScheme: string) => void;
+}
 
-  const handleZoom = (factor: number) => {
-    actions.setMapView({
-      ...state.mapView,
-      scale: state.mapView.scale * factor,
-    });
-  };
-
-  const handleProjectionChange = (event: any) => {
-    actions.setProjection(event.target.value);
-  };
-
-  const handleColorSchemeChange = (event: any) => {
-    actions.setColorScheme(event.target.value);
-  };
-
-  return (
-    <Box
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 2,
-        p: 2,
-        border: '1px solid #e0e0e0',
-        borderRadius: 2,
-      }}
-    >
-      <Typography variant='h6' gutterBottom>
-        Map Controls
-      </Typography>
-
-      {/* Zoom Controls */}
-      <Box>
-        <Typography variant='subtitle2' gutterBottom>
-          Zoom
-        </Typography>
-        <ButtonGroup variant='outlined' aria-label='zoom controls'>
-          <Button onClick={() => handleZoom(1.2)}>
-            <Add />
-          </Button>
-          <Button onClick={() => handleZoom(0.8)}>
-            <Remove />
-          </Button>
-        </ButtonGroup>
-      </Box>
-
-      {/* Projection Selector */}
-      <FormControl fullWidth size='small'>
-        <InputLabel id='projection-select-label'>Projection</InputLabel>
-        <Select
-          labelId='projection-select-label'
-          value={state.projection}
-          label='Projection'
-          onChange={handleProjectionChange}
-        >
-          <MenuItem value='geoNaturalEarth1'>
-            <Public sx={{ mr: 1 }} /> Natural Earth
-          </MenuItem>
-          <MenuItem value='geoMercator'>
-            <Explore sx={{ mr: 1 }} /> Mercator
-          </MenuItem>
-          <MenuItem value='geoOrthographic'>
-            <TravelExplore sx={{ mr: 1 }} /> Orthographic
-          </MenuItem>
-        </Select>
-      </FormControl>
-
-      {/* Color Scheme Selector */}
-      <FormControl fullWidth size='small'>
-        <InputLabel id='color-scheme-select-label'>Color Scheme</InputLabel>
-        <Select
-          labelId='color-scheme-select-label'
-          value={state.colorScheme}
-          label='Color Scheme'
-          onChange={handleColorSchemeChange}
-        >
-          <MenuItem value='viridis'>Viridis</MenuItem>
-          <MenuItem value='blues'>Blues</MenuItem>
-          <MenuItem value='reds'>Reds</MenuItem>
-        </Select>
-      </FormControl>
-    </Box>
-  );
+const COLOR_SCHEME_NAMES: Record<keyof typeof COLOR_SCHEMES, string> = {
+  viridis: 'Viridis',
+  blues: 'Blues',
+  reds: 'Reds',
+  greens: 'Greens',
 };
+
+const WorldMapControls: React.FC<WorldMapControlsProps> = ({
+  projection,
+  onProjectionChange,
+  colorScheme,
+  onColorSchemeChange,
+}) => (
+  <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+    <FormControl size='small' sx={{ minWidth: 160 }}>
+      <InputLabel id='projection-select-label'>Projection</InputLabel>
+      <Select
+        labelId='projection-select-label'
+        value={projection}
+        label='Projection'
+        onChange={event => onProjectionChange(event.target.value)}
+      >
+        {Object.entries(PROJECTIONS).map(([key, { name }]) => (
+          <MenuItem key={key} value={key}>
+            {name}
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+
+    <FormControl size='small' sx={{ minWidth: 140 }}>
+      <InputLabel id='color-scheme-select-label'>Color scheme</InputLabel>
+      <Select
+        labelId='color-scheme-select-label'
+        value={colorScheme}
+        label='Color scheme'
+        onChange={event => onColorSchemeChange(event.target.value)}
+      >
+        {Object.entries(COLOR_SCHEME_NAMES).map(([key, name]) => (
+          <MenuItem key={key} value={key}>
+            {name}
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+  </Box>
+);
 
 export default WorldMapControls;

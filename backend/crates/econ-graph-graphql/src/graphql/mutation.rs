@@ -583,9 +583,10 @@ mod tests {
         assert!(err(input(&["NOPE"], &[], None, None)).contains("unknown source"));
         assert!(err(input(&[], &["GDP"], Some("NOPE"), None)).contains("unknown source"));
         // IMF has no adapter in any build (its series ids were made up). The static catalogs
-        // (ECB and friends) can't be asserted against here: they register in this same test
-        // binary's dev-profile build via `debug_assertions`, so only a --release build excludes
-        // them (see the crawler crate's own `default_registry_holds_exactly_the_live_sources`).
+        // (ECB and friends) can't be asserted against here: they register whenever the
+        // `static_catalogs` build flag is on, which this test binary's dev profile build is by
+        // default, so only a FLAGS_PROFILE=release build excludes them (see the crawler crate's
+        // own `default_registry_holds_exactly_the_live_sources`).
         assert!(err(input(&["IMF"], &[], None, None)).contains("not available in this build"));
         assert!(err(input(&["FRED"], &[], None, Some(0))).contains("priority"));
         assert!(err(input(&["FRED"], &[], None, Some(11))).contains("priority"));

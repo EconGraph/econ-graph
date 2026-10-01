@@ -18,6 +18,10 @@
       "kind": "build",
       "value": true
     },
+    "static_catalogs": {
+      "kind": "build",
+      "value": true
+    },
     "technical_analysis": {
       "kind": "build",
       "value": false

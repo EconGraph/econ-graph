@@ -13,9 +13,15 @@ import InteractiveWorldMap from '../InteractiveWorldMap';
 vi.unmock('d3-geo');
 vi.unmock('d3-zoom');
 
-vi.mock('../worldAtlas', () => ({
-  loadWorldAtlas: vi.fn(() => Promise.reject(new Error('chunk failed to load'))),
-}));
+vi.mock('../worldAtlas', async importOriginal => {
+  const actual = await importOriginal<typeof import('../worldAtlas')>();
+  const loadWorldAtlas = vi.fn(() => Promise.reject(new Error('chunk failed to load')));
+  return {
+    ...actual,
+    loadWorldAtlas,
+    worldAtlasQuery: { ...actual.worldAtlasQuery, queryFn: loadWorldAtlas },
+  };
+});
 
 describe('InteractiveWorldMap atlas load failure', () => {
   it('shows an error instead of the map', async () => {
@@ -26,13 +32,8 @@ describe('InteractiveWorldMap atlas load failure', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <InteractiveWorldMap
-          data={[]}
-          selectedIndicator='gdp'
-          timeRange={{ start: new Date('2020-01-01'), end: new Date('2024-01-01') }}
-          onCountryClick={vi.fn()}
-          onCountryHover={vi.fn()}
-          mapView={{ scale: 1, translation: [0, 0], rotation: [0, 0, 0] }}
-          onMapViewChange={vi.fn()}
+          valuesByIsoNumeric={new Map()}
+          colorScale={() => '#000'}
           width={800}
           height={400}
         />

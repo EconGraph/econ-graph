@@ -13,7 +13,7 @@ test.describe('World atlas', () => {
       const external = url.origin !== appOrigin;
       if (
         url.hostname === 'cdn.jsdelivr.net' ||
-        (external && /world-atlas|110m/.test(url.pathname))
+        (external && /world-atlas|countries-\d+m/.test(url.pathname))
       ) {
         externalRequests.push(url.href);
       }
@@ -26,7 +26,7 @@ test.describe('World atlas', () => {
   });
 
   test('shows an error with a reload action when the outline fails to load', async ({ page }) => {
-    await page.route('**/*countries-110m*', route => route.abort());
+    await page.route('**/*countries-50m*', route => route.abort());
 
     await page.goto('/global');
 

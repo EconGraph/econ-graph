@@ -289,7 +289,7 @@ impl FredAdapter {
                         units: meta.units,
                         frequency: meta.frequency,
                         data_url: Some(format!("{FRED_WEB_SERIES_URL}/{id}")),
-                        dataset: Some(fred_dataset()),
+                        dataset: fred_dataset(),
                     });
                 }
                 Err(e) => {
@@ -397,7 +397,7 @@ impl FredAdapter {
         Ok(FetchedSeries {
             metadata: Some(metadata),
             points,
-            dataset: Some(fred_dataset()),
+            dataset: fred_dataset(),
         })
     }
 }
@@ -613,7 +613,7 @@ mod tests {
             Some("Seasonally Adjusted Annual Rate")
         );
         assert!(m.description.unwrap().starts_with("BEA Account Code"));
-        assert_eq!(s.dataset, Some(fred_dataset()));
+        assert_eq!(s.dataset, fred_dataset());
 
         // One point per vintage, revision_date = realtime_start, the earliest vintage of each
         // date is its original release, and "." is kept as a missing value.
@@ -1061,7 +1061,7 @@ mod tests {
             Some("https://fred.stlouisfed.org/series/GDP")
         );
         for s in &found {
-            let ds = s.dataset.as_ref().expect("every FRED series has a dataset");
+            let ds = &s.dataset;
             assert_eq!(ds.code, DATASET, "{}", s.external_id);
             assert!(ds.dimensions.0.is_empty(), "{}", s.external_id);
         }

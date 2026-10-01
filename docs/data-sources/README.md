@@ -82,7 +82,7 @@ prefix ECO), not here.
 
 | Change | Source | PR |
 |---|---|---|
-| The ten static catalogs are registered only with the `static-catalogs` cargo feature, so they are absent from release builds. The IMF adapter is deleted (its ids were made up); `SourceId::Imf` stays for a later SDMX adapter | Static catalogs, IMF | #217 |
+| The ten static catalogs are registered only with the `static-catalogs` cargo feature, so they are absent from release builds (later replaced by the `static_catalogs` build flag, #311). The IMF adapter is deleted (its ids were made up); `SourceId::Imf` stays for a later SDMX adapter | Static catalogs, IMF | #217 |
 | A Census key is required, and a missing key fails before any request | Census BDS | #207 |
 | FRED records ALFRED vintages: `revision_date = realtime_start` | FRED | #214 |
 | The series list moves to a data file of 291 series (no discovery request), fetched 50 per request (25 keyless), footnotes parsed and logged but not stored | BLS | #235 |

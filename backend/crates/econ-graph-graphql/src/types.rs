@@ -128,7 +128,8 @@ impl EconomicSeriesType {
         self.updated_at
     }
 
-    /// The dataset this series belongs to. Null until its adapter declares one.
+    /// The dataset this series belongs to. Every series has one; null only if the series or its
+    /// dataset can no longer be found.
     async fn dataset(&self, ctx: &Context<'_>) -> Result<Option<DatasetType>> {
         let (_, dataset) = self.load_dataset(ctx).await?;
         Ok(dataset.map(DatasetType))
@@ -305,7 +306,7 @@ impl EconomicSeriesType {
 impl From<EconomicSeries> for EconomicSeriesType {
     fn from(series: EconomicSeries) -> Self {
         let dataset_fields = Some(SeriesDatasetFields {
-            dataset_id: series.dataset_id,
+            dataset_id: Some(series.dataset_id),
             dimensions: series.dimensions,
             default_measure: series.default_measure,
         });

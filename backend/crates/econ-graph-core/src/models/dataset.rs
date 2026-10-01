@@ -150,8 +150,8 @@ impl DatasetComponents {
 }
 
 /// A series' dimension values within its dataset, stored as a flat `jsonb` object of strings,
-/// e.g. `{"geo_level": "state", "state": "06", "variable": "ESTAB"}`. Empty for a series with
-/// no dataset or in a dimensionless dataset.
+/// e.g. `{"geo_level": "state", "state": "06", "variable": "ESTAB"}`. Empty for a series in a
+/// dimensionless dataset (or a catalog row without a dataset).
 #[derive(
     Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, AsExpression, FromSqlRow,
 )]
