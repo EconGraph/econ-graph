@@ -40,6 +40,16 @@
         "owner": "ECO-105",
         "remove_by": "train 3"
       }
+    },
+    "static_catalogs": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "build",
+        "owner": "ECO-142",
+        "remove_by": "unscheduled"
+      }
     }
   }
 }

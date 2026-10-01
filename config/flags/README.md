@@ -115,11 +115,18 @@ run `node scripts/flags-merge`, and remove the code paths for its other value.
 
 - `build_canary` (build, off in release, on in dev, `remove_by: unscheduled`)
   guards a module with a unique marker string, so CI can prove a release bundle
-  leaves flagged-off code out. It is the one permanent build flag.
+  leaves flagged-off code out. It is one of two permanent build flags (see
+  `static_catalogs` below), kept rather than removed because it's a standing
+  check, not unfinished work.
 - `mcp` (build, off in release, on in dev, `remove_by: train 2`, owner ECO-123,
   the issue that gates `/mcp` behind the flag) compiles `/mcp` out of release
   builds while MCP is unfinished. It becomes an ops flag when
   MCP ships.
+- `static_catalogs` (build, off in release, on in dev, `remove_by: unscheduled`,
+  owner ECO-142) registers `econ-graph-crawler`'s ten hardcoded dev-only source
+  catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO). Unlike the
+  other seeded flags it is meant to stay: these catalogs are a development
+  convenience, not unfinished work, so there is no release train to remove it by.
 
 ## Updating the vendored schema
 
