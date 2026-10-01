@@ -6,7 +6,7 @@
 // database, and run the embedded migrations once without dropping the schema.
 
 use async_graphql::{Request, Variables};
-use diesel::ExpressionMethods;
+use diesel::{ExpressionMethods, QueryDsl};
 use econ_graph_core::database::{create_pool, run_migrations};
 use econ_graph_core::models::dataset::{
     ComponentType, Dataset, DatasetComponent, NewDataset, SeriesDimensions,
@@ -126,13 +126,14 @@ async fn seed(pool: &DatabasePool) -> Uuid {
 }
 
 const QUERY: &str = r#"
-query ($datasetId: ID!, $date: NaiveDate, $latest: Boolean) {
+query ($datasetId: ID!, $date: NaiveDate, $latest: Boolean, $asOf: NaiveDate) {
   crossSection(
     datasetId: $datasetId
     filter: [{dimension: "indicator", value: "GDP"}]
     across: "area"
     date: $date
     latest: $latest
+    asOf: $asOf
   ) {
     key
     area { name iso3 isoNumeric kind }
@@ -186,6 +187,65 @@ async fn cross_section_returns_areas_and_values() {
                 "flags": [],
             },
         ]})
+    );
+}
+
+#[tokio::test]
+async fn as_of_reads_the_revision_known_on_that_day() {
+    let pool = test_pool().await;
+    let dataset_id = seed(&pool).await;
+
+    // seed() stores USA's 2023 value (1.5) with revision_date 2023-12-31; add a later
+    // revision (2.5) published 2024-06-01.
+    use econ_graph_core::schema::economic_series;
+    let mut conn = pool.get().await.expect("connection");
+    let usa_id: Uuid = diesel_async::RunQueryDsl::get_result(
+        economic_series::table
+            .filter(economic_series::dataset_id.eq(Some(dataset_id)))
+            .filter(economic_series::external_id.eq("GDP.USA"))
+            .select(economic_series::id),
+        &mut conn,
+    )
+    .await
+    .expect("find USA series");
+    let obs_date = NaiveDate::from_ymd_opt(2023, 12, 31).unwrap();
+    let insert = diesel::insert_into(data_points::table).values((
+        data_points::series_id.eq(usa_id),
+        data_points::date.eq(obs_date),
+        data_points::value.eq(Some("2.5".parse::<BigDecimal>().unwrap())),
+        data_points::revision_date.eq(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
+        data_points::is_original_release.eq(false),
+    ));
+    diesel_async::RunQueryDsl::execute(insert, &mut conn)
+        .await
+        .expect("insert revision");
+
+    let response = run(
+        &pool,
+        json!({"datasetId": dataset_id.to_string(), "date": "2023-12-31", "asOf": "2023-12-31"}),
+    )
+    .await;
+    assert!(response.errors.is_empty(), "{:?}", response.errors);
+    let data = response.data.into_json().unwrap();
+    assert_eq!(data["crossSection"][0]["key"], json!("USA"));
+    assert_eq!(
+        data["crossSection"][0]["value"],
+        json!("1.500000"),
+        "before the revision"
+    );
+
+    let response = run(
+        &pool,
+        json!({"datasetId": dataset_id.to_string(), "date": "2023-12-31", "asOf": "2024-06-01"}),
+    )
+    .await;
+    assert!(response.errors.is_empty(), "{:?}", response.errors);
+    let data = response.data.into_json().unwrap();
+    assert_eq!(data["crossSection"][0]["key"], json!("USA"));
+    assert_eq!(
+        data["crossSection"][0]["value"],
+        json!("2.500000"),
+        "on or after the revision"
     );
 }
 

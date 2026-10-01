@@ -150,6 +150,11 @@ impl Query {
     /// `latest: true`; `latest` returns each key's most recent non-null value with its own
     /// date. `measure` defaults to the dataset's default measure. Every active matching series
     /// is returned, ordered by key, with a null value where it has none.
+    ///
+    /// `asOf` reads each series as it was known on that day: its newest revision published on
+    /// or before it, as data-point vintages record (see the series `asOf` filter). Observations
+    /// first published after `asOf` are treated as not yet known. Omit it to read the current
+    /// revision.
     #[allow(clippy::too_many_arguments)]
     async fn cross_section(
         &self,
@@ -160,8 +165,12 @@ impl Query {
         across: String,
         date: Option<chrono::NaiveDate>,
         latest: Option<bool>,
+        as_of: Option<chrono::NaiveDate>,
     ) -> Result<Vec<CrossSectionEntry>> {
-        cross_section::resolve(ctx, dataset_id, measure, filter, across, date, latest).await
+        cross_section::resolve(
+            ctx, dataset_id, measure, filter, across, date, latest, as_of,
+        )
+        .await
     }
 
     /// List all data sources

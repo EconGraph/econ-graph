@@ -108,6 +108,7 @@ impl From<CrossSectionRow> for CrossSectionEntry {
 }
 
 /// Resolves `crossSection`; see [`crate::graphql::query::Query`].
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn resolve(
     ctx: &Context<'_>,
     dataset_id: ID,
@@ -116,6 +117,7 @@ pub(crate) async fn resolve(
     across: String,
     date: Option<NaiveDate>,
     latest: Option<bool>,
+    as_of: Option<NaiveDate>,
 ) -> async_graphql::Result<Vec<CrossSectionEntry>> {
     let dataset_id = Uuid::parse_str(&dataset_id)
         .map_err(|_| bad_request(format!("datasetId {:?} is not a UUID", dataset_id.as_str())))?;
@@ -139,6 +141,7 @@ pub(crate) async fn resolve(
         filter: pinned,
         across,
         date,
+        as_of,
     };
 
     let areas = reference::areas().map_err(|e| {
