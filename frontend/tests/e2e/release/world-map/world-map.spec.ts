@@ -4,6 +4,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { OIDC_ISSUER } from '../env';
 import { SEEDED_WDI } from '../fixtures';
 
 // Live QA: the world map shows a value for every country World Development Indicators are
@@ -47,12 +48,24 @@ test.describe('World map release spec', () => {
     baseURL,
   }) => {
     const appOrigin = new URL(baseURL ?? 'http://localhost:3000').origin;
+    // Release auth calls go straight to the backend (VITE_API_URL, playwright.release.config.ts),
+    // a different origin from the frontend, and a deployed run signs in against an external OIDC
+    // issuer; both are legitimate and not what this check is for. Everything else external is
+    // flagged regardless of path, so an outline request under an unrecognized path is still
+    // caught, not just the jsdelivr.net CDN and the `world-atlas`/`countries-NNm` paths it used
+    // to serve them from.
+    const backendOrigin = `http://localhost:${Number(process.env.RELEASE_BACKEND_PORT ?? 18080)}`;
+    const allowedOrigins = new Set(
+      [appOrigin, backendOrigin, OIDC_ISSUER ? new URL(OIDC_ISSUER).origin : null].filter(
+        (origin): origin is string => origin !== null
+      )
+    );
     const externalOutlineRequests: string[] = [];
     page.on('request', request => {
       const url = new URL(request.url());
       if (
-        url.hostname === 'cdn.jsdelivr.net' ||
-        (url.origin !== appOrigin && /world-atlas|countries-\d+m/.test(url.pathname))
+        (url.protocol === 'http:' || url.protocol === 'https:') &&
+        !allowedOrigins.has(url.origin)
       ) {
         externalOutlineRequests.push(url.href);
       }
