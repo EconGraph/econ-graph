@@ -201,7 +201,7 @@ async fn as_of_reads_the_revision_known_on_that_day() {
     let mut conn = pool.get().await.expect("connection");
     let usa_id: Uuid = diesel_async::RunQueryDsl::get_result(
         economic_series::table
-            .filter(economic_series::dataset_id.eq(Some(dataset_id)))
+            .filter(economic_series::dataset_id.eq(dataset_id))
             .filter(economic_series::external_id.eq("GDP.USA"))
             .select(economic_series::id),
         &mut conn,

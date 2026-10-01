@@ -453,7 +453,7 @@ async fn as_of_excludes_a_pre_vintage_legacy_row() {
             external_id: "VAL.XXX".to_string(),
             title: "VAL XXX".to_string(),
             frequency: "Annual".to_string(),
-            dataset_id: Some(dataset.id),
+            dataset_id: dataset.id,
             dimensions: [("area", "XXX")].into_iter().collect::<SeriesDimensions>(),
             ..Default::default()
         },
