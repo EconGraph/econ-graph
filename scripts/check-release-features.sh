@@ -110,11 +110,23 @@ if [[ ${#static_catalogs_crates_with_feature[@]} -eq 0 ]]; then
 fi
 
 dockerfile="backend/Dockerfile"
-if ! grep -qE '^ARG CARGO_FEATURES=""$' "$dockerfile"; then
-  echo "::error::$dockerfile's CARGO_FEATURES build arg no longer defaults to empty, so a plain docker build could enable xbrl-parser or static-catalogs in a release image without anyone passing --build-arg."
-  fail=1
+if grep -q "CARGO_FEATURES" "$dockerfile"; then
+  # The build-arg mechanism still exists (pre-FLAGS-4, or reintroduced): it must default to empty.
+  if ! grep -qE '^ARG CARGO_FEATURES=""$' "$dockerfile"; then
+    echo "::error::$dockerfile's CARGO_FEATURES build arg no longer defaults to empty, so a plain docker build could enable xbrl-parser or static-catalogs in a release image without anyone passing --build-arg."
+    fail=1
+  else
+    echo "ok: $dockerfile's CARGO_FEATURES build arg defaults to empty"
+  fi
 else
-  echo "ok: $dockerfile's CARGO_FEATURES build arg defaults to empty"
+  # FLAGS-4 removed the build-arg mechanism entirely: the builder stage's cargo build must not
+  # pass --features at all, so there's no way to turn a feature on via a Docker build-arg.
+  if grep -qE 'cargo build .*--features' "$dockerfile"; then
+    echo "::error::$dockerfile has no CARGO_FEATURES build-arg, but its cargo build still passes --features from somewhere — check what enables it."
+    fail=1
+  else
+    echo "ok: $dockerfile has no CARGO_FEATURES build-arg and its cargo build passes no --features at all"
+  fi
 fi
 
 exit $fail
