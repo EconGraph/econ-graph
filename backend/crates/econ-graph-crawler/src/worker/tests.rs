@@ -57,6 +57,10 @@ async fn db() -> Option<Db> {
             diesel::sql_query(sql).execute(&mut conn).await.unwrap();
         }
     }
+    // Every series needs a dataset, so the test adapters' datasets are always synced.
+    persist::sync_datasets(&pool, &test_catalog())
+        .await
+        .unwrap();
     Some(Db {
         pool,
         _guard: guard,
@@ -87,8 +91,14 @@ struct CatalogBody {
 
 /// Dataset the test adapter declares: dimensions `indicator` and `area`.
 const DATASET: &str = "t5_ds";
+/// The test adapters' other dataset, with no dimensions, for every other series.
+const FLAT: &str = "t5_flat";
 
 const DATASET_TOML: &str = r#"
+[[dataset]]
+code = "t5_flat"
+name = "Flat test dataset"
+
 [[dataset]]
 code = "t5_ds"
 name = "Test dataset"
@@ -106,30 +116,45 @@ label = "Area"
 /// - `t5_ds/{indicator}.{area}` is in [`DATASET`] under its canonical id;
 /// - `t5_badkeys_*` has the wrong dimension keys;
 /// - `t5_undeclared_*` names a dataset the adapter does not declare;
-/// - anything else has none.
-fn test_dataset(external_id: &str) -> Option<SeriesDataset> {
+/// - anything else is in [`FLAT`].
+fn test_dataset(external_id: &str) -> SeriesDataset {
     if let Some((indicator, area)) = external_id
         .strip_prefix("t5_ds/")
         .and_then(|rest| rest.rsplit_once('.'))
     {
-        Some(SeriesDataset::new(
-            DATASET,
-            [("indicator", indicator), ("area", area)],
-        ))
+        SeriesDataset::new(DATASET, [("indicator", indicator), ("area", area)])
     } else if external_id.starts_with("t5_badkeys_") {
-        Some(SeriesDataset::new(DATASET, [("indicator", external_id)]))
+        SeriesDataset::new(DATASET, [("indicator", external_id)])
     } else if external_id.starts_with("t5_undeclared_") {
-        Some(SeriesDataset::new("t5_other", [("indicator", external_id)]))
+        SeriesDataset::new("t5_other", [("indicator", external_id)])
     } else {
-        None
+        flat()
+    }
+}
+
+/// A series of the dimensionless [`FLAT`] dataset.
+fn flat() -> SeriesDataset {
+    SeriesDataset::new(FLAT, Vec::<(String, String)>::new())
+}
+
+/// A fetch with no metadata and no points, in [`FLAT`].
+fn empty_fetch() -> FetchedSeries {
+    FetchedSeries {
+        metadata: None,
+        points: Vec::new(),
+        dataset: flat(),
     }
 }
 
 fn test_catalog() -> DatasetCatalog {
     let mut c = DatasetCatalog::empty();
     for id in [SRC, OTHER] {
-        c.insert(id, &[DATASET], parse_dataset_file(DATASET_TOML).unwrap())
-            .unwrap();
+        c.insert(
+            id,
+            &[DATASET, FLAT],
+            parse_dataset_file(DATASET_TOML).unwrap(),
+        )
+        .unwrap();
     }
     c
 }
@@ -141,7 +166,7 @@ impl SourceAdapter for TestAdapter {
     }
 
     fn datasets(&self) -> &[&str] {
-        &[DATASET]
+        &[DATASET, FLAT]
     }
 
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
@@ -544,7 +569,7 @@ async fn revision_filter_picks_latest_and_as_of_revisions() {
                 revision("2024-02-01", "5", "2024-05-01", true),
                 revision("2024-01-01", "2", "2024-03-01", false),
             ],
-            dataset: None,
+            dataset: flat(),
         },
     )
     .await
@@ -631,7 +656,7 @@ async fn exclude_synthetic_legacy_rows_keeps_asof_and_original_only_correct() {
                 revision("2025-04-01", "30353.902", "2025-08-28", false),
                 revision("2025-04-01", "30485.729", "2025-09-25", false),
             ],
-            dataset: None,
+            dataset: flat(),
         },
     )
     .await
@@ -697,7 +722,7 @@ async fn revision_filter_breaks_same_day_ties_and_pages_after_filtering() {
                 revision("2024-02-01", "21", "2024-04-01", false),
                 revision("2024-03-01", "30", "2024-04-01", true),
             ],
-            dataset: None,
+            dataset: flat(),
         },
     )
     .await
@@ -818,7 +843,7 @@ async fn fred_vintages_first_and_incremental_fetch() {
         ID,
         &FetchedSeries {
             metadata: None,
-            dataset: None,
+            dataset: SeriesDataset::new("FRED", Vec::<(String, String)>::new()),
             points: vec![revision("2025-04-01", "30485.729", "2025-04-01", true)],
         },
     )
@@ -908,7 +933,7 @@ async fn server_error_retries_with_counted_attempt_and_backoff() {
     mock.mount(&Route::get("/series/t5_err"), Reply::status(500))
         .await;
     // Pre-existing series, so the failed attempt is recorded against it.
-    let write = persist::persist_series(&db.pool, SRC, "t5_err", &FetchedSeries::default())
+    let write = persist::persist_series(&db.pool, SRC, "t5_err", &empty_fetch())
         .await
         .unwrap();
     let w = worker(&db.pool, &mock);
@@ -1138,6 +1163,20 @@ struct DatasetRowTest {
     updated_at: chrono::DateTime<Utc>,
 }
 
+/// `datasets.id` of [`FLAT`] under [`SRC`].
+async fn flat_dataset_id(pool: &DatabasePool) -> Uuid {
+    let source_id = persist::data_source_id(pool, SRC).await.unwrap();
+    let mut conn = pool.get().await.unwrap();
+    use econ_graph_core::schema::datasets::dsl as ds;
+    ds::datasets
+        .filter(ds::source_id.eq(source_id))
+        .filter(ds::code.eq(FLAT))
+        .select(ds::id)
+        .first(&mut conn)
+        .await
+        .unwrap()
+}
+
 async fn dataset_row(pool: &DatabasePool, source: SourceId) -> Vec<DatasetRowTest> {
     let source_id = persist::data_source_id(pool, source).await.unwrap();
     let mut conn = pool.get().await.unwrap();
@@ -1156,7 +1195,8 @@ async fn dataset_row(pool: &DatabasePool, source: SourceId) -> Vec<DatasetRowTes
 async fn sync_datasets_upserts_rows() {
     let Some(db) = db().await else { return };
     let mut catalog = test_catalog();
-    assert_eq!(persist::sync_datasets(&db.pool, &catalog).await.unwrap(), 2);
+    // Two datasets under each of two sources.
+    assert_eq!(persist::sync_datasets(&db.pool, &catalog).await.unwrap(), 4);
     let first = dataset_row(&db.pool, SRC).await;
     assert_eq!(first.len(), 1);
     assert_eq!(first[0].name, "Test dataset");
@@ -1174,8 +1214,8 @@ async fn sync_datasets_upserts_rows() {
     catalog
         .insert(
             SRC,
-            &[DATASET],
-            parse_dataset_file(&DATASET_TOML.replace("Test dataset", "Renamed")).unwrap(),
+            &[DATASET, FLAT],
+            parse_dataset_file(&DATASET_TOML.replace("\"Test dataset", "\"Renamed")).unwrap(),
         )
         .unwrap();
     persist::sync_datasets(&db.pool, &catalog).await.unwrap();
@@ -1228,32 +1268,15 @@ async fn dataset_series_persist_dataset_id_and_dimensions() {
         dataset_columns(&db.pool, "series_metadata", "t5_ds/a.USA").await,
         expected
     );
-    let none = DatasetColumnsRow {
-        dataset_id: None,
+    let flat_id = flat_dataset_id(&db.pool).await;
+    let plain = DatasetColumnsRow {
+        dataset_id: Some(flat_id),
         dimensions: Some(serde_json::json!({})),
         default_measure: None,
     };
     assert_eq!(
         dataset_columns(&db.pool, "series_metadata", "t5_plain").await,
-        none
-    );
-
-    // Rediscovering it without a dataset keeps the stored one.
-    let bare = DiscoveredSeries {
-        external_id: "t5_ds/a.USA".into(),
-        title: "A".into(),
-        description: None,
-        units: None,
-        frequency: None,
-        data_url: None,
-        dataset: None,
-    };
-    persist::persist_discovered(&db.pool, SRC, &[bare])
-        .await
-        .unwrap();
-    assert_eq!(
-        dataset_columns(&db.pool, "series_metadata", "t5_ds/a.USA").await,
-        expected
+        plain
     );
 
     enqueue(
@@ -1265,16 +1288,6 @@ async fn dataset_series_persist_dataset_id_and_dimensions() {
     )
     .await;
     assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
-    assert_eq!(
-        dataset_columns(&db.pool, "economic_series", "t5_ds/a.USA").await,
-        expected
-    );
-
-    // A fetch without a dataset keeps the stored one.
-    let fetched = FetchedSeries::default();
-    persist::persist_series(&db.pool, SRC, "t5_ds/a.USA", &fetched)
-        .await
-        .unwrap();
     assert_eq!(
         dataset_columns(&db.pool, "economic_series", "t5_ds/a.USA").await,
         expected
@@ -1294,7 +1307,7 @@ async fn dataset_series_persist_dataset_id_and_dimensions() {
         units: None,
         frequency: None,
         data_url: None,
-        dataset: Some(moved.clone()),
+        dataset: moved.clone(),
     };
     persist::persist_discovered(&db.pool, SRC, &[rediscovered])
         .await
@@ -1304,8 +1317,8 @@ async fn dataset_series_persist_dataset_id_and_dimensions() {
         expected_moved
     );
     let refetched = FetchedSeries {
-        dataset: Some(moved),
-        ..FetchedSeries::default()
+        dataset: moved,
+        ..empty_fetch()
     };
     persist::persist_series(&db.pool, SRC, "t5_ds/a.USA", &refetched)
         .await
@@ -1379,9 +1392,14 @@ async fn undeclared_dataset_or_wrong_keys_fail_before_writing() {
 #[tokio::test]
 async fn persist_rejects_a_dataset_that_was_not_synced() {
     let Some(db) = db().await else { return };
+    let mut conn = db.pool.get().await.unwrap();
+    diesel::sql_query("DELETE FROM datasets WHERE code LIKE 't5\\_%'")
+        .execute(&mut conn)
+        .await
+        .unwrap();
     let fetched = FetchedSeries {
         dataset: test_dataset("t5_ds/unsynced.USA"),
-        ..FetchedSeries::default()
+        ..empty_fetch()
     };
     let e = persist::persist_series(&db.pool, SRC, "t5_ds/unsynced.USA", &fetched)
         .await
@@ -1447,6 +1465,7 @@ async fn two_workers_drain_twenty_items_exactly_once() {
                 ..config(id)
             },
         )
+        .with_datasets(test_catalog())
     };
     let (w1, w2) = (mk("t5-w1"), mk("t5-w2"));
     tokio::time::timeout(
@@ -1532,7 +1551,8 @@ async fn circuit_breaker_pauses_throttled_source_only() {
             pause_for: Duration::from_secs(60),
             ..config("t5-breaker")
         },
-    );
+    )
+    .with_datasets(test_catalog());
 
     // Two 429s in a row trip the breaker for SRC.
     for _ in 0..2 {
@@ -1662,7 +1682,7 @@ async fn zero_revision_lookback_fetches_since_latest_date() {
         },
     )]));
     ctx.pool = db.pool.clone();
-    let w = Worker::new(ctx, registry(&mock), config("t5-zero"));
+    let w = Worker::new(ctx, registry(&mock), config("t5-zero")).with_datasets(test_catalog());
     enqueue(&db.pool, SRC.as_str(), "t5_zero", JobKind::FetchSeries, 5).await;
     assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
     mock.reset().await;
@@ -1782,7 +1802,8 @@ async fn maintenance_loop_purges_old_finished_items() {
             queue_retention: Some(Duration::from_secs(14 * 86_400)),
             ..config("t5-purger")
         },
-    );
+    )
+    .with_datasets(test_catalog());
     w.run(tokio::time::sleep(Duration::from_millis(300))).await;
 
     let mut conn = db.pool.get().await.unwrap();
@@ -1832,7 +1853,8 @@ async fn release_stuck_runs_on_start() {
             stuck_after: Duration::from_secs(600),
             ..config("t5-rescuer")
         },
-    );
+    )
+    .with_datasets(test_catalog());
     tokio::time::timeout(
         Duration::from_secs(30),
         w.run(wait_until_completed(&db.pool, 1)),
@@ -1995,7 +2017,7 @@ impl BatchAdapter {
                 revision_date: date,
                 is_original_release: true,
             }],
-            dataset: None,
+            dataset: flat(),
         })
     }
 
@@ -2012,6 +2034,10 @@ impl BatchAdapter {
 impl SourceAdapter for BatchAdapter {
     fn id(&self) -> SourceId {
         SRC
+    }
+
+    fn datasets(&self) -> &[&str] {
+        &[DATASET, FLAT]
     }
 
     async fn discover(&self, _: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
@@ -2078,7 +2104,7 @@ fn batch_worker(pool: &DatabasePool, adapter: &Arc<BatchAdapter>, max_batch: usi
     ctx.pool = pool.clone();
     let mut registry = AdapterRegistry::new();
     registry.register(adapter.clone());
-    Worker::new(ctx, registry, config("t5-batch-worker"))
+    Worker::new(ctx, registry, config("t5-batch-worker")).with_datasets(test_catalog())
 }
 
 async fn enqueue_fetch(pool: &DatabasePool, ids: &[&str]) -> Vec<Uuid> {
@@ -2093,7 +2119,7 @@ async fn enqueue_fetch(pool: &DatabasePool, ids: &[&str]) -> Vec<Uuid> {
 async fn create_series(pool: &DatabasePool, ids: &[&str]) -> Vec<Uuid> {
     let mut out = Vec::new();
     for id in ids {
-        let write = persist::persist_series(pool, SRC, id, &FetchedSeries::default())
+        let write = persist::persist_series(pool, SRC, id, &empty_fetch())
             .await
             .unwrap();
         out.push(write.series_id);
@@ -2437,7 +2463,16 @@ async fn discovered_series_are_fetched_after_a_scheduler_tick() {
         id: FETCHABLE,
         base_url: mock.base_url(),
     }));
-    let w = Worker::new(ctx(p), registry, config("t5-fresh"));
+    let mut datasets = test_catalog();
+    datasets
+        .insert(
+            FETCHABLE,
+            &[DATASET, FLAT],
+            parse_dataset_file(DATASET_TOML).unwrap(),
+        )
+        .unwrap();
+    persist::sync_datasets(p, &datasets).await.unwrap();
+    let w = Worker::new(ctx(p), registry, config("t5-fresh")).with_datasets(datasets);
     #[derive(diesel::QueryableByName)]
     struct WasEnabled {
         #[diesel(sql_type = diesel::sql_types::Bool)]
@@ -2539,6 +2574,10 @@ impl SourceAdapter for LeaseGateAdapter {
         SRC
     }
 
+    fn datasets(&self) -> &[&str] {
+        &[DATASET, FLAT]
+    }
+
     fn discovery_is_complete(&self) -> bool {
         self.catalog.is_some()
     }
@@ -2596,7 +2635,7 @@ fn lease_response(title: &str, value: i32) -> FetchedSeries {
             revision_date: d("2024-06-01"),
             is_original_release: true,
         }],
-        dataset: None,
+        dataset: flat(),
     }
 }
 
@@ -2611,7 +2650,7 @@ fn lease_worker(pool: &DatabasePool, adapter: &Arc<LeaseGateAdapter>, id: &str) 
         },
     )]));
     ctx.pool = pool.clone();
-    Worker::new(ctx, registry, config(id))
+    Worker::new(ctx, registry, config(id)).with_datasets(test_catalog())
 }
 
 async fn expired_fetch_preserves_newer_result(
@@ -2894,7 +2933,7 @@ fn discovered(external_id: &str, title: &str) -> DiscoveredSeries {
         units: None,
         frequency: None,
         data_url: None,
-        dataset: None,
+        dataset: flat(),
     }
 }
 
@@ -2905,14 +2944,14 @@ async fn expired_discovery_cannot_overwrite_or_insert_stale_metadata() {
         // B's complete catalog retires the stale-only series and keeps its own series active.
         // A must neither reactivate the former nor retire the latter when it resumes.
         for id in ["t5_lease_catalog_stale_only", "t5_lease_catalog_newer_only"] {
-            persist::persist_series(&db.pool, SRC, id, &FetchedSeries::default())
+            persist::persist_series(&db.pool, SRC, id, &empty_fetch())
                 .await
                 .unwrap();
         }
         let old = Arc::new(LeaseGateAdapter {
             entered: tokio::sync::Barrier::new(2),
             resume: tokio::sync::Barrier::new(2),
-            result: Ok(FetchedSeries::default()),
+            result: Ok(empty_fetch()),
             batching: false,
             catalog: Some(vec![
                 discovered("t5_lease_catalog", "Older catalog"),
@@ -2922,7 +2961,7 @@ async fn expired_discovery_cannot_overwrite_or_insert_stale_metadata() {
         let newer = Arc::new(LeaseGateAdapter {
             entered: tokio::sync::Barrier::new(2),
             resume: tokio::sync::Barrier::new(2),
-            result: Ok(FetchedSeries::default()),
+            result: Ok(empty_fetch()),
             batching: false,
             catalog: Some(vec![
                 discovered("t5_lease_catalog", "Newer catalog"),

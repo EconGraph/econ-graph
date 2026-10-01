@@ -29,15 +29,17 @@ pub(crate) struct EchoAdapter {
     declared: Vec<&'static str>,
     /// Dataset attached to every series, with the series id as the `id` dimension value when
     /// the dataset has an `id` key.
-    dataset: Option<SeriesDataset>,
+    dataset: SeriesDataset,
 }
 
 impl EchoAdapter {
     pub(crate) fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
-            declared: Vec::new(),
-            dataset: None,
+            // The adapter is registered as FRED, so by default it writes FRED's real (dimensionless)
+            // dataset from `datasets/fred.toml`.
+            declared: vec!["FRED"],
+            dataset: SeriesDataset::new("FRED", Vec::<(String, String)>::new()),
         }
     }
 
@@ -48,16 +50,16 @@ impl EchoAdapter {
         dataset: SeriesDataset,
     ) -> Self {
         self.declared = declared;
-        self.dataset = Some(dataset);
+        self.dataset = dataset;
         self
     }
 
-    fn dataset_for(&self, id: &str) -> Option<SeriesDataset> {
-        let mut dataset = self.dataset.clone()?;
+    fn dataset_for(&self, id: &str) -> SeriesDataset {
+        let mut dataset = self.dataset.clone();
         if let Some(v) = dataset.dimensions.0.get_mut("id") {
             *v = id.to_string();
         }
-        Some(dataset)
+        dataset
     }
 }
 
@@ -235,9 +237,7 @@ mod dataset_contract {
         assert_series_datasets_in(
             &catalog(),
             adapter,
-            found
-                .iter()
-                .map(|s| (s.external_id.as_str(), s.dataset.as_ref())),
+            found.iter().map(|s| (s.external_id.as_str(), &s.dataset)),
         );
     }
 
@@ -246,7 +246,7 @@ mod dataset_contract {
     async fn discover_fails_on_undeclared_dataset() {
         let mock = mock().await;
         let adapter = EchoAdapter::new(mock.base_url())
-            .with_dataset(vec![], SeriesDataset::new("echo", [("id", "")]));
+            .with_dataset(vec!["FRED"], SeriesDataset::new("echo", [("id", "")]));
         assert_discover_ok(&adapter, &test_ctx(), &mock, 1).await;
     }
 
@@ -255,7 +255,7 @@ mod dataset_contract {
     async fn fetch_fails_on_undeclared_dataset() {
         let mock = mock().await;
         let adapter = EchoAdapter::new(mock.base_url())
-            .with_dataset(vec![], SeriesDataset::new("echo", [("id", "")]));
+            .with_dataset(vec!["FRED"], SeriesDataset::new("echo", [("id", "")]));
         assert_fetch_ok(&adapter, &test_ctx(), &mock, "GDP", 0).await;
     }
 
@@ -281,10 +281,7 @@ mod dataset_contract {
         let def = &parse_dataset_file(ECHO).unwrap()[0];
         let ids: Vec<String> = found
             .iter()
-            .map(|s| {
-                def.external_id(&s.dataset.as_ref().unwrap().dimensions)
-                    .unwrap()
-            })
+            .map(|s| def.external_id(&s.dataset.dimensions).unwrap())
             .collect();
         assert_eq!(ids, ["echo/GDP", "echo/CPI"]);
         // The source's own ids (GDP, CPI) are accepted as well as canonical ones.
@@ -319,9 +316,7 @@ mod dataset_contract {
         assert_series_datasets_in(
             &c,
             &adapter,
-            found
-                .iter()
-                .map(|s| (s.external_id.as_str(), s.dataset.as_ref())),
+            found.iter().map(|s| (s.external_id.as_str(), &s.dataset)),
         );
     }
 }

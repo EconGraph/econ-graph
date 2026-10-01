@@ -527,6 +527,9 @@ mod tests {
         .await
         .expect("Should create data source");
 
+        let dataset_id =
+            crate::test_utils::test_dataset_id(&mut pool.get().await.unwrap(), data_source.id)
+                .await;
         let series = EconomicSeries::create(
             &pool,
             &NewEconomicSeries {
@@ -545,7 +548,7 @@ mod tests {
                 start_date: Some(NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()),
                 end_date: Some(NaiveDate::from_ymd_opt(2024, 12, 31).unwrap()),
                 is_active: true,
-                dataset_id: None,
+                dataset_id,
                 dimensions: Default::default(),
                 default_measure: None,
             },

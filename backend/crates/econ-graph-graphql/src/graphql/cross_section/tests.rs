@@ -94,7 +94,7 @@ async fn seed(pool: &DatabasePool) -> Uuid {
                 external_id: format!("GDP.{key}"),
                 title: format!("GDP {key}"),
                 frequency: "Annual".to_string(),
-                dataset_id: Some(dataset.id),
+                dataset_id: dataset.id,
                 dimensions: [("indicator", "GDP"), ("area", key)]
                     .into_iter()
                     .collect::<SeriesDimensions>(),

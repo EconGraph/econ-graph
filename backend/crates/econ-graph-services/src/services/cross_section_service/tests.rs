@@ -155,7 +155,7 @@ async fn seed() -> Seeded {
                 external_id: format!("{indicator}.{area}"),
                 title: format!("{indicator} {area}"),
                 frequency: "Annual".to_string(),
-                dataset_id: Some(dataset.id),
+                dataset_id: dataset.id,
                 dimensions: [("indicator", indicator), ("area", area)]
                     .into_iter()
                     .collect::<SeriesDimensions>(),
@@ -176,7 +176,7 @@ async fn seed() -> Seeded {
             external_id: "GDP.CAN".to_string(),
             title: "GDP CAN (inactive)".to_string(),
             frequency: "Annual".to_string(),
-            dataset_id: Some(dataset.id),
+            dataset_id: dataset.id,
             dimensions: [("indicator", "GDP"), ("area", "CAN")]
                 .into_iter()
                 .collect::<SeriesDimensions>(),
@@ -193,7 +193,7 @@ async fn seed() -> Seeded {
             external_id: "GDP.no-area".to_string(),
             title: "GDP with no area dimension".to_string(),
             frequency: "Annual".to_string(),
-            dataset_id: Some(dataset.id),
+            dataset_id: dataset.id,
             dimensions: [("indicator", "GDP")]
                 .into_iter()
                 .collect::<SeriesDimensions>(),

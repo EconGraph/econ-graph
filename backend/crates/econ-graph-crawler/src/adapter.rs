@@ -104,15 +104,15 @@ pub struct NewSeriesMetadataLite {
 }
 
 /// The result of fetching one series.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FetchedSeries {
     /// Updated metadata, if the source returned any.
     pub metadata: Option<NewSeriesMetadataLite>,
     /// Observations, in any order.
     pub points: Vec<FetchedPoint>,
-    /// The series' dataset and dimension values, when the adapter declares datasets. `None`
-    /// keeps whatever is stored.
-    pub dataset: Option<SeriesDataset>,
+    /// The series' dataset and dimension values. Every series belongs to a dataset the adapter
+    /// declares in [`SourceAdapter::datasets`].
+    pub dataset: SeriesDataset,
 }
 
 /// One observation of a series.
@@ -143,8 +143,8 @@ pub struct DiscoveredSeries {
     pub frequency: Option<String>,
     /// Link to the series on the source's website or API.
     pub data_url: Option<String>,
-    /// The series' dataset and dimension values, when the adapter declares datasets.
-    pub dataset: Option<SeriesDataset>,
+    /// The series' dataset and dimension values (see [`FetchedSeries::dataset`]).
+    pub dataset: SeriesDataset,
 }
 
 /// Per-series results of [`SourceAdapter::fetch_batch`], keyed by external id.
@@ -163,12 +163,10 @@ pub trait SourceAdapter: Send + Sync {
     }
 
     /// Codes of the datasets this adapter writes, each defined in the source's
-    /// `datasets/<source>.toml` (see [`crate::dataset`]). Every series it returns with a
-    /// [`SeriesDataset`] must use one of these codes and the definition's dimension keys.
-    /// Default: none.
-    fn datasets(&self) -> &[&str] {
-        &[]
-    }
+    /// `datasets/<source>.toml` (see [`crate::dataset`]). At least one: every series belongs to
+    /// a dataset, and every series the adapter returns must use one of these codes and the
+    /// definition's dimension keys.
+    fn datasets(&self) -> &[&str];
 
     /// Lists the series this source offers.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError>;
@@ -314,10 +312,21 @@ mod tests {
 
     struct Dummy(SourceId, &'static str);
 
+    fn empty_series() -> FetchedSeries {
+        FetchedSeries {
+            metadata: None,
+            points: Vec::new(),
+            dataset: SeriesDataset::new("test", Vec::<(String, String)>::new()),
+        }
+    }
+
     #[async_trait]
     impl SourceAdapter for Dummy {
         fn id(&self) -> SourceId {
             self.0
+        }
+        fn datasets(&self) -> &[&str] {
+            &["test"]
         }
         async fn discover(&self, _: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
             Err(CrawlError::Permanent(self.1.into()))
@@ -328,7 +337,7 @@ mod tests {
             _: &str,
             _: Option<NaiveDate>,
         ) -> Result<FetchedSeries, CrawlError> {
-            Ok(FetchedSeries::default())
+            Ok(empty_series())
         }
     }
 
@@ -365,8 +374,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.len(), 2);
-        assert_eq!(out["A"], Ok(FetchedSeries::default()));
-        assert_eq!(out["B"], Ok(FetchedSeries::default()));
+        assert_eq!(out["A"], Ok(empty_series()));
+        assert_eq!(out["B"], Ok(empty_series()));
     }
 
     /// Rate limited on ids starting with `"limited"`, unauthorised on `"denied"`, else not found.
@@ -376,6 +385,9 @@ mod tests {
     impl SourceAdapter for Limited {
         fn id(&self) -> SourceId {
             SourceId::Bea
+        }
+        fn datasets(&self) -> &[&str] {
+            &["test"]
         }
         async fn discover(&self, _: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
             Ok(Vec::new())
@@ -422,11 +434,6 @@ mod tests {
     fn default_adapter_policy_is_source_default() {
         let d = Dummy(SourceId::Bea, "");
         assert_eq!(d.policy(), SourcePolicy::default_for(SourceId::Bea));
-    }
-
-    #[test]
-    fn default_adapter_declares_no_datasets() {
-        assert!(Dummy(SourceId::Bea, "").datasets().is_empty());
     }
 
     #[test]

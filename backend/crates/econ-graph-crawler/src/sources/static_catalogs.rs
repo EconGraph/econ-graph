@@ -35,6 +35,7 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use crate::adapter::{CrawlCtx, DiscoveredSeries, FetchedSeries, SourceAdapter};
+use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
 use crate::source::SourceId;
 
@@ -59,6 +60,10 @@ pub const STATIC_CATALOG_SOURCES: [SourceId; 10] = [
 pub fn is_static_catalog_source(source: SourceId) -> bool {
     STATIC_CATALOG_SOURCES.contains(&source)
 }
+
+/// Code of each static catalog's one dataset. Its series ids are opaque keys, so the dataset has
+/// no dimensions.
+pub const DATASET: &str = "catalog";
 
 /// One hardcoded catalog entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,7 +93,7 @@ impl CatalogEntry {
             units: Some(self.units.to_string()),
             frequency: Some(self.frequency.to_string()),
             data_url: Some(self.data_url.to_string()),
-            dataset: None,
+            dataset: SeriesDataset::new(DATASET, Vec::<(String, String)>::new()),
         }
     }
 }
@@ -179,6 +184,11 @@ impl StaticCatalogAdapter {
 impl SourceAdapter for StaticCatalogAdapter {
     fn id(&self) -> SourceId {
         self.source
+    }
+
+    /// One dimensionless dataset, [`DATASET`], defined in each source's `datasets/<source>.toml`.
+    fn datasets(&self) -> &[&str] {
+        &[DATASET]
     }
 
     /// Returns the hardcoded catalog. Makes no HTTP requests.

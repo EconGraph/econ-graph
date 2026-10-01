@@ -137,6 +137,11 @@ async fn mock_source() -> MockSource {
 /// list, persisting everything, the same calls the worker makes.
 async fn crawl(pool: &DatabasePool, mock: &MockSource) {
     let adapter = EchoAdapter::new(mock.base_url());
+    let mut datasets = crate::dataset::DatasetCatalog::empty();
+    datasets.load_adapter(&adapter).unwrap();
+    crate::persist::sync_datasets(pool, &datasets)
+        .await
+        .unwrap();
     let ctx = test_ctx();
     let found = adapter.discover(&ctx).await.unwrap();
     persist_discovered(pool, adapter.id(), &found)
@@ -257,7 +262,15 @@ async fn active(pool: &DatabasePool, external_id: &str) -> (Option<bool>, Option
     (series, metadata)
 }
 
+/// FRED series `ids`, as discovery lists them.
 fn listed(ids: &[&str]) -> Vec<DiscoveredSeries> {
+    listed_in(
+        ids,
+        &crate::dataset::SeriesDataset::new("FRED", Vec::<(String, String)>::new()),
+    )
+}
+
+fn listed_in(ids: &[&str], dataset: &crate::dataset::SeriesDataset) -> Vec<DiscoveredSeries> {
     ids.iter()
         .map(|id| DiscoveredSeries {
             external_id: id.to_string(),
@@ -266,7 +279,7 @@ fn listed(ids: &[&str]) -> Vec<DiscoveredSeries> {
             units: None,
             frequency: None,
             data_url: None,
-            dataset: None,
+            dataset: dataset.clone(),
         })
         .collect()
 }
@@ -346,7 +359,20 @@ async fn census_retirement_is_scoped_to_bds_and_never_touches_seeded_acs_rows() 
     assert_eq!(active(p, "B19013_001E").await, (None, Some(true)));
 
     // A BDS discovery that lists one national series and nothing else.
-    let bds = listed(&["bds/national..ESTAB"]);
+    let mut datasets = crate::dataset::DatasetCatalog::empty();
+    datasets.load_adapter(&adapter).unwrap();
+    crate::persist::sync_datasets(p, &datasets).await.unwrap();
+    let bds = listed_in(
+        &["bds/national..ESTAB"],
+        &crate::dataset::SeriesDataset::new(
+            "bds",
+            [
+                ("geo_level", "national"),
+                ("state", ""),
+                ("variable", "ESTAB"),
+            ],
+        ),
+    );
     persist_discovered(p, SourceId::Census, &bds).await.unwrap();
     let retired = retire_unlisted(p, SourceId::Census, &bds, scope)
         .await
