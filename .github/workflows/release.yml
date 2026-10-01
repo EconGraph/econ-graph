@@ -2,11 +2,13 @@ name: Release Images
 
 # Builds and publishes the backend, crawler-worker and frontend images.
 #
-# - workflow_dispatch, or a push of a `vX.Y.Z-rc.N` tag: builds fresh images and
-#   pushes them tagged by commit SHA (and, for an rc tag, by the rc tag itself),
-#   for QA to deploy and soak before a release is final. Refuses to rebuild a
-#   commit that was already built, so a QA-tested image can't be silently
-#   replaced by a later, possibly different, build under the same sha tag.
+# - workflow_dispatch, or a push of a `vX.Y.Z-rc.N` tag: builds and pushes
+#   whichever of the three images don't already have a `sha-<commit>` tag (so
+#   a second build of the same commit can't silently replace an image a QA
+#   run already tested, and a partial failure can be retried without that
+#   turning into "this commit can never be built again"), then makes sure the
+#   rc tag itself (when this run is a tag push) points at those sha-tagged
+#   digests, whether they were just built or already existed.
 # - a push of the final `vX.Y.Z` tag: does NOT rebuild. It resolves the image
 #   already pushed for that exact commit (built by one of the runs above) to
 #   its digest and retags that digest as the version and, if it's the newest
@@ -94,66 +96,54 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    # A second build of the same commit (a re-run, or two workflow_dispatch
-    # runs for the same SHA) would otherwise silently repoint the sha tag at a
-    # new digest, which the publish job treats as "what QA tested" and the
-    # whole point of retagging-not-rebuilding is to avoid exactly that drift.
-    - name: Refuse to rebuild an already-published commit
+    # Check each image independently: a re-run of the same commit, or a
+    # retry after a partial failure (e.g. backend pushed, frontend didn't),
+    # must build only what's actually missing. Never overwrite a sha tag that
+    # already exists - the publish job treats it as "what QA tested", and the
+    # whole point of retagging-not-rebuilding is to avoid that drifting.
+    - name: Check which images already have this commit's sha tag
+      id: check
       run: |
         set -euo pipefail
         owner="${{ steps.owner.outputs.owner }}"
         sha_tag="sha-${{ steps.sha.outputs.sha }}"
         for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend; do
           ref="${REGISTRY}/${owner}/${image}:${sha_tag}"
+          key="$(echo "${image}" | tr '-' '_')"
           if docker buildx imagetools inspect "${ref}" >/dev/null 2>&1; then
-            echo "release.yml: ${ref} already exists. Refusing to rebuild this commit: a later build could silently replace the image a QA run (or a release) already references by this tag. If this commit genuinely needs a new image, make a new commit." >&2
-            exit 1
+            echo "${ref} already exists; will not rebuild it."
+            echo "${key}=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "${key}=false" >> "$GITHUB_OUTPUT"
           fi
         done
 
-    # flavor: latest=false on every image here: metadata-action's default
-    # (latest=auto) would otherwise move `latest` to every rc build too. Only
-    # the publish job below, gated on actually being the newest release,
-    # should ever move it.
-    #
-    # type=ref,event=tag is enabled only for an actual tag push, not for
-    # workflow_dispatch: the Actions UI lets a manual run be started "from" a
-    # tag, which would otherwise tag a fresh rebuild with that tag name and
-    # silently defeat the publish job's byte-for-byte retag guarantee.
     - name: Metadata for backend image
       id: meta-backend
+      if: steps.check.outputs.econ_graph_backend != 'true'
       uses: docker/metadata-action@v5
       with:
         images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-backend
-        flavor: |
-          latest=false
-        tags: |
-          type=raw,value=sha-${{ steps.sha.outputs.sha }}
-          type=ref,event=tag,enable=${{ github.event_name == 'push' }}
+        tags: type=raw,value=sha-${{ steps.sha.outputs.sha }}
 
     - name: Metadata for crawler-worker image
       id: meta-crawler-worker
+      if: steps.check.outputs.econ_graph_crawler_worker != 'true'
       uses: docker/metadata-action@v5
       with:
         images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-crawler-worker
-        flavor: |
-          latest=false
-        tags: |
-          type=raw,value=sha-${{ steps.sha.outputs.sha }}
-          type=ref,event=tag,enable=${{ github.event_name == 'push' }}
+        tags: type=raw,value=sha-${{ steps.sha.outputs.sha }}
 
     - name: Metadata for frontend image
       id: meta-frontend
+      if: steps.check.outputs.econ_graph_frontend != 'true'
       uses: docker/metadata-action@v5
       with:
         images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-frontend
-        flavor: |
-          latest=false
-        tags: |
-          type=raw,value=sha-${{ steps.sha.outputs.sha }}
-          type=ref,event=tag,enable=${{ github.event_name == 'push' }}
+        tags: type=raw,value=sha-${{ steps.sha.outputs.sha }}
 
     - name: Build and push backend image
+      if: steps.check.outputs.econ_graph_backend != 'true'
       uses: docker/build-push-action@v5
       with:
         context: ./backend
@@ -165,6 +155,7 @@ jobs:
         cache-to: type=gha,mode=max
 
     - name: Build and push crawler-worker image
+      if: steps.check.outputs.econ_graph_crawler_worker != 'true'
       uses: docker/build-push-action@v5
       with:
         context: ./backend
@@ -176,6 +167,7 @@ jobs:
         cache-to: type=gha,mode=max
 
     - name: Build and push frontend image
+      if: steps.check.outputs.econ_graph_frontend != 'true'
       uses: docker/build-push-action@v5
       with:
         context: ./frontend
@@ -191,6 +183,29 @@ jobs:
           NODE_ENV=production
         cache-from: type=gha
         cache-to: type=gha,mode=max
+
+    # Apply the rc tag itself here (only for a tag push, not workflow_dispatch:
+    # the Actions UI lets a manual run be started "from" a tag, which must
+    # never cause the tag to be re-pointed). Runs whether each image was just
+    # built above or already existed, so either way the rc tag ends up on the
+    # sha-tagged digest - never on a mutable tag, so this can't silently move
+    # if something retags `sha-<commit>` later.
+    - name: Point the rc tag at the sha-tagged digests
+      if: github.event_name == 'push'
+      run: |
+        set -euo pipefail
+        owner="${{ steps.owner.outputs.owner }}"
+        sha_tag="sha-${{ steps.sha.outputs.sha }}"
+        for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend; do
+          src="${REGISTRY}/${owner}/${image}:${sha_tag}"
+          digest="$(docker buildx imagetools inspect "${src}" --format '{{json .Manifest}}' | jq -r '.digest')"
+          if [ -z "${digest}" ] || [ "${digest}" = "null" ]; then
+            echo "release.yml: couldn't resolve a digest for ${src} to apply the rc tag" >&2
+            exit 1
+          fi
+          echo "Tagging ${REGISTRY}/${owner}/${image}@${digest} as ${GITHUB_REF_NAME}"
+          docker buildx imagetools create -t "${REGISTRY}/${owner}/${image}:${GITHUB_REF_NAME}" "${REGISTRY}/${owner}/${image}@${digest}"
+        done
 
   publish:
     name: Publish release images and draft the GitHub release
