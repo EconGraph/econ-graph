@@ -4,20 +4,22 @@ name: Release Images
 #
 # - workflow_dispatch, or a push of a `vX.Y.Z-rc.N` tag: builds fresh images and
 #   pushes them tagged by commit SHA (and, for an rc tag, by the rc tag itself),
-#   for QA to deploy and soak before a release is final.
-# - a push of the final `vX.Y.Z` tag: does NOT rebuild. It retags the image
-#   already pushed for that exact commit (built by one of the runs above) as
-#   the version and, if it's the newest release, `latest`, so what QA tested is
-#   byte-for-byte what ships, then drafts a GitHub release from CHANGELOG.md.
-#   This never runs on a push to main: see docs/development/RELEASE_PROCESS.md
-#   for when tags get pushed.
+#   for QA to deploy and soak before a release is final. Refuses to rebuild a
+#   commit that was already built, so a QA-tested image can't be silently
+#   replaced by a later, possibly different, build under the same sha tag.
+# - a push of the final `vX.Y.Z` tag: does NOT rebuild. It resolves the image
+#   already pushed for that exact commit (built by one of the runs above) to
+#   its digest and retags that digest as the version and, if it's the newest
+#   release, `latest`, so what QA tested is byte-for-byte what ships, then
+#   drafts a GitHub release from CHANGELOG.md. This never runs on a push to
+#   main: see docs/development/RELEASE_PROCESS.md for when tags get pushed.
 #
 # scripts/release/tag.sh is what pushes the final tag that triggers the second
 # case; it runs the flags remove_by check (config/flags) before pushing, so a
 # flag due for removal is caught before the tag exists rather than after. The
-# "Verify the rc-built images exist" step below is the real check that this
-# commit was actually built by the first case; tag.sh only has git state to go
-# on, which can't tell a successful rc build from a failed one.
+# "Resolve the rc-built images to their digests" step below is the real check
+# that this commit was actually built by the first case; tag.sh only has git
+# state to go on, which can't tell a successful rc build from a failed one.
 
 on:
   workflow_dispatch:
@@ -55,6 +57,11 @@ jobs:
       uses: actions/checkout@v4
       with:
         ref: ${{ github.event.inputs.ref || github.ref }}
+        # This job only needs to read the checked-out tree; it never pushes to
+        # the repo, so the default token credential has no reason to persist
+        # in the git config where a later step (or a compromised dependency in
+        # the build) could pick it up.
+        persist-credentials: false
 
     - name: Validate the rc tag's shape
       if: github.event_name == 'push'
@@ -68,6 +75,15 @@ jobs:
       id: owner
       run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
+    # Resolve the sha ourselves instead of using github.sha: on a
+    # workflow_dispatch with a `ref` input, github.sha is the commit the
+    # workflow run started *from*, not the one `actions/checkout` above just
+    # checked out (which honors `ref`). This is also what the publish job
+    # resolves against.
+    - name: Resolve commit SHA
+      id: sha
+      run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
@@ -78,14 +94,22 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    # Resolve the sha ourselves instead of using github.sha: on a
-    # workflow_dispatch with a `ref` input, github.sha is the commit the
-    # workflow run started *from*, not the one `actions/checkout` above just
-    # checked out (which honors `ref`). This is also what the publish job's
-    # `sha-${GITHUB_SHA}` lookup expects.
-    - name: Resolve commit SHA
-      id: sha
-      run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+    # A second build of the same commit (a re-run, or two workflow_dispatch
+    # runs for the same SHA) would otherwise silently repoint the sha tag at a
+    # new digest, which the publish job treats as "what QA tested" and the
+    # whole point of retagging-not-rebuilding is to avoid exactly that drift.
+    - name: Refuse to rebuild an already-published commit
+      run: |
+        set -euo pipefail
+        owner="${{ steps.owner.outputs.owner }}"
+        sha_tag="sha-${{ steps.sha.outputs.sha }}"
+        for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend; do
+          ref="${REGISTRY}/${owner}/${image}:${sha_tag}"
+          if docker buildx imagetools inspect "${ref}" >/dev/null 2>&1; then
+            echo "release.yml: ${ref} already exists. Refusing to rebuild this commit: a later build could silently replace the image a QA run (or a release) already references by this tag. If this commit genuinely needs a new image, make a new commit." >&2
+            exit 1
+          fi
+        done
 
     # flavor: latest=false on every image here: metadata-action's default
     # (latest=auto) would otherwise move `latest` to every rc build too. Only
@@ -176,6 +200,14 @@ jobs:
     permissions:
       contents: write
       packages: write
+    # Not keyed on github.ref like the top-level group: two final-tag pushes
+    # (e.g. v4.0.0 and a same-day v4.0.1 patch) must never resolve "newest
+    # release" and retag concurrently, since each decides and writes `latest`
+    # from a read of the same tag list. Serializing (never cancelling) makes
+    # that read-then-write race impossible instead of just unlikely.
+    concurrency:
+      group: ${{ github.workflow }}-publish
+      cancel-in-progress: false
 
     steps:
     - name: Checkout code
@@ -183,6 +215,7 @@ jobs:
       with:
         fetch-depth: 0
         fetch-tags: true
+        persist-credentials: false
 
     - name: Validate this is a final release tag
       run: |
@@ -217,29 +250,43 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     # Not a rebuild: this commit was already built (by workflow_dispatch or an
-    # `-rc.` tag push) and pushed under a `sha-<full sha>` tag. Retagging the
-    # same digest is what makes the tested rc image and the shipped release
-    # image identical. Inspect all three sources before retagging any of them,
-    # so a missing image fails loudly instead of leaving only some images
-    # retagged.
-    - name: Verify the rc-built images exist
+    # `-rc.` tag push) and pushed under a `sha-<full sha>` tag. Resolve that
+    # mutable tag to its digest now, once, and retag the digest rather than
+    # the tag below: the sha tag could in principle be repointed between this
+    # step and the retag step (or already have drifted, if the build job's
+    # refuse-to-rebuild guard was somehow bypassed), and retagging a digest
+    # instead of a tag closes that gap. Resolve all three before retagging
+    # any of them, so a missing image fails loudly instead of leaving only
+    # some images retagged.
+    - name: Resolve the rc-built images to their digests
+      id: digests
       run: |
         set -euo pipefail
         owner="${{ steps.owner.outputs.owner }}"
         sha_tag="sha-${GITHUB_SHA}"
         for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend; do
           src="${REGISTRY}/${owner}/${image}:${sha_tag}"
-          echo "Checking ${src} exists..."
-          docker buildx imagetools inspect "${src}" >/dev/null
+          echo "Resolving ${src} to a digest..."
+          digest="$(docker buildx imagetools inspect "${src}" --format '{{json .Manifest}}' | jq -r '.digest')"
+          if [ -z "${digest}" ] || [ "${digest}" = "null" ]; then
+            echo "release.yml: couldn't resolve a digest for ${src}" >&2
+            exit 1
+          fi
+          key="$(echo "${image}" | tr '-' '_')"
+          echo "${key}=${digest}" >> "$GITHUB_OUTPUT"
         done
 
-    - name: Retag the SHA-tagged images as the release
+    - name: Retag the resolved digests as the release
       run: |
         set -euo pipefail
         owner="${{ steps.owner.outputs.owner }}"
-        sha_tag="sha-${GITHUB_SHA}"
-        for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend; do
-          src="${REGISTRY}/${owner}/${image}:${sha_tag}"
+        declare -A digests=(
+          [econ-graph-backend]="${{ steps.digests.outputs.econ_graph_backend }}"
+          [econ-graph-crawler-worker]="${{ steps.digests.outputs.econ_graph_crawler_worker }}"
+          [econ-graph-frontend]="${{ steps.digests.outputs.econ_graph_frontend }}"
+        )
+        for image in "${!digests[@]}"; do
+          src="${REGISTRY}/${owner}/${image}@${digests[$image]}"
           tags=(-t "${REGISTRY}/${owner}/${image}:${GITHUB_REF_NAME}")
           if [ "${{ steps.latest.outputs.is_latest }}" = "true" ]; then
             tags+=(-t "${REGISTRY}/${owner}/${image}:latest")

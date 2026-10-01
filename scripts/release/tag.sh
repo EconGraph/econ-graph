@@ -5,8 +5,9 @@
 #
 # - Working tree must be clean, and HEAD must already be pushed to origin.
 # - backend/Cargo.toml's workspace version must match the version given.
-# - CHANGELOG.md must have a dated, non-empty section for that version (not
-#   "Unreleased").
+# - CHANGELOG.md must have a non-empty section headed exactly
+#   "## [X.Y.Z] - YYYY-MM-DD" for that version (not "Unreleased", and an
+#   actual date, not any other trailing text).
 # - config/flags must have no flag whose remove_by train is the one being shipped
 #   (scripts/check-flags --shipped-train N): shipping the train is what retires
 #   those flags, so a flag due for removal blocks the tag instead of shipping
@@ -46,7 +47,7 @@ fi
 
 git fetch origin --tags --quiet
 
-if [ -z "$(git branch -r --contains HEAD 2>/dev/null | grep '^  origin/')" ]; then
+if ! git branch -r --contains HEAD 2>/dev/null | grep -q '^  origin/'; then
   echo "tag.sh: HEAD isn't on any origin branch; push it first so the pushed tags and the rc-built images point at a commit everyone else can see." >&2
   exit 1
 fi
@@ -58,16 +59,20 @@ if [ "$cargo_version" != "$version" ]; then
 fi
 
 echo "tag.sh: checking CHANGELOG.md has a dated section for ${version}..."
-changelog_heading="$(grep -m1 "^## \[${version}\]" CHANGELOG.md || true)"
+version_re="${version//./\\.}"
+# Accept the heading with its brackets either plain ("## [X.Y.Z] - ...") or
+# backslash-escaped ("## \[X.Y.Z\] - ..."), matching changelog-section.sh.
+changelog_heading="$(grep -m1 -E "^## \\\\?\\[${version_re}\\\\?\\]" CHANGELOG.md || true)"
 if [ -z "$changelog_heading" ]; then
   echo "tag.sh: CHANGELOG.md has no '## [${version}]' section." >&2
   exit 1
 fi
-if echo "$changelog_heading" | grep -qi 'unreleased'; then
-  echo "tag.sh: CHANGELOG.md's ${version} section is still marked Unreleased; give it today's date first." >&2
+if ! [[ "$changelog_heading" =~ ^\#\#\ \\?\[${version_re}\\?\]\ -\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  echo "tag.sh: CHANGELOG.md's ${version} heading must be '## [${version}] - YYYY-MM-DD' (got: '${changelog_heading}')." >&2
   exit 1
 fi
-# grep only checked the heading; make sure the body isn't empty too.
+# The heading regex above only checked the heading line; make sure the body
+# isn't empty too.
 "${root}/scripts/release/changelog-section.sh" "$version" >/dev/null
 
 echo "tag.sh: checking config/flags for flags due for removal by train-${train}..."

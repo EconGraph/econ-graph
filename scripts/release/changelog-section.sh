@@ -13,10 +13,10 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 changelog="${root}/CHANGELOG.md"
 
 section="$(awk -v ver="$version" '
-  BEGIN { gsub(/\./, "\\.", ver) }
-  /^## \[/ {
+  BEGIN { gsub(/\./, "\\.", ver); heading = "^## \\\\?\\[" ver "\\\\?\\]" }
+  /^## \\?\[/ {
     if (found) exit
-    found = ($0 ~ ("\\[" ver "\\]")) ? 1 : 0
+    found = ($0 ~ heading) ? 1 : 0
     next
   }
   found { print }
