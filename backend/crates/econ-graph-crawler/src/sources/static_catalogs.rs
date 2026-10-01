@@ -19,9 +19,10 @@
 //!   [`is_static_catalog_source`] let status pages and the UI flag them.
 //!
 //! **Development only.** [`default_registry`](crate::sources::default_registry) registers these
-//! adapters only when the crate is built with the `static-catalogs` feature, which release builds
-//! leave off (for example `cargo run -p econ-graph-crawler-worker --features static-catalogs`).
-//! They give a development database catalog entries for more sources without any API keys.
+//! adapters only when the `static_catalogs` build flag is on (config/flags/README.md): on by
+//! default for the `dev` profile, off for `release` (for example a release image built with
+//! `--build-arg FLAGS_PROFILE=dev` still gets them). They give a development database catalog
+//! entries for more sources without any API keys.
 //!
 //! Because no HTTP is made, the testkit's `new(base_url)` constructor convention does not apply;
 //! the constructors are one per source ([`StaticCatalogAdapter::boc`], ...). The `data_url`

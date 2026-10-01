@@ -10,6 +10,11 @@
       "state": "ENABLED",
       "variants": { "on": true, "off": false },
       "defaultVariant": "on"
+    },
+    "static_catalogs": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "on"
     }
   }
 }

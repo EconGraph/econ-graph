@@ -1426,6 +1426,7 @@ dependencies = [
  "diesel",
  "diesel-async",
  "econ-graph-core",
+ "econ-graph-flags-build",
  "econ-graph-metrics",
  "futures",
  "httpdate",

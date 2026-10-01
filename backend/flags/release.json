@@ -17,6 +17,10 @@
     "mcp": {
       "kind": "build",
       "value": false
+    },
+    "static_catalogs": {
+      "kind": "build",
+      "value": false
     }
   }
 }

@@ -655,8 +655,9 @@ jobs:
         cargo test -p econ-graph-graphql --lib cross_section -- --test-threads=1
       working-directory: backend
 
-    # A plain `cargo test` (dev profile) still carries the dev-only static catalogs via
-    # debug_assertions, so only a real --release build proves a release image leaves them out.
+    # backend/.cargo/config.toml defaults FLAGS_PROFILE to dev, which keeps the static_catalogs
+    # build flag on even in a --release cargo build; only building with FLAGS_PROFILE=release
+    # explicitly set (as deployed images do) proves a release image leaves the catalogs out.
     - name: Crawler CLI in release mode registers only the live sources
       run: |
         set -euo pipefail
@@ -676,6 +677,8 @@ jobs:
           fi
         done
       working-directory: backend
+      env:
+        FLAGS_PROFILE: release
 
     # Allowed to fail (owner decision): the full workspace run still has known
     # pre-existing failures in tests unrelated to the crawler/queue work. It keeps
