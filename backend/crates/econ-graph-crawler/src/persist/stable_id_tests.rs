@@ -270,6 +270,7 @@ fn listed(ids: &[&str]) -> Vec<DiscoveredSeries> {
     )
 }
 
+/// Series `ids`, as discovery lists them, all in `dataset`.
 fn listed_in(ids: &[&str], dataset: &crate::dataset::SeriesDataset) -> Vec<DiscoveredSeries> {
     ids.iter()
         .map(|id| DiscoveredSeries {

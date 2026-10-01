@@ -312,6 +312,7 @@ mod tests {
 
     struct Dummy(SourceId, &'static str);
 
+    /// A fetch with no metadata and no points, in the dimensionless `test` dataset.
     fn empty_series() -> FetchedSeries {
         FetchedSeries {
             metadata: None,

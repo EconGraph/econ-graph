@@ -54,6 +54,7 @@ impl EchoAdapter {
         self
     }
 
+    /// The configured dataset for series `id`, with its `id` dimension (if any) set to `id`.
     fn dataset_for(&self, id: &str) -> SeriesDataset {
         let mut dataset = self.dataset.clone();
         if let Some(v) = dataset.dimensions.0.get_mut("id") {
