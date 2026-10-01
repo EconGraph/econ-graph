@@ -2,3 +2,12 @@
 reviews:
   # Suppress skipped-review notices, including draft PR notices.
   review_status: false
+  # Keep generated files and docs-only changes out of review scope to cut
+  # noise and save CodeRabbit review quota.
+  path_filters:
+    - "!**/schema.graphql"
+    - "!frontend/flags/*.json"
+    - "!backend/flags/*.json"
+    - "!**/Cargo.lock"
+    - "!**/package-lock.json"
+    - "!**/*.md"
