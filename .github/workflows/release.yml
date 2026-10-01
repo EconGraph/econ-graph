@@ -1,0 +1,261 @@
+name: Release Images
+
+# Builds and publishes the backend, crawler-worker and frontend images.
+#
+# - workflow_dispatch, or a push of a `vX.Y.Z-rc.N` tag: builds fresh images and
+#   pushes them tagged by commit SHA (and, for an rc tag, by the rc tag itself),
+#   for QA to deploy and soak before a release is final.
+# - a push of the final `vX.Y.Z` tag: does NOT rebuild. It retags the image
+#   already pushed for that exact commit (built by one of the runs above) as
+#   the version and, if it's the newest release, `latest`, so what QA tested is
+#   byte-for-byte what ships, then drafts a GitHub release from CHANGELOG.md.
+#   This never runs on a push to main: see docs/development/RELEASE_PROCESS.md
+#   for when tags get pushed.
+#
+# scripts/release/tag.sh is what pushes the final tag that triggers the second
+# case; it runs the flags remove_by check (config/flags) before pushing, so a
+# flag due for removal is caught before the tag exists rather than after. The
+# "Verify the rc-built images exist" step below is the real check that this
+# commit was actually built by the first case; tag.sh only has git state to go
+# on, which can't tell a successful rc build from a failed one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit or branch to build as a release candidate (defaults to the ref this is run on)'
+        required: false
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    name: Build and push images
+    # Manual RC build, or a push of an `vX.Y.Z-rc.N` tag. The final `vX.Y.Z` tag
+    # (no `-rc.` suffix) is handled by the publish job instead, which retags
+    # rather than rebuilding.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.ref_name, '-rc.'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.ref || github.ref }}
+
+    - name: Validate the rc tag's shape
+      if: github.event_name == 'push'
+      run: |
+        if ! [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
+          echo "release.yml: '${GITHUB_REF_NAME}' doesn't look like vX.Y.Z-rc.N; refusing to build it as a release candidate." >&2
+          exit 1
+        fi
+
+    - name: Set lowercase image owner
+      id: owner
+      run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to ${{ env.REGISTRY }}
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    # Resolve the sha ourselves instead of using github.sha: on a
+    # workflow_dispatch with a `ref` input, github.sha is the commit the
+    # workflow run started *from*, not the one `actions/checkout` above just
+    # checked out (which honors `ref`). This is also what the publish job's
+    # `sha-${GITHUB_SHA}` lookup expects.
+    - name: Resolve commit SHA
+      id: sha
+      run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+    # flavor: latest=false on every image here: metadata-action's default
+    # (latest=auto) would otherwise move `latest` to every rc build too. Only
+    # the publish job below, gated on actually being the newest release,
+    # should ever move it.
+    #
+    # type=ref,event=tag is enabled only for an actual tag push, not for
+    # workflow_dispatch: the Actions UI lets a manual run be started "from" a
+    # tag, which would otherwise tag a fresh rebuild with that tag name and
+    # silently defeat the publish job's byte-for-byte retag guarantee.
+    - name: Metadata for backend image
+      id: meta-backend
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-backend
+        flavor: |
+          latest=false
+        tags: |
+          type=raw,value=sha-${{ steps.sha.outputs.sha }}
+          type=ref,event=tag,enable=${{ github.event_name == 'push' }}
+
+    - name: Metadata for crawler-worker image
+      id: meta-crawler-worker
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-crawler-worker
+        flavor: |
+          latest=false
+        tags: |
+          type=raw,value=sha-${{ steps.sha.outputs.sha }}
+          type=ref,event=tag,enable=${{ github.event_name == 'push' }}
+
+    - name: Metadata for frontend image
+      id: meta-frontend
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-frontend
+        flavor: |
+          latest=false
+        tags: |
+          type=raw,value=sha-${{ steps.sha.outputs.sha }}
+          type=ref,event=tag,enable=${{ github.event_name == 'push' }}
+
+    - name: Build and push backend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        target: backend
+        push: true
+        tags: ${{ steps.meta-backend.outputs.tags }}
+        labels: ${{ steps.meta-backend.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push crawler-worker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        target: crawler-worker
+        push: true
+        tags: ${{ steps.meta-crawler-worker.outputs.tags }}
+        labels: ${{ steps.meta-crawler-worker.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push frontend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        push: true
+        tags: ${{ steps.meta-frontend.outputs.tags }}
+        labels: ${{ steps.meta-frontend.outputs.labels }}
+        # Same build args as ci-core.yml's docker-build job (AUTH-7, ECO-220/225
+        # review): VITE_API_URL/GRAPHQL_URL/WS_URL stay unset so the frontend
+        # uses relative paths; sign-in hides itself if VITE_OIDC_ISSUER is unset.
+        build-args: |
+          VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER }}
+          VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID || 'econ-graph-web' }}
+          NODE_ENV=production
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  publish:
+    name: Publish release images and draft the GitHub release
+    if: github.event_name == 'push' && !contains(github.ref_name, '-rc.')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        fetch-tags: true
+
+    - name: Validate this is a final release tag
+      run: |
+        if ! [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "release.yml: '${GITHUB_REF_NAME}' isn't a plain vX.Y.Z tag; refusing to publish it as a release (an rc, beta or hotfix-style tag isn't final)." >&2
+          exit 1
+        fi
+
+    - name: Set lowercase image owner
+      id: owner
+      run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+    - name: Check whether this is the newest release
+      id: latest
+      run: |
+        newest="$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+        if [ "$newest" = "${GITHUB_REF_NAME}" ]; then
+          echo "is_latest=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "is_latest=false" >> "$GITHUB_OUTPUT"
+          echo "release.yml: ${GITHUB_REF_NAME} is not the newest release tag (${newest} is); not moving 'latest'."
+        fi
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to ${{ env.REGISTRY }}
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    # Not a rebuild: this commit was already built (by workflow_dispatch or an
+    # `-rc.` tag push) and pushed under a `sha-<full sha>` tag. Retagging the
+    # same digest is what makes the tested rc image and the shipped release
+    # image identical. Inspect all three sources before retagging any of them,
+    # so a missing image fails loudly instead of leaving only some images
+    # retagged.
+    - name: Verify the rc-built images exist
+      run: |
+        set -euo pipefail
+        owner="${{ steps.owner.outputs.owner }}"
+        sha_tag="sha-${GITHUB_SHA}"
+        for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend; do
+          src="${REGISTRY}/${owner}/${image}:${sha_tag}"
+          echo "Checking ${src} exists..."
+          docker buildx imagetools inspect "${src}" >/dev/null
+        done
+
+    - name: Retag the SHA-tagged images as the release
+      run: |
+        set -euo pipefail
+        owner="${{ steps.owner.outputs.owner }}"
+        sha_tag="sha-${GITHUB_SHA}"
+        for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend; do
+          src="${REGISTRY}/${owner}/${image}:${sha_tag}"
+          tags=(-t "${REGISTRY}/${owner}/${image}:${GITHUB_REF_NAME}")
+          if [ "${{ steps.latest.outputs.is_latest }}" = "true" ]; then
+            tags+=(-t "${REGISTRY}/${owner}/${image}:latest")
+          fi
+          echo "Retagging ${src} as ${tags[*]}"
+          docker buildx imagetools create "${tags[@]}" "${src}"
+        done
+
+    - name: Extract the CHANGELOG section for this version
+      run: scripts/release/changelog-section.sh "${GITHUB_REF_NAME#v}" > /tmp/release-notes.md
+
+    - name: Draft the GitHub release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release create "${GITHUB_REF_NAME}" \
+          --draft \
+          --title "${GITHUB_REF_NAME}" \
+          --notes-file /tmp/release-notes.md
