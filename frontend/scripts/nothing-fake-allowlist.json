@@ -1,8 +1,1 @@
-[
-  {
-    "type": "module",
-    "pattern": "src/data/sampleCountryData.ts",
-    "reason": "GlobalAnalysisDemo's map tab (route /global) renders this static sample dataset instead of live data; nothing gates it behind a flag.",
-    "removeBy": "MAP-6 (ECO-154), which deletes sampleCountryData.ts and wires the map to live crossSection data"
-  }
-]
+[]
