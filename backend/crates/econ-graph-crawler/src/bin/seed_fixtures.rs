@@ -8,9 +8,13 @@
 //! For each series in the manifest (default `tests/fixtures/e2e-seed.json`) it starts a local
 //! mock upstream that serves only that entry's fixtures, points the source's adapter at it, calls
 //! `fetch_series` and writes the result with [`persist::persist_series`], the worker's own
-//! persistence. The seed fails when the adapter errors (a request the manifest doesn't cover gets
-//! a 404), when it returns no observations, or when a listed fixture was never requested, so a
-//! stale fixture or a changed adapter shows up here instead of as an empty page.
+//! persistence. An entry with `discovery` fixtures first runs the adapter's catalog discovery
+//! against them and writes the series' catalog row with [`persist::persist_discovered`], as the
+//! worker does before fetching; adapters whose fetch carries no metadata (Census BDS) get their
+//! title, units and frequency from that row. The seed fails when the adapter errors (a request
+//! the manifest doesn't cover gets a 404), when it returns no observations, or when a listed
+//! fixture was never requested, so a stale fixture or a changed adapter shows up here instead of
+//! as an empty page.
 //!
 //! Runs the database migrations first, so it works on an empty database, then syncs every
 //! adapter's dataset declarations ([`DatasetCatalog::load`] and [`persist::sync_datasets`]) before
@@ -64,6 +68,9 @@ struct Manifest {
 struct SeedSeries {
     source: SourceId,
     external_id: String,
+    /// Responses `discover` gets, for an adapter whose fetch carries no metadata. Optional.
+    #[serde(default)]
+    discovery: Vec<FixtureRoute>,
     routes: Vec<FixtureRoute>,
 }
 
@@ -149,7 +156,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
     for entry in &manifest.series {
         let label = format!("{} {}", entry.source, entry.external_id);
         let mock = MockSource::start().await;
-        for r in &entry.routes {
+        for r in entry.discovery.iter().chain(&entry.routes) {
             let path = fixture_dir.join(&r.fixture);
             let body = std::fs::read_to_string(&path)
                 .with_context(|| format!("{label}: reading {}", path.display()))?;
@@ -158,6 +165,24 @@ async fn run(args: Args) -> anyhow::Result<()> {
         let adapter = registry_at(&mock.base_url())
             .get(entry.source)
             .ok_or_else(|| anyhow!("{label}: no adapter registered"))?;
+        if !entry.discovery.is_empty() {
+            let found = adapter
+                .discover(&ctx)
+                .await
+                .with_context(|| format!("{label}: discover against the fixtures"))?;
+            let listed = found
+                .into_iter()
+                .find(|d| d.external_id == entry.external_id)
+                .ok_or_else(|| {
+                    anyhow!("{label}: discovery against the fixtures doesn't list it")
+                })?;
+            datasets
+                .check(entry.source, &entry.external_id, &listed.dataset)
+                .with_context(|| format!("{label}: discovered dataset"))?;
+            persist::persist_discovered(&pool, entry.source, &[listed])
+                .await
+                .with_context(|| format!("{label}: persisting its catalog row"))?;
+        }
         let fetched = adapter
             .fetch_series(&ctx, &entry.external_id, None)
             .await
@@ -166,7 +191,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
             bail!("{label}: the fixtures produced no observations");
         }
         let received = mock.received_requests().await;
-        for r in &entry.routes {
+        for r in entry.discovery.iter().chain(&entry.routes) {
             let hit = received.iter().any(|req| {
                 req.method.as_str().eq_ignore_ascii_case(&r.method)
                     && req.url.path() == r.path

@@ -23,6 +23,10 @@
     {
       "source": "CENSUS",
       "external_id": "bds/national..ESTAB",
+      "discovery": [
+        { "method": "GET", "path": "/timeseries/bds/variables.json", "fixture": "census/variables.json" },
+        { "method": "GET", "path": "/timeseries/bds/geography.json", "fixture": "census/geography.json" }
+      ],
       "routes": [
         {
           "method": "GET",

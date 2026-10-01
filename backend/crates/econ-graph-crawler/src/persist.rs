@@ -392,10 +392,12 @@ async fn upsert_points(
 /// Upserts the `economic_series` row for `(source, external_id)` and all `fetched.points`, in one
 /// transaction.
 ///
-/// - Series: created if missing, with the [stable id](crate::series_id) of `(source, external_id)`
-///   (title falls back to `external_id`, frequency to [`UNKNOWN_FREQUENCY`]). An existing row keeps
-///   its id. When `fetched.metadata` is present, its non-empty fields replace the
-///   stored ones; absent fields keep their stored values. Always sets `last_crawled_at`,
+/// - Series: created if missing, with the [stable id](crate::series_id) of `(source, external_id)`.
+///   An existing row keeps its id. Each of title, description, units and frequency comes from
+///   `fetched.metadata` when it has the field, else from the series' `series_metadata` row
+///   ([`persist_discovered`]) when discovery listed it, else stays as stored. Adapters whose
+///   fetch response carries no metadata (Census BDS) rely on that row. A new row with neither
+///   gets `external_id` as its title and [`UNKNOWN_FREQUENCY`]. Always sets `last_crawled_at`,
 ///   `last_updated`, `crawl_status = 'success'` and clears `crawl_error_message`.
 /// - Points: upserted on the `data_points` unique key `(series_id, date, revision_date,
 ///   is_original_release)` in chunks of [`INSERT_CHUNK`]; a conflicting row gets the new value
@@ -446,16 +448,26 @@ pub(crate) async fn persist_series_conn(
     let ids = dataset_ids(&mut *conn, source, source_id, &codes).await?;
     let dataset_id = ids[&fetched.dataset.code];
     let row: UpsertedSeries = diesel::sql_query(
-        "INSERT INTO economic_series (id, source_id, external_id, title, description, units, \
+        // `discovered`: the series' catalog row, if discovery listed it, for the fields the fetch
+        // left out. A FROM-less SELECT so the row is inserted whether or not there is one.
+        "WITH discovered AS ( \
+                     SELECT title, LEFT(description, 2000) AS description, units, frequency \
+                     FROM series_metadata WHERE source_id = $1 AND external_id = $2) \
+                 INSERT INTO economic_series (id, source_id, external_id, title, description, units, \
                      frequency, seasonal_adjustment, is_active, first_discovered_at, last_crawled_at, \
                      last_updated, crawl_status, crawl_error_message, dataset_id, dimensions) \
-                 VALUES ($9, $1, $2, COALESCE($3, $2), $4, $5, COALESCE($6, $7), $8, TRUE, NOW(), \
-                     NOW(), NOW(), 'success', NULL, $10, $11) \
+                 SELECT $9, $1, $2, COALESCE($3, (SELECT title FROM discovered), $2), \
+                     COALESCE($4, (SELECT description FROM discovered)), \
+                     COALESCE($5, (SELECT units FROM discovered)), \
+                     COALESCE($6, (SELECT frequency FROM discovered), $7), $8, TRUE, NOW(), \
+                     NOW(), NOW(), 'success', NULL, $10, $11 \
                  ON CONFLICT (source_id, external_id) DO UPDATE SET \
-                     title = COALESCE($3, economic_series.title), \
-                     description = COALESCE($4, economic_series.description), \
-                     units = COALESCE($5, economic_series.units), \
-                     frequency = COALESCE($6, economic_series.frequency), \
+                     title = COALESCE($3, (SELECT title FROM discovered), economic_series.title), \
+                     description = COALESCE($4, (SELECT description FROM discovered), \
+                         economic_series.description), \
+                     units = COALESCE($5, (SELECT units FROM discovered), economic_series.units), \
+                     frequency = COALESCE($6, (SELECT frequency FROM discovered), \
+                         economic_series.frequency), \
                      seasonal_adjustment = COALESCE($8, economic_series.seasonal_adjustment), \
                      dataset_id = $10, dimensions = $11, \
                      last_crawled_at = NOW(), last_updated = NOW(), \
