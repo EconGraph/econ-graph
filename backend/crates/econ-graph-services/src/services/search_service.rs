@@ -41,6 +41,7 @@ impl SearchService {
         })?;
 
         let search_query = params.query.clone();
+        let fulltext_query = fulltext_query(&search_query);
         let similarity_threshold = params.get_similarity_threshold();
         let limit = params.get_limit();
         let offset = params.get_offset();
@@ -75,8 +76,8 @@ impl SearchService {
                         // External ids are indexed with the `simple` configuration, so the query
                         // is parsed with both `english` (titles, descriptions) and `simple`.
                         "WITH q AS (SELECT tsq, (''::tsvector @@ tsq) AS vacuous FROM (
-                                 SELECT websearch_to_tsquery('english', $1)
-                                     || websearch_to_tsquery('simple', $1) AS tsq
+                                 SELECT websearch_to_tsquery('english', $7)
+                                     || websearch_to_tsquery('simple', $7) AS tsq
                              ) parsed)
                          SELECT es.id, es.title, es.description, es.external_id, es.source_id,
                                 es.frequency, es.units, es.start_date, es.end_date,
@@ -103,6 +104,7 @@ impl SearchService {
                     .bind::<diesel::sql_types::Bool, _>(include_inactive)
                     .bind::<diesel::sql_types::Integer, _>(limit)
                     .bind::<diesel::sql_types::Integer, _>(offset)
+                    .bind::<diesel::sql_types::Text, _>(&fulltext_query)
                     .load::<SeriesSearchResultRow>(conn)
                     .await
                 },
@@ -192,6 +194,19 @@ impl SearchService {
 
         Ok(search_suggestions)
     }
+}
+
+/// The query as `websearch_to_tsquery` gets it: words made only of dashes are dropped, because
+/// websearch syntax reads a dash before a word as "exclude it" even across a space. Without
+/// this, a title written `Label - Area` (Census BDS's style, and many FRED titles) excluded its
+/// own area, so searching a series' exact title didn't find it. A dash attached to a word
+/// (`-rate`) still excludes it.
+fn fulltext_query(query: &str) -> String {
+    query
+        .split_whitespace()
+        .filter(|word| !word.chars().all(|c| c == '-'))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Escapes LIKE wildcards (`%`, `_`) and the default escape character `\`.
@@ -314,6 +329,7 @@ mod db_tests {
              FROM data_sources ds JOIN datasets d ON d.source_id = ds.id AND d.code = 'test',
              (VALUES ('srch_UNRATE', 'Unemployment Rate',
                       'Unemployed persons as a share of the labor force'),
+                     ('srch_ESTAB', 'Number of establishments - United States', NULL),
                      ('srch_CPI', 'Consumer Price Index for All Urban Consumers',
                       'Measure of inflation in prices paid by urban consumers'),
                      ('srch_HOUSES', 'New Dwellings Begun', NULL)) v(e, t, d)
@@ -412,6 +428,23 @@ mod db_tests {
             );
         }
 
+        // A dash standing alone is punctuation, not an exclusion: a series' exact title finds it
+        // (the release suite's six-source sweep found a Census BDS title that didn't).
+        for query in [
+            "Number of establishments - United States",
+            "establishments -- united",
+        ] {
+            let dashed = service
+                .search_series(&SearchParams::simple(query))
+                .await
+                .unwrap();
+            assert_eq!(
+                titles(&dashed).into_iter().next(),
+                Some("Number of establishments - United States"),
+                "{query}"
+            );
+        }
+
         // A query with no positive requirement (all-NOT, or a NOT an empty document already
         // satisfies) returns nothing, rather than every series that lacks the excluded word.
         for query in ["-rate", "-rate -unemployment", "unemployment OR -rate"] {
@@ -461,6 +494,21 @@ mod db_tests {
             .all(|s| matches!(s.suggestion_type, SuggestionType::Correction)));
 
         remove_fixtures(&pool).await;
+    }
+
+    #[test]
+    /// Only all-dash words are dropped from the full-text query.
+    fn fulltext_query_drops_standalone_dashes_only() {
+        assert_eq!(
+            fulltext_query("Number of establishments - United States"),
+            "Number of establishments United States"
+        );
+        assert_eq!(fulltext_query("a -- b\t-"), "a b");
+        assert_eq!(fulltext_query("unemployment -rate"), "unemployment -rate");
+        assert_eq!(
+            fulltext_query("\"unemployment\"-rate"),
+            "\"unemployment\"-rate"
+        );
     }
 
     #[test]

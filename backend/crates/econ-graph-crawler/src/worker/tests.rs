@@ -3106,3 +3106,87 @@ async fn result_transaction_rolls_back_if_queue_completion_fails() {
     assert_eq!(queued.retry_count, 1);
     assert!(queued.claim_token.is_none());
 }
+
+/// Census BDS's fetch carries no metadata, so its series took their external id as title and an
+/// unknown frequency, with no units, though discovery had listed all three (found by the release
+/// suite's six-source sweep). A fetch without metadata now takes them from the discovered row;
+/// a fetch with metadata still wins over it.
+#[tokio::test]
+async fn fetch_without_metadata_takes_the_discovered_title_units_and_frequency() {
+    let Some(db) = db().await else { return };
+    let external_id = "t5_discovered_only";
+    let discovered = DiscoveredSeries {
+        external_id: external_id.into(),
+        title: "Number of establishments - United States".into(),
+        description: Some("Business Dynamics Statistics".into()),
+        units: Some("Count".into()),
+        frequency: Some("Annual".into()),
+        data_url: None,
+        dataset: flat(),
+    };
+    persist::persist_discovered(&db.pool, SRC, std::slice::from_ref(&discovered))
+        .await
+        .unwrap();
+    let point = FetchedPoint {
+        date: NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(),
+        value: Some(BigDecimal::from(7)),
+        revision_date: NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(),
+        is_original_release: true,
+    };
+    let fetch = |metadata| FetchedSeries {
+        metadata,
+        points: vec![point.clone()],
+        dataset: flat(),
+    };
+    let stored = |pool: DatabasePool| async move {
+        let mut conn = pool.get().await.unwrap();
+        economic_series::table
+            .filter(economic_series::external_id.eq(external_id))
+            .select((
+                economic_series::title,
+                economic_series::description,
+                economic_series::units,
+                economic_series::frequency,
+            ))
+            .first::<(String, Option<String>, Option<String>, String)>(&mut conn)
+            .await
+            .unwrap()
+    };
+    let expected = (
+        discovered.title.clone(),
+        discovered.description.clone(),
+        discovered.units.clone(),
+        "Annual".to_string(),
+    );
+
+    // Creating the row.
+    persist::persist_series(&db.pool, SRC, external_id, &fetch(None))
+        .await
+        .unwrap();
+    assert_eq!(stored(db.pool.clone()).await, expected);
+
+    // Updating it: still the discovered values, not the external id or "Unknown".
+    persist::persist_series(&db.pool, SRC, external_id, &fetch(None))
+        .await
+        .unwrap();
+    assert_eq!(stored(db.pool.clone()).await, expected);
+
+    // A fetch's own metadata wins field by field; fields it leaves out keep the discovered ones.
+    let own = NewSeriesMetadataLite {
+        title: "Establishments".into(),
+        units: Some("Establishments".into()),
+        ..Default::default()
+    };
+    persist::persist_series(&db.pool, SRC, external_id, &fetch(Some(own)))
+        .await
+        .unwrap();
+    assert_eq!(
+        stored(db.pool.clone()).await,
+        (
+            "Establishments".to_string(),
+            discovered.description.clone(),
+            Some("Establishments".to_string()),
+            "Annual".to_string(),
+        )
+    );
+}

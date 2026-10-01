@@ -74,8 +74,11 @@ In this mode (`env.ts`):
 - Specs that compare with fixture values check live data instead: the journey
   checks that GDP's newest point is within FRED's publication cadence
   (`liveMaxAgeDays` in `fixtures.ts`) and that each transformation shows a
-  number. The per-source cadence check for the other train 1 sources (check 3)
-  comes with REL-4's six-source sweep.
+  number. The six-source sweep checks each other train 1 source's newest point
+  against its own cadence (`liveMaxAgeDays` in `SWEPT_SOURCES`). Census BDS
+  series crawled before #316 have their external id as title until the crawler
+  fetches them again (weekly, since their frequency reads "Unknown"), and the
+  sweep searches by title, so run it once they have been re-fetched.
 - The signed-in specs use the two QA-only realm users, `qa-alice` and `qa-bob`
   (`config/keycloak/qa/`). Their passwords come from `RELEASE_QA_USER1_PASSWORD`
   and `RELEASE_QA_USER2_PASSWORD`; `RELEASE_QA_USER<n>`, `_NAME` and `_EMAIL`
@@ -108,6 +111,13 @@ In this mode (`env.ts`):
   `stale allowlist entry` annotations. A new route in `App.tsx` fails the crawl
   until `ROUTE_URLS` in `crawl/every-control.spec.ts` says which URLs to visit
   for it.
+- `sources/six-source-sweep.spec.ts`: one series from each train 1 source (FRED,
+  BLS, Census BDS, BEA, FHFA, World Bank WDI), signed out. Search for it on the
+  explore page and open it, check its newest point, apply every transformation
+  the page offers (checking its value, or that the page says there aren't enough
+  observations), and download the CSV (header and row count). The expected
+  values are `SWEPT_SOURCES` in `fixtures.ts`. The world map's three WDI
+  indicators are the world-map area's spec.
 - `auth/`: sign-in and annotation privacy (the auth area's spec).
 
 ## Add specs for your area
@@ -122,7 +132,10 @@ Put them in `tests/e2e/release/<area>/`, for example
   entry to `e2e-seed.json` with the source, the external id, and each request
   the adapter makes as `method`, `path`, optional `query` and `fixture`. Add the
   series to `fixtures.ts`. The seed fails on any request the manifest doesn't
-  cover, so a stale fixture shows up there, not as an empty page.
+  cover, so a stale fixture shows up there, not as an empty page. A source whose
+  fetch response carries no title or units (Census BDS) also lists its catalog
+  requests under `discovery`; the seed runs discovery first, as the crawler
+  worker does, and the series takes its title, units and frequency from that.
 - **Need a signed-in user?** Use `signInOnKeycloak` from `auth/helpers.ts`,
   which drives Keycloak's login page, with a user from `USERS` in `env.ts`, and
   `uniqueTitle` for rows you create. Never sign the same dev user in from two
