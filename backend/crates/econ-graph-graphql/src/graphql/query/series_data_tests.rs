@@ -126,6 +126,11 @@ impl Fixture {
                  VALUES ('{source_id}', 'seriesData test {source_id}', 'test', 'https://example.test')"
             ))
             .await;
+        fixture
+            .sql(&format!(
+                "INSERT INTO datasets (source_id, code, name) VALUES ('{source_id}', 'test', 'Test')"
+            ))
+            .await;
         Some(fixture)
     }
 
@@ -150,8 +155,9 @@ impl Fixture {
     async fn series(&self, frequency: &str, points_sql: &str) -> Uuid {
         let series_id = Uuid::new_v4();
         self.sql(&format!(
-            "INSERT INTO economic_series (id, source_id, external_id, title, frequency) \
-             VALUES ('{series_id}', '{}', 'seriesdata_{series_id}', 'seriesData test', '{frequency}')",
+            "INSERT INTO economic_series (id, source_id, external_id, title, frequency, dataset_id) \
+             SELECT '{series_id}', '{0}', 'seriesdata_{series_id}', 'seriesData test', \
+                 '{frequency}', id FROM datasets WHERE source_id = '{0}' AND code = 'test'",
             self.source_id
         ))
         .await;

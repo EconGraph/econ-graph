@@ -353,6 +353,7 @@ pub fn label_dimensions(
 /// The dataset columns of a series row.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SeriesDatasetFields {
+    /// Every stored series has one; `None` only for a series whose row was not found.
     pub dataset_id: Option<Uuid>,
     pub dimensions: SeriesDimensions,
     /// Overrides the dataset's default measure when set.
@@ -439,7 +440,7 @@ impl BatchFn<Uuid, Option<SeriesDatasetFields>> for SeriesDatasetFieldsBatcher {
                     dsl::dimensions,
                     dsl::default_measure,
                 ))
-                .load::<(Uuid, Option<Uuid>, SeriesDimensions, Option<String>)>(&mut conn)
+                .load::<(Uuid, Uuid, SeriesDimensions, Option<String>)>(&mut conn)
                 .await
             {
                 Ok(rows) => rows,
@@ -455,7 +456,7 @@ impl BatchFn<Uuid, Option<SeriesDatasetFields>> for SeriesDatasetFieldsBatcher {
                     (
                         id,
                         SeriesDatasetFields {
-                            dataset_id,
+                            dataset_id: Some(dataset_id),
                             dimensions,
                             default_measure,
                         },

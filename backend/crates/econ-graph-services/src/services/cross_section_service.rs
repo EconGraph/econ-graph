@@ -9,8 +9,8 @@
 //! one reads every matching series with its observation (a lateral join over `data_points`).
 //!
 //! Observations are read at their current revision: for each date the newest `revision_date`
-//! wins, and on the same revision date a revision beats the original release (the order PR
-//! #184's `revision_filter` uses). `asOf` arrives with that filter.
+//! wins, and on the same revision date a revision beats the original release (the order
+//! [`econ_graph_core::models::revision_filter`] uses). `asOf` arrives with that filter.
 
 use std::collections::BTreeMap;
 
@@ -51,6 +51,10 @@ pub struct CrossSectionRequest {
     /// The dimension the result varies over, e.g. `area`.
     pub across: String,
     pub date: CrossSectionDate,
+    /// Read each series as it was known on this day: its newest revision published on or
+    /// before it (PR #184's `revision_filter`). Observations first published after this day
+    /// are treated as not yet known. `None` reads the current revision.
+    pub as_of: Option<NaiveDate>,
 }
 
 /// One key of a cross-section.
@@ -107,6 +111,13 @@ pub async fn cross_section(
     // latest non-null one (or the one on `on_date`, null or not) is the series' observation;
     // `value IS NOT NULL` runs after the current revision is picked, so a null current value
     // never lets an earlier, superseded value show through.
+    //
+    // With `asOf` ($5), revisions first published after it are invisible (`dp.revision_date <=
+    // $5`). A pre-vintage-tracking synthetic row (`revision_date = date`, tagged
+    // `is_original_release`) is also dropped when the same date has another original-release
+    // row at a different `revision_date` — see
+    // [`econ_graph_core::models::exclude_synthetic_legacy_rows`] — so the synthetic row can't
+    // stand in for "known on `$5`" when it really only means "current as of an old crawl".
     let rows: Vec<SqlRow> = diesel::sql_query(
         "SELECT s.id AS series_id, s.dimensions ->> $2 AS key, obs.date, obs.value \
          FROM economic_series s \
@@ -115,6 +126,17 @@ pub async fn cross_section(
                  SELECT DISTINCT ON (dp.date) dp.date, dp.value \
                  FROM data_points dp \
                  WHERE dp.series_id = s.id AND ($4::date IS NULL OR dp.date = $4) \
+                   AND ($5::date IS NULL OR dp.revision_date <= $5) \
+                   AND ($5::date IS NULL OR NOT ( \
+                         dp.revision_date = dp.date AND dp.is_original_release \
+                         AND EXISTS ( \
+                           SELECT 1 FROM data_points other_original \
+                           WHERE other_original.series_id = dp.series_id \
+                             AND other_original.date = dp.date \
+                             AND other_original.is_original_release \
+                             AND other_original.revision_date <> dp.date \
+                         ) \
+                       )) \
                  ORDER BY dp.date DESC, dp.revision_date DESC, dp.is_original_release ASC, \
                           dp.id DESC \
              ) cur \
@@ -130,6 +152,7 @@ pub async fn cross_section(
     .bind::<Text, _>(&request.across)
     .bind::<Jsonb, _>(filter)
     .bind::<Nullable<diesel::sql_types::Date>, _>(on_date)
+    .bind::<Nullable<diesel::sql_types::Date>, _>(request.as_of)
     .load(conn)
     .await?;
 

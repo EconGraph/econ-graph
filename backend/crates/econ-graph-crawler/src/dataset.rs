@@ -7,7 +7,8 @@
 //!
 //! - Definitions are reference data. They live in `datasets/<source>.toml` under the reference
 //!   data directory ([`crate::reference::datasets`]), not in code.
-//! - Each adapter declares the dataset codes it writes ([`SourceAdapter::datasets`]).
+//! - Each adapter declares the dataset codes it writes ([`SourceAdapter::datasets`]), at least
+//!   one: every series belongs to a dataset (`economic_series.dataset_id` is `NOT NULL`).
 //! - [`DatasetCatalog::load`] reads the definitions for every registered adapter at startup and
 //!   rejects a declared code without a definition, or a definition no adapter declares.
 //!   [`crate::persist::sync_datasets`] then upserts them into the `datasets` table.
@@ -395,7 +396,7 @@ pub struct DatasetCatalog {
 }
 
 impl DatasetCatalog {
-    /// A catalog with no datasets: every series that names a dataset is rejected.
+    /// A catalog with no datasets: every series is rejected.
     pub fn empty() -> Self {
         Self::default()
     }
@@ -412,13 +413,17 @@ impl DatasetCatalog {
         Ok(catalog)
     }
 
-    /// Loads one adapter's definitions from the reference data directory (nothing is read when it
-    /// declares no datasets, so a stray `<source>.toml` for an adapter that declares nothing is
-    /// not checked; [`load`](Self::load) covers every registered adapter, not every file on disk).
+    /// Loads one adapter's definitions from the reference data directory. An adapter that
+    /// declares no datasets is an error, since every series needs one. [`load`](Self::load)
+    /// covers every registered adapter, not every file on disk, so a `<source>.toml` for an
+    /// adapter that isn't registered (a static catalog in a release build) is not read.
     pub fn load_adapter(&mut self, adapter: &dyn SourceAdapter) -> Result<(), CrawlError> {
         let declared = adapter.datasets();
         if declared.is_empty() {
-            return Ok(());
+            return Err(CrawlError::Permanent(format!(
+                "{}: adapter declares no datasets; every series needs one",
+                adapter.id()
+            )));
         }
         let defs = crate::reference::datasets(adapter.id())?.to_vec();
         self.insert(adapter.id(), declared, defs)
@@ -486,10 +491,8 @@ impl DatasetCatalog {
         self.len() == 0
     }
 
-    /// Checks one series an adapter emitted. `None` (no dataset) passes, for now: the dataset
-    /// becomes required once every adapter declares one. It is a `Permanent` error naming the
-    /// series if the adapter did not declare the dataset, or if the dimension keys differ from the
-    /// definition.
+    /// Checks one series an adapter emitted. It is a `Permanent` error naming the series if the
+    /// adapter did not declare the dataset, or if the dimension keys differ from the definition.
     ///
     /// The external id is not checked against the dimensions: a source with its own series key
     /// (FRED, BLS, SDMX) keeps it and parses dimensions from it, and only sources without one
@@ -498,11 +501,8 @@ impl DatasetCatalog {
         &self,
         source: SourceId,
         external_id: &str,
-        dataset: Option<&SeriesDataset>,
-    ) -> Result<Option<&DatasetDef>, CrawlError> {
-        let Some(dataset) = dataset else {
-            return Ok(None);
-        };
+        dataset: &SeriesDataset,
+    ) -> Result<&DatasetDef, CrawlError> {
         let fail =
             |msg: String| CrawlError::Permanent(format!("{source} series {external_id}: {msg}"));
         let def = self.get(source, &dataset.code).ok_or_else(|| {
@@ -512,7 +512,7 @@ impl DatasetCatalog {
             ))
         })?;
         def.check_dimensions(&dataset.dimensions).map_err(fail)?;
-        Ok(Some(def))
+        Ok(def)
     }
 
     /// [`check`](Self::check) for a batch of series, which also rejects two external ids with the
@@ -522,13 +522,12 @@ impl DatasetCatalog {
     pub fn check_all<'a>(
         &self,
         source: SourceId,
-        series: impl IntoIterator<Item = (&'a str, Option<&'a SeriesDataset>)>,
+        series: impl IntoIterator<Item = (&'a str, &'a SeriesDataset)>,
     ) -> Result<(), CrawlError> {
         let mut by_key: HashMap<(&str, &BTreeMap<String, String>), &str> = HashMap::new();
         let mut by_id: HashMap<&str, &SeriesDataset> = HashMap::new();
         for (external_id, dataset) in series {
-            let Some(dataset) = dataset else { continue };
-            self.check(source, external_id, Some(dataset))?;
+            self.check(source, external_id, dataset)?;
             if let Some(prev) = by_id.insert(external_id, dataset) {
                 if prev != dataset {
                     return Err(CrawlError::Permanent(format!(
@@ -794,38 +793,27 @@ label = "Observation status"
     }
 
     #[test]
-    fn check_accepts_declared_dataset_and_no_dataset() {
+    fn check_accepts_declared_dataset() {
         let c = catalog();
         let ds = SeriesDataset::new("wdi", [("indicator", "X"), ("area", "USA")]);
         assert_eq!(
-            c.check(SourceId::WorldBank, "wdi/X.USA", Some(&ds))
-                .unwrap()
-                .unwrap()
-                .code,
+            c.check(SourceId::WorldBank, "wdi/X.USA", &ds).unwrap().code,
             "wdi"
         );
-        assert!(c
-            .check(SourceId::WorldBank, "legacy", None)
-            .unwrap()
-            .is_none());
     }
 
     #[test]
     fn check_rejects_undeclared_dataset_and_wrong_keys() {
         let c = catalog();
         let other = SeriesDataset::new("ids", [("indicator", "X")]);
-        let e = c
-            .check(SourceId::WorldBank, "s1", Some(&other))
-            .unwrap_err();
+        let e = c.check(SourceId::WorldBank, "s1", &other).unwrap_err();
         assert_eq!(e.kind(), "permanent");
         assert!(e.to_string().contains("dataset ids is not declared"), "{e}");
         // Right code, wrong source.
         let ds = SeriesDataset::new("wdi", [("indicator", "X"), ("area", "USA")]);
-        assert!(c.check(SourceId::Imf, "s1", Some(&ds)).is_err());
+        assert!(c.check(SourceId::Imf, "s1", &ds).is_err());
         let wrong = SeriesDataset::new("wdi", [("indicator", "X"), ("country", "USA")]);
-        let e = c
-            .check(SourceId::WorldBank, "s2", Some(&wrong))
-            .unwrap_err();
+        let e = c.check(SourceId::WorldBank, "s2", &wrong).unwrap_err();
         assert!(
             e.to_string()
                 .contains("missing [\"area\"], unexpected [\"country\"]"),
@@ -837,7 +825,7 @@ label = "Observation status"
     fn check_accepts_a_source_key_as_external_id() {
         let c = catalog();
         let ds = SeriesDataset::new("wdi", [("indicator", "X"), ("area", "USA")]);
-        assert!(c.check(SourceId::WorldBank, "X_USA", Some(&ds)).is_ok());
+        assert!(c.check(SourceId::WorldBank, "X_USA", &ds).is_ok());
     }
 
     #[test]
@@ -845,7 +833,7 @@ label = "Observation status"
         let c = catalog();
         let a = SeriesDataset::new("wdi", [("indicator", "X"), ("area", "USA")]);
         let e = c
-            .check_all(SourceId::WorldBank, [("a", Some(&a)), ("b", Some(&a))])
+            .check_all(SourceId::WorldBank, [("a", &a), ("b", &a)])
             .unwrap_err();
         assert_eq!(e.kind(), "permanent");
         assert!(e.to_string().contains("same dataset wdi"), "{e}");
@@ -855,15 +843,8 @@ label = "Observation status"
     fn check_all_rejects_an_id_listed_twice_with_different_values() {
         let c = catalog();
         let a = SeriesDataset::new("wdi", [("indicator", "X"), ("area", "USA")]);
-        c.check_all(
-            SourceId::WorldBank,
-            [
-                ("wdi/X.USA", Some(&a)),
-                ("wdi/X.USA", Some(&a)),
-                ("n", None),
-            ],
-        )
-        .unwrap();
+        c.check_all(SourceId::WorldBank, [("wdi/X.USA", &a), ("wdi/X.USA", &a)])
+            .unwrap();
         let mut flat = DatasetCatalog::empty();
         flat.insert(
             SourceId::Fred,
@@ -876,16 +857,53 @@ label = "Observation status"
             SeriesDataset::new("b", Vec::<(String, String)>::new()),
         );
         let e = flat
-            .check_all(SourceId::Fred, [("GDP", Some(&in_a)), ("GDP", Some(&in_b))])
+            .check_all(SourceId::Fred, [("GDP", &in_a), ("GDP", &in_b)])
             .unwrap_err();
         assert!(e.to_string().contains("is listed as both"), "{e}");
     }
 
-    /// Every production adapter's declarations match the shipped dataset files: FRED, BLS,
-    /// Census BDS and FHFA all declare datasets.
+    /// Every adapter, the static catalogs included, declares at least one dataset, and the
+    /// declarations match the shipped dataset files.
     #[test]
-    fn default_registry_declarations_match_shipped_files() {
+    fn every_adapter_declares_datasets_matching_shipped_files() {
+        let registry = crate::sources::registry_at("http://unused");
+        let catalog = DatasetCatalog::load(&registry).unwrap();
+        for id in registry.ids() {
+            assert!(catalog.iter().any(|(s, _)| s == id), "{id} has no dataset");
+        }
         DatasetCatalog::load(&crate::sources::default_registry()).unwrap();
+    }
+
+    #[test]
+    fn load_rejects_an_adapter_without_datasets() {
+        struct NoDatasets;
+        #[async_trait::async_trait]
+        impl SourceAdapter for NoDatasets {
+            fn id(&self) -> SourceId {
+                SourceId::Fred
+            }
+            fn datasets(&self) -> &[&str] {
+                &[]
+            }
+            async fn discover(
+                &self,
+                _: &crate::adapter::CrawlCtx,
+            ) -> Result<Vec<crate::adapter::DiscoveredSeries>, CrawlError> {
+                Ok(Vec::new())
+            }
+            async fn fetch_series(
+                &self,
+                _: &crate::adapter::CrawlCtx,
+                external_id: &str,
+                _: Option<chrono::NaiveDate>,
+            ) -> Result<crate::adapter::FetchedSeries, CrawlError> {
+                Err(CrawlError::NotFound(external_id.into()))
+            }
+        }
+        let e = DatasetCatalog::empty()
+            .load_adapter(&NoDatasets)
+            .unwrap_err();
+        assert!(e.to_string().contains("declares no datasets"), "{e}");
     }
 
     /// A dimensionless dataset (e.g. FRED) holds many series, keyed by external id.
@@ -899,10 +917,7 @@ label = "Observation status"
         )
         .unwrap();
         let flat = SeriesDataset::new("FRED", Vec::<(String, String)>::new());
-        c.check_all(
-            SourceId::Fred,
-            [("GDP", Some(&flat)), ("UNRATE", Some(&flat))],
-        )
-        .unwrap();
+        c.check_all(SourceId::Fred, [("GDP", &flat), ("UNRATE", &flat)])
+            .unwrap();
     }
 }

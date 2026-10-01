@@ -16,10 +16,10 @@
 //! - [`latest_point_date`]: the `since` bound for incremental fetches.
 //! - [`latest_revision_date`]: the known-vintage bound for sources that track vintages.
 //!
-//! A series that names a dataset ([`SeriesDataset`]) is written with the dataset's id and its
-//! dimension values. `default_measure` on a series is an override of the dataset's and is not
-//! written: train 1 datasets have the single measure `value`. Callers check the series against
-//! the [`DatasetCatalog`] first; persistence only resolves the synced row.
+//! Every series is written with its dataset's ([`SeriesDataset`]) id and its dimension values.
+//! `default_measure` on a series is an override of the dataset's and is not written: train 1
+//! datasets have the single measure `value`. Callers check the series against the
+//! [`DatasetCatalog`] first; persistence only resolves the synced row.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -261,14 +261,8 @@ async fn dataset_ids(
 }
 
 /// The distinct dataset codes named by `datasets`.
-fn dataset_codes<'a>(
-    datasets: impl IntoIterator<Item = Option<&'a SeriesDataset>>,
-) -> Vec<&'a str> {
-    let codes: BTreeSet<&str> = datasets
-        .into_iter()
-        .flatten()
-        .map(|d| d.code.as_str())
-        .collect();
+fn dataset_codes<'a>(datasets: impl IntoIterator<Item = &'a SeriesDataset>) -> Vec<&'a str> {
+    let codes: BTreeSet<&str> = datasets.into_iter().map(|d| d.code.as_str()).collect();
     codes.into_iter().collect()
 }
 
@@ -408,9 +402,9 @@ async fn upsert_points(
 ///   only if it differs.
 ///   Duplicate keys in the input keep the last occurrence.
 /// - `start_date` / `end_date` are recomputed from the stored points.
-/// - Dataset: when `fetched.dataset` is set, `dataset_id` (from the synced `datasets` row) and
-///   `dimensions` are written from it; when it is `None` the stored values are kept.
-///   `default_measure` is a per-series override and is left alone, so the dataset's applies.
+/// - Dataset: `dataset_id` (from the synced `datasets` row) and `dimensions` are written from
+///   `fetched.dataset`. `default_measure` is a per-series override and is left alone, so the
+///   dataset's applies.
 pub async fn persist_series(
     pool: &DatabasePool,
     source: SourceId,
@@ -448,26 +442,22 @@ pub(crate) async fn persist_series_conn(
     }
     let latest_date = unique.keys().map(|k| k.0).max();
 
-    let codes = dataset_codes([fetched.dataset.as_ref()]);
+    let codes = dataset_codes([&fetched.dataset]);
     let ids = dataset_ids(&mut *conn, source, source_id, &codes).await?;
-    let dataset = fetched
-        .dataset
-        .as_ref()
-        .map(|d| (ids[&d.code], &d.dimensions));
+    let dataset_id = ids[&fetched.dataset.code];
     let row: UpsertedSeries = diesel::sql_query(
         "INSERT INTO economic_series (id, source_id, external_id, title, description, units, \
                      frequency, seasonal_adjustment, is_active, first_discovered_at, last_crawled_at, \
                      last_updated, crawl_status, crawl_error_message, dataset_id, dimensions) \
                  VALUES ($9, $1, $2, COALESCE($3, $2), $4, $5, COALESCE($6, $7), $8, TRUE, NOW(), \
-                     NOW(), NOW(), 'success', NULL, $10, COALESCE($11, '{}'::jsonb)) \
+                     NOW(), NOW(), 'success', NULL, $10, $11) \
                  ON CONFLICT (source_id, external_id) DO UPDATE SET \
                      title = COALESCE($3, economic_series.title), \
                      description = COALESCE($4, economic_series.description), \
                      units = COALESCE($5, economic_series.units), \
                      frequency = COALESCE($6, economic_series.frequency), \
                      seasonal_adjustment = COALESCE($8, economic_series.seasonal_adjustment), \
-                     dataset_id = COALESCE($10, economic_series.dataset_id), \
-                     dimensions = COALESCE($11, economic_series.dimensions), \
+                     dataset_id = $10, dimensions = $11, \
                      last_crawled_at = NOW(), last_updated = NOW(), \
                      crawl_status = 'success', crawl_error_message = NULL \
                  RETURNING id, (old.id IS NULL) AS inserted",
@@ -481,8 +471,8 @@ pub(crate) async fn persist_series_conn(
     .bind::<Text, _>(UNKNOWN_FREQUENCY)
     .bind::<Nullable<Text>, _>(seasonal.as_deref())
     .bind::<SqlUuid, _>(id)
-    .bind::<Nullable<SqlUuid>, _>(dataset.map(|d| d.0))
-    .bind::<Nullable<Jsonb>, _>(dataset.map(|d| d.1))
+    .bind::<SqlUuid, _>(dataset_id)
+    .bind::<Jsonb, _>(&fetched.dataset.dimensions)
     .get_result(&mut *conn)
     .await?;
     let series_id = row.id;
@@ -520,8 +510,8 @@ pub(crate) async fn persist_series_conn(
 /// one transaction, chunked. Every row gets the [stable id](crate::series_id) of its key. Existing
 /// rows get the new title/description/units/frequency/data_url, `last_discovered_at = NOW()` and
 /// `is_active = TRUE`. Duplicate ids in the input keep the last.
-/// Series with a dataset get its `dataset_id` and their `dimensions`; series without one keep the
-/// stored values. `default_measure` (a per-series override) is left alone.
+/// Every row gets its series' `dataset_id` and `dimensions`. `default_measure` (a per-series
+/// override) is left alone.
 /// Returns the number of rows written.
 pub async fn persist_discovered(
     pool: &DatabasePool,
@@ -541,7 +531,6 @@ pub(crate) async fn persist_discovered_conn(
     source: SourceId,
     discovered: &[DiscoveredSeries],
 ) -> AppResult<usize> {
-    use diesel::dsl::sql;
     use diesel::upsert::excluded;
     use econ_graph_core::models::NewSeriesMetadata;
     use series_metadata::dsl as sm;
@@ -555,7 +544,7 @@ pub(crate) async fn persist_discovered_conn(
             unique.insert(clip(&d.external_id, 255), d);
         }
     }
-    let codes = dataset_codes(unique.values().map(|d| d.dataset.as_ref()));
+    let codes = dataset_codes(unique.values().map(|d| &d.dataset));
     let ids = dataset_ids(&mut *conn, source, source_id, &codes).await?;
     let rows: Vec<_> = unique
         .into_iter()
@@ -574,12 +563,8 @@ pub(crate) async fn persist_discovered_conn(
                     data_url: clip_opt(d.data_url.as_deref(), usize::MAX),
                     api_endpoint: None,
                     is_active: true,
-                    dataset_id: d.dataset.as_ref().map(|ds| ids[&ds.code]),
-                    dimensions: d
-                        .dataset
-                        .as_ref()
-                        .map(|ds| ds.dimensions.clone())
-                        .unwrap_or_default(),
+                    dataset_id: Some(ids[&d.dataset.code]),
+                    dimensions: d.dataset.dimensions.clone(),
                     default_measure: None,
                     external_id,
                 },
@@ -602,14 +587,8 @@ pub(crate) async fn persist_discovered_conn(
                 sm::units.eq(excluded(sm::units)),
                 sm::frequency.eq(excluded(sm::frequency)),
                 sm::data_url.eq(excluded(sm::data_url)),
-                // A series discovered without a dataset keeps the stored one.
-                sm::dataset_id.eq(sql::<Nullable<SqlUuid>>(
-                    "COALESCE(EXCLUDED.dataset_id, series_metadata.dataset_id)",
-                )),
-                sm::dimensions.eq(sql::<Jsonb>(
-                    "CASE WHEN EXCLUDED.dataset_id IS NULL THEN series_metadata.dimensions \
-                     ELSE EXCLUDED.dimensions END",
-                )),
+                sm::dataset_id.eq(excluded(sm::dataset_id)),
+                sm::dimensions.eq(excluded(sm::dimensions)),
                 sm::is_active.eq(true),
                 sm::last_discovered_at.eq(now),
                 sm::updated_at.eq(now),
