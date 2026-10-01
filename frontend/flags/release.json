@@ -17,6 +17,10 @@
     "mcp": {
       "kind": "build",
       "value": false
+    },
+    "technical_analysis": {
+      "kind": "build",
+      "value": false
     }
   }
 }
