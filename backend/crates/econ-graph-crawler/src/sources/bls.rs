@@ -94,8 +94,9 @@
 //! Each survey with a layout in [`SERIES_ID_LAYOUTS`] is one dataset, coded by its two-letter
 //! series id prefix and defined in `data/datasets/bls.toml`. A series id is that prefix followed
 //! by fixed-width fields, which [`series_dataset`] splits into the dataset's dimensions. Series
-//! keep their BLS ids as external ids, since the API takes those. A series of any other survey,
-//! or whose id does not fit its survey's layout, is written without a dataset.
+//! keep their BLS ids as external ids, since the API takes those. Every series needs a dataset, so
+//! a series of any other survey, or whose id does not fit its survey's layout, goes in the
+//! dimensionless [`OTHER_DATASET`] until its survey gets a layout.
 
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
@@ -165,8 +166,12 @@ pub const SERIES_ID_LAYOUTS: &[(&str, &[(&str, usize)])] = &[
     ("LA", &[("seasonal", 1), ("area", 15), ("measure", 2)]),
 ];
 
-/// The codes in [`SERIES_ID_LAYOUTS`], for [`SourceAdapter::datasets`].
-const DATASET_CODES: &[&str] = &["CU", "CE", "LN", "LA"];
+/// Dataset of BLS series without a layout in [`SERIES_ID_LAYOUTS`]: no dimensions, keyed by the
+/// BLS series id, like FRED.
+pub const OTHER_DATASET: &str = "other";
+
+/// The codes in [`SERIES_ID_LAYOUTS`] and [`OTHER_DATASET`], for [`SourceAdapter::datasets`].
+const DATASET_CODES: &[&str] = &["CU", "CE", "LN", "LA", OTHER_DATASET];
 
 /// BLS adapter. See the module docs for request shape, batching, windowing and error mapping.
 #[derive(Debug, Clone)]
@@ -573,6 +578,7 @@ fn build_series(
     raw: &[DataPoint],
     since: Option<NaiveDate>,
 ) -> Result<FetchedSeries, CrawlError> {
+    let dataset = dataset_of(external_id);
     let frequency = determine_frequency(raw.iter().map(|p| p.period.as_str()));
     let mut points = Vec::with_capacity(raw.len());
     let mut preliminary = 0usize;
@@ -644,8 +650,15 @@ fn build_series(
     Ok(FetchedSeries {
         metadata,
         points,
-        dataset: series_dataset(external_id),
+        dataset,
     })
+}
+
+/// The dataset of BLS series `series_id`: its survey's ([`series_dataset`]), else
+/// [`OTHER_DATASET`].
+pub fn dataset_of(series_id: &str) -> SeriesDataset {
+    series_dataset(series_id)
+        .unwrap_or_else(|| SeriesDataset::new(OTHER_DATASET, Vec::<(String, String)>::new()))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -870,7 +883,7 @@ impl SourceAdapter for BlsAdapter {
                 units: Some(s.units.clone()),
                 frequency: Some(s.frequency.clone()),
                 data_url: Some(format!("{}/timeseries/data/{}", self.base_url, s.id)),
-                dataset: series_dataset(&s.id),
+                dataset: dataset_of(&s.id),
             })
             .collect())
     }
@@ -1156,7 +1169,7 @@ mod tests {
             m.description.as_deref(),
             Some("CPI for All Urban Consumers (CPI-U)")
         );
-        let ds = s.dataset.unwrap();
+        let ds = s.dataset;
         assert_eq!(ds.code, "CU");
         assert_eq!(
             ds.dimensions.0,
@@ -1187,8 +1200,11 @@ mod tests {
             vec![d(2023, 7, 1), d(2023, 10, 1), d(2024, 1, 1), d(2024, 4, 1)]
         );
         assert!(s.metadata.is_none());
-        // ECI (CI) has no dataset layout yet.
-        assert_eq!(s.dataset, None);
+        // ECI (CI) has no dataset layout yet, so it is in the dimensionless catch-all.
+        assert_eq!(
+            s.dataset,
+            SeriesDataset::new(OTHER_DATASET, Vec::<(String, String)>::new())
+        );
 
         // A listed series without a catalog (keyless) takes its metadata from the list.
         mock.reset().await;
@@ -1510,7 +1526,7 @@ mod tests {
         );
         assert_eq!(cpi.frequency.as_deref(), Some("Monthly"));
         assert_eq!(cpi.units.as_deref(), Some("Index 1982-1984=100"));
-        let ds = cpi.dataset.as_ref().expect("CPI series has a dataset");
+        let ds = &cpi.dataset;
         assert_eq!(ds.code, "CU");
     }
 
@@ -1706,6 +1722,14 @@ mod tests {
         }
     }
 
+    /// Every curated series has its survey's dataset, not the catch-all.
+    #[test]
+    fn listed_series_have_survey_datasets() {
+        for s in crate::reference::bls_series().unwrap() {
+            assert!(series_dataset(&s.id).is_some(), "{} has no layout", s.id);
+        }
+    }
+
     /// The layouts and `data/datasets/bls.toml` list the same datasets and dimensions, in the same
     /// order, so the id splits into exactly the declared keys.
     #[test]
@@ -1713,6 +1737,12 @@ mod tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/datasets/bls.toml");
         let defs =
             crate::dataset::parse_dataset_file(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let (other, defs): (Vec<_>, Vec<_>) =
+            defs.into_iter().partition(|d| d.code == OTHER_DATASET);
+        assert!(
+            other[0].dimensions.is_empty(),
+            "{OTHER_DATASET} has no dimensions"
+        );
         let from_file: Vec<(&str, Vec<&str>)> = defs
             .iter()
             .map(|d| (d.code.as_str(), d.dimension_names().collect()))
@@ -1727,6 +1757,7 @@ mod tests {
             SERIES_ID_LAYOUTS
                 .iter()
                 .map(|(c, _)| *c)
+                .chain([OTHER_DATASET])
                 .collect::<Vec<_>>()
         );
         for ((code, layout), def) in SERIES_ID_LAYOUTS.iter().zip(&defs) {

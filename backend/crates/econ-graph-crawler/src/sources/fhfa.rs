@@ -226,7 +226,7 @@ impl HpiSeries {
                     is_original_release: true,
                 })
                 .collect(),
-            dataset: Some(self.dataset.clone()),
+            dataset: self.dataset.clone(),
         })
     }
 }
@@ -514,7 +514,7 @@ impl SourceAdapter for FhfaAdapter {
                     units: m.units,
                     frequency: m.frequency,
                     data_url: Some(url.clone()),
-                    dataset: Some(s.dataset),
+                    dataset: s.dataset,
                     external_id,
                 }
             })
@@ -680,7 +680,7 @@ mod tests {
             m.seasonal_adjustment.as_deref(),
             Some("Seasonally Adjusted")
         );
-        let dims = &f.dataset.unwrap().dimensions.0;
+        let dims = &f.dataset.dimensions.0;
         assert_eq!(dims["level"], "usa-or-census-division");
         assert_eq!(dims["seasonal_adjustment"], "sa");
 
@@ -846,9 +846,7 @@ mod tests {
         );
         crate::testkit::contract::assert_series_datasets(
             &FhfaAdapter::default(),
-            found
-                .iter()
-                .map(|s| (s.external_id.as_str(), s.dataset.as_ref())),
+            found.iter().map(|s| (s.external_id.as_str(), &s.dataset)),
         );
     }
 

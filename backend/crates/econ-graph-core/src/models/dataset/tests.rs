@@ -9,6 +9,7 @@ use crate::models::data_source::{DataSource, NewDataSource};
 use crate::models::economic_series::{EconomicSeries, NewEconomicSeries};
 use crate::models::series_metadata::{NewSeriesMetadata, SeriesMetadata};
 use crate::schema::{economic_series, series_metadata};
+use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 
 static MIGRATED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
@@ -215,17 +216,17 @@ async fn dimensioned_series_round_trips_and_filters() {
         .unwrap();
 
     let mut ca = new_series(source.id, "BDS/state.06.ESTAB");
-    ca.dataset_id = Some(dataset.id);
+    ca.dataset_id = dataset.id;
     ca.dimensions = state_dims("06");
     let ca = EconomicSeries::create(&pool, &ca)
         .await
         .expect("create series");
-    assert_eq!(ca.dataset_id, Some(dataset.id));
+    assert_eq!(ca.dataset_id, dataset.id);
     assert_eq!(ca.dimensions, state_dims("06"));
     assert_eq!(ca.default_measure, None);
 
     let mut ny = new_series(source.id, "BDS/state.36.ESTAB");
-    ny.dataset_id = Some(dataset.id);
+    ny.dataset_id = dataset.id;
     ny.dimensions = state_dims("36");
     ny.default_measure = Some(VALUE_MEASURE.to_string());
     let ny = EconomicSeries::create(&pool, &ny).await.unwrap();
@@ -299,12 +300,12 @@ async fn unique_index_rejects_duplicate_dimension_key() {
     let other = Dataset::create(&pool, &other).await.unwrap();
 
     let mut first = new_series(source.id, "BDS/state.06.ESTAB");
-    first.dataset_id = Some(dataset.id);
+    first.dataset_id = dataset.id;
     first.dimensions = state_dims("06");
     EconomicSeries::create(&pool, &first).await.unwrap();
 
     let mut duplicate = new_series(source.id, "CENSUS_BDS_ESTAB_state_06");
-    duplicate.dataset_id = Some(dataset.id);
+    duplicate.dataset_id = dataset.id;
     duplicate.dimensions = state_dims("06");
     assert_eq!(
         violated_app(EconomicSeries::create(&pool, &duplicate).await),
@@ -312,7 +313,7 @@ async fn unique_index_rejects_duplicate_dimension_key() {
     );
 
     // The same key in another dataset is a different series.
-    duplicate.dataset_id = Some(other.id);
+    duplicate.dataset_id = other.id;
     EconomicSeries::create(&pool, &duplicate).await.unwrap();
 
     // series_metadata has the same index.
@@ -343,7 +344,7 @@ async fn dimensionless_dataset_holds_many_series() {
 
     for external_id in ["GDP", "UNRATE"] {
         let mut series = new_series(source.id, external_id);
-        series.dataset_id = Some(dataset.id);
+        series.dataset_id = dataset.id;
         let series = EconomicSeries::create(&pool, &series).await.unwrap();
         assert!(series.dimensions.0.is_empty());
     }
@@ -359,7 +360,7 @@ async fn series_dataset_must_belong_to_its_source() {
         .unwrap();
 
     let mut series = new_series(source.id, "BDS/state.06.ESTAB");
-    series.dataset_id = Some(dataset.id);
+    series.dataset_id = dataset.id;
     series.dimensions = state_dims("06");
     assert_eq!(
         violated_app(EconomicSeries::create(&pool, &series).await),
@@ -412,6 +413,10 @@ async fn database_rejects_malformed_dimensions() {
             (None, r#"{"state": "06"}"#, "dimensions_need_dataset"),
         ];
         for (dataset_id, dimensions, constraint) in cases {
+            // economic_series.dataset_id is NOT NULL (see database_requires_a_series_dataset).
+            if table == "economic_series" && dataset_id.is_none() {
+                continue;
+            }
             let result = diesel::sql_query(format!(
                 "INSERT INTO {table} (source_id, external_id, title, frequency, dataset_id, \
                  dimensions) VALUES ($1, $2, 'Bad', 'Annual', $3, $4::jsonb)"
@@ -429,6 +434,9 @@ async fn database_rejects_malformed_dimensions() {
             );
         }
 
+        if table == "economic_series" {
+            continue;
+        }
         let result = diesel::sql_query(format!(
             "INSERT INTO {table} (source_id, external_id, title, frequency, default_measure) \
              VALUES ($1, $2, 'Bad', 'Annual', 'value')"
@@ -442,6 +450,32 @@ async fn database_rejects_malformed_dimensions() {
             format!("{table}_default_measure_needs_dataset")
         );
     }
+}
+
+/// Every series belongs to a dataset; series_metadata (the discovery catalog) may lack one.
+#[tokio::test]
+async fn database_requires_a_series_dataset() {
+    let pool = test_pool().await;
+    let source = new_source(&pool).await;
+    let mut conn = pool.get().await.unwrap();
+    let result = diesel::sql_query(
+        "INSERT INTO economic_series (source_id, external_id, title, frequency) \
+         VALUES ($1, 'NO_DATASET', 'No dataset', 'Annual')",
+    )
+    .bind::<diesel::sql_types::Uuid, _>(source.id)
+    .execute(&mut conn)
+    .await;
+    match result {
+        Err(DieselError::DatabaseError(DatabaseErrorKind::NotNullViolation, info)) => {
+            assert_eq!(info.column_name(), Some("dataset_id"));
+        }
+        other => panic!("expected a NOT NULL violation, got {other:?}"),
+    }
+    diesel::insert_into(series_metadata::table)
+        .values(&new_metadata(source.id, "NO_DATASET"))
+        .execute(&mut conn)
+        .await
+        .expect("series_metadata without a dataset");
 }
 
 #[tokio::test]
@@ -542,7 +576,7 @@ async fn used_dataset_cannot_be_deleted_but_its_source_can() {
         .await
         .unwrap();
     let mut series = new_series(source.id, "BDS/state.06.ESTAB");
-    series.dataset_id = Some(dataset.id);
+    series.dataset_id = dataset.id;
     series.dimensions = state_dims("06");
     let series = EconomicSeries::create(&pool, &series).await.unwrap();
 

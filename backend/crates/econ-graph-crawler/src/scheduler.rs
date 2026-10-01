@@ -575,10 +575,12 @@ mod tests {
         }
         let source_id = persist::data_source_id(pool, source).await.unwrap();
         let mut conn = pool.get().await.unwrap();
+        let dataset = econ_graph_core::test_utils::test_dataset_id(&mut conn, source_id).await;
         let row: Id = diesel::sql_query(
             "INSERT INTO economic_series \
-               (source_id, external_id, title, frequency, is_active, last_crawled_at, crawl_status) \
-             VALUES ($1, $2, $2, $3, $4, NOW() - make_interval(secs => $5), $6) RETURNING id",
+               (source_id, external_id, title, frequency, is_active, last_crawled_at, crawl_status, \
+                dataset_id) \
+             VALUES ($1, $2, $2, $3, $4, NOW() - make_interval(secs => $5), $6, $7) RETURNING id",
         )
         .bind::<diesel::sql_types::Uuid, _>(source_id)
         .bind::<Text, _>(external_id)
@@ -586,6 +588,7 @@ mod tests {
         .bind::<Bool, _>(is_active)
         .bind::<Nullable<Double>, _>(crawled_days_ago.map(|d| d * DAY))
         .bind::<Nullable<Text>, _>(crawl_status)
+        .bind::<diesel::sql_types::Uuid, _>(dataset)
         .get_result(&mut conn)
         .await
         .unwrap();
