@@ -259,7 +259,7 @@ impl SourceAdapter for CensusAdapter {
                     units: Some("Count".into()),
                     frequency: Some("Annual".into()),
                     data_url: None,
-                    dataset: Some(dataset),
+                    dataset,
                 });
             }
         }
@@ -302,7 +302,7 @@ impl SourceAdapter for CensusAdapter {
         Ok(FetchedSeries {
             metadata: None,
             points,
-            dataset: Some(dataset),
+            dataset,
         })
     }
 }
@@ -761,7 +761,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("{id} not discovered"))
         };
         let dims = |s: &DiscoveredSeries| {
-            let ds = s.dataset.as_ref().expect("every series has a dataset");
+            let ds = &s.dataset;
             assert_eq!(ds.code, BDS_DATASET, "{}", s.external_id);
             ["geo_level", "state", "variable"].map(|k| ds.dimensions.0[k].clone())
         };
@@ -780,9 +780,7 @@ mod tests {
         assert_eq!(keys.len(), found.len());
         crate::testkit::contract::assert_series_datasets(
             &CensusAdapter::default(),
-            found
-                .iter()
-                .map(|s| (s.external_id.as_str(), s.dataset.as_ref())),
+            found.iter().map(|s| (s.external_id.as_str(), &s.dataset)),
         );
         let estab_us = by_id("bds/national..ESTAB");
         assert_eq!(estab_us.title, "Number of establishments - United States");
@@ -853,14 +851,14 @@ mod tests {
         assert_eq!(s.metadata, None);
         assert_eq!(
             s.dataset,
-            Some(SeriesDataset::new(
+            SeriesDataset::new(
                 BDS_DATASET,
                 [
                     ("geo_level", "national"),
                     ("state", ""),
                     ("variable", "ESTAB")
                 ]
-            ))
+            )
         );
         let got: Vec<(NaiveDate, Option<String>)> = s
             .points
@@ -1004,14 +1002,14 @@ mod tests {
             .unwrap();
         assert_eq!(
             s.dataset,
-            Some(SeriesDataset::new(
+            SeriesDataset::new(
                 BDS_DATASET,
                 [
                     ("geo_level", "state"),
                     ("state", "06"),
                     ("variable", "ESTAB")
                 ]
-            ))
+            )
         );
         let got: Vec<(NaiveDate, Option<String>)> = s
             .points

@@ -18,6 +18,7 @@ use econ_graph_core::models::{
     Code, ComponentType, DataSource, Dataset, DatasetComponent, EconomicSeries, NewDataSource,
     NewDataset, NewEconomicSeries, SeriesDimensions, SeriesSearchResult,
 };
+use econ_graph_core::test_utils::test_dataset_id;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -108,7 +109,14 @@ async fn new_series(
     external_id: &str,
     dataset: Option<(Uuid, SeriesDimensions)>,
 ) -> EconomicSeries {
-    let (dataset_id, dimensions) = dataset.unzip();
+    // A series without a dimensioned dataset goes in its source's dimensionless test dataset.
+    let (dataset_id, dimensions) = match dataset {
+        Some(d) => d,
+        None => (
+            test_dataset_id(&mut pool.get().await.unwrap(), source_id).await,
+            SeriesDimensions::default(),
+        ),
+    };
     EconomicSeries::create(
         pool,
         &NewEconomicSeries {
@@ -117,7 +125,7 @@ async fn new_series(
             title: format!("Series {external_id}"),
             frequency: "Annual".to_string(),
             dataset_id,
-            dimensions: dimensions.unwrap_or_default(),
+            dimensions,
             // The `series` query treats a series with no end_date as having no data and hides
             // it (main's "hide series without data" change), so give these a date.
             end_date: Some(chrono::Utc::now().date_naive()),
@@ -263,9 +271,15 @@ async fn series_fields_resolve_dataset_labelled_dimensions_and_default_measure()
         data["pr"]["dimensions"][1],
         json!({ "name": "state", "value": "72", "valueLabel": null })
     );
+    // A series in a dimensionless dataset: no dimensions, the dataset's default measure.
+    let test_dataset = test_dataset_id(&mut pool.get().await.unwrap(), source.id).await;
     assert_eq!(
         data["plain"],
-        json!({ "dataset": null, "dimensions": [], "defaultMeasure": null })
+        json!({
+            "dataset": { "id": test_dataset.to_string(), "code": "test" },
+            "dimensions": [],
+            "defaultMeasure": "value"
+        })
     );
 }
 
@@ -597,5 +611,11 @@ async fn series_dataset_fields_loader_runs_one_query_per_batch() {
         );
     }
     let plain_fields = results[3].as_ref().expect("key present").clone();
-    assert_eq!(plain_fields, Some(SeriesDatasetFields::default()));
+    assert_eq!(
+        plain_fields,
+        Some(SeriesDatasetFields {
+            dataset_id: Some(test_dataset_id(&mut pool.get().await.unwrap(), source.id).await),
+            ..SeriesDatasetFields::default()
+        })
+    );
 }

@@ -275,17 +275,20 @@ mod tests {
         crawled_days_ago: Option<f64>,
     ) {
         let mut conn = pool.get().await.unwrap();
+        let dataset = econ_graph_core::test_utils::test_dataset_id(&mut conn, source_id).await;
         diesel::sql_query(
             "INSERT INTO economic_series \
-               (source_id, external_id, title, frequency, is_active, end_date, last_crawled_at) \
+               (source_id, external_id, title, frequency, is_active, end_date, last_crawled_at, \
+                dataset_id) \
              VALUES ($1, $2, $2, $3, TRUE, CASE WHEN $4 THEN DATE '2026-01-01' END, \
-                     NOW() - make_interval(secs => $5))",
+                     NOW() - make_interval(secs => $5), $6)",
         )
         .bind::<diesel::sql_types::Uuid, _>(source_id)
         .bind::<Text, _>(external_id)
         .bind::<Text, _>(frequency)
         .bind::<Bool, _>(has_data)
         .bind::<Nullable<Double>, _>(crawled_days_ago.map(|d| d * DAY))
+        .bind::<diesel::sql_types::Uuid, _>(dataset)
         .execute(&mut conn)
         .await
         .unwrap();

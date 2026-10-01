@@ -609,7 +609,8 @@ type EconomicSeriesType {
 	createdAt: DateTime!
 	updatedAt: DateTime!
 	"""
-	The dataset this series belongs to. Null until its adapter declares one.
+	The dataset this series belongs to. Every series has one; null only if the series or its
+	dataset can no longer be found.
 	"""
 	dataset: Dataset
 	"""

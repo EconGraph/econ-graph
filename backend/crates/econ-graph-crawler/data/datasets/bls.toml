@@ -119,3 +119,10 @@ codes = [
   { code = "05", label = "Employment" },
   { code = "06", label = "Labor force" },
 ]
+
+# BLS series of any other survey, or whose id does not fit its survey's layout above: no
+# dimensions, keyed by the BLS series id (like FRED) until the survey gets a layout.
+[[dataset]]
+code = "other"
+name = "Other BLS series"
+description = "BLS series from surveys the crawler does not split into dimensions"

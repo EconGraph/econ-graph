@@ -318,7 +318,7 @@ async fn fetch_one(
     let fetched = adapter
         .fetch_series_incremental(&ctx, external_id, since, known_vintage)
         .await?;
-    datasets.check(source, external_id, fetched.dataset.as_ref())?;
+    datasets.check(source, external_id, &fetched.dataset)?;
     let write = persist::persist_series(&pool, source, external_id, &fetched).await?;
     Ok(format!(
         "{source} {external_id}: {} point(s) written ({} new), latest {}, series {}{}\n",
@@ -721,14 +721,17 @@ mod tests {
             .get_result(&mut conn)
             .await
             .unwrap();
+            let dataset = econ_graph_core::test_utils::test_dataset_id(&mut conn, fred).await;
             diesel::sql_query(
                 "INSERT INTO economic_series \
-                   (source_id, external_id, title, frequency, end_date, last_crawled_at) \
-                 VALUES ($1, 't_covcli_1', 't', 'Monthly', DATE '2026-01-01', NOW()) \
+                   (source_id, external_id, title, frequency, end_date, last_crawled_at, \
+                    dataset_id) \
+                 VALUES ($1, 't_covcli_1', 't', 'Monthly', DATE '2026-01-01', NOW(), $2) \
                  ON CONFLICT (source_id, external_id) DO UPDATE SET end_date = DATE '2026-01-01', \
                      is_active = TRUE, last_crawled_at = NOW()",
             )
             .bind::<SqlUuid, _>(fred)
+            .bind::<SqlUuid, _>(dataset)
             .execute(&mut conn)
             .await
             .unwrap();

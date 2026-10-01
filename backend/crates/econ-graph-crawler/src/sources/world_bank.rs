@@ -208,7 +208,7 @@ impl SourceAdapter for WorldBankAdapter {
                             units: meta.units,
                             frequency: meta.frequency,
                             data_url: Some(data_url(&indicator.id, &rows)),
-                            dataset: Some(dataset),
+                            dataset,
                         });
                     }
                 }
@@ -311,7 +311,7 @@ impl SourceAdapter for WorldBankAdapter {
                                 is_original_release: true,
                             })
                             .collect(),
-                        dataset: Some(dataset),
+                        dataset,
                     });
                 out.insert((*id).to_string(), series);
             }

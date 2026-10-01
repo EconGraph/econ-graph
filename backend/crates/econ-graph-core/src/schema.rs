@@ -424,7 +424,7 @@ diesel::table! {
         #[max_length = 50]
         crawl_status -> Nullable<Varchar>,
         crawl_error_message -> Nullable<Text>,
-        dataset_id -> Nullable<Uuid>,
+        dataset_id -> Uuid,
         dimensions -> Jsonb,
         #[max_length = 100]
         default_measure -> Nullable<Varchar>,

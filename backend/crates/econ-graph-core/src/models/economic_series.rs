@@ -32,8 +32,8 @@ pub struct EconomicSeries {
     pub first_missing_date: Option<NaiveDate>,
     pub crawl_status: Option<String>,
     pub crawl_error_message: Option<String>,
-    /// Dataset this series belongs to, once its adapter declares one.
-    pub dataset_id: Option<Uuid>,
+    /// Dataset this series belongs to. Every series has one.
+    pub dataset_id: Uuid,
     /// Dimension values within the dataset; empty when it has none.
     pub dimensions: SeriesDimensions,
     /// Overrides the dataset's default measure; `None` uses the dataset's.
@@ -66,8 +66,8 @@ pub struct NewEconomicSeries {
     #[validate(length(max = 50))]
     pub crawl_status: Option<String>,
     pub crawl_error_message: Option<String>,
-    #[serde(default)]
-    pub dataset_id: Option<Uuid>,
+    /// Dataset this series belongs to (required: every series has one).
+    pub dataset_id: Uuid,
     #[serde(default)]
     pub dimensions: SeriesDimensions,
     #[serde(default)]
@@ -163,7 +163,8 @@ impl Default for NewEconomicSeries {
             first_missing_date: None,
             crawl_status: None,
             crawl_error_message: None,
-            dataset_id: None,
+            // Like source_id, a placeholder: inserting needs a real dataset of the source.
+            dataset_id: Uuid::nil(),
             dimensions: SeriesDimensions::default(),
             default_measure: None,
         }

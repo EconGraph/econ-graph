@@ -46,10 +46,14 @@ async fn source(pool: &DatabasePool) -> (Uuid, String) {
 }
 
 async fn series(pool: &DatabasePool, source_id: Uuid, external_id: &str) -> EconomicSeries {
+    let dataset_id =
+        econ_graph_core::test_utils::test_dataset_id(&mut pool.get().await.unwrap(), source_id)
+            .await;
     EconomicSeries::create(
         pool,
         &NewEconomicSeries {
             source_id,
+            dataset_id,
             external_id: external_id.into(),
             title: format!("Series {external_id}"),
             ..Default::default()
