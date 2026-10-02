@@ -69,8 +69,8 @@ missing observations.
 
 ## Database
 
-The data source row ("U.S. Census Bureau") is visible and enabled. Migration
-`2026-09-28-000001_census_api_key_required` marks it as requiring `CENSUS_API_KEY`. Discovered
+The data source row ("U.S. Census Bureau") is visible and enabled. Its seed row
+in the v4.0.0 baseline migration (`2026-10-01-000100_v4_0_baseline`) marks it as requiring `CENSUS_API_KEY`. Discovered
 series are written as `EconomicSeries` rows keyed by the external IDs above when `crawler-worker`
 runs the discovery job.
 

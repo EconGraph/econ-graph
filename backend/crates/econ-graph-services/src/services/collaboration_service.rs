@@ -618,12 +618,11 @@ mod tests {
     async fn migrate_sharing(pool: &DatabasePool) {
         use diesel_async::SimpleAsyncConnection;
         let mut conn = pool.get().await.unwrap();
-        conn.transaction::<(), diesel::result::Error, _>(async |conn| {
-            conn.batch_execute(include_str!(
-                "../../../../migrations/2026-09-30-000100_unique_chart_collaborators/up.sql"
-            ))
-            .await
-        })
+        // The one-grant-per-user constraint from the baseline migration.
+        conn.batch_execute(
+            "ALTER TABLE chart_collaborators
+            ADD CONSTRAINT chart_collaborators_chart_user_unique UNIQUE (chart_id, user_id);",
+        )
         .await
         .unwrap();
     }
@@ -722,63 +721,6 @@ mod tests {
             .unwrap();
         assert_eq!(count, 0);
         drop(revoker);
-        cleanup_sharing(&pool).await;
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn migration_reconciles_duplicates_without_promoting_grants() {
-        let (pool, chart, admin, _) = sharing_fixture().await;
-        let mut conn = pool.get().await.unwrap();
-        let original: ChartCollaborator =
-            chart_collaborators::table.first(&mut conn).await.unwrap();
-        diesel::update(chart_collaborators::table.find(original.id))
-            .set(chart_collaborators::created_at.eq(chrono::Utc::now() - chrono::Duration::days(1)))
-            .execute(&mut conn)
-            .await
-            .unwrap();
-        for role in [Some("edit"), None, Some("unknown")] {
-            diesel::insert_into(chart_collaborators::table)
-                .values(NewChartCollaborator {
-                    chart_id: chart,
-                    user_id: admin,
-                    invited_by: None,
-                    role: role.map(str::to_owned),
-                    permissions: Some(serde_json::json!({"edit": true})),
-                })
-                .execute(&mut conn)
-                .await
-                .unwrap();
-        }
-        drop(conn);
-        migrate_sharing(&pool).await;
-        let mut conn = pool.get().await.unwrap();
-        let grants = chart_collaborators::table
-            .load::<ChartCollaborator>(&mut conn)
-            .await
-            .unwrap();
-        assert_eq!(grants.len(), 1);
-        assert_eq!(grants[0].id, original.id);
-        assert_eq!(grants[0].role.as_deref(), Some("view"));
-        assert_eq!(grants[0].permissions, None);
-        let duplicate = diesel::insert_into(chart_collaborators::table)
-            .values(NewChartCollaborator {
-                chart_id: chart,
-                user_id: admin,
-                invited_by: None,
-                role: Some("admin".into()),
-                permissions: None,
-            })
-            .execute(&mut conn)
-            .await;
-        assert!(matches!(
-            duplicate,
-            Err(diesel::result::Error::DatabaseError(
-                diesel::result::DatabaseErrorKind::UniqueViolation,
-                _
-            ))
-        ));
-        drop(conn);
         cleanup_sharing(&pool).await;
     }
 
