@@ -22,10 +22,8 @@ use uuid::Uuid;
 use econ_graph_core::database::DatabasePool;
 use econ_graph_core::models::{
     Code, ComponentType, Dataset, DatasetComponent, SeriesDimensions, COUNTRIES_CODELIST,
-    US_STATES_CODELIST,
 };
 use econ_graph_core::reference::{self, Area, Areas};
-use econ_graph_crawler::reference::{self as crawler_reference, UsState};
 
 use crate::graphql::schema::SchemaResources;
 use crate::types::DataSourceType;
@@ -76,17 +74,6 @@ impl From<&Code> for DimensionCodeType {
     }
 }
 
-impl From<&UsState> for DimensionCodeType {
-    fn from(state: &UsState) -> Self {
-        Self {
-            code: state.fips.clone(),
-            label: state.name.clone(),
-            unit: None,
-            description: None,
-        }
-    }
-}
-
 impl From<&Area> for DimensionCodeType {
     fn from(area: &Area) -> Self {
         Self {
@@ -103,7 +90,6 @@ enum CodeSource<'a> {
     Uncoded,
     Inline(&'a [Code]),
     Areas(&'static Areas),
-    UsStates(&'static [UsState]),
 }
 
 impl<'a> CodeSource<'a> {
@@ -117,12 +103,6 @@ impl<'a> CodeSource<'a> {
                     async_graphql::Error::new(format!("code list {name:?} unavailable: {e}"))
                 })?;
                 Ok(Self::Areas(areas))
-            }
-            (None, Some(name)) if name == US_STATES_CODELIST => {
-                let states = crawler_reference::us_states().map_err(|e| {
-                    async_graphql::Error::new(format!("code list {name:?} unavailable: {e}"))
-                })?;
-                Ok(Self::UsStates(states))
             }
             (None, Some(name)) => Err(async_graphql::Error::new(format!(
                 "dataset component {:?} uses unknown code list {name:?}",
@@ -155,7 +135,6 @@ impl<'a> CodeSource<'a> {
             Self::Uncoded => Vec::new(),
             Self::Inline(codes) => codes.iter().map(Into::into).collect(),
             Self::Areas(areas) => areas.all().iter().map(Into::into).collect(),
-            Self::UsStates(states) => states.iter().map(Into::into).collect(),
         }
     }
 
@@ -168,7 +147,6 @@ impl<'a> CodeSource<'a> {
                 .by_key(value)
                 .filter(|area| area.key == value)
                 .map(Into::into),
-            Self::UsStates(states) => states.iter().find(|s| s.fips == value).map(Into::into),
         }
     }
 }
@@ -642,19 +620,6 @@ mod tests {
         let lower = dims(&[("area", "deu")]);
         let labelled = label_dimensions(&lower, Some(&wdi()));
         assert_eq!(labelled[0].value_label, None);
-    }
-
-    #[test]
-    fn us_states_code_list_labels_fips_codes() {
-        let mut state = DatasetComponent::new("state", "State", ComponentType::String);
-        state.codelist = Some(US_STATES_CODELIST.to_string());
-        let source = CodeSource::of(&state).unwrap();
-        assert_eq!(source.all().len(), 51);
-        assert_eq!(
-            source.get("06").map(|c| c.label),
-            Some("California".to_string())
-        );
-        assert_eq!(source.get("6"), None);
     }
 
     #[test]

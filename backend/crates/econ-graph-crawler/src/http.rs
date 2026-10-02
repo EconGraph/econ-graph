@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use econ_graph_metrics::crawler::CRAWLER_METRICS;
 use rand::RngExt;
-use reqwest::header::{HeaderMap, ACCEPT, CONTENT_TYPE, RETRY_AFTER};
+use reqwest::header::{HeaderMap, ACCEPT, CONTENT_TYPE, ETAG, IF_NONE_MATCH, RETRY_AFTER};
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -64,6 +64,24 @@ impl Default for HttpConfig {
     }
 }
 
+/// A successful (or `304`) response: the status, the response's `ETag` if it sent one, and the
+/// body (empty for `304`).
+struct RawResponse {
+    status: StatusCode,
+    etag: Option<String>,
+    body: String,
+}
+
+/// Outcome of [`HttpFetcher::get_text_conditional`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConditionalText {
+    /// The server confirmed the cached copy is still current; the caller keeps using it.
+    NotModified,
+    /// A fresh body, with the `ETag` to send next time (`None` if the server sent none, in
+    /// which case the caller has no validator to use for a future conditional GET).
+    Modified { body: String, etag: Option<String> },
+}
+
 /// Rate-limited, retrying HTTP client shared by all adapters. Cheap to clone.
 ///
 /// Every request method:
@@ -99,6 +117,8 @@ struct Target {
     url: Url,
     body: Option<Vec<u8>>,
     accept_json: bool,
+    /// `If-None-Match` value to send, for a conditional GET ([`HttpFetcher::get_text_conditional`]).
+    if_none_match: Option<String>,
     /// The URL with secret query values replaced; the only form that may be logged.
     redacted: String,
     /// Secret values sent in the query or a JSON body, scrubbed from quoted response bodies too.
@@ -140,6 +160,7 @@ impl Target {
             url,
             body,
             accept_json,
+            if_none_match: None,
         })
     }
 
@@ -205,7 +226,29 @@ impl HttpFetcher {
         query: &[(&str, &str)],
     ) -> Result<String, CrawlError> {
         let target = Target::new(source, Method::GET, url, query, None, false)?;
-        self.execute(&target).await
+        Ok(self.execute(&target).await?.body)
+    }
+
+    /// Conditional GET of `url`: sends `If-None-Match: etag` when `etag` is given, and returns
+    /// [`ConditionalText::NotModified`] on a `304` response instead of fetching the body again.
+    /// On any other successful status, returns the body and the response's own `ETag` (`None` if
+    /// the server didn't send one), for the caller to store and pass back next time.
+    pub async fn get_text_conditional(
+        &self,
+        source: SourceId,
+        url: &str,
+        etag: Option<&str>,
+    ) -> Result<ConditionalText, CrawlError> {
+        let mut target = Target::new(source, Method::GET, url, &[], None, false)?;
+        target.if_none_match = etag.map(str::to_owned);
+        let resp = self.execute(&target).await?;
+        if resp.status == StatusCode::NOT_MODIFIED {
+            return Ok(ConditionalText::NotModified);
+        }
+        Ok(ConditionalText::Modified {
+            body: resp.body,
+            etag: resp.etag,
+        })
     }
 
     /// Records `err` in `CRAWLER_METRICS`, for a caller that fetched a successful (HTTP 200)
@@ -231,7 +274,7 @@ impl HttpFetcher {
         query: &[(&str, &str)],
     ) -> Result<T, CrawlError> {
         let target = Target::new(source, Method::GET, url, query, None, true)?;
-        let text = self.execute(&target).await?;
+        let text = self.execute(&target).await?.body;
         decode(&target, &text)
     }
 
@@ -246,16 +289,16 @@ impl HttpFetcher {
             CrawlError::Permanent(format!("{source}: serializing request body: {e}"))
         })?;
         let target = Target::new(source, Method::POST, url, &[], Some(bytes), true)?;
-        let text = self.execute(&target).await?;
+        let text = self.execute(&target).await?.body;
         decode(&target, &text)
     }
 
     /// Runs the attempt loop: first attempt plus up to [`EXTRA_ATTEMPTS`] retries.
-    async fn execute(&self, target: &Target) -> Result<String, CrawlError> {
+    async fn execute(&self, target: &Target) -> Result<RawResponse, CrawlError> {
         let mut attempt: u32 = 0;
         loop {
             let err = match self.attempt(target).await {
-                Ok(body) => return Ok(body),
+                Ok(resp) => return Ok(resp),
                 Err(e) => e,
             };
             if !err.is_retryable() {
@@ -299,8 +342,9 @@ impl HttpFetcher {
         }
     }
 
-    /// One rate-limited request, including reading the body.
-    async fn attempt(&self, target: &Target) -> Result<String, CrawlError> {
+    /// One rate-limited request, including reading the body. A `304` response (only possible
+    /// when [`Target::if_none_match`] was sent) is treated as success, with an empty body.
+    async fn attempt(&self, target: &Target) -> Result<RawResponse, CrawlError> {
         let _permit = self.inner.limiter.acquire(target.source).await;
 
         let mut request = self
@@ -309,6 +353,9 @@ impl HttpFetcher {
             .request(target.method.clone(), target.url.clone());
         if target.accept_json {
             request = request.header(ACCEPT, "application/json");
+        }
+        if let Some(etag) = &target.if_none_match {
+            request = request.header(IF_NONE_MATCH, etag.clone());
         }
         if let Some(body) = &target.body {
             request = request
@@ -323,6 +370,14 @@ impl HttpFetcher {
         };
 
         let status = response.status();
+        if status == StatusCode::NOT_MODIFIED {
+            self.record_request(target, status.as_str(), start);
+            return Ok(RawResponse {
+                status,
+                etag: None,
+                body: String::new(),
+            });
+        }
         if !status.is_success() {
             let retry_after = parse_retry_after(response.headers());
             // Include a scrubbed snippet of the body: many APIs (FRED, BLS) explain the
@@ -344,6 +399,11 @@ impl HttpFetcher {
             return Err(err);
         }
 
+        let etag = response
+            .headers()
+            .get(ETAG)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
         match response.text().await {
             Ok(body) => {
                 self.record_request(target, status.as_str(), start);
@@ -352,7 +412,7 @@ impl HttpFetcher {
                     &target.host,
                     body.len() as u64,
                 );
-                Ok(body)
+                Ok(RawResponse { status, etag, body })
             }
             Err(e) => Err(self.transport_error(target, e, start)),
         }
@@ -1035,6 +1095,72 @@ mod tests {
             start.elapsed() >= Duration::from_millis(950),
             "{:?}",
             start.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn get_text_conditional_returns_body_and_etag_on_200() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("a,b\n1,2\n")
+                    .insert_header("ETag", "\"v1\""),
+            )
+            .mount(&server)
+            .await;
+        let got = fetcher()
+            .get_text_conditional(SourceId::Fred, &format!("{}/r", server.uri()), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            got,
+            ConditionalText::Modified {
+                body: "a,b\n1,2\n".to_string(),
+                etag: Some("\"v1\"".to_string()),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn get_text_conditional_sends_if_none_match_and_handles_304() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .and(header("if-none-match", "\"v1\""))
+            .respond_with(ResponseTemplate::new(304))
+            .mount(&server)
+            .await;
+        let got = fetcher()
+            .get_text_conditional(
+                SourceId::Fred,
+                &format!("{}/r", server.uri()),
+                Some("\"v1\""),
+            )
+            .await
+            .unwrap();
+        assert_eq!(got, ConditionalText::NotModified);
+    }
+
+    #[tokio::test]
+    async fn get_text_conditional_with_no_response_etag_is_none() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("x"))
+            .mount(&server)
+            .await;
+        let got = fetcher()
+            .get_text_conditional(SourceId::Fred, &format!("{}/r", server.uri()), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            got,
+            ConditionalText::Modified {
+                body: "x".to_string(),
+                etag: None,
+            }
         );
     }
 }

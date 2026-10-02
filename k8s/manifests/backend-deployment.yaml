@@ -16,6 +16,10 @@ spec:
       labels:
         app: econ-graph-backend
         component: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9876"
+        prometheus.io/path: "/metrics"
     spec:
       initContainers:
       - name: wait-for-postgres
@@ -84,8 +88,8 @@ spec:
         # Shared reference data (countries.csv) copied into the image; matches its ENV.
         - name: REFERENCE_DATA_DIR
           value: /app/reference
-        # The crawler's reference data (us_states.csv), also copied into the image; GraphQL
-        # labels dataset dimension values from it.
+        # The crawler's data directory, also copied into the image, for the crawler code the
+        # backend links in (the adapter registry behind trigger-crawl validation).
         - name: CRAWLER_DATA_DIR
           value: /app/data
         - name: CORS_ALLOWED_ORIGINS

@@ -738,6 +738,19 @@ impl Worker {
         let complete = adapter.discovery_is_complete();
         let scope_prefix = adapter.retirement_scope_prefix().map(str::to_string);
         let ctx = self.ctx.clone();
+        {
+            let adapter = adapter.clone();
+            let ctx = ctx.clone();
+            if let Err(error) =
+                guarded(async move { adapter.refresh_reference_data(&ctx).await }).await
+            {
+                tracing::warn!(
+                    %source,
+                    %error,
+                    "refresh_reference_data failed; discovering with existing reference data"
+                );
+            }
+        }
         let found = guarded(async move { adapter.discover(&ctx).await }).await?;
         self.datasets.check_all(
             source,

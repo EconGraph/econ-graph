@@ -3,75 +3,73 @@
 Adapter: `backend/crates/econ-graph-crawler/src/sources/fhfa.rs`. Fixtures:
 `tests/fixtures/fhfa/`. No key.
 
-> **Release 1 (#240, draft):** the API client below is replaced by a download of the HPI
-> master CSV, as dataset `fhfa_hpi` with 203 series. Train 1 covers the purchase-only
-> and all-transactions indexes for the US, census divisions and states, NSA and SA;
-> metros later. The dimensions come from the file's columns, as proposed at the end of
-> this page, and the made-up `{CODE}HPI` ids are dropped.
-
 ## What we fetch today
 
-- **Discovery**: no request. A static catalog: the national index `USHPI`, one `{STATE}HPI`
-  per state and DC (from `data/us_states.csv`), and one `{METRO}HPI` for each of a short
-  list of metro areas. All quarterly, units "Index (1991Q1 = 100)". Metro codes that
-  collide with state codes lose (`LAHPI` is Louisiana, not Los Angeles).
-- **Fetch**: `GET https://api.fhfa.gov/v1/house-price-index/{national | state/{CODE} |
-  metro/{CODE}}?page=N[&start_date=YYYY-MM-DD]`, paged.
-- **Kept**: `year` + `quarter` (as the quarter's first day) and `hpi_value`.
-- **Dropped**: `yoy_change`, `qoq_change` (derivable), `state`, `metro_area`.
+- **Discovery and fetch**: both download the HPI master CSV,
+  `GET https://www.fhfa.gov/hpi/download/monthly/hpi_master.csv` — one file holding every
+  HPI series and period. Columns are found by header name. Discovery and every fetch batch
+  download the same file; a process-local in-flight reservation keyed by the URL stops two
+  workers downloading it at once (the second gets a retryable `Busy` instead of making a
+  redundant request).
+- **Scope (train 1)**: rows with `hpi_type` `traditional`, `hpi_flavor` `purchase-only` or
+  `all-transactions`, `frequency` `monthly` or `quarterly`, and `level`
+  `USA or Census Division` or `State` — the United States, the nine census divisions, and
+  the states and DC. Every other row (metros, expanded-data, non-metro, distress-free, ...)
+  is skipped without being parsed.
+- **Series and ids**: each series is in dataset `fhfa_hpi`
+  (`data/datasets/fhfa.toml`), with dimensions `hpi_type`, `hpi_flavor`, `frequency`,
+  `level`, `place_id` and `seasonal_adjustment` (`nsa` for the `index_nsa` column, `sa` for
+  `index_sa`) — the two value columns become separate series. Ids are canonical dataset
+  ids, e.g. `fhfa_hpi/traditional.purchase-only.monthly.usa-or-census-division.USA.sa`. A
+  series exists only when its column has at least one value (`index_sa` is empty for many
+  series). The made-up `{CODE}HPI` ids (e.g. `USHPI`, `CAHPI`) are gone.
+- **Kept**: `yr` + `period` (as the month's or quarter's first day), `index_nsa`,
+  `index_sa`.
+- **Dropped**: nothing published per observation beyond the two index columns; there are no
+  derived year-over-year or quarter-over-quarter fields in the master file.
 
-**This endpoint has never been verified.** The request and response shape were carried over
-from structs in the old code, which never ran against a live server. FHFA publishes the HPI
-as downloadable files, not (as far as its public docs show) as a JSON API. The fixtures
-below are hand-written to that assumed shape, not recordings.
+**The master CSV's layout has never been verified against a live download.** The column
+names and order, the `hpi_type`/`hpi_flavor`/`frequency`/`level` values, and the division
+and state `place_id`s are carried over from FHFA's public documentation, not a recording;
+see `tests/fixtures/fhfa/README.md` for the exact pre-release checks planned (URL, header,
+`place_id` values, which series have `index_sa`, and the base periods the adapter states as
+units).
 
 ## Sample
 
-Assumed API shape (`hpi_ca_page1.json`, **not a real recording**):
-
-```json
-{
-  "data": [
-    {"year": 2024, "quarter": 1, "state": "CA", "metro_area": null, "hpi_value": 1012.4, "yoy_change": 5.2, "qoq_change": 1.1}
-  ],
-  "meta": {"total_count": 3, "page": 1, "per_page": 2}
-}
-```
-
-What FHFA actually publishes (**from public docs**): a master CSV of all HPI series,
-`HPI_master.csv`, with one row per series and period (values illustrative):
+Assumed file layout (`hpi_master.csv`, **not a recording**; values illustrative):
 
 ```csv
 hpi_type,hpi_flavor,frequency,level,place_name,place_id,yr,period,index_nsa,index_sa
-traditional,purchase-only,monthly,USA or Census Division,United States,USA,2024,3,420.1,418.7
-traditional,all-transactions,quarterly,State,California,CA,2024,1,1012.4,
+traditional,purchase-only,monthly,USA or Census Division,United States,USA,2024,10,203.17,203.78
+traditional,purchase-only,monthly,USA or Census Division,East North Central Division,DV_ENC,2024,10,206.34,206.96
 ```
 
-`index_sa` is only present for some series (purchase-only, national and division level).
+`index_sa` is only present for purchase-only series (every level, including states); it is
+empty, not omitted, for all-transactions series.
 
 ## Frequency and revisions
 
 Monthly (purchase-only, national and census divisions) and quarterly (all levels). The
 index is a repeat-sales estimate, so every release re-estimates the whole history as new
-sale pairs arrive (from public docs): each quarterly release is effectively a new vintage
-of every observation. The file has no vintage column; the vintage is the release date.
+sale pairs arrive (from public docs): each release is effectively a new vintage of every
+observation. The file has no vintage column; a fetch ignores `since` and returns every
+observation, so each refresh overwrites the stored values with the latest estimate
+(`revision_date = date`, `is_original_release = true`, as for the other sources without
+vintage history).
 
 ## Flags and footnotes
 
 None per observation in the published file. Series with too few transactions are omitted
 rather than flagged.
 
-## Proposed dataset mapping
+## Dataset mapping
 
-One dataset for the HPI master file:
+One dataset for the HPI master file, already in effect (`data/datasets/fhfa.toml`):
 
 | Role | Columns |
 |---|---|
-| Dimensions | `hpi_type`, `hpi_flavor`, `frequency`, `level`, `place_id` |
-| Measures | `index_nsa`, `index_sa` (decimal; `index_sa` often null) |
+| Dimensions | `hpi_type`, `hpi_flavor`, `frequency`, `level`, `place_id`, `seasonal_adjustment` |
+| Measures | `value` (decimal) |
 | Attributes | none |
-| Shape | wide (two measures), `revision_date` = release date |
-
-The practical next step is to replace the API adapter with a download of the master file:
-one request gives every series, and the dimension columns replace our made-up `{CODE}HPI`
-ids.
+| Shape | long; the file's two value columns (`index_nsa`, `index_sa`) become separate series via the `seasonal_adjustment` dimension rather than a wide row; `revision_date = date` (no vintage column; each refresh overwrites) |

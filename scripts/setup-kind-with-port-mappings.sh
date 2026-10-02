@@ -32,9 +32,6 @@ nodes:
   - containerPort: 30080
     hostPort: 30080
     protocol: TCP
-  - containerPort: 30001
-    hostPort: 30001
-    protocol: TCP
   - containerPort: 30002
     hostPort: 30002
     protocol: TCP
@@ -43,8 +40,8 @@ EOF
 echo "✅ Kind cluster created with port mappings:"
 echo "   - Frontend: localhost:30000"
 echo "   - Backend:  localhost:30080"
-echo "   - Grafana:  localhost:30001"
 echo "   - Admin UI: localhost:30002"
+echo "   - Grafana:  ClusterIP only; kubectl port-forward service/grafana-service 3000:3000 -n econ-graph"
 
 echo "🔧 Setting up ingress controller..."
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
@@ -60,8 +57,8 @@ echo ""
 echo "🌐 NodePort services will now be accessible via localhost:"
 echo "   Frontend: http://localhost:30000"
 echo "   Backend:  http://localhost:30080"
-echo "   Grafana:  http://localhost:30001"
 echo "   Admin UI: http://localhost:30002"
+echo "   Grafana:  ClusterIP only; kubectl port-forward service/grafana-service 3000:3000 -n econ-graph"
 echo ""
 echo "📋 Next steps:"
 echo "   1. Run: ./scripts/deploy/restart-k8s-rollout.sh"
