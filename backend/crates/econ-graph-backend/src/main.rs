@@ -335,40 +335,90 @@ fn mcp_filter(
         .boxed()
 }
 
-/// The largest `/graphql` request body accepted, matching ingress-nginx's default
-/// `proxy-body-size`, so the backend refuses what the ingress would instead of buffering it.
-const GRAPHQL_BODY_LIMIT: u64 = 1024 * 1024;
+/// The largest `/graphql` request body accepted, in bytes. GraphQL operations are small; the
+/// biggest in the repo is under 10 KB.
+const GRAPHQL_BODY_LIMIT: usize = 1024 * 1024;
 
-/// Refuses a `POST` whose `Content-Length` exceeds [`GRAPHQL_BODY_LIMIT`] before the body is
-/// read. A `POST` with no `Content-Length` (chunked) is refused with 411; ingress-nginx buffers
-/// requests and sets it. `GET` carries its query in the URL and has no body to limit.
-fn graphql_body_limit() -> impl Filter<Extract = (), Error = warp::Rejection> + Clone {
-    warp::get()
-        .or(warp::post().and(warp::body::content_length_limit(GRAPHQL_BODY_LIMIT)))
-        .unify()
+/// A `/graphql` body of more than [`GRAPHQL_BODY_LIMIT`] bytes.
+#[derive(Debug)]
+struct GraphqlBodyTooLarge;
+
+impl warp::reject::Reject for GraphqlBodyTooLarge {}
+
+/// Collects a request body, giving up as soon as more than `limit` bytes have arrived.
+///
+/// This counts the bytes actually received rather than trusting `Content-Length`, which a
+/// chunked request can carry alongside a much larger body.
+async fn read_graphql_body<S, B>(body: S, limit: usize) -> Result<Vec<u8>, warp::Rejection>
+where
+    S: tokio_stream::Stream<Item = Result<B, warp::Error>>,
+    B: warp::hyper::body::Buf,
+{
+    use tokio_stream::StreamExt as _;
+    use warp::hyper::body::Buf as _;
+
+    let mut body = std::pin::pin!(body);
+    let mut collected = Vec::new();
+    while let Some(chunk) = body.next().await {
+        let mut chunk = chunk.map_err(|_| warp::reject::reject())?;
+        if collected.len() + chunk.remaining() > limit {
+            return Err(warp::reject::custom(GraphqlBodyTooLarge));
+        }
+        while chunk.has_remaining() {
+            let bytes = chunk.chunk();
+            collected.extend_from_slice(bytes);
+            let read = bytes.len();
+            chunk.advance(read);
+        }
+    }
+    Ok(collected)
 }
 
-/// An oversize `/graphql` body is answered 413 (or 411 without a length) in GraphQL's own error
-/// shape. Every other rejection passes through.
+/// The `/graphql` request filter: a `GET` carries its query in the URL, and a `POST` body is
+/// refused once it exceeds [`GRAPHQL_BODY_LIMIT`] bytes, before it is buffered or parsed. It
+/// extracts what `async_graphql_warp::graphql` does, and rejects a body that isn't a GraphQL
+/// request the same way.
+fn graphql_request<E>(
+    executor: E,
+) -> impl Filter<Extract = ((E, async_graphql::Request),), Error = warp::Rejection> + Clone
+where
+    E: async_graphql::Executor,
+{
+    let post_executor = executor.clone();
+    let get = warp::get().and(async_graphql_warp::graphql(executor));
+    let post = warp::post()
+        .and(warp::header::optional::<String>("content-type"))
+        .and(warp::body::stream())
+        .and_then(move |content_type: Option<String>, body| {
+            let executor = post_executor.clone();
+            async move {
+                let bytes = read_graphql_body(body, GRAPHQL_BODY_LIMIT).await?;
+                let request = async_graphql::http::receive_batch_body(
+                    content_type,
+                    bytes.as_slice(),
+                    async_graphql::http::MultipartOptions::default(),
+                )
+                .await
+                .and_then(async_graphql::BatchRequest::into_single)
+                .map_err(|e| warp::reject::custom(async_graphql_warp::GraphQLBadRequest(e)))?;
+                Ok::<_, warp::Rejection>((executor, request))
+            }
+        });
+    get.or(post).unify()
+}
+
+/// An oversize `/graphql` body is answered 413 in GraphQL's own error shape. Every other
+/// rejection passes through.
 async fn graphql_body_too_large(
     rejection: warp::Rejection,
 ) -> Result<warp::reply::Response, warp::Rejection> {
-    let (status, message) = if rejection.find::<warp::reject::PayloadTooLarge>().is_some() {
-        (
-            warp::http::StatusCode::PAYLOAD_TOO_LARGE,
-            format!("Request body is larger than {GRAPHQL_BODY_LIMIT} bytes"),
-        )
-    } else if rejection.find::<warp::reject::LengthRequired>().is_some() {
-        (
-            warp::http::StatusCode::LENGTH_REQUIRED,
-            "Content-Length is required".to_string(),
-        )
-    } else {
+    if rejection.find::<GraphqlBodyTooLarge>().is_none() {
         return Err(rejection);
-    };
+    }
     Ok(warp::reply::with_status(
-        warp::reply::json(&json!({"errors": [{"message": message}]})),
-        status,
+        warp::reply::json(&json!({"errors": [{"message":
+            format!("Request body is larger than {GRAPHQL_BODY_LIMIT} bytes")}]})),
+        warp::http::StatusCode::PAYLOAD_TOO_LARGE,
     )
     .into_response())
 }
@@ -393,9 +443,8 @@ fn build_routes(
     let pool_for_graphql = pool.clone();
     let verifier_for_graphql = verifier.clone();
     let graphql_filter = warp::path("graphql")
-        .and(graphql_body_limit())
         .and(warp::header::headers_cloned())
-        .and(async_graphql_warp::graphql(schema))
+        .and(graphql_request(schema))
         .and_then(
             move |headers: warp::http::HeaderMap<warp::http::HeaderValue>,
                   (_schema, request): (
@@ -1195,7 +1244,7 @@ mod mcp_flag_off_tests {
 
 #[cfg(test)]
 mod route_tests {
-    use super::{build_routes, GRAPHQL_BODY_LIMIT};
+    use super::{build_routes, read_graphql_body, GraphqlBodyTooLarge, GRAPHQL_BODY_LIMIT};
     use econ_graph_core::DatabasePool;
     use econ_graph_graphql::graphql::schema::create_schema_with_data;
 
@@ -1267,45 +1316,71 @@ mod route_tests {
         assert_eq!(res.status(), 200);
     }
 
-    /// A `/graphql` body over the limit is a JSON 413 before it is read; one at the limit and any
-    /// `GET` are not refused for size.
+    /// A `{ __typename }` request padded with trailing spaces to exactly `len` bytes.
+    fn padded_request(len: usize) -> String {
+        let body = r#"{"query": "{ __typename }"}"#;
+        format!("{body}{}", " ".repeat(len - body.len()))
+    }
+
+    /// A `/graphql` body of exactly the limit is answered; one byte more is a JSON 413 with
+    /// CORS headers. `GET` and the preflight are untouched.
     #[tokio::test]
     async fn oversize_graphql_body_is_a_json_413() {
-        let big = format!(
-            r#"{{"query": "{{ __typename }}", "pad": "{}"}}"#,
-            "x".repeat(GRAPHQL_BODY_LIMIT as usize)
-        );
-        let res = warp::test::request()
-            .method("POST")
-            .path("/graphql")
-            .header("origin", "http://localhost:3000")
-            .header("content-type", "application/json")
-            .body(big)
+        let post = |body: String| {
+            warp::test::request()
+                .method("POST")
+                .path("/graphql")
+                .header("origin", "http://localhost:3000")
+                .header("content-type", "application/json")
+                .body(body)
+        };
+        let res = post(padded_request(GRAPHQL_BODY_LIMIT))
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 200, "{:?}", res.body());
+
+        let res = post(padded_request(GRAPHQL_BODY_LIMIT + 1))
             .reply(&routes(false))
             .await;
         assert_eq!(res.status(), 413);
         let body: serde_json::Value = serde_json::from_slice(res.body()).unwrap();
-        assert!(body["errors"][0]["message"].as_str().is_some(), "{body}");
+        assert!(
+            body["errors"][0]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("1048576")),
+            "{body}"
+        );
         assert_eq!(
             res.headers()["access-control-allow-origin"],
             "http://localhost:3000"
         );
 
-        // A normal request is still answered, and so is a GET.
-        let res = warp::test::request()
-            .method("POST")
-            .path("/graphql")
-            .header("content-type", "application/json")
-            .body(r#"{"query": "{ __typename }"}"#)
-            .reply(&routes(false))
-            .await;
-        assert_eq!(res.status(), 200);
         let res = warp::test::request()
             .method("GET")
             .path("/graphql?query=%7B__typename%7D")
             .reply(&routes(false))
             .await;
         assert_eq!(res.status(), 200);
+        let res = warp::test::request()
+            .method("OPTIONS")
+            .path("/graphql")
+            .header("origin", "http://localhost:3000")
+            .header("access-control-request-method", "POST")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 200);
+    }
+
+    /// The limit counts the bytes that arrive, not the `Content-Length` a chunked request may
+    /// carry alongside a larger body (warp's test client always sets an honest length).
+    #[tokio::test]
+    async fn graphql_body_limit_counts_streamed_bytes() {
+        let chunk = |n: usize| Ok::<_, warp::Error>(warp::hyper::body::Bytes::from(vec![b'a'; n]));
+        let at_limit = tokio_stream::iter(vec![chunk(600), chunk(400)]);
+        assert_eq!(read_graphql_body(at_limit, 1000).await.unwrap().len(), 1000);
+        let over = tokio_stream::iter(vec![chunk(600), chunk(401)]);
+        let rejection = read_graphql_body(over, 1000).await.unwrap_err();
+        assert!(rejection.find::<GraphqlBodyTooLarge>().is_some());
     }
 
     /// `GET /playground` answers 200 through the full route set when enabled.
