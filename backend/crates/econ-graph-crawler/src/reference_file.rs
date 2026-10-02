@@ -570,6 +570,23 @@ mod tests {
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
         assert_eq!(dirs, ["2026-10-02-040000_seed_census_reference_codes"]);
+        // A second recording in the same second would reuse the version Diesel already ran;
+        // it is refused, and the existing recording stays.
+        let e = crate::cli::record_reference_seeds(
+            &adapter,
+            &ApiKeys::default(),
+            &test_ctx().http,
+            &catalog,
+            &dir,
+            false,
+            later,
+        )
+        .await
+        .unwrap_err();
+        assert!(e.to_string().contains("already taken"), "{e}");
+        assert!(dir
+            .join("2026-10-02-040000_seed_census_reference_codes/up.sql")
+            .is_file());
         let migration = dir.join(&dirs[0]);
         let up = std::fs::read_to_string(migration.join("up.sql")).unwrap();
         let down = std::fs::read_to_string(migration.join("down.sql")).unwrap();

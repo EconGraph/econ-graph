@@ -367,33 +367,51 @@ pub async fn record_reference_seeds(
     }
     let (up, down) = reference_file::seed_migration_sql(source, recorded_at, &entries)?;
     let suffix = format!("_seed_{}_reference_codes", source.as_str().to_lowercase());
-    let name = format!("{}{suffix}", recorded_at.format("%Y-%m-%d-%H%M%S"));
-    if recorded_at.format("%Y-%m-%d-%H%M%S").to_string().as_str() <= SEED_FUNCTION_VERSION {
+    let version = recorded_at.format("%Y-%m-%d-%H%M%S").to_string();
+    let name = format!("{version}{suffix}");
+    if version.as_str() <= SEED_FUNCTION_VERSION {
         bail!("{name} would not run after migration {SEED_FUNCTION_VERSION}, which creates seed_reference_codes; check the clock");
     }
-    // A new recording replaces the previous one. Both would run on a new database, and the older
-    // would store the file first, so the newer one's codes would never load. Removing an applied
-    // migration's directory is safe: Diesel only runs versions it hasn't recorded.
-    let mut replaced = Vec::new();
+    let mut names = Vec::new();
     for entry in std::fs::read_dir(migrations_dir)
         .with_context(|| format!("reading {}", migrations_dir.display()))?
     {
         let path = entry?.path();
-        if path.is_dir()
-            && path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.ends_with(&suffix) && n != name)
-        {
+        if let Some(n) = path.file_name().and_then(|n| n.to_str()) {
+            if path.is_dir() {
+                names.push((n.to_string(), path.clone()));
+            }
+        }
+    }
+    // Diesel identifies a migration by its version alone, so a second migration with this
+    // version would be skipped on any database that already ran the first.
+    if let Some((taken, _)) = names
+        .iter()
+        .find(|(n, _)| n.split('_').next() == Some(version.as_str()))
+    {
+        bail!("migration version {version} is already taken by {taken}; record again");
+    }
+    // Write the new recording before removing the old one, so a failed write leaves the
+    // previous seed in place.
+    let dir = migrations_dir.join(&name);
+    std::fs::create_dir(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    std::fs::write(dir.join("up.sql"), up)
+        .and_then(|()| std::fs::write(dir.join("down.sql"), down))
+        .with_context(|| format!("writing {}", dir.display()))
+        .inspect_err(|_| {
+            let _ = std::fs::remove_dir_all(&dir);
+        })?;
+    // A new recording replaces the previous one. Both would run on a new database, and the older
+    // would store the file first, so the newer one's codes would never load. Removing an applied
+    // migration's directory is safe: Diesel only runs versions it hasn't recorded.
+    let mut replaced = Vec::new();
+    for (n, path) in names {
+        if n.ends_with(&suffix) {
             std::fs::remove_dir_all(&path)
                 .with_context(|| format!("removing {}", path.display()))?;
             replaced.push(path);
         }
     }
-    let dir = migrations_dir.join(&name);
-    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    std::fs::write(dir.join("up.sql"), up)?;
-    std::fs::write(dir.join("down.sql"), down)?;
     let mut out = format!("wrote {}\n", dir.display());
     for path in &replaced {
         let _ = writeln!(out, "  replaced {}", path.display());

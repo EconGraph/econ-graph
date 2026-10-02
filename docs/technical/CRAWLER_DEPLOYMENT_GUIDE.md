@@ -127,7 +127,7 @@ A new database can get those labels before the first crawl from a seed migration
 cd backend && cargo run -p econ-graph-crawler --bin crawler -- record-reference-seeds --source CENSUS
 ```
 
-It replaces that source's previous seed migration. If any list fails to download or parse, it writes nothing and names every failure; `--skip-failed` writes the rest and leaves the failed lists for the crawl. A `403` or `429` stops it at once. Never write or edit a seed by hand: a made-up `ETag` would let a `304` keep wrong labels.
+It replaces that source's previous seed migration. If any list fails to download or parse, it writes nothing and names every failure; `--skip-failed` writes the rest and leaves the failed lists for the crawl. A refused (401, 403) or throttled (429) request stops it at once. Never write or edit a seed by hand: a made-up `ETag` would let a `304` keep wrong labels.
 
 ## Retries
 
