@@ -53,8 +53,8 @@ export const TRANSFORMATION_OPTIONS: readonly TransformationOption[] = [
   },
   {
     value: 'PERCENT_CHANGE',
-    label: 'Change since first observation',
-    description: '% Change since First Observation',
+    label: 'Change since first available value',
+    description: '% Change since First Available Value',
     units: '%',
     axisTitle: 'Percent Change',
   },
