@@ -1020,8 +1020,24 @@ mod tests {
         let Some(db) = db().await else { return };
         let p = &db.pool;
         let fred = persist::data_source_id(p, SourceId::Fred).await.unwrap();
-        let stale = seed(p, SourceId::Fred, "t15c_legacy_stale", "Daily", Some(30.0), None).await;
-        seed(p, SourceId::Fred, "t15c_current_stale", "Daily", Some(30.0), None).await;
+        let stale = seed(
+            p,
+            SourceId::Fred,
+            "t15c_legacy_stale",
+            "Daily",
+            Some(30.0),
+            None,
+        )
+        .await;
+        seed(
+            p,
+            SourceId::Fred,
+            "t15c_current_stale",
+            "Daily",
+            Some(30.0),
+            None,
+        )
+        .await;
         exec(
             p,
             &format!(
