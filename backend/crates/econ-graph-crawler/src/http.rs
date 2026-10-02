@@ -10,7 +10,10 @@ use std::time::{Duration, Instant, SystemTime};
 
 use econ_graph_metrics::crawler::CRAWLER_METRICS;
 use rand::RngExt;
-use reqwest::header::{HeaderMap, ACCEPT, CONTENT_TYPE, ETAG, IF_NONE_MATCH, RETRY_AFTER};
+use reqwest::header::{
+    HeaderMap, ACCEPT, CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED,
+    RETRY_AFTER,
+};
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -64,12 +67,43 @@ impl Default for HttpConfig {
     }
 }
 
-/// A successful (or `304`) response: the status, the response's `ETag` if it sent one, and the
-/// body (empty for `304`).
+/// A successful (or `304`) response: the status, the response's `ETag` and `Last-Modified` if it
+/// sent them, and the body (empty for `304`).
 struct RawResponse {
     status: StatusCode,
     etag: Option<String>,
+    last_modified: Option<String>,
     body: String,
+}
+
+/// What a later fetch needs to tell whether a source resource changed since it was last read.
+///
+/// `etag` and `last_modified` are the response headers, sent back as `If-None-Match` and
+/// `If-Modified-Since`. `content_sha256` is the hex SHA-256 of the body, which catches an
+/// unchanged re-download from a server that honours neither header. `version` is a
+/// version the adapter sets itself (FRED's `last_updated`, the World Bank's `lastupdated`, or the
+/// adapter's own parser version); the fetcher never compares it, and keeps `known`'s on an
+/// [`IfChanged::Unchanged`] result.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Validators {
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+    pub content_sha256: Option<String>,
+    pub version: Option<String>,
+}
+
+/// Outcome of [`HttpFetcher::get_text_if_changed`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IfChanged {
+    /// The resource is the one `known` described: the server answered `304`, or re-sent a body
+    /// with the same SHA-256. `validators` are the ones to store for next time (the server may
+    /// have sent a new `ETag` or `Last-Modified` with an identical body), with `known`'s `version`.
+    Unchanged { validators: Validators },
+    /// A new body, with its validators (`version` is `None`: the caller sets it).
+    Changed {
+        body: String,
+        validators: Validators,
+    },
 }
 
 /// Outcome of [`HttpFetcher::get_text_conditional`].
@@ -117,8 +151,10 @@ struct Target {
     url: Url,
     body: Option<Vec<u8>>,
     accept_json: bool,
-    /// `If-None-Match` value to send, for a conditional GET ([`HttpFetcher::get_text_conditional`]).
+    /// `If-None-Match` value to send, for a conditional GET ([`HttpFetcher::get_text_if_changed`]).
     if_none_match: Option<String>,
+    /// `If-Modified-Since` value to send, for a conditional GET.
+    if_modified_since: Option<String>,
     /// The URL with secret query values replaced; the only form that may be logged.
     redacted: String,
     /// Secret values sent in the query or a JSON body, scrubbed from quoted response bodies too.
@@ -161,6 +197,7 @@ impl Target {
             body,
             accept_json,
             if_none_match: None,
+            if_modified_since: None,
         })
     }
 
@@ -239,15 +276,75 @@ impl HttpFetcher {
         url: &str,
         etag: Option<&str>,
     ) -> Result<ConditionalText, CrawlError> {
-        let mut target = Target::new(source, Method::GET, url, &[], None, false)?;
-        target.if_none_match = etag.map(str::to_owned);
+        let known = etag.map(|e| Validators {
+            etag: Some(e.to_owned()),
+            ..Validators::default()
+        });
+        Ok(
+            match self
+                .get_text_if_changed(source, url, &[], known.as_ref())
+                .await?
+            {
+                IfChanged::Unchanged { .. } => ConditionalText::NotModified,
+                IfChanged::Changed { body, validators } => ConditionalText::Modified {
+                    body,
+                    etag: validators.etag,
+                },
+            },
+        )
+    }
+
+    /// GET `url` with `query` appended, skipping the body when it hasn't changed since `known`.
+    ///
+    /// Sends `If-None-Match` and `If-Modified-Since` from `known`'s `etag` and `last_modified`.
+    /// A `304` is [`IfChanged::Unchanged`], keeping `known`'s validators except where the `304`
+    /// sent new ones. A `200` whose body hashes to `known.content_sha256` is also `Unchanged`
+    /// (the server ignored or doesn't support the conditional headers), with the response's
+    /// validators. Any other success is [`IfChanged::Changed`]. With `known = None` the request is
+    /// a plain GET that returns `Changed` with the validators to store; a `304` to a request that
+    /// sent no conditional header is a `Transient` error, never `Unchanged`.
+    pub async fn get_text_if_changed(
+        &self,
+        source: SourceId,
+        url: &str,
+        query: &[(&str, &str)],
+        known: Option<&Validators>,
+    ) -> Result<IfChanged, CrawlError> {
+        let mut target = Target::new(source, Method::GET, url, query, None, false)?;
+        if let Some(k) = known {
+            target.if_none_match = k.etag.clone();
+            target.if_modified_since = k.last_modified.clone();
+        }
         let resp = self.execute(&target).await?;
         if resp.status == StatusCode::NOT_MODIFIED {
-            return Ok(ConditionalText::NotModified);
+            if target.if_none_match.is_none() && target.if_modified_since.is_none() {
+                return Err(CrawlError::Transient(format!(
+                    "{}: 304 Not Modified to an unconditional request",
+                    target.context()
+                )));
+            }
+            let mut validators = known.cloned().unwrap_or_default();
+            if resp.etag.is_some() {
+                validators.etag = resp.etag;
+            }
+            if resp.last_modified.is_some() {
+                validators.last_modified = resp.last_modified;
+            }
+            return Ok(IfChanged::Unchanged { validators });
         }
-        Ok(ConditionalText::Modified {
-            body: resp.body,
+        let mut validators = Validators {
             etag: resp.etag,
+            last_modified: resp.last_modified,
+            content_sha256: Some(sha256_hex(resp.body.as_bytes())),
+            version: None,
+        };
+        if known.and_then(|k| k.content_sha256.as_deref()) == validators.content_sha256.as_deref() {
+            validators.version = known.and_then(|k| k.version.clone());
+            return Ok(IfChanged::Unchanged { validators });
+        }
+        Ok(IfChanged::Changed {
+            body: resp.body,
+            validators,
         })
     }
 
@@ -357,6 +454,9 @@ impl HttpFetcher {
         if let Some(etag) = &target.if_none_match {
             request = request.header(IF_NONE_MATCH, etag.clone());
         }
+        if let Some(date) = &target.if_modified_since {
+            request = request.header(IF_MODIFIED_SINCE, date.clone());
+        }
         if let Some(body) = &target.body {
             request = request
                 .header(CONTENT_TYPE, "application/json")
@@ -374,7 +474,8 @@ impl HttpFetcher {
             self.record_request(target, status.as_str(), start);
             return Ok(RawResponse {
                 status,
-                etag: None,
+                etag: header_string(response.headers(), ETAG),
+                last_modified: header_string(response.headers(), LAST_MODIFIED),
                 body: String::new(),
             });
         }
@@ -399,11 +500,8 @@ impl HttpFetcher {
             return Err(err);
         }
 
-        let etag = response
-            .headers()
-            .get(ETAG)
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned);
+        let etag = header_string(response.headers(), ETAG);
+        let last_modified = header_string(response.headers(), LAST_MODIFIED);
         match response.text().await {
             Ok(body) => {
                 self.record_request(target, status.as_str(), start);
@@ -412,7 +510,12 @@ impl HttpFetcher {
                     &target.host,
                     body.len() as u64,
                 );
-                Ok(RawResponse { status, etag, body })
+                Ok(RawResponse {
+                    status,
+                    etag,
+                    last_modified,
+                    body,
+                })
             }
             Err(e) => Err(self.transport_error(target, e, start)),
         }
@@ -561,6 +664,23 @@ fn endpoint_label(url: &Url) -> String {
         })
         .unwrap_or_default();
     format!("/{}", segments.join("/"))
+}
+
+/// `name`'s value, if present and visible ASCII.
+fn header_string(headers: &HeaderMap, name: reqwest::header::HeaderName) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+}
+
+/// Lowercase hex SHA-256 of `bytes`.
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// `Retry-After` as delta-seconds or an HTTP-date (a date in the past means "now").
@@ -1162,5 +1282,159 @@ mod tests {
                 etag: None,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn get_text_if_changed_sends_both_validators_and_keeps_known_on_304() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .and(header("if-none-match", "\"v1\""))
+            .respond_with(ResponseTemplate::new(304))
+            .mount(&server)
+            .await;
+        let known = Validators {
+            etag: Some("\"v1\"".into()),
+            last_modified: Some("Tue, 01 Sep 2026 00:00:00 GMT".into()),
+            content_sha256: Some("abc".into()),
+            version: Some("ignored".into()),
+        };
+        let got = fetcher()
+            .get_text_if_changed(
+                SourceId::Fred,
+                &format!("{}/r", server.uri()),
+                &[],
+                Some(&known),
+            )
+            .await
+            .unwrap();
+        assert_eq!(got, IfChanged::Unchanged { validators: known });
+        // (wiremock's `header` matcher splits values on commas, so an HTTP-date is checked here.)
+        let sent = server.received_requests().await.unwrap();
+        assert_eq!(
+            sent[0].headers.get("if-modified-since").unwrap(),
+            "Tue, 01 Sep 2026 00:00:00 GMT"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_text_if_changed_takes_new_headers_from_a_304() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(ResponseTemplate::new(304).insert_header("ETag", "\"v2\""))
+            .mount(&server)
+            .await;
+        let known = Validators {
+            etag: Some("\"v1\"".into()),
+            ..Validators::default()
+        };
+        let got = fetcher()
+            .get_text_if_changed(
+                SourceId::Fred,
+                &format!("{}/r", server.uri()),
+                &[],
+                Some(&known),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            got,
+            IfChanged::Unchanged {
+                validators: Validators {
+                    etag: Some("\"v2\"".into()),
+                    ..Validators::default()
+                }
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn get_text_if_changed_detects_an_identical_body_without_header_support() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("same")
+                    .insert_header("Last-Modified", "Wed, 02 Sep 2026 00:00:00 GMT"),
+            )
+            .mount(&server)
+            .await;
+        let url = format!("{}/r", server.uri());
+        let IfChanged::Changed { body, validators } = fetcher()
+            .get_text_if_changed(SourceId::Fred, &url, &[], None)
+            .await
+            .unwrap()
+        else {
+            panic!("a first fetch is always Changed")
+        };
+        assert_eq!(body, "same");
+        assert_eq!(
+            validators,
+            Validators {
+                etag: None,
+                last_modified: Some("Wed, 02 Sep 2026 00:00:00 GMT".into()),
+                // sha256("same")
+                content_sha256: Some(
+                    "0967115f2813a3541eaef77de9d9d5773f1c0c04314b0bbfe4ff3b3b1c55b5d5".into()
+                ),
+                version: None,
+            }
+        );
+        let again = fetcher()
+            .get_text_if_changed(SourceId::Fred, &url, &[], Some(&validators))
+            .await
+            .unwrap();
+        assert_eq!(again, IfChanged::Unchanged { validators });
+    }
+
+    #[tokio::test]
+    async fn get_text_if_changed_returns_a_different_body() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("new"))
+            .mount(&server)
+            .await;
+        let known = Validators {
+            content_sha256: Some(sha256_hex(b"old")),
+            ..Validators::default()
+        };
+        let got = fetcher()
+            .get_text_if_changed(
+                SourceId::Fred,
+                &format!("{}/r", server.uri()),
+                &[],
+                Some(&known),
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(got, IfChanged::Changed { ref body, .. } if body == "new"),
+            "{got:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_304_to_an_unconditional_request_is_an_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(ResponseTemplate::new(304))
+            .mount(&server)
+            .await;
+        let url = format!("{}/r", server.uri());
+        let only_hash = Validators {
+            content_sha256: Some("ff".into()),
+            ..Validators::default()
+        };
+        for known in [None, Some(&only_hash)] {
+            let err = fetcher()
+                .get_text_if_changed(SourceId::Fred, &url, &[], known)
+                .await
+                .unwrap_err();
+            assert_eq!(err.kind(), "transient", "{err}");
+        }
     }
 }

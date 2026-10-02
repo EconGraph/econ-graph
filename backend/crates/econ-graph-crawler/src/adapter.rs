@@ -15,7 +15,7 @@ use econ_graph_core::DatabasePool;
 
 use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
-use crate::http::HttpFetcher;
+use crate::http::{HttpFetcher, Validators};
 use crate::policy::SourcePolicy;
 use crate::source::SourceId;
 
@@ -113,6 +113,28 @@ pub struct FetchedSeries {
     /// The series' dataset and dimension values. Every series belongs to a dataset the adapter
     /// declares in [`SourceAdapter::datasets`].
     pub dataset: SeriesDataset,
+    /// What the next fetch of this series can send or compare to skip unchanged data (see
+    /// [`HttpFetcher::get_text_if_changed`]). Stored with the points, in the same transaction,
+    /// so a validator is never kept for data that wasn't written; read back with
+    /// [`persist::stored_fetch_state`](crate::persist::stored_fetch_state). `None` clears any
+    /// stored validators: the next fetch is a full one.
+    pub validators: Option<Validators>,
+}
+
+impl FetchedSeries {
+    /// The result for a series the source reports unchanged since its last stored fetch: no
+    /// points and no metadata, so persisting it only marks the series crawled (keeping its
+    /// stored title, units and points) and stores `validators`. `dataset` is the series' stored
+    /// dataset ([`persist::stored_fetch_state`](crate::persist::stored_fetch_state)), so the
+    /// adapter needn't re-derive it from data it skipped.
+    pub fn unchanged(dataset: SeriesDataset, validators: Validators) -> Self {
+        Self {
+            metadata: None,
+            points: Vec::new(),
+            dataset,
+            validators: Some(validators),
+        }
+    }
 }
 
 /// One observation of a series.
@@ -147,6 +169,22 @@ pub struct DiscoveredSeries {
     pub dataset: SeriesDataset,
 }
 
+/// Outcome of [`SourceAdapter::discover_if_changed`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Discovery {
+    /// The source's catalog hasn't changed since the last discovery that stored a validator: the
+    /// worker writes nothing and retires nothing.
+    Unchanged,
+    /// The catalog as [`SourceAdapter::discover`] lists it. `validator`, when given, is the
+    /// `(url, validators)` pair the next discovery compares against; the worker stores it (see
+    /// [`persist::url_validators`](crate::persist::url_validators)) in the same transaction as
+    /// the discovered series.
+    Changed {
+        found: Vec<DiscoveredSeries>,
+        validator: Option<(String, Validators)>,
+    },
+}
+
 /// Per-series results of [`SourceAdapter::fetch_batch`], keyed by external id.
 pub type BatchFetch = HashMap<String, Result<FetchedSeries, CrawlError>>;
 
@@ -174,7 +212,8 @@ pub trait SourceAdapter: Send + Sync {
     /// Refreshes this adapter's own reference data — a source's published code→label lists that
     /// back a dataset's dimension `codes`, as opposed to the series `discover` returns — so
     /// static reference files in `data/` don't go stale as the source adds or renames codes.
-    /// Called once per scheduled catalog discovery, before [`discover`](Self::discover).
+    /// Called once per scheduled catalog discovery, before
+    /// [`discover_if_changed`](Self::discover_if_changed).
     ///
     /// The default is a no-op, for adapters with no such reference data of their own (most
     /// sources either have none or use a shared [`crate::dataset::CODELISTS`] entry instead).
@@ -186,11 +225,28 @@ pub trait SourceAdapter: Send + Sync {
         Ok(())
     }
 
+    /// Discovery that can skip an unchanged catalog. The worker calls this, not
+    /// [`discover`](Self::discover). The default always discovers, with no validator. An adapter
+    /// that wraps another must forward this, or the wrapped adapter's check is bypassed.
+    ///
+    /// An adapter whose catalog comes from a resource it can check cheaply (a conditional GET, a
+    /// source-reported version) overrides this: it reads the validator it stored last time with
+    /// [`persist::url_validators`](crate::persist::url_validators), returns
+    /// [`Discovery::Unchanged`] when the source confirms nothing changed, and otherwise returns
+    /// the full list with the validator to store.
+    async fn discover_if_changed(&self, ctx: &CrawlCtx) -> Result<Discovery, CrawlError> {
+        Ok(Discovery::Changed {
+            found: self.discover(ctx).await?,
+            validator: None,
+        })
+    }
+
     /// Whether a successful [`discover`](Self::discover) lists every series this adapter crawls,
     /// so a series it no longer lists has been retired by the source. The worker then marks such
     /// series inactive (see [`persist::retire_unlisted`](crate::persist::retire_unlisted)); they
     /// are never deleted. Defaults to `false`, for discoveries that return a sample (FRED by
-    /// popularity, World Bank by topic) or tolerate partial failure.
+    /// popularity, World Bank by topic) or tolerate partial failure. A
+    /// [`Discovery::Unchanged`] result retires nothing: the last changed discovery already did.
     fn discovery_is_complete(&self) -> bool {
         false
     }
@@ -333,6 +389,7 @@ mod tests {
             metadata: None,
             points: Vec::new(),
             dataset: SeriesDataset::new("test", Vec::<(String, String)>::new()),
+            validators: None,
         }
     }
 

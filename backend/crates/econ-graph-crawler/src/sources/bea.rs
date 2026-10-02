@@ -1047,6 +1047,7 @@ fn nipa_series(
         metadata: Some(metadata),
         points,
         dataset,
+        validators: None,
     })
 }
 
@@ -1075,6 +1076,7 @@ fn regional_series(
         metadata: Some(metadata),
         points,
         dataset,
+        validators: None,
     })
 }
 

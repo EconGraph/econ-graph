@@ -303,6 +303,7 @@ impl SourceAdapter for CensusAdapter {
             metadata: None,
             points,
             dataset,
+            validators: None,
         })
     }
 }
