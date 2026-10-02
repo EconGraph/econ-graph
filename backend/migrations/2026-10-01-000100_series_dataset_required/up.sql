@@ -15,7 +15,14 @@
 --      the next crawl; legacy FHFA ids are no longer crawled, so theirs stay empty.
 -- A dataset that rule 2 needs but that has no row yet (sync_datasets runs at worker startup,
 -- after migrations) gets one with just its code and name; the next sync fills in the rest.
--- Any row still without a dataset stops the migration with a list of what is left.
+--   3. A series no adapter forms an id for any more (before BEA, Census and WDI used dataset
+--      prefixes: `GDP` from BEA, an ACS table id from Census, `NY.GDP.PCAP.CD` from the World
+--      Bank, or any IMF or SEC EDGAR id) goes to its source's `legacy` dataset, so upgrading a
+--      database that crawled them keeps their observations instead of stopping every backend
+--      start. The scheduler never selects them (they are not crawled again); delete them or
+--      leave them as history.
+-- Any row still without a dataset (a series with no applicable rule) stops the migration with a
+-- list of what is left.
 --
 -- series_metadata.dataset_id stays nullable: it is the discovery catalog, and the initial schema
 -- seeds rows for sources the crawler has no adapter for (IMF) or under retired ids.
@@ -57,6 +64,12 @@ INSERT INTO series_dataset_rules (source_name, code, name, id_pattern) VALUES
     ('Federal Housing Finance Agency (FHFA)', 'fhfa_hpi', 'FHFA House Price Index', '^fhfa_hpi/'),
     -- Legacy ids of the FHFA adapter before DATA-7: USHPI, {STATE}HPI, {METRO}HPI (e.g. NYCHPI).
     ('Federal Housing Finance Agency (FHFA)', 'fhfa_hpi', 'FHFA House Price Index', '^[A-Z]{2,3}HPI$'),
+    -- Series from before the datasets above (see rule 3 in the header).
+    ('Bureau of Economic Analysis (BEA)', 'legacy', 'BEA series from before datasets', NULL),
+    ('U.S. Census Bureau', 'legacy', 'Census series from before datasets', NULL),
+    ('World Bank Open Data', 'legacy', 'World Bank series from before datasets', NULL),
+    ('International Monetary Fund (IMF)', 'legacy', 'IMF series from before datasets', NULL),
+    ('SEC EDGAR', 'legacy', 'SEC EDGAR series from before datasets', NULL),
     -- Development-only static catalogs (econ-graph-crawler src/sources/static_catalogs.rs).
     ('Bank of Canada (BoC)', 'catalog', 'Bank of Canada catalog', NULL),
     ('Bank of England (BoE)', 'catalog', 'Bank of England catalog', NULL),

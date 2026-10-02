@@ -132,8 +132,9 @@ In this mode (`env.ts`):
   behavior, and the outline's load-without-a-network-request and
   failure/Reload cases, all against mocked GraphQL responses (`page.route`)
   rather than this suite's seeded backend (ECO-282).
-- `mobile/navigation.spec.ts` (`release-mobile` only): pages load with the phone nav
-  drawer closed, and the menu opens it and picking a page closes it (ECO-335).
+- `mobile/navigation.spec.ts` (`release-mobile` only): the home, explore and map
+  pages load with the phone nav drawer closed, the menu opens it and picking a
+  page closes it, and the map's zoom controls leave the map uncovered (ECO-335).
 
 ## Add specs for your area
 

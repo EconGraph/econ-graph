@@ -360,7 +360,8 @@ async fn transformed_pages_match_the_whole_series_across_revisions() {
     let Some(db) = Fixture::new().await else {
         return;
     };
-    // 15 dates with 3 revisions each and no revision filter, so pages split a date's revisions.
+    // 15 dates with 3 revisions each and `latestRevisionOnly: false`, so pages split a date's
+    // revisions.
     // 15 months gives YoY (12 apart) and QoQ (3 apart) pairs, so both actually compute a value.
     let series = db
         .series(
@@ -378,7 +379,8 @@ async fn transformed_pages_match_the_whole_series_across_revisions() {
         "QUARTER_OVER_QUARTER",
         "YEAR_OVER_YEAR",
     ] {
-        let args = format!(", transformation: {transformation}");
+        let args =
+            format!(", filter: {{ latestRevisionOnly: false }}, transformation: {transformation}");
         let (whole, _) = db.all_pages(series, &args, 1000).await;
         assert_eq!(whole.len(), 45, "{transformation}");
         assert!(
@@ -390,6 +392,94 @@ async fn transformed_pages_match_the_whole_series_across_revisions() {
             assert_eq!(paged, whole, "{transformation}, first: {first}");
         }
     }
+    db.finish().await;
+}
+
+#[tokio::test]
+async fn transformations_default_to_the_latest_revisions() {
+    let Some(db) = Fixture::new().await else {
+        return;
+    };
+    // 15 months, each published 3 times (r months after the date); the latest revision of month d
+    // is d * 10 + 3.
+    let series = db
+        .series(
+            "Monthly",
+            "SELECT (DATE '2020-01-01' + make_interval(months => d))::date, (d * 10 + r + 1)::numeric, \
+                    (DATE '2020-01-01' + make_interval(months => d + r))::date, r = 0 \
+             FROM generate_series(0, 14) d, generate_series(0, 2) r",
+        )
+        .await;
+
+    for transformation in ["PERCENT_CHANGE", "MONTH_OVER_MONTH", "YEAR_OVER_YEAR"] {
+        let explicit =
+            format!(", filter: {{ latestRevisionOnly: true }}, transformation: {transformation}");
+        let default = format!(", transformation: {transformation}");
+        let (expected, _) = db.all_pages(series, &explicit, 1000).await;
+        assert_eq!(expected.len(), 15, "{transformation}");
+        let (got, _) = db.all_pages(series, &default, 1000).await;
+        assert_eq!(got, expected, "{transformation}");
+        // Paged the same way too.
+        let (paged, _) = db.all_pages(series, &default, 4).await;
+        assert_eq!(paged, expected, "{transformation}");
+    }
+
+    // The latest revisions are 3, 13, 23, ...: month-over-month is 13/3 - 1 = 333.33...%.
+    let (got, _) = db
+        .all_pages(series, ", transformation: MONTH_OVER_MONTH", 1000)
+        .await;
+    assert_eq!(got[0]["value"], Value::Null);
+    assert_eq!(value(&got[1]).round(2), dec("333.33"));
+
+    // `originalOnly: false` is no revision mode, so the default still applies.
+    let (got, _) = db
+        .all_pages(
+            series,
+            ", filter: { originalOnly: false }, transformation: MONTH_OVER_MONTH",
+            1000,
+        )
+        .await;
+    assert_eq!(got.len(), 15);
+    assert_eq!(value(&got[1]).round(2), dec("333.33"));
+
+    // `asOf` is a mode: as known on 2020-03-01, month d is its newest revision published by then
+    // (month 0: r=2 -> 3, month 1: r=1 -> 12, month 2: r=0 -> 21), one point per known date.
+    let (known, _) = db
+        .all_pages(
+            series,
+            ", filter: { asOf: \"2020-03-01\" }, transformation: MONTH_OVER_MONTH",
+            1000,
+        )
+        .await;
+    assert_eq!(known.len(), 3);
+    assert_eq!(value(&known[1]).round(2), dec("300"));
+    assert_eq!(value(&known[2]).round(2), dec("75"));
+
+    // The nested `dataPoints` field follows the same rule (`series` hides a series with no
+    // `end_date`).
+    db.sql(&format!(
+        "UPDATE economic_series SET end_date = DATE '2021-03-01' WHERE id = '{series}'"
+    ))
+    .await;
+    let data = db
+        .query(&format!(
+            "{{ series(id: \"{series}\") {{ dataPoints(transformation: MONTH_OVER_MONTH) {{ date value }} }} }}"
+        ))
+        .await;
+    let nested = data["series"]["dataPoints"].as_array().unwrap();
+    assert_eq!(nested.len(), 15);
+    assert_eq!(value(&nested[1]).round(2), dec("333.33"));
+
+    // An explicit revision mode is respected: originals only is not collapsed to the latest.
+    let (originals, _) = db
+        .all_pages(
+            series,
+            ", filter: { originalOnly: true }, transformation: PERCENT_CHANGE",
+            1000,
+        )
+        .await;
+    assert_eq!(originals.len(), 15);
+    assert_eq!(value(&originals[1]).round(2), dec("1000"));
     db.finish().await;
 }
 
