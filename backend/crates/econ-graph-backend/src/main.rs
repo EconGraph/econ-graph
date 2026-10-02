@@ -335,6 +335,44 @@ fn mcp_filter(
         .boxed()
 }
 
+/// The largest `/graphql` request body accepted, matching ingress-nginx's default
+/// `proxy-body-size`, so the backend refuses what the ingress would instead of buffering it.
+const GRAPHQL_BODY_LIMIT: u64 = 1024 * 1024;
+
+/// Refuses a `POST` whose `Content-Length` exceeds [`GRAPHQL_BODY_LIMIT`] before the body is
+/// read. A `POST` with no `Content-Length` (chunked) is refused with 411; ingress-nginx buffers
+/// requests and sets it. `GET` carries its query in the URL and has no body to limit.
+fn graphql_body_limit() -> impl Filter<Extract = (), Error = warp::Rejection> + Clone {
+    warp::get()
+        .or(warp::post().and(warp::body::content_length_limit(GRAPHQL_BODY_LIMIT)))
+        .unify()
+}
+
+/// An oversize `/graphql` body is answered 413 (or 411 without a length) in GraphQL's own error
+/// shape. Every other rejection passes through.
+async fn graphql_body_too_large(
+    rejection: warp::Rejection,
+) -> Result<warp::reply::Response, warp::Rejection> {
+    let (status, message) = if rejection.find::<warp::reject::PayloadTooLarge>().is_some() {
+        (
+            warp::http::StatusCode::PAYLOAD_TOO_LARGE,
+            format!("Request body is larger than {GRAPHQL_BODY_LIMIT} bytes"),
+        )
+    } else if rejection.find::<warp::reject::LengthRequired>().is_some() {
+        (
+            warp::http::StatusCode::LENGTH_REQUIRED,
+            "Content-Length is required".to_string(),
+        )
+    } else {
+        return Err(rejection);
+    };
+    Ok(warp::reply::with_status(
+        warp::reply::json(&json!({"errors": [{"message": message}]})),
+        status,
+    )
+    .into_response())
+}
+
 /// Every route this server answers on. There is no in-house sign-in: `/auth/*` answers nowhere
 /// on this backend (the frontend's own `/auth/callback` is a separate ingress rule that serves
 /// the frontend, not this process).
@@ -355,6 +393,7 @@ fn build_routes(
     let pool_for_graphql = pool.clone();
     let verifier_for_graphql = verifier.clone();
     let graphql_filter = warp::path("graphql")
+        .and(graphql_body_limit())
         .and(warp::header::headers_cloned())
         .and(async_graphql_warp::graphql(schema))
         .and_then(
@@ -393,6 +432,8 @@ fn build_routes(
                 }
             },
         );
+
+    let graphql_filter = graphql_filter.recover(graphql_body_too_large);
 
     // GraphQL Playground: off unless ENABLE_GRAPHQL_PLAYGROUND=true (local development).
     let playground_filter =
@@ -1154,7 +1195,7 @@ mod mcp_flag_off_tests {
 
 #[cfg(test)]
 mod route_tests {
-    use super::build_routes;
+    use super::{build_routes, GRAPHQL_BODY_LIMIT};
     use econ_graph_core::DatabasePool;
     use econ_graph_graphql::graphql::schema::create_schema_with_data;
 
@@ -1221,6 +1262,47 @@ mod route_tests {
         let res = warp::test::request()
             .method("GET")
             .path("/health")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 200);
+    }
+
+    /// A `/graphql` body over the limit is a JSON 413 before it is read; one at the limit and any
+    /// `GET` are not refused for size.
+    #[tokio::test]
+    async fn oversize_graphql_body_is_a_json_413() {
+        let big = format!(
+            r#"{{"query": "{{ __typename }}", "pad": "{}"}}"#,
+            "x".repeat(GRAPHQL_BODY_LIMIT as usize)
+        );
+        let res = warp::test::request()
+            .method("POST")
+            .path("/graphql")
+            .header("origin", "http://localhost:3000")
+            .header("content-type", "application/json")
+            .body(big)
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 413);
+        let body: serde_json::Value = serde_json::from_slice(res.body()).unwrap();
+        assert!(body["errors"][0]["message"].as_str().is_some(), "{body}");
+        assert_eq!(
+            res.headers()["access-control-allow-origin"],
+            "http://localhost:3000"
+        );
+
+        // A normal request is still answered, and so is a GET.
+        let res = warp::test::request()
+            .method("POST")
+            .path("/graphql")
+            .header("content-type", "application/json")
+            .body(r#"{"query": "{ __typename }"}"#)
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 200);
+        let res = warp::test::request()
+            .method("GET")
+            .path("/graphql?query=%7B__typename%7D")
             .reply(&routes(false))
             .await;
         assert_eq!(res.status(), 200);
