@@ -1099,7 +1099,7 @@ impl SourceAdapter for BlsAdapter {
     /// catalog, each by conditional GET so an unchanged file costs one small request. Each
     /// file is independent (its own URL, its own cached `ETag`), so one failing never stops the
     /// others from refreshing; if any failed, returns an aggregate error naming all of them
-    /// (the caller, [`Worker::discover`](crate::worker::Worker::discover), only logs it).
+    /// (the caller, `Worker::discover`, only logs it).
     async fn refresh_reference_data(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
         let mut errors = Vec::new();
         for spec in CODE_FILES {
