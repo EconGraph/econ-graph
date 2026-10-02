@@ -1047,4 +1047,6 @@ mod tests {
 #[cfg(test)]
 mod reference_data_tests;
 #[cfg(test)]
+mod release_sources_tests;
+#[cfg(test)]
 pub(crate) mod stable_id_tests;
