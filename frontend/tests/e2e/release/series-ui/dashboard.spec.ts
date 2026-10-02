@@ -4,35 +4,38 @@
 
 import { expect, test } from '@playwright/test';
 
+import { DEPLOYED } from '../env';
 import { SEEDED } from '../fixtures';
+import { expectWithinCadence } from '../seriesPage';
 
 // Live QA: the dashboard's featured-indicator cards show the real latest value and period for
 // the series they link to, not placeholder figures.
-//
-// As of this writing (src/pages/Dashboard.tsx), `featuredIndicators` hardcodes value/change/
-// period/source for every card ('$27.36T', 'Q3 2024', source 'BEA' for a series that is
-// actually seeded from FRED, etc.) and only `seriesId` comes from a real search. Un-fixme once
-// the cards are wired to the series' own latest observation (#212, #200).
 test.describe('dashboard cards', () => {
-  test.fixme(
-    'the GDP card shows the seeded series’ real latest value and period (blocked on #212, #200)',
-    async ({ page }) => {
-      await page.goto('/');
+  test('the GDP card shows the seeded series’ real latest value and period', async ({ page }) => {
+    await page.goto('/');
 
-      // The card's title is currently the hardcoded 'Real Gross Domestic Product', but #212/
-      // #200 may switch it to the series' own title; match either so this doesn't fail for the
-      // wrong reason once that changes.
-      const card = page.locator('.MuiCard-root').filter({
-        hasText: new RegExp(`Real Gross Domestic Product|${SEEDED.fredGdp.title}`),
-      });
-      await expect(card).toBeVisible();
+    // The card is an article named for the series it links to.
+    const card = page.getByRole('article', { name: SEEDED.fredGdp.title });
+    await expect(card).toBeVisible();
 
-      // e2e-seed.json's FRED GDP fixture's latest non-missing observation is 32101.6 (billions
-      // of dollars) for 2026-04-01 (Q2 2026), not the hardcoded '$27.36T' / 'Q3 2024'.
-      await expect(card.getByText(/\$32\.10T/)).toBeVisible();
-      await expect(card.getByText(/Q2 2026/)).toBeVisible();
-      await expect(card.getByText('FRED')).toBeVisible();
-      await expect(card.getByText('BEA')).toHaveCount(0);
+    await expect(card.getByText(SEEDED.fredGdp.units)).toBeVisible();
+    if (DEPLOYED) {
+      // Live GDP moves with every release: the period must be recent for a quarterly series.
+      const shown = (await card.textContent())?.match(/[A-Z][a-z]{2} \d{1,2}, \d{4}/)?.[0];
+      expect(shown, 'a period on the GDP card').toBeDefined();
+      expectWithinCadence(shown!, SEEDED.fredGdp.liveMaxAgeDays, 'dashboard GDP');
+    } else {
+      // e2e-seed.json's FRED GDP fixture's latest non-missing observation is 32101.6 (billions of
+      // dollars) for 2026-04-01, not a hardcoded placeholder.
+      await expect(card.getByText('32,101.6')).toBeVisible();
+      await expect(card.getByText('Apr 1, 2026')).toBeVisible();
     }
-  );
+    await expect(card).toContainText('FRED');
+    await expect(card).not.toContainText('BEA');
+    await expect(card.getByRole('link', { name: SEEDED.fredGdp.title })).toHaveAttribute(
+      'href',
+      /^\/series\//
+    );
+    await expect(page.getByText(/\$27\.36T/)).toHaveCount(0);
+  });
 });
