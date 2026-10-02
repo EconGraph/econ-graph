@@ -20,7 +20,15 @@ CREATE FUNCTION seed_reference_codes(
 LANGUAGE plpgsql AS $$
 DECLARE
     v_source_id UUID;
-    v_dimension JSONB := (p_dimension - 'codes' - 'codelist') || jsonb_build_object('codes', p_codes);
+    v_codes JSONB := (
+        SELECT COALESCE(jsonb_agg(c ORDER BY c ->> 'code'), '[]'::jsonb)
+        FROM (
+            SELECT DISTINCT ON (c ->> 'code') c
+            FROM jsonb_array_elements(p_codes) AS c
+            ORDER BY c ->> 'code'
+        ) AS u(c)
+    );
+    v_dimension JSONB := (p_dimension - 'codes' - 'codelist') || jsonb_build_object('codes', v_codes);
 BEGIN
     SELECT id INTO v_source_id FROM data_sources WHERE name = p_source;
     IF v_source_id IS NULL THEN
@@ -54,11 +62,7 @@ BEGIN
                     WHEN d ->> 'name' = p_dimension ->> 'name' THEN
                         d || jsonb_build_object('codes', COALESCE(d -> 'codes', '[]'::jsonb) || (
                             SELECT COALESCE(jsonb_agg(c ORDER BY c ->> 'code'), '[]'::jsonb)
-                            FROM (
-                                SELECT DISTINCT ON (c ->> 'code') c
-                                FROM jsonb_array_elements(p_codes) AS c
-                                ORDER BY c ->> 'code'
-                            ) AS u(c)
+                            FROM jsonb_array_elements(v_codes) AS c
                             WHERE NOT EXISTS (
                                 SELECT 1
                                 FROM jsonb_array_elements(COALESCE(d -> 'codes', '[]'::jsonb)) AS e

@@ -134,8 +134,9 @@ pub enum Command {
     },
 }
 
-/// The migration that creates `seed_reference_codes`; every seed migration must sort after it.
-const SEED_FUNCTION_MIGRATION: &str = "2026-10-02-000250_seed_reference_codes";
+/// Version of the migration that creates `seed_reference_codes`
+/// (`2026-10-02-000250_seed_reference_codes`); every seed migration's version must be later.
+const SEED_FUNCTION_VERSION: &str = "2026-10-02-000250";
 
 /// `backend/migrations` of the checkout this binary was built from.
 const DEFAULT_MIGRATIONS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../migrations");
@@ -341,8 +342,8 @@ pub async fn record_reference_seeds(
     let (up, down) = reference_file::seed_migration_sql(source, recorded_at, &entries)?;
     let suffix = format!("_seed_{}_reference_codes", source.as_str().to_lowercase());
     let name = format!("{}{suffix}", recorded_at.format("%Y-%m-%d-%H%M%S"));
-    if name.as_str() <= SEED_FUNCTION_MIGRATION {
-        bail!("{name} would run before {SEED_FUNCTION_MIGRATION} creates seed_reference_codes; check the clock");
+    if recorded_at.format("%Y-%m-%d-%H%M%S").to_string().as_str() <= SEED_FUNCTION_VERSION {
+        bail!("{name} would not run after migration {SEED_FUNCTION_VERSION}, which creates seed_reference_codes; check the clock");
     }
     // A new recording replaces the previous one. Both would run on a new database, and the older
     // would store the file first, so the newer one's codes would never load. Removing an applied
