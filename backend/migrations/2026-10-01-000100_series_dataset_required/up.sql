@@ -19,8 +19,9 @@
 --      prefixes: `GDP` from BEA, an ACS table id from Census, `NY.GDP.PCAP.CD` from the World
 --      Bank, or any IMF or SEC EDGAR id) goes to its source's `legacy` dataset, so upgrading a
 --      database that crawled them keeps their observations instead of stopping every backend
---      start. They are not crawled again; delete them or leave them as history.
--- Any row still without a dataset (a source with no rule at all) stops the migration with a
+--      start. The scheduler never selects them (they are not crawled again); delete them or
+--      leave them as history.
+-- Any row still without a dataset (a series with no applicable rule) stops the migration with a
 -- list of what is left.
 --
 -- series_metadata.dataset_id stays nullable: it is the discovery catalog, and the initial schema
