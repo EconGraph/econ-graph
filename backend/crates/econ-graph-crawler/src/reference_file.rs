@@ -208,12 +208,15 @@ pub async fn refresh_code_list(
     .await
 }
 
-/// `codes`, or a `Parse` error if a file parsed to none: an empty code list is a broken
+/// `codes` with later repeats of a code dropped (the first entry wins, in the refresh and the
+/// seed alike), or a `Parse` error if a file parsed to none: an empty code list is a broken
 /// download (a header-only or truncated file), never a source that has no codes.
-fn non_empty(url: &str, codes: Vec<Code>) -> Result<Vec<Code>, CrawlError> {
+fn non_empty(url: &str, mut codes: Vec<Code>) -> Result<Vec<Code>, CrawlError> {
     if codes.is_empty() {
         return Err(CrawlError::Parse(format!("{url}: no codes")));
     }
+    let mut seen = std::collections::HashSet::new();
+    codes.retain(|c| seen.insert(c.code.clone()));
     Ok(codes)
 }
 
@@ -285,7 +288,6 @@ pub async fn download_seed_entries(
         };
         let mut codes = non_empty(&list.url, (list.parse)(&body)?)?;
         codes.sort_by(|a, b| a.code.cmp(&b.code));
-        codes.dedup_by(|a, b| a.code == b.code);
         let mut dimension = DatasetComponent::from(dimension);
         dimension.codes = None;
         dimension.codelist = None;
@@ -425,6 +427,21 @@ mod tests {
             .batch_execute(&format!("BEGIN;\n{sql}\nCOMMIT;"))
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn non_empty_keeps_the_first_entry_of_a_repeated_code() {
+        let got = non_empty(
+            "u",
+            vec![
+                Code::new("01", "first"),
+                Code::new("02", "b"),
+                Code::new("01", "second"),
+            ],
+        )
+        .unwrap();
+        assert_eq!(got, [Code::new("01", "first"), Code::new("02", "b")]);
+        assert_eq!(non_empty("u", Vec::new()).unwrap_err().kind(), "parse");
     }
 
     #[test]
