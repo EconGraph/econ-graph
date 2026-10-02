@@ -39,9 +39,10 @@
 //! Discovery downloads the file, and so does each fetch batch. Every series shares one
 //! [`batch_key`](SourceAdapter::batch_key) and the policy's `max_batch` ([`MAX_BATCH`]) covers
 //! every train 1 series, so fetching them all is normally one download (discovery downloads the
-//! file separately). Discovery also labels every `place_id` dimension code (states and census
-//! divisions alike) from the file's own `place_name` column, reusing that same download; the
-//! dataset definition (`data/datasets/fhfa.toml`) ships no hand-typed place labels.
+//! file separately). [`refresh_reference_data`](SourceAdapter::refresh_reference_data) downloads
+//! it once more to label every `place_id` dimension code (states and census divisions alike)
+//! from the file's own `place_name` column; the dataset definition (`data/datasets/fhfa.toml`)
+//! ships no hand-typed place labels.
 //!
 //! Points are dated the first day of their month or quarter, with `revision_date = date` and
 //! `is_original_release = true`. FHFA re-estimates the whole history at every release and the file
@@ -82,6 +83,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use chrono::NaiveDate;
+use econ_graph_core::error::AppError;
 use rand::RngExt;
 
 use crate::adapter::{
@@ -460,13 +462,14 @@ impl FhfaAdapter {
         parse_master(&text, def)
     }
 
-    /// Labels every `place_id` found in `master` (states and census divisions alike) from the
-    /// file's own `place_name` column, into the `place_id` dimension of [`DATASET`]. Reuses
-    /// `master`'s already-downloaded rows rather than fetching the file again: unlike
-    /// [`SourceAdapter::refresh_reference_data`] (always run before `discover`, so it can't share
-    /// `discover`'s download), this runs from inside `discover` itself. A failure here is logged
-    /// and does not fail discovery; a stale or missing label is cosmetic, not a crawl error.
-    async fn refresh_place_labels(&self, ctx: &CrawlCtx, master: &BTreeMap<String, HpiSeries>) {
+    /// Labels every `place_id` in the master file (states and census divisions alike) from its
+    /// own `place_name` column, into the `place_id` dimension of [`DATASET`]. Downloads and
+    /// parses the file itself rather than sharing `discover`'s download: `discover` stays
+    /// DB-free, like every other adapter (see [`SourceAdapter::refresh_reference_data`], always
+    /// run before `discover`), at the cost of fetching the file an extra time per scheduled
+    /// discovery.
+    async fn refresh_place_labels(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
+        let master = self.master(ctx).await?;
         let mut labels: BTreeMap<String, String> = BTreeMap::new();
         for s in master.values() {
             if let Some(place_id) = s.dataset.dimensions.0.get("place_id") {
@@ -476,7 +479,7 @@ impl FhfaAdapter {
             }
         }
         let labels: Vec<(String, String)> = labels.into_iter().collect();
-        if let Err(error) = persist::merge_dataset_dimension_codes(
+        persist::merge_dataset_dimension_codes(
             &ctx.pool,
             SourceId::Fhfa,
             DATASET,
@@ -484,9 +487,7 @@ impl FhfaAdapter {
             &labels,
         )
         .await
-        {
-            tracing::warn!(%error, "FHFA: failed to refresh place_id labels");
-        }
+        .map_err(db_err)
     }
 }
 
@@ -506,6 +507,12 @@ fn not_in_file(external_id: &str) -> CrawlError {
     CrawlError::NotFound(format!(
         "FHFA: series {external_id:?} is not in the HPI master file"
     ))
+}
+
+/// Wraps a reference-data DB error as [`CrawlError::Transient`] (retried on the next scheduled
+/// discovery, same as any other reference-data fetch failure).
+fn db_err(e: AppError) -> CrawlError {
+    CrawlError::Transient(format!("FHFA reference data: {e}"))
 }
 
 #[async_trait]
@@ -531,12 +538,18 @@ impl SourceAdapter for FhfaAdapter {
         true
     }
 
+    /// Labels every `place_id` dimension code from the master file's own `place_name` column
+    /// (see [`refresh_place_labels`](Self::refresh_place_labels)).
+    async fn refresh_reference_data(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
+        self.refresh_place_labels(ctx).await
+    }
+
     /// Every train 1 series in the master file (see the module docs).
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         let url = self.master_url();
-        let master = self.master(ctx).await?;
-        self.refresh_place_labels(ctx, &master).await;
-        Ok(master
+        Ok(self
+            .master(ctx)
+            .await?
             .into_iter()
             .map(|(external_id, s)| {
                 let m = s.metadata();
@@ -1042,11 +1055,12 @@ mod tests {
         assert_eq!(mock.received_requests().await.len(), 2);
     }
 
-    /// `refresh_place_labels` merges a label for every `place_id` in the file (states and census
-    /// divisions alike) into `fhfa.toml`'s `place_id` dimension, which ships with no codes of its
-    /// own. The conditional-GET mechanics are covered at the `HttpFetcher` level (see BLS's
-    /// `refresh_code_file_merges_labels_and_caches_etag`); this checks FHFA's own wiring: reading
-    /// `place_name` out of the already-parsed file and merging it through `persist`.
+    /// `refresh_place_labels` (FHFA's `refresh_reference_data`) downloads the master file itself
+    /// and merges a label for every `place_id` it finds (states and census divisions alike) into
+    /// `fhfa.toml`'s `place_id` dimension, which ships with no codes of its own. This checks
+    /// FHFA's own wiring: downloading, reading `place_name` out of the parsed file, and merging
+    /// it through `persist`; unlike BLS's code files, FHFA's master file has no ETag-based
+    /// conditional GET (see the module docs on why this costs an extra download).
     #[tokio::test]
     async fn refresh_place_labels_merges_states_and_divisions() {
         let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
@@ -1076,12 +1090,13 @@ mod tests {
             .await
             .unwrap();
 
+        let mock = serving(MASTER).await;
         let mut ctx = test_ctx();
         ctx.pool = db.pool.clone();
-        let master = parse(MASTER);
-        FhfaAdapter::default()
-            .refresh_place_labels(&ctx, &master)
-            .await;
+        FhfaAdapter::new(mock.base_url())
+            .refresh_place_labels(&ctx)
+            .await
+            .unwrap();
 
         let codes = {
             use diesel::prelude::*;
@@ -1110,7 +1125,9 @@ mod tests {
         assert!(codes
             .iter()
             .any(|c| c.code == "DV_ENC" && c.label == "East North Central Division"));
-        assert!(codes.iter().any(|c| c.code == "LA" && c.label == "Louisiana"));
+        assert!(codes
+            .iter()
+            .any(|c| c.code == "LA" && c.label == "Louisiana"));
 
         db.drop().await;
     }

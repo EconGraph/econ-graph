@@ -334,10 +334,13 @@ pub async fn set_reference_file_etag(
 
 /// Merges `labels` (code -> label) into `source`'s dataset `dataset_code`, dimension
 /// `dimension_name`: adds a code that isn't there yet, updates the label of one that is, and
-/// leaves any other existing code alone. Returns whether anything was merged: `false` (nothing
-/// written) when the dataset or dimension isn't declared (the catalog hasn't synced yet, or the
-/// caller mis-named one) or the dimension uses a shared `codelist`. The caller should then not
-/// treat the fetch that produced `labels` as consumed, e.g. by caching its `ETag`.
+/// leaves any other existing code alone. Skips the write (but still returns `true`) when the
+/// merged codes equal what's already stored, so `updated_at` doesn't move on every refresh of a
+/// source with no conditional GET of its own to short-circuit first. Returns whether anything
+/// was merged: `false` (nothing written) when the dataset or dimension isn't declared (the
+/// catalog hasn't synced yet, or the caller mis-named one) or the dimension uses a shared
+/// `codelist`. The caller should then not treat the fetch that produced `labels` as consumed,
+/// e.g. by caching its `ETag`.
 pub async fn merge_dataset_dimension_codes(
     pool: &DatabasePool,
     source: SourceId,
@@ -371,7 +374,8 @@ pub async fn merge_dataset_dimension_codes(
         if dim.codelist.is_some() {
             return Ok(false);
         }
-        let mut codes = dim.codes.take().unwrap_or_default();
+        let before = dim.codes.clone().unwrap_or_default();
+        let mut codes = before.clone();
         for (code, label) in labels {
             match codes.iter_mut().find(|c| &c.code == code) {
                 Some(existing) => existing.label = label.clone(),
@@ -379,6 +383,13 @@ pub async fn merge_dataset_dimension_codes(
             }
         }
         codes.sort_unstable_by(|a, b| a.code.cmp(&b.code));
+        if codes == before {
+            // Nothing changed: skip the write so `updated_at` doesn't move on every refresh of a
+            // source (like FHFA's) with no conditional GET to short-circuit on first. The
+            // dataset and dimension were still found (and not codelist-backed), so this is
+            // `true`, not the "nothing to merge into" `false` above.
+            return Ok(true);
+        }
         dim.codes = Some(codes);
         diesel::update(dsl::datasets.filter(dsl::id.eq(id)))
             .set(dsl::dimensions.eq(dims))
