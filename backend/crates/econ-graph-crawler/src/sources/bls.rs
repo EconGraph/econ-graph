@@ -475,7 +475,7 @@ const CODE_FILES: &[CodeFileSpec<'static>] = &[
         dataset: "CE",
         dimension: "data_type",
         code_col: "data_type_code",
-        label_col: "data_type_name",
+        label_col: "data_type_text",
     },
     CodeFileSpec {
         url: "https://download.bls.gov/pub/time.series/la/la.area",
@@ -574,7 +574,7 @@ impl BlsAdapter {
             return Ok(());
         };
         let labels = parse_bls_code_file(&body, spec.code_col, spec.label_col)?;
-        persist::merge_dataset_dimension_codes(
+        let merged = persist::merge_dataset_dimension_codes(
             &ctx.pool,
             SourceId::Bls,
             spec.dataset,
@@ -583,6 +583,12 @@ impl BlsAdapter {
         )
         .await
         .map_err(db_err)?;
+        // Only cache the ETag once the labels actually landed: if `spec.dataset`/`dimension`
+        // doesn't exist yet (e.g. sync_datasets hasn't run), caching it here would make every
+        // later refresh a no-op 304 until BLS changes the file again.
+        if !merged {
+            return Ok(());
+        }
         persist::set_reference_file_etag(&ctx.pool, SourceId::Bls, spec.url, etag.as_deref())
             .await
             .map_err(db_err)
@@ -602,7 +608,7 @@ impl BlsAdapter {
             return Ok(());
         };
         let labels = parse_ln_series_titles(&body)?;
-        persist::merge_dataset_dimension_codes(
+        let merged = persist::merge_dataset_dimension_codes(
             &ctx.pool,
             SourceId::Bls,
             "LN",
@@ -611,6 +617,9 @@ impl BlsAdapter {
         )
         .await
         .map_err(db_err)?;
+        if !merged {
+            return Ok(());
+        }
         persist::set_reference_file_etag(&ctx.pool, SourceId::Bls, LN_SERIES_URL, etag.as_deref())
             .await
             .map_err(db_err)
@@ -1087,14 +1096,28 @@ impl SourceAdapter for BlsAdapter {
     }
 
     /// Refreshes CU/CE/LA's code labels from BLS's own flat files and LN's from its series
-    /// catalog, each by conditional GET so an unchanged file costs one small request. Returns
-    /// the first failure; a caller that wants partial progress on error should call
-    /// [`refresh_code_file`](Self::refresh_code_file) directly instead.
+    /// catalog, each by conditional GET so an unchanged file costs one small request. Each
+    /// file is independent (its own URL, its own cached `ETag`), so one failing never stops the
+    /// others from refreshing; if any failed, returns an aggregate error naming all of them
+    /// (the caller, [`Worker::discover`](crate::worker::Worker::discover), only logs it).
     async fn refresh_reference_data(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
+        let mut errors = Vec::new();
         for spec in CODE_FILES {
-            self.refresh_code_file(ctx, spec).await?;
+            if let Err(e) = self.refresh_code_file(ctx, spec).await {
+                errors.push(format!("{}: {e}", spec.url));
+            }
         }
-        self.refresh_ln_series(ctx).await
+        if let Err(e) = self.refresh_ln_series(ctx).await {
+            errors.push(format!("{LN_SERIES_URL}: {e}"));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(CrawlError::Transient(format!(
+                "BLS reference data: {}",
+                errors.join("; ")
+            )))
+        }
     }
 
     /// Fetches `external_ids` in requests of at most 50 series (25 without a key). When the ids
@@ -2502,7 +2525,8 @@ mod tests {
         let mock = MockSource::start().await;
         mock.mount(
             &Route::get("/cu.item"),
-            Reply::text("item_code\titem_name\nSAZZ\tBrand new item\n").header("ETag", "\"v1\""),
+            Reply::text("item_code\titem_name\nSA0\tAll items\nSAZZ\tBrand new item\n")
+                .header("ETag", "\"v1\""),
         )
         .await;
         let url = mock.url("/cu.item");
@@ -2546,11 +2570,83 @@ mod tests {
         };
         assert!(codes
             .iter()
-            .any(|c| c.code == "SAZZ" && c.label == "Brand new item"));
-        // The file's own curated label for "SA0" survives the merge.
+            .any(|c| c.code == "SA0" && c.label == "All items"));
         assert!(codes
             .iter()
-            .any(|c| c.code == "SA0" && c.label == "All items"));
+            .any(|c| c.code == "SAZZ" && c.label == "Brand new item"));
+
+        // bls.toml itself carries no "item" codes any more (BLS's own file is the source of
+        // truth), so a resync from it must not drop what this refresh just merged in.
+        crate::persist::sync_datasets(&db.pool, &catalog)
+            .await
+            .unwrap();
+        let codes_after_resync = {
+            use diesel::prelude::*;
+            use diesel_async::RunQueryDsl;
+            use econ_graph_core::schema::datasets::dsl;
+            let mut conn = db.pool.get().await.unwrap();
+            let dims: econ_graph_core::models::DatasetComponents = dsl::datasets
+                .filter(dsl::code.eq("CU"))
+                .select(dsl::dimensions)
+                .first(&mut conn)
+                .await
+                .unwrap();
+            dims.0
+                .into_iter()
+                .find(|d| d.name == "item")
+                .unwrap()
+                .codes
+                .unwrap()
+        };
+        assert_eq!(codes, codes_after_resync);
+
+        db.drop().await;
+    }
+
+    /// If `sync_datasets` hasn't run yet (or the dataset/dimension named in a `CodeFileSpec`
+    /// doesn't exist), `merge_dataset_dimension_codes` has nothing to write into and
+    /// `refresh_code_file` must not cache the `ETag`: caching it anyway would make the next
+    /// refresh a `304` that still has nothing to merge into, silently losing the labels for
+    /// good (short of BLS changing the file again).
+    #[tokio::test]
+    async fn refresh_code_file_does_not_cache_etag_when_nothing_to_merge_into() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_bls_refresh_no_dataset",
+        )
+        .await;
+        // Deliberately skip sync_datasets: no "CU" dataset row exists yet.
+
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/cu.item"),
+            Reply::text("item_code\titem_name\nSA0\tAll items\n").header("ETag", "\"v1\""),
+        )
+        .await;
+        let url = mock.url("/cu.item");
+        let spec = CodeFileSpec {
+            url: &url,
+            dataset: "CU",
+            dimension: "item",
+            code_col: "item_code",
+            label_col: "item_name",
+        };
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        BlsAdapter::default()
+            .refresh_code_file(&ctx, &spec)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            crate::persist::reference_file_etag(&db.pool, SourceId::Bls, spec.url)
+                .await
+                .unwrap(),
+            None
+        );
 
         db.drop().await;
     }

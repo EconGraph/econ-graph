@@ -334,17 +334,21 @@ pub async fn set_reference_file_etag(
 /// `dimension_name`: adds a code that isn't there yet, updates the label of one that is, and
 /// leaves any other existing code alone. No-op if the dataset or dimension isn't declared (the
 /// catalog hasn't synced yet, or the caller mis-named one).
+/// Merges `labels` into `dataset_code`'s `dimension_name` codes. Returns whether there was a
+/// matching dataset and dimension to merge into: `false` means nothing was written (the caller
+/// should not treat the fetch that produced `labels` as consumed, e.g. by caching its `ETag`,
+/// since the next fetch still has the same merging to do).
 pub async fn merge_dataset_dimension_codes(
     pool: &DatabasePool,
     source: SourceId,
     dataset_code: &str,
     dimension_name: &str,
     labels: &[(String, String)],
-) -> AppResult<()> {
+) -> AppResult<bool> {
     use datasets::dsl;
     let mut conn = pool.get().await.map_err(conn_err)?;
     let source_id = data_source_id_conn(&mut conn, source).await?;
-    conn.transaction::<(), AppError, _>(async move |conn| {
+    conn.transaction::<bool, AppError, _>(async move |conn| {
         let row: Option<(Uuid, DatasetComponents)> = dsl::datasets
             .filter(dsl::source_id.eq(source_id))
             .filter(dsl::code.eq(dataset_code))
@@ -353,10 +357,10 @@ pub async fn merge_dataset_dimension_codes(
             .await
             .optional()?;
         let Some((id, mut dims)) = row else {
-            return Ok(());
+            return Ok(false);
         };
         let Some(dim) = dims.0.iter_mut().find(|d| d.name == dimension_name) else {
-            return Ok(());
+            return Ok(false);
         };
         let mut codes = dim.codes.take().unwrap_or_default();
         for (code, label) in labels {
@@ -371,7 +375,7 @@ pub async fn merge_dataset_dimension_codes(
             .set(dsl::dimensions.eq(dims))
             .execute(conn)
             .await?;
-        Ok(())
+        Ok(true)
     })
     .await
 }
