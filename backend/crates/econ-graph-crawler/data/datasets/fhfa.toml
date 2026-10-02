@@ -39,10 +39,9 @@ codes = [
   { code = "state", label = "State" },
 ]
 
-# The file's `place_id` column: USA, a census division (DV_*) or a state's USPS code. State
-# codes are USPS codes, not the FIPS codes of the us_states codelist. Labels come from the
-# master file's own `place_name` column (see `FhfaAdapter::refresh_reference_data`), not a
-# hand-typed list.
+# The file's `place_id` column: USA, a census division (DV_*) or a state's USPS code (not
+# Census's FIPS codes). Labels come from the master file's own `place_name` column, one of
+# `FhfaAdapter::code_lists` (see src/sources/fhfa.rs), not a hand-typed list.
 [[dataset.dimensions]]
 name = "place_id"
 label = "Place"

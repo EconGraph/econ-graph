@@ -332,21 +332,34 @@ pub async fn set_reference_file_etag(
     Ok(())
 }
 
-/// Merges `labels` (code -> label) into `source`'s dataset `dataset_code`, dimension
-/// `dimension_name`: adds a code that isn't there yet, updates the label of one that is, and
-/// leaves any other existing code alone. Skips the write (but still returns `true`) when the
-/// merged codes equal what's already stored, so `updated_at` doesn't move on every refresh of a
-/// source with no conditional GET of its own to short-circuit first. Returns whether anything
-/// was merged: `false` (nothing written) when the dataset or dimension isn't declared (the
-/// catalog hasn't synced yet, or the caller mis-named one) or the dimension uses a shared
-/// `codelist`. The caller should then not treat the fetch that produced `labels` as consumed,
-/// e.g. by caching its `ETag`.
+/// [`merge_dataset_dimension_code_entries`] for plain `(code, label)` pairs.
 pub async fn merge_dataset_dimension_codes(
     pool: &DatabasePool,
     source: SourceId,
     dataset_code: &str,
     dimension_name: &str,
     labels: &[(String, String)],
+) -> AppResult<bool> {
+    let entries: Vec<Code> = labels.iter().map(|(c, l)| Code::new(c, l)).collect();
+    merge_dataset_dimension_code_entries(pool, source, dataset_code, dimension_name, &entries).await
+}
+
+/// Merges `entries` into `source`'s dataset `dataset_code`, dimension `dimension_name`: adds a
+/// code that isn't there yet, and for one that is, updates its label plus its `unit` and
+/// `description` where the entry has one (a missing one keeps what is stored). Skips the write
+/// (but still returns `true`) when the merged codes equal what's already stored, so
+/// `updated_at` doesn't move on every refresh of a source whose files carry no `ETag` of their
+/// own for [`reference_file::refresh`](crate::reference_file::refresh) to short-circuit on.
+/// Returns whether anything was merged: `false` (nothing written) when the dataset or dimension
+/// isn't declared (the catalog hasn't synced yet, or the caller mis-named one) or the dimension
+/// uses a shared `codelist`. The caller should then not treat the fetch that produced `entries`
+/// as consumed, e.g. by caching its `ETag`.
+pub async fn merge_dataset_dimension_code_entries(
+    pool: &DatabasePool,
+    source: SourceId,
+    dataset_code: &str,
+    dimension_name: &str,
+    entries: &[Code],
 ) -> AppResult<bool> {
     use datasets::dsl;
     let mut conn = pool.get().await.map_err(conn_err)?;
@@ -376,10 +389,18 @@ pub async fn merge_dataset_dimension_codes(
         }
         let before = dim.codes.clone().unwrap_or_default();
         let mut codes = before.clone();
-        for (code, label) in labels {
-            match codes.iter_mut().find(|c| &c.code == code) {
-                Some(existing) => existing.label = label.clone(),
-                None => codes.push(Code::new(code, label)),
+        for entry in entries {
+            match codes.iter_mut().find(|c| c.code == entry.code) {
+                Some(existing) => {
+                    existing.label = entry.label.clone();
+                    if entry.unit.is_some() {
+                        existing.unit = entry.unit.clone();
+                    }
+                    if entry.description.is_some() {
+                        existing.description = entry.description.clone();
+                    }
+                }
+                None => codes.push(entry.clone()),
             }
         }
         codes.sort_unstable_by(|a, b| a.code.cmp(&b.code));
