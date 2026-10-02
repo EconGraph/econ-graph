@@ -220,8 +220,15 @@ fn non_empty(url: &str, mut codes: Vec<Code>) -> Result<Vec<Code>, CrawlError> {
     Ok(codes)
 }
 
+/// True for an error after which more requests only make things worse: the source refused our
+/// credentials or asked us to back off.
+pub(crate) fn stops_the_batch(e: &CrawlError) -> bool {
+    matches!(e, CrawlError::Auth(_) | CrawlError::RateLimited { .. })
+}
+
 /// [`refresh_code_list`] for each of `lists`, all attempted even when one fails; the error names
-/// every file that failed.
+/// every file that failed. An `Auth` or `RateLimited` error stops at once and is returned as is,
+/// so the remaining lists don't hit a source that just refused us.
 pub async fn refresh_code_lists(
     ctx: &CrawlCtx,
     source: SourceId,
@@ -230,6 +237,9 @@ pub async fn refresh_code_lists(
     let mut errors = Vec::new();
     for list in lists {
         if let Err(e) = refresh_code_list(ctx, source, list).await {
+            if stops_the_batch(&e) {
+                return Err(e);
+            }
             errors.push(format!("{}: {e}", list.url));
         }
     }
@@ -258,15 +268,27 @@ pub struct SeedEntry {
     pub codes: Vec<Code>,
 }
 
+/// What [`download_seed_entries`] got: the lists it could seed, and why each other one failed.
+#[derive(Debug, Default)]
+pub struct SeedDownload {
+    /// One entry per list that downloaded and parsed.
+    pub entries: Vec<SeedEntry>,
+    /// `(url, error)` for each list that didn't.
+    pub failures: Vec<(String, CrawlError)>,
+}
+
 /// Downloads each of `lists` (unconditionally), parses it and pairs it with its dimension from
-/// `catalog`, for [`seed_migration_sql`].
+/// `catalog`, for [`seed_migration_sql`]. A list that fails is recorded in
+/// [`SeedDownload::failures`] and the rest are still tried, except that an `Auth` or
+/// `RateLimited` error stops at once and is returned. A list naming a dimension `catalog` lacks
+/// is a configuration error, also returned at once.
 pub async fn download_seed_entries(
     http: &HttpFetcher,
     source: SourceId,
     lists: &[CodeList],
     catalog: &DatasetCatalog,
-) -> Result<Vec<SeedEntry>, CrawlError> {
-    let mut out = Vec::with_capacity(lists.len());
+) -> Result<SeedDownload, CrawlError> {
+    let mut out = SeedDownload::default();
     for list in lists {
         let dimension = catalog
             .get(source, list.dataset)
@@ -277,29 +299,44 @@ pub async fn download_seed_entries(
                     list.dataset, list.dimension
                 ))
             })?;
-        let ConditionalText::Modified { body, etag } = http
-            .get_text_conditional(source, list.request_url(), None)
-            .await?
-        else {
-            return Err(CrawlError::Transient(format!(
-                "{}: 304 to an unconditional request",
-                list.url
-            )));
-        };
-        let mut codes = non_empty(&list.url, (list.parse)(&body)?)?;
-        codes.sort_by(|a, b| a.code.cmp(&b.code));
-        let mut dimension = DatasetComponent::from(dimension);
-        dimension.codes = None;
-        dimension.codelist = None;
-        out.push(SeedEntry {
-            dataset: list.dataset.to_string(),
-            dimension,
-            url: list.url.clone(),
-            etag,
-            codes,
-        });
+        match download_seed_codes(http, source, list).await {
+            Ok((etag, codes)) => {
+                let mut dimension = DatasetComponent::from(dimension);
+                dimension.codes = None;
+                dimension.codelist = None;
+                out.entries.push(SeedEntry {
+                    dataset: list.dataset.to_string(),
+                    dimension,
+                    url: list.url.clone(),
+                    etag,
+                    codes,
+                });
+            }
+            Err(e) if stops_the_batch(&e) => return Err(e),
+            Err(e) => out.failures.push((list.url.clone(), e)),
+        }
     }
     Ok(out)
+}
+
+/// One list's `ETag` and codes, sorted by code.
+async fn download_seed_codes(
+    http: &HttpFetcher,
+    source: SourceId,
+    list: &CodeList,
+) -> Result<(Option<String>, Vec<Code>), CrawlError> {
+    let ConditionalText::Modified { body, etag } = http
+        .get_text_conditional(source, list.request_url(), None)
+        .await?
+    else {
+        return Err(CrawlError::Transient(format!(
+            "{}: 304 to an unconditional request",
+            list.url
+        )));
+    };
+    let mut codes = non_empty(&list.url, (list.parse)(&body)?)?;
+    codes.sort_by(|a, b| a.code.cmp(&b.code));
+    Ok((etag, codes))
 }
 
 /// A SQL string literal.
@@ -507,6 +544,7 @@ mod tests {
             &test_ctx().http,
             &catalog,
             &dir,
+            false,
             at,
         )
         .await
@@ -521,6 +559,7 @@ mod tests {
             &test_ctx().http,
             &catalog,
             &dir,
+            false,
             later,
         )
         .await
@@ -531,6 +570,23 @@ mod tests {
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
         assert_eq!(dirs, ["2026-10-02-040000_seed_census_reference_codes"]);
+        // A second recording in the same second would reuse the version Diesel already ran;
+        // it is refused, and the existing recording stays.
+        let e = crate::cli::record_reference_seeds(
+            &adapter,
+            &ApiKeys::default(),
+            &test_ctx().http,
+            &catalog,
+            &dir,
+            false,
+            later,
+        )
+        .await
+        .unwrap_err();
+        assert!(e.to_string().contains("already taken"), "{e}");
+        assert!(dir
+            .join("2026-10-02-040000_seed_census_reference_codes/up.sql")
+            .is_file());
         let migration = dir.join(&dirs[0]);
         let up = std::fs::read_to_string(migration.join("up.sql")).unwrap();
         let down = std::fs::read_to_string(migration.join("down.sql")).unwrap();
@@ -773,15 +829,63 @@ mod tests {
                 .unwrap(),
             None
         );
-        let e = download_seed_entries(
+        let got = download_seed_entries(
             &ctx.http,
             SourceId::Census,
             &[list],
             &catalog(&census(&mock)),
         )
         .await
+        .unwrap();
+        assert!(got.entries.is_empty());
+        assert_eq!(got.failures.len(), 1);
+        assert_eq!(got.failures[0].1.kind(), "parse", "{:?}", got.failures);
+        db.drop().await;
+    }
+
+    /// A 403 stops a batch at once: the lists after it are not requested, by the refresh or the
+    /// seed recorder, and the error comes back as `Auth` for the caller's backoff.
+    #[tokio::test]
+    async fn a_refused_request_stops_the_batch() {
+        let Some(admin_url) = database_url() else {
+            return;
+        };
+        let db = FreshDb::create(&admin_url, "econgraph_reference_refused").await;
+        let mock = MockSource::start().await;
+        mock.mount(&Route::get("/refused.txt"), Reply::status(403))
+            .await;
+        mock.mount(
+            &Route::get(URL_PATH),
+            Reply::text("code\tlabel\n01\tAlabama\n"),
+        )
+        .await;
+        let parse: ParseCodes = Arc::new(|_| Ok(vec![Code::new("01", "Alabama")]));
+        let lists = [
+            CodeList::new(mock.url("/refused.txt"), "bds", "state", parse.clone()),
+            CodeList::new(mock.url(URL_PATH), "bds", "state", parse),
+        ];
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let e = refresh_code_lists(&ctx, SourceId::Census, &lists)
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind(), "auth", "{e}");
+        let e = download_seed_entries(
+            &ctx.http,
+            SourceId::Census,
+            &lists,
+            &catalog(&census(&mock)),
+        )
+        .await
         .unwrap_err();
-        assert_eq!(e.kind(), "parse", "{e}");
+        assert_eq!(e.kind(), "auth", "{e}");
+        let paths: Vec<_> = mock
+            .received_requests()
+            .await
+            .iter()
+            .map(|r| r.url.path().to_string())
+            .collect();
+        assert!(paths.iter().all(|p| p == "/refused.txt"), "{paths:?}");
         db.drop().await;
     }
 
@@ -857,7 +961,8 @@ mod tests {
 
         let entries = download_seed_entries(&ctx.http, SourceId::Census, &[list], &catalog)
             .await
-            .unwrap();
+            .unwrap()
+            .entries;
         let at = "2026-10-02T03:00:00Z".parse().unwrap();
         let (up, down) = seed_migration_sql(SourceId::Census, at, &entries).unwrap();
         assert!(

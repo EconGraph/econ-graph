@@ -784,8 +784,13 @@ impl CodeFileSpec<'_> {
 impl BlsAdapter {
     /// [`refresh_series_file`](Self::refresh_series_file) for every survey in [`SERIES_FILES`]
     /// with its ids from `curated`, skipping a survey with none unless its file also carries
-    /// code labels (LN). Returns one error message per file that failed; the others still run.
-    async fn refresh_series_files(&self, ctx: &CrawlCtx, curated: &[BlsSeries]) -> Vec<String> {
+    /// code labels (LN). Returns one error message per file that failed; the others still run,
+    /// except after an `Auth` or `RateLimited` error, which is returned at once.
+    async fn refresh_series_files(
+        &self,
+        ctx: &CrawlCtx,
+        curated: &[BlsSeries],
+    ) -> Result<Vec<String>, CrawlError> {
         let mut errors = Vec::new();
         for spec in SERIES_FILES {
             let wanted: BTreeSet<String> = curated
@@ -797,10 +802,13 @@ impl BlsAdapter {
                 continue;
             }
             if let Err(e) = self.refresh_series_file(ctx, spec, &wanted).await {
+                if reference_file::stops_the_batch(&e) {
+                    return Err(e);
+                }
                 errors.push(format!("{}: {e}", self.series_file_url(spec.survey)));
             }
         }
-        errors
+        Ok(errors)
     }
 
     /// Re-fetches `spec`'s survey series file through [`reference_file::refresh`] (a conditional
@@ -1456,19 +1464,23 @@ impl SourceAdapter for BlsAdapter {
     /// conditional GET, so an unchanged file costs one small request. Each file is independent
     /// (its own URL, its own cached `ETag`), so one failing never stops the others from
     /// refreshing; if any failed, returns an aggregate error naming all of them (the caller,
-    /// `Worker::discover`, only logs it). The code files go first, so units read from their
-    /// labels are current when discovery runs.
+    /// `Worker::discover`, only logs it). An `Auth` or `RateLimited` error stops at once and is
+    /// returned as is, as in [`reference_file::refresh_code_lists`]. The code files go first, so
+    /// units read from their labels are current when discovery runs.
     async fn refresh_reference_data(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
         let mut errors = Vec::new();
         for list in self.code_lists(&ctx.keys) {
             if let Err(e) = reference_file::refresh_code_list(ctx, SourceId::Bls, &list).await {
+                if reference_file::stops_the_batch(&e) {
+                    return Err(e);
+                }
                 errors.push(format!("{}: {e}", list.url));
             }
         }
         let curated = bls_series()
             .map_err(|e| errors.push(e.to_string()))
             .unwrap_or_default();
-        errors.extend(self.refresh_series_files(ctx, curated).await);
+        errors.extend(self.refresh_series_files(ctx, curated).await?);
         if errors.is_empty() {
             Ok(())
         } else {
@@ -2424,7 +2436,8 @@ mod tests {
 
         let errors = adapter
             .refresh_series_files(&ctx, bls_series().unwrap())
-            .await;
+            .await
+            .unwrap();
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
             errors[0].contains(&adapter.series_file_url("LA")),
@@ -2447,7 +2460,11 @@ mod tests {
             Reply::text(LN_SERIES).header("ETag", "\"v2\""),
         )
         .await;
-        assert!(adapter.refresh_series_files(&ctx, &[]).await.is_empty());
+        assert!(adapter
+            .refresh_series_files(&ctx, &[])
+            .await
+            .unwrap()
+            .is_empty());
         // That fetch was only for LN's code labels: the rows stored for the curated list stay,
         // but no longer count as looked up for any id, since they predate the stored `ETag`.
         let ln_url = adapter.series_file_url("LN");
@@ -2477,6 +2494,43 @@ mod tests {
             .unwrap();
         let reqs = mock.received_requests().await;
         assert!(reqs[0].headers.get("if-none-match").is_none());
+
+        db.drop().await;
+    }
+
+    /// A throttled series file stops the others: the error comes back as is and nothing more is
+    /// requested.
+    #[tokio::test]
+    async fn refresh_series_files_stops_on_a_rate_limit() {
+        let Some(db) = bls_db("econgraph_bls_refresh_series_files_429").await else {
+            return;
+        };
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let mock = MockSource::start().await;
+        let adapter = BlsAdapter::new(mock.base_url()).with_download_url(mock.base_url());
+        mock.mount(&Route::get("/cu/cu.series"), Reply::status(429))
+            .await;
+        for (path, body) in [
+            ("/ce/ce.series", CE_SERIES),
+            ("/ln/ln.series", LN_SERIES),
+            ("/la/la.series", LA_SERIES),
+        ] {
+            mock.mount(&Route::get(path), Reply::text(body)).await;
+        }
+
+        let err = adapter
+            .refresh_series_files(&ctx, bls_series().unwrap())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CrawlError::RateLimited { .. }), "{err:?}");
+        let paths: Vec<String> = mock
+            .received_requests()
+            .await
+            .iter()
+            .map(|r| r.url.path().to_string())
+            .collect();
+        assert_eq!(paths, ["/cu/cu.series"]);
 
         db.drop().await;
     }
