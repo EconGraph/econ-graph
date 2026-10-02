@@ -21,7 +21,7 @@
 //! datasets have the single measure `value`. Callers check the series against the
 //! [`DatasetCatalog`] first; persistence only resolves the synced row.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use chrono::{NaiveDate, Utc};
@@ -332,6 +332,122 @@ pub async fn set_reference_file_etag(
     Ok(())
 }
 
+/// What [`reference_file_cache`] holds for one of a source's reference files.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ReferenceFileCache {
+    /// The validator to send next time (see [`reference_file_etag`]).
+    pub etag: Option<String>,
+    /// What the adapter kept from the copy that `etag` names ([`set_reference_file_payload`]),
+    /// for files whose contents aren't merged into another table. `None` if never stored.
+    pub payload: Option<serde_json::Value>,
+}
+
+/// The cached `ETag` and payload of `url`, one of `source`'s reference files. Both `None` if it
+/// was never fetched.
+pub async fn reference_file_cache(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+) -> AppResult<ReferenceFileCache> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    #[derive(QueryableByName)]
+    struct Row {
+        #[diesel(sql_type = Nullable<Text>)]
+        etag: Option<String>,
+        #[diesel(sql_type = Nullable<Jsonb>)]
+        payload: Option<serde_json::Value>,
+    }
+    let row: Option<Row> = diesel::sql_query(
+        "SELECT etag, payload FROM reference_file_cache WHERE source_id = $1 AND url = $2",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .get_result(&mut conn)
+    .await
+    .optional()?;
+    Ok(row
+        .map(|r| ReferenceFileCache {
+            etag: r.etag,
+            payload: r.payload,
+        })
+        .unwrap_or_default())
+}
+
+/// Stores what an adapter kept from a copy of `url` (`payload`), for files whose contents aren't
+/// merged into another table. Called from inside [`crate::reference_file::refresh`]'s apply
+/// step, which then stores that copy's `ETag` ([`set_reference_file_etag`], which leaves the
+/// payload alone), so a later `304` pairs with the payload it validates. A new row gets no
+/// `ETag` until then.
+pub async fn set_reference_file_payload(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+    payload: &serde_json::Value,
+) -> AppResult<()> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    diesel::sql_query(
+        "INSERT INTO reference_file_cache (source_id, url, etag, payload, fetched_at) \
+             VALUES ($1, $2, NULL, $3, NOW()) \
+         ON CONFLICT (source_id, url) DO UPDATE SET payload = EXCLUDED.payload",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .bind::<Jsonb, _>(payload)
+    .execute(&mut conn)
+    .await?;
+    Ok(())
+}
+
+/// Forgets the stored `ETag` of `url` (if it has a row), so the next conditional GET downloads
+/// the file again. The row (and its payload) stays, so a seed migration still sees the file as
+/// present and leaves it alone.
+pub async fn clear_reference_file_etag(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+) -> AppResult<()> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    diesel::sql_query(
+        "UPDATE reference_file_cache SET etag = NULL WHERE source_id = $1 AND url = $2",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .execute(&mut conn)
+    .await?;
+    Ok(())
+}
+
+/// The codes of `source`'s dataset `dataset_code`, dimension `dimension_name`, by code, as stored
+/// (the dataset file's codes plus any [`merge_dataset_dimension_codes`] added). Empty if the
+/// dataset or dimension isn't stored or has no codes.
+pub async fn dataset_dimension_codes(
+    pool: &DatabasePool,
+    source: SourceId,
+    dataset_code: &str,
+    dimension_name: &str,
+) -> AppResult<BTreeMap<String, Code>> {
+    use datasets::dsl;
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    let dims: Option<DatasetComponents> = dsl::datasets
+        .filter(dsl::source_id.eq(source_id))
+        .filter(dsl::code.eq(dataset_code))
+        .select(dsl::dimensions)
+        .first(&mut conn)
+        .await
+        .optional()?;
+    Ok(dims
+        .into_iter()
+        .flat_map(|d| d.0)
+        .filter(|d| d.name == dimension_name)
+        .flat_map(|d| d.codes.unwrap_or_default())
+        .map(|c| (c.code.clone(), c))
+        .collect())
+}
+
 /// [`merge_dataset_dimension_code_entries`] for plain `(code, label)` pairs.
 pub async fn merge_dataset_dimension_codes(
     pool: &DatabasePool,
@@ -420,36 +536,6 @@ pub async fn merge_dataset_dimension_code_entries(
         Ok(true)
     })
     .await
-}
-
-/// Current inline codes of `source`'s dataset `dataset_code`, dimension `dimension_name`, by
-/// code: whatever [`merge_dataset_dimension_codes`] last merged in, or the dataset file's own
-/// codes if no merge has happened yet. Empty if the dataset or dimension isn't declared, or has
-/// no inline codes. For an adapter that needs a code's current label or description to build a
-/// series' own title or description (not just the dimension's code list).
-pub async fn dataset_dimension_codes(
-    pool: &DatabasePool,
-    source: SourceId,
-    dataset_code: &str,
-    dimension_name: &str,
-) -> AppResult<HashMap<String, Code>> {
-    use datasets::dsl;
-    let mut conn = pool.get().await.map_err(conn_err)?;
-    let source_id = data_source_id_conn(&mut conn, source).await?;
-    let row: Option<DatasetComponents> = dsl::datasets
-        .filter(dsl::source_id.eq(source_id))
-        .filter(dsl::code.eq(dataset_code))
-        .select(dsl::dimensions)
-        .first(&mut conn)
-        .await
-        .optional()?;
-    Ok(row
-        .and_then(|dims| dims.0.into_iter().find(|d| d.name == dimension_name))
-        .and_then(|dim| dim.codes)
-        .into_iter()
-        .flatten()
-        .map(|c| (c.code.clone(), c))
-        .collect())
 }
 
 /// `datasets.id` of each of `source_id`'s datasets named in `codes`. A code without a row means
