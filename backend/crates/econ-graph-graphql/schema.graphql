@@ -822,11 +822,12 @@ type Query {
 		after: String
 	): DataPointConnection!
 	"""
-	Crawler status, derived from the crawl queue (workers keep no other state).
+	Crawler status, derived from the crawl queue (workers keep no other state; requires
+	`admin.system:read`).
 	"""
 	crawlerStatus: CrawlerStatus!
 	"""
-	Get queue statistics
+	Get queue statistics (requires `admin.system:read`)
 	"""
 	queueStatistics: QueueStatistics!
 	"""

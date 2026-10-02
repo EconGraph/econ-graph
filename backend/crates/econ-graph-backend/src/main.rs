@@ -150,11 +150,6 @@ async fn root_handler(playground: bool) -> Result<impl warp::Reply, Infallible> 
             <p><a href="/health">Health check endpoint</a> - API status and version info</p>
         </div>
 
-        <div class="endpoint">
-            <div><span class="method">GET</span> <code>/metrics</code></div>
-            <p><a href="/metrics">Prometheus metrics endpoint</a> - Application metrics for monitoring</p>
-        </div>
-
 <!--MCP_ENDPOINT-->
         <h2>🚀 Quick Start</h2>
 <!--PLAYGROUND_QUICK_START-->

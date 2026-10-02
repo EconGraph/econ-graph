@@ -64,11 +64,40 @@ spec:
             port:
               number: 3000
   
-  # API subdomain
+  # API subdomain. Only the paths ingress.yaml sends to the backend: /metrics and the backend's
+  # other endpoints stay inside the cluster.
   - host: api.econgraph.example.com  # Replace with your actual domain
     http:
       paths:
-      - path: /
+      - path: /graphql
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /auth
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /playground
+        pathType: Prefix
+        backend:
+          service:
+            name: econ-graph-backend-service
+            port:
+              number: 9876
+      - path: /health
         pathType: Prefix
         backend:
           service:
