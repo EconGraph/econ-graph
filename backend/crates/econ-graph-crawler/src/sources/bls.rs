@@ -100,6 +100,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -107,18 +108,15 @@ use chrono::{Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
-use econ_graph_core::error::AppError;
-
 use crate::adapter::{
     ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
     NewSeriesMetadataLite, SourceAdapter,
 };
 use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
-use crate::http::ConditionalText;
-use crate::persist;
 use crate::policy::SourcePolicy;
 use crate::reference::{bls_series, BlsSeries};
+use crate::reference_file::CodeList;
 use crate::source::SourceId;
 
 /// The real BLS Public Data API v2 root.
@@ -441,7 +439,7 @@ pub fn series_dataset(series_id: &str) -> Option<SeriesDataset> {
 }
 
 /// One of BLS's own flat-file code lists that back a dataset dimension's `codes` in
-/// `data/datasets/bls.toml`. [`BlsAdapter::refresh_reference_data`] fetches each conditionally
+/// `data/datasets/bls.toml`. The default `refresh_reference_data` fetches each conditionally
 /// and merges its labels into the dataset so the checked-in file's coverage doesn't have to keep
 /// up by hand with every code BLS has ever published.
 struct CodeFileSpec<'a> {
@@ -453,7 +451,7 @@ struct CodeFileSpec<'a> {
 }
 
 /// `series_code` (LN) isn't here: CPS has no small per-field code file like the others (its
-/// value is effectively a series' own identity), so [`BlsAdapter::refresh_ln_series`] reads
+/// value is effectively a series' own identity), so [`bls_code_lists`] reads
 /// BLS's series catalog instead.
 const CODE_FILES: &[CodeFileSpec<'static>] = &[
     CodeFileSpec {
@@ -496,12 +494,6 @@ const CODE_FILES: &[CodeFileSpec<'static>] = &[
 /// BLS's CPS series catalog: one row per series id, with its title. Backs LN's `series_code`
 /// dimension (the id's tail after the seasonal letter).
 const LN_SERIES_URL: &str = "https://download.bls.gov/pub/time.series/ln/ln.series";
-
-/// Wraps a reference-data DB error as [`CrawlError::Transient`] (retried on the next scheduled
-/// discovery, same as any other reference-data fetch failure).
-fn db_err(e: AppError) -> CrawlError {
-    CrawlError::Transient(format!("BLS reference data: {e}"))
-}
 
 /// Parses a BLS flat reference file: a header row naming tab-delimited columns, then one data
 /// row per line. Returns `(code, label)` for every row that has both `code_col` and `label_col`,
@@ -562,75 +554,29 @@ fn parse_ln_series_titles(text: &str) -> Result<Vec<(String, String)>, CrawlErro
         .collect())
 }
 
-impl BlsAdapter {
-    /// Conditionally re-fetches one of BLS's flat code files and merges any new/changed labels
-    /// into `dataset`'s `dimension`. A `304` (unchanged since the cached `ETag`) does nothing.
-    async fn refresh_code_file(
-        &self,
-        ctx: &CrawlCtx,
-        spec: &CodeFileSpec<'_>,
-    ) -> Result<(), CrawlError> {
-        let cached_etag = persist::reference_file_etag(&ctx.pool, SourceId::Bls, spec.url)
-            .await
-            .map_err(db_err)?;
-        let fetched = ctx
-            .http
-            .get_text_conditional(SourceId::Bls, spec.url, cached_etag.as_deref())
-            .await?;
-        let ConditionalText::Modified { body, etag } = fetched else {
-            return Ok(());
-        };
-        let labels = parse_bls_code_file(&body, spec.code_col, spec.label_col)?;
-        let merged = persist::merge_dataset_dimension_codes(
-            &ctx.pool,
-            SourceId::Bls,
-            spec.dataset,
-            spec.dimension,
-            &labels,
-        )
-        .await
-        .map_err(db_err)?;
-        // Only cache the ETag once the labels actually landed: if `spec.dataset`/`dimension`
-        // doesn't exist yet (e.g. sync_datasets hasn't run), caching it here would make every
-        // later refresh a no-op 304 until BLS changes the file again.
-        if !merged {
-            return Ok(());
+impl CodeFileSpec<'_> {
+    /// This file as a [`CodeList`], parsed by [`parse_bls_code_file`] with its columns.
+    fn code_list(&self) -> CodeList {
+        let (code_col, label_col) = (self.code_col, self.label_col);
+        CodeList {
+            url: self.url.to_string(),
+            dataset: self.dataset,
+            dimension: self.dimension,
+            parse: Arc::new(move |body| parse_bls_code_file(body, code_col, label_col)),
         }
-        persist::set_reference_file_etag(&ctx.pool, SourceId::Bls, spec.url, etag.as_deref())
-            .await
-            .map_err(db_err)
     }
+}
 
-    /// Same as [`refresh_code_file`](Self::refresh_code_file), for LN's `series_code` dimension,
-    /// whose labels come from BLS's series catalog rather than a per-field code file.
-    async fn refresh_ln_series(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
-        let cached_etag = persist::reference_file_etag(&ctx.pool, SourceId::Bls, LN_SERIES_URL)
-            .await
-            .map_err(db_err)?;
-        let fetched = ctx
-            .http
-            .get_text_conditional(SourceId::Bls, LN_SERIES_URL, cached_etag.as_deref())
-            .await?;
-        let ConditionalText::Modified { body, etag } = fetched else {
-            return Ok(());
-        };
-        let labels = parse_ln_series_titles(&body)?;
-        let merged = persist::merge_dataset_dimension_codes(
-            &ctx.pool,
-            SourceId::Bls,
-            "LN",
-            "series_code",
-            &labels,
-        )
-        .await
-        .map_err(db_err)?;
-        if !merged {
-            return Ok(());
-        }
-        persist::set_reference_file_etag(&ctx.pool, SourceId::Bls, LN_SERIES_URL, etag.as_deref())
-            .await
-            .map_err(db_err)
-    }
+/// [`CODE_FILES`], then LN's `series_code` labels from BLS's series catalog.
+fn bls_code_lists() -> Vec<CodeList> {
+    let mut lists: Vec<CodeList> = CODE_FILES.iter().map(CodeFileSpec::code_list).collect();
+    lists.push(CodeList {
+        url: LN_SERIES_URL.to_string(),
+        dataset: "LN",
+        dimension: "series_code",
+        parse: Arc::new(parse_ln_series_titles),
+    });
+    lists
 }
 
 /// Removes `secret` from `text`.
@@ -1102,29 +1048,8 @@ impl SourceAdapter for BlsAdapter {
         Some(BATCH_KEY.to_string())
     }
 
-    /// Refreshes CU/CE/LA's code labels from BLS's own flat files and LN's from its series
-    /// catalog, each by conditional GET so an unchanged file costs one small request. Each
-    /// file is independent (its own URL, its own cached `ETag`), so one failing never stops the
-    /// others from refreshing; if any failed, returns an aggregate error naming all of them
-    /// (the caller, `Worker::discover`, only logs it).
-    async fn refresh_reference_data(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
-        let mut errors = Vec::new();
-        for spec in CODE_FILES {
-            if let Err(e) = self.refresh_code_file(ctx, spec).await {
-                errors.push(format!("{}: {e}", spec.url));
-            }
-        }
-        if let Err(e) = self.refresh_ln_series(ctx).await {
-            errors.push(format!("{LN_SERIES_URL}: {e}"));
-        }
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(CrawlError::Transient(format!(
-                "BLS reference data: {}",
-                errors.join("; ")
-            )))
-        }
+    fn code_lists(&self) -> Vec<CodeList> {
+        bls_code_lists()
     }
 
     /// Fetches `external_ids` in requests of at most 50 series (25 without a key). When the ids
@@ -2495,7 +2420,7 @@ mod tests {
         assert_eq!(parse_ln_series_titles(text).unwrap(), vec![]);
     }
 
-    /// `refresh_code_file` fetches, parses and merges a code file's labels into the dataset, and
+    /// Refreshing a code list fetches, parses and merges a code file's labels into the dataset, and
     /// caches the response's `ETag` for next time. The conditional-GET mechanics themselves
     /// (sending `If-None-Match`, treating `304` as "nothing to do") are covered at the
     /// `HttpFetcher` level; this checks BLS's own wiring: parsing plus the merge into
@@ -2546,8 +2471,7 @@ mod tests {
         };
         let mut ctx = test_ctx();
         ctx.pool = db.pool.clone();
-        BlsAdapter::default()
-            .refresh_code_file(&ctx, &spec)
+        crate::reference_file::refresh_code_list(&ctx, SourceId::Bls, &spec.code_list())
             .await
             .unwrap();
 
@@ -2612,7 +2536,7 @@ mod tests {
 
     /// If `sync_datasets` hasn't run yet (or the dataset/dimension named in a `CodeFileSpec`
     /// doesn't exist), `merge_dataset_dimension_codes` has nothing to write into and
-    /// `refresh_code_file` must not cache the `ETag`: caching it anyway would make the next
+    /// the refresh must not cache the `ETag`: caching it anyway would make the next
     /// refresh a `304` that still has nothing to merge into, silently losing the labels for
     /// good (short of BLS changing the file again).
     #[tokio::test]
@@ -2643,8 +2567,7 @@ mod tests {
         };
         let mut ctx = test_ctx();
         ctx.pool = db.pool.clone();
-        BlsAdapter::default()
-            .refresh_code_file(&ctx, &spec)
+        crate::reference_file::refresh_code_list(&ctx, SourceId::Bls, &spec.code_list())
             .await
             .unwrap();
 

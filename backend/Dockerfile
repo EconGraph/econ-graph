@@ -84,7 +84,7 @@ COPY --from=builder --chown=econuser:econuser /out/crawler-worker /app/crawler-w
 # The operator CLI (`kubectl exec deploy/crawler-worker -- /app/crawler coverage`); it reads the
 # pod's DATABASE_URL and API keys.
 COPY --from=builder --chown=econuser:econuser /out/crawler /app/crawler
-# Reference data read at runtime (not compiled in), e.g. the U.S. states table.
+# Reference data read at runtime (not compiled in), e.g. the BLS series list and dataset files.
 COPY --chown=econuser:econuser crates/econ-graph-crawler/data /app/data
 ENV CRAWLER_DATA_DIR=/app/data
 # Shared reference data (econ-graph-core), e.g. the country table.
@@ -115,7 +115,8 @@ COPY --from=builder --chown=econuser:econuser /out/econ-graph-backend /app/econ-
 # Shared reference data (econ-graph-core) read at runtime (not compiled in), e.g. the country table.
 COPY --chown=econuser:econuser crates/econ-graph-core/data /app/reference
 ENV REFERENCE_DATA_DIR=/app/reference
-# The crawler's reference data too: GraphQL labels dataset codes from its U.S. states table.
+# The crawler's reference data too, for the crawler code the backend links in (the adapter
+# registry behind trigger-crawl validation), so any of it that loads reference data finds it.
 COPY --chown=econuser:econuser crates/econ-graph-crawler/data /app/data
 ENV CRAWLER_DATA_DIR=/app/data
 
