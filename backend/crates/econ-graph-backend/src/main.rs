@@ -93,6 +93,49 @@ async fn health_check() -> Result<impl warp::Reply, Infallible> {
     })))
 }
 
+/// Liveness: this process is up and serving HTTP. No database access, so a slow or down
+/// database never gets this pod killed and restarted.
+async fn livez_handler() -> Result<impl warp::Reply, Infallible> {
+    metrics::record_http_request("GET", "/livez", 200, 0.0);
+    Ok(warp::reply::json(&json!({ "status": "alive" })))
+}
+
+/// Readiness (and startup): the database must be reachable and its applied schema must be at
+/// least as new as this binary's minimum. Unlike `/health`, this can actually fail, so a pod
+/// whose database is down or mid-migration is taken out of rotation instead of serving errors.
+async fn readyz_handler(pool: DatabasePool) -> Result<impl warp::Reply, Infallible> {
+    use warp::http::StatusCode;
+
+    // k8s's probe timeout (3s, see backend-deployment.yaml) is well under the pool's 30s
+    // connection_timeout, so bound the check itself rather than let a down database make this
+    // handler outlive the probe that's waiting on it.
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        econ_graph_core::readiness_check(&pool),
+    )
+    .await;
+
+    let (status, body) = match outcome {
+        Ok(Ok(())) => (StatusCode::OK, json!({ "status": "ready" })),
+        Ok(Err(e)) => {
+            tracing::warn!("readiness check failed: {e}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({ "status": "not_ready", "reason": e.to_string() }),
+            )
+        }
+        Err(_) => {
+            tracing::warn!("readiness check timed out");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({ "status": "not_ready", "reason": "readiness check timed out" }),
+            )
+        }
+    };
+    metrics::record_http_request("GET", "/readyz", status.as_u16(), 0.0);
+    Ok(warp::reply::with_status(warp::reply::json(&body), status))
+}
+
 /// Landing-page entry for `/playground`, shown only when the playground is served.
 const PLAYGROUND_ENDPOINT_HTML: &str = r#"        <div class="endpoint">
             <div><span class="method">GET</span> <code>/playground</code></div>
@@ -148,6 +191,16 @@ async fn root_handler(playground: bool) -> Result<impl warp::Reply, Infallible> 
         <div class="endpoint">
             <div><span class="method">GET</span> <code>/health</code></div>
             <p><a href="/health">Health check endpoint</a> - API status and version info</p>
+        </div>
+
+        <div class="endpoint">
+            <div><span class="method">GET</span> <code>/livez</code></div>
+            <p><a href="/livez">Liveness probe</a> - process is up</p>
+        </div>
+
+        <div class="endpoint">
+            <div><span class="method">GET</span> <code>/readyz</code></div>
+            <p><a href="/readyz">Readiness probe</a> - database reachable and schema current</p>
         </div>
 
         <div class="endpoint">
@@ -406,8 +459,18 @@ fn build_routes(
                 }
             });
 
-    // Health check
+    // Health check (kept for existing callers; static, never fails)
     let health_filter = warp::path("health").and(warp::get()).and_then(health_check);
+
+    // Liveness: process is up, no database access.
+    let livez_filter = warp::path("livez").and(warp::get()).and_then(livez_handler);
+
+    // Readiness: database reachable and schema at least as new as this binary needs.
+    let pool_for_readyz = pool.clone();
+    let readyz_filter = warp::path("readyz").and(warp::get()).and_then(move || {
+        let pool = pool_for_readyz.clone();
+        async move { readyz_handler(pool).await }
+    });
 
     // Metrics endpoint for Prometheus
     let metrics_filter = warp::path("metrics")
@@ -428,6 +491,8 @@ fn build_routes(
         .or(graphql_filter)
         .or(playground_filter)
         .or(health_filter)
+        .or(livez_filter)
+        .or(readyz_filter)
         .or(metrics_filter)
         .or(mcp_filter)
         .with(cors)
@@ -630,6 +695,8 @@ async fn main() -> AppResult<()> {
         info!("  - GET /playground - GraphQL Playground");
     }
     info!("  - GET /health - Health check");
+    info!("  - GET /livez - Liveness probe");
+    info!("  - GET /readyz - Readiness probe");
     info!("  - GET /metrics - Prometheus metrics");
     info!("  - GET / - API documentation");
 
@@ -1246,5 +1313,28 @@ mod route_tests {
             .reply(&routes(false))
             .await;
         assert_eq!(res.status(), 404);
+    }
+
+    /// `/livez` never touches the database, so it answers 200 even behind an unreachable pool.
+    #[tokio::test]
+    async fn livez_answers_200_even_when_the_database_is_unreachable() {
+        let res = warp::test::request()
+            .method("GET")
+            .path("/livez")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 200);
+    }
+
+    /// `/readyz` must not report ready when the database can't be reached: this is the bug
+    /// ECO-230 fixes, where `/health` served all three probes and never caught this.
+    #[tokio::test]
+    async fn readyz_answers_503_when_the_database_is_unreachable() {
+        let res = warp::test::request()
+            .method("GET")
+            .path("/readyz")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 503);
     }
 }

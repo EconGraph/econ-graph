@@ -182,6 +182,60 @@ pub async fn check_database_health(pool: &DatabasePool) -> AppResult<()> {
     test_connection(pool).await
 }
 
+/// The migration version (diesel's zero-padded timestamp, e.g. `"20261001000100"`) of the
+/// newest migration embedded in this binary: the schema version it requires at minimum to run
+/// correctly.
+fn minimum_schema_version() -> AppResult<String> {
+    use diesel::migration::{Migration, MigrationSource};
+    use diesel_migrations::{embed_migrations, EmbeddedMigrations};
+
+    const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
+
+    let migrations = MigrationSource::<diesel::pg::Pg>::migrations(&MIGRATIONS).map_err(|e| {
+        AppError::InternalError(format!("Failed to read embedded migrations: {}", e))
+    })?;
+    migrations
+        .iter()
+        .map(|m| m.name().version().to_string())
+        .max()
+        .ok_or_else(|| AppError::InternalError("No embedded migrations found".to_string()))
+}
+
+#[derive(diesel::QueryableByName)]
+struct SchemaVersionRow {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    version: String,
+}
+
+/// Readiness check for Kubernetes' `/readyz`: the database must be reachable, and its latest
+/// applied migration must be at least as new as this binary's own minimum (`>=`, not `==`): a
+/// pod still running the previous binary, while a newer one is mid-rollout migrating the
+/// database further ahead, stays ready rather than flipping to not-ready on a schema it can
+/// still work with.
+pub async fn readiness_check(pool: &DatabasePool) -> AppResult<()> {
+    let mut conn = pool.get().await.map_err(|e| {
+        AppError::InternalError(format!("Failed to get database connection: {}", e))
+    })?;
+
+    let row: SchemaVersionRow = diesel_async::RunQueryDsl::get_result(
+        diesel::sql_query(
+            "SELECT version FROM __diesel_schema_migrations ORDER BY version DESC LIMIT 1",
+        ),
+        &mut conn,
+    )
+    .await
+    .map_err(|e| AppError::DatabaseError(format!("Failed to read schema version: {}", e)))?;
+
+    let minimum = minimum_schema_version()?;
+    if row.version < minimum {
+        return Err(AppError::DatabaseError(format!(
+            "database schema version {} is older than this binary's minimum {}",
+            row.version, minimum
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,6 +353,84 @@ mod tests {
             .expect("run_migrations should complete soon after the lock is released")
             .expect("migration task should not panic")
             .expect("run_migrations should succeed once the lock is available");
+    }
+
+    /// `/readyz` must refuse a database it cannot reach, not hang or report ready.
+    #[tokio::test]
+    async fn readiness_check_fails_when_the_database_is_unreachable() {
+        let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
+            diesel_async::AsyncPgConnection,
+        >::new("postgres://nobody@127.0.0.1:1/none");
+        let pool = DatabasePool::builder()
+            .connection_timeout(Duration::from_secs(1))
+            .build_unchecked(manager);
+
+        let err = readiness_check(&pool)
+            .await
+            .expect_err("an unreachable database should not be ready");
+        assert!(matches!(err, AppError::InternalError(_)), "{err:?}");
+    }
+
+    /// A freshly migrated database is ready; one whose applied-migrations table is missing
+    /// this binary's newest migration (an older schema than the binary requires) is not,
+    /// which is exactly the case a rolling deploy must catch before routing traffic to a pod
+    /// whose database hasn't caught up yet.
+    ///
+    /// Connects directly with `DATABASE_URL`, like `test_migrations_block_while_another_session_holds_the_lock`
+    /// above, since this environment has no Docker daemon for `TestContainer`.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn readiness_check_rejects_a_schema_older_than_this_binarys_minimum() {
+        use diesel_async::RunQueryDsl;
+
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+
+        run_migrations(&database_url)
+            .await
+            .expect("migrations should apply");
+
+        let pool = create_pool(&database_url)
+            .await
+            .expect("Should connect to DATABASE_URL");
+
+        readiness_check(&pool)
+            .await
+            .expect("a freshly migrated schema should be ready");
+
+        let mut conn = pool.get().await.expect("Should get a connection");
+        let latest: SchemaVersionRow = diesel::sql_query(
+            "SELECT version FROM __diesel_schema_migrations ORDER BY version DESC LIMIT 1",
+        )
+        .get_result(&mut conn)
+        .await
+        .expect("should read the latest applied version");
+
+        diesel::sql_query("DELETE FROM __diesel_schema_migrations WHERE version = $1")
+            .bind::<diesel::sql_types::Text, _>(latest.version.clone())
+            .execute(&mut conn)
+            .await
+            .expect("should delete the latest migration row");
+
+        let result = readiness_check(&pool).await;
+
+        // Restore the row directly (rather than replaying the migration's `up.sql`, which
+        // isn't necessarily idempotent against a database that never had it reverted) before
+        // asserting anything below, so a failed assertion can't leave this database shared by
+        // other tests permanently missing its newest migration.
+        diesel::sql_query("INSERT INTO __diesel_schema_migrations (version) VALUES ($1)")
+            .bind::<diesel::sql_types::Text, _>(latest.version)
+            .execute(&mut conn)
+            .await
+            .expect("should restore the migration row");
+
+        let err = result
+            .expect_err("a schema missing this binary's newest migration should not be ready");
+        assert!(matches!(err, AppError::DatabaseError(_)), "{err:?}");
+
+        readiness_check(&pool)
+            .await
+            .expect("schema restored to current should be ready again");
     }
 
     #[tokio::test]

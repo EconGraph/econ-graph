@@ -113,9 +113,13 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "500m"
+        # startupProbe and readinessProbe hit /readyz (database reachable AND schema at least
+        # as new as this binary needs), so a pod is never routed traffic before migrations
+        # have actually caught up. livenessProbe hits /livez, which only checks the process is
+        # up, so a slow or briefly-down database can't get a healthy pod killed and restarted.
         startupProbe:
           httpGet:
-            path: /health
+            path: /readyz
             port: 9876
           initialDelaySeconds: 10
           periodSeconds: 5
@@ -123,7 +127,7 @@ spec:
           failureThreshold: 30  # Allow up to 150 seconds for startup (30 * 5s)
         livenessProbe:
           httpGet:
-            path: /health
+            path: /livez
             port: 9876
           initialDelaySeconds: 30
           periodSeconds: 10
@@ -131,7 +135,7 @@ spec:
           failureThreshold: 3
         readinessProbe:
           httpGet:
-            path: /health
+            path: /readyz
             port: 9876
           initialDelaySeconds: 15  # Increased from 5 to allow for migrations
           periodSeconds: 5
