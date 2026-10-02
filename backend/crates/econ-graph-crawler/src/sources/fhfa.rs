@@ -58,7 +58,10 @@
 //! download a no-op instead: it makes no request and fails with a retryable [`CrawlError::Busy`]
 //! (exponential backoff with jitter), which the worker reschedules without counting a failed
 //! attempt (see [`worker`](crate::worker)). The reservation is one process's in-memory state: it
-//! does nothing for two separate `crawler-worker` processes downloading at once. Recovering a
+//! does nothing for two separate `crawler-worker` processes downloading at once, and does not
+//! cover the reference-data download [`code_lists`](SourceAdapter::code_lists) makes through
+//! [`reference_file::refresh`](crate::reference_file::refresh) (which runs before discovery in
+//! the same job, not concurrently with it). Recovering a
 //! reservation left behind by a crawler crash is
 //! [ECO-257](https://linear.app/econgraph/issue/ECO-257/recover-shared-download-reservations-after-crawler-crashes);
 //! today a crash simply loses the in-memory reservation along with the rest of the process.
@@ -482,7 +485,7 @@ fn not_in_file(external_id: &str) -> CrawlError {
 }
 
 /// Labels every `place_id` in the master file (states and census divisions alike) from its own
-/// `place_name` column, the [`DATASET`] dimension's codes for [`FhfaAdapter::code_lists`].
+/// `place_name` column: the `place_id` codes of [`DATASET`] for [`FhfaAdapter::code_lists`].
 fn place_labels(text: &str) -> Result<Vec<(String, String)>, CrawlError> {
     let def = crate::reference::dataset(SourceId::Fhfa, DATASET)?;
     let master = parse_master(text, def)?;
@@ -1135,6 +1138,11 @@ mod tests {
         let (codes_again, updated_at_again) = place_codes_and_updated_at(&db.pool).await;
         assert_eq!(codes_again, codes);
         assert_eq!(updated_at_again, updated_at);
+        assert_eq!(
+            mock.received_requests().await.len(),
+            2,
+            "no ETag to short-circuit on, so the second refresh re-downloads too"
+        );
 
         db.drop().await;
     }

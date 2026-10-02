@@ -387,7 +387,8 @@ pub async fn merge_dataset_dimension_code_entries(
         if dim.codelist.is_some() {
             return Ok(false);
         }
-        let before = dim.codes.clone().unwrap_or_default();
+        let mut before = dim.codes.clone().unwrap_or_default();
+        before.sort_unstable_by(|a, b| a.code.cmp(&b.code));
         let mut codes = before.clone();
         for entry in entries {
             match codes.iter_mut().find(|c| c.code == entry.code) {
