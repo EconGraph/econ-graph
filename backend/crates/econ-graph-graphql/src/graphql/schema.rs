@@ -163,7 +163,9 @@ mod query_limit_tests {
     use econ_graph_core::database::DatabasePool;
 
     /// A pool that never connects: these queries are refused, or answered from the schema,
-    /// before any resolver touches the database.
+    /// before any resolver touches the database. The one exception is the at-the-limit
+    /// complexity test, whose resolvers fail to get a connection; its runtime is bounded by the
+    /// one-second connection timeout.
     fn unreachable_pool() -> DatabasePool {
         let manager = diesel_async::pooled_connection::AsyncDieselConnectionManager::<
             diesel_async::AsyncPgConnection,
@@ -238,21 +240,6 @@ mod query_limit_tests {
         assert!(errors.iter().any(|e| e.contains("too deep")), "{errors:?}");
     }
 
-    /// A query whose field count exceeds the complexity limit is refused before it runs.
-    /// Each aliased `dataSources { id }` costs 2, so 600 of them cost 1200, over the 1000 limit.
-    #[tokio::test]
-    async fn query_over_the_complexity_limit_is_refused() {
-        let fields: Vec<String> = (0..600)
-            .map(|i| format!("a{i}: dataSources {{ id }}"))
-            .collect();
-        let query = format!("{{ {} }}", fields.join(" "));
-        let errors = errors(&query).await;
-        assert!(
-            errors.iter().any(|e| e.contains("too complex")),
-            "{errors:?}"
-        );
-    }
-
     /// Build a query of `n` aliased `dataSources { id }` selections, each costing 2, so its
     /// complexity is `2 * n`. (async-graphql does not count `__typename`, so it can't be used
     /// to build a query of an exact cost.)
@@ -274,7 +261,7 @@ mod query_limit_tests {
         );
     }
 
-    /// A query one field over the complexity limit is refused.
+    /// A query one selection (cost 2) over the complexity limit is refused.
     #[tokio::test]
     async fn query_one_over_the_complexity_limit_is_refused() {
         let errors = errors(&data_sources_query(MAX_QUERY_COMPLEXITY / 2 + 1)).await;
