@@ -461,7 +461,6 @@ impl FhfaAdapter {
         let text = ctx.http.get_text(SourceId::Fhfa, &url, &[]).await?;
         parse_master(&text, def)
     }
-
 }
 
 impl Default for FhfaAdapter {
