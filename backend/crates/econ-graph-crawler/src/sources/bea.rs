@@ -9,7 +9,9 @@
 //!
 //! The tables are reference data in `bea_tables.csv` ([`TABLES_FILE`], in the
 //! [reference data directory](crate::reference::data_dir)): BEA dataset (`NIPA` or `Regional`),
-//! `TableName`, the frequencies crawled and a short title. See [`tables`].
+//! `TableName` and the frequencies crawled. See [`tables`]. Each table's title comes from BEA's
+//! own `GetParameterValues(TableName)`, refreshed each crawl (see
+//! [`BeaAdapter::refresh_table_titles`]), not from a curated column.
 //!
 //! # Datasets and ids
 //!
@@ -66,10 +68,13 @@
 //! `---` and the like: anything without a digit) become points with no value. `TimePeriod` is
 //! `2024`, `2024Q3` or `2024M07`; the point date is the period's first day.
 //!
-//! A table dropped from `bea_tables.csv`, or a Regional line BEA no longer lists in
-//! `GetParameterValuesFiltered`, still fetches its points (see [`fallback_table`]) but with no
+//! A table whose title isn't known yet (BEA no longer lists it in
+//! `GetParameterValues(TableName)`, or `refresh_table_titles` hasn't synced it this process)
+//! fails discovery outright (see Discovery above) rather than writing a placeholder title that
+//! would overwrite every one of its series' stored titles. A fetch for such a table (discovery
+//! ran earlier, successfully, before the title went stale) still returns its points but with no
 //! metadata, so [`persist_series`](crate::persist::persist_series)'s COALESCE keeps the series'
-//! already-stored title instead of overwriting it with a degraded placeholder.
+//! already-stored title instead of overwriting it with the table name.
 //!
 //! `NoteRef` is dropped: train 1 has no place for observation attributes, and the notes are table
 //! footnotes or the `(D)` marker already reflected in the missing value.
@@ -119,8 +124,11 @@ use crate::adapter::{
 };
 use crate::dataset::{DatasetDef, SeriesDataset};
 use crate::error::CrawlError;
+use crate::persist;
 use crate::reference::{data_dir, DATA_DIR_ENV};
+use crate::reference_file::{refresh_at, ReferenceFile};
 use crate::source::SourceId;
+use econ_graph_core::error::AppError;
 
 /// The real BEA API root.
 pub const DEFAULT_BASE_URL: &str = "https://apps.bea.gov/api/data";
@@ -208,7 +216,9 @@ impl Frequency {
     }
 }
 
-/// One curated table from [`TABLES_FILE`].
+/// One curated table from [`TABLES_FILE`]. Its title, used in series titles, is not here: it
+/// comes from BEA's own `GetParameterValues(TableName)` on each crawl (see
+/// [`BeaAdapter::refresh_table_titles`]), not from a curated column.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BeaTable {
     /// BEA dataset.
@@ -217,8 +227,6 @@ pub struct BeaTable {
     pub table_name: String,
     /// Frequencies crawled, in file order. Regional tables are annual.
     pub frequencies: Vec<Frequency>,
-    /// Short title used in series titles, e.g. `GDP, current dollars`.
-    pub title: String,
 }
 
 /// The curated tables from [`TABLES_FILE`] in the reference data directory, read on first use
@@ -237,11 +245,10 @@ fn load_tables(path: &Path) -> Result<Vec<BeaTable>, String> {
     parse_tables(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Parses `dataset,table_name,frequencies,title` rows after a header line. Blank lines and `#`
-/// comments are skipped; the title may be wrapped in double quotes (it may contain commas).
-/// Table names must be unique, and at least one table is required.
+/// Parses `dataset,table_name,frequencies` rows after a header line. Blank lines and `#`
+/// comments are skipped. Table names must be unique, and at least one table is required.
 fn parse_tables(text: &str) -> Result<Vec<BeaTable>, String> {
-    const HEADER: &str = "dataset,table_name,frequencies,title";
+    const HEADER: &str = "dataset,table_name,frequencies";
     let mut lines = text
         .lines()
         .enumerate()
@@ -257,9 +264,9 @@ fn parse_tables(text: &str) -> Result<Vec<BeaTable>, String> {
     let mut tables = Vec::new();
     let mut seen = HashSet::new();
     for (n, line) in lines {
-        let mut cols = line.splitn(4, ',').map(str::trim);
-        let (Some(dataset), Some(table_name), Some(frequencies), Some(title)) =
-            (cols.next(), cols.next(), cols.next(), cols.next())
+        let mut cols = line.splitn(3, ',').map(str::trim);
+        let (Some(dataset), Some(table_name), Some(frequencies)) =
+            (cols.next(), cols.next(), cols.next())
         else {
             return Err(format!("line {n}: expected {HEADER}, got {line:?}"));
         };
@@ -295,19 +302,10 @@ fn parse_tables(text: &str) -> Result<Vec<BeaTable>, String> {
                 "line {n}: Regional table {table_name} must be annual (A)"
             ));
         }
-        let title = title
-            .strip_prefix('"')
-            .and_then(|t| t.strip_suffix('"'))
-            .unwrap_or(title)
-            .trim();
-        if title.is_empty() {
-            return Err(format!("line {n}: table {table_name} has no title"));
-        }
         tables.push(BeaTable {
             dataset,
             table_name: table_name.to_string(),
             frequencies,
-            title: title.to_string(),
         });
     }
     if tables.is_empty() {
@@ -411,11 +409,19 @@ fn regional_dimensions(table: &str, line: &str, geo: &str) -> SeriesDataset {
 }
 
 /// BEA adapter. See the module docs.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BeaAdapter {
     base_url: String,
     /// Fixed "current year" for tests; `None` uses the clock.
     current_year: Option<i32>,
+    /// BEA's own titles for NIPA and Regional tables, from the last successful
+    /// [`refresh_table_titles`](Self::refresh_table_titles) in this adapter's lifetime (empty
+    /// until then). `discover` and `fetch_*` only ever read this in-process cache: they never
+    /// touch the database or the network for a title, so a BEA or DB hiccup there can't fail a
+    /// `fetch` already in flight, only make it omit metadata for a table whose title isn't
+    /// cached (see the module docs); `discover` instead fails outright on such a table, rather
+    /// than persisting the bare table name as a real title.
+    titles: tokio::sync::RwLock<HashMap<BeaDataset, HashMap<String, String>>>,
 }
 
 impl BeaAdapter {
@@ -424,6 +430,7 @@ impl BeaAdapter {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             current_year: None,
+            titles: tokio::sync::RwLock::new(HashMap::new()),
         }
     }
 
@@ -431,6 +438,22 @@ impl BeaAdapter {
     fn with_current_year(mut self, year: i32) -> Self {
         self.current_year = Some(year);
         self
+    }
+
+    /// Seeds the in-process title cache directly, bypassing BEA and the database, as if
+    /// [`refresh_table_titles`](Self::refresh_table_titles) had already run.
+    #[cfg(test)]
+    fn with_table_titles(self, dataset: BeaDataset, titles: &[(&str, &str)]) -> Self {
+        let mut map = self.titles.into_inner();
+        map.entry(dataset).or_default().extend(
+            titles
+                .iter()
+                .map(|(code, label)| (code.to_string(), label.to_string())),
+        );
+        Self {
+            titles: tokio::sync::RwLock::new(map),
+            ..self
+        }
     }
 
     fn current_year(&self) -> i32 {
@@ -460,21 +483,7 @@ impl BeaAdapter {
             .http
             .get_json(SourceId::Bea, &format!("{}/", self.base_url), &query)
             .await?;
-        let api = body.beaapi;
-        if let Some(err) = &api.error {
-            return Err(classify_bea_error(err));
-        }
-        // BEA sometimes wraps `Results` in a one-element array.
-        let results = match api.results {
-            Some(serde_json::Value::Array(items)) => items.into_iter().next(),
-            other => other,
-        }
-        .ok_or_else(|| CrawlError::Parse(format!("BEA {method}: no Results")))?;
-        if let Some(err) = results.get("Error") {
-            let err: BeaError = serde_json::from_value(err.clone())
-                .map_err(|e| CrawlError::Parse(format!("BEA {method}: bad Error: {e}")))?;
-            return Err(classify_bea_error(&err));
-        }
+        let results = decode_results(body, method)?;
         serde_json::from_value(results)
             .map_err(|e| CrawlError::Parse(format!("BEA {method}: unexpected Results: {e}")))
     }
@@ -511,12 +520,109 @@ impl BeaAdapter {
         Ok(values.param_value)
     }
 
+    /// Conditionally re-fetches BEA's own titles for every `TableName` of `dataset`
+    /// (`GetParameterValues`, `ParameterName=TableName`; its `ParamValue` rows are named after
+    /// the parameter itself, `TableName`/`Description`, for NIPA, or the generic `Key`/`Desc`
+    /// every other `GetParameterValues*` call on Regional uses — [`TableNameValue`] accepts
+    /// either), merges them into `dataset`'s `table_name` dimension
+    /// ([`crate::reference_file::refresh_at`], so `bea_tables.csv` doesn't need a curated title column
+    /// and the GraphQL code list carries them too) and refreshes the in-process cache
+    /// [`table_titles`](Self::table_titles) reads. The only method that touches the database or
+    /// fetches titles over the network; called by
+    /// [`refresh_reference_data`](SourceAdapter::refresh_reference_data), so its failure (BEA or
+    /// the database) never fails a `discover` or `fetch_*` already in flight, only leaves the
+    /// cache as it was (empty, or last refresh's titles).
+    ///
+    /// Uses [`refresh_at`] rather than a plain [`CodeList`](crate::reference_file::CodeList)
+    /// (whose `url` doubles as the `reference_file_cache` key): BEA's request URL carries the
+    /// API key, which must never land in that table, so the cache key is a stable, keyless
+    /// label ([`table_titles_cache_key`]) and the keyed URL is only ever used for the request.
+    ///
+    /// Reloads the in-process cache from the database after every refresh attempt, applied or
+    /// not (a `304`, or an `apply` that found nowhere to merge into), rather than trusting
+    /// whatever this process instance already has in memory, so a fresh worker process picks up
+    /// another instance's last merge instead of placeholder titles.
+    async fn refresh_table_titles(
+        &self,
+        ctx: &CrawlCtx,
+        key: &str,
+        dataset: BeaDataset,
+    ) -> Result<(), CrawlError> {
+        let file = ReferenceFile {
+            source: SourceId::Bea,
+            url: table_titles_cache_key(dataset),
+        };
+        // The key sits in the query string because `get_text_conditional` has no separate query
+        // parameter; that's fine, `Target::new`'s `SECRET_PARAMS` already redacts `userid` from
+        // logged URLs (see http.rs), the same as every other BEA request this adapter makes. It
+        // never reaches `reference_file_cache`: `refresh_at` stores `file.url` (the keyless
+        // cache key above), not this request URL.
+        let request_url = format!(
+            "{}/?UserID={key}&method=GetParameterValues&DatasetName={}&ParameterName=TableName&ResultFormat=JSON",
+            self.base_url,
+            dataset.api_name(),
+        );
+        let dataset_code = dataset.code();
+        let refreshed = refresh_at(ctx, &file, &request_url, |body| {
+            let request_url = request_url.clone();
+            Box::pin(async move {
+                let labels = parse_table_titles(&body).inspect_err(|e| {
+                    ctx.http
+                        .record_response_error(SourceId::Bea, &request_url, e)
+                })?;
+                persist::merge_dataset_dimension_codes(
+                    &ctx.pool,
+                    SourceId::Bea,
+                    dataset_code,
+                    "table_name",
+                    &labels,
+                )
+                .await
+                .map_err(db_err)
+            })
+        })
+        .await;
+        // Reload from the database either way, even on a failed refresh (BEA down, rate
+        // limited, a bad body): a prior process instance's merge, or this process's own earlier
+        // one, may already be there, and skipping the reload would otherwise blank the
+        // in-process cache (and so fail every subsequent `discover`) on a single transient BEA
+        // error. After a successful merge this is the dataset's canonical (sorted, deduplicated)
+        // code list rather than just this fetch's rows; after a no-op (304, or nothing to merge
+        // into), it's the best available titles. Keep whatever this process already has only if
+        // the database truly has nothing yet.
+        let from_db =
+            persist::dataset_dimension_labels(&ctx.pool, SourceId::Bea, dataset_code, "table_name")
+                .await
+                .map_err(db_err)?;
+        refreshed?;
+        let titles = if from_db.is_empty() {
+            self.table_titles(dataset).await
+        } else {
+            from_db
+        };
+        self.titles.write().await.insert(dataset, titles);
+        Ok(())
+    }
+
+    /// `table_name` -> BEA's title, from the last successful
+    /// [`refresh_table_titles`](Self::refresh_table_titles) in this adapter's lifetime. Empty
+    /// before then.
+    async fn table_titles(&self, dataset: BeaDataset) -> HashMap<String, String> {
+        self.titles
+            .read()
+            .await
+            .get(&dataset)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     async fn discover_nipa(
         &self,
         ctx: &CrawlCtx,
         key: &str,
         def: &DatasetDef,
         table: &BeaTable,
+        title: &str,
     ) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         let end = self.current_year();
         let year = years(end - DISCOVERY_YEARS + 1, end);
@@ -555,7 +661,7 @@ impl BeaAdapter {
                     .external_id(&dataset.dimensions)
                     .map_err(|e| CrawlError::Permanent(format!("BEA {}: {e}", table.table_name)))?;
                 let repeated = repeated.contains(row.line_description.trim());
-                let meta = nipa_metadata(table, frequency, row, repeated)?;
+                let meta = nipa_metadata(&table.table_name, title, frequency, row, repeated)?;
                 found.push(DiscoveredSeries {
                     external_id,
                     title: meta.title,
@@ -576,6 +682,7 @@ impl BeaAdapter {
         key: &str,
         def: &DatasetDef,
         table: &BeaTable,
+        title: &str,
     ) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         let lines = self
             .param_values(ctx, key, &table.table_name, "LineCode")
@@ -603,8 +710,8 @@ impl BeaAdapter {
                     .map_err(|e| CrawlError::Permanent(format!("BEA {}: {e}", table.table_name)))?;
                 found.push(DiscoveredSeries {
                     external_id,
-                    title: regional_title(table, line_desc, &geo.desc),
-                    description: Some(regional_description(table, &line.key, &geo.key)),
+                    title: regional_title(title, line_desc, &geo.desc),
+                    description: Some(regional_description(&table.table_name, &line.key, &geo.key)),
                     units: None,
                     frequency: Some(Frequency::Annual.label().into()),
                     data_url: None,
@@ -615,22 +722,25 @@ impl BeaAdapter {
         Ok(found)
     }
 
-    /// Fetches one batch group (ids sharing a [`SeriesKey::batch_key`]).
+    /// Fetches one batch group (ids sharing a [`SeriesKey::batch_key`]). `titles` is this
+    /// crawl's title map for the group's dataset (NIPA or Regional), from
+    /// [`table_titles`](Self::table_titles).
     async fn fetch_group(
         &self,
         ctx: &CrawlCtx,
         key: &str,
+        titles: &HashMap<String, String>,
         group: &[(&String, SeriesKey)],
     ) -> Result<BatchFetch, CrawlError> {
         let table_name = group[0].1.table();
-        let table = tables()?.iter().find(|t| t.table_name == table_name);
+        let (title, title_known) = title_for(titles, table_name);
         match &group[0].1 {
             SeriesKey::Nipa { frequency, .. } => {
-                self.fetch_nipa(ctx, key, table_name, table, *frequency, group)
+                self.fetch_nipa(ctx, key, table_name, &title, title_known, *frequency, group)
                     .await
             }
             SeriesKey::Regional { line, .. } => {
-                self.fetch_regional(ctx, key, table_name, table, line, group)
+                self.fetch_regional(ctx, key, table_name, &title, title_known, line, group)
                     .await
             }
         }
@@ -642,7 +752,8 @@ impl BeaAdapter {
         ctx: &CrawlCtx,
         key: &str,
         table_name: &str,
-        table: Option<&BeaTable>,
+        title: &str,
+        title_known: bool,
         frequency: Frequency,
         group: &[(&String, SeriesKey)],
     ) -> Result<BatchFetch, CrawlError> {
@@ -667,12 +778,10 @@ impl BeaAdapter {
                 .push(row);
         }
         let repeated = repeated_descriptions(&rows);
-        let fallback = fallback_table(BeaDataset::Nipa, table_name, frequency);
-        // A table dropped from bea_tables.csv still has real rows and line descriptions from
-        // BEA, but no curated short title; don't let the bare table name overwrite a good
-        // stored title on every refresh.
-        let stale_table = table.is_none();
-        let table = table.unwrap_or(&fallback);
+        // A table BEA no longer lists in GetParameterValues still has real rows and line
+        // descriptions, but only the bare table name as a placeholder title; don't let it
+        // overwrite a good stored title on every refresh.
+        let stale_table = !title_known;
         let mut out = BatchFetch::with_capacity(group.len());
         for (id, series) in group {
             let SeriesKey::Nipa { line, .. } = series else {
@@ -683,14 +792,20 @@ impl BeaAdapter {
                     "BEA {id}: no line {line} in {table_name} ({})",
                     frequency.code()
                 ))),
-                Some(rows) => {
-                    nipa_series(table, frequency, rows, &repeated, series.dataset()).map(|mut s| {
-                        if stale_table {
-                            s.metadata = None;
-                        }
-                        s
-                    })
-                }
+                Some(rows) => nipa_series(
+                    table_name,
+                    title,
+                    frequency,
+                    rows,
+                    &repeated,
+                    series.dataset(),
+                )
+                .map(|mut s| {
+                    if stale_table {
+                        s.metadata = None;
+                    }
+                    s
+                }),
             };
             out.insert((*id).clone(), result);
         }
@@ -703,7 +818,8 @@ impl BeaAdapter {
         ctx: &CrawlCtx,
         key: &str,
         table_name: &str,
-        table: Option<&BeaTable>,
+        title: &str,
+        title_known: bool,
         line: &str,
         group: &[(&String, SeriesKey)],
     ) -> Result<BatchFetch, CrawlError> {
@@ -745,9 +861,9 @@ impl BeaAdapter {
         for row in &rows {
             by_geo.entry(row.geo_fips.as_str()).or_default().push(row);
         }
-        let fallback = fallback_table(BeaDataset::Regional, table_name, Frequency::Annual);
-        let stale_table = table.is_none();
-        let table = table.unwrap_or(&fallback);
+        // A table BEA no longer lists in GetParameterValues still has real rows, but only the
+        // bare table name as a placeholder title; don't let it overwrite a good stored title.
+        let stale_table = !title_known;
         let mut out = BatchFetch::with_capacity(group.len());
         for (id, series) in group {
             let SeriesKey::Regional { geo, .. } = series else {
@@ -757,13 +873,21 @@ impl BeaAdapter {
                 None => Err(CrawlError::NotFound(format!(
                     "BEA {id}: no data for area {geo} in {table_name} line {line}"
                 ))),
-                Some(rows) => regional_series(table, &line_desc, line, geo, rows, series.dataset())
-                    .map(|mut s| {
-                        if stale_table || stale_line {
-                            s.metadata = None;
-                        }
-                        s
-                    }),
+                Some(rows) => regional_series(
+                    table_name,
+                    title,
+                    &line_desc,
+                    line,
+                    geo,
+                    rows,
+                    series.dataset(),
+                )
+                .map(|mut s| {
+                    if stale_table || stale_line {
+                        s.metadata = None;
+                    }
+                    s
+                }),
             };
             out.insert((*id).clone(), result);
         }
@@ -797,12 +921,35 @@ impl SourceAdapter for BeaAdapter {
             })
         };
         let (nipa, regional) = (def(NIPA_DATASET)?, def(REGIONAL_DATASET)?);
+        let nipa_titles = self.table_titles(BeaDataset::Nipa).await;
+        let regional_titles = self.table_titles(BeaDataset::Regional).await;
 
         let mut found = Vec::new();
         for table in tables {
+            let titles = match table.dataset {
+                BeaDataset::Nipa => &nipa_titles,
+                BeaDataset::Regional => &regional_titles,
+            };
+            let (title, known) = title_for(titles, &table.table_name);
+            // Discovery is all or nothing (see the module docs), so a table whose title isn't
+            // known yet (refresh_reference_data never ran, or failed) fails discovery rather
+            // than persisting the bare-table-name placeholder as every one of its series'
+            // titles: `persist_discovered` writes `DiscoveredSeries::title` unconditionally, so
+            // a degraded discovery would overwrite real stored titles on the very next fetch,
+            // defeating the staleness protection `fetch_nipa`/`fetch_regional` rely on.
+            if !known {
+                return Err(CrawlError::Transient(format!(
+                    "BEA {} {}: title not yet known; refresh_reference_data hasn't synced it",
+                    table.dataset.api_name(),
+                    table.table_name
+                )));
+            }
             let series = match table.dataset {
-                BeaDataset::Nipa => self.discover_nipa(ctx, key, nipa, table).await,
-                BeaDataset::Regional => self.discover_regional(ctx, key, regional, table).await,
+                BeaDataset::Nipa => self.discover_nipa(ctx, key, nipa, table, &title).await,
+                BeaDataset::Regional => {
+                    self.discover_regional(ctx, key, regional, table, &title)
+                        .await
+                }
             }?;
             tracing::debug!(table = %table.table_name, series = series.len(), "BEA table");
             found.extend(series);
@@ -818,6 +965,27 @@ impl SourceAdapter for BeaAdapter {
     /// Discovery fails whole on any error (see the module docs), so a successful one is complete.
     fn discovery_is_complete(&self) -> bool {
         true
+    }
+
+    /// Fetches BEA's own titles for every NIPA and Regional `TableName` and merges them into
+    /// `bea_tables.csv`'s curated tables' `table_name` dimension (see
+    /// [`refresh_table_titles`](Self::refresh_table_titles)).
+    async fn refresh_reference_data(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
+        let key = self.api_key(ctx)?;
+        let mut errors = Vec::new();
+        for dataset in [BeaDataset::Nipa, BeaDataset::Regional] {
+            if let Err(e) = self.refresh_table_titles(ctx, key, dataset).await {
+                errors.push(format!("{}: {e}", dataset.api_name()));
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(CrawlError::Transient(format!(
+                "BEA table titles (used by {TABLES_FILE}'s curated tables): {}",
+                errors.join("; ")
+            )))
+        }
     }
 
     async fn fetch_series(
@@ -865,8 +1033,16 @@ impl SourceAdapter for BeaAdapter {
                 }
             }
         }
+        // Both maps are small clones of the in-process cache; reading them once up front is
+        // simpler than scanning `groups` to fetch only the dataset(s) actually present.
+        let nipa_titles = self.table_titles(BeaDataset::Nipa).await;
+        let regional_titles = self.table_titles(BeaDataset::Regional).await;
         for group in groups.values() {
-            match self.fetch_group(ctx, key, group).await {
+            let group_titles = match &group[0].1 {
+                SeriesKey::Nipa { .. } => &nipa_titles,
+                SeriesKey::Regional { .. } => &regional_titles,
+            };
+            match self.fetch_group(ctx, key, group_titles, group).await {
                 Ok(results) => out.extend(results),
                 Err(e @ (CrawlError::RateLimited { .. } | CrawlError::Auth(_))) => return Err(e),
                 Err(e) if groups.len() == 1 && out.is_empty() => return Err(e),
@@ -878,18 +1054,6 @@ impl SourceAdapter for BeaAdapter {
             }
         }
         Ok(out)
-    }
-}
-
-/// A table missing from the CSV (removed after its series were discovered) still fetches, using
-/// the table name as a placeholder title; the caller drops that placeholder from the resulting
-/// metadata so a stored title is never overwritten with it.
-fn fallback_table(dataset: BeaDataset, table_name: &str, frequency: Frequency) -> BeaTable {
-    BeaTable {
-        dataset,
-        table_name: table_name.to_string(),
-        frequencies: vec![frequency],
-        title: table_name.to_string(),
     }
 }
 
@@ -948,7 +1112,7 @@ fn geo_name(name: &str) -> &str {
 /// `Gross domestic product (GDP, current dollars, quarterly)`; a description the table repeats
 /// gets its line: `Goods, line 17 (GDP, current dollars, quarterly)`.
 fn nipa_title(
-    table: &BeaTable,
+    title: &str,
     frequency: Frequency,
     line_desc: &str,
     line: &str,
@@ -960,9 +1124,8 @@ fn nipa_title(
         String::new()
     };
     format!(
-        "{}{line} ({}, {})",
+        "{}{line} ({title}, {})",
         line_desc.trim(),
-        table.title,
         frequency.label().to_lowercase()
     )
 }
@@ -988,19 +1151,17 @@ fn nipa_seasonal_adjustment(frequency: Frequency, row: &NipaRow) -> Option<Strin
     })
 }
 
-fn regional_title(table: &BeaTable, line_desc: &str, geo: &str) -> String {
-    format!("{}, {} ({})", line_desc.trim(), geo_name(geo), table.title)
+fn regional_title(title: &str, line_desc: &str, geo: &str) -> String {
+    format!("{}, {} ({title})", line_desc.trim(), geo_name(geo))
 }
 
-fn regional_description(table: &BeaTable, line: &str, geo: &str) -> String {
-    format!(
-        "BEA Regional table {}, line {line}, area {geo}.",
-        table.table_name
-    )
+fn regional_description(table_name: &str, line: &str, geo: &str) -> String {
+    format!("BEA Regional table {table_name}, line {line}, area {geo}.")
 }
 
 fn nipa_metadata(
-    table: &BeaTable,
+    table_name: &str,
+    title: &str,
     frequency: Frequency,
     row: &NipaRow,
     repeated: bool,
@@ -1013,15 +1174,15 @@ fn nipa_metadata(
         .unwrap_or_default();
     Ok(NewSeriesMetadataLite {
         title: nipa_title(
-            table,
+            title,
             frequency,
             &row.line_description,
             &row.line_number,
             repeated,
         ),
         description: Some(format!(
-            "BEA NIPA table {}, line {}{series_code}.",
-            table.table_name, row.line_number
+            "BEA NIPA table {table_name}, line {}{series_code}.",
+            row.line_number
         )),
         units: units(row.metric_name.as_deref(), row.cl_unit.as_deref(), mult),
         frequency: Some(frequency.label().into()),
@@ -1030,7 +1191,8 @@ fn nipa_metadata(
 }
 
 fn nipa_series(
-    table: &BeaTable,
+    table_name: &str,
+    title: &str,
     frequency: Frequency,
     rows: &[&NipaRow],
     repeated: &HashSet<&str>,
@@ -1038,7 +1200,7 @@ fn nipa_series(
 ) -> Result<FetchedSeries, CrawlError> {
     let first = rows[0];
     let repeated = repeated.contains(first.line_description.trim());
-    let metadata = nipa_metadata(table, frequency, first, repeated)?;
+    let metadata = nipa_metadata(table_name, title, frequency, first, repeated)?;
     let points = points(
         rows.iter()
             .map(|r| (&r.time_period, &r.data_value, r.unit_mult.as_deref())),
@@ -1051,7 +1213,8 @@ fn nipa_series(
 }
 
 fn regional_series(
-    table: &BeaTable,
+    table_name: &str,
+    title: &str,
     line_desc: &str,
     line: &str,
     geo: &str,
@@ -1061,8 +1224,8 @@ fn regional_series(
     let first = rows[0];
     let mult = unit_mult(first.unit_mult.as_deref())?;
     let metadata = NewSeriesMetadataLite {
-        title: regional_title(table, line_desc, first.geo_name.as_deref().unwrap_or(geo)),
-        description: Some(regional_description(table, line, geo)),
+        title: regional_title(title, line_desc, first.geo_name.as_deref().unwrap_or(geo)),
+        description: Some(regional_description(table_name, line, geo)),
         units: units(None, first.cl_unit.as_deref(), mult),
         frequency: Some(Frequency::Annual.label().into()),
         seasonal_adjustment: None,
@@ -1169,6 +1332,12 @@ fn units(metric_name: Option<&str>, cl_unit: Option<&str>, mult: u32) -> Option<
     }
 }
 
+/// Wraps a reference-data DB error as [`CrawlError::Transient`] (retried on the next scheduled
+/// discovery, same as any other reference-data fetch failure).
+fn db_err(e: AppError) -> CrawlError {
+    CrawlError::Transient(format!("BEA reference data: {e}"))
+}
+
 /// Maps BEA's in-body error: a description about the `UserId` (missing / invalid / inactive
 /// key) is `Auth`; a rejected parameter (invalid, not valid, does not exist, missing,
 /// required) is `Permanent`; anything else is `Transient`. The message never contains the key.
@@ -1196,6 +1365,96 @@ pub fn classify_bea_error(err: &BeaError) -> CrawlError {
         CrawlError::Permanent(msg)
     } else {
         CrawlError::Transient(msg)
+    }
+}
+
+/// Checks a decoded `BEAAPI` envelope for an in-body error (top-level, or inside `Results` once
+/// BEA's occasional one-element array is unwrapped) and returns the decoded `Results` value.
+/// Shared by [`BeaAdapter::call`] and [`parse_table_titles`], which decodes its own conditional
+/// GET response the same way.
+fn decode_results(envelope: Envelope, method: &str) -> Result<serde_json::Value, CrawlError> {
+    let api = envelope.beaapi;
+    if let Some(err) = &api.error {
+        return Err(classify_bea_error(err));
+    }
+    // BEA sometimes wraps `Results` in a one-element array.
+    let results = match api.results {
+        Some(serde_json::Value::Array(items)) => items.into_iter().next(),
+        other => other,
+    }
+    .ok_or_else(|| CrawlError::Parse(format!("BEA {method}: no Results")))?;
+    if let Some(err) = results.get("Error") {
+        let err: BeaError = serde_json::from_value(err.clone())
+            .map_err(|e| CrawlError::Parse(format!("BEA {method}: bad Error: {e}")))?;
+        return Err(classify_bea_error(&err));
+    }
+    Ok(results)
+}
+
+/// Logical cache key for [`persist::reference_file_etag`]: `GetParameterValues` takes the key in
+/// the query string, which must never be persisted, so this is a stable label, not the literal
+/// request URL.
+fn table_titles_cache_key(dataset: BeaDataset) -> &'static str {
+    match dataset {
+        BeaDataset::Nipa => "bea:GetParameterValues:NIPA:TableName",
+        BeaDataset::Regional => "bea:GetParameterValues:Regional:TableName",
+    }
+}
+
+/// `TableName` -> BEA's own title, from a `GetParameterValues(TableName)` response body.
+/// Table names or titles BEA sent empty are dropped.
+fn parse_table_titles(body: &str) -> Result<Vec<(String, String)>, CrawlError> {
+    let envelope: Envelope = serde_json::from_str(body)
+        .map_err(|e| CrawlError::Parse(format!("BEA GetParameterValues: {e}")))?;
+    let results = decode_results(envelope, "GetParameterValues")?;
+    let values: TableNameValues = serde_json::from_value(results).map_err(|e| {
+        CrawlError::Parse(format!("BEA GetParameterValues: unexpected Results: {e}"))
+    })?;
+    Ok(values
+        .param_value
+        .into_iter()
+        .filter_map(|v| {
+            if v.table_name.is_empty() {
+                return None;
+            }
+            let title = strip_table_number_prefix(&v.description).to_string();
+            if title.is_empty() {
+                return None;
+            }
+            Some((v.table_name, title))
+        })
+        .collect())
+}
+
+/// Strips a leading `Table 1.1.5.` or `Table 6.1D.` (NIPA's `TableName` descriptions repeat the
+/// table's own number, with an occasional trailing letter such as `6.1D` or `7.2.5A`, before its
+/// title): `nipa_title` already combines this title with the line description and frequency, so
+/// the number would just be redundant clutter. A description with no such prefix (Regional's, or
+/// a NIPA one BEA formats differently) passes through unchanged, as does one that's only a table
+/// number with no title following it (filtered out by the caller as empty, same as BEA sending
+/// no description at all).
+fn strip_table_number_prefix(description: &str) -> &str {
+    let Some(rest) = description.strip_prefix("Table ") else {
+        return description;
+    };
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit() && c != '.' && !c.is_ascii_uppercase())
+        .unwrap_or(rest.len());
+    let number = &rest[..end];
+    if !number.contains('.') || !number.chars().any(|c| c.is_ascii_digit()) {
+        return description;
+    }
+    rest[end..].trim_start_matches(['.', ' '])
+}
+
+/// `titles.get(table_name)`, or the bare table name as a placeholder if BEA hasn't published (or
+/// [`BeaAdapter::refresh_table_titles`] hasn't yet fetched) a title for it. The `bool` is false
+/// in the fallback case, so the caller can avoid overwriting a previously stored good title with
+/// the placeholder (see the module docs).
+fn title_for(titles: &HashMap<String, String>, table_name: &str) -> (String, bool) {
+    match titles.get(table_name) {
+        Some(title) => (title.clone(), true),
+        None => (table_name.to_string(), false),
     }
 }
 
@@ -1235,6 +1494,27 @@ struct ParamValue {
     key: String,
     #[serde(rename = "Desc", default)]
     desc: String,
+}
+
+/// `GetParameterValues(DatasetName, ParameterName=TableName)`'s results: unlike
+/// `GetParameterValuesFiltered`, its `ParamValue` rows are named after the parameter itself.
+#[derive(Debug, Deserialize)]
+struct TableNameValues {
+    #[serde(rename = "ParamValue")]
+    param_value: Vec<TableNameValue>,
+}
+
+/// NIPA's `GetParameterValues(ParameterName=TableName)` rows are named after the parameter
+/// itself (`TableName`/`Description`); Regional's are the generic `Key`/`Desc` that every other
+/// `GetParameterValuesFiltered`/`GetParameterValues` call on that dataset uses (confirmed against
+/// `regional_sagdp2n_linecodes.json`'s real `LineCode` response) — accept either name for either
+/// dataset rather than assuming NIPA's naming applies everywhere.
+#[derive(Debug, Deserialize)]
+struct TableNameValue {
+    #[serde(rename = "TableName", alias = "Key")]
+    table_name: String,
+    #[serde(rename = "Description", alias = "Desc", default)]
+    description: String,
 }
 
 /// One NIPA `GetData` row.
@@ -1300,6 +1580,9 @@ mod tests {
         include_str!("../../tests/fixtures/bea/regional_sagdp2n_linecodes.json");
     const REGIONAL_GEOS: &str =
         include_str!("../../tests/fixtures/bea/regional_sagdp2n_geofips.json");
+    const NIPA_TABLE_TITLES: &str = include_str!("../../tests/fixtures/bea/nipa_table_titles.json");
+    const REGIONAL_TABLE_TITLES: &str =
+        include_str!("../../tests/fixtures/bea/regional_table_titles.json");
 
     /// Every NIPA table and frequency in `bea_tables.csv`, with its fixture.
     const NIPA_FIXTURES: &[(&str, &str, &str)] = &[
@@ -1351,8 +1634,26 @@ mod tests {
         ),
     ];
 
+    /// Curated tables' titles, as if [`BeaAdapter::refresh_table_titles`] had already run
+    /// (`discover`/`fetch_*` read only the in-process cache, never the network, for a title).
     fn adapter(mock: &MockSource) -> BeaAdapter {
-        BeaAdapter::new(mock.base_url()).with_current_year(2024)
+        BeaAdapter::new(mock.base_url())
+            .with_current_year(2024)
+            .with_table_titles(
+                BeaDataset::Nipa,
+                &[
+                    ("T10101", "Real GDP, percent change from preceding period"),
+                    ("T10105", "GDP, current dollars"),
+                    ("T10106", "Real GDP, chained dollars"),
+                    ("T20100", "Personal income and its disposition"),
+                    ("T20600", "Personal income and its disposition"),
+                    ("T20804", "PCE price indexes"),
+                ],
+            )
+            .with_table_titles(
+                BeaDataset::Regional,
+                &[("SAGDP2N", "GDP by state, current dollars")],
+            )
     }
 
     fn get_data() -> Route {
@@ -1382,6 +1683,16 @@ mod tests {
             .query("DatasetName", "Regional")
             .query("TableName", "SAGDP2N")
             .query("LineCode", "1")
+    }
+
+    /// `GetParameterValues(DatasetName, ParameterName=TableName)` for `dataset`.
+    fn table_titles_route(dataset: &str) -> Route {
+        Route::get("/")
+            .query("UserID", TEST_API_KEY)
+            .query("method", "GetParameterValues")
+            .query("DatasetName", dataset)
+            .query("ParameterName", "TableName")
+            .query("ResultFormat", "JSON")
     }
 
     async fn mount_discovery(mock: &MockSource) {
@@ -1431,7 +1742,6 @@ mod tests {
         let gdp = &tables[1];
         assert_eq!(gdp.dataset, BeaDataset::Nipa);
         assert_eq!(gdp.frequencies, [Frequency::Annual, Frequency::Quarterly]);
-        assert_eq!(gdp.title, "GDP, current dollars");
         assert_eq!(tables[6].dataset, BeaDataset::Regional);
         // Every NIPA table and frequency has a discovery fixture.
         let listed: usize = tables
@@ -1444,21 +1754,20 @@ mod tests {
 
     #[test]
     fn parse_tables_rejects_bad_rows() {
-        let header = "dataset,table_name,frequencies,title\n";
-        let ok = parse_tables(&format!("# c\n{header}NIPA,T1,A Q,\"A, b\"\n")).unwrap();
-        assert_eq!(ok[0].title, "A, b");
+        let header = "dataset,table_name,frequencies\n";
+        let ok = parse_tables(&format!("# c\n{header}NIPA,T1,A Q\n")).unwrap();
+        assert_eq!(ok[0].table_name, "T1");
         for (body, err) in [
             ("", "no header"),
             ("x,y\n", "expected header"),
             (header, "no tables"),
-            ("NIPA,T1,A\n", "expected dataset"),
-            ("ITA,T1,A,t\n", "unknown dataset"),
-            ("NIPA,T-1,A,t\n", "not alphanumeric"),
-            ("NIPA,T1,A,t\nNIPA,T1,Q,t\n", "listed twice"),
-            ("NIPA,T1,W,t\n", "unknown frequency"),
-            ("NIPA,T1, ,t\n", "no frequency"),
-            ("Regional,S1,Q,t\n", "must be annual"),
-            ("NIPA,T1,A,\"\"\n", "no title"),
+            ("NIPA,T1\n", "expected dataset"),
+            ("ITA,T1,A\n", "unknown dataset"),
+            ("NIPA,T-1,A\n", "not alphanumeric"),
+            ("NIPA,T1,A\nNIPA,T1,Q\n", "listed twice"),
+            ("NIPA,T1,W\n", "unknown frequency"),
+            ("NIPA,T1, \n", "no frequency"),
+            ("Regional,S1,Q\n", "must be annual"),
         ] {
             let text = if body.starts_with("dataset") || body.is_empty() || body.starts_with("x,") {
                 body.to_string()
@@ -1620,6 +1929,27 @@ mod tests {
         assert!(found
             .iter()
             .any(|s| s.external_id == "bea_regional/SAGDP2N.1.98000"));
+    }
+
+    /// A curated table whose title the in-process cache doesn't have yet (no
+    /// `refresh_table_titles` has run in this process) fails discovery rather than writing the
+    /// bare table name as every one of its series' titles: that placeholder would then overwrite
+    /// a good stored title on the very next fetch, since `persist_discovered` writes
+    /// `DiscoveredSeries::title` unconditionally.
+    #[tokio::test]
+    async fn discover_fails_when_a_titles_cache_is_empty() {
+        let mock = MockSource::start().await;
+        // No .with_table_titles(...): titles are exactly as they'd be in a fresh process whose
+        // refresh_reference_data hasn't run (or failed) yet.
+        let e = BeaAdapter::new(mock.base_url())
+            .with_current_year(2024)
+            .discover(&test_ctx())
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind(), "transient", "{e}");
+        assert!(e.to_string().contains("title not yet known"), "{e}");
+        // The empty cache fails discovery before it ever asks BEA for anything.
+        assert!(mock.received_requests().await.is_empty());
     }
 
     /// Discovery is all or nothing: a table BEA rejects fails it rather than being skipped, so
@@ -1974,7 +2304,8 @@ mod tests {
         assert_eq!(e.kind(), "not_found", "{e}");
     }
 
-    /// A table dropped from `bea_tables.csv` after its series were discovered still fetches real
+    /// A table whose title isn't in the in-process cache (BEA stopped listing it, or this
+    /// process hasn't refreshed titles since its series were discovered) still fetches real
     /// points, but doesn't overwrite a good stored title with the bare table name.
     #[tokio::test]
     async fn fetch_stale_table_keeps_points_but_omits_metadata() {
@@ -2186,6 +2517,242 @@ mod tests {
             assert_eq!(e.kind(), kind, "{e}");
             assert!(!e.to_string().contains(TEST_API_KEY), "{e}");
         }
+    }
+
+    /// `refresh_table_titles` fetches `GetParameterValues(TableName)`, merges the titles into
+    /// the dataset's `table_name` dimension, caches the `ETag`, and fills the in-process cache
+    /// `table_titles` then reads straight from (no second DB round trip needed in the same
+    /// process). A second call that gets a `304` reloads the same titles from the database
+    /// instead of trusting memory, so a fresh process picks up another instance's last merge.
+    #[tokio::test]
+    async fn refresh_table_titles_merges_labels_caches_etag_and_fills_in_process_cache() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_bea_refresh_table_titles",
+        )
+        .await;
+        let mut catalog = crate::dataset::DatasetCatalog::empty();
+        catalog
+            .insert(
+                SourceId::Bea,
+                &[NIPA_DATASET, REGIONAL_DATASET],
+                crate::dataset::parse_dataset_file(
+                    &std::fs::read_to_string(
+                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("data/datasets/bea.toml"),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        crate::persist::sync_datasets(&db.pool, &catalog)
+            .await
+            .unwrap();
+
+        // `mount_expect`'s drop-time check only covers the last mount still standing when the
+        // mock server drops: `reset()` below clears it along with everything mounted before, so
+        // only the final (Regional) `mount_expect` actually gets verified that way. The NIPA 200
+        // and 304 legs are still proven correct, just by their own assertions: a stray extra
+        // request to the wrong fixture would 404 (the route wouldn't match) and `unwrap()` would
+        // fail, and the 304 leg's title can only come from the database reload, never the mock.
+        let mock = MockSource::start().await;
+        mock.mount_expect(
+            &table_titles_route("NIPA"),
+            Reply::json_str(NIPA_TABLE_TITLES).header("ETag", "\"v1\""),
+            1,
+        )
+        .await;
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let adapter = BeaAdapter::new(mock.base_url());
+        adapter
+            .refresh_table_titles(&ctx, TEST_API_KEY, BeaDataset::Nipa)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            adapter.table_titles(BeaDataset::Nipa).await.get("T10105"),
+            Some(&"Gross Domestic Product".to_string())
+        );
+        let cache_key = table_titles_cache_key(BeaDataset::Nipa);
+        assert_eq!(
+            persist::reference_file_etag(&db.pool, SourceId::Bea, cache_key)
+                .await
+                .unwrap(),
+            Some("\"v1\"".to_string())
+        );
+        let labels =
+            persist::dataset_dimension_labels(&db.pool, SourceId::Bea, NIPA_DATASET, "table_name")
+                .await
+                .unwrap();
+        assert_eq!(
+            labels.get("T10105"),
+            Some(&"Gross Domestic Product".to_string())
+        );
+
+        // A fresh adapter instance (no in-process cache), a `304` this time: it reloads the
+        // titles already merged into the database rather than ending up with nothing. `reset`
+        // first: `mount` matches in mount order, so without it the still-mounted 200 fixture
+        // above would answer this request too and the 304 path would go untested.
+        mock.reset().await;
+        mock.mount_expect(
+            &table_titles_route("NIPA"),
+            Reply::status(304).header("ETag", "\"v1\""),
+            1,
+        )
+        .await;
+        let fresh = BeaAdapter::new(mock.base_url());
+        fresh
+            .refresh_table_titles(&ctx, TEST_API_KEY, BeaDataset::Nipa)
+            .await
+            .unwrap();
+        assert_eq!(
+            fresh.table_titles(BeaDataset::Nipa).await.get("T10105"),
+            Some(&"Gross Domestic Product".to_string())
+        );
+        // Conditional on the ETag cached from the first fetch: proves the 304 above was actually
+        // exercising the conditional-GET path, not just a mock that would have answered 304
+        // regardless of what was asked.
+        assert_eq!(
+            mock.received_requests()
+                .await
+                .last()
+                .unwrap()
+                .headers
+                .get("If-None-Match")
+                .unwrap(),
+            "\"v1\"",
+        );
+
+        // Regional works the same, with its own cache key and dimension row.
+        mock.reset().await;
+        mock.mount_expect(
+            &table_titles_route("Regional"),
+            Reply::json_str(REGIONAL_TABLE_TITLES),
+            1,
+        )
+        .await;
+        adapter
+            .refresh_table_titles(&ctx, TEST_API_KEY, BeaDataset::Regional)
+            .await
+            .unwrap();
+        assert_eq!(
+            adapter
+                .table_titles(BeaDataset::Regional)
+                .await
+                .get("SAGDP2N"),
+            Some(&"SAGDP2N Gross domestic product (GDP) by state".to_string())
+        );
+
+        db.drop().await;
+    }
+
+    /// A BEA error envelope for the title fetch classifies like any other BEA error and doesn't
+    /// cache an `ETag` (there's nothing to treat as "unchanged" next time), so the next refresh
+    /// retries rather than silently keeping an empty title cache.
+    #[tokio::test]
+    async fn refresh_table_titles_fails_and_does_not_cache_etag_on_bea_error() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_bea_refresh_table_titles_error",
+        )
+        .await;
+
+        let mock = MockSource::start().await;
+        mock.mount(
+            &table_titles_route("NIPA"),
+            Reply::json_str(
+                r#"{"BEAAPI":{"Results":{"Error":{"APIErrorCode":"1","APIErrorDescription":"Unknown error."}}}}"#,
+            ),
+        )
+        .await;
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let adapter = BeaAdapter::new(mock.base_url());
+        let e = adapter
+            .refresh_table_titles(&ctx, TEST_API_KEY, BeaDataset::Nipa)
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind(), "transient", "{e}");
+
+        assert_eq!(
+            persist::reference_file_etag(
+                &db.pool,
+                SourceId::Bea,
+                table_titles_cache_key(BeaDataset::Nipa)
+            )
+            .await
+            .unwrap(),
+            None
+        );
+        assert!(adapter.table_titles(BeaDataset::Nipa).await.is_empty());
+
+        db.drop().await;
+    }
+
+    #[test]
+    fn strip_table_number_prefix_removes_the_table_number_but_leaves_other_descriptions_alone() {
+        assert_eq!(
+            strip_table_number_prefix("Table 1.1.5. Gross Domestic Product"),
+            "Gross Domestic Product"
+        );
+        assert_eq!(
+            strip_table_number_prefix("Table 2.8.4. Price Indexes for PCE"),
+            "Price Indexes for PCE"
+        );
+        // No table-number prefix (Regional's descriptions, or an unexpected NIPA shape): left
+        // exactly as BEA sent it.
+        assert_eq!(
+            strip_table_number_prefix("SAGDP2N Gross domestic product (GDP) by state"),
+            "SAGDP2N Gross domestic product (GDP) by state"
+        );
+        assert_eq!(
+            strip_table_number_prefix("GDP, current dollars"),
+            "GDP, current dollars"
+        );
+        // "Table " followed by something that isn't a dotted table number: left alone too.
+        assert_eq!(
+            strip_table_number_prefix("Table of contents"),
+            "Table of contents"
+        );
+        // A trailing letter on the table number (BEA really has these: 6.1D, 7.2.5A/B) is part
+        // of the number, not the title.
+        assert_eq!(
+            strip_table_number_prefix(
+                "Table 6.1D. National Income Without Capital Consumption Adjustment by Industry"
+            ),
+            "National Income Without Capital Consumption Adjustment by Industry"
+        );
+        assert_eq!(
+            strip_table_number_prefix("Table 7.2.5A. Auto Output"),
+            "Auto Output"
+        );
+        // Nothing but a table number: strips to empty (the caller filters this out the same as
+        // an empty description).
+        assert_eq!(strip_table_number_prefix("Table 1.1.5."), "");
+    }
+
+    #[test]
+    fn parse_table_titles_drops_empty_rows_and_unwraps_a_one_element_results_array() {
+        let titles = parse_table_titles(
+            r#"{"BEAAPI":{"Results":[{"ParamValue":[
+                {"TableName": "T10105", "Description": "GDP, current dollars"},
+                {"TableName": "", "Description": "no table name"},
+                {"TableName": "T99999", "Description": ""}
+            ]}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            titles,
+            vec![("T10105".to_string(), "GDP, current dollars".to_string())]
+        );
     }
 }
 
