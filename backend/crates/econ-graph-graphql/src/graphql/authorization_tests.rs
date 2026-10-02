@@ -129,6 +129,16 @@ fn protected() -> Vec<(&'static str, Role, String)> {
             "{ systemHealth { __typename } }".into(),
         ),
         (
+            "crawlerStatus",
+            Role::AdminSystemRead,
+            "{ crawlerStatus { isRunning } }".into(),
+        ),
+        (
+            "queueStatistics",
+            Role::AdminSystemRead,
+            "{ queueStatistics { totalItems } }".into(),
+        ),
+        (
             "securityEvents",
             Role::AdminSecurityRead,
             "{ securityEvents { __typename } }".into(),

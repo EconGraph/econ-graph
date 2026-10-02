@@ -122,28 +122,3 @@ data:
           regex: (.+)
           target_label: __metrics_path__
           replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
-
-      # PostgreSQL (if postgres_exporter is available)
-      - job_name: 'postgres'
-        kubernetes_sd_configs:
-        - role: pod
-          namespaces:
-            names:
-            - econ-graph
-        relabel_configs:
-        - source_labels: [__meta_kubernetes_pod_label_app]
-          action: keep
-          regex: postgres
-        - source_labels: [__meta_kubernetes_pod_ip]
-          action: replace
-          target_label: __address__
-          regex: (.+)
-          replacement: $1:9187
-        - action: labelmap
-          regex: __meta_kubernetes_pod_label_(.+)
-        - source_labels: [__meta_kubernetes_namespace]
-          action: replace
-          target_label: kubernetes_namespace
-        - source_labels: [__meta_kubernetes_pod_name]
-          action: replace
-          target_label: kubernetes_pod_name

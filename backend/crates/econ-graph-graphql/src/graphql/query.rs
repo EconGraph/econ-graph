@@ -251,6 +251,10 @@ impl Query {
     /// time in date order. `totalCount` counts every matching point; read the next page with
     /// `after: pageInfo.endCursor` until `pageInfo.hasNextPage` is false. A transformed page
     /// has the values it would have in the whole series.
+    ///
+    /// A series can hold several revisions of one date's value. A `transformation` is computed
+    /// over the latest revisions unless the filter picks a revision mode (`asOf`, `originalOnly`,
+    /// or `latestRevisionOnly: false` for every stored revision).
     async fn series_data(
         &self,
         ctx: &Context<'_>,
@@ -284,20 +288,35 @@ impl Query {
             None => 0,
         };
 
+        let transformation =
+            transformation.filter(|&transformation| transformation != DataTransformationType::None);
+
+        // A transformation compares neighbouring points, so over every stored revision it would
+        // compare a date's revisions with one another. Unless the caller chose a revision mode
+        // (`asOf`, `originalOnly`, or an explicit `latestRevisionOnly`), transform the latest
+        // revisions.
+        let latest_revision_only = filter
+            .as_ref()
+            .and_then(|f| f.latest_revision_only)
+            .or_else(|| {
+                let chose_mode = filter
+                    .as_ref()
+                    .is_some_and(|f| f.as_of.is_some() || f.original_only == Some(true));
+                (transformation.is_some() && !chose_mode).then_some(true)
+            });
+
         // Convert GraphQL inputs to service parameters
         let query_params = models::DataQueryParams {
             series_id: series_uuid,
             start_date: filter.as_ref().and_then(|f| f.start_date),
             end_date: filter.as_ref().and_then(|f| f.end_date),
             original_only: filter.as_ref().and_then(|f| f.original_only),
-            latest_revision_only: filter.as_ref().and_then(|f| f.latest_revision_only),
+            latest_revision_only,
             as_of: filter.as_ref().and_then(|f| f.as_of),
             limit: first.map(i64::from),
             offset: Some(offset),
         };
 
-        let transformation =
-            transformation.filter(|&transformation| transformation != DataTransformationType::None);
         let context = transformation.and_then(transformation_context);
         let page = series_service::get_series_data(pool, query_params, context).await?;
         let has_next_page = page.has_next_page();
@@ -337,15 +356,18 @@ impl Query {
         })
     }
 
-    /// Crawler status, derived from the crawl queue (workers keep no other state).
+    /// Crawler status, derived from the crawl queue (workers keep no other state; requires
+    /// `admin.system:read`).
     async fn crawler_status(&self, ctx: &Context<'_>) -> Result<CrawlerStatusType> {
+        require_role(ctx, Role::AdminSystemRead)?;
         let pool = ctx.data::<DatabasePool>()?;
         let snapshot = econ_graph_crawler::status::crawler_status(pool).await?;
         Ok(CrawlerStatusType::from_snapshot(snapshot))
     }
 
-    /// Get queue statistics
+    /// Get queue statistics (requires `admin.system:read`)
     async fn queue_statistics(&self, ctx: &Context<'_>) -> Result<QueueStatisticsType> {
+        require_role(ctx, Role::AdminSystemRead)?;
         let pool = ctx.data::<DatabasePool>()?;
 
         let stats = queue_service::get_queue_statistics(&pool).await?;

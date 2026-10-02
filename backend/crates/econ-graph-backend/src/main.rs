@@ -150,11 +150,6 @@ async fn root_handler(playground: bool) -> Result<impl warp::Reply, Infallible> 
             <p><a href="/health">Health check endpoint</a> - API status and version info</p>
         </div>
 
-        <div class="endpoint">
-            <div><span class="method">GET</span> <code>/metrics</code></div>
-            <p><a href="/metrics">Prometheus metrics endpoint</a> - Application metrics for monitoring</p>
-        </div>
-
 <!--MCP_ENDPOINT-->
         <h2>🚀 Quick Start</h2>
 <!--PLAYGROUND_QUICK_START-->
@@ -335,6 +330,22 @@ fn mcp_filter(
         .boxed()
 }
 
+/// A `/graphql` body that isn't a GraphQL request (malformed JSON, wrong content type) is the
+/// caller's mistake: answer 400 in GraphQL's own error shape rather than warp's plain-text
+/// "Unhandled rejection: ..." 500. Every other rejection passes through to the next route.
+async fn graphql_bad_request(
+    rejection: warp::Rejection,
+) -> Result<warp::reply::Response, warp::Rejection> {
+    match rejection.find::<async_graphql_warp::GraphQLBadRequest>() {
+        Some(bad) => Ok(warp::reply::with_status(
+            warp::reply::json(&json!({"errors": [{"message": bad.0.to_string()}]})),
+            bad.status(),
+        )
+        .into_response()),
+        None => Err(rejection),
+    }
+}
+
 /// Every route this server answers on. There is no in-house sign-in: `/auth/*` answers nowhere
 /// on this backend (the frontend's own `/auth/callback` is a separate ingress rule that serves
 /// the frontend, not this process).
@@ -393,6 +404,8 @@ fn build_routes(
                 }
             },
         );
+
+    let graphql_filter = graphql_filter.recover(graphql_bad_request);
 
     // GraphQL Playground: off unless ENABLE_GRAPHQL_PLAYGROUND=true (local development).
     let playground_filter =
@@ -1083,6 +1096,13 @@ mod playground_tests {
         assert!(!landing_page(false).await.contains("/playground"));
     }
 
+    /// The landing page is public, so it must not name the internal `/metrics` endpoint.
+    #[tokio::test]
+    async fn landing_page_does_not_mention_metrics() {
+        assert!(!landing_page(true).await.contains("/metrics"));
+        assert!(!landing_page(false).await.contains("/metrics"));
+    }
+
     /// The playground is served only when explicitly turned on.
     #[test]
     fn playground_is_off_unless_explicitly_enabled() {
@@ -1224,6 +1244,52 @@ mod route_tests {
             .reply(&routes(false))
             .await;
         assert_eq!(res.status(), 200);
+    }
+
+    /// A malformed `/graphql` body is a 400 JSON error, not a plain-text 500, and doesn't
+    /// swallow the other routes' own rejections.
+    #[tokio::test]
+    async fn malformed_graphql_body_is_a_json_400() {
+        let res = warp::test::request()
+            .method("POST")
+            .path("/graphql")
+            .header("content-type", "application/json")
+            .body(r#"{"query": "{ __typename }"#)
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 400);
+        let body: serde_json::Value = serde_json::from_slice(res.body()).unwrap();
+        assert!(body["errors"][0]["message"].as_str().is_some(), "{body}");
+        assert!(!String::from_utf8_lossy(res.body()).contains("Unhandled"));
+
+        // The 400 carries CORS headers like any other answer.
+        let res = warp::test::request()
+            .method("POST")
+            .path("/graphql")
+            .header("origin", "http://localhost:3000")
+            .header("content-type", "application/json")
+            .body("{")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 400);
+        assert_eq!(
+            res.headers()["access-control-allow-origin"],
+            "http://localhost:3000"
+        );
+
+        // Rejections that aren't a bad GraphQL body still pass through.
+        let res = warp::test::request()
+            .method("GET")
+            .path("/nowhere")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 404);
+        let res = warp::test::request()
+            .method("PUT")
+            .path("/graphql")
+            .reply(&routes(false))
+            .await;
+        assert_eq!(res.status(), 405);
     }
 
     /// `GET /playground` answers 200 through the full route set when enabled.
