@@ -4,24 +4,28 @@ Adapter: `backend/crates/econ-graph-crawler/src/sources/bls.rs`. Fixtures:
 `tests/fixtures/bls/`. Key optional (`BLS_API_KEY`); with a key a request may span 20
 years, without one 10. Background: [BLS API experimental findings](../technical/BLS_API_EXPERIMENTAL_FINDINGS.md).
 
-> **Release 1 (#235, draft):** discovery reads 291 series from
-> `econ-graph-crawler/data/bls_series.csv` with no HTTP call, replacing the `/surveys`
-> discovery below. The list covers CPI-U, CES, CPS and LAUS for the states and DC.
-> Fetches are batched at 50 series per request with `BLS_API_KEY`, 25 without. Footnotes
-> are parsed and logged, but not yet stored. The rest of this page describes `main`.
-
 ## What we fetch today
 
-- **Discovery**: `GET /surveys` lists surveys, not series. Each survey abbreviation is then
-  expanded from a hard-coded table (`known_series_for_survey`) to four series in total:
-  `CUUR0000SA0`, `CUUR0000SA0L1E` (CPI), `CES0000000001` (nonfarm payrolls) and
-  `LNS14000000` (unemployment rate).
-- **Fetch**: `POST /timeseries/data/` with `{"seriesid": [id], "startyear", "endyear",
-  "catalog": true}`, in year windows, newest first; 20 years of history on a first fetch.
-- **Kept**: `year` + `period` (as the period's start date) and `value`; from `catalog`,
-  the title, survey name, `measure_data_type` (as units) and seasonality.
-- **Dropped**: `footnotes` (not even deserialized), `latest`, `periodName`, the catalog's
-  `area` and `item`; annual averages `M13`, `Q05` and `S03` are skipped.
+- **Discovery**: reads 291 series from
+  `backend/crates/econ-graph-crawler/data/bls_series.csv`, no HTTP call. The list covers
+  headline CPI-U (CU), CES payrolls and earnings (CE), CPS labor force (LN), and LAUS state
+  unemployment rates and labor force (LA) for the states and DC.
+- **Fetch**: `POST /timeseries/data/` with `{"seriesid": [ids..], "startyear", "endyear",
+  "catalog": true, "registrationkey"?: key}`, batched at 50 series per request with a key
+  (25 without), in year windows (20 years per window with a key, 10 without), newest first.
+- **Kept**: `year` + `period` (as the period's start date) and `value`. A listed series
+  (all 291) keeps the data file's title, units and frequency, so discovery and fetch agree
+  with or without a key; `catalog` (sent only with a key) adds the survey name and
+  seasonality. An unlisted series takes title, units and frequency from `catalog` alone.
+  Each
+  observation's `footnotes` (`{code, text}`) are parsed and logged — a `P` (preliminary)
+  footnote and an `X` ("data unavailable") footnote are recognised — but not yet stored:
+  `data_points` has no footnote column in train 1.
+- **Dropped**: `latest`, `periodName`, the catalog's `area` and `item`; annual averages
+  `M13`, `Q05` and `S03` are skipped.
+- Until the scheduler picked up discovered-but-never-fetched series (#228, now merged),
+  a newly listed series needed a manual `crawler enqueue --source BLS --series <ids>`; the
+  scheduler now does this on its own.
 
 ## Sample (recorded)
 
@@ -77,23 +81,27 @@ more codes. The v2 API also offers `calculations`, `annualaverage` and `aspects`
 options (from public docs; not requested today); aspects carry extra per-observation values
 such as standard errors for some surveys.
 
-The adapter drops footnotes entirely: `DataPoint` in `bls.rs` deserializes only `year`,
-`period` and `value`. A `"-"` value becomes `NULL` with no record of why.
+Footnotes are now parsed (`code`, `text`) and logged per observation, but `DataPoint`'s
+stored fields are still only `year`, `period` and `value` — there is no footnote column to
+write them to yet. A `"-"` value becomes `NULL` with no stored record of why, beyond the log
+line.
 
-## Proposed dataset mapping
+## Dataset mapping
 
-One dataset per survey (CU, CE, LN, ...), since each survey's series id is a fixed layout
-of that survey's dimensions (documented in the survey's mapping files, for example
-`https://download.bls.gov/pub/time.series/cu/cu.series`, from public docs). For CPI (CU):
+One dataset per survey with a known id layout — CU (CPI-U), CE (CES national), LN (CPS) and
+LA (LAUS) — coded by the two-letter series id prefix and defined in `data/datasets/bls.toml`
+(`SERIES_ID_LAYOUTS` in `bls.rs`). A series id is that prefix followed by fixed-width
+fields, split into the dataset's dimensions; a series of any other survey, or whose id
+doesn't fit its survey's layout, goes in the dimensionless `other` dataset (like FRED). For
+CPI (CU), id `CUUR0000SA0`:
 
 | Role | Columns |
 |---|---|
-| Dimensions | `seasonal` (S/U), `periodicity`, `area_code`, `item_code` |
+| Dimensions | `seasonal` (S/U), `periodicity`, `area` (4 chars), `item` (the rest) |
 | Measures | `value` (decimal) |
-| Attributes | `footnote_codes` (list of strings), `preliminary` (bool, from `P`) |
-| Shape | long (one value column); `revision_date` = crawl date |
+| Attributes | none yet — footnotes are parsed and logged (see above) but not stored |
+| Shape | long (one value column); `revision_date = date` (no vintage column; each refresh overwrites) |
 
 Annual averages (`M13`) are derived; keep skipping them, or store them as a separate
-periodicity rather than colliding with `M01`. Decoding ids into dimensions needs each
-survey's mapping files, which is new reference data (a shared data file, like
-`us_states.csv`).
+periodicity rather than colliding with `M01`. A footnote attribute column (codes,
+`preliminary` bool) would let the parsed-but-dropped footnotes above actually be stored.
