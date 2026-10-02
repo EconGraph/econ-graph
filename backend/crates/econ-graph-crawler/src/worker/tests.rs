@@ -333,6 +333,17 @@ async fn series_row(
         .unwrap()
 }
 
+async fn metadata_is_active(pool: &DatabasePool, external_id: &str) -> Option<bool> {
+    let mut conn = pool.get().await.unwrap();
+    series_metadata::table
+        .filter(series_metadata::external_id.eq(external_id))
+        .select(series_metadata::is_active)
+        .first(&mut conn)
+        .await
+        .optional()
+        .unwrap()
+}
+
 async fn point_count(pool: &DatabasePool, series_id: Uuid) -> i64 {
     let mut conn = pool.get().await.unwrap();
     data_points::table
@@ -1000,6 +1011,23 @@ async fn rate_limited_retries_after_retry_after_without_counting() {
 async fn not_found_fails_permanently() {
     let Some(db) = db().await else { return };
     let mock = MockSource::start().await; // nothing mounted: 404
+                                          // A catalog-discovered series with no economic_series row yet (ECO-254: this is the
+                                          // "discovered-but-empty forever" case coverage used to overcount).
+    persist::persist_discovered(
+        &db.pool,
+        SRC,
+        &[DiscoveredSeries {
+            dataset: flat(),
+            data_url: None,
+            external_id: "t5_missing".into(),
+            title: "Missing".into(),
+            description: None,
+            units: None,
+            frequency: None,
+        }],
+    )
+    .await
+    .unwrap();
     let w = worker(&db.pool, &mock);
     let id = enqueue(
         &db.pool,
@@ -1017,7 +1045,57 @@ async fn not_found_fails_permanently() {
     assert!(it.locked_by.is_none());
     assert!(it.finished_at.is_some());
     assert!(it.error_message.unwrap().contains("not found"));
+    // No economic_series row is created for a confirmed-NotFound series with none yet...
     assert!(series_row(&db.pool, "t5_missing").await.is_none());
+    // ...instead its series_metadata row is deactivated, so coverage stops counting it as
+    // discovered. It comes back only if a later catalog discovery lists it again.
+    assert_eq!(
+        metadata_is_active(&db.pool, "t5_missing").await,
+        Some(false)
+    );
+}
+
+#[tokio::test]
+async fn not_found_on_existing_series_sets_not_found_status() {
+    let Some(db) = db().await else { return };
+    let mock = MockSource::start().await; // nothing mounted: 404
+                                          // Catalog-discovered *and* already fetched once with no points, so both the series_metadata
+                                          // and economic_series rows exist (the usual shape once a series has been tried before).
+    persist::persist_discovered(
+        &db.pool,
+        SRC,
+        &[DiscoveredSeries {
+            dataset: flat(),
+            data_url: None,
+            external_id: "t5_gone".into(),
+            title: "Gone".into(),
+            description: None,
+            units: None,
+            frequency: None,
+        }],
+    )
+    .await
+    .unwrap();
+    let write = persist::persist_series(&db.pool, SRC, "t5_gone", &empty_fetch())
+        .await
+        .unwrap();
+    let w = worker(&db.pool, &mock);
+    let id = enqueue(&db.pool, SRC.as_str(), "t5_gone", JobKind::FetchSeries, 5).await;
+    let outcome = w.run_once().await.expect("claimed");
+    assert!(matches!(outcome, JobOutcome::Failed { .. }), "{outcome:?}");
+    assert_eq!(item(&db.pool, id).await.status, "failed");
+    // crawl_status is the NotFound-specific value, distinct from a generic transient/parse
+    // 'failed', so coverage (ECO-254) can exclude it from "discovered" while it has no data.
+    let (.., status) = series_row(&db.pool, "t5_gone").await.unwrap();
+    assert_eq!(status.as_deref(), Some("not_found"));
+    assert_eq!(
+        attempts(&db.pool, write.series_id).await,
+        vec![(false, Some("not_found".into()), Some(0))]
+    );
+    // Its series_metadata row is left active (unlike the no-economic_series-row case): coverage's
+    // query excludes it by joining the two, not by deactivating metadata out from under a series
+    // that's actually still being tracked.
+    assert_eq!(metadata_is_active(&db.pool, "t5_gone").await, Some(true));
 }
 
 #[tokio::test]

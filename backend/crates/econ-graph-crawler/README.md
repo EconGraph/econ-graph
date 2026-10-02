@@ -15,7 +15,11 @@ Data collection for EconGraph. All crawling goes through the Postgres `crawl_que
    each registered source whose last discovery finished more than 7 days ago. A series is due if it was
    never crawled or `last_crawled_at` is older than its frequency's interval: daily 1 day, weekly and
    monthly 7 days, quarterly 14 days, annual/semiannual 30 days, anything else 7 days. Series with
-   `crawl_status = 'failed'` wait twice as long (from their last attempt). Skipped: static catalogs,
+   `crawl_status = 'failed'` wait twice as long (from their last attempt); `'not_found'` (the source
+   confirmed the series doesn't exist) waits ten times as long. A series with no `economic_series`
+   row yet whose first fetch comes back NotFound has its `series_metadata` row deactivated instead
+   (see `persist::deactivate_metadata_conn`), so it isn't retried on a timer at all until catalog
+   discovery lists it again. Skipped: static catalogs,
    sources whose `fetch_series` isn't implemented (WORLD_BANK, BEA), SEC, and disabled `data_sources`.
    Duplicates of active jobs are rejected by the queue's unique index, so no leader election is needed.
 

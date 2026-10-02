@@ -13,15 +13,28 @@
 //! For one source:
 //!
 //! - **discovered**: distinct external ids among its active `series_metadata` rows (catalog
-//!   discovery) and active `economic_series` rows (fetched series).
+//!   discovery) and active `economic_series` rows (fetched series), except a series the source has
+//!   confirmed doesn't exist (`crawl_status = 'not_found'`) and that never got any data (`end_date
+//!   IS NULL`): that series is excluded entirely rather than counted as discovered-but-empty,
+//!   whether it surfaces through its `series_metadata` row, its `economic_series` row, or (the
+//!   usual case once both exist) both. A `series_metadata` row for a series the source confirmed
+//!   NotFound before any `economic_series` row existed is deactivated at crawl time instead (see
+//!   `persist::deactivate_metadata_conn`), so it already drops out of the `is_active` filter below;
+//!   this exclusion additionally covers a `series_metadata` row that's still active alongside a
+//!   `not_found`, dataless `economic_series` row (the series was fetched at least once before
+//!   confirming NotFound). A series that *had* data before later turning up NotFound keeps counting
+//!   (its `end_date` is still set), since its historical data is still real coverage.
 //! - **with data**: active `economic_series` rows with at least one data point (`end_date` is set;
 //!   persistence recomputes it from `data_points`).
 //! - **overdue**: series with data whose last successful crawl (`last_crawled_at`, which a failed
 //!   crawl leaves alone) is older than **twice** its refresh interval
-//!   ([`refresh_interval`](crate::scheduler::refresh_interval), by frequency), or never recorded
-//!   (the scheduler treats that as due too). The scheduler retries
-//!   a failed series only after twice its interval too, so a single failed refresh makes the series
-//!   overdue until the retry succeeds.
+//!   ([`refresh_interval`](crate::scheduler::refresh_interval), by frequency) — **ten times** for a
+//!   `not_found` series, matching the scheduler's own multiplier for it (see
+//!   [`scheduler`](crate::scheduler)) so a series that won't be retried for a while doesn't sit
+//!   "overdue" in the meantime — or never recorded (the scheduler treats that as due too). The
+//!   scheduler also considers a *failed* `fetch_series` attempt (not just a successful crawl), so a
+//!   single failed or not_found refresh can make a series overdue here slightly before the
+//!   scheduler actually retries it.
 //! - **oldest success**: the earliest `last_crawled_at` among its active series.
 //!
 //! Census counts only the ids its adapter can fetch, as the scheduler does.
@@ -102,10 +115,15 @@ static COVERAGE_SQL: LazyLock<String> = LazyLock::new(|| {
              SELECT src.code, sm.external_id::text AS external_id \
              FROM src JOIN series_metadata sm ON sm.source_id = src.ds_id \
              WHERE sm.is_active \
+               AND NOT EXISTS ( \
+                     SELECT 1 FROM economic_series es \
+                     WHERE es.source_id = sm.source_id AND es.external_id = sm.external_id \
+                       AND es.crawl_status = 'not_found' AND es.end_date IS NULL) \
              UNION \
              SELECT src.code, es.external_id::text \
              FROM src JOIN economic_series es ON es.source_id = src.ds_id \
              WHERE es.is_active \
+               AND (es.crawl_status IS DISTINCT FROM 'not_found' OR es.end_date IS NOT NULL) \
          ), discovered AS ( \
              SELECT code, COUNT(*) AS n FROM ids \
              WHERE code <> '{census}' OR external_id ~ $3 \
@@ -115,7 +133,8 @@ static COVERAGE_SQL: LazyLock<String> = LazyLock::new(|| {
                     COUNT(*) FILTER (WHERE es.end_date IS NOT NULL) AS with_data, \
                     COUNT(*) FILTER (WHERE es.end_date IS NOT NULL \
                         AND COALESCE(es.last_crawled_at, '-infinity') \
-                            <= NOW() - 2 * make_interval(days => ({days}))) \
+                            <= NOW() - (CASE WHEN es.crawl_status = 'not_found' THEN 10 ELSE 2 END) \
+                               * make_interval(days => ({days}))) \
                         AS overdue, \
                     MIN(es.last_crawled_at) AS oldest_success \
              FROM src JOIN economic_series es ON es.source_id = src.ds_id \
@@ -421,6 +440,72 @@ mod tests {
         exec(
             &pool,
             "DELETE FROM data_sources WHERE name LIKE 't\\_cov %'",
+        )
+        .await;
+    }
+
+    /// Sets `economic_series.crawl_status` for an already-inserted row.
+    async fn set_crawl_status(
+        pool: &DatabasePool,
+        source_id: Uuid,
+        external_id: &str,
+        status: &str,
+    ) {
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query(
+            "UPDATE economic_series SET crawl_status = $3 \
+             WHERE source_id = $1 AND external_id = $2",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(source_id)
+        .bind::<Text, _>(external_id)
+        .bind::<Text, _>(status)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn not_found_series_excluded_unless_it_has_data() {
+        let Some((url, _guard)) = crate::testkit::lock_test_db("coverage").await else {
+            return;
+        };
+        let pool = econ_graph_core::create_pool(&url).await.expect("pool");
+
+        let a = source(&pool, "t_cov notfound", true).await;
+        // n1: confirmed NotFound, never got data: excluded entirely (ECO-254).
+        series(&pool, a, "n1", "Monthly", false, Some(0.1)).await;
+        set_crawl_status(&pool, a, "n1", "not_found").await;
+        // n2: had data before later turning up NotFound: still counts, its history is real.
+        series(&pool, a, "n2", "Monthly", true, Some(0.1)).await;
+        set_crawl_status(&pool, a, "n2", "not_found").await;
+        // n3: ordinary fetched series with data, for a sanity baseline.
+        series(&pool, a, "n3", "Monthly", true, Some(0.1)).await;
+        // n4: catalog-discovered (series_metadata still active) AND fetched once with no data,
+        // now confirmed NotFound: the series_metadata side must be excluded too, not just the
+        // economic_series side (n1's case), since both rows exist once a series has been fetched
+        // at least once before going NotFound.
+        discovered(&pool, a, "n4", true).await;
+        series(&pool, a, "n4", "Monthly", false, Some(0.1)).await;
+        set_crawl_status(&pool, a, "n4", "not_found").await;
+        // n5: had data, now not_found, crawled 20 days ago (Monthly = 7-day interval): overdue at
+        // twice the interval (14 days) but not at ten times (70), the multiplier a not_found
+        // series actually gets, matching how long the scheduler waits before retrying it.
+        series(&pool, a, "n5", "Monthly", true, Some(20.0)).await;
+        set_crawl_status(&pool, a, "n5", "not_found").await;
+
+        let got = coverage_for(&pool, &[pair("A", "t_cov notfound")], "")
+            .await
+            .unwrap();
+        let a = &got[0];
+        assert_eq!(
+            (a.discovered, a.with_data, a.overdue),
+            (3, 3, 0),
+            "n1 and n4 excluded; n2, n3, n5 counted; n5 not overdue at the not_found multiplier"
+        );
+
+        exec(
+            &pool,
+            "DELETE FROM data_sources WHERE name = 't_cov notfound'",
         )
         .await;
     }
