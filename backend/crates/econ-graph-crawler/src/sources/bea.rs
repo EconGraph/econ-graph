@@ -2834,8 +2834,9 @@ mod tests {
         let mut ctx = test_ctx();
         ctx.pool = db.pool.clone();
         let adapter = BeaAdapter::new(mock.base_url());
+        let nipa_list = table_titles_code_list(&adapter, BeaDataset::Nipa);
         let e = adapter
-            .refresh_table_titles(&ctx, TEST_API_KEY, BeaDataset::Nipa)
+            .refresh_table_titles(&ctx, &nipa_list, BeaDataset::Nipa)
             .await
             .unwrap_err();
         assert_eq!(e.kind(), "transient", "{e}");
