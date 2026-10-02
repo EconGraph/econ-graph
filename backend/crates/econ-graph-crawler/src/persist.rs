@@ -332,12 +332,7 @@ pub async fn set_reference_file_etag(
     Ok(())
 }
 
-/// Merges `labels` (code -> label) into `source`'s dataset `dataset_code`, dimension
-/// `dimension_name`: adds a code that isn't there yet, updates the label of one that is, and
-/// leaves any other existing code alone. Returns whether anything was merged: `false` (nothing
-/// written) when the dataset or dimension isn't declared (the catalog hasn't synced yet, or the
-/// caller mis-named one) or the dimension uses a shared `codelist`. The caller should then not
-/// treat the fetch that produced `labels` as consumed, e.g. by caching its `ETag`.
+/// [`merge_dataset_dimension_code_entries`] for plain `(code, label)` pairs.
 pub async fn merge_dataset_dimension_codes(
     pool: &DatabasePool,
     source: SourceId,
@@ -349,9 +344,16 @@ pub async fn merge_dataset_dimension_codes(
     merge_dataset_dimension_code_entries(pool, source, dataset_code, dimension_name, &entries).await
 }
 
-/// [`merge_dataset_dimension_codes`] for full code entries: a stored code gets the entry's
-/// label, and its `unit` and `description` where the entry has one (a missing one keeps what is
-/// stored).
+/// Merges `entries` into `source`'s dataset `dataset_code`, dimension `dimension_name`: adds a
+/// code that isn't there yet, and for one that is, updates its label plus its `unit` and
+/// `description` where the entry has one (a missing one keeps what is stored). Skips the write
+/// (but still returns `true`) when the merged codes equal what's already stored, so
+/// `updated_at` doesn't move on every refresh of a source whose files carry no `ETag` of their
+/// own for [`reference_file::refresh`](crate::reference_file::refresh) to short-circuit on.
+/// Returns whether anything was merged: `false` (nothing written) when the dataset or dimension
+/// isn't declared (the catalog hasn't synced yet, or the caller mis-named one) or the dimension
+/// uses a shared `codelist`. The caller should then not treat the fetch that produced `entries`
+/// as consumed, e.g. by caching its `ETag`.
 pub async fn merge_dataset_dimension_code_entries(
     pool: &DatabasePool,
     source: SourceId,
@@ -385,7 +387,9 @@ pub async fn merge_dataset_dimension_code_entries(
         if dim.codelist.is_some() {
             return Ok(false);
         }
-        let mut codes = dim.codes.take().unwrap_or_default();
+        let mut before = dim.codes.clone().unwrap_or_default();
+        before.sort_unstable_by(|a, b| a.code.cmp(&b.code));
+        let mut codes = before.clone();
         for entry in entries {
             match codes.iter_mut().find(|c| c.code == entry.code) {
                 Some(existing) => {
@@ -401,6 +405,13 @@ pub async fn merge_dataset_dimension_code_entries(
             }
         }
         codes.sort_unstable_by(|a, b| a.code.cmp(&b.code));
+        if codes == before {
+            // Nothing changed: skip the write so `updated_at` doesn't move on every refresh of a
+            // source (like FHFA's) with no conditional GET to short-circuit on first. The
+            // dataset and dimension were still found (and not codelist-backed), so this is
+            // `true`, not the "nothing to merge into" `false` above.
+            return Ok(true);
+        }
         dim.codes = Some(codes);
         diesel::update(dsl::datasets.filter(dsl::id.eq(id)))
             .set(dsl::dimensions.eq(dims))
