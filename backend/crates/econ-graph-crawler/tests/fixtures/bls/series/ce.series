@@ -1,0 +1,2 @@
+series_id	supersector_code	industry_code	data_type_code	seasonal	series_title	footnote_codes	begin_year	begin_period	end_year	end_period
+CES0000000001	00	00000000	01	S	All employees, thousands, total nonfarm, seasonally adjusted		1939	M01	2024	M03
