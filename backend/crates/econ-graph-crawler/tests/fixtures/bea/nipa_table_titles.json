@@ -1,0 +1,24 @@
+{
+ "BEAAPI": {
+  "Request": {
+   "RequestParam": [
+    {"ParameterName": "USERID", "ParameterValue": "REDACTED"},
+    {"ParameterName": "METHOD", "ParameterValue": "GETPARAMETERVALUES"},
+    {"ParameterName": "DATASETNAME", "ParameterValue": "NIPA"},
+    {"ParameterName": "PARAMETERNAME", "ParameterValue": "TABLENAME"},
+    {"ParameterName": "RESULTFORMAT", "ParameterValue": "JSON"}
+   ]
+  },
+  "Results": {
+   "ParamValue": [
+    {"TableName": "T10101", "Description": "Table 1.1.1. Percent Change From Preceding Period in Real Gross Domestic Product"},
+    {"TableName": "T10105", "Description": "Table 1.1.5. Gross Domestic Product"},
+    {"TableName": "T10106", "Description": "Table 1.1.6. Real Gross Domestic Product, Chained Dollars"},
+    {"TableName": "T20100", "Description": "Table 2.1. Personal Income and Its Disposition"},
+    {"TableName": "T20600", "Description": "Table 2.6. Personal Income and Its Disposition, Monthly"},
+    {"TableName": "T20804", "Description": "Table 2.8.4. Price Indexes for Personal Consumption Expenditures by Major Type of Product"},
+    {"TableName": "T30100", "Description": "Table 3.1. Government Current Receipts and Expenditures"}
+   ]
+  }
+ }
+}

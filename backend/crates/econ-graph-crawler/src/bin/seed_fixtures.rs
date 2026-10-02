@@ -6,15 +6,20 @@
 //! network access. Used by the release end-to-end stack (`frontend/tests/e2e/release/`).
 //!
 //! For each series in the manifest (default `tests/fixtures/e2e-seed.json`) it starts a local
-//! mock upstream that serves only that entry's fixtures, points the source's adapter at it, calls
-//! `fetch_series` and writes the result with [`persist::persist_series`], the worker's own
-//! persistence. An entry with `discovery` fixtures first runs the adapter's catalog discovery
-//! against them and writes the series' catalog row with [`persist::persist_discovered`], as the
-//! worker does before fetching; adapters whose fetch carries no metadata (Census BDS) get their
-//! title, units and frequency from that row. The seed fails when the adapter errors (a request
-//! the manifest doesn't cover gets a 404), when it returns no observations, or when a listed
-//! fixture was never requested, so a stale fixture or a changed adapter shows up here instead of
-//! as an empty page.
+//! mock upstream that serves only that entry's fixtures, points the source's adapter at it, best-
+//! effort refreshes its reference data against the same mock (as the worker does before
+//! `discover`, see `worker.rs`'s `discover`; a source with nothing mounted for it, or no
+//! `code_lists` at all, just keeps whatever it already has) — skipped entirely when any of the
+//! adapter's `code_lists` points outside this entry's mock, since an adapter that hardcodes a
+//! reference-data URL rather than deriving it from its own base URL (BLS, Census) would otherwise
+//! have this reach the real internet — calls `fetch_series` and writes the
+//! result with [`persist::persist_series`], the worker's own persistence. An entry with
+//! `discovery` fixtures first runs the adapter's catalog discovery against them and writes the
+//! series' catalog row with [`persist::persist_discovered`], as the worker does before fetching;
+//! adapters whose fetch carries no metadata (Census BDS) get their title, units and frequency
+//! from that row. The seed fails when the adapter errors (a request the manifest doesn't cover
+//! gets a 404), when it returns no observations, or when a listed fixture was never requested, so
+//! a stale fixture or a changed adapter shows up here instead of as an empty page.
 //!
 //! Runs the database migrations first, so it works on an empty database, then syncs every
 //! adapter's dataset declarations ([`DatasetCatalog::load`] and [`persist::sync_datasets`]) before
@@ -31,6 +36,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Context};
 use clap::Parser;
 use econ_graph_crawler::persist;
+use econ_graph_crawler::reference_file::CodeList;
 use econ_graph_crawler::source::SourceId;
 use econ_graph_crawler::sources::registry_at;
 use econ_graph_crawler::testkit::{test_ctx, MockSource, Reply, Route};
@@ -151,7 +157,9 @@ async fn run(args: Args) -> anyhow::Result<()> {
         .await
         .context("syncing datasets")?;
     // Fake API keys, fast rate limits and short timeouts; nothing here reaches a real upstream.
-    let ctx = test_ctx();
+    // The real pool, not `test_ctx`'s lazy one: `refresh_reference_data` reads and writes it.
+    let mut ctx = test_ctx();
+    ctx.pool = pool.clone();
 
     for entry in &manifest.series {
         let label = format!("{} {}", entry.source, entry.external_id);
@@ -165,6 +173,27 @@ async fn run(args: Args) -> anyhow::Result<()> {
         let adapter = registry_at(&mock.base_url())
             .get(entry.source)
             .ok_or_else(|| anyhow!("{label}: no adapter registered"))?;
+        // Best-effort, same as the worker's own `discover` (worker.rs): a source with no
+        // reference-data route mounted for this entry just keeps whatever it already has rather
+        // than failing the seed. Only when every one of its code lists actually points at this
+        // entry's mock, though: some adapters (BLS, Census) hardcode their reference-data URLs
+        // rather than deriving them from the adapter's own base URL, so `registry_at` can't
+        // redirect those — calling `refresh_reference_data` on them here would reach the real
+        // internet instead of staying within this "no network access" tool.
+        let lists: Vec<CodeList> = adapter.code_lists(&ctx.keys);
+        if lists
+            .iter()
+            .all(|list| list.request_url().starts_with(&mock.base_url()))
+        {
+            if let Err(e) = adapter.refresh_reference_data(&ctx).await {
+                tracing::warn!(series = %label, error = %e, "refresh_reference_data failed");
+            }
+        } else {
+            tracing::debug!(
+                series = %label,
+                "skipping refresh_reference_data: its code lists point outside this entry's mock"
+            );
+        }
         if !entry.discovery.is_empty() {
             let found = adapter
                 .discover(&ctx)

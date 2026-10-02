@@ -80,7 +80,7 @@ export const SEEDED = {
     sourceName: 'Bureau of Economic Analysis (BEA)',
     // BEA's own ids: NIPA table T10105, line 1 (GDP), quarterly.
     externalId: 'bea_nipa/T10105.1.Q',
-    title: 'Gross domestic product (GDP, current dollars, quarterly)',
+    title: 'Gross domestic product (Gross Domestic Product, quarterly)',
     // UNIT_MULT 6 is applied, so values are in dollars, not millions.
     units: 'Current Dollars',
   },

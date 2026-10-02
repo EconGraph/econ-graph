@@ -724,6 +724,32 @@ pub async fn merge_dataset_dimension_code_entries(
     .await
 }
 
+/// Current labels of `source`'s dataset `dataset_code`, dimension `dimension_name`: whatever the
+/// checked-in catalog declared plus anything [`merge_dataset_dimension_codes`] has merged since.
+/// Empty if the dataset or dimension isn't declared, or has no codes yet.
+pub async fn dataset_dimension_labels(
+    pool: &DatabasePool,
+    source: SourceId,
+    dataset_code: &str,
+    dimension_name: &str,
+) -> AppResult<HashMap<String, String>> {
+    use datasets::dsl;
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    let dims: Option<DatasetComponents> = dsl::datasets
+        .filter(dsl::source_id.eq(source_id))
+        .filter(dsl::code.eq(dataset_code))
+        .select(dsl::dimensions)
+        .first(&mut conn)
+        .await
+        .optional()?;
+    Ok(dims
+        .and_then(|d| d.0.into_iter().find(|d| d.name == dimension_name))
+        .and_then(|d| d.codes)
+        .map(|codes| codes.into_iter().map(|c| (c.code, c.label)).collect())
+        .unwrap_or_default())
+}
+
 /// `datasets.id` of each of `source_id`'s datasets named in `codes`. A code without a row means
 /// the catalog was not synced ([`sync_datasets`]): an error, not a silent `NULL`.
 async fn dataset_ids(

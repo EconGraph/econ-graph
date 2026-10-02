@@ -17,6 +17,14 @@ any request.
   `GeoFips`, kept to the US, states and BEA regions. Discovery is all or nothing: any failed
   request or empty table fails it, and a successful one is complete, so the worker retires
   series it no longer lists (dropped lines, and the old made-up ids such as `NIPA_GDP_TOTAL`).
+- **Table titles** are BEA's own, from `GetParameterValues(DatasetName, ParameterName=TableName)`
+  (one request per dataset, conditional `ETag`), not a curated column: `bea_tables.csv` only
+  lists which tables and frequencies we crawl. Titles are kept in an in-process cache the worker
+  fills from this call (so `discover`/`fetch` stay DB-free); until a worker process has run it at
+  least once, every table's title is unknown. `fetch` on an unknown title still fetches real
+  points but omits metadata so a previously stored good title isn't overwritten; `discover`
+  fails outright on an unknown title, rather than persisting the bare table name as every one of
+  that table's series' titles.
 - **Fetch**: `GetData` per NIPA table and frequency, or per Regional table and line with the
   requested areas comma-separated, batched up to 64 series. Always the whole history (`Year`
   `X` or `ALL`), since revisions reach back years. Values are scaled by `UNIT_MULT`;
