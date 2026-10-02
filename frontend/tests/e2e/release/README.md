@@ -5,7 +5,10 @@ the frontend release build against the real backend on Postgres 18. The database
 is seeded from recorded fixtures through the crawler adapters, so nothing
 touches the network and no API keys are needed. This suite is the release exit
 check (release 1 exit criterion 5). The other specs under `tests/e2e/` belong to
-the older configs, which skip this directory.
+the older configs, which skip this directory — except `world-map/world-map-mocked.spec.ts`
+and `world-map/world-atlas.spec.ts` (ECO-282), which only mock GraphQL via `page.route` and
+so also run under the older `global-analysis` and default/mobile configs; everything else
+here needs this suite's seeded backend.
 
 ## Run it
 
@@ -119,6 +122,11 @@ In this mode (`env.ts`):
   values are `SWEPT_SOURCES` in `fixtures.ts`. The world map's three WDI
   indicators are the world-map area's spec.
 - `auth/`: sign-in and annotation privacy (the auth area's spec).
+- `world-map/world-map-mocked.spec.ts` and `world-map/world-atlas.spec.ts`: the
+  map's zoom, projection, click-through, table, tooltip and indicator-refetch
+  behavior, and the outline's load-without-a-network-request and
+  failure/Reload cases, all against mocked GraphQL responses (`page.route`)
+  rather than this suite's seeded backend (ECO-282).
 
 ## Add specs for your area
 
