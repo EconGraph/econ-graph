@@ -66,7 +66,7 @@ impl Default for HttpConfig {
 
 /// Total timeout of a [`HttpFetcher::get_text_conditional`] request: reference files can be
 /// tens of megabytes, too big for the per-request [`HttpConfig::timeout`] on a slow link. Kept
-/// short enough that BLS's eight reference files, one attempt each, fit well inside a discovery
+/// short enough that BLS's nine reference files, one attempt each, fit well inside a discovery
 /// job's stuck threshold (`CRAWLER_STUCK_AFTER_SECS`, 30 minutes by default).
 pub const REFERENCE_FILE_TIMEOUT: Duration = Duration::from_secs(120);
 
