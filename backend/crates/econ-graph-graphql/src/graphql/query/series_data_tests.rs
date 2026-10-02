@@ -73,16 +73,50 @@ async fn log_difference_transformation_compares_consecutive_points() {
 }
 
 #[tokio::test]
-async fn percent_change_without_a_base_keeps_every_point() {
+async fn percent_change_without_any_usable_base_keeps_every_point() {
     let points = vec![
         point(day(2024, 1, 1), None),
-        point(day(2024, 2, 1), Some("110")),
+        point(day(2024, 2, 1), None),
+        point(day(2024, 3, 1), Some("0")),
     ];
     let out = apply_data_transformation(points, DataTransformationType::PercentChange)
         .await
         .unwrap();
-    assert_eq!(out.len(), 2);
+    assert_eq!(out.len(), 3);
     assert!(out.iter().all(|p| p.value.is_none()));
+}
+
+#[tokio::test]
+async fn percent_change_skips_a_null_first_point_for_the_base() {
+    let points = vec![
+        point(day(2024, 1, 1), None),
+        point(day(2024, 2, 1), Some("100")),
+        point(day(2024, 3, 1), Some("110")),
+    ];
+    let out = apply_data_transformation(points, DataTransformationType::PercentChange)
+        .await
+        .unwrap();
+    let values: Vec<_> = out.iter().map(|p| p.value.clone()).collect();
+    assert_eq!(values, vec![None, Some(dec("0")), Some(dec("10"))]);
+}
+
+#[tokio::test]
+async fn percent_change_skips_a_zero_first_point_for_the_base() {
+    let points = vec![
+        point(day(2024, 1, 1), Some("0")),
+        point(day(2024, 2, 1), Some("50")),
+        point(day(2024, 3, 1), Some("75")),
+    ];
+    let out = apply_data_transformation(points, DataTransformationType::PercentChange)
+        .await
+        .unwrap();
+    let values: Vec<_> = out.iter().map(|p| p.value.clone()).collect();
+    // The zero first point still gets a value (compared against the real base, 50), unlike a
+    // null point which has nothing to transform.
+    assert_eq!(
+        values,
+        vec![Some(dec("-100")), Some(dec("0")), Some(dec("50"))]
+    );
 }
 
 fn value(node: &Value) -> BigDecimal {
@@ -391,6 +425,49 @@ async fn transformed_pages_match_the_whole_series_across_revisions() {
             let (paged, _) = db.all_pages(series, &args, first).await;
             assert_eq!(paged, whole, "{transformation}, first: {first}");
         }
+    }
+    db.finish().await;
+}
+
+#[tokio::test]
+async fn percent_change_paging_skips_leading_null_and_zero_points_consistently() {
+    let Some(db) = Fixture::new().await else {
+        return;
+    };
+    // Jan is null and Feb is zero, so Mar (10) is the real base; Apr..Oct keep climbing by 10.
+    let series = db
+        .series(
+            "Monthly",
+            "SELECT (DATE '2020-01-01' + make_interval(months => d))::date, \
+                    CASE d WHEN 0 THEN NULL WHEN 1 THEN 0 ELSE (d - 1) * 10 END::numeric, \
+                    (DATE '2020-01-01' + make_interval(months => d))::date, true \
+             FROM generate_series(0, 7) d",
+        )
+        .await;
+
+    let (whole, _) = db
+        .all_pages(series, ", transformation: PERCENT_CHANGE", 1000)
+        .await;
+    assert_eq!(whole.len(), 8);
+    assert_eq!(whole[0]["value"], Value::Null); // null point: nothing to transform
+    assert_eq!(value(&whole[1]).round(0), dec("-100")); // zero vs. base 10
+    assert_eq!(value(&whole[2]).round(0), dec("0")); // the base itself
+    assert_eq!(value(&whole[7]).round(0), dec("500")); // (60-10)/10 * 100
+
+    // Every page size that keeps Jan..Mar together on the first page gives the same values,
+    // including pages whose context (loaded separately per page) must itself skip the leading
+    // null/zero to find the real base.
+    //
+    // A page boundary that *splits* the leading null/zero run from the base it precedes (e.g.
+    // `first: 1`) is a known gap this fix doesn't close: a page seen before the base is found
+    // has no later point to borrow one from, so it renders those points as having no usable
+    // base yet, unlike a single whole-series read. That needs look-ahead paging context, which
+    // is out of scope here; see the PR description.
+    for first in [3, 4, 8] {
+        let (paged, _) = db
+            .all_pages(series, ", transformation: PERCENT_CHANGE", first)
+            .await;
+        assert_eq!(paged, whole, "first: {first}");
     }
     db.finish().await;
 }
