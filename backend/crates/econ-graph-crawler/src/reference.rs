@@ -10,8 +10,8 @@
 //! `CRAWLER_DATA_DIR` to it.
 //!
 //! Each file is read once per process and cached, including a failure to read it, so the
-//! worker checks them at startup ([`us_states`], [`bls_series`], [`fred_series`]) rather than on
-//! its first job.
+//! worker checks them at startup ([`bls_series`], [`fred_series`], [`wdi_indicators`]) rather
+//! than on its first job.
 //!
 //! Dataset definitions ([`datasets`]) are cached the same way; the worker loads them at startup
 //! through [`DatasetCatalog::load`](crate::dataset::DatasetCatalog::load).
@@ -27,34 +27,17 @@ use crate::source::SourceId;
 /// Environment variable naming the reference data directory.
 pub const DATA_DIR_ENV: &str = "CRAWLER_DATA_DIR";
 
-/// File name of the U.S. states table in the data directory.
-pub const US_STATES_FILE: &str = "us_states.csv";
-
 /// File name of the World Development Indicators list in the data directory.
 pub const WDI_INDICATORS_FILE: &str = "wdi_indicators.csv";
 
 /// Directory under [`data_dir`] holding one `<source>.toml` of dataset definitions per source.
 pub const DATASETS_DIR: &str = "datasets";
 
-/// Rows the states table must hold: the 50 states and DC.
-pub const US_STATE_COUNT: usize = 51;
-
 /// File name of the BLS series list in the data directory.
 pub const BLS_SERIES_FILE: &str = "bls_series.csv";
 
 /// File name of the curated FRED series list in the data directory.
 pub const FRED_SERIES_FILE: &str = "fred_series.csv";
-
-/// A U.S. state or the District of Columbia.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UsState {
-    /// Two-digit state FIPS code, e.g. `06`.
-    pub fips: String,
-    /// USPS postal code, e.g. `CA`.
-    pub postal: String,
-    /// Name, e.g. `California`.
-    pub name: String,
-}
 
 /// A BLS series the crawler discovers and fetches.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,14 +62,15 @@ pub fn data_dir() -> PathBuf {
         )
 }
 
-/// One World Development Indicator the World Bank adapter crawls.
+/// One World Development Indicator the World Bank adapter crawls. Its name and description are
+/// not shipped here: [`crate::sources::world_bank`]'s
+/// [`code_lists`](crate::adapter::SourceAdapter::code_lists) fetches them, one indicator at a
+/// time, from the World Bank's own `/indicator/{id}` endpoint.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WdiIndicator {
     /// Indicator code, e.g. `NY.GDP.PCAP.CD`.
     pub id: String,
-    /// Name, e.g. `GDP per capita (current US$)`.
-    pub name: String,
     /// Unit stored as each series' units, e.g. `current US$`.
     pub unit: String,
 }
@@ -110,17 +94,17 @@ fn load_wdi_indicators(path: &Path) -> Result<Vec<WdiIndicator>, String> {
     parse_wdi_indicators(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Parses `id,name,unit` rows after a header line (`#` comment lines skipped; fields may be
-/// quoted) and checks them.
+/// Parses `id,unit` rows after a header line (`#` comment lines skipped; fields may be quoted)
+/// and checks them.
 fn parse_wdi_indicators(text: &str) -> Result<Vec<WdiIndicator>, String> {
     let mut reader = csv::ReaderBuilder::new()
         .comment(Some(b'#'))
         .trim(csv::Trim::All)
         .from_reader(text.as_bytes());
     let header = reader.headers().map_err(|e| e.to_string())?.clone();
-    if header.iter().ne(["id", "name", "unit"]) {
+    if header.iter().ne(["id", "unit"]) {
         return Err(format!(
-            "expected header id,name,unit, got {}",
+            "expected header id,unit, got {}",
             header.iter().collect::<Vec<_>>().join(",")
         ));
     }
@@ -132,8 +116,8 @@ fn parse_wdi_indicators(text: &str) -> Result<Vec<WdiIndicator>, String> {
         if id.is_empty() || id.contains('/') || id.contains(char::is_whitespace) {
             return Err(format!("indicator id {id:?} is empty or has '/' or spaces"));
         }
-        if row.name.is_empty() || row.unit.is_empty() {
-            return Err(format!("indicator {id}: empty name or unit"));
+        if row.unit.is_empty() {
+            return Err(format!("indicator {id}: empty unit"));
         }
         if !seen.insert(id.clone()) {
             return Err(format!("indicator {id} is listed twice"));
@@ -146,18 +130,6 @@ fn parse_wdi_indicators(text: &str) -> Result<Vec<WdiIndicator>, String> {
     Ok(out)
 }
 
-/// The states and DC from `us_states.csv` in [`data_dir`], read on first use and cached.
-///
-/// A missing, malformed or incomplete file (not [`US_STATE_COUNT`] rows) is a `Permanent` error,
-/// with the path in the message.
-pub fn us_states() -> Result<&'static [UsState], CrawlError> {
-    static STATES: OnceLock<Result<Vec<UsState>, String>> = OnceLock::new();
-    STATES
-        .get_or_init(|| load_us_states(&data_dir().join(US_STATES_FILE)))
-        .as_deref()
-        .map_err(|e| CrawlError::Permanent(e.clone()))
-}
-
 /// The dataset definitions file for `source`: `datasets/<source>.toml` in [`data_dir`], where
 /// `<source>` is the lowercase [`SourceId::as_str`] (e.g. `world_bank.toml`).
 pub fn datasets_file(source: SourceId) -> PathBuf {
@@ -167,7 +139,7 @@ pub fn datasets_file(source: SourceId) -> PathBuf {
 }
 
 /// `source`'s dataset definitions from [`datasets_file`], parsed and validated, read on first use
-/// and cached (including a failure) like [`us_states`].
+/// and cached (including a failure) like [`bls_series`].
 ///
 /// A missing or invalid file is a `Permanent` error, with the path in the message.
 pub fn datasets(source: SourceId) -> Result<&'static [DatasetDef], CrawlError> {
@@ -204,15 +176,6 @@ pub(crate) fn load_datasets(path: &Path) -> Result<Vec<DatasetDef>, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| format!("reading {}: {e} (set {DATA_DIR_ENV})", path.display()))?;
     parse_dataset_file(&text).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-/// Reads, parses and checks a states table.
-fn load_us_states(path: &Path) -> Result<Vec<UsState>, String> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| format!("reading {}: {e} (set {DATA_DIR_ENV})", path.display()))?;
-    parse_us_states(&text)
-        .and_then(check_complete)
-        .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The BLS series from `bls_series.csv` in [`data_dir`], read on first use and cached.
@@ -289,70 +252,6 @@ fn parse_bls_series(text: &str) -> Result<Vec<BlsSeries>, String> {
     Ok(series)
 }
 
-/// Rejects a table without exactly [`US_STATE_COUNT`] rows, so a truncated file cannot silently
-/// drop states from discovery and scheduling.
-fn check_complete(states: Vec<UsState>) -> Result<Vec<UsState>, String> {
-    if states.len() == US_STATE_COUNT {
-        Ok(states)
-    } else {
-        Err(format!(
-            "expected {US_STATE_COUNT} rows (50 states and DC), got {}",
-            states.len()
-        ))
-    }
-}
-
-/// Parses `fips,postal,name` rows after a header line; blank lines and `#` comments are skipped.
-fn parse_us_states(text: &str) -> Result<Vec<UsState>, String> {
-    let mut lines = text
-        .lines()
-        .enumerate()
-        .map(|(i, l)| (i + 1, l.trim()))
-        .filter(|(_, l)| !l.is_empty() && !l.starts_with('#'));
-    match lines.next() {
-        Some((_, "fips,postal,name")) => {}
-        Some((n, other)) => {
-            return Err(format!(
-                "line {n}: expected header fips,postal,name, got {other:?}"
-            ))
-        }
-        None => return Err("no header line".into()),
-    }
-    let mut states = Vec::new();
-    let (mut fips_seen, mut postal_seen) = (HashSet::new(), HashSet::new());
-    for (n, line) in lines {
-        let mut cols = line.splitn(3, ',').map(str::trim);
-        let (Some(fips), Some(postal), Some(name)) = (cols.next(), cols.next(), cols.next()) else {
-            return Err(format!("line {n}: expected fips,postal,name, got {line:?}"));
-        };
-        if fips.len() != 2 || !fips.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(format!("line {n}: FIPS code {fips:?} is not two digits"));
-        }
-        if postal.len() != 2 || !postal.bytes().all(|b| b.is_ascii_uppercase()) {
-            return Err(format!(
-                "line {n}: postal code {postal:?} is not two capital letters"
-            ));
-        }
-        if name.is_empty() {
-            return Err(format!("line {n}: empty name"));
-        }
-        if !fips_seen.insert(fips.to_string()) || !postal_seen.insert(postal.to_string()) {
-            return Err(format!(
-                "line {n}: duplicate FIPS or postal code ({fips}, {postal})"
-            ));
-        }
-        states.push(UsState {
-            fips: fips.into(),
-            postal: postal.into(),
-            name: name.into(),
-        });
-    }
-    if states.is_empty() {
-        return Err("no states".into());
-    }
-    Ok(states)
-}
-
 /// The curated FRED series ids from `fred_series.csv` in [`data_dir`], read on first use and
 /// cached. Replaces FRED's `/series/search` discovery (see the file's own header comment for
 /// why): the FRED adapter's `discover()` looks up each of these ids' live metadata instead of
@@ -417,21 +316,6 @@ fn parse_fred_series(text: &str) -> Result<Vec<String>, String> {
 mod tests {
     use super::*;
 
-    /// The shipped file parses and holds the 50 states and DC.
-    #[test]
-    fn shipped_states_file_is_valid() {
-        let states = load_us_states(
-            &Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("data")
-                .join(US_STATES_FILE),
-        )
-        .unwrap();
-        assert_eq!(states.len(), US_STATE_COUNT);
-        let ca = states.iter().find(|s| s.postal == "CA").unwrap();
-        assert_eq!((ca.fips.as_str(), ca.name.as_str()), ("06", "California"));
-        assert!(states.iter().any(|s| s.fips == "11" && s.postal == "DC"));
-    }
-
     /// The shipped indicator list parses and holds the curated set (about 50).
     #[test]
     fn shipped_wdi_indicators_file_is_valid() {
@@ -443,78 +327,34 @@ mod tests {
         .unwrap();
         assert!((45..=60).contains(&list.len()), "{}", list.len());
         let gdp = list.iter().find(|i| i.id == "NY.GDP.PCAP.CD").unwrap();
-        assert_eq!(gdp.name, "GDP per capita (current US$)");
         assert_eq!(gdp.unit, "current US$");
-        // Quoted names keep their commas.
-        assert!(list.iter().any(|i| i.name == "Population, total"));
     }
 
     #[test]
     fn rejects_malformed_wdi_indicators() {
         for (text, needle) in [
-            ("code,name,unit\n", "expected header"),
-            ("id,name,unit\n", "no indicators"),
-            ("id,name,unit\na/b,X,u\n", "'/'"),
-            ("id,name,unit\nA,X,\n", "empty name or unit"),
-            ("id,name,unit\nA,X,u\nA,Y,u\n", "twice"),
-            ("id,name,unit\nA,X\n", "found record with 2 fields"),
+            ("code,unit\n", "expected header"),
+            ("id,unit\n", "no indicators"),
+            ("id,unit\na/b,u\n", "'/'"),
+            ("id,unit\nA,\n", "empty unit"),
+            ("id,unit\nA,u\nA,u\n", "twice"),
+            ("id,unit\nA,u,X\n", "found record with 3 fields"),
         ] {
             let e = parse_wdi_indicators(text).unwrap_err();
             assert!(e.contains(needle), "{text:?}: {e}");
         }
-        let ok = parse_wdi_indicators("# c\nid,name,unit\n A ,\"B, c\", u \n").unwrap();
+        let ok = parse_wdi_indicators("# c\nid,unit\n A , u \n").unwrap();
         assert_eq!(
             ok,
             [WdiIndicator {
                 id: "A".into(),
-                name: "B, c".into(),
                 unit: "u".into(),
             }]
         );
     }
 
-    /// Comments and blank lines are skipped; names may contain spaces.
-    #[test]
-    fn parses_rows_after_header() {
-        let s = parse_us_states("# c\n\nfips,postal,name\n11,DC,District of Columbia\n").unwrap();
-        assert_eq!(
-            s,
-            [UsState {
-                fips: "11".into(),
-                postal: "DC".into(),
-                name: "District of Columbia".into(),
-            }]
-        );
-    }
-
-    /// Malformed files are rejected with the offending line.
-    #[test]
-    fn rejects_malformed_files() {
-        for (text, needle) in [
-            ("", "no header"),
-            ("name,fips\n", "expected header"),
-            ("fips,postal,name\n", "no states"),
-            ("fips,postal,name\n6,CA,California\n", "line 2"),
-            ("fips,postal,name\n06,ca,California\n", "postal"),
-            ("fips,postal,name\n06,CA\n", "expected fips,postal,name"),
-            ("fips,postal,name\n06,CA,\n", "empty name"),
-            ("fips,postal,name\n06,CA,California\n06,CB,X\n", "duplicate"),
-        ] {
-            let e = parse_us_states(text).unwrap_err();
-            assert!(e.contains(needle), "{text:?}: {e}");
-        }
-    }
-
-    /// A table missing any state is rejected, even if every row is valid.
-    #[test]
-    fn rejects_incomplete_tables() {
-        let one = parse_us_states("fips,postal,name\n06,CA,California\n").unwrap();
-        let e = check_complete(one).unwrap_err();
-        assert!(e.contains("expected 51 rows") && e.contains("got 1"), "{e}");
-    }
-
     /// The shipped BLS list parses, covers every survey the adapter promises, and has a LAUS
-    /// unemployment rate for every state in the shipped states table.
+    /// unemployment rate for every state and DC (the Census state file fixture).
     #[test]
     fn shipped_bls_series_file_is_valid() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
@@ -526,7 +366,10 @@ mod tests {
                 "no {prefix} series"
             );
         }
-        let states = load_us_states(&dir.join(US_STATES_FILE)).unwrap();
+        let states = crate::sources::census::parse_state_file(include_str!(
+            "../tests/fixtures/census/state.txt"
+        ))
+        .unwrap();
         for st in &states {
             for id in [
                 format!("LASST{}0000000000003", st.fips),
@@ -626,16 +469,6 @@ mod tests {
         let e = load_datasets(Path::new("/nonexistent/fred.toml")).unwrap_err();
         assert!(
             e.contains("/nonexistent/fred.toml") && e.contains(DATA_DIR_ENV),
-            "{e}"
-        );
-    }
-
-    /// A missing file names its path and the environment variable.
-    #[test]
-    fn missing_file_names_path_and_env() {
-        let e = load_us_states(Path::new("/nonexistent/us_states.csv")).unwrap_err();
-        assert!(
-            e.contains("/nonexistent/us_states.csv") && e.contains(DATA_DIR_ENV),
             "{e}"
         );
     }

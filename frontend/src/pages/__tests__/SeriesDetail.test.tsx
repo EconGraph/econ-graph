@@ -203,7 +203,7 @@ describe('SeriesDetail', () => {
     ['Year-over-Year', 'YEAR_OVER_YEAR'],
     ['Quarter-over-Quarter', 'QUARTER_OVER_QUARTER'],
     ['Month-over-Month', 'MONTH_OVER_MONTH'],
-    ['Change since first observation', 'PERCENT_CHANGE'],
+    ['Change since first available value', 'PERCENT_CHANGE'],
     ['Log difference', 'LOG_DIFFERENCE'],
   ])('choosing %s sends %s to the backend', async (label, enumValue) => {
     serve({ NONE: unrateLevels, [enumValue]: unrateYearOverYear });

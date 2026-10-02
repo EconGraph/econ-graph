@@ -44,8 +44,8 @@ export const SEEDED = {
       },
       { label: 'Month-over-Month', description: 'Month-over-Month % Change', latestShown: null },
       {
-        label: 'Change since first observation',
-        description: '% Change since First Observation',
+        label: 'Change since first available value',
+        description: '% Change since First Available Value',
         latestShown: { date: 'Apr 1, 2026', value: '5.30' },
       },
       // Last, back to levels.
@@ -212,7 +212,7 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
       'Year-over-Year': shown('Apr 1, 2026', '5.30'),
       'Quarter-over-Quarter': shown('Apr 1, 2026', '1.20'),
       'Month-over-Month': null,
-      'Change since first observation': shown('Apr 1, 2026', '5.30'),
+      'Change since first available value': shown('Apr 1, 2026', '5.30'),
       // ln(32101.6 / 31722.514)
       'Log difference': shown('Apr 1, 2026', '0.01'),
     },
@@ -229,9 +229,9 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
       // 312.332 / 306.746 (December)
       'Quarter-over-Quarter': shown('Mar 1, 2024', '1.82'),
       'Month-over-Month': shown('Mar 1, 2024', '0.65'),
-      // The base is the first observation even when it is missing, as here (2023-11), so there
-      // is no value; seriesData's percent_change_without_a_base_keeps_every_point pins that.
-      'Change since first observation': null,
+      // The first observation (2023-11) is missing, so the base is the next usable value,
+      // December's 306.746: 312.332 / 306.746, the same comparison as QoQ here.
+      'Change since first available value': shown('Mar 1, 2024', '1.82'),
       'Log difference': shown('Mar 1, 2024', '0.01'),
     },
     liveNotEnough: [],
@@ -249,7 +249,7 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
       'Quarter-over-Quarter': null,
       'Month-over-Month': null,
       // 7324017 / 7106316 (2019)
-      'Change since first observation': shown('Jan 1, 2022', '3.06'),
+      'Change since first available value': shown('Jan 1, 2022', '3.06'),
       'Log difference': shown('Jan 1, 2020', '0.01'),
     },
     liveNotEnough: ANNUAL_NOT_ENOUGH,
@@ -268,7 +268,7 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
       'Year-over-Year': null,
       'Quarter-over-Quarter': shown('Oct 1, 2024', '0.00'),
       'Month-over-Month': null,
-      'Change since first observation': shown('Oct 1, 2024', '0.00'),
+      'Change since first available value': shown('Oct 1, 2024', '0.00'),
       'Log difference': shown('Oct 1, 2024', '0.00'),
     },
     liveNotEnough: ['Month-over-Month'],
@@ -288,7 +288,7 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
       // 209.93 / 208.70
       'Month-over-Month': shown('Mar 1, 2025', '0.59'),
       // 209.93 / 203.78 (October)
-      'Change since first observation': shown('Mar 1, 2025', '3.02'),
+      'Change since first available value': shown('Mar 1, 2025', '3.02'),
       'Log difference': shown('Mar 1, 2025', '0.01'),
     },
     liveNotEnough: [],
@@ -306,7 +306,7 @@ export const SWEPT_SOURCES: readonly SweptSeries[] = [
       'Quarter-over-Quarter': null,
       'Month-over-Month': null,
       // 82769.4 / 71055.9 (2021)
-      'Change since first observation': shown('Jan 1, 2023', '16.48'),
+      'Change since first available value': shown('Jan 1, 2023', '16.48'),
       // ln(82769.4 / 77860.9)
       'Log difference': shown('Jan 1, 2023', '0.06'),
     },

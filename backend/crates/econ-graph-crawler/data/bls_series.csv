@@ -3,7 +3,7 @@
 # contain commas; no other column may. Lines starting with # are comments.
 # The crawler looks for this file in $CRAWLER_DATA_DIR (the crawler-worker image sets /app/data).
 # Covers headline CPI-U (CU), CES payrolls and earnings (CE), CPS labor force (LN) and
-# LAUS state unemployment rates and labor force (LA). LAUS rows follow us_states.csv.
+# LAUS state unemployment rates and labor force (LA). LAUS rows cover the 50 states and DC.
 series_id,frequency,units,title
 CUSR0000SA0,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: All Items in U.S. City Average (Seasonally Adjusted)
 CUSR0000SA0L1E,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: All Items Less Food and Energy in U.S. City Average (Seasonally Adjusted)

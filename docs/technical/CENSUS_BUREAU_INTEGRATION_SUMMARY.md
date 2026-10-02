@@ -36,8 +36,9 @@ series:
 - `us`: one national series per variable, `bds/national..{VARIABLE}` (e.g. `bds/national..ESTAB`);
 - `state`: one series per state and DC, `bds/state.{FIPS}.{VARIABLE}` with the two-digit
   state FIPS code (e.g. `bds/state.06.ESTAB` for California), 51 per variable. The states
-  come from `backend/crates/econ-graph-crawler/data/us_states.csv`, which the crawler reads at
-  runtime from `CRAWLER_DATA_DIR` (shared with the FHFA adapter).
+  come from the Census Bureau's state FIPS file
+  (<https://www2.census.gov/geo/docs/reference/state.txt>), which the crawler downloads on every
+  crawl; FIPS codes `01` to `56` are the states and DC, and the territories are dropped.
 
 Finer levels (county, metro area) have thousands of areas and are skipped.
 
