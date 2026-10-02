@@ -332,12 +332,123 @@ pub async fn set_reference_file_etag(
     Ok(())
 }
 
-/// Merges `labels` (code -> label) into `source`'s dataset `dataset_code`, dimension
-/// `dimension_name`: adds a code that isn't there yet, updates the label of one that is, and
-/// leaves any other existing code alone. Returns whether anything was merged: `false` (nothing
-/// written) when the dataset or dimension isn't declared (the catalog hasn't synced yet, or the
-/// caller mis-named one) or the dimension uses a shared `codelist`. The caller should then not
-/// treat the fetch that produced `labels` as consumed, e.g. by caching its `ETag`.
+/// What [`reference_file_cache`] holds for one of a source's reference files.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ReferenceFileCache {
+    /// The validator to send next time (see [`reference_file_etag`]).
+    pub etag: Option<String>,
+    /// What the adapter kept from the copy that `etag` names ([`set_reference_file_payload`]),
+    /// for files whose contents aren't merged into another table. `None` if never stored.
+    pub payload: Option<serde_json::Value>,
+}
+
+/// The cached `ETag` and payload of `url`, one of `source`'s reference files. Both `None` if it
+/// was never fetched.
+pub async fn reference_file_cache(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+) -> AppResult<ReferenceFileCache> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    #[derive(QueryableByName)]
+    struct Row {
+        #[diesel(sql_type = Nullable<Text>)]
+        etag: Option<String>,
+        #[diesel(sql_type = Nullable<Jsonb>)]
+        payload: Option<serde_json::Value>,
+    }
+    let row: Option<Row> = diesel::sql_query(
+        "SELECT etag, payload FROM reference_file_cache WHERE source_id = $1 AND url = $2",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .get_result(&mut conn)
+    .await
+    .optional()?;
+    Ok(row
+        .map(|r| ReferenceFileCache {
+            etag: r.etag,
+            payload: r.payload,
+        })
+        .unwrap_or_default())
+}
+
+/// Stores what an adapter kept from a copy of `url` (`payload`), for files whose contents aren't
+/// merged into another table. Called from inside [`crate::reference_file::refresh`]'s apply
+/// step, which then stores that copy's `ETag` ([`set_reference_file_etag`], which leaves the
+/// payload alone), so a later `304` pairs with the payload it validates. A new row gets no
+/// `ETag` until then.
+pub async fn set_reference_file_payload(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+    payload: &serde_json::Value,
+) -> AppResult<()> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    diesel::sql_query(
+        "INSERT INTO reference_file_cache (source_id, url, etag, payload, fetched_at) \
+             VALUES ($1, $2, NULL, $3, NOW()) \
+         ON CONFLICT (source_id, url) DO UPDATE SET payload = EXCLUDED.payload",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .bind::<Jsonb, _>(payload)
+    .execute(&mut conn)
+    .await?;
+    Ok(())
+}
+
+/// Forgets the stored `ETag` of `url` (if it has a row), so the next conditional GET downloads
+/// the file again. The row (and its payload) stays, so a seed migration still sees the file as
+/// present and leaves it alone.
+pub async fn clear_reference_file_etag(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+) -> AppResult<()> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    diesel::sql_query(
+        "UPDATE reference_file_cache SET etag = NULL WHERE source_id = $1 AND url = $2",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .execute(&mut conn)
+    .await?;
+    Ok(())
+}
+
+/// The codes of `source`'s dataset `dataset_code`, dimension `dimension_name`, by code, as stored
+/// (the dataset file's codes plus any [`merge_dataset_dimension_codes`] added). Empty if the
+/// dataset or dimension isn't stored or has no codes.
+pub async fn dataset_dimension_codes(
+    pool: &DatabasePool,
+    source: SourceId,
+    dataset_code: &str,
+    dimension_name: &str,
+) -> AppResult<BTreeMap<String, Code>> {
+    use datasets::dsl;
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    let dims: Option<DatasetComponents> = dsl::datasets
+        .filter(dsl::source_id.eq(source_id))
+        .filter(dsl::code.eq(dataset_code))
+        .select(dsl::dimensions)
+        .first(&mut conn)
+        .await
+        .optional()?;
+    Ok(dims
+        .into_iter()
+        .flat_map(|d| d.0)
+        .filter(|d| d.name == dimension_name)
+        .flat_map(|d| d.codes.unwrap_or_default())
+        .map(|c| (c.code.clone(), c))
+        .collect())
+}
+
+/// [`merge_dataset_dimension_code_entries`] for plain `(code, label)` pairs.
 pub async fn merge_dataset_dimension_codes(
     pool: &DatabasePool,
     source: SourceId,
@@ -349,9 +460,16 @@ pub async fn merge_dataset_dimension_codes(
     merge_dataset_dimension_code_entries(pool, source, dataset_code, dimension_name, &entries).await
 }
 
-/// [`merge_dataset_dimension_codes`] for full code entries: a stored code gets the entry's
-/// label, and its `unit` and `description` where the entry has one (a missing one keeps what is
-/// stored).
+/// Merges `entries` into `source`'s dataset `dataset_code`, dimension `dimension_name`: adds a
+/// code that isn't there yet, and for one that is, updates its label plus its `unit` and
+/// `description` where the entry has one (a missing one keeps what is stored). Skips the write
+/// (but still returns `true`) when the merged codes equal what's already stored, so
+/// `updated_at` doesn't move on every refresh of a source whose files carry no `ETag` of their
+/// own for [`reference_file::refresh`](crate::reference_file::refresh) to short-circuit on.
+/// Returns whether anything was merged: `false` (nothing written) when the dataset or dimension
+/// isn't declared (the catalog hasn't synced yet, or the caller mis-named one) or the dimension
+/// uses a shared `codelist`. The caller should then not treat the fetch that produced `entries`
+/// as consumed, e.g. by caching its `ETag`.
 pub async fn merge_dataset_dimension_code_entries(
     pool: &DatabasePool,
     source: SourceId,
@@ -385,7 +503,9 @@ pub async fn merge_dataset_dimension_code_entries(
         if dim.codelist.is_some() {
             return Ok(false);
         }
-        let mut codes = dim.codes.take().unwrap_or_default();
+        let mut before = dim.codes.clone().unwrap_or_default();
+        before.sort_unstable_by(|a, b| a.code.cmp(&b.code));
+        let mut codes = before.clone();
         for entry in entries {
             match codes.iter_mut().find(|c| c.code == entry.code) {
                 Some(existing) => {
@@ -401,6 +521,13 @@ pub async fn merge_dataset_dimension_code_entries(
             }
         }
         codes.sort_unstable_by(|a, b| a.code.cmp(&b.code));
+        if codes == before {
+            // Nothing changed: skip the write so `updated_at` doesn't move on every refresh of a
+            // source (like FHFA's) with no conditional GET to short-circuit on first. The
+            // dataset and dimension were still found (and not codelist-backed), so this is
+            // `true`, not the "nothing to merge into" `false` above.
+            return Ok(true);
+        }
         dim.codes = Some(codes);
         diesel::update(dsl::datasets.filter(dsl::id.eq(id)))
             .set(dsl::dimensions.eq(dims))
@@ -1044,5 +1171,7 @@ mod tests {
 
 #[cfg(test)]
 mod reference_data_tests;
+#[cfg(test)]
+mod release_sources_tests;
 #[cfg(test)]
 pub(crate) mod stable_id_tests;

@@ -32,6 +32,21 @@ fn ids(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
 
+/// Seeds `adapter`'s in-process indicator name cache, as `refresh_reference_data` would have,
+/// for tests that check a built title without exercising the fetch itself.
+fn with_indicator_names(adapter: &WorldBankAdapter, entries: &[(&str, &str)]) {
+    let mut cache = adapter.indicator_meta.lock().unwrap();
+    for (id, name) in entries {
+        cache.insert(
+            (*id).to_string(),
+            IndicatorMeta {
+                name: (*name).to_string(),
+                description: None,
+            },
+        );
+    }
+}
+
 /// Every other request answers with the API's in-body "Invalid value" error.
 async fn mount_invalid_fallback(mock: &MockSource) {
     mock.server()
@@ -108,28 +123,18 @@ fn periods() {
     }
 }
 
-/// The indicator list and the dataset file's indicator codes agree.
+/// The dataset file declares the `indicator` dimension with no inline codes: names and
+/// descriptions come from the crawl (`refresh_reference_data`), not this file.
 #[test]
-fn dataset_file_lists_every_indicator() {
+fn dataset_file_declares_indicator_dimension_with_no_shipped_codes() {
     let def = wdi_def().unwrap();
-    let codes = def
+    let indicator_dim = def
         .dimensions
         .iter()
         .find(|d| d.name == "indicator")
-        .unwrap()
-        .codes
-        .as_ref()
         .unwrap();
-    let list = reference::wdi_indicators().unwrap();
-    let from_list: BTreeMap<&str, &str> = list
-        .iter()
-        .map(|i| (i.id.as_str(), i.name.as_str()))
-        .collect();
-    let from_file: BTreeMap<&str, &str> = codes
-        .iter()
-        .map(|c| (c.code.as_str(), c.label.as_str()))
-        .collect();
-    assert_eq!(from_list, from_file);
+    assert!(indicator_dim.codes.is_none());
+    assert!(!reference::wdi_indicators().unwrap().is_empty());
     assert_eq!(
         def.dimension_names().collect::<Vec<_>>(),
         ["indicator", "area"]
@@ -210,7 +215,12 @@ async fn fetch_batch_one_request_for_every_area() {
         "wdi/XX.NOPE.USA",
         "NY.GDP.PCAP.CD",
     ]);
-    let out = WorldBankAdapter::new(mock.base_url())
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    with_indicator_names(
+        &adapter,
+        &[("NY.GDP.PCAP.CD", "GDP per capita (current US$)")],
+    );
+    let out = adapter
         .fetch_batch(&test_ctx(), &requested, Some(date(2023, 1)))
         .await
         .unwrap();
@@ -432,10 +442,16 @@ async fn discover_lists_areas_with_values_indicator_by_indicator() {
             .await;
     }
     mount_invalid_fallback(&mock).await;
-    let found = WorldBankAdapter::new(mock.base_url())
-        .discover(&test_ctx())
-        .await
-        .unwrap();
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    with_indicator_names(
+        &adapter,
+        &[
+            ("NY.GDP.PCAP.CD", "GDP per capita (current US$)"),
+            ("SP.POP.TOTL", "Population, total"),
+            ("FP.CPI.TOTL.ZG", "Inflation, consumer prices (annual %)"),
+        ],
+    );
+    let found = adapter.discover(&test_ctx()).await.unwrap();
     mock.server().verify().await;
 
     let indicators = reference::wdi_indicators().unwrap();
@@ -516,6 +532,519 @@ async fn discover_fails_when_every_indicator_fails() {
         .await
         .unwrap_err();
     assert_eq!(e.kind(), "not_found");
+}
+
+/// `code_lists` carries one `CodeList` per listed indicator; refreshing one fetches that
+/// indicator's name and `sourceNote` and merges them into the `wdi` dataset's `indicator`
+/// dimension codes, caching the response's `ETag` for next time. The in-process cache is not
+/// touched by this alone (that is `refresh_reference_data`'s job, via `seed_cache_from_db`).
+/// Mirrors the BLS adapter's `refresh_code_file_merges_labels_and_caches_etag`.
+#[tokio::test]
+async fn code_list_merges_name_and_caches_etag() {
+    let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+        return;
+    };
+    let db = crate::persist::stable_id_tests::FreshDb::create(
+        &admin_url,
+        "econgraph_wb_code_list_merge",
+    )
+    .await;
+    let mut catalog = crate::dataset::DatasetCatalog::empty();
+    catalog
+        .insert(
+            SourceId::WorldBank,
+            &[DATASET],
+            crate::dataset::parse_dataset_file(
+                &std::fs::read_to_string(
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("data/datasets/world_bank.toml"),
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    crate::persist::sync_datasets(&db.pool, &catalog)
+        .await
+        .unwrap();
+
+    let mock = MockSource::start().await;
+    mock.mount(
+        &Route::get("/indicator/NY.GDP.PCAP.CD").query("format", "json"),
+        Reply::json(serde_json::json!([
+            {"page": 1, "pages": 1, "per_page": 50, "total": 1},
+            [{
+                "id": "NY.GDP.PCAP.CD",
+                "name": "GDP per capita (current US$)",
+                "sourceNote": "GDP per capita is gross domestic product divided by midyear population.",
+            }]
+        ]))
+        .header("ETag", "\"v1\""),
+    )
+    .await;
+
+    let mut ctx = test_ctx();
+    ctx.pool = db.pool.clone();
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    let lists = adapter.code_lists(&ApiKeys::default());
+    let list = lists
+        .iter()
+        .find(|l| l.url.contains("NY.GDP.PCAP.CD"))
+        .unwrap();
+    assert!(
+        reference_file::refresh_code_list(&ctx, SourceId::WorldBank, list)
+            .await
+            .unwrap()
+    );
+
+    let url = format!("{}/indicator/NY.GDP.PCAP.CD?format=json", mock.base_url());
+    assert_eq!(
+        crate::persist::reference_file_etag(&db.pool, SourceId::WorldBank, &url)
+            .await
+            .unwrap(),
+        Some("\"v1\"".to_string())
+    );
+    let codes = crate::persist::dataset_dimension_codes(
+        &db.pool,
+        SourceId::WorldBank,
+        DATASET,
+        INDICATOR_DIMENSION,
+    )
+    .await
+    .unwrap();
+    let code = codes.get("NY.GDP.PCAP.CD").unwrap();
+    assert_eq!(code.label, "GDP per capita (current US$)");
+    assert_eq!(
+        code.description.as_deref(),
+        Some("GDP per capita is gross domestic product divided by midyear population.")
+    );
+
+    // `seed_cache_from_db` is what actually populates the in-process cache from what just merged.
+    adapter.seed_cache_from_db(&ctx).await;
+    assert_eq!(
+        adapter
+            .indicator_meta
+            .lock()
+            .unwrap()
+            .get("NY.GDP.PCAP.CD")
+            .unwrap()
+            .name,
+        "GDP per capita (current US$)"
+    );
+
+    // A second refresh with the same ETag short-circuits (no body): the DB codes from the first
+    // refresh are untouched, not cleared. The 304 only fires for the stored ETag, so this also
+    // proves it was actually sent as `If-None-Match`.
+    mock.server().reset().await;
+    mock.server()
+        .register(
+            wiremock::Mock::given(wiremock::matchers::method("GET"))
+                .and(wiremock::matchers::path("/indicator/NY.GDP.PCAP.CD"))
+                .and(wiremock::matchers::header("If-None-Match", "\"v1\""))
+                .respond_with(wiremock::ResponseTemplate::new(304)),
+        )
+        .await;
+    assert!(
+        !reference_file::refresh_code_list(&ctx, SourceId::WorldBank, list)
+            .await
+            .unwrap()
+    );
+    let codes = crate::persist::dataset_dimension_codes(
+        &db.pool,
+        SourceId::WorldBank,
+        DATASET,
+        INDICATOR_DIMENSION,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        codes["NY.GDP.PCAP.CD"].label,
+        "GDP per capita (current US$)"
+    );
+    db.drop().await;
+}
+
+/// Without `sync_datasets` having run yet, there is no `wdi` dataset row to merge into: refreshing
+/// the code list returns `Ok(false)` and stores no `ETag`, so the same indicator is fetched again
+/// next time instead of being wrongly treated as done.
+#[tokio::test]
+async fn code_list_does_not_cache_when_the_dataset_is_not_synced() {
+    let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+        return;
+    };
+    let db = crate::persist::stable_id_tests::FreshDb::create(
+        &admin_url,
+        "econgraph_wb_refresh_not_synced",
+    )
+    .await;
+
+    let mock = MockSource::start().await;
+    mock.mount(
+        &Route::get("/indicator/NY.GDP.PCAP.CD").query("format", "json"),
+        Reply::json(serde_json::json!([
+            {"page": 1, "pages": 1, "per_page": 50, "total": 1},
+            [{
+                "id": "NY.GDP.PCAP.CD",
+                "name": "GDP per capita (current US$)",
+                "sourceNote": "GDP per capita is gross domestic product divided by midyear population.",
+            }]
+        ]))
+        .header("ETag", "\"v1\""),
+    )
+    .await;
+
+    let mut ctx = test_ctx();
+    ctx.pool = db.pool.clone();
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    let lists = adapter.code_lists(&ApiKeys::default());
+    let list = lists
+        .iter()
+        .find(|l| l.url.contains("NY.GDP.PCAP.CD"))
+        .unwrap();
+    assert!(
+        !reference_file::refresh_code_list(&ctx, SourceId::WorldBank, list)
+            .await
+            .unwrap()
+    );
+
+    assert!(adapter.indicator_meta.lock().unwrap().is_empty());
+    let url = format!("{}/indicator/NY.GDP.PCAP.CD?format=json", mock.base_url());
+    assert_eq!(
+        crate::persist::reference_file_etag(&db.pool, SourceId::WorldBank, &url)
+            .await
+            .unwrap(),
+        None
+    );
+    db.drop().await;
+}
+
+/// A process that restarts (or a fetch job that runs before this process's first discovery) has
+/// an empty in-process cache even though the DB still holds a label from an earlier process's
+/// refresh. `discover` and `fetch_batch` must seed the cache from the DB before building series
+/// metadata, rather than falling back to the bare indicator id.
+#[tokio::test]
+async fn cold_cache_is_seeded_from_the_db_before_building_titles() {
+    let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+        return;
+    };
+    let db =
+        crate::persist::stable_id_tests::FreshDb::create(&admin_url, "econgraph_wb_cold_cache")
+            .await;
+    let mut catalog = crate::dataset::DatasetCatalog::empty();
+    catalog
+        .insert(
+            SourceId::WorldBank,
+            &[DATASET],
+            crate::dataset::parse_dataset_file(
+                &std::fs::read_to_string(
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("data/datasets/world_bank.toml"),
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    crate::persist::sync_datasets(&db.pool, &catalog)
+        .await
+        .unwrap();
+    // Simulate an earlier process's successful refresh: the DB already has the label, with no
+    // entry yet in this fresh adapter's in-process cache.
+    crate::persist::merge_dataset_dimension_code_entries(
+        &db.pool,
+        SourceId::WorldBank,
+        DATASET,
+        INDICATOR_DIMENSION,
+        &[Code::new("NY.GDP.PCAP.CD", "GDP per capita (current US$)")],
+    )
+    .await
+    .unwrap();
+
+    let mock = MockSource::start().await;
+    mock.mount_expect(&route("NY.GDP.PCAP.CD"), Reply::json_str(GDP_PCAP), 1)
+        .await;
+    let mut ctx = test_ctx();
+    ctx.pool = db.pool.clone();
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    assert!(adapter.indicator_meta.lock().unwrap().is_empty());
+
+    let out = adapter
+        .fetch_batch(&ctx, &ids(&["wdi/NY.GDP.PCAP.CD.USA"]), None)
+        .await
+        .unwrap();
+    mock.server().verify().await;
+
+    assert_eq!(
+        out["wdi/NY.GDP.PCAP.CD.USA"]
+            .as_ref()
+            .unwrap()
+            .metadata
+            .as_ref()
+            .unwrap()
+            .title,
+        "GDP per capita (current US$): United States"
+    );
+    db.drop().await;
+}
+
+/// A cache already holding one indicator (as an earlier call in this process would leave it)
+/// must not stop a later call from seeding a *different* indicator's name and description from
+/// the DB: `seed_cache_from_db` runs unconditionally, not only when the whole cache is empty, so
+/// an indicator this process hasn't fetched itself still gets its merged `sourceNote` instead of
+/// the row-carried fallback (which has no description).
+#[tokio::test]
+async fn partial_cache_still_seeds_db_description_for_a_different_indicator() {
+    let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+        return;
+    };
+    let db =
+        crate::persist::stable_id_tests::FreshDb::create(&admin_url, "econgraph_wb_partial_cache")
+            .await;
+    let mut catalog = crate::dataset::DatasetCatalog::empty();
+    catalog
+        .insert(
+            SourceId::WorldBank,
+            &[DATASET],
+            crate::dataset::parse_dataset_file(
+                &std::fs::read_to_string(
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("data/datasets/world_bank.toml"),
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    crate::persist::sync_datasets(&db.pool, &catalog)
+        .await
+        .unwrap();
+    // Both indicators already merged into the DB, as an earlier `refresh_reference_data` would
+    // have left them.
+    crate::persist::merge_dataset_dimension_code_entries(
+        &db.pool,
+        SourceId::WorldBank,
+        DATASET,
+        INDICATOR_DIMENSION,
+        &[Code::new("NY.GDP.PCAP.CD", "GDP per capita (current US$)")],
+    )
+    .await
+    .unwrap();
+    let mut population_code = Code::new("SP.POP.TOTL", "Population, total (World Bank)");
+    population_code.description =
+        Some("Total population is based on the de facto definition.".to_string());
+    crate::persist::merge_dataset_dimension_code_entries(
+        &db.pool,
+        SourceId::WorldBank,
+        DATASET,
+        INDICATOR_DIMENSION,
+        &[population_code],
+    )
+    .await
+    .unwrap();
+
+    let mock = MockSource::start().await;
+    mock.mount_expect(&route("SP.POP.TOTL"), Reply::json_str(POPULATION), 1)
+        .await;
+    let mut ctx = test_ctx();
+    ctx.pool = db.pool.clone();
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    // Simulate an earlier `fetch_batch` call in this same process having already cached
+    // NY.GDP.PCAP.CD (but never SP.POP.TOTL): the cache is non-empty, which must not short-circuit
+    // `seed_cache_from_db` the way `is_empty()` used to.
+    with_indicator_names(
+        &adapter,
+        &[("NY.GDP.PCAP.CD", "GDP per capita (current US$)")],
+    );
+    assert!(!adapter.indicator_meta.lock().unwrap().is_empty());
+    assert!(!adapter
+        .indicator_meta
+        .lock()
+        .unwrap()
+        .contains_key("SP.POP.TOTL"));
+
+    let out = adapter
+        .fetch_batch(&ctx, &ids(&["wdi/SP.POP.TOTL.USA"]), None)
+        .await
+        .unwrap();
+    mock.server().verify().await;
+
+    let metadata = out["wdi/SP.POP.TOTL.USA"]
+        .as_ref()
+        .unwrap()
+        .metadata
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        metadata.title,
+        "Population, total (World Bank): United States"
+    );
+    assert_eq!(
+        metadata.description.as_deref(),
+        Some("Total population is based on the de facto definition.")
+    );
+    db.drop().await;
+}
+
+/// With no cache entry and nothing in the DB (a brand new database that hasn't run
+/// `refresh_reference_data` yet, as in the release e2e seed), `series_metadata` still names the
+/// series from the data response's own `indicator.value`, not the bare id.
+#[tokio::test]
+async fn row_carried_indicator_name_names_a_series_before_any_reference_refresh() {
+    let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+        return;
+    };
+    let db = crate::persist::stable_id_tests::FreshDb::create(
+        &admin_url,
+        "econgraph_wb_row_carried_name",
+    )
+    .await;
+    let mut catalog = crate::dataset::DatasetCatalog::empty();
+    catalog
+        .insert(
+            SourceId::WorldBank,
+            &[DATASET],
+            crate::dataset::parse_dataset_file(
+                &std::fs::read_to_string(
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("data/datasets/world_bank.toml"),
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    crate::persist::sync_datasets(&db.pool, &catalog)
+        .await
+        .unwrap();
+
+    let mock = MockSource::start().await;
+    mock.mount_expect(&route("NY.GDP.PCAP.CD"), Reply::json_str(GDP_PCAP), 1)
+        .await;
+    let mut ctx = test_ctx();
+    ctx.pool = db.pool.clone();
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    assert!(adapter.indicator_meta.lock().unwrap().is_empty());
+
+    let out = adapter
+        .fetch_batch(&ctx, &ids(&["wdi/NY.GDP.PCAP.CD.USA"]), None)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        out["wdi/NY.GDP.PCAP.CD.USA"]
+            .as_ref()
+            .unwrap()
+            .metadata
+            .as_ref()
+            .unwrap()
+            .title,
+        "GDP per capita (current US$): United States"
+    );
+    // Also merged into the dataset's own indicator codes, not just this process's cache, so a
+    // fresh database gets a usable indicator picker from the first fetch alone.
+    let codes = crate::persist::dataset_dimension_codes(
+        &db.pool,
+        SourceId::WorldBank,
+        DATASET,
+        INDICATOR_DIMENSION,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        codes["NY.GDP.PCAP.CD"].label,
+        "GDP per capita (current US$)"
+    );
+    db.drop().await;
+}
+
+/// `refresh_reference_data` (`reference_file::refresh_code_lists` under the hood) stops at once on
+/// `Auth`/`RateLimited` (more requests would only hit a source that just refused us), but attempts
+/// every listed indicator regardless of an earlier one's `NotFound`/`Parse`/etc. failure,
+/// aggregating those into one error. An indicator that did merge before a stop is still reflected
+/// in the in-process cache afterwards, since `seed_cache_from_db` runs unconditionally even when
+/// the refresh as a whole failed.
+#[tokio::test]
+async fn refresh_reference_data_stops_on_auth_and_aggregates_other_failures() {
+    let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+        return;
+    };
+    let indicators = reference::wdi_indicators().unwrap();
+
+    let db = crate::persist::stable_id_tests::FreshDb::create(
+        &admin_url,
+        "econgraph_wb_refresh_reference_data_auth",
+    )
+    .await;
+    let mut catalog = crate::dataset::DatasetCatalog::empty();
+    catalog
+        .insert(
+            SourceId::WorldBank,
+            &[DATASET],
+            crate::dataset::parse_dataset_file(
+                &std::fs::read_to_string(
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("data/datasets/world_bank.toml"),
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    crate::persist::sync_datasets(&db.pool, &catalog)
+        .await
+        .unwrap();
+    let mock = MockSource::start().await;
+    mock.mount(
+        &Route::get(format!("/indicator/{}", indicators[0].id)).query("format", "json"),
+        Reply::json(serde_json::json!([
+            {"page": 1, "pages": 1, "per_page": 50, "total": 1},
+            [{"id": indicators[0].id, "name": "First indicator"}]
+        ])),
+    )
+    .await;
+    mock.mount(
+        &Route::get(format!("/indicator/{}", indicators[1].id)),
+        Reply::status(403),
+    )
+    .await;
+    let mut ctx = test_ctx();
+    ctx.pool = db.pool.clone();
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    let e = adapter.refresh_reference_data(&ctx).await.unwrap_err();
+    // The first indicator's URL succeeds, the second 403s (`Auth`): the refresh stops there
+    // rather than requesting any other indicator, but the first merge is still reflected in the
+    // in-process cache afterwards.
+    assert_eq!(mock.received_requests().await.len(), 2);
+    assert_eq!(e.kind(), "auth");
+    assert_eq!(
+        adapter
+            .indicator_meta
+            .lock()
+            .unwrap()
+            .get(&indicators[0].id)
+            .unwrap()
+            .name,
+        "First indicator"
+    );
+    db.drop().await;
+
+    let db = crate::persist::stable_id_tests::FreshDb::create(
+        &admin_url,
+        "econgraph_wb_refresh_reference_data_skip",
+    )
+    .await;
+    let mock = MockSource::start().await;
+    mount_invalid_fallback(&mock).await;
+    let mut ctx = test_ctx();
+    ctx.pool = db.pool.clone();
+    let adapter = WorldBankAdapter::new(mock.base_url());
+    // Every indicator answers "Invalid value" (NotFound, not Auth/RateLimited): all attempted,
+    // aggregated into one error.
+    let e = adapter.refresh_reference_data(&ctx).await.unwrap_err();
+    assert_eq!(e.kind(), "transient");
+    assert_eq!(mock.received_requests().await.len(), indicators.len());
+    assert!(adapter.indicator_meta.lock().unwrap().is_empty());
+    db.drop().await;
 }
 
 mod contract {
