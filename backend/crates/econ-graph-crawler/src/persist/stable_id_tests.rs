@@ -16,16 +16,17 @@ use crate::series_id::stable_series_id;
 use crate::testkit::echo::EchoAdapter;
 use crate::testkit::{test_ctx, MockSource, Reply, Route};
 
-/// A migrated database of its own, dropped by [`FreshDb::drop`].
-struct FreshDb {
+/// A migrated database of its own, dropped by [`FreshDb::drop`]. `pub(crate)` so other
+/// DB-backed test modules (e.g. `reference_data_tests`) can reuse it.
+pub(crate) struct FreshDb {
     admin_url: String,
     name: String,
-    pool: DatabasePool,
+    pub(crate) pool: DatabasePool,
 }
 
 impl FreshDb {
     /// `base` plus this process id, so concurrent test runs on one server don't collide.
-    async fn create(admin_url: &str, base: &str) -> Self {
+    pub(crate) async fn create(admin_url: &str, base: &str) -> Self {
         let name = format!("{base}_{}", std::process::id());
         let mut admin = AsyncPgConnection::establish(admin_url).await.unwrap();
         for sql in [
@@ -45,7 +46,7 @@ impl FreshDb {
         }
     }
 
-    async fn drop(self) {
+    pub(crate) async fn drop(self) {
         drop(self.pool);
         let mut admin = AsyncPgConnection::establish(&self.admin_url).await.unwrap();
         diesel::sql_query(format!(
@@ -58,10 +59,10 @@ impl FreshDb {
     }
 }
 
-fn database_url() -> Option<String> {
+pub(crate) fn database_url() -> Option<String> {
     let url = std::env::var("DATABASE_URL").ok();
     if url.is_none() {
-        eprintln!("DATABASE_URL not set; skipping DB-backed stable id test");
+        eprintln!("DATABASE_URL not set; skipping DB-backed test");
     }
     url
 }
