@@ -24,8 +24,11 @@ About 50 curated World Development Indicators, listed in
   aggregates such as `EMU` or `WLD`). The external id is `wdi/{indicator}.{area}` (for
   example `wdi/NY.GDP.PCAP.CD.USA`). That is about 50 x 217 ≈ 11,000 series, not the
   roughly 1,400 x 217 ≈ 300,000 a crawl of all of WDI's indicators would be.
-- **Kept**: indicator id and name (from `wdi_indicators.csv`), per-row `date`, `value`
-  and the response's `lastupdated` (as the vintage date).
+- **Kept**: indicator id (from `wdi_indicators.csv`), per-row `date`, `value` and the
+  response's `lastupdated` (as the vintage date). The indicator's name and description
+  (`sourceNote`) are not shipped in the csv: `refresh_reference_data` fetches them from
+  `GET /indicator/{id}?format=json` on each scheduled crawl and merges them into the `wdi`
+  dataset's `indicator` dimension codes and into each series' title/description.
 - **Dropped**: `obs_status` and `decimal` — `data_points` has no attribute columns in train
   1 (the dataset still declares them, for the schema). WDI leaves `obs_status` empty for
   nearly every row. Rows for an area outside the shared country table (regional aggregates

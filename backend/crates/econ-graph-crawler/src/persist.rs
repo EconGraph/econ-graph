@@ -21,7 +21,7 @@
 //! datasets have the single measure `value`. Callers check the series against the
 //! [`DatasetCatalog`] first; persistence only resolves the synced row.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Duration;
 
 use chrono::{NaiveDate, Utc};
@@ -409,6 +409,36 @@ pub async fn merge_dataset_dimension_code_entries(
         Ok(true)
     })
     .await
+}
+
+/// Current inline codes of `source`'s dataset `dataset_code`, dimension `dimension_name`, by
+/// code: whatever [`merge_dataset_dimension_codes`] last merged in, or the dataset file's own
+/// codes if no merge has happened yet. Empty if the dataset or dimension isn't declared, or has
+/// no inline codes. For an adapter that needs a code's current label or description to build a
+/// series' own title or description (not just the dimension's code list).
+pub async fn dataset_dimension_codes(
+    pool: &DatabasePool,
+    source: SourceId,
+    dataset_code: &str,
+    dimension_name: &str,
+) -> AppResult<HashMap<String, Code>> {
+    use datasets::dsl;
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    let row: Option<DatasetComponents> = dsl::datasets
+        .filter(dsl::source_id.eq(source_id))
+        .filter(dsl::code.eq(dataset_code))
+        .select(dsl::dimensions)
+        .first(&mut conn)
+        .await
+        .optional()?;
+    Ok(row
+        .and_then(|dims| dims.0.into_iter().find(|d| d.name == dimension_name))
+        .and_then(|dim| dim.codes)
+        .into_iter()
+        .flatten()
+        .map(|c| (c.code.clone(), c))
+        .collect())
 }
 
 /// `datasets.id` of each of `source_id`'s datasets named in `codes`. A code without a row means
