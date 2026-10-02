@@ -39,7 +39,9 @@
 //! Discovery downloads the file, and so does each fetch batch. Every series shares one
 //! [`batch_key`](SourceAdapter::batch_key) and the policy's `max_batch` ([`MAX_BATCH`]) covers
 //! every train 1 series, so fetching them all is normally one download (discovery downloads the
-//! file separately).
+//! file separately). Discovery also labels every `place_id` dimension code (states and census
+//! divisions alike) from the file's own `place_name` column, reusing that same download; the
+//! dataset definition (`data/datasets/fhfa.toml`) ships no hand-typed place labels.
 //!
 //! Points are dated the first day of their month or quarter, with `revision_date = date` and
 //! `is_original_release = true`. FHFA re-estimates the whole history at every release and the file
@@ -88,6 +90,7 @@ use crate::adapter::{
 };
 use crate::dataset::{DatasetDef, SeriesDataset};
 use crate::error::CrawlError;
+use crate::persist;
 use crate::policy::SourcePolicy;
 use crate::source::SourceId;
 
@@ -456,6 +459,35 @@ impl FhfaAdapter {
         let text = ctx.http.get_text(SourceId::Fhfa, &url, &[]).await?;
         parse_master(&text, def)
     }
+
+    /// Labels every `place_id` found in `master` (states and census divisions alike) from the
+    /// file's own `place_name` column, into the `place_id` dimension of [`DATASET`]. Reuses
+    /// `master`'s already-downloaded rows rather than fetching the file again: unlike
+    /// [`SourceAdapter::refresh_reference_data`] (always run before `discover`, so it can't share
+    /// `discover`'s download), this runs from inside `discover` itself. A failure here is logged
+    /// and does not fail discovery; a stale or missing label is cosmetic, not a crawl error.
+    async fn refresh_place_labels(&self, ctx: &CrawlCtx, master: &BTreeMap<String, HpiSeries>) {
+        let mut labels: BTreeMap<String, String> = BTreeMap::new();
+        for s in master.values() {
+            if let Some(place_id) = s.dataset.dimensions.0.get("place_id") {
+                labels
+                    .entry(place_id.clone())
+                    .or_insert_with(|| s.place_name.clone());
+            }
+        }
+        let labels: Vec<(String, String)> = labels.into_iter().collect();
+        if let Err(error) = persist::merge_dataset_dimension_codes(
+            &ctx.pool,
+            SourceId::Fhfa,
+            DATASET,
+            "place_id",
+            &labels,
+        )
+        .await
+        {
+            tracing::warn!(%error, "FHFA: failed to refresh place_id labels");
+        }
+    }
 }
 
 impl Default for FhfaAdapter {
@@ -502,9 +534,9 @@ impl SourceAdapter for FhfaAdapter {
     /// Every train 1 series in the master file (see the module docs).
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         let url = self.master_url();
-        Ok(self
-            .master(ctx)
-            .await?
+        let master = self.master(ctx).await?;
+        self.refresh_place_labels(ctx, &master).await;
+        Ok(master
             .into_iter()
             .map(|(external_id, s)| {
                 let m = s.metadata();
@@ -1008,6 +1040,79 @@ mod tests {
             .unwrap();
         assert!(!ok.points.is_empty());
         assert_eq!(mock.received_requests().await.len(), 2);
+    }
+
+    /// `refresh_place_labels` merges a label for every `place_id` in the file (states and census
+    /// divisions alike) into `fhfa.toml`'s `place_id` dimension, which ships with no codes of its
+    /// own. The conditional-GET mechanics are covered at the `HttpFetcher` level (see BLS's
+    /// `refresh_code_file_merges_labels_and_caches_etag`); this checks FHFA's own wiring: reading
+    /// `place_name` out of the already-parsed file and merging it through `persist`.
+    #[tokio::test]
+    async fn refresh_place_labels_merges_states_and_divisions() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_fhfa_refresh_place_labels",
+        )
+        .await;
+        let mut catalog = crate::dataset::DatasetCatalog::empty();
+        catalog
+            .insert(
+                SourceId::Fhfa,
+                &[DATASET],
+                crate::dataset::parse_dataset_file(
+                    &std::fs::read_to_string(
+                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("data/datasets/fhfa.toml"),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        crate::persist::sync_datasets(&db.pool, &catalog)
+            .await
+            .unwrap();
+
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let master = parse(MASTER);
+        FhfaAdapter::default()
+            .refresh_place_labels(&ctx, &master)
+            .await;
+
+        let codes = {
+            use diesel::prelude::*;
+            use diesel_async::RunQueryDsl;
+            use econ_graph_core::schema::datasets::dsl;
+            let mut conn = db.pool.get().await.unwrap();
+            let dims: econ_graph_core::models::DatasetComponents = dsl::datasets
+                .filter(dsl::code.eq(DATASET))
+                .select(dsl::dimensions)
+                .first(&mut conn)
+                .await
+                .unwrap();
+            dims.0
+                .into_iter()
+                .find(|d| d.name == "place_id")
+                .unwrap()
+                .codes
+                .unwrap()
+        };
+        // US + 9 census divisions + 51 states (including DC): every in-scope place is labelled,
+        // not just the divisions a hand-typed list used to cover.
+        assert_eq!(codes.len(), 61);
+        assert!(codes
+            .iter()
+            .any(|c| c.code == "USA" && c.label == "United States"));
+        assert!(codes
+            .iter()
+            .any(|c| c.code == "DV_ENC" && c.label == "East North Central Division"));
+        assert!(codes.iter().any(|c| c.code == "LA" && c.label == "Louisiana"));
+
+        db.drop().await;
     }
 }
 
