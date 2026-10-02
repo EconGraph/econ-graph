@@ -39,7 +39,11 @@
 //! Discovery downloads the file, and so does each fetch batch. Every series shares one
 //! [`batch_key`](SourceAdapter::batch_key) and the policy's `max_batch` ([`MAX_BATCH`]) covers
 //! every train 1 series, so fetching them all is normally one download (discovery downloads the
-//! file separately).
+//! file separately). The file is also one of [`code_lists`](SourceAdapter::code_lists): the
+//! default `refresh_reference_data` reads it once more, under its own `ETag` cache (a full
+//! download whenever FHFA sends no `ETag`; QA checks whether it does), to label every `place_id` dimension code (states and census divisions alike) from its own
+//! `place_name` column; the dataset definition (`data/datasets/fhfa.toml`) ships no hand-typed
+//! place labels.
 //!
 //! Points are dated the first day of their month or quarter, with `revision_date = date` and
 //! `is_original_release = true`. FHFA re-estimates the whole history at every release and the file
@@ -77,7 +81,10 @@
 //! download a no-op instead: it makes no request and fails with a retryable [`CrawlError::Busy`]
 //! (exponential backoff with jitter), which the worker reschedules without counting a failed
 //! attempt (see [`worker`](crate::worker)). The reservation is one process's in-memory state: it
-//! does nothing for two separate `crawler-worker` processes downloading at once. Recovering a
+//! does nothing for two separate `crawler-worker` processes downloading at once, and does not
+//! cover the reference-data download [`code_lists`](SourceAdapter::code_lists) makes through
+//! [`reference_file::refresh`](crate::reference_file::refresh) (which runs before discovery in
+//! the same job, not concurrently with it). Recovering a
 //! reservation left behind by a crawler crash is
 //! [ECO-257](https://linear.app/econgraph/issue/ECO-257/recover-shared-download-reservations-after-crawler-crashes);
 //! today a crash simply loses the in-memory reservation along with the rest of the process.
@@ -106,7 +113,7 @@ use chrono::NaiveDate;
 use rand::RngExt;
 
 use crate::adapter::{
-    BatchFetch, CrawlCtx, DiscoveredSeries, Discovery, FetchedPoint, FetchedSeries,
+    ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, Discovery, FetchedPoint, FetchedSeries,
     NewSeriesMetadataLite, SourceAdapter,
 };
 use crate::dataset::{DatasetDef, SeriesDataset};
@@ -114,6 +121,7 @@ use crate::error::CrawlError;
 use crate::http::{IfChanged, Validators};
 use crate::persist::{self, StoredFetchState};
 use crate::policy::SourcePolicy;
+use crate::reference_file::{labels_only, CodeList};
 use crate::source::SourceId;
 
 /// FHFA's website root.
@@ -582,6 +590,22 @@ fn not_in_file(external_id: &str) -> CrawlError {
     ))
 }
 
+/// Labels every `place_id` in the master file (states and census divisions alike) from its own
+/// `place_name` column: the `place_id` codes of [`DATASET`] for [`FhfaAdapter::code_lists`].
+fn place_labels(text: &str) -> Result<Vec<(String, String)>, CrawlError> {
+    let def = crate::reference::dataset(SourceId::Fhfa, DATASET)?;
+    let master = parse_master(text, def)?;
+    let mut labels: BTreeMap<String, String> = BTreeMap::new();
+    for s in master.values() {
+        if let Some(place_id) = s.dataset.dimensions.0.get("place_id") {
+            labels
+                .entry(place_id.clone())
+                .or_insert_with(|| s.place_name.clone());
+        }
+    }
+    Ok(labels.into_iter().collect())
+}
+
 #[async_trait]
 impl SourceAdapter for FhfaAdapter {
     fn id(&self) -> SourceId {
@@ -603,6 +627,18 @@ impl SourceAdapter for FhfaAdapter {
     /// no longer lists, including the retired `{CODE}HPI` ids, has been retired by FHFA.
     fn discovery_is_complete(&self) -> bool {
         true
+    }
+
+    /// The master file itself, whose `place_name` column labels [`DATASET`]'s `place_id`
+    /// dimension (see [`place_labels`]). The default `refresh_reference_data` reads it again each
+    /// scheduled discovery, short-circuiting only if FHFA sends an `ETag` (see the module docs).
+    fn code_lists(&self, _keys: &ApiKeys) -> Vec<CodeList> {
+        vec![CodeList::new(
+            self.master_url(),
+            DATASET,
+            "place_id",
+            labels_only(place_labels),
+        )]
     }
 
     /// Every train 1 series in the master file (see the module docs).
@@ -1295,6 +1331,106 @@ mod tests {
             None
         );
         assert_eq!(shared_validators(&[], &HashMap::new()), None);
+    }
+
+    /// FHFA's `refresh_reference_data` (the default, driven by [`FhfaAdapter::code_lists`])
+    /// downloads the master file itself and merges a label for every `place_id` it finds (states
+    /// and census divisions alike) into `fhfa.toml`'s `place_id` dimension, which ships with no
+    /// codes of its own. Unlike BLS's code files or Census's state file, FHFA's master file sends
+    /// no `ETag`, so every refresh re-downloads and re-merges (see the module docs); the merge
+    /// itself still no-ops the write when nothing changed, so `updated_at` doesn't move.
+    #[tokio::test]
+    async fn refresh_place_labels_merges_states_and_divisions() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_fhfa_refresh_place_labels",
+        )
+        .await;
+        let mut catalog = crate::dataset::DatasetCatalog::empty();
+        catalog
+            .insert(
+                SourceId::Fhfa,
+                &[DATASET],
+                crate::dataset::parse_dataset_file(
+                    &std::fs::read_to_string(
+                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("data/datasets/fhfa.toml"),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        crate::persist::sync_datasets(&db.pool, &catalog)
+            .await
+            .unwrap();
+
+        let mock = serving(MASTER).await;
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let adapter = FhfaAdapter::new(mock.base_url());
+        adapter.refresh_reference_data(&ctx).await.unwrap();
+        assert_eq!(
+            mock.received_requests().await.len(),
+            1,
+            "one extra download of the master file, as the module docs say"
+        );
+
+        async fn place_codes_and_updated_at(
+            pool: &econ_graph_core::DatabasePool,
+        ) -> (
+            Vec<econ_graph_core::models::Code>,
+            chrono::DateTime<chrono::Utc>,
+        ) {
+            use diesel::prelude::*;
+            use diesel_async::RunQueryDsl;
+            use econ_graph_core::schema::datasets::dsl;
+            let mut conn = pool.get().await.unwrap();
+            let (dims, updated_at): (econ_graph_core::models::DatasetComponents, _) = dsl::datasets
+                .filter(dsl::code.eq(DATASET))
+                .select((dsl::dimensions, dsl::updated_at))
+                .first(&mut conn)
+                .await
+                .unwrap();
+            let codes = dims
+                .0
+                .into_iter()
+                .find(|d| d.name == "place_id")
+                .unwrap()
+                .codes
+                .unwrap();
+            (codes, updated_at)
+        }
+
+        let (codes, updated_at) = place_codes_and_updated_at(&db.pool).await;
+        // US + 9 census divisions + 51 states (including DC): every in-scope place is labelled,
+        // not just the divisions a hand-typed list used to cover.
+        assert_eq!(codes.len(), 61);
+        assert!(codes
+            .iter()
+            .any(|c| c.code == "USA" && c.label == "United States"));
+        assert!(codes
+            .iter()
+            .any(|c| c.code == "DV_ENC" && c.label == "East North Central Division"));
+        assert!(codes
+            .iter()
+            .any(|c| c.code == "LA" && c.label == "Louisiana"));
+
+        // Refreshing again from the same unchanged file is a no-op write: `updated_at` doesn't move.
+        adapter.refresh_reference_data(&ctx).await.unwrap();
+        let (codes_again, updated_at_again) = place_codes_and_updated_at(&db.pool).await;
+        assert_eq!(codes_again, codes);
+        assert_eq!(updated_at_again, updated_at);
+        assert_eq!(
+            mock.received_requests().await.len(),
+            2,
+            "no ETag to short-circuit on, so the second refresh re-downloads too"
+        );
+
+        db.drop().await;
     }
 }
 
