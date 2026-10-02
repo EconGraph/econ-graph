@@ -253,24 +253,31 @@ mod query_limit_tests {
         );
     }
 
-    /// Build a query with `n` aliased `__typename` selections, each costing 1, so its
-    /// complexity is exactly `n`. `__typename` needs no resolver or database.
-    fn typename_query(n: usize) -> String {
-        let fields: Vec<String> = (0..n).map(|i| format!("a{i}: __typename")).collect();
+    /// Build a query of `n` aliased `dataSources { id }` selections, each costing 2, so its
+    /// complexity is `2 * n`. (async-graphql does not count `__typename`, so it can't be used
+    /// to build a query of an exact cost.)
+    fn data_sources_query(n: usize) -> String {
+        let fields: Vec<String> = (0..n)
+            .map(|i| format!("a{i}: dataSources {{ id }}"))
+            .collect();
         format!("{{ {} }}", fields.join(" "))
     }
 
-    /// A query at exactly the complexity limit is accepted.
+    /// A query at exactly the complexity limit is not refused as too complex. The resolvers
+    /// then fail on the unreachable database, which is not what this test is about.
     #[tokio::test]
     async fn query_at_the_complexity_limit_is_accepted() {
-        let errors = errors(&typename_query(MAX_QUERY_COMPLEXITY)).await;
-        assert!(errors.is_empty(), "{errors:?}");
+        let errors = errors(&data_sources_query(MAX_QUERY_COMPLEXITY / 2)).await;
+        assert!(
+            !errors.iter().any(|e| e.contains("too complex")),
+            "{errors:?}"
+        );
     }
 
     /// A query one field over the complexity limit is refused.
     #[tokio::test]
     async fn query_one_over_the_complexity_limit_is_refused() {
-        let errors = errors(&typename_query(MAX_QUERY_COMPLEXITY + 1)).await;
+        let errors = errors(&data_sources_query(MAX_QUERY_COMPLEXITY / 2 + 1)).await;
         assert!(
             errors.iter().any(|e| e.contains("too complex")),
             "{errors:?}"
