@@ -1093,29 +1093,41 @@ mod tests {
         let mock = serving(MASTER).await;
         let mut ctx = test_ctx();
         ctx.pool = db.pool.clone();
-        FhfaAdapter::new(mock.base_url())
-            .refresh_place_labels(&ctx)
-            .await
-            .unwrap();
+        let adapter = FhfaAdapter::new(mock.base_url());
+        adapter.refresh_place_labels(&ctx).await.unwrap();
+        assert_eq!(
+            mock.received_requests().await.len(),
+            1,
+            "one extra download of the master file, as the module docs say"
+        );
 
-        let codes = {
+        async fn place_codes_and_updated_at(
+            pool: &econ_graph_core::DatabasePool,
+        ) -> (
+            Vec<econ_graph_core::models::Code>,
+            chrono::DateTime<chrono::Utc>,
+        ) {
             use diesel::prelude::*;
             use diesel_async::RunQueryDsl;
             use econ_graph_core::schema::datasets::dsl;
-            let mut conn = db.pool.get().await.unwrap();
-            let dims: econ_graph_core::models::DatasetComponents = dsl::datasets
+            let mut conn = pool.get().await.unwrap();
+            let (dims, updated_at): (econ_graph_core::models::DatasetComponents, _) = dsl::datasets
                 .filter(dsl::code.eq(DATASET))
-                .select(dsl::dimensions)
+                .select((dsl::dimensions, dsl::updated_at))
                 .first(&mut conn)
                 .await
                 .unwrap();
-            dims.0
+            let codes = dims
+                .0
                 .into_iter()
                 .find(|d| d.name == "place_id")
                 .unwrap()
                 .codes
-                .unwrap()
-        };
+                .unwrap();
+            (codes, updated_at)
+        }
+
+        let (codes, updated_at) = place_codes_and_updated_at(&db.pool).await;
         // US + 9 census divisions + 51 states (including DC): every in-scope place is labelled,
         // not just the divisions a hand-typed list used to cover.
         assert_eq!(codes.len(), 61);
@@ -1128,6 +1140,12 @@ mod tests {
         assert!(codes
             .iter()
             .any(|c| c.code == "LA" && c.label == "Louisiana"));
+
+        // Refreshing again from the same unchanged file is a no-op write: `updated_at` doesn't move.
+        adapter.refresh_place_labels(&ctx).await.unwrap();
+        let (codes_again, updated_at_again) = place_codes_and_updated_at(&db.pool).await;
+        assert_eq!(codes_again, codes);
+        assert_eq!(updated_at_again, updated_at);
 
         db.drop().await;
     }
