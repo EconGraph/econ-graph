@@ -709,20 +709,23 @@ async fn query_count_does_not_grow_with_the_number_of_keys() {
         }
     });
 
-    for (indicator, keys) in [("GDP", AREAS.len()), ("NONE", 0)] {
+    for (indicator, keys, date) in [
+        ("GDP", AREAS.len(), CrossSectionDate::Latest),
+        ("POP", AREAS.len(), CrossSectionDate::Latest),
+        ("NONE", 0, CrossSectionDate::Latest),
+        ("GDP", AREAS.len(), CrossSectionDate::On(d(2023))),
+        ("POP", AREAS.len(), CrossSectionDate::On(d(2023))),
+        ("NONE", 0, CrossSectionDate::On(d(2023))),
+    ] {
         queries.store(0, Ordering::SeqCst);
-        let rows = cross_section(
-            &mut conn,
-            areas(),
-            &request(&seeded, indicator, CrossSectionDate::Latest),
-        )
-        .await
-        .unwrap();
+        let rows = cross_section(&mut conn, areas(), &request(&seeded, indicator, date))
+            .await
+            .unwrap();
         assert_eq!(rows.len(), keys);
         assert_eq!(
             AtomicUsize::load(&queries, Ordering::SeqCst),
             2,
-            "{indicator}"
+            "{indicator} {date:?}"
         );
     }
 }
