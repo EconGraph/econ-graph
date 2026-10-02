@@ -20,7 +20,9 @@
 //! all of them too slow to finish a first crawl in reasonable time. The curated list keeps
 //! discovery's own request count equal to its size (under two hundred, not unbounded), while still
 //! checking each series' live notes against [`is_copyright_restricted`] as a safety net before
-//! it is discovered.
+//! it is discovered. [`FredAdapter::fetch`] repeats the same check, so a series id fetched
+//! directly (a manual `triggerCrawl`, or a scheduled refresh of an already-stored series) without
+//! going through discovery is refused too, rather than only kept out of the curated list.
 //!
 //! # Vintages
 //!
@@ -378,7 +380,9 @@ impl SourceAdapter for FredAdapter {
     }
 
     /// `/series` (metadata), then every vintage of the observations on or after `since` from
-    /// `/series/observations` (one request per [`OBSERVATIONS_PAGE_SIZE`] rows).
+    /// `/series/observations` (one request per [`OBSERVATIONS_PAGE_SIZE`] rows). Refuses with
+    /// [`CrawlError::Permanent`] if the series' notes are copyright-restricted (see
+    /// [`is_copyright_restricted`]), whether or not it was reached via discovery.
     async fn fetch_series(
         &self,
         ctx: &CrawlCtx,
@@ -417,6 +421,15 @@ impl FredAdapter {
     ) -> Result<FetchedSeries, CrawlError> {
         let api_key = self.api_key(ctx)?;
         let (metadata, last_updated) = self.fetch_metadata(ctx, api_key, external_id).await?;
+        if is_copyright_restricted(metadata.description.as_deref()) {
+            tracing::warn!(
+                series_id = external_id,
+                "refusing to fetch copyright-restricted series"
+            );
+            return Err(CrawlError::Permanent(format!(
+                "FRED {external_id}: copyright-restricted, refusing to fetch"
+            )));
+        }
         let validators = last_updated.map(|v| Validators {
             version: Some(format!("{PARSE_VERSION}:{v}")),
             ..Validators::default()
@@ -703,6 +716,36 @@ mod tests {
         assert_eq!(param(&q, "observation_start"), None);
     }
 
+    /// A manually triggered crawl (triggerCrawl) must not pull in a series copyright-restriction
+    /// would otherwise exclude from discovery: `fetch_series` checks `notes` itself and refuses
+    /// before fetching observations, so the restricted series is never persisted.
+    #[tokio::test]
+    async fn fetch_series_refuses_a_copyright_restricted_series() {
+        let mock = MockSource::start().await;
+        let restricted = restricted_fixture("CBBTCUSD", "Coinbase Bitcoin");
+        mock.mount(
+            &Route::get("/series").query("series_id", "CBBTCUSD"),
+            Reply::json_str(restricted),
+        )
+        .await;
+        // No /series/observations route mounted: if the adapter fetched observations anyway,
+        // the request would fail with a connection/404 error instead of this one, failing the
+        // assertion below.
+
+        let err = FredAdapter::new(mock.base_url())
+            .fetch_series(&test_ctx(), "CBBTCUSD", None)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            CrawlError::Permanent(
+                "FRED CBBTCUSD: copyright-restricted, refusing to fetch".to_string()
+            )
+        );
+        let reqs = mock.received_requests().await;
+        assert_eq!(reqs.len(), 1, "must not fetch observations");
+    }
+
     #[tokio::test]
     async fn incremental_fetch_asks_only_for_vintages_from_the_known_one() {
         let mock = MockSource::start().await;
@@ -824,6 +867,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(observation_requests().await, 2);
+
+        // A series that became copyright-restricted is refused even though its stored
+        // `last_updated` still matches.
+        mock.reset().await;
+        mock.mount(
+            &Route::get("/series"),
+            Reply::json_str(SERIES_GDP.replace(
+                "BEA Account Code: A191RC",
+                "Copyright, 2026, All rights reserved.",
+            )),
+        )
+        .await;
+        let refused = adapter
+            .fetch_series_incremental(&ctx, "GDP", None, known)
+            .await
+            .unwrap_err();
+        assert!(matches!(refused, CrawlError::Permanent(_)), "{refused:?}");
 
         // A new `last_updated` fetches the observations again.
         mock.reset().await;
@@ -1166,6 +1226,19 @@ mod tests {
             )
     }
 
+    /// [`series_fixture`] with `notes` replaced by copyright-restricted wording (the Coinbase
+    /// `CBBTCUSD` family's actual FRED notes), for tests of [`is_copyright_restricted`] callers.
+    fn restricted_fixture(id: &str, title: &str) -> String {
+        let notes_field = "\"notes\": \"BEA Account Code: A191RC\\n\\nGross domestic product \
+            (GDP), the featured measure of U.S. output, is the market value of the goods and \
+            services produced by labor and property located in the United States.\"";
+        series_fixture(id, title).replace(
+            notes_field,
+            "\"notes\": \"Reproduction, retransmission, or other use is prohibited except \
+                      with prior written permission.\"",
+        )
+    }
+
     #[tokio::test]
     async fn discover_ids_looks_up_each_curated_id() {
         let mock = MockSource::start().await;
@@ -1214,14 +1287,7 @@ mod tests {
     #[tokio::test]
     async fn discover_ids_drops_copyright_restricted_series_as_a_safety_net() {
         let mock = MockSource::start().await;
-        let notes_field = "\"notes\": \"BEA Account Code: A191RC\\n\\nGross domestic product \
-            (GDP), the featured measure of U.S. output, is the market value of the goods and \
-            services produced by labor and property located in the United States.\"";
-        let restricted = series_fixture("CBBTCUSD", "Coinbase Bitcoin").replace(
-            notes_field,
-            "\"notes\": \"Reproduction, retransmission, or other use is prohibited except \
-                      with prior written permission.\"",
-        );
+        let restricted = restricted_fixture("CBBTCUSD", "Coinbase Bitcoin");
         mock.mount(
             &Route::get("/series").query("series_id", "CBBTCUSD"),
             Reply::json_str(restricted),
