@@ -87,7 +87,7 @@ pub use adapter::{
 };
 pub use dataset::{DatasetCatalog, DatasetDef, SeriesDataset};
 pub use error::CrawlError;
-pub use http::{HttpConfig, HttpFetcher};
+pub use http::{ConditionalText, HttpConfig, HttpFetcher};
 pub use policy::SourcePolicy;
 pub use rate_limit::{SourcePermit, SourceRateLimiter};
 pub use scheduler::{RefreshScheduler, SchedulerConfig, SchedulerTickStats};

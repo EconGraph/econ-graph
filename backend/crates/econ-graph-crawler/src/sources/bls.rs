@@ -107,12 +107,16 @@ use chrono::{Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
+use econ_graph_core::error::AppError;
+
 use crate::adapter::{
     ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
     NewSeriesMetadataLite, SourceAdapter,
 };
 use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
+use crate::http::ConditionalText;
+use crate::persist;
 use crate::policy::SourcePolicy;
 use crate::reference::{bls_series, BlsSeries};
 use crate::source::SourceId;
@@ -434,6 +438,199 @@ pub fn series_dataset(series_id: &str) -> Option<SeriesDataset> {
     }
     rest.is_empty()
         .then(|| SeriesDataset::new(*code, dimensions))
+}
+
+/// One of BLS's own flat-file code lists that back a dataset dimension's `codes` in
+/// `data/datasets/bls.toml`. [`BlsAdapter::refresh_reference_data`] fetches each conditionally
+/// and merges its labels into the dataset so the checked-in file's coverage doesn't have to keep
+/// up by hand with every code BLS has ever published.
+struct CodeFileSpec<'a> {
+    url: &'a str,
+    dataset: &'static str,
+    dimension: &'static str,
+    code_col: &'static str,
+    label_col: &'static str,
+}
+
+/// `series_code` (LN) isn't here: CPS has no small per-field code file like the others (its
+/// value is effectively a series' own identity), so [`BlsAdapter::refresh_ln_series`] reads
+/// BLS's series catalog instead.
+const CODE_FILES: &[CodeFileSpec<'static>] = &[
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/cu/cu.item",
+        dataset: "CU",
+        dimension: "item",
+        code_col: "item_code",
+        label_col: "item_name",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/cu/cu.area",
+        dataset: "CU",
+        dimension: "area",
+        code_col: "area_code",
+        label_col: "area_name",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/ce/ce.industry",
+        dataset: "CE",
+        dimension: "industry",
+        code_col: "industry_code",
+        label_col: "industry_name",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/ce/ce.datatype",
+        dataset: "CE",
+        dimension: "data_type",
+        code_col: "data_type_code",
+        label_col: "data_type_text",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/la/la.area",
+        dataset: "LA",
+        dimension: "area",
+        code_col: "area_code",
+        label_col: "area_text",
+    },
+];
+
+/// BLS's CPS series catalog: one row per series id, with its title. Backs LN's `series_code`
+/// dimension (the id's tail after the seasonal letter).
+const LN_SERIES_URL: &str = "https://download.bls.gov/pub/time.series/ln/ln.series";
+
+/// Wraps a reference-data DB error as [`CrawlError::Transient`] (retried on the next scheduled
+/// discovery, same as any other reference-data fetch failure).
+fn db_err(e: AppError) -> CrawlError {
+    CrawlError::Transient(format!("BLS reference data: {e}"))
+}
+
+/// Parses a BLS flat reference file: a header row naming tab-delimited columns, then one data
+/// row per line. Returns `(code, label)` for every row that has both `code_col` and `label_col`,
+/// skipping blank lines. `Err` only if the header doesn't have both columns.
+fn parse_bls_code_file(
+    text: &str,
+    code_col: &str,
+    label_col: &str,
+) -> Result<Vec<(String, String)>, CrawlError> {
+    let mut lines = text.lines();
+    let header = lines
+        .next()
+        .ok_or_else(|| CrawlError::Parse("BLS reference file: empty body".into()))?;
+    let columns: Vec<&str> = header.split('\t').map(str::trim).collect();
+    let find = |name: &str| {
+        columns.iter().position(|c| *c == name).ok_or_else(|| {
+            CrawlError::Parse(format!("BLS reference file: no {name:?} column in header"))
+        })
+    };
+    let code_idx = find(code_col)?;
+    let label_idx = find(label_col)?;
+    Ok(lines
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split('\t').collect();
+            Some((fields.get(code_idx)?.trim(), fields.get(label_idx)?.trim()))
+        })
+        .filter(|(code, _)| !code.is_empty())
+        .map(|(code, label)| (code.to_string(), label.to_string()))
+        .collect())
+}
+
+/// `series_code` -> title for every LN series in `ln.series`'s body: the id's tail after its
+/// 2-letter prefix and 1-letter seasonal code, so S/U variants of the same concept (different
+/// `series_code` values, see the module docs) each keep their own title.
+fn parse_ln_series_titles(text: &str) -> Result<Vec<(String, String)>, CrawlError> {
+    let mut lines = text.lines();
+    let header = lines
+        .next()
+        .ok_or_else(|| CrawlError::Parse("BLS reference file: empty body".into()))?;
+    let columns: Vec<&str> = header.split('\t').map(str::trim).collect();
+    let find = |name: &str| {
+        columns.iter().position(|c| *c == name).ok_or_else(|| {
+            CrawlError::Parse(format!("BLS reference file: no {name:?} column in header"))
+        })
+    };
+    let id_idx = find("series_id")?;
+    let title_idx = find("series_title")?;
+    Ok(lines
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split('\t').collect();
+            let id = fields.get(id_idx)?.trim();
+            let title = fields.get(title_idx)?.trim();
+            let code = id.strip_prefix("LN")?.get(1..)?;
+            (!code.is_empty() && !title.is_empty()).then(|| (code.to_string(), title.to_string()))
+        })
+        .collect())
+}
+
+impl BlsAdapter {
+    /// Conditionally re-fetches one of BLS's flat code files and merges any new/changed labels
+    /// into `dataset`'s `dimension`. A `304` (unchanged since the cached `ETag`) does nothing.
+    async fn refresh_code_file(
+        &self,
+        ctx: &CrawlCtx,
+        spec: &CodeFileSpec<'_>,
+    ) -> Result<(), CrawlError> {
+        let cached_etag = persist::reference_file_etag(&ctx.pool, SourceId::Bls, spec.url)
+            .await
+            .map_err(db_err)?;
+        let fetched = ctx
+            .http
+            .get_text_conditional(SourceId::Bls, spec.url, cached_etag.as_deref())
+            .await?;
+        let ConditionalText::Modified { body, etag } = fetched else {
+            return Ok(());
+        };
+        let labels = parse_bls_code_file(&body, spec.code_col, spec.label_col)?;
+        let merged = persist::merge_dataset_dimension_codes(
+            &ctx.pool,
+            SourceId::Bls,
+            spec.dataset,
+            spec.dimension,
+            &labels,
+        )
+        .await
+        .map_err(db_err)?;
+        // Only cache the ETag once the labels actually landed: if `spec.dataset`/`dimension`
+        // doesn't exist yet (e.g. sync_datasets hasn't run), caching it here would make every
+        // later refresh a no-op 304 until BLS changes the file again.
+        if !merged {
+            return Ok(());
+        }
+        persist::set_reference_file_etag(&ctx.pool, SourceId::Bls, spec.url, etag.as_deref())
+            .await
+            .map_err(db_err)
+    }
+
+    /// Same as [`refresh_code_file`](Self::refresh_code_file), for LN's `series_code` dimension,
+    /// whose labels come from BLS's series catalog rather than a per-field code file.
+    async fn refresh_ln_series(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
+        let cached_etag = persist::reference_file_etag(&ctx.pool, SourceId::Bls, LN_SERIES_URL)
+            .await
+            .map_err(db_err)?;
+        let fetched = ctx
+            .http
+            .get_text_conditional(SourceId::Bls, LN_SERIES_URL, cached_etag.as_deref())
+            .await?;
+        let ConditionalText::Modified { body, etag } = fetched else {
+            return Ok(());
+        };
+        let labels = parse_ln_series_titles(&body)?;
+        let merged = persist::merge_dataset_dimension_codes(
+            &ctx.pool,
+            SourceId::Bls,
+            "LN",
+            "series_code",
+            &labels,
+        )
+        .await
+        .map_err(db_err)?;
+        if !merged {
+            return Ok(());
+        }
+        persist::set_reference_file_etag(&ctx.pool, SourceId::Bls, LN_SERIES_URL, etag.as_deref())
+            .await
+            .map_err(db_err)
+    }
 }
 
 /// Removes `secret` from `text`.
@@ -903,6 +1100,31 @@ impl SourceAdapter for BlsAdapter {
 
     fn batch_key(&self, _external_id: &str) -> Option<String> {
         Some(BATCH_KEY.to_string())
+    }
+
+    /// Refreshes CU/CE/LA's code labels from BLS's own flat files and LN's from its series
+    /// catalog, each by conditional GET so an unchanged file costs one small request. Each
+    /// file is independent (its own URL, its own cached `ETag`), so one failing never stops the
+    /// others from refreshing; if any failed, returns an aggregate error naming all of them
+    /// (the caller, `Worker::discover`, only logs it).
+    async fn refresh_reference_data(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
+        let mut errors = Vec::new();
+        for spec in CODE_FILES {
+            if let Err(e) = self.refresh_code_file(ctx, spec).await {
+                errors.push(format!("{}: {e}", spec.url));
+            }
+        }
+        if let Err(e) = self.refresh_ln_series(ctx).await {
+            errors.push(format!("{LN_SERIES_URL}: {e}"));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(CrawlError::Transient(format!(
+                "BLS reference data: {}",
+                errors.join("; ")
+            )))
+        }
     }
 
     /// Fetches `external_ids` in requests of at most 50 series (25 without a key). When the ids
@@ -2223,6 +2445,217 @@ mod tests {
         assert!(crate::sources::default_registry()
             .get(SourceId::Bls)
             .is_some());
+    }
+
+    #[test]
+    fn parse_bls_code_file_reads_named_columns_and_skips_blank_lines() {
+        let text = "item_code\titem_name\tdisplay_level\n\
+                     SA0\tAll items\t0\n\
+                     \n\
+                     SAA\tApparel\t1\n";
+        assert_eq!(
+            parse_bls_code_file(text, "item_code", "item_name").unwrap(),
+            vec![
+                ("SA0".to_string(), "All items".to_string()),
+                ("SAA".to_string(), "Apparel".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_bls_code_file_rejects_a_missing_column() {
+        let text = "area_type_code\tarea_code\tarea_text\n0\tST0100000000000\tAlabama\n";
+        let err = parse_bls_code_file(text, "item_code", "item_name").unwrap_err();
+        assert!(matches!(err, CrawlError::Parse(_)));
+    }
+
+    #[test]
+    fn parse_ln_series_titles_strips_prefix_and_seasonal_code() {
+        let text = "series_id\tseasonal\tseries_title\tfootnote_codes\n\
+                     LNS14000000\tS\t(Seas) Unemployment Rate\t\n\
+                     LNU04000000\tU\t(Unadj) Unemployment Rate\t\n";
+        assert_eq!(
+            parse_ln_series_titles(text).unwrap(),
+            vec![
+                (
+                    "14000000".to_string(),
+                    "(Seas) Unemployment Rate".to_string()
+                ),
+                (
+                    "04000000".to_string(),
+                    "(Unadj) Unemployment Rate".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_ln_series_titles_skips_rows_outside_ln() {
+        let text = "series_id\tseries_title\nCES0000000001\tAll Employees\n";
+        assert_eq!(parse_ln_series_titles(text).unwrap(), vec![]);
+    }
+
+    /// `refresh_code_file` fetches, parses and merges a code file's labels into the dataset, and
+    /// caches the response's `ETag` for next time. The conditional-GET mechanics themselves
+    /// (sending `If-None-Match`, treating `304` as "nothing to do") are covered at the
+    /// `HttpFetcher` level; this checks BLS's own wiring: parsing plus the merge into
+    /// `datasets.dimensions` through `persist`.
+    #[tokio::test]
+    async fn refresh_code_file_merges_labels_and_caches_etag() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_bls_refresh_code_file",
+        )
+        .await;
+        let mut catalog = crate::dataset::DatasetCatalog::empty();
+        catalog
+            .insert(
+                SourceId::Bls,
+                DATASET_CODES,
+                crate::dataset::parse_dataset_file(
+                    &std::fs::read_to_string(
+                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("data/datasets/bls.toml"),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        crate::persist::sync_datasets(&db.pool, &catalog)
+            .await
+            .unwrap();
+
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/cu.item"),
+            Reply::text("item_code\titem_name\nSA0\tAll items\nSAZZ\tBrand new item\n")
+                .header("ETag", "\"v1\""),
+        )
+        .await;
+        let url = mock.url("/cu.item");
+        let spec = CodeFileSpec {
+            url: &url,
+            dataset: "CU",
+            dimension: "item",
+            code_col: "item_code",
+            label_col: "item_name",
+        };
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        BlsAdapter::default()
+            .refresh_code_file(&ctx, &spec)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            crate::persist::reference_file_etag(&db.pool, SourceId::Bls, spec.url)
+                .await
+                .unwrap(),
+            Some("\"v1\"".to_string())
+        );
+        let codes = {
+            use diesel::prelude::*;
+            use diesel_async::RunQueryDsl;
+            use econ_graph_core::schema::datasets::dsl;
+            let mut conn = db.pool.get().await.unwrap();
+            let dims: econ_graph_core::models::DatasetComponents = dsl::datasets
+                .filter(dsl::code.eq("CU"))
+                .select(dsl::dimensions)
+                .first(&mut conn)
+                .await
+                .unwrap();
+            dims.0
+                .into_iter()
+                .find(|d| d.name == "item")
+                .unwrap()
+                .codes
+                .unwrap()
+        };
+        assert!(codes
+            .iter()
+            .any(|c| c.code == "SA0" && c.label == "All items"));
+        assert!(codes
+            .iter()
+            .any(|c| c.code == "SAZZ" && c.label == "Brand new item"));
+
+        // bls.toml itself carries no "item" codes any more (BLS's own file is the source of
+        // truth), so a resync from it must not drop what this refresh just merged in.
+        crate::persist::sync_datasets(&db.pool, &catalog)
+            .await
+            .unwrap();
+        let codes_after_resync = {
+            use diesel::prelude::*;
+            use diesel_async::RunQueryDsl;
+            use econ_graph_core::schema::datasets::dsl;
+            let mut conn = db.pool.get().await.unwrap();
+            let dims: econ_graph_core::models::DatasetComponents = dsl::datasets
+                .filter(dsl::code.eq("CU"))
+                .select(dsl::dimensions)
+                .first(&mut conn)
+                .await
+                .unwrap();
+            dims.0
+                .into_iter()
+                .find(|d| d.name == "item")
+                .unwrap()
+                .codes
+                .unwrap()
+        };
+        assert_eq!(codes, codes_after_resync);
+
+        db.drop().await;
+    }
+
+    /// If `sync_datasets` hasn't run yet (or the dataset/dimension named in a `CodeFileSpec`
+    /// doesn't exist), `merge_dataset_dimension_codes` has nothing to write into and
+    /// `refresh_code_file` must not cache the `ETag`: caching it anyway would make the next
+    /// refresh a `304` that still has nothing to merge into, silently losing the labels for
+    /// good (short of BLS changing the file again).
+    #[tokio::test]
+    async fn refresh_code_file_does_not_cache_etag_when_nothing_to_merge_into() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_bls_refresh_no_dataset",
+        )
+        .await;
+        // Deliberately skip sync_datasets: no "CU" dataset row exists yet.
+
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/cu.item"),
+            Reply::text("item_code\titem_name\nSA0\tAll items\n").header("ETag", "\"v1\""),
+        )
+        .await;
+        let url = mock.url("/cu.item");
+        let spec = CodeFileSpec {
+            url: &url,
+            dataset: "CU",
+            dimension: "item",
+            code_col: "item_code",
+            label_col: "item_name",
+        };
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        BlsAdapter::default()
+            .refresh_code_file(&ctx, &spec)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            crate::persist::reference_file_etag(&db.pool, SourceId::Bls, spec.url)
+                .await
+                .unwrap(),
+            None
+        );
+
+        db.drop().await;
     }
 }
 
