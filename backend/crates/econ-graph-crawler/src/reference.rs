@@ -62,14 +62,15 @@ pub fn data_dir() -> PathBuf {
         )
 }
 
-/// One World Development Indicator the World Bank adapter crawls.
+/// One World Development Indicator the World Bank adapter crawls. Its name and description are
+/// not shipped here: [`crate::sources::world_bank`]'s
+/// [`code_lists`](crate::adapter::SourceAdapter::code_lists) fetches them, one indicator at a
+/// time, from the World Bank's own `/indicator/{id}` endpoint.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WdiIndicator {
     /// Indicator code, e.g. `NY.GDP.PCAP.CD`.
     pub id: String,
-    /// Name, e.g. `GDP per capita (current US$)`.
-    pub name: String,
     /// Unit stored as each series' units, e.g. `current US$`.
     pub unit: String,
 }
@@ -93,17 +94,17 @@ fn load_wdi_indicators(path: &Path) -> Result<Vec<WdiIndicator>, String> {
     parse_wdi_indicators(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Parses `id,name,unit` rows after a header line (`#` comment lines skipped; fields may be
-/// quoted) and checks them.
+/// Parses `id,unit` rows after a header line (`#` comment lines skipped; fields may be quoted)
+/// and checks them.
 fn parse_wdi_indicators(text: &str) -> Result<Vec<WdiIndicator>, String> {
     let mut reader = csv::ReaderBuilder::new()
         .comment(Some(b'#'))
         .trim(csv::Trim::All)
         .from_reader(text.as_bytes());
     let header = reader.headers().map_err(|e| e.to_string())?.clone();
-    if header.iter().ne(["id", "name", "unit"]) {
+    if header.iter().ne(["id", "unit"]) {
         return Err(format!(
-            "expected header id,name,unit, got {}",
+            "expected header id,unit, got {}",
             header.iter().collect::<Vec<_>>().join(",")
         ));
     }
@@ -115,8 +116,8 @@ fn parse_wdi_indicators(text: &str) -> Result<Vec<WdiIndicator>, String> {
         if id.is_empty() || id.contains('/') || id.contains(char::is_whitespace) {
             return Err(format!("indicator id {id:?} is empty or has '/' or spaces"));
         }
-        if row.name.is_empty() || row.unit.is_empty() {
-            return Err(format!("indicator {id}: empty name or unit"));
+        if row.unit.is_empty() {
+            return Err(format!("indicator {id}: empty unit"));
         }
         if !seen.insert(id.clone()) {
             return Err(format!("indicator {id} is listed twice"));
@@ -326,31 +327,27 @@ mod tests {
         .unwrap();
         assert!((45..=60).contains(&list.len()), "{}", list.len());
         let gdp = list.iter().find(|i| i.id == "NY.GDP.PCAP.CD").unwrap();
-        assert_eq!(gdp.name, "GDP per capita (current US$)");
         assert_eq!(gdp.unit, "current US$");
-        // Quoted names keep their commas.
-        assert!(list.iter().any(|i| i.name == "Population, total"));
     }
 
     #[test]
     fn rejects_malformed_wdi_indicators() {
         for (text, needle) in [
-            ("code,name,unit\n", "expected header"),
-            ("id,name,unit\n", "no indicators"),
-            ("id,name,unit\na/b,X,u\n", "'/'"),
-            ("id,name,unit\nA,X,\n", "empty name or unit"),
-            ("id,name,unit\nA,X,u\nA,Y,u\n", "twice"),
-            ("id,name,unit\nA,X\n", "found record with 2 fields"),
+            ("code,unit\n", "expected header"),
+            ("id,unit\n", "no indicators"),
+            ("id,unit\na/b,u\n", "'/'"),
+            ("id,unit\nA,\n", "empty unit"),
+            ("id,unit\nA,u\nA,u\n", "twice"),
+            ("id,unit\nA,u,X\n", "found record with 3 fields"),
         ] {
             let e = parse_wdi_indicators(text).unwrap_err();
             assert!(e.contains(needle), "{text:?}: {e}");
         }
-        let ok = parse_wdi_indicators("# c\nid,name,unit\n A ,\"B, c\", u \n").unwrap();
+        let ok = parse_wdi_indicators("# c\nid,unit\n A , u \n").unwrap();
         assert_eq!(
             ok,
             [WdiIndicator {
                 id: "A".into(),
-                name: "B, c".into(),
                 unit: "u".into(),
             }]
         );

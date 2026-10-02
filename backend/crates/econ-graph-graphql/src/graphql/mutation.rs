@@ -228,8 +228,8 @@ impl Mutation {
         if changes.is_empty() {
             return Err(GraphQLError::new("No fields to update"));
         }
-        let mut conn = pool.get().await?;
         require_manageable(ctx, caller, user_id)?;
+        let mut conn = pool.get().await?;
         let final_user: User = diesel::update(users::table.filter(users::id.eq(user_id)))
             .set(&changes)
             .returning(User::as_select())
@@ -259,8 +259,8 @@ impl Mutation {
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::users;
 
-        let mut conn = pool.get().await?;
         require_manageable(ctx, caller, user_id)?;
+        let mut conn = pool.get().await?;
 
         // Delete user (cascade will handle related records)
         let deleted = diesel::delete(users::table.filter(users::id.eq(user_id)))
@@ -282,8 +282,8 @@ impl Mutation {
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::users;
 
-        let mut conn = pool.get().await?;
         require_manageable(ctx, caller, user_id)?;
+        let mut conn = pool.get().await?;
 
         // Suspend user
         let updated = diesel::update(users::table.filter(users::id.eq(user_id)))
@@ -306,8 +306,8 @@ impl Mutation {
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::users;
 
-        let mut conn = pool.get().await?;
         require_manageable(ctx, caller, user_id)?;
+        let mut conn = pool.get().await?;
 
         // Activate user
         let updated = diesel::update(users::table.filter(users::id.eq(user_id)))
