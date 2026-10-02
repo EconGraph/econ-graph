@@ -169,7 +169,6 @@ and [#182](https://github.com/EconGraph/econ-graph/pull/182) (backend CORS).
 | Plaintext DB, monitoring and Google OAuth client-secret credentials in k8s manifests. The OAuth secret must be rotated | `k8s/manifests/postgres-deployment.yaml`, `configmap.yaml`, `ingress-cloudflare-dns01.yaml` |
 | Sealed Secrets / secrets submodule not set up | `k8s/secrets` is uninitialized. `SECRETS_MANAGEMENT.md` describes a target state, not the current one |
 | Tokens are stored in `localStorage` | `frontend/src/contexts/AuthContext.tsx` and `admin-frontend/src/contexts/AuthContext.tsx` |
-| Terraform state files and provider binaries are committed to git | `terraform/k8s/terraform.tfstate`, `terraform.tfstate.backup`, `terraform/k8s/.terraform/` |
 | Security scans upload results but never fail the build | `.github/workflows/security.yml` |
 
 Fixed: no ingress sets CORS headers any more, so the backend's `CORS_ALLOWED_ORIGINS`
