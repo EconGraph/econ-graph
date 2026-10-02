@@ -103,3 +103,6 @@ EarningsCalls/
 # Demo videos and audio files
 demo-videos/
 *.aiff
+
+/frontend/test-results-layout/
+/frontend/playwright-report-layout/

@@ -1,0 +1,53 @@
+name: Visual layout
+
+on:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "admin-frontend/**"
+      - "config/flags/**"
+      - ".github/workflows/visual-layout.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  layout:
+    name: Public and admin layout (Chromium)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            admin-frontend/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm ci --prefix frontend
+          npm ci --prefix admin-frontend
+      - name: Install locked Chromium and dependencies
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Check production UI geometry and focus
+        working-directory: frontend
+        run: npm run test:layout
+      - name: Preserve failure screenshots, traces and report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-layout-failures
+          path: |
+            frontend/test-results-layout/
+            frontend/playwright-report-layout/
+          retention-days: 14
