@@ -50,7 +50,7 @@ The cache build compiles test binaries; it does not execute tests. Rust test job
 - Core CI E2E jobs are disabled unless explicitly selected on manual dispatch. Independent Release E2E runs on matching PRs, not ordinary main pushes.
 - The scheduled accessibility runtime commands currently mask failures; their green job status is not evidence of successful execution.
 - Scheduled security audit steps include continue-on-error; inspect their artifacts and logs.
-- Nightly E2E and cost-update workflows have separate failures. See their latest runs rather than assuming scheduled coverage is healthy.
+- The cost-update workflow has separate failures. See its latest runs rather than assuming scheduled coverage is healthy.
 
 These limitations describe the checked-in configuration as of September 29, 2026. Update this section when fixes merge.
 
