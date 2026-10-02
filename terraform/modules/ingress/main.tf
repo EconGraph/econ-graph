@@ -368,7 +368,8 @@ resource "kubernetes_ingress_v1" "econgraph" {
     namespace = var.namespace
     annotations = {
       "kubernetes.io/ingress.class"                = "nginx"
-      "nginx.ingress.kubernetes.io/rewrite-target" = "/"
+      # No rewrite-target: it would turn every path, /graphql included, into "/" before it
+      # reached the backend. k8s/manifests/ingress.yaml has none either.
       "nginx.ingress.kubernetes.io/ssl-redirect"   = "true"
       "nginx.ingress.kubernetes.io/force-ssl-redirect" = "true"
 
