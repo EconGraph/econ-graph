@@ -67,6 +67,12 @@ impl Default for HttpConfig {
     }
 }
 
+/// Total timeout of a [`HttpFetcher::get_text_conditional`] request: reference files can be
+/// tens of megabytes, too big for the per-request [`HttpConfig::timeout`] on a slow link. Kept
+/// short enough that BLS's nine reference files, one attempt each, fit well inside a discovery
+/// job's stuck threshold (`CRAWLER_STUCK_AFTER_SECS`, 30 minutes by default).
+pub const REFERENCE_FILE_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// A successful (or `304`) response: the status, the response's `ETag` and `Last-Modified` if it
 /// sent them, and the body (empty for `304`).
 struct RawResponse {
@@ -155,6 +161,10 @@ struct Target {
     if_none_match: Option<String>,
     /// `If-Modified-Since` value to send, for a conditional GET.
     if_modified_since: Option<String>,
+    /// Overrides [`HttpConfig::timeout`] for this request.
+    timeout: Option<Duration>,
+    /// In-process retries after the first attempt ([`EXTRA_ATTEMPTS`] unless overridden).
+    extra_attempts: u32,
     /// The URL with secret query values replaced; the only form that may be logged.
     redacted: String,
     /// Secret values sent in the query or a JSON body, scrubbed from quoted response bodies too.
@@ -198,6 +208,8 @@ impl Target {
             accept_json,
             if_none_match: None,
             if_modified_since: None,
+            timeout: None,
+            extra_attempts: EXTRA_ATTEMPTS,
         })
     }
 
@@ -270,6 +282,11 @@ impl HttpFetcher {
     /// [`ConditionalText::NotModified`] on a `304` response instead of fetching the body again.
     /// On any other successful status, returns the body and the response's own `ETag` (`None` if
     /// the server didn't send one), for the caller to store and pass back next time.
+    ///
+    /// These are whole reference files (BLS's `la.series` is the full LAUS series catalog), so
+    /// the request gets [`REFERENCE_FILE_TIMEOUT`] instead of [`HttpConfig::timeout`], and no
+    /// in-process retry: a refresh runs inside a discovery job, which must not hold its queue row
+    /// for several long downloads per file, and the next scheduled refresh tries again anyway.
     pub async fn get_text_conditional(
         &self,
         source: SourceId,
@@ -280,18 +297,16 @@ impl HttpFetcher {
             etag: Some(e.to_owned()),
             ..Validators::default()
         });
-        Ok(
-            match self
-                .get_text_if_changed(source, url, &[], known.as_ref())
-                .await?
-            {
-                IfChanged::Unchanged { .. } => ConditionalText::NotModified,
-                IfChanged::Changed { body, validators } => ConditionalText::Modified {
-                    body,
-                    etag: validators.etag,
-                },
+        let mut target = Target::new(source, Method::GET, url, &[], None, false)?;
+        target.timeout = Some(REFERENCE_FILE_TIMEOUT.max(self.inner.config.timeout));
+        target.extra_attempts = 0;
+        Ok(match self.if_changed(target, known.as_ref()).await? {
+            IfChanged::Unchanged { .. } => ConditionalText::NotModified,
+            IfChanged::Changed { body, validators } => ConditionalText::Modified {
+                body,
+                etag: validators.etag,
             },
-        )
+        })
     }
 
     /// GET `url` with `query` appended, skipping the body when it hasn't changed since `known`.
@@ -310,7 +325,17 @@ impl HttpFetcher {
         query: &[(&str, &str)],
         known: Option<&Validators>,
     ) -> Result<IfChanged, CrawlError> {
-        let mut target = Target::new(source, Method::GET, url, query, None, false)?;
+        let target = Target::new(source, Method::GET, url, query, None, false)?;
+        self.if_changed(target, known).await
+    }
+
+    /// [`get_text_if_changed`](Self::get_text_if_changed) for a `target` already built (with its
+    /// own timeout or retries).
+    async fn if_changed(
+        &self,
+        mut target: Target,
+        known: Option<&Validators>,
+    ) -> Result<IfChanged, CrawlError> {
         if let Some(k) = known {
             target.if_none_match = k.etag.clone();
             target.if_modified_since = k.last_modified.clone();
@@ -402,7 +427,7 @@ impl HttpFetcher {
                 tracing::debug!(source = %target.source, url = %target.redacted, error = %err, "request failed");
                 return Err(err);
             }
-            if attempt >= EXTRA_ATTEMPTS {
+            if attempt >= target.extra_attempts {
                 tracing::warn!(
                     source = %target.source,
                     url = %target.redacted,
@@ -456,6 +481,9 @@ impl HttpFetcher {
         }
         if let Some(date) = &target.if_modified_since {
             request = request.header(IF_MODIFIED_SINCE, date.clone());
+        }
+        if let Some(timeout) = target.timeout {
+            request = request.timeout(timeout);
         }
         if let Some(body) = &target.body {
             request = request
@@ -541,7 +569,7 @@ impl HttpFetcher {
             CrawlError::Transient(format!(
                 "{}: timed out after {:?}: {detail}",
                 target.context(),
-                self.inner.config.timeout
+                target.timeout.unwrap_or(self.inner.config.timeout)
             ))
         } else if permanent {
             CrawlError::Permanent(format!("{}: {detail}", target.context()))
@@ -1261,6 +1289,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(got, ConditionalText::NotModified);
+    }
+
+    /// A reference file gets one attempt: a 500 is returned, not retried in-process.
+    #[tokio::test]
+    async fn get_text_conditional_does_not_retry() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let err = fetcher()
+            .get_text_conditional(SourceId::Fred, &format!("{}/r", server.uri()), None)
+            .await
+            .unwrap_err();
+        assert!(err.is_retryable(), "{err:?}");
     }
 
     #[tokio::test]

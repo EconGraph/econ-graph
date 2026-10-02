@@ -6,18 +6,30 @@ years, without one 10. Background: [BLS API experimental findings](../technical/
 
 ## What we fetch today
 
-- **Discovery**: reads 291 series from
-  `backend/crates/econ-graph-crawler/data/bls_series.csv`, no HTTP call. The list covers
-  headline CPI-U (CU), CES payrolls and earnings (CE), CPS labor force (LN), and LAUS state
-  unemployment rates and labor force (LA) for the states and DC.
+- **Discovery**: the 291 series ids in
+  `backend/crates/econ-graph-crawler/data/bls_series.csv` (headline CPI-U (CU), CES payrolls
+  and earnings (CE), CPS labor force (LN), and LAUS state unemployment rates and labor force
+  (LA) for the states and DC), described from BLS's own survey series files
+  (`https://download.bls.gov/pub/time.series/{cu,ce,la,ln}/*.series`): title
+  (`series_title`), frequency (from the latest period, `end_period`), and units from CPI's
+  `base_period` ("Index 1982-84=100"), the CE data type label (from `ce.datatype`) or the LA
+  measure label. LN's flat files have no units, so LN series have units only after a fetch
+  with a key. Before each scheduled discovery the worker re-fetches each file by conditional
+  GET (`ETag`) and stores the curated series' rows (`reference_file_cache.payload`);
+  discovery reads those rows and makes no API call. The files go through the shared
+  reference-file refresh (`reference_file::refresh`); no seed migration carries them (seeds
+  hold code lists only), so a new database lists these series after its first successful
+  refresh. `ln.series` also supplies LN's `series_code` labels, so those aren't seeded
+  either. A curated id whose file hasn't loaded yet, or that BLS's file doesn't list, is left
+  out of that discovery with a warning.
 - **Fetch**: `POST /timeseries/data/` with `{"seriesid": [ids..], "startyear", "endyear",
   "catalog": true, "registrationkey"?: key}`, batched at 50 series per request with a key
   (25 without), in year windows (20 years per window with a key, 10 without), newest first.
-- **Kept**: `year` + `period` (as the period's start date) and `value`. A listed series
-  (all 291) keeps the data file's title, units and frequency, so discovery and fetch agree
-  with or without a key; `catalog` (sent only with a key) adds the survey name and
-  seasonality. An unlisted series takes title, units and frequency from `catalog` alone.
-  Each
+- **Kept**: `year` + `period` (as the period's start date) and `value`. With a key, the
+  `catalog` gives the series' title, survey name, units (`measure_data_type`) and
+  seasonality; frequency comes from the periods. Without a key there is no catalog: the fetch
+  reports the frequency and the seasonal adjustment the id encodes, and the series keeps the
+  title and units discovery stored from the series files. Each
   observation's `footnotes` (`{code, text}`) are parsed and logged — a `P` (preliminary)
   footnote and an `X` ("data unavailable") footnote are recognised — but not yet stored:
   `data_points` has no footnote column in train 1.
