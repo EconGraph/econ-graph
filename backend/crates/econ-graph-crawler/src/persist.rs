@@ -564,7 +564,6 @@ pub async fn dataset_dimension_labels(
         .unwrap_or_default())
 }
 
-
 /// `datasets.id` of each of `source_id`'s datasets named in `codes`. A code without a row means
 /// the catalog was not synced ([`sync_datasets`]): an error, not a silent `NULL`.
 async fn dataset_ids(
