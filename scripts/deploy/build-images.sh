@@ -7,21 +7,23 @@ set -e
 
 echo "Building EconGraph Docker images..."
 
-# Version to tag images with. k8s/manifests/backend-deployment.yaml,
-# frontend-deployment.yaml and crawler-worker.yaml hard-code this same tag, so it
-# can't be overridden independently: doing so would load images under a tag the
-# manifests don't reference and pods would sit on ErrImageNeverPull.
-EXPECTED_VERSION="v3.7.4"
-VERSION="${VERSION:-$EXPECTED_VERSION}"
-if [ "${VERSION}" != "${EXPECTED_VERSION}" ]; then
-  echo "❌ VERSION=${VERSION} but the k8s manifests hard-code image tag ${EXPECTED_VERSION}." >&2
-  echo "   Update the manifests' image tags too, or unset VERSION." >&2
-  exit 1
-fi
-
 # Get the project root directory
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_ROOT"
+
+# Version to tag images with, read from backend/Cargo.toml (the one place the
+# version lives). k8s/manifests/backend-deployment.yaml, frontend-deployment.yaml
+# and crawler-worker.yaml hard-code this same tag, so it can't be overridden
+# independently: doing so would load images under a tag the manifests don't
+# reference and pods would sit on ErrImageNeverPull.
+WORKSPACE_VERSION="$(grep -m1 '^version' backend/Cargo.toml | sed -E 's/version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')"
+EXPECTED_VERSION="v${WORKSPACE_VERSION}"
+VERSION="${VERSION:-$EXPECTED_VERSION}"
+if [ "${VERSION}" != "${EXPECTED_VERSION}" ]; then
+  echo "❌ VERSION=${VERSION} but backend/Cargo.toml's version (${EXPECTED_VERSION}) is what the k8s manifests hard-code." >&2
+  echo "   Update backend/Cargo.toml and the manifests' image tags together, or unset VERSION." >&2
+  exit 1
+fi
 
 # Build backend image
 echo "Building backend image..."
