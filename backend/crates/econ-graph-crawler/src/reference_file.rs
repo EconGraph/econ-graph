@@ -222,7 +222,7 @@ fn non_empty(url: &str, mut codes: Vec<Code>) -> Result<Vec<Code>, CrawlError> {
 
 /// True for an error after which more requests only make things worse: the source refused our
 /// credentials or asked us to back off.
-fn stops_the_batch(e: &CrawlError) -> bool {
+pub(crate) fn stops_the_batch(e: &CrawlError) -> bool {
     matches!(e, CrawlError::Auth(_) | CrawlError::RateLimited { .. })
 }
 

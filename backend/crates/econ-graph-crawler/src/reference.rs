@@ -39,17 +39,12 @@ pub const BLS_SERIES_FILE: &str = "bls_series.csv";
 /// File name of the curated FRED series list in the data directory.
 pub const FRED_SERIES_FILE: &str = "fred_series.csv";
 
-/// A BLS series the crawler discovers and fetches.
+/// A BLS series the crawler discovers and fetches. Only the id is curated here: its title, units
+/// and frequency come from BLS (see [`crate::sources::bls`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlsSeries {
     /// BLS series id, e.g. `CUUR0000SA0`.
     pub id: String,
-    /// Frequency, e.g. `Monthly`.
-    pub frequency: String,
-    /// Units, e.g. `Percent`.
-    pub units: String,
-    /// Title.
-    pub title: String,
 }
 
 /// The reference data directory: `$CRAWLER_DATA_DIR`, or this crate's `data/` directory.
@@ -62,14 +57,15 @@ pub fn data_dir() -> PathBuf {
         )
 }
 
-/// One World Development Indicator the World Bank adapter crawls.
+/// One World Development Indicator the World Bank adapter crawls. Its name and description are
+/// not shipped here: [`crate::sources::world_bank`]'s
+/// [`code_lists`](crate::adapter::SourceAdapter::code_lists) fetches them, one indicator at a
+/// time, from the World Bank's own `/indicator/{id}` endpoint.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WdiIndicator {
     /// Indicator code, e.g. `NY.GDP.PCAP.CD`.
     pub id: String,
-    /// Name, e.g. `GDP per capita (current US$)`.
-    pub name: String,
     /// Unit stored as each series' units, e.g. `current US$`.
     pub unit: String,
 }
@@ -93,17 +89,17 @@ fn load_wdi_indicators(path: &Path) -> Result<Vec<WdiIndicator>, String> {
     parse_wdi_indicators(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Parses `id,name,unit` rows after a header line (`#` comment lines skipped; fields may be
-/// quoted) and checks them.
+/// Parses `id,unit` rows after a header line (`#` comment lines skipped; fields may be quoted)
+/// and checks them.
 fn parse_wdi_indicators(text: &str) -> Result<Vec<WdiIndicator>, String> {
     let mut reader = csv::ReaderBuilder::new()
         .comment(Some(b'#'))
         .trim(csv::Trim::All)
         .from_reader(text.as_bytes());
     let header = reader.headers().map_err(|e| e.to_string())?.clone();
-    if header.iter().ne(["id", "name", "unit"]) {
+    if header.iter().ne(["id", "unit"]) {
         return Err(format!(
-            "expected header id,name,unit, got {}",
+            "expected header id,unit, got {}",
             header.iter().collect::<Vec<_>>().join(",")
         ));
     }
@@ -115,8 +111,8 @@ fn parse_wdi_indicators(text: &str) -> Result<Vec<WdiIndicator>, String> {
         if id.is_empty() || id.contains('/') || id.contains(char::is_whitespace) {
             return Err(format!("indicator id {id:?} is empty or has '/' or spaces"));
         }
-        if row.name.is_empty() || row.unit.is_empty() {
-            return Err(format!("indicator {id}: empty name or unit"));
+        if row.unit.is_empty() {
+            return Err(format!("indicator {id}: empty unit"));
         }
         if !seen.insert(id.clone()) {
             return Err(format!("indicator {id} is listed twice"));
@@ -195,8 +191,8 @@ fn load_bls_series(path: &Path) -> Result<Vec<BlsSeries>, String> {
     parse_bls_series(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Parses `series_id,frequency,units,title` rows after a header line; blank lines and `#`
-/// comments are skipped. The title is the last column and may contain commas.
+/// Parses one `series_id` per line after a `series_id` header line; blank lines and `#` comments
+/// are skipped.
 fn parse_bls_series(text: &str) -> Result<Vec<BlsSeries>, String> {
     let mut lines = text
         .lines()
@@ -204,46 +200,29 @@ fn parse_bls_series(text: &str) -> Result<Vec<BlsSeries>, String> {
         .map(|(i, l)| (i + 1, l.trim()))
         .filter(|(_, l)| !l.is_empty() && !l.starts_with('#'));
     match lines.next() {
-        Some((_, "series_id,frequency,units,title")) => {}
+        Some((_, "series_id")) => {}
         Some((n, other)) => {
             return Err(format!(
-                "line {n}: expected header series_id,frequency,units,title, got {other:?}"
+                "line {n}: expected header series_id, got {other:?}"
             ))
         }
         None => return Err("no header line".into()),
     }
     let mut series = Vec::new();
     let mut seen = HashSet::new();
-    for (n, line) in lines {
-        let mut cols = line.splitn(4, ',').map(str::trim);
-        let (Some(id), Some(frequency), Some(units), Some(title)) =
-            (cols.next(), cols.next(), cols.next(), cols.next())
-        else {
-            return Err(format!(
-                "line {n}: expected series_id,frequency,units,title, got {line:?}"
-            ));
-        };
-        if id.is_empty()
-            || !id
-                .bytes()
-                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+    for (n, id) in lines {
+        if !id
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
         {
             return Err(format!(
                 "line {n}: series id {id:?} is not capital letters and digits"
             ));
         }
-        if frequency.is_empty() || units.is_empty() || title.is_empty() {
-            return Err(format!("line {n}: empty frequency, units or title"));
-        }
         if !seen.insert(id.to_string()) {
             return Err(format!("line {n}: duplicate series id {id}"));
         }
-        series.push(BlsSeries {
-            id: id.into(),
-            frequency: frequency.into(),
-            units: units.into(),
-            title: title.into(),
-        });
+        series.push(BlsSeries { id: id.into() });
     }
     if series.is_empty() {
         return Err("no series".into());
@@ -326,38 +305,35 @@ mod tests {
         .unwrap();
         assert!((45..=60).contains(&list.len()), "{}", list.len());
         let gdp = list.iter().find(|i| i.id == "NY.GDP.PCAP.CD").unwrap();
-        assert_eq!(gdp.name, "GDP per capita (current US$)");
         assert_eq!(gdp.unit, "current US$");
-        // Quoted names keep their commas.
-        assert!(list.iter().any(|i| i.name == "Population, total"));
     }
 
     #[test]
     fn rejects_malformed_wdi_indicators() {
         for (text, needle) in [
-            ("code,name,unit\n", "expected header"),
-            ("id,name,unit\n", "no indicators"),
-            ("id,name,unit\na/b,X,u\n", "'/'"),
-            ("id,name,unit\nA,X,\n", "empty name or unit"),
-            ("id,name,unit\nA,X,u\nA,Y,u\n", "twice"),
-            ("id,name,unit\nA,X\n", "found record with 2 fields"),
+            ("code,unit\n", "expected header"),
+            ("id,unit\n", "no indicators"),
+            ("id,unit\na/b,u\n", "'/'"),
+            ("id,unit\nA,\n", "empty unit"),
+            ("id,unit\nA,u\nA,u\n", "twice"),
+            ("id,unit\nA,u,X\n", "found record with 3 fields"),
         ] {
             let e = parse_wdi_indicators(text).unwrap_err();
             assert!(e.contains(needle), "{text:?}: {e}");
         }
-        let ok = parse_wdi_indicators("# c\nid,name,unit\n A ,\"B, c\", u \n").unwrap();
+        let ok = parse_wdi_indicators("# c\nid,unit\n A , u \n").unwrap();
         assert_eq!(
             ok,
             [WdiIndicator {
                 id: "A".into(),
-                name: "B, c".into(),
                 unit: "u".into(),
             }]
         );
     }
 
     /// The shipped BLS list parses, covers every survey the adapter promises, and has a LAUS
-    /// unemployment rate for every state and DC (the Census state file fixture).
+    /// unemployment rate (seasonally adjusted and not) for every state and DC (the Census state
+    /// file fixture).
     #[test]
     fn shipped_bls_series_file_is_valid() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
@@ -378,12 +354,7 @@ mod tests {
                 format!("LASST{}0000000000003", st.fips),
                 format!("LAUST{}0000000000003", st.fips),
             ] {
-                let row = series.iter().find(|s| s.id == id);
-                assert!(
-                    row.is_some_and(|r| r.title.contains(&st.name)),
-                    "{id} ({})",
-                    st.name
-                );
+                assert!(series.iter().any(|s| s.id == id), "{id} ({})", st.name);
             }
         }
     }
@@ -414,42 +385,38 @@ mod tests {
         }
     }
 
-    /// Titles keep their commas; comments and blank lines are skipped.
+    /// Comments and blank lines are skipped.
     #[test]
     fn parses_bls_rows() {
-        let s = parse_bls_series(
-            "# c\n\nseries_id,frequency,units,title\nCES4000000001,Monthly,Thousands,All Employees, Trade\n",
-        )
-        .unwrap();
+        let s =
+            parse_bls_series("# c\n\nseries_id\n# CES\nCES4000000001\n  LNS14000000  \n").unwrap();
         assert_eq!(
             s,
-            [BlsSeries {
-                id: "CES4000000001".into(),
-                frequency: "Monthly".into(),
-                units: "Thousands".into(),
-                title: "All Employees, Trade".into(),
-            }]
+            [
+                BlsSeries {
+                    id: "CES4000000001".into()
+                },
+                BlsSeries {
+                    id: "LNS14000000".into()
+                },
+            ]
         );
     }
 
     /// Malformed BLS lists are rejected with the offending line.
     #[test]
     fn rejects_malformed_bls_files() {
-        const H: &str = "series_id,frequency,units,title\n";
+        const H: &str = "series_id\n";
         for (text, needle) in [
             (String::new(), "no header"),
-            ("id,title\n".to_string(), "expected header"),
+            (
+                "series_id,frequency,units,title\n".to_string(),
+                "expected header",
+            ),
             (H.to_string(), "no series"),
-            (format!("{H}CUUR0000SA0,Monthly,Index\n"), "line 2"),
-            (
-                format!("{H}cuur0000sa0,Monthly,Index,T\n"),
-                "capital letters",
-            ),
-            (format!("{H}CUUR0000SA0,,Index,T\n"), "empty"),
-            (
-                format!("{H}CUUR0000SA0,Monthly,Index,T\nCUUR0000SA0,Monthly,Index,U\n"),
-                "duplicate",
-            ),
+            (format!("{H}CUUR0000SA0,Monthly\n"), "line 2"),
+            (format!("{H}cuur0000sa0\n"), "capital letters"),
+            (format!("{H}CUUR0000SA0\nCUUR0000SA0\n"), "duplicate"),
         ] {
             let e = parse_bls_series(&text).unwrap_err();
             assert!(e.contains(needle), "{text:?}: {e}");
