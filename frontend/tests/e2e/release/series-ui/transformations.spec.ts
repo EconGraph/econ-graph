@@ -87,8 +87,8 @@ test.describe('series transformations', () => {
         expected: SEEDED.fredGdp.transformations[1].latestShown,
       },
       {
-        option: 'Change since first observation',
-        columnHeader: '% Change since First Observation',
+        option: 'Change since first available value',
+        columnHeader: '% Change since First Available Value',
         expected: SEEDED.fredGdp.transformations[3].latestShown,
       },
     ];

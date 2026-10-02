@@ -820,12 +820,13 @@ pub async fn apply_data_transformation(
         }
 
         DataTransformation::PercentChange => {
-            // For percent change, compare each point with the first point. Without a usable
-            // base every point is empty, but still returned.
+            // For percent change, compare each point with the series' earliest usable value: a
+            // null or zero reading at the very first date (or several) would otherwise blank the
+            // whole series, so skip leading points without one. Without any usable base every
+            // point is empty, but still returned.
             let base_value = sorted_points
-                .first()
-                .and_then(|p| p.value.clone())
-                .filter(|base| !base.is_zero());
+                .iter()
+                .find_map(|p| p.value.clone().filter(|base| !base.is_zero()));
             for point in &sorted_points {
                 let transformed_value = match (&point.value, &base_value) {
                     (Some(current_value), Some(base_value)) => {
