@@ -56,8 +56,8 @@ export const SEEDED = {
     source: 'BLS',
     sourceName: 'Bureau of Labor Statistics (BLS)',
     externalId: 'CUUR0000SA0',
-    title:
-      'Consumer Price Index for All Urban Consumers: All Items in U.S. City Average (Not Seasonally Adjusted)',
+    // BLS's own catalog title and units (cpi_monthly.json's `catalog`).
+    title: 'All items in U.S. city average, all urban consumers, not seasonally adjusted',
     units: 'Index 1982-1984=100',
     // cpi_monthly.json's newest two points: March 2024 (312.332) over February 2024 (310.326).
     transformations: [

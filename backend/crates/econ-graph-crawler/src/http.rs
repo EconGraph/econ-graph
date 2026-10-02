@@ -64,6 +64,12 @@ impl Default for HttpConfig {
     }
 }
 
+/// Total timeout of a [`HttpFetcher::get_text_conditional`] request: reference files can be
+/// tens of megabytes, too big for the per-request [`HttpConfig::timeout`] on a slow link. Kept
+/// short enough that BLS's eight reference files, one attempt each, fit well inside a discovery
+/// job's stuck threshold (`CRAWLER_STUCK_AFTER_SECS`, 30 minutes by default).
+pub const REFERENCE_FILE_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// A successful (or `304`) response: the status, the response's `ETag` if it sent one, and the
 /// body (empty for `304`).
 struct RawResponse {
@@ -119,6 +125,10 @@ struct Target {
     accept_json: bool,
     /// `If-None-Match` value to send, for a conditional GET ([`HttpFetcher::get_text_conditional`]).
     if_none_match: Option<String>,
+    /// Overrides [`HttpConfig::timeout`] for this request.
+    timeout: Option<Duration>,
+    /// In-process retries after the first attempt ([`EXTRA_ATTEMPTS`] unless overridden).
+    extra_attempts: u32,
     /// The URL with secret query values replaced; the only form that may be logged.
     redacted: String,
     /// Secret values sent in the query or a JSON body, scrubbed from quoted response bodies too.
@@ -161,6 +171,8 @@ impl Target {
             body,
             accept_json,
             if_none_match: None,
+            timeout: None,
+            extra_attempts: EXTRA_ATTEMPTS,
         })
     }
 
@@ -233,6 +245,11 @@ impl HttpFetcher {
     /// [`ConditionalText::NotModified`] on a `304` response instead of fetching the body again.
     /// On any other successful status, returns the body and the response's own `ETag` (`None` if
     /// the server didn't send one), for the caller to store and pass back next time.
+    ///
+    /// These are whole reference files (BLS's `la.series` is the full LAUS series catalog), so
+    /// the request gets [`REFERENCE_FILE_TIMEOUT`] instead of [`HttpConfig::timeout`], and no
+    /// in-process retry: a refresh runs inside a discovery job, which must not hold its queue row
+    /// for several long downloads per file, and the next scheduled refresh tries again anyway.
     pub async fn get_text_conditional(
         &self,
         source: SourceId,
@@ -241,6 +258,8 @@ impl HttpFetcher {
     ) -> Result<ConditionalText, CrawlError> {
         let mut target = Target::new(source, Method::GET, url, &[], None, false)?;
         target.if_none_match = etag.map(str::to_owned);
+        target.timeout = Some(REFERENCE_FILE_TIMEOUT.max(self.inner.config.timeout));
+        target.extra_attempts = 0;
         let resp = self.execute(&target).await?;
         if resp.status == StatusCode::NOT_MODIFIED {
             return Ok(ConditionalText::NotModified);
@@ -305,7 +324,7 @@ impl HttpFetcher {
                 tracing::debug!(source = %target.source, url = %target.redacted, error = %err, "request failed");
                 return Err(err);
             }
-            if attempt >= EXTRA_ATTEMPTS {
+            if attempt >= target.extra_attempts {
                 tracing::warn!(
                     source = %target.source,
                     url = %target.redacted,
@@ -356,6 +375,9 @@ impl HttpFetcher {
         }
         if let Some(etag) = &target.if_none_match {
             request = request.header(IF_NONE_MATCH, etag.clone());
+        }
+        if let Some(timeout) = target.timeout {
+            request = request.timeout(timeout);
         }
         if let Some(body) = &target.body {
             request = request
@@ -438,7 +460,7 @@ impl HttpFetcher {
             CrawlError::Transient(format!(
                 "{}: timed out after {:?}: {detail}",
                 target.context(),
-                self.inner.config.timeout
+                target.timeout.unwrap_or(self.inner.config.timeout)
             ))
         } else if permanent {
             CrawlError::Permanent(format!("{}: {detail}", target.context()))
@@ -1141,6 +1163,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(got, ConditionalText::NotModified);
+    }
+
+    /// A reference file gets one attempt: a 500 is returned, not retried in-process.
+    #[tokio::test]
+    async fn get_text_conditional_does_not_retry() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let err = fetcher()
+            .get_text_conditional(SourceId::Fred, &format!("{}/r", server.uri()), None)
+            .await
+            .unwrap_err();
+        assert!(err.is_retryable(), "{err:?}");
     }
 
     #[tokio::test]

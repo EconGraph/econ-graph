@@ -54,7 +54,7 @@ Configuration (flags or environment):
 | `CRAWLER_STUCK_AFTER_SECS` | 1800 | release items locked longer than this |
 | `CRAWLER_PAUSE_AFTER` / `CRAWLER_PAUSE_SECS` | 5 / 300 | pause a source after N consecutive rate-limit/auth errors |
 | `CRAWLER_HTTP_TIMEOUT_SECS` | 30 | per-request timeout |
-| `CRAWLER_DATA_DIR` | `/app/data` in the image | reference data read at runtime (`bls_series.csv`, the BLS series list; and `datasets/<source>.toml` for each adapter that declares datasets, today FRED, BLS, Census and FHFA); the worker exits at startup if any of it is missing |
+| `CRAWLER_DATA_DIR` | `/app/data` in the image | reference data read at runtime (`bls_series.csv`, the ids of the BLS series to crawl (their titles, units and frequency come from BLS); and `datasets/<source>.toml` for each adapter that declares datasets, today FRED, BLS, Census and FHFA); the worker exits at startup if any of it is missing |
 | `REFERENCE_DATA_DIR` | `/app/reference` in the image | shared reference data (`countries.csv`, econ-graph-core's `data/`); the worker and the backend exit at startup if it is missing |
 | `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY`, `CENSUS_API_KEY` | unset | from Secret `crawler-api-keys`; the worker starts without them, but FRED, BEA and Census jobs fail with an auth error when their key is missing |
 | `CRAWLER_SCHEDULER` | true | enqueue due refreshes and catalog discovery in the background (see below); `false` disables it, leaving `triggerCrawl` / the CLI as the only way to enqueue work |

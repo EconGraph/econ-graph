@@ -1,298 +1,303 @@
 # BLS series the crawler discovers and fetches, read at runtime by the BLS adapter.
-# Columns: BLS series id, frequency, units, title. The title is the last column and may
-# contain commas; no other column may. Lines starting with # are comments.
+# One BLS series id per line. Lines starting with # are comments.
+# Titles, units and frequency are not kept here: the adapter reads them from BLS's own
+# survey series files (cu.series, ce.series, la.series, ln.series under
+# https://download.bls.gov/pub/time.series/), refreshed by conditional GET on each scheduled
+# discovery, and from the API's catalog on each fetch with a key.
 # The crawler looks for this file in $CRAWLER_DATA_DIR (the crawler-worker image sets /app/data).
-# Covers headline CPI-U (CU), CES payrolls and earnings (CE), CPS labor force (LN) and
-# LAUS state unemployment rates and labor force (LA). LAUS rows cover the 50 states and DC.
-series_id,frequency,units,title
-CUSR0000SA0,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: All Items in U.S. City Average (Seasonally Adjusted)
-CUSR0000SA0L1E,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: All Items Less Food and Energy in U.S. City Average (Seasonally Adjusted)
-CUSR0000SA0L2,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: All Items Less Shelter in U.S. City Average (Seasonally Adjusted)
-CUSR0000SAF1,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Food in U.S. City Average (Seasonally Adjusted)
-CUSR0000SAF11,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Food at Home in U.S. City Average (Seasonally Adjusted)
-CUSR0000SEFV,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Food Away from Home in U.S. City Average (Seasonally Adjusted)
-CUSR0000SA0E,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Energy in U.S. City Average (Seasonally Adjusted)
-CUSR0000SACE,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Energy Commodities in U.S. City Average (Seasonally Adjusted)
-CUSR0000SETB01,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Gasoline (All Types) in U.S. City Average (Seasonally Adjusted)
-CUSR0000SEHF,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Energy Services in U.S. City Average (Seasonally Adjusted)
-CUSR0000SEHF01,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Electricity in U.S. City Average (Seasonally Adjusted)
-CUSR0000SEHF02,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Utility (Piped) Gas Service in U.S. City Average (Seasonally Adjusted)
-CUSR0000SAH,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Housing in U.S. City Average (Seasonally Adjusted)
-CUSR0000SAH1,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Shelter in U.S. City Average (Seasonally Adjusted)
-CUSR0000SEHA,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Rent of Primary Residence in U.S. City Average (Seasonally Adjusted)
-CUSR0000SEHC01,Monthly,Index Dec 1982=100,Consumer Price Index for All Urban Consumers: Owners' Equivalent Rent of Primary Residence in U.S. City Average (Seasonally Adjusted)
-CUSR0000SAC,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Commodities in U.S. City Average (Seasonally Adjusted)
-CUSR0000SACL1E,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Commodities Less Food and Energy Commodities in U.S. City Average (Seasonally Adjusted)
-CUSR0000SAS,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Services in U.S. City Average (Seasonally Adjusted)
-CUSR0000SASLE,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Services Less Energy Services in U.S. City Average (Seasonally Adjusted)
-CUSR0000SAM,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Medical Care in U.S. City Average (Seasonally Adjusted)
-CUSR0000SAT,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Transportation in U.S. City Average (Seasonally Adjusted)
-CUSR0000SAA,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Apparel in U.S. City Average (Seasonally Adjusted)
-CUSR0000SETA01,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: New Vehicles in U.S. City Average (Seasonally Adjusted)
-CUSR0000SETA02,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Used Cars and Trucks in U.S. City Average (Seasonally Adjusted)
-CUUR0000SA0,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: All Items in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SA0L1E,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: All Items Less Food and Energy in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SA0L2,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: All Items Less Shelter in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SAF1,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Food in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SAF11,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Food at Home in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SEFV,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Food Away from Home in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SA0E,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Energy in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SACE,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Energy Commodities in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SETB01,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Gasoline (All Types) in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SEHF,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Energy Services in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SEHF01,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Electricity in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SEHF02,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Utility (Piped) Gas Service in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SAH,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Housing in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SAH1,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Shelter in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SEHA,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Rent of Primary Residence in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SEHC01,Monthly,Index Dec 1982=100,Consumer Price Index for All Urban Consumers: Owners' Equivalent Rent of Primary Residence in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SAC,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Commodities in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SACL1E,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Commodities Less Food and Energy Commodities in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SAS,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Services in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SASLE,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Services Less Energy Services in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SAM,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Medical Care in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SAT,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Transportation in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SAA,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Apparel in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SETA01,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: New Vehicles in U.S. City Average (Not Seasonally Adjusted)
-CUUR0000SETA02,Monthly,Index 1982-1984=100,Consumer Price Index for All Urban Consumers: Used Cars and Trucks in U.S. City Average (Not Seasonally Adjusted)
-CES0000000001,Monthly,Thousands of Persons,All Employees, Total Nonfarm (Seasonally Adjusted)
-CES0500000001,Monthly,Thousands of Persons,All Employees, Total Private (Seasonally Adjusted)
-CES0600000001,Monthly,Thousands of Persons,All Employees, Goods-Producing (Seasonally Adjusted)
-CES0700000001,Monthly,Thousands of Persons,All Employees, Service-Providing (Seasonally Adjusted)
-CES0800000001,Monthly,Thousands of Persons,All Employees, Private Service-Providing (Seasonally Adjusted)
-CES1000000001,Monthly,Thousands of Persons,All Employees, Mining and Logging (Seasonally Adjusted)
-CES2000000001,Monthly,Thousands of Persons,All Employees, Construction (Seasonally Adjusted)
-CES3000000001,Monthly,Thousands of Persons,All Employees, Manufacturing (Seasonally Adjusted)
-CES3100000001,Monthly,Thousands of Persons,All Employees, Durable Goods (Seasonally Adjusted)
-CES3200000001,Monthly,Thousands of Persons,All Employees, Nondurable Goods (Seasonally Adjusted)
-CES4000000001,Monthly,Thousands of Persons,All Employees, Trade, Transportation, and Utilities (Seasonally Adjusted)
-CES4200000001,Monthly,Thousands of Persons,All Employees, Retail Trade (Seasonally Adjusted)
-CES5000000001,Monthly,Thousands of Persons,All Employees, Information (Seasonally Adjusted)
-CES5500000001,Monthly,Thousands of Persons,All Employees, Financial Activities (Seasonally Adjusted)
-CES6000000001,Monthly,Thousands of Persons,All Employees, Professional and Business Services (Seasonally Adjusted)
-CES6500000001,Monthly,Thousands of Persons,All Employees, Private Education and Health Services (Seasonally Adjusted)
-CES7000000001,Monthly,Thousands of Persons,All Employees, Leisure and Hospitality (Seasonally Adjusted)
-CES8000000001,Monthly,Thousands of Persons,All Employees, Other Services (Seasonally Adjusted)
-CES9000000001,Monthly,Thousands of Persons,All Employees, Government (Seasonally Adjusted)
-CES9091000001,Monthly,Thousands of Persons,All Employees, Federal Government (Seasonally Adjusted)
-CES9092000001,Monthly,Thousands of Persons,All Employees, State Government (Seasonally Adjusted)
-CES9093000001,Monthly,Thousands of Persons,All Employees, Local Government (Seasonally Adjusted)
-CEU0000000001,Monthly,Thousands of Persons,All Employees, Total Nonfarm (Not Seasonally Adjusted)
-CEU0500000001,Monthly,Thousands of Persons,All Employees, Total Private (Not Seasonally Adjusted)
-CEU0600000001,Monthly,Thousands of Persons,All Employees, Goods-Producing (Not Seasonally Adjusted)
-CEU0700000001,Monthly,Thousands of Persons,All Employees, Service-Providing (Not Seasonally Adjusted)
-CEU0800000001,Monthly,Thousands of Persons,All Employees, Private Service-Providing (Not Seasonally Adjusted)
-CEU1000000001,Monthly,Thousands of Persons,All Employees, Mining and Logging (Not Seasonally Adjusted)
-CEU2000000001,Monthly,Thousands of Persons,All Employees, Construction (Not Seasonally Adjusted)
-CEU3000000001,Monthly,Thousands of Persons,All Employees, Manufacturing (Not Seasonally Adjusted)
-CEU3100000001,Monthly,Thousands of Persons,All Employees, Durable Goods (Not Seasonally Adjusted)
-CEU3200000001,Monthly,Thousands of Persons,All Employees, Nondurable Goods (Not Seasonally Adjusted)
-CEU4000000001,Monthly,Thousands of Persons,All Employees, Trade, Transportation, and Utilities (Not Seasonally Adjusted)
-CEU4200000001,Monthly,Thousands of Persons,All Employees, Retail Trade (Not Seasonally Adjusted)
-CEU5000000001,Monthly,Thousands of Persons,All Employees, Information (Not Seasonally Adjusted)
-CEU5500000001,Monthly,Thousands of Persons,All Employees, Financial Activities (Not Seasonally Adjusted)
-CEU6000000001,Monthly,Thousands of Persons,All Employees, Professional and Business Services (Not Seasonally Adjusted)
-CEU6500000001,Monthly,Thousands of Persons,All Employees, Private Education and Health Services (Not Seasonally Adjusted)
-CEU7000000001,Monthly,Thousands of Persons,All Employees, Leisure and Hospitality (Not Seasonally Adjusted)
-CEU8000000001,Monthly,Thousands of Persons,All Employees, Other Services (Not Seasonally Adjusted)
-CEU9000000001,Monthly,Thousands of Persons,All Employees, Government (Not Seasonally Adjusted)
-CEU9091000001,Monthly,Thousands of Persons,All Employees, Federal Government (Not Seasonally Adjusted)
-CEU9092000001,Monthly,Thousands of Persons,All Employees, State Government (Not Seasonally Adjusted)
-CEU9093000001,Monthly,Thousands of Persons,All Employees, Local Government (Not Seasonally Adjusted)
-CES0500000003,Monthly,Dollars per Hour,Average Hourly Earnings of All Employees, Total Private (Seasonally Adjusted)
-CES0600000003,Monthly,Dollars per Hour,Average Hourly Earnings of All Employees, Goods-Producing (Seasonally Adjusted)
-CES0800000003,Monthly,Dollars per Hour,Average Hourly Earnings of All Employees, Private Service-Providing (Seasonally Adjusted)
-CES1000000003,Monthly,Dollars per Hour,Average Hourly Earnings of All Employees, Mining and Logging (Seasonally Adjusted)
-CES2000000003,Monthly,Dollars per Hour,Average Hourly Earnings of All Employees, Construction (Seasonally Adjusted)
-CES3000000003,Monthly,Dollars per Hour,Average Hourly Earnings of All Employees, Manufacturing (Seasonally Adjusted)
-CES4000000003,Monthly,Dollars per Hour,Average Hourly Earnings of All Employees, Trade, Transportation, and Utilities (Seasonally Adjusted)
-CES5000000003,Monthly,Dollars per Hour,Average Hourly Earnings of All Employees, Information (Seasonally Adjusted)
-CES5500000003,Monthly,Dollars per Hour,Average Hourly Earnings of All Employees, Financial Activities (Seasonally Adjusted)
-CES6000000003,Monthly,Dollars per Hour,Average Hourly Earnings of All Employees, Professional and Business Services (Seasonally Adjusted)
-CES6500000003,Monthly,Dollars per Hour,Average Hourly Earnings of All Employees, Private Education and Health Services (Seasonally Adjusted)
-CES7000000003,Monthly,Dollars per Hour,Average Hourly Earnings of All Employees, Leisure and Hospitality (Seasonally Adjusted)
-CES8000000003,Monthly,Dollars per Hour,Average Hourly Earnings of All Employees, Other Services (Seasonally Adjusted)
-CES0500000002,Monthly,Hours,Average Weekly Hours of All Employees, Total Private (Seasonally Adjusted)
-CES0500000011,Monthly,Dollars per Week,Average Weekly Earnings of All Employees, Total Private (Seasonally Adjusted)
-CES0500000007,Monthly,Hours,Average Weekly Hours of Production and Nonsupervisory Employees, Total Private (Seasonally Adjusted)
-CES0500000008,Monthly,Dollars per Hour,Average Hourly Earnings of Production and Nonsupervisory Employees, Total Private (Seasonally Adjusted)
-LNS14000000,Monthly,Percent,Unemployment Rate (Seasonally Adjusted)
-LNS11300000,Monthly,Percent,Labor Force Participation Rate (Seasonally Adjusted)
-LNS12300000,Monthly,Percent,Employment-Population Ratio (Seasonally Adjusted)
-LNS11000000,Monthly,Thousands of Persons,Civilian Labor Force Level (Seasonally Adjusted)
-LNS12000000,Monthly,Thousands of Persons,Employment Level (Seasonally Adjusted)
-LNS13000000,Monthly,Thousands of Persons,Unemployment Level (Seasonally Adjusted)
-LNU04000000,Monthly,Percent,Unemployment Rate (Not Seasonally Adjusted)
-LNU01300000,Monthly,Percent,Labor Force Participation Rate (Not Seasonally Adjusted)
-LNU02300000,Monthly,Percent,Employment-Population Ratio (Not Seasonally Adjusted)
-LNU01000000,Monthly,Thousands of Persons,Civilian Labor Force Level (Not Seasonally Adjusted)
-LNU02000000,Monthly,Thousands of Persons,Employment Level (Not Seasonally Adjusted)
-LNU03000000,Monthly,Thousands of Persons,Unemployment Level (Not Seasonally Adjusted)
-LNS13327709,Monthly,Percent,Total Unemployed Plus Marginally Attached Plus Part Time for Economic Reasons (U-6) (Seasonally Adjusted)
-LNS11300060,Monthly,Percent,Labor Force Participation Rate, 25-54 Years (Seasonally Adjusted)
-LNS12300060,Monthly,Percent,Employment-Population Ratio, 25-54 Years (Seasonally Adjusted)
-LNS14000001,Monthly,Percent,Unemployment Rate, Men (Seasonally Adjusted)
-LNS14000002,Monthly,Percent,Unemployment Rate, Women (Seasonally Adjusted)
-LNS14000003,Monthly,Percent,Unemployment Rate, White (Seasonally Adjusted)
-LNS14000006,Monthly,Percent,Unemployment Rate, Black or African American (Seasonally Adjusted)
-LNS14000009,Monthly,Percent,Unemployment Rate, Hispanic or Latino (Seasonally Adjusted)
-LNS14000012,Monthly,Percent,Unemployment Rate, 16-19 Years (Seasonally Adjusted)
-LNS14027659,Monthly,Percent,Unemployment Rate, Less Than a High School Diploma, 25 Years and Over (Seasonally Adjusted)
-LNS14027660,Monthly,Percent,Unemployment Rate, High School Graduates, No College, 25 Years and Over (Seasonally Adjusted)
-LNS14027689,Monthly,Percent,Unemployment Rate, Some College or Associate Degree, 25 Years and Over (Seasonally Adjusted)
-LNS14027662,Monthly,Percent,Unemployment Rate, Bachelor's Degree and Higher, 25 Years and Over (Seasonally Adjusted)
-LNS13008636,Monthly,Thousands of Persons,Number Unemployed for 27 Weeks and Over (Seasonally Adjusted)
-LNS12032194,Monthly,Thousands of Persons,Employed, Usually Work Full Time, Part Time for Economic Reasons (Seasonally Adjusted)
-LASST010000000000003,Monthly,Percent,Unemployment Rate: Alabama (Seasonally Adjusted)
-LAUST010000000000003,Monthly,Percent,Unemployment Rate: Alabama (Not Seasonally Adjusted)
-LASST010000000000006,Monthly,Persons,Labor Force: Alabama (Seasonally Adjusted)
-LASST020000000000003,Monthly,Percent,Unemployment Rate: Alaska (Seasonally Adjusted)
-LAUST020000000000003,Monthly,Percent,Unemployment Rate: Alaska (Not Seasonally Adjusted)
-LASST020000000000006,Monthly,Persons,Labor Force: Alaska (Seasonally Adjusted)
-LASST040000000000003,Monthly,Percent,Unemployment Rate: Arizona (Seasonally Adjusted)
-LAUST040000000000003,Monthly,Percent,Unemployment Rate: Arizona (Not Seasonally Adjusted)
-LASST040000000000006,Monthly,Persons,Labor Force: Arizona (Seasonally Adjusted)
-LASST050000000000003,Monthly,Percent,Unemployment Rate: Arkansas (Seasonally Adjusted)
-LAUST050000000000003,Monthly,Percent,Unemployment Rate: Arkansas (Not Seasonally Adjusted)
-LASST050000000000006,Monthly,Persons,Labor Force: Arkansas (Seasonally Adjusted)
-LASST060000000000003,Monthly,Percent,Unemployment Rate: California (Seasonally Adjusted)
-LAUST060000000000003,Monthly,Percent,Unemployment Rate: California (Not Seasonally Adjusted)
-LASST060000000000006,Monthly,Persons,Labor Force: California (Seasonally Adjusted)
-LASST080000000000003,Monthly,Percent,Unemployment Rate: Colorado (Seasonally Adjusted)
-LAUST080000000000003,Monthly,Percent,Unemployment Rate: Colorado (Not Seasonally Adjusted)
-LASST080000000000006,Monthly,Persons,Labor Force: Colorado (Seasonally Adjusted)
-LASST090000000000003,Monthly,Percent,Unemployment Rate: Connecticut (Seasonally Adjusted)
-LAUST090000000000003,Monthly,Percent,Unemployment Rate: Connecticut (Not Seasonally Adjusted)
-LASST090000000000006,Monthly,Persons,Labor Force: Connecticut (Seasonally Adjusted)
-LASST100000000000003,Monthly,Percent,Unemployment Rate: Delaware (Seasonally Adjusted)
-LAUST100000000000003,Monthly,Percent,Unemployment Rate: Delaware (Not Seasonally Adjusted)
-LASST100000000000006,Monthly,Persons,Labor Force: Delaware (Seasonally Adjusted)
-LASST110000000000003,Monthly,Percent,Unemployment Rate: District of Columbia (Seasonally Adjusted)
-LAUST110000000000003,Monthly,Percent,Unemployment Rate: District of Columbia (Not Seasonally Adjusted)
-LASST110000000000006,Monthly,Persons,Labor Force: District of Columbia (Seasonally Adjusted)
-LASST120000000000003,Monthly,Percent,Unemployment Rate: Florida (Seasonally Adjusted)
-LAUST120000000000003,Monthly,Percent,Unemployment Rate: Florida (Not Seasonally Adjusted)
-LASST120000000000006,Monthly,Persons,Labor Force: Florida (Seasonally Adjusted)
-LASST130000000000003,Monthly,Percent,Unemployment Rate: Georgia (Seasonally Adjusted)
-LAUST130000000000003,Monthly,Percent,Unemployment Rate: Georgia (Not Seasonally Adjusted)
-LASST130000000000006,Monthly,Persons,Labor Force: Georgia (Seasonally Adjusted)
-LASST150000000000003,Monthly,Percent,Unemployment Rate: Hawaii (Seasonally Adjusted)
-LAUST150000000000003,Monthly,Percent,Unemployment Rate: Hawaii (Not Seasonally Adjusted)
-LASST150000000000006,Monthly,Persons,Labor Force: Hawaii (Seasonally Adjusted)
-LASST160000000000003,Monthly,Percent,Unemployment Rate: Idaho (Seasonally Adjusted)
-LAUST160000000000003,Monthly,Percent,Unemployment Rate: Idaho (Not Seasonally Adjusted)
-LASST160000000000006,Monthly,Persons,Labor Force: Idaho (Seasonally Adjusted)
-LASST170000000000003,Monthly,Percent,Unemployment Rate: Illinois (Seasonally Adjusted)
-LAUST170000000000003,Monthly,Percent,Unemployment Rate: Illinois (Not Seasonally Adjusted)
-LASST170000000000006,Monthly,Persons,Labor Force: Illinois (Seasonally Adjusted)
-LASST180000000000003,Monthly,Percent,Unemployment Rate: Indiana (Seasonally Adjusted)
-LAUST180000000000003,Monthly,Percent,Unemployment Rate: Indiana (Not Seasonally Adjusted)
-LASST180000000000006,Monthly,Persons,Labor Force: Indiana (Seasonally Adjusted)
-LASST190000000000003,Monthly,Percent,Unemployment Rate: Iowa (Seasonally Adjusted)
-LAUST190000000000003,Monthly,Percent,Unemployment Rate: Iowa (Not Seasonally Adjusted)
-LASST190000000000006,Monthly,Persons,Labor Force: Iowa (Seasonally Adjusted)
-LASST200000000000003,Monthly,Percent,Unemployment Rate: Kansas (Seasonally Adjusted)
-LAUST200000000000003,Monthly,Percent,Unemployment Rate: Kansas (Not Seasonally Adjusted)
-LASST200000000000006,Monthly,Persons,Labor Force: Kansas (Seasonally Adjusted)
-LASST210000000000003,Monthly,Percent,Unemployment Rate: Kentucky (Seasonally Adjusted)
-LAUST210000000000003,Monthly,Percent,Unemployment Rate: Kentucky (Not Seasonally Adjusted)
-LASST210000000000006,Monthly,Persons,Labor Force: Kentucky (Seasonally Adjusted)
-LASST220000000000003,Monthly,Percent,Unemployment Rate: Louisiana (Seasonally Adjusted)
-LAUST220000000000003,Monthly,Percent,Unemployment Rate: Louisiana (Not Seasonally Adjusted)
-LASST220000000000006,Monthly,Persons,Labor Force: Louisiana (Seasonally Adjusted)
-LASST230000000000003,Monthly,Percent,Unemployment Rate: Maine (Seasonally Adjusted)
-LAUST230000000000003,Monthly,Percent,Unemployment Rate: Maine (Not Seasonally Adjusted)
-LASST230000000000006,Monthly,Persons,Labor Force: Maine (Seasonally Adjusted)
-LASST240000000000003,Monthly,Percent,Unemployment Rate: Maryland (Seasonally Adjusted)
-LAUST240000000000003,Monthly,Percent,Unemployment Rate: Maryland (Not Seasonally Adjusted)
-LASST240000000000006,Monthly,Persons,Labor Force: Maryland (Seasonally Adjusted)
-LASST250000000000003,Monthly,Percent,Unemployment Rate: Massachusetts (Seasonally Adjusted)
-LAUST250000000000003,Monthly,Percent,Unemployment Rate: Massachusetts (Not Seasonally Adjusted)
-LASST250000000000006,Monthly,Persons,Labor Force: Massachusetts (Seasonally Adjusted)
-LASST260000000000003,Monthly,Percent,Unemployment Rate: Michigan (Seasonally Adjusted)
-LAUST260000000000003,Monthly,Percent,Unemployment Rate: Michigan (Not Seasonally Adjusted)
-LASST260000000000006,Monthly,Persons,Labor Force: Michigan (Seasonally Adjusted)
-LASST270000000000003,Monthly,Percent,Unemployment Rate: Minnesota (Seasonally Adjusted)
-LAUST270000000000003,Monthly,Percent,Unemployment Rate: Minnesota (Not Seasonally Adjusted)
-LASST270000000000006,Monthly,Persons,Labor Force: Minnesota (Seasonally Adjusted)
-LASST280000000000003,Monthly,Percent,Unemployment Rate: Mississippi (Seasonally Adjusted)
-LAUST280000000000003,Monthly,Percent,Unemployment Rate: Mississippi (Not Seasonally Adjusted)
-LASST280000000000006,Monthly,Persons,Labor Force: Mississippi (Seasonally Adjusted)
-LASST290000000000003,Monthly,Percent,Unemployment Rate: Missouri (Seasonally Adjusted)
-LAUST290000000000003,Monthly,Percent,Unemployment Rate: Missouri (Not Seasonally Adjusted)
-LASST290000000000006,Monthly,Persons,Labor Force: Missouri (Seasonally Adjusted)
-LASST300000000000003,Monthly,Percent,Unemployment Rate: Montana (Seasonally Adjusted)
-LAUST300000000000003,Monthly,Percent,Unemployment Rate: Montana (Not Seasonally Adjusted)
-LASST300000000000006,Monthly,Persons,Labor Force: Montana (Seasonally Adjusted)
-LASST310000000000003,Monthly,Percent,Unemployment Rate: Nebraska (Seasonally Adjusted)
-LAUST310000000000003,Monthly,Percent,Unemployment Rate: Nebraska (Not Seasonally Adjusted)
-LASST310000000000006,Monthly,Persons,Labor Force: Nebraska (Seasonally Adjusted)
-LASST320000000000003,Monthly,Percent,Unemployment Rate: Nevada (Seasonally Adjusted)
-LAUST320000000000003,Monthly,Percent,Unemployment Rate: Nevada (Not Seasonally Adjusted)
-LASST320000000000006,Monthly,Persons,Labor Force: Nevada (Seasonally Adjusted)
-LASST330000000000003,Monthly,Percent,Unemployment Rate: New Hampshire (Seasonally Adjusted)
-LAUST330000000000003,Monthly,Percent,Unemployment Rate: New Hampshire (Not Seasonally Adjusted)
-LASST330000000000006,Monthly,Persons,Labor Force: New Hampshire (Seasonally Adjusted)
-LASST340000000000003,Monthly,Percent,Unemployment Rate: New Jersey (Seasonally Adjusted)
-LAUST340000000000003,Monthly,Percent,Unemployment Rate: New Jersey (Not Seasonally Adjusted)
-LASST340000000000006,Monthly,Persons,Labor Force: New Jersey (Seasonally Adjusted)
-LASST350000000000003,Monthly,Percent,Unemployment Rate: New Mexico (Seasonally Adjusted)
-LAUST350000000000003,Monthly,Percent,Unemployment Rate: New Mexico (Not Seasonally Adjusted)
-LASST350000000000006,Monthly,Persons,Labor Force: New Mexico (Seasonally Adjusted)
-LASST360000000000003,Monthly,Percent,Unemployment Rate: New York (Seasonally Adjusted)
-LAUST360000000000003,Monthly,Percent,Unemployment Rate: New York (Not Seasonally Adjusted)
-LASST360000000000006,Monthly,Persons,Labor Force: New York (Seasonally Adjusted)
-LASST370000000000003,Monthly,Percent,Unemployment Rate: North Carolina (Seasonally Adjusted)
-LAUST370000000000003,Monthly,Percent,Unemployment Rate: North Carolina (Not Seasonally Adjusted)
-LASST370000000000006,Monthly,Persons,Labor Force: North Carolina (Seasonally Adjusted)
-LASST380000000000003,Monthly,Percent,Unemployment Rate: North Dakota (Seasonally Adjusted)
-LAUST380000000000003,Monthly,Percent,Unemployment Rate: North Dakota (Not Seasonally Adjusted)
-LASST380000000000006,Monthly,Persons,Labor Force: North Dakota (Seasonally Adjusted)
-LASST390000000000003,Monthly,Percent,Unemployment Rate: Ohio (Seasonally Adjusted)
-LAUST390000000000003,Monthly,Percent,Unemployment Rate: Ohio (Not Seasonally Adjusted)
-LASST390000000000006,Monthly,Persons,Labor Force: Ohio (Seasonally Adjusted)
-LASST400000000000003,Monthly,Percent,Unemployment Rate: Oklahoma (Seasonally Adjusted)
-LAUST400000000000003,Monthly,Percent,Unemployment Rate: Oklahoma (Not Seasonally Adjusted)
-LASST400000000000006,Monthly,Persons,Labor Force: Oklahoma (Seasonally Adjusted)
-LASST410000000000003,Monthly,Percent,Unemployment Rate: Oregon (Seasonally Adjusted)
-LAUST410000000000003,Monthly,Percent,Unemployment Rate: Oregon (Not Seasonally Adjusted)
-LASST410000000000006,Monthly,Persons,Labor Force: Oregon (Seasonally Adjusted)
-LASST420000000000003,Monthly,Percent,Unemployment Rate: Pennsylvania (Seasonally Adjusted)
-LAUST420000000000003,Monthly,Percent,Unemployment Rate: Pennsylvania (Not Seasonally Adjusted)
-LASST420000000000006,Monthly,Persons,Labor Force: Pennsylvania (Seasonally Adjusted)
-LASST440000000000003,Monthly,Percent,Unemployment Rate: Rhode Island (Seasonally Adjusted)
-LAUST440000000000003,Monthly,Percent,Unemployment Rate: Rhode Island (Not Seasonally Adjusted)
-LASST440000000000006,Monthly,Persons,Labor Force: Rhode Island (Seasonally Adjusted)
-LASST450000000000003,Monthly,Percent,Unemployment Rate: South Carolina (Seasonally Adjusted)
-LAUST450000000000003,Monthly,Percent,Unemployment Rate: South Carolina (Not Seasonally Adjusted)
-LASST450000000000006,Monthly,Persons,Labor Force: South Carolina (Seasonally Adjusted)
-LASST460000000000003,Monthly,Percent,Unemployment Rate: South Dakota (Seasonally Adjusted)
-LAUST460000000000003,Monthly,Percent,Unemployment Rate: South Dakota (Not Seasonally Adjusted)
-LASST460000000000006,Monthly,Persons,Labor Force: South Dakota (Seasonally Adjusted)
-LASST470000000000003,Monthly,Percent,Unemployment Rate: Tennessee (Seasonally Adjusted)
-LAUST470000000000003,Monthly,Percent,Unemployment Rate: Tennessee (Not Seasonally Adjusted)
-LASST470000000000006,Monthly,Persons,Labor Force: Tennessee (Seasonally Adjusted)
-LASST480000000000003,Monthly,Percent,Unemployment Rate: Texas (Seasonally Adjusted)
-LAUST480000000000003,Monthly,Percent,Unemployment Rate: Texas (Not Seasonally Adjusted)
-LASST480000000000006,Monthly,Persons,Labor Force: Texas (Seasonally Adjusted)
-LASST490000000000003,Monthly,Percent,Unemployment Rate: Utah (Seasonally Adjusted)
-LAUST490000000000003,Monthly,Percent,Unemployment Rate: Utah (Not Seasonally Adjusted)
-LASST490000000000006,Monthly,Persons,Labor Force: Utah (Seasonally Adjusted)
-LASST500000000000003,Monthly,Percent,Unemployment Rate: Vermont (Seasonally Adjusted)
-LAUST500000000000003,Monthly,Percent,Unemployment Rate: Vermont (Not Seasonally Adjusted)
-LASST500000000000006,Monthly,Persons,Labor Force: Vermont (Seasonally Adjusted)
-LASST510000000000003,Monthly,Percent,Unemployment Rate: Virginia (Seasonally Adjusted)
-LAUST510000000000003,Monthly,Percent,Unemployment Rate: Virginia (Not Seasonally Adjusted)
-LASST510000000000006,Monthly,Persons,Labor Force: Virginia (Seasonally Adjusted)
-LASST530000000000003,Monthly,Percent,Unemployment Rate: Washington (Seasonally Adjusted)
-LAUST530000000000003,Monthly,Percent,Unemployment Rate: Washington (Not Seasonally Adjusted)
-LASST530000000000006,Monthly,Persons,Labor Force: Washington (Seasonally Adjusted)
-LASST540000000000003,Monthly,Percent,Unemployment Rate: West Virginia (Seasonally Adjusted)
-LAUST540000000000003,Monthly,Percent,Unemployment Rate: West Virginia (Not Seasonally Adjusted)
-LASST540000000000006,Monthly,Persons,Labor Force: West Virginia (Seasonally Adjusted)
-LASST550000000000003,Monthly,Percent,Unemployment Rate: Wisconsin (Seasonally Adjusted)
-LAUST550000000000003,Monthly,Percent,Unemployment Rate: Wisconsin (Not Seasonally Adjusted)
-LASST550000000000006,Monthly,Persons,Labor Force: Wisconsin (Seasonally Adjusted)
-LASST560000000000003,Monthly,Percent,Unemployment Rate: Wyoming (Seasonally Adjusted)
-LAUST560000000000003,Monthly,Percent,Unemployment Rate: Wyoming (Not Seasonally Adjusted)
-LASST560000000000006,Monthly,Persons,Labor Force: Wyoming (Seasonally Adjusted)
+series_id
+# CPI-U (CU): headline and major components, seasonally adjusted and not
+CUSR0000SA0
+CUSR0000SA0L1E
+CUSR0000SA0L2
+CUSR0000SAF1
+CUSR0000SAF11
+CUSR0000SEFV
+CUSR0000SA0E
+CUSR0000SACE
+CUSR0000SETB01
+CUSR0000SEHF
+CUSR0000SEHF01
+CUSR0000SEHF02
+CUSR0000SAH
+CUSR0000SAH1
+CUSR0000SEHA
+CUSR0000SEHC01
+CUSR0000SAC
+CUSR0000SACL1E
+CUSR0000SAS
+CUSR0000SASLE
+CUSR0000SAM
+CUSR0000SAT
+CUSR0000SAA
+CUSR0000SETA01
+CUSR0000SETA02
+CUUR0000SA0
+CUUR0000SA0L1E
+CUUR0000SA0L2
+CUUR0000SAF1
+CUUR0000SAF11
+CUUR0000SEFV
+CUUR0000SA0E
+CUUR0000SACE
+CUUR0000SETB01
+CUUR0000SEHF
+CUUR0000SEHF01
+CUUR0000SEHF02
+CUUR0000SAH
+CUUR0000SAH1
+CUUR0000SEHA
+CUUR0000SEHC01
+CUUR0000SAC
+CUUR0000SACL1E
+CUUR0000SAS
+CUUR0000SASLE
+CUUR0000SAM
+CUUR0000SAT
+CUUR0000SAA
+CUUR0000SETA01
+CUUR0000SETA02
+# CES national (CE): payrolls, hours and earnings
+CES0000000001
+CES0500000001
+CES0600000001
+CES0700000001
+CES0800000001
+CES1000000001
+CES2000000001
+CES3000000001
+CES3100000001
+CES3200000001
+CES4000000001
+CES4200000001
+CES5000000001
+CES5500000001
+CES6000000001
+CES6500000001
+CES7000000001
+CES8000000001
+CES9000000001
+CES9091000001
+CES9092000001
+CES9093000001
+CEU0000000001
+CEU0500000001
+CEU0600000001
+CEU0700000001
+CEU0800000001
+CEU1000000001
+CEU2000000001
+CEU3000000001
+CEU3100000001
+CEU3200000001
+CEU4000000001
+CEU4200000001
+CEU5000000001
+CEU5500000001
+CEU6000000001
+CEU6500000001
+CEU7000000001
+CEU8000000001
+CEU9000000001
+CEU9091000001
+CEU9092000001
+CEU9093000001
+CES0500000003
+CES0600000003
+CES0800000003
+CES1000000003
+CES2000000003
+CES3000000003
+CES4000000003
+CES5000000003
+CES5500000003
+CES6000000003
+CES6500000003
+CES7000000003
+CES8000000003
+CES0500000002
+CES0500000011
+CES0500000007
+CES0500000008
+# CPS labor force (LN): national rates and levels
+LNS14000000
+LNS11300000
+LNS12300000
+LNS11000000
+LNS12000000
+LNS13000000
+LNU04000000
+LNU01300000
+LNU02300000
+LNU01000000
+LNU02000000
+LNU03000000
+LNS13327709
+LNS11300060
+LNS12300060
+LNS14000001
+LNS14000002
+LNS14000003
+LNS14000006
+LNS14000009
+LNS14000012
+LNS14027659
+LNS14027660
+LNS14027689
+LNS14027662
+LNS13008636
+LNS12032194
+# LAUS (LA): unemployment rate and labor force for the 50 states and DC
+LASST010000000000003
+LAUST010000000000003
+LASST010000000000006
+LASST020000000000003
+LAUST020000000000003
+LASST020000000000006
+LASST040000000000003
+LAUST040000000000003
+LASST040000000000006
+LASST050000000000003
+LAUST050000000000003
+LASST050000000000006
+LASST060000000000003
+LAUST060000000000003
+LASST060000000000006
+LASST080000000000003
+LAUST080000000000003
+LASST080000000000006
+LASST090000000000003
+LAUST090000000000003
+LASST090000000000006
+LASST100000000000003
+LAUST100000000000003
+LASST100000000000006
+LASST110000000000003
+LAUST110000000000003
+LASST110000000000006
+LASST120000000000003
+LAUST120000000000003
+LASST120000000000006
+LASST130000000000003
+LAUST130000000000003
+LASST130000000000006
+LASST150000000000003
+LAUST150000000000003
+LASST150000000000006
+LASST160000000000003
+LAUST160000000000003
+LASST160000000000006
+LASST170000000000003
+LAUST170000000000003
+LASST170000000000006
+LASST180000000000003
+LAUST180000000000003
+LASST180000000000006
+LASST190000000000003
+LAUST190000000000003
+LASST190000000000006
+LASST200000000000003
+LAUST200000000000003
+LASST200000000000006
+LASST210000000000003
+LAUST210000000000003
+LASST210000000000006
+LASST220000000000003
+LAUST220000000000003
+LASST220000000000006
+LASST230000000000003
+LAUST230000000000003
+LASST230000000000006
+LASST240000000000003
+LAUST240000000000003
+LASST240000000000006
+LASST250000000000003
+LAUST250000000000003
+LASST250000000000006
+LASST260000000000003
+LAUST260000000000003
+LASST260000000000006
+LASST270000000000003
+LAUST270000000000003
+LASST270000000000006
+LASST280000000000003
+LAUST280000000000003
+LASST280000000000006
+LASST290000000000003
+LAUST290000000000003
+LASST290000000000006
+LASST300000000000003
+LAUST300000000000003
+LASST300000000000006
+LASST310000000000003
+LAUST310000000000003
+LASST310000000000006
+LASST320000000000003
+LAUST320000000000003
+LASST320000000000006
+LASST330000000000003
+LAUST330000000000003
+LASST330000000000006
+LASST340000000000003
+LAUST340000000000003
+LASST340000000000006
+LASST350000000000003
+LAUST350000000000003
+LASST350000000000006
+LASST360000000000003
+LAUST360000000000003
+LASST360000000000006
+LASST370000000000003
+LAUST370000000000003
+LASST370000000000006
+LASST380000000000003
+LAUST380000000000003
+LASST380000000000006
+LASST390000000000003
+LAUST390000000000003
+LASST390000000000006
+LASST400000000000003
+LAUST400000000000003
+LASST400000000000006
+LASST410000000000003
+LAUST410000000000003
+LASST410000000000006
+LASST420000000000003
+LAUST420000000000003
+LASST420000000000006
+LASST440000000000003
+LAUST440000000000003
+LASST440000000000006
+LASST450000000000003
+LAUST450000000000003
+LASST450000000000006
+LASST460000000000003
+LAUST460000000000003
+LASST460000000000006
+LASST470000000000003
+LAUST470000000000003
+LASST470000000000006
+LASST480000000000003
+LAUST480000000000003
+LASST480000000000006
+LASST490000000000003
+LAUST490000000000003
+LASST490000000000006
+LASST500000000000003
+LAUST500000000000003
+LASST500000000000006
+LASST510000000000003
+LAUST510000000000003
+LASST510000000000006
+LASST530000000000003
+LAUST530000000000003
+LASST530000000000006
+LASST540000000000003
+LAUST540000000000003
+LASST540000000000006
+LASST550000000000003
+LAUST550000000000003
+LASST550000000000006
+LASST560000000000003
+LAUST560000000000003
+LASST560000000000006

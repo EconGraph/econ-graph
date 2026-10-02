@@ -92,7 +92,8 @@ pub struct CrawlCtx {
 /// Series-level metadata returned alongside observations. Maps onto `economic_series` columns.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct NewSeriesMetadataLite {
-    /// Human-readable title.
+    /// Human-readable title. Empty when the fetch carried none (BLS without a key): the stored
+    /// series then keeps its discovered or existing title, as with the `None` fields below.
     pub title: String,
     /// Longer description / notes.
     pub description: Option<String>,
