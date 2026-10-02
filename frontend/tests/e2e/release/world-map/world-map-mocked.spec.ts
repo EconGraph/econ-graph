@@ -1,3 +1,7 @@
+// Copyright (c) 2024 EconGraph. All rights reserved.
+// Licensed under the Microsoft Reference Source License (MS-RSL).
+// See LICENSE file for complete terms and conditions.
+
 import { test, expect, type Page } from '@playwright/test';
 
 /**
@@ -99,7 +103,7 @@ async function mockGraphQL(page: Page): Promise<string[]> {
 const country = (page: Page, isoNumeric: number) =>
   page.locator(`svg path.country[data-iso-numeric="${isoNumeric}"]`);
 
-test.describe('World map', () => {
+test.describe('World map (mocked)', () => {
   let requested: string[];
 
   test.beforeEach(async ({ page }) => {
