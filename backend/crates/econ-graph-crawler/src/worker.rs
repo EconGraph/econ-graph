@@ -910,8 +910,16 @@ impl Worker {
             Ok(stats) => stats.series_id,
             Err(_) => persist::find_series_id_conn(conn, source, &item.series_id).await?,
         };
-        // crawl_attempts.series_id references economic_series; nothing to attach to yet.
+        // crawl_attempts.series_id references economic_series; nothing to attach to yet. A
+        // confirmed NotFound on a catalog-only (series_metadata) series has nowhere to record a
+        // crawl_status either, so it deactivates the series_metadata row instead, matching
+        // `retire_unlisted_conn`: the next catalog discovery that lists the id again reactivates it.
         let Some(series_id) = series_id else {
+            if let Err(e) = result {
+                if e.kind() == "not_found" {
+                    persist::deactivate_metadata_conn(conn, source, &item.series_id).await?;
+                }
+            }
             return Ok(());
         };
         let record = match result {
