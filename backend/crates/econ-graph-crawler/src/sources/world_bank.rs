@@ -29,6 +29,35 @@
 //!   area of an indicator, up to [`MAX_BATCH`] series. A lone `fetch_series` makes the same request
 //!   and keeps its own area.
 //!
+//! # Indicator names and descriptions
+//!
+//! `wdi_indicators.csv` carries only each indicator's id and unit. Its name and description
+//! (`sourceNote`) are not shipped: each indicator's own `/indicator/{id}?format=json` carries
+//! both, one indicator per URL, so [`code_lists`](SourceAdapter::code_lists) lists one
+//! [`CodeList`] per listed indicator rather than one shared file. The default
+//! `refresh_reference_data` (`reference_file::refresh_code_lists`) fetches every one of them,
+//! merging each indicator's name and description into the `wdi` dataset's `indicator` dimension
+//! codes ([`persist::merge_dataset_dimension_code_entries`]); being `code_lists` entries, these can
+//! also be recorded as a seed migration by `crawler record-reference-seeds` (no WDI seed is
+//! recorded yet), so a new database could have usable indicator names from its first deploy rather
+//! than only after its first crawl.
+//!
+//! [`refresh_reference_data`](WorldBankAdapter) is still overridden, but only to keep the
+//! in-process [`indicator_meta`](WorldBankAdapter::indicator_meta) cache (shared by every clone of
+//! the adapter) fresh from the DB after that refresh, for building a series' title and
+//! description without a DB round trip per series. `discover` and `fetch_batch` reseed the cache
+//! from the same DB-held codes first, every call (so a freshly started process, a fetch job that
+//! runs before this process's first discovery, or a cache only partly filled by an earlier call's
+//! row-carried fallbacks, all pick up whatever is currently in the DB rather than seeing only the
+//! id for an indicator this process hasn't merged itself); an indicator still missing after that
+//! falls back to the name the data response itself carries for each row
+//! ([`series_metadata`](WorldBankAdapter::series_metadata)), and only then to its bare id; that
+//! row-carried fallback is itself merged into the dataset's `indicator` codes (and the in-process
+//! cache), at most once per indicator per `discover`/`fetch_batch` call, so a brand new database
+//! gets a usable indicator picker (the world map's indicator list reads these codes) from the very
+//! first discovery or fetch, not just a usable series title, before `refresh_reference_data` has
+//! ever run.
+//!
 //! # Rows
 //!
 //! Each row names its area by `countryiso3code` (ISO alpha-3, or the World Bank's code for an
@@ -57,24 +86,28 @@
 //! `Parse` error. An id that is not a `wdi` id of a listed indicator is `NotFound` without a
 //! request.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use chrono::NaiveDate;
+use econ_graph_core::models::Code;
 use econ_graph_core::reference::{areas, Area};
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::adapter::{
-    BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, NewSeriesMetadataLite,
-    SourceAdapter,
+    ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
+    NewSeriesMetadataLite, SourceAdapter,
 };
 use crate::dataset::{DatasetDef, SeriesDataset};
 use crate::error::CrawlError;
+use crate::persist;
 use crate::policy::SourcePolicy;
 use crate::reference::{self, WdiIndicator};
+use crate::reference_file::{self, CodeList, ParseCodes};
 use crate::source::SourceId;
 
 /// The real World Bank API root.
@@ -96,10 +129,29 @@ pub const MAX_PAGES: u64 = 10;
 /// rows), with room to spare.
 pub const MAX_BATCH: usize = 400;
 
+/// One World Bank indicator's own name and description, as last merged into the DB by a
+/// [`code_lists`](WorldBankAdapter::code_lists) refresh, or, without one yet, a row-carried
+/// fallback name with no description ([`series_metadata`](WorldBankAdapter::series_metadata)).
+#[derive(Debug, Clone)]
+struct IndicatorMeta {
+    name: String,
+    description: Option<String>,
+}
+
+/// The dataset dimension indicator names and descriptions are merged into.
+const INDICATOR_DIMENSION: &str = "indicator";
+
 /// World Bank adapter. See the module docs for endpoints, ids and error mapping.
 #[derive(Debug, Clone)]
 pub struct WorldBankAdapter {
     base_url: String,
+    /// Indicator id -> name/description, last loaded by [`seed_cache_from_db`](Self::seed_cache_from_db)
+    /// (called after `refresh_reference_data`'s refresh, and at the start of every `discover`/
+    /// `fetch_batch` call) or, failing that, by a row-carried fallback name
+    /// ([`series_metadata`](Self::series_metadata)). Shared by every clone (the worker clones the
+    /// adapter per job; the registry holds one `Arc` of it), so a fetch or discover job sees
+    /// whatever was last loaded in this process. Empty until the first such load.
+    indicator_meta: Arc<Mutex<HashMap<String, IndicatorMeta>>>,
 }
 
 impl WorldBankAdapter {
@@ -107,6 +159,7 @@ impl WorldBankAdapter {
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
+            indicator_meta: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -160,6 +213,139 @@ impl WorldBankAdapter {
         })?;
         Ok(IndicatorData::group(indicator, last_updated, rows))
     }
+
+    /// Overwrites the in-process cache with whatever the `wdi` dataset's `indicator` dimension
+    /// currently holds in the DB (the last successful merge, by this process or another one).
+    /// Errors (e.g. no DB reachable, as in tests) are swallowed: the cache is best-effort and
+    /// callers fall back to a row-carried name, and only then to the indicator's id (see
+    /// [`series_metadata`](Self::series_metadata)).
+    ///
+    /// Called after [`refresh_reference_data`](SourceAdapter::refresh_reference_data) refreshes
+    /// the `code_lists`, so the cache reflects whatever merged even when some indicators failed;
+    /// also called at the start of every `discover`/`fetch_batch` call, unconditionally (not just
+    /// when the cache is still empty), so an indicator another call's row-carried fallback merged
+    /// in the meantime is picked up too, rather than being merged all over again with its
+    /// `sourceNote` dropped. A freshly started process, or a fetch job that races this process's
+    /// first discovery, sees whatever an earlier process last found rather than only the id.
+    async fn seed_cache_from_db(&self, ctx: &CrawlCtx) {
+        let codes = match persist::dataset_dimension_codes(
+            &ctx.pool,
+            SourceId::WorldBank,
+            DATASET,
+            INDICATOR_DIMENSION,
+        )
+        .await
+        {
+            Ok(codes) => codes,
+            Err(e) => {
+                tracing::warn!(error = %e, "World Bank: could not seed indicator cache from the DB");
+                return;
+            }
+        };
+        let mut cache = self.indicator_meta.lock().unwrap();
+        for (id, code) in codes {
+            cache.insert(
+                id,
+                IndicatorMeta {
+                    name: code.label,
+                    description: code.description,
+                },
+            );
+        }
+    }
+
+    /// `indicator`'s name and description as last cached (by a fetch in this process or
+    /// [`seed_cache_from_db`](Self::seed_cache_from_db) from the DB). Without a cache entry yet
+    /// (a brand new database, or a fetch that races the first scheduled
+    /// `refresh_reference_data`), the name falls back to `rows`' own `indicator.value` from the
+    /// data response itself, and only then to the indicator's bare id; the description has no
+    /// such fallback (`sourceNote` is only ever on `/indicator/{id}`). A row-carried fallback name
+    /// is also merged into the `wdi` dataset's `indicator` dimension codes (best-effort; a DB
+    /// error here is logged and otherwise ignored), so a fresh database that has not yet run
+    /// `refresh_reference_data` still gets a usable indicator picker from the first discovery or
+    /// fetch alone, not just a usable series title. `attempted` tracks, for the whole `discover`
+    /// or `fetch_batch` call this is part of, which indicators this fallback merge was already
+    /// tried for: a cache miss that leaves the cache empty (`Ok(false)` or `Err`) would otherwise
+    /// repeat the same pooled transaction and `FOR UPDATE` query once per area of that indicator.
+    /// Kept local to the call so a later `discover`/`fetch_batch` can still retry.
+    async fn series_metadata(
+        &self,
+        ctx: &CrawlCtx,
+        indicator: &WdiIndicator,
+        area: &Area,
+        rows: &[Row],
+        attempted: &mut HashSet<String>,
+    ) -> NewSeriesMetadataLite {
+        let row_name = rows.first().and_then(|r| r.indicator_name.clone());
+        let (name, description, fallback_to_merge) = {
+            let cache = self.indicator_meta.lock().unwrap();
+            match cache.get(&indicator.id) {
+                Some(cached) => (cached.name.clone(), cached.description.clone(), None),
+                None => (
+                    row_name.clone().unwrap_or_else(|| indicator.id.clone()),
+                    None,
+                    row_name.clone(),
+                ),
+            }
+        };
+        // Merged (and cached) at most once per process per indicator: once this succeeds, later
+        // calls for the same indicator find the cache populated and skip straight past this. A
+        // failed or no-op attempt is only skipped for the rest of this `discover`/`fetch_batch`
+        // call (via `attempted`), not forever, so a later call can retry.
+        if let Some(name) = fallback_to_merge {
+            if attempted.insert(indicator.id.clone()) {
+                match persist::merge_dataset_dimension_code_entries(
+                    &ctx.pool,
+                    SourceId::WorldBank,
+                    DATASET,
+                    INDICATOR_DIMENSION,
+                    &[Code::new(&indicator.id, &name)],
+                )
+                .await
+                {
+                    // Only cache a name the DB actually stored: `false` (the dataset row isn't
+                    // synced yet, or this dimension uses a shared codelist) must not make later
+                    // calls in this process believe the DB has a label it doesn't.
+                    Ok(true) => {
+                        self.indicator_meta
+                            .lock()
+                            .unwrap()
+                            .entry(indicator.id.clone())
+                            .or_insert(IndicatorMeta {
+                                name,
+                                description: None,
+                            });
+                    }
+                    Ok(false) => {}
+                    Err(e) => {
+                        tracing::warn!(
+                            indicator = %indicator.id,
+                            error = %e,
+                            "World Bank: could not merge the row-carried indicator name into the dataset codes"
+                        );
+                    }
+                }
+            }
+        }
+        let description = description.unwrap_or_else(|| {
+            format!(
+                "World Development Indicators {} for {}",
+                indicator.id, area.name
+            )
+        });
+        NewSeriesMetadataLite {
+            title: format!("{name}: {}", area.name),
+            description: Some(description),
+            units: Some(indicator.unit.clone()),
+            frequency: Some(
+                rows.first()
+                    .map_or(Frequency::Annual, |r| r.frequency)
+                    .label()
+                    .to_string(),
+            ),
+            seasonal_adjustment: None,
+        }
+    }
 }
 
 impl Default for WorldBankAdapter {
@@ -185,14 +371,81 @@ impl SourceAdapter for WorldBankAdapter {
         &[DATASET]
     }
 
+    /// One [`CodeList`] per listed indicator: World Bank indicator names and `sourceNote`s each
+    /// live at their own `/indicator/{id}?format=json`, never in one shared file. See the module
+    /// docs.
+    fn code_lists(&self, _keys: &ApiKeys) -> Vec<CodeList> {
+        let indicators = match reference::wdi_indicators() {
+            Ok(indicators) => indicators,
+            Err(e) => {
+                // `discover`/`fetch_batch` surface this same error themselves; here there is no
+                // `Result` to return it through, so at least log it rather than silently
+                // publishing no code lists.
+                tracing::warn!(error = %e, "World Bank: could not list indicators for code_lists");
+                return Vec::new();
+            }
+        };
+        indicators
+            .iter()
+            .map(|indicator| {
+                let id = indicator.id.clone();
+                let url = format!("{}/indicator/{id}?format=json", self.base_url);
+                let parse: ParseCodes = Arc::new(move |body: &str| {
+                    let value: Value = serde_json::from_str(body).map_err(|e| {
+                        CrawlError::Parse(format!("World Bank indicator {id}: {e}"))
+                    })?;
+                    let (_, items) = parse_list(&format!("/indicator/{id}"), value)?;
+                    let Some(row) = items.first() else {
+                        return Err(CrawlError::Parse(format!(
+                            "World Bank indicator {id}: response has no rows"
+                        )));
+                    };
+                    let name = row
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .trim();
+                    if name.is_empty() {
+                        return Err(CrawlError::Parse(format!(
+                            "World Bank indicator {id}: response has no name"
+                        )));
+                    }
+                    let description = row
+                        .get("sourceNote")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string);
+                    let mut code = Code::new(&id, name);
+                    code.description = description;
+                    Ok(vec![code])
+                });
+                CodeList::new(url, DATASET, INDICATOR_DIMENSION, parse)
+            })
+            .collect()
+    }
+
+    /// The default `code_lists` refresh (every indicator attempted and failures aggregated, except
+    /// `Auth`/`RateLimited`, which stop the refresh at once), then
+    /// [`seed_cache_from_db`](Self::seed_cache_from_db) unconditionally, so the in-process cache
+    /// reflects whatever merged even when the refresh as a whole failed.
+    async fn refresh_reference_data(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
+        let result =
+            reference_file::refresh_code_lists(ctx, self.id(), &self.code_lists(&ctx.keys)).await;
+        self.seed_cache_from_db(ctx).await;
+        result
+    }
+
     /// One request per indicator; see the module docs. Series come out indicator by indicator
     /// (in file order), areas sorted by key, so the queue holds each indicator's series together
     /// for batching.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
+        self.seed_cache_from_db(ctx).await;
         let indicators = reference::wdi_indicators()?;
         let def = wdi_def()?;
         let areas = areas().map_err(|e| CrawlError::Permanent(e.to_string()))?;
         let mut found = Vec::new();
+        let mut attempted = HashSet::new();
         let (mut any_ok, mut last_err) = (false, None);
         for indicator in indicators {
             match self.fetch_indicator(ctx, &indicator.id).await {
@@ -200,7 +453,9 @@ impl SourceAdapter for WorldBankAdapter {
                     any_ok = true;
                     for (area, rows) in data.resolve(areas) {
                         let (external_id, dataset) = series_id(def, &indicator.id, &area.key)?;
-                        let meta = metadata(indicator, area, &rows);
+                        let meta = self
+                            .series_metadata(ctx, indicator, area, &rows, &mut attempted)
+                            .await;
                         found.push(DiscoveredSeries {
                             external_id,
                             title: meta.title,
@@ -260,9 +515,11 @@ impl SourceAdapter for WorldBankAdapter {
         external_ids: &[String],
         _since: Option<NaiveDate>,
     ) -> Result<BatchFetch, CrawlError> {
+        self.seed_cache_from_db(ctx).await;
         let indicators = reference::wdi_indicators()?;
         let def = wdi_def()?;
         let areas = areas().map_err(|e| CrawlError::Permanent(e.to_string()))?;
+        let mut attempted = HashSet::new();
         let mut out = BatchFetch::with_capacity(external_ids.len());
         // Requested areas per indicator, in first-requested order.
         let mut wanted: Vec<(&WdiIndicator, BTreeMap<&str, &str>)> = Vec::new();
@@ -299,20 +556,27 @@ impl SourceAdapter for WorldBankAdapter {
                 let Some(id) = ids.get(area.key.as_str()) else {
                     continue;
                 };
-                let series =
-                    series_id(def, &indicator.id, &area.key).map(|(_, dataset)| FetchedSeries {
-                        metadata: Some(metadata(indicator, area, &rows)),
-                        points: rows
-                            .iter()
-                            .map(|r| FetchedPoint {
-                                date: r.date,
-                                value: Some(r.value.clone()),
-                                revision_date: data.last_updated,
-                                is_original_release: true,
-                            })
-                            .collect(),
-                        dataset,
-                    });
+                let series = match series_id(def, &indicator.id, &area.key) {
+                    Ok((_, dataset)) => {
+                        let metadata = self
+                            .series_metadata(ctx, indicator, area, &rows, &mut attempted)
+                            .await;
+                        Ok(FetchedSeries {
+                            metadata: Some(metadata),
+                            points: rows
+                                .iter()
+                                .map(|r| FetchedPoint {
+                                    date: r.date,
+                                    value: Some(r.value.clone()),
+                                    revision_date: data.last_updated,
+                                    is_original_release: true,
+                                })
+                                .collect(),
+                            dataset,
+                        })
+                    }
+                    Err(e) => Err(e),
+                };
                 out.insert((*id).to_string(), series);
             }
         }
@@ -348,24 +612,6 @@ fn parse_id(external_id: &str) -> Option<(&str, &str)> {
     let rest = external_id.strip_prefix(DATASET)?.strip_prefix('/')?;
     let (indicator, area) = rest.rsplit_once('.')?;
     (!indicator.is_empty() && !area.is_empty()).then_some((indicator, area))
-}
-
-fn metadata(indicator: &WdiIndicator, area: &Area, rows: &[Row]) -> NewSeriesMetadataLite {
-    NewSeriesMetadataLite {
-        title: format!("{}: {}", indicator.name, area.name),
-        description: Some(format!(
-            "World Development Indicators {} for {}",
-            indicator.id, area.name
-        )),
-        units: Some(indicator.unit.clone()),
-        frequency: Some(
-            rows.first()
-                .map_or(Frequency::Annual, |r| r.frequency)
-                .label()
-                .to_string(),
-        ),
-        seasonal_adjustment: None,
-    }
 }
 
 /// The indicator's page on data.worldbank.org, filtered to the row's area.
@@ -511,6 +757,12 @@ struct Row {
     wb_id: String,
     /// `country.value`, for warnings.
     name: String,
+    /// `indicator.value` from this same row: the indicator's own name, straight from the data
+    /// response. Used as a fallback title when `refresh_reference_data` hasn't named this
+    /// indicator yet (a brand new database, or a fetch that races the first scheduled refresh),
+    /// so a series still gets a real name instead of its bare id; `sourceNote` (the description)
+    /// is still only ever fetched from `/indicator/{id}`, which this row doesn't carry.
+    indicator_name: Option<String>,
     date: NaiveDate,
     frequency: Frequency,
     value: BigDecimal,
@@ -519,6 +771,8 @@ struct Row {
 /// Wire format of a data row (only the fields we use).
 #[derive(Debug, Deserialize)]
 struct WbRow {
+    #[serde(default)]
+    indicator: IdValue,
     country: IdValue,
     #[serde(default, rename = "countryiso3code")]
     iso3: Option<String>,
@@ -526,7 +780,7 @@ struct WbRow {
     value: Option<serde_json::Number>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct IdValue {
     #[serde(default)]
     id: Option<String>,
@@ -550,6 +804,13 @@ fn parse_rows(what: &str, items: Vec<Value>) -> Result<Vec<Row>, CrawlError> {
             iso3: r.iso3.unwrap_or_default().trim().to_string(),
             wb_id: r.country.id.unwrap_or_default().trim().to_string(),
             name: r.country.value.unwrap_or_default(),
+            indicator_name: r
+                .indicator
+                .value
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
             date,
             frequency,
             value,
