@@ -181,13 +181,13 @@ placeholders such as `password` or `your-...` are refused. A variable set to the
 counts as unset.
 
 ```bash
-GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... FRED_API_KEY=... ./scripts/deploy/create-secrets.sh
+FRED_API_KEY=... ./scripts/deploy/create-secrets.sh
 kubectl -n econ-graph rollout restart deployment/econ-graph-backend deployment/crawler-worker
 ```
 
 | Secret | Keys (environment variable) | Used by |
 | --- | --- | --- |
-| `econ-graph-secrets` | `jwt-secret` (`JWT_SECRET`, generated), `database-url` (built from `app-password`), optional `google-client-id`, `google-client-secret`, `facebook-app-id`, `facebook-app-secret`, `facebook-access-token` (same names in upper case) | backend, crawler-worker (`database-url`) |
+| `econ-graph-secrets` | `database-url` (built from `app-password`); the retired in-house login keys (`jwt-secret`, `google-*`, `facebook-*`) are removed if an older run left them | backend, crawler-worker (`database-url`) |
 | `econ-graph-postgres` | `postgres-password` (`POSTGRES_PASSWORD`, generated), `app-password` (`APP_DB_PASSWORD`, generated) | postgres, its init script |
 | `crawler-api-keys` | optional `fred-api-key`, `bls-api-key`, `bea-api-key`, `census-api-key` (`FRED_API_KEY`, ...) | crawler-worker |
 | `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`); the passwords are generated on the first run, the username defaults to `admin` | Keycloak (manifests arrive with the Keycloak deploy PR) |
