@@ -150,11 +150,6 @@ async fn root_handler(playground: bool) -> Result<impl warp::Reply, Infallible> 
             <p><a href="/health">Health check endpoint</a> - API status and version info</p>
         </div>
 
-        <div class="endpoint">
-            <div><span class="method">GET</span> <code>/metrics</code></div>
-            <p><a href="/metrics">Prometheus metrics endpoint</a> - Application metrics for monitoring</p>
-        </div>
-
 <!--MCP_ENDPOINT-->
         <h2>🚀 Quick Start</h2>
 <!--PLAYGROUND_QUICK_START-->
@@ -1099,6 +1094,13 @@ mod playground_tests {
     async fn landing_page_mentions_playground_only_when_enabled() {
         assert!(landing_page(true).await.contains("href=\"/playground\""));
         assert!(!landing_page(false).await.contains("/playground"));
+    }
+
+    /// The landing page is public, so it must not name the internal `/metrics` endpoint.
+    #[tokio::test]
+    async fn landing_page_does_not_mention_metrics() {
+        assert!(!landing_page(true).await.contains("/metrics"));
+        assert!(!landing_page(false).await.contains("/metrics"));
     }
 
     /// The playground is served only when explicitly turned on.

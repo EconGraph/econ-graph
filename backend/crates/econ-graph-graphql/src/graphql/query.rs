@@ -356,15 +356,18 @@ impl Query {
         })
     }
 
-    /// Crawler status, derived from the crawl queue (workers keep no other state).
+    /// Crawler status, derived from the crawl queue (workers keep no other state; requires
+    /// `admin.system:read`).
     async fn crawler_status(&self, ctx: &Context<'_>) -> Result<CrawlerStatusType> {
+        require_role(ctx, Role::AdminSystemRead)?;
         let pool = ctx.data::<DatabasePool>()?;
         let snapshot = econ_graph_crawler::status::crawler_status(pool).await?;
         Ok(CrawlerStatusType::from_snapshot(snapshot))
     }
 
-    /// Get queue statistics
+    /// Get queue statistics (requires `admin.system:read`)
     async fn queue_statistics(&self, ctx: &Context<'_>) -> Result<QueueStatisticsType> {
+        require_role(ctx, Role::AdminSystemRead)?;
         let pool = ctx.data::<DatabasePool>()?;
 
         let stats = queue_service::get_queue_statistics(&pool).await?;
