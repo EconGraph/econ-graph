@@ -14,25 +14,32 @@
 //! crawler coverage [--json] [--fail-under PCT]   # per-source coverage and freshness
 //! crawler sources
 //! crawler fetch    --source FRED --series GDP [--full]   # one fetch + persist, in-process (debugging)
+//! crawler record-reference-seeds --source BLS [--migrations-dir DIR]   # no database needed
 //! ```
+//!
+//! `record-reference-seeds` downloads a source's code lists and writes them, with the `ETag`s
+//! they were served with, as a seed migration for new databases (see [`crate::reference_file`]).
 //!
 //! Diagnostics go through `tracing` (stderr, `RUST_LOG`); stdout carries only the command's output.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context as _};
+use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use econ_graph_core::models::{CrawlQueueItem, JobKind, NewCrawlQueueItem};
 use econ_graph_core::DatabasePool;
 
-use crate::adapter::{AdapterRegistry, ApiKeys, CrawlCtx};
+use crate::adapter::{AdapterRegistry, ApiKeys, CrawlCtx, SourceAdapter};
 use crate::coverage::{covered_sources, crawl_coverage, SourceCoverage};
 use crate::dataset::DatasetCatalog;
 use crate::http::{HttpConfig, HttpFetcher};
 use crate::persist;
 use crate::policy::SourcePolicy;
+use crate::reference_file;
 use crate::source::SourceId;
 use crate::sources::default_registry;
 use crate::status::{crawler_status, CrawlerStatusSnapshot};
@@ -115,7 +122,28 @@ pub enum Command {
         #[arg(long)]
         full: bool,
     },
+    /// Download a source's code lists and write them as a seed migration that gives a new
+    /// database their labels (with the ETags they were served with) before the first crawl.
+    RecordReferenceSeeds {
+        /// Source, e.g. BLS.
+        #[arg(long)]
+        source: SourceId,
+        /// Diesel migrations directory to write the migration into.
+        #[arg(long, default_value = DEFAULT_MIGRATIONS_DIR)]
+        migrations_dir: PathBuf,
+        /// Write the lists that downloaded even if others failed, leaving the failed ones
+        /// unseeded (the crawl still fetches them). Without it, any failure writes nothing.
+        #[arg(long)]
+        skip_failed: bool,
+    },
 }
+
+/// Version of the migration that creates `seed_reference_codes`
+/// (`2026-10-02-000250_seed_reference_codes`); every seed migration's version must be later.
+const SEED_FUNCTION_VERSION: &str = "2026-10-02-000250";
+
+/// `backend/migrations` of the checkout this binary was built from.
+const DEFAULT_MIGRATIONS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../migrations");
 
 /// Parses a percentage in `[0, 100]`.
 fn parse_percent(s: &str) -> Result<f64, String> {
@@ -201,6 +229,28 @@ impl Cli {
         if self.command == Command::Sources {
             return Ok(format_sources(&default_registry(), &ApiKeys::from_env()));
         }
+        if let Command::RecordReferenceSeeds {
+            source,
+            migrations_dir,
+            skip_failed,
+        } = &self.command
+        {
+            let registry = default_registry();
+            let adapter = registry
+                .get(*source)
+                .ok_or_else(|| anyhow!("no adapter registered for {source}"))?;
+            let catalog = DatasetCatalog::load(&registry)?;
+            return record_reference_seeds(
+                &*adapter,
+                &ApiKeys::from_env(),
+                &build_http(&registry)?,
+                &catalog,
+                migrations_dir,
+                *skip_failed,
+                Utc::now(),
+            )
+            .await;
+        }
         let url = self
             .database_url
             .ok_or_else(|| anyhow!("DATABASE_URL is not set (or pass --database-url)"))?;
@@ -273,9 +323,114 @@ impl Cli {
                 series,
                 full,
             } => fetch_one(pool, source, series.trim(), full).await,
-            Command::Sources => unreachable!("handled above"),
+            Command::Sources | Command::RecordReferenceSeeds { .. } => {
+                unreachable!("handled above")
+            }
         }
     }
+}
+
+/// Downloads `adapter`'s code lists and writes them as the migration
+/// `{migrations_dir}/{recorded_at}_seed_{source}_reference_codes` (`source` lowercase),
+/// replacing the source's previous seed migration; returns what it wrote. If any list fails it
+/// writes nothing and lists every failure, unless `skip_failed`.
+pub async fn record_reference_seeds(
+    adapter: &dyn SourceAdapter,
+    keys: &ApiKeys,
+    http: &HttpFetcher,
+    catalog: &DatasetCatalog,
+    migrations_dir: &Path,
+    skip_failed: bool,
+    recorded_at: DateTime<Utc>,
+) -> anyhow::Result<String> {
+    let source = adapter.id();
+    let lists = adapter.code_lists(keys);
+    if lists.is_empty() {
+        bail!("{source} publishes no code lists to seed");
+    }
+    let reference_file::SeedDownload { entries, failures } =
+        reference_file::download_seed_entries(http, source, &lists, catalog).await?;
+    let failed: Vec<String> = failures
+        .iter()
+        .map(|(url, e)| format!("{url}: {e}"))
+        .collect();
+    if !failed.is_empty() && !skip_failed {
+        bail!(
+            "{} of {} {source} code lists failed (--skip-failed writes the rest): {}",
+            failed.len(),
+            lists.len(),
+            failed.join("; ")
+        );
+    }
+    if entries.is_empty() {
+        bail!("every {source} code list failed: {}", failed.join("; "));
+    }
+    let (up, down) = reference_file::seed_migration_sql(source, recorded_at, &entries)?;
+    let suffix = format!("_seed_{}_reference_codes", source.as_str().to_lowercase());
+    let version = recorded_at.format("%Y-%m-%d-%H%M%S").to_string();
+    let name = format!("{version}{suffix}");
+    if version.as_str() <= SEED_FUNCTION_VERSION {
+        bail!("{name} would not run after migration {SEED_FUNCTION_VERSION}, which creates seed_reference_codes; check the clock");
+    }
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(migrations_dir)
+        .with_context(|| format!("reading {}", migrations_dir.display()))?
+    {
+        let path = entry?.path();
+        if let Some(n) = path.file_name().and_then(|n| n.to_str()) {
+            if path.is_dir() {
+                names.push((n.to_string(), path.clone()));
+            }
+        }
+    }
+    // Diesel identifies a migration by its version alone, so a second migration with this
+    // version would be skipped on any database that already ran the first.
+    if let Some((taken, _)) = names
+        .iter()
+        .find(|(n, _)| n.split('_').next() == Some(version.as_str()))
+    {
+        bail!("migration version {version} is already taken by {taken}; record again");
+    }
+    // Write the new recording before removing the old one, so a failed write leaves the
+    // previous seed in place.
+    let dir = migrations_dir.join(&name);
+    std::fs::create_dir(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    std::fs::write(dir.join("up.sql"), up)
+        .and_then(|()| std::fs::write(dir.join("down.sql"), down))
+        .with_context(|| format!("writing {}", dir.display()))
+        .inspect_err(|_| {
+            let _ = std::fs::remove_dir_all(&dir);
+        })?;
+    // A new recording replaces the previous one. Both would run on a new database, and the older
+    // would store the file first, so the newer one's codes would never load. Removing an applied
+    // migration's directory is safe: Diesel only runs versions it hasn't recorded.
+    let mut replaced = Vec::new();
+    for (n, path) in names {
+        if n.ends_with(&suffix) {
+            std::fs::remove_dir_all(&path)
+                .with_context(|| format!("removing {}", path.display()))?;
+            replaced.push(path);
+        }
+    }
+    let mut out = format!("wrote {}\n", dir.display());
+    for path in &replaced {
+        let _ = writeln!(out, "  replaced {}", path.display());
+    }
+    for e in &entries {
+        let _ = writeln!(
+            out,
+            "  {}.{}: {} codes from {} (etag {})",
+            e.dataset,
+            e.dimension.name,
+            e.codes.len(),
+            e.url,
+            e.etag.as_deref().unwrap_or("none")
+        );
+    }
+    for f in &failed {
+        let _ = writeln!(out, "  skipped {f}");
+    }
+    Ok(out)
 }
 
 /// One fetch + persist, the same calls the worker makes for a `fetch_series` job.
@@ -496,6 +651,23 @@ mod tests {
             }
         );
         assert_eq!(cli.database_url.as_deref(), Some("postgres://x"));
+    }
+
+    #[test]
+    fn cli_parses_record_reference_seeds() {
+        let cli = parse(&["record-reference-seeds", "--source", "bls"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::RecordReferenceSeeds {
+                source: SourceId::Bls,
+                migrations_dir: PathBuf::from(DEFAULT_MIGRATIONS_DIR),
+                skip_failed: false,
+            }
+        );
+        // The default is this checkout's migrations directory.
+        assert!(Path::new(DEFAULT_MIGRATIONS_DIR)
+            .join("00000000000000_diesel_initial_setup")
+            .is_dir());
     }
 
     #[test]

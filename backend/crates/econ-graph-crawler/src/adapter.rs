@@ -17,6 +17,7 @@ use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
 use crate::http::HttpFetcher;
 use crate::policy::SourcePolicy;
+use crate::reference_file::{self, CodeList};
 use crate::source::SourceId;
 
 /// API keys for sources that use them. `Debug` redacts the values.
@@ -171,19 +172,28 @@ pub trait SourceAdapter: Send + Sync {
     /// Lists the series this source offers.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError>;
 
-    /// Refreshes this adapter's own reference data — a source's published code→label lists that
-    /// back a dataset's dimension `codes`, as opposed to the series `discover` returns — so
-    /// static reference files in `data/` don't go stale as the source adds or renames codes.
-    /// Called once per scheduled catalog discovery, before [`discover`](Self::discover).
+    /// The source's own files of codes and labels behind this adapter's dataset dimensions (a
+    /// state list, a code file per field, ...), as opposed to the series `discover` returns.
+    /// The default [`refresh_reference_data`](Self::refresh_reference_data) keeps them current,
+    /// and `crawler record-reference-seeds` records them into a seed migration for new databases
+    /// (see [`crate::reference_file`]). Empty by default.
+    /// `keys` is for a source that wants its API key in the request URL
+    /// ([`CodeList::request_url`]).
+    fn code_lists(&self, _keys: &ApiKeys) -> Vec<CodeList> {
+        Vec::new()
+    }
+
+    /// Refreshes this adapter's own reference data so its labels don't go stale as the source
+    /// adds or renames codes. Called at worker startup and once per scheduled catalog discovery,
+    /// before [`discover`](Self::discover).
     ///
-    /// The default is a no-op, for adapters with no such reference data of their own (most
-    /// sources either have none or use a shared [`crate::dataset::CODELISTS`] entry instead).
-    /// An implementation should fetch conditionally (see [`HttpFetcher::get_text_conditional`])
-    /// and cache its validator through `ctx.pool`, so a source that hasn't changed its file costs
-    /// one small request, not a re-parse. Failure here does not fail the discovery job: the
-    /// worker logs it and carries on with whatever labels are already stored.
-    async fn refresh_reference_data(&self, _ctx: &CrawlCtx) -> Result<(), CrawlError> {
-        Ok(())
+    /// The default refreshes each of [`code_lists`](Self::code_lists) with a conditional GET
+    /// ([`reference_file::refresh_code_lists`]), so a source that hasn't changed a file costs one
+    /// small request, not a re-parse. Override it for reference data that isn't a dimension's
+    /// code list, going through [`reference_file::refresh`]. Failure here does not fail the
+    /// discovery job: the worker logs it and carries on with whatever labels are already stored.
+    async fn refresh_reference_data(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
+        reference_file::refresh_code_lists(ctx, self.id(), &self.code_lists(&ctx.keys)).await
     }
 
     /// Whether a successful [`discover`](Self::discover) lists every series this adapter crawls,

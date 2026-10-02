@@ -162,7 +162,7 @@ pub async fn crawl_coverage(
         .collect();
     // Only read when Census is covered; the pattern is unused otherwise.
     let census_ids = if sources.contains(&SourceId::Census) {
-        crate::sources::census::fetchable_id_regex()?
+        crate::sources::census::fetchable_id_regex()
     } else {
         String::new()
     };
