@@ -54,7 +54,7 @@ Configuration (flags or environment):
 | `CRAWLER_STUCK_AFTER_SECS` | 1800 | release items locked longer than this |
 | `CRAWLER_PAUSE_AFTER` / `CRAWLER_PAUSE_SECS` | 5 / 300 | pause a source after N consecutive rate-limit/auth errors |
 | `CRAWLER_HTTP_TIMEOUT_SECS` | 30 | per-request timeout |
-| `CRAWLER_DATA_DIR` | `/app/data` in the image | reference data read at runtime (`us_states.csv`, used by FHFA and Census; `bls_series.csv`, the BLS series list; and `datasets/<source>.toml` for each adapter that declares datasets, today FRED, BLS, Census and FHFA); the worker exits at startup if any of it is missing |
+| `CRAWLER_DATA_DIR` | `/app/data` in the image | reference data read at runtime (`bls_series.csv`, the ids of the BLS series to crawl (their titles, units and frequency come from BLS); and `datasets/<source>.toml` for each adapter that declares datasets, today FRED, BLS, Census and FHFA); the worker exits at startup if any of it is missing |
 | `REFERENCE_DATA_DIR` | `/app/reference` in the image | shared reference data (`countries.csv`, econ-graph-core's `data/`); the worker and the backend exit at startup if it is missing |
 | `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY`, `CENSUS_API_KEY` | unset | from Secret `crawler-api-keys`; the worker starts without them, but FRED, BEA and Census jobs fail with an auth error when their key is missing |
 | `CRAWLER_SCHEDULER` | true | enqueue due refreshes and catalog discovery in the background (see below); `false` disables it, leaving `triggerCrawl` / the CLI as the only way to enqueue work |
@@ -116,6 +116,18 @@ most one refresh in the window, or none if the run is shorter. Quarterly (14-day
 (30-day) series are not expected to refresh again inside a single seven-day run. `crawler status`
 and the `crawler_queue_*` / `crawler_coverage_*` Prometheus metrics (see Monitoring below) show
 whether jobs are actually being enqueued and completed on this cadence.
+
+## Source reference data
+
+Labels a source publishes itself (Census state names, BLS code labels) are crawled, never shipped as data files: the worker refreshes each adapter's code lists at startup and before each catalog discovery, with a conditional GET on the `ETag` stored in `reference_file_cache`.
+
+A new database can get those labels before the first crawl from a seed migration, `backend/migrations/<timestamp>_seed_<source>_reference_codes/`, which loads them with the `ETag` they were downloaded with, and only if this database doesn't have the file yet. Record one from a machine that can reach the source:
+
+```bash
+cd backend && cargo run -p econ-graph-crawler --bin crawler -- record-reference-seeds --source CENSUS
+```
+
+It replaces that source's previous seed migration. If any list fails to download or parse, it writes nothing and names every failure; `--skip-failed` writes the rest and leaves the failed lists for the crawl. A refused (401, 403) or throttled (429) request stops it at once. Never write or edit a seed by hand: a made-up `ETag` would let a `304` keep wrong labels.
 
 ## Retries
 

@@ -10,7 +10,6 @@ The workflow YAML files in this directory define what runs. See the [CI pipeline
 | [docs-checks.yml](docs-checks.yml) | Push to main/develop; all PRs, including docs-only and stacked PRs | Markdown lint and offline relative-link checks |
 | [feature-flags.yml](feature-flags.yml) | Push to main/develop/release/**; train-* tags; all PRs; Monday 06:17 UTC | Flag validation and generated-file consistency |
 | [release-e2e.yml](release-e2e.yml) | PRs touching its listed application, Keycloak, release-stack or workflow paths | Chromium against a release frontend, real backend and PostgreSQL 18 with recorded fixtures |
-| [e2e-tests-nightly.yml](e2e-tests-nightly.yml) | Daily 02:00 UTC | Container-based desktop and mobile E2E suites |
 | [security.yml](security.yml) | Daily 02:00 UTC | Dependency audits, Trivy, CodeQL, licenses and Dockerfile scanning |
 | [accessibility-tests.yml](accessibility-tests.yml) | Monday 09:00 UTC | Accessibility static/runtime checks and manual-testing guidance |
 | [update-cost-analysis.yml](update-cost-analysis.yml) | Daily 06:00 UTC | Recalculate cost documentation and attempt to publish changes |

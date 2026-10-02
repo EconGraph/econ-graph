@@ -68,20 +68,6 @@ spec:
             name: econ-graph-backend-service
             port:
               number: 9876
-      - path: /grafana
-        pathType: Prefix
-        backend:
-          service:
-            name: grafana-service
-            port:
-              number: 3000
-      - path: /login
-        pathType: Prefix
-        backend:
-          service:
-            name: grafana-service
-            port:
-              number: 3000
       - path: /
         pathType: Prefix
         backend:

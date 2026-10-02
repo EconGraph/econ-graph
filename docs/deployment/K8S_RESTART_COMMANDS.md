@@ -47,7 +47,6 @@ docker build \
   --build-arg REACT_APP_API_URL="http://localhost" \
   --build-arg REACT_APP_GRAPHQL_URL="/graphql" \
   --build-arg REACT_APP_WS_URL="ws://localhost/graphql" \
-  --build-arg REACT_APP_GRAFANA_URL="http://localhost:${GRAFANA_NODEPORT}" \
   --build-arg NODE_ENV="production" \
   -t econ-graph-admin-frontend:latest .
 
@@ -166,7 +165,7 @@ source ports.env
 - **Health Check**: http://localhost:${BACKEND_NODEPORT}/health
   - ✅ Service status monitoring
 
-- **Grafana**: http://localhost:${GRAFANA_NODEPORT}
+- **Grafana**: `kubectl port-forward service/grafana-service 3000:3000 -n econ-graph`, then http://localhost:3000
   - ✅ Monitoring dashboards (user admin, password in Secret `grafana-admin`, see k8s/README.md)
 
 ---

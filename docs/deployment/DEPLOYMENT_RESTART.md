@@ -130,7 +130,7 @@ source ports.env
 - **Backend**: http://localhost:${BACKEND_NODEPORT} (Rust API with improved performance)  
 - **GraphQL**: http://localhost:${BACKEND_NODEPORT}/graphql (Enhanced schema)
 - **Health Check**: http://localhost:${BACKEND_NODEPORT}/health (System status)
-- **Grafana**: http://localhost:${GRAFANA_NODEPORT} (user admin, password in Secret `grafana-admin`, see k8s/README.md)
+- **Grafana**: `kubectl port-forward service/grafana-service 3000:3000 -n econ-graph`, then http://localhost:3000 (user admin, password in Secret `grafana-admin`, see k8s/README.md)
 
 ---
 

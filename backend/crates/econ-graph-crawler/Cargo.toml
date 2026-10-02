@@ -35,7 +35,7 @@ serde.workspace = true
 serde_json.workspace = true
 # Dataset definitions (data/datasets/*.toml)
 toml.workspace = true
-# Reference data files with quoted fields (data/wdi_indicators.csv, FHFA HPI master file)
+# Reference data files (FHFA HPI master file has quoted fields; data/wdi_indicators.csv doesn't)
 csv.workspace = true
 
 # Error handling

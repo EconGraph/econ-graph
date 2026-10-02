@@ -351,7 +351,7 @@ pub enum PageContext {
     Days(i64),
     /// The point just before the page.
     PreviousPoint,
-    /// The series' first point (the base of a percent change).
+    /// The series' earliest usable (non-null, non-zero) point, the base of a percent change.
     FirstPoint,
 }
 
@@ -362,7 +362,7 @@ async fn load_context(
     first: &DataPoint,
     context: PageContext,
 ) -> Result<Vec<DataPoint>, diesel::result::Error> {
-    use data_points::dsl::{date, id, revision_date};
+    use data_points::dsl::{date, id, revision_date, value};
 
     // (date, revision_date, id) < first's, spelled out for Diesel.
     let before_first = date.lt(first.date).or(date.eq(first.date).and(
@@ -390,7 +390,11 @@ async fn load_context(
                 .await
         }
         PageContext::FirstPoint => {
-            in_page_order(earlier)
+            // The percent-change base is the series' earliest *usable* value: a null or zero
+            // reading at the very first date (or several) is skipped. `.ne` on a nullable column
+            // already excludes NULLs under SQL's three-valued logic, so this one filter covers
+            // both.
+            in_page_order(earlier.filter(value.ne(bigdecimal::BigDecimal::from(0))))
                 .limit(1)
                 .load::<DataPoint>(conn)
                 .await

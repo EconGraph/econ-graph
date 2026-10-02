@@ -190,6 +190,9 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
              JOIN src ON es.source_id = src.ds_id \
              WHERE es.is_active \
                AND (src.code <> '{census}' OR es.external_id ~ $4) \
+               AND NOT EXISTS ( \
+                     SELECT 1 FROM datasets d \
+                     WHERE d.id = es.dataset_id AND d.code = 'legacy') \
              UNION ALL \
              SELECT src.code, NULL::uuid, sm.external_id, NULL::timestamptz, \
                     CASE WHEN f.failed_at IS NOT NULL THEN 'failed' END, f.failed_at, TRUE, \
@@ -377,7 +380,7 @@ impl RefreshScheduler {
         let codes: Vec<String> = sources.iter().map(|s| s.as_str().to_string()).collect();
         // Only read when Census is scheduled; the pattern is unused otherwise.
         let census_ids = if sources.contains(&SourceId::Census) {
-            crate::sources::census::fetchable_id_regex()?
+            crate::sources::census::fetchable_id_regex()
         } else {
             String::new()
         };
@@ -833,7 +836,8 @@ mod tests {
         let ids = [
             "bds/national..T15CX",
             "bds/state.06.T15CX",
-            "bds/state.03.T15CX",
+            "bds/state.72.T15CX",
+            "bds/state.57.T15CX",
             "bds/state..T15CX",
             "bds/county.001.T15CX",
             "bds/national.06.T15CX",
@@ -1008,6 +1012,57 @@ mod tests {
         seed(p, SourceId::Bls, "t15c_bls", "Monthly", None, None).await;
         s.tick().await.unwrap();
         assert_eq!(queued_series(p).await, expected);
+    }
+
+    /// Series the dataset migration parked in a source's `legacy` dataset have no adapter that can
+    /// fetch them, so they are never due, however stale.
+    #[tokio::test]
+    async fn legacy_dataset_series_are_never_due() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        let fred = persist::data_source_id(p, SourceId::Fred).await.unwrap();
+        let stale = seed(
+            p,
+            SourceId::Fred,
+            "t15c_legacy_stale",
+            "Daily",
+            Some(30.0),
+            None,
+        )
+        .await;
+        seed(
+            p,
+            SourceId::Fred,
+            "t15c_current_stale",
+            "Daily",
+            Some(30.0),
+            None,
+        )
+        .await;
+        exec(
+            p,
+            &format!(
+                "INSERT INTO datasets (source_id, code, name) \
+                 VALUES ('{fred}', 'legacy', 'FRED series from before datasets') \
+                 ON CONFLICT (source_id, code) DO NOTHING"
+            ),
+        )
+        .await;
+        exec(
+            p,
+            &format!(
+                "UPDATE economic_series SET dataset_id = \
+                     (SELECT id FROM datasets WHERE source_id = '{fred}' AND code = 'legacy') \
+                 WHERE id = '{stale}'"
+            ),
+        )
+        .await;
+
+        let s = scheduler(p, &[SourceId::Fred], DEFAULT_BATCH_LIMIT);
+        s.tick().await.unwrap();
+        let queued = queued_series(p).await;
+        assert!(queued.contains("FRED/t15c_current_stale"), "{queued:?}");
+        assert!(!queued.contains("FRED/t15c_legacy_stale"), "{queued:?}");
     }
 
     #[tokio::test]

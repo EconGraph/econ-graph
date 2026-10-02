@@ -7,6 +7,12 @@
 #
 # `codes` label common values. They are not closed lists.
 # Layouts: https://www.bls.gov/help/hlpforma.htm
+#
+# Dimensions BLS itself publishes a reference file for (CU item/area, CE industry/data_type,
+# LN series_code) carry no `codes` here: `BlsAdapter::refresh_reference_data` fetches and
+# caches their labels from BLS on each scheduled re-crawl instead, so a BLS rename or addition
+# shows up without a code change here. Dimensions that are just this series id layout's own
+# fixed encoding (seasonal, periodicity, LA measure) keep their codes inline.
 
 [[dataset]]
 code = "CU"
@@ -32,15 +38,10 @@ codes = [
 [[dataset.dimensions]]
 name = "area"
 label = "Area"
-codes = [{ code = "0000", label = "U.S. city average" }]
 
 [[dataset.dimensions]]
 name = "item"
 label = "Item"
-codes = [
-  { code = "SA0", label = "All items" },
-  { code = "SA0L1E", label = "All items less food and energy" },
-]
 
 [[dataset]]
 code = "CE"
@@ -58,18 +59,10 @@ codes = [
 [[dataset.dimensions]]
 name = "industry"
 label = "Industry"
-codes = [
-  { code = "00000000", label = "Total nonfarm" },
-  { code = "05000000", label = "Total private" },
-]
 
 [[dataset.dimensions]]
 name = "data_type"
 label = "Data type"
-codes = [
-  { code = "01", label = "All employees, thousands" },
-  { code = "03", label = "Average hourly earnings of all employees" },
-]
 
 [[dataset]]
 code = "LN"
@@ -87,11 +80,6 @@ codes = [
 [[dataset.dimensions]]
 name = "series_code"
 label = "Series"
-codes = [
-  { code = "14000000", label = "Unemployment rate" },
-  { code = "11300000", label = "Labor force participation rate" },
-  { code = "12300000", label = "Employment-population ratio" },
-]
 
 [[dataset]]
 code = "LA"
