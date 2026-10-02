@@ -12,8 +12,11 @@ Invalid Key HTML page. Background:
 
 - **Discovery**: `GET /data/timeseries/bds/variables.json` and `geography.json`. Variables
   are filtered by keyword (`is_economic_variable`) and crossed with the `us` and `state`
-  levels: one series per variable nationally and one per variable per state and DC (states
-  from `backend/crates/econ-graph-crawler/data/us_states.csv`).
+  levels: one series per variable nationally and one per variable per state and DC. The states
+  come from the Census Bureau's FIPS reference file
+  (<https://www2.census.gov/geo/docs/reference/state.txt>), fetched on every crawl; each crawl
+  also stores their names as the `state` dimension's codes (conditional GET, so an unchanged file
+  costs one small request).
 - **Series and ids**: each variable is its own series in dataset `bds`
   (`data/datasets/census.toml`), dimensions `geo_level` (`national`/`state`), `state` (the
   two-digit FIPS code, empty for national) and `variable`. External ids are the canonical

@@ -40,8 +40,8 @@ codes = [
 ]
 
 # The file's `place_id` column: USA, a census division (DV_*) or a state's USPS code. State
-# codes are USPS codes, not the FIPS codes of the us_states codelist, so only the national and
-# division ids are labelled here.
+# codes are USPS codes, not FIPS codes, so only the national and division ids are labelled
+# here.
 [[dataset.dimensions]]
 name = "place_id"
 label = "Place"

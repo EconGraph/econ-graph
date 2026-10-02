@@ -12,7 +12,7 @@
 //! Environment: `DATABASE_URL` (required), `FRED_API_KEY` / `BLS_API_KEY` / `BEA_API_KEY` /
 //! `CENSUS_API_KEY` (the worker starts without them; FRED, BEA and Census jobs fail with `Auth`
 //! when their key is missing), `RUST_LOG` (default `info`), `CRAWLER_DATA_DIR` (reference data
-//! files such as `us_states.csv`; defaults to the crawler crate's `data/` directory in the source
+//! files such as `bls_series.csv`; defaults to the crawler crate's `data/` directory in the source
 //! tree, and the image sets `/app/data`), `REFERENCE_DATA_DIR` (shared reference data such as
 //! `countries.csv`; defaults to econ-graph-core's `data/` directory, and the image sets
 //! `/app/reference`). Every flag can also be set through the `CRAWLER_*`
@@ -142,14 +142,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let registry = default_registry();
     // Reference data adapters read at runtime ($CRAWLER_DATA_DIR): fail at startup rather than on
-    // their first job (FHFA and Census read `us_states`; BLS reads `bls_series`; FRED reads
-    // `fred_series`).
-    let states = econ_graph_crawler::reference::us_states()?;
+    // their first job (BLS reads `bls_series`; FRED reads `fred_series`).
     let bls_series = econ_graph_crawler::reference::bls_series()?;
     let fred_series = econ_graph_crawler::reference::fred_series()?;
     tracing::info!(
         data_dir = %econ_graph_crawler::reference::data_dir().display(),
-        states = states.len(),
         bls_series = bls_series.len(),
         fred_series = fred_series.len(),
         "reference data loaded"
@@ -204,6 +201,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     if registry.ids().is_empty() {
         tracing::warn!("no source adapters registered; only SEC fetch_filing jobs can succeed");
+    }
+    // Reference data each source publishes (code lists, state lists): refresh it with a
+    // conditional GET on the ETag stored by the last crawl or by the seed migration, so labels are
+    // current from the first start instead of after the first weekly discovery. In the
+    // background: a slow source must not hold up the queue. Failures are logged; every scheduled
+    // discovery refreshes again.
+    for id in registry
+        .ids()
+        .into_iter()
+        .filter(|id| config.source_filter.as_ref().is_none_or(|f| f.contains(id)))
+    {
+        let Some(adapter) = registry.get(id) else {
+            continue;
+        };
+        let ctx = ctx.clone();
+        tokio::spawn(async move {
+            match adapter.refresh_reference_data(&ctx).await {
+                Ok(()) => tracing::debug!(source = %id, "reference data refreshed at startup"),
+                Err(error) => tracing::warn!(
+                    source = %id,
+                    %error,
+                    "reference data refresh at startup failed; the next discovery retries"
+                ),
+            }
+        });
     }
 
     // Metrics server + queue gauges. `stop` ends both after the worker has drained.

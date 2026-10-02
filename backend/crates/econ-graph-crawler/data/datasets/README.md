@@ -27,7 +27,7 @@ type = "string"              # string (default), integer, decimal, date or boole
 [[dataset.dimensions]]
 name = "area"
 label = "Country or area"
-codelist = "countries"       # a shared reference list (countries or us_states),
+codelist = "countries"       # a shared reference list (today only countries),
                              # resolved by the API, not the crawler
 
 # Or list the codes inline (not a closed list), instead of codelist:

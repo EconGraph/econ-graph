@@ -16,11 +16,12 @@ codes = [
   { code = "state", label = "State" },
 ]
 
-# Two-digit state FIPS code from the shared us_states.csv; empty for national series.
+# Two-digit state FIPS code; empty for national series. No codes here: the crawler fetches the
+# Census Bureau's state file on each crawl and stores the state names as this dimension's codes
+# (see src/sources/census.rs).
 [[dataset.dimensions]]
 name = "state"
 label = "State"
-codelist = "us_states"
 
 # The BDS variable name (for example ESTAB or JOB_CREATION).
 [[dataset.dimensions]]
