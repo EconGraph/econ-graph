@@ -464,6 +464,13 @@ const CODE_FILES: &[CodeFileSpec<'static>] = &[
         label_col: "item_name",
     },
     CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/cu/cu.area",
+        dataset: "CU",
+        dimension: "area",
+        code_col: "area_code",
+        label_col: "area_name",
+    },
+    CodeFileSpec {
         url: "https://download.bls.gov/pub/time.series/ce/ce.industry",
         dataset: "CE",
         dimension: "industry",
