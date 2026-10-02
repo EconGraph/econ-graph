@@ -5,13 +5,12 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { DEPLOYED } from '../env';
-import { SEEDED } from '../fixtures';
+import { SEEDED, SWEPT_SOURCES } from '../fixtures';
 import { seededSeriesId } from '../auth/helpers';
 
 /**
- * The Transformation select on a series page. It has no labelId wired to its InputLabel
- * (SeriesChart.tsx), so it has no accessible name; find it by its containing FormControl's
- * visible label text instead.
+ * The Transformation select on a series page. Find it by its containing FormControl's visible
+ * label text.
  * @param page - The test's page, already on a series page.
  * @returns The select's combobox locator.
  */
@@ -135,17 +134,24 @@ test.describe('series transformations', () => {
     }
   });
 
-  // The schema has LOG_DIFFERENCE, but the backend computes ratio - 1 rather than a log, so the
-  // frontend doesn't offer it (frontend/src/utils/transformations.ts). Un-fixme once the backend
-  // fix (#230) and the frontend option it unblocks (#245) merge.
-  test.fixme(
-    'log difference is offered and computes an actual logarithm (blocked on #230, #245)',
-    async ({ page, request }) => {
-      const seriesId = await seededSeriesId(request, SEEDED.fredGdp);
-      await page.goto(`/series/${seriesId}`);
+  // Log difference is offered by the frontend (src/utils/transformations.ts) and computed by the
+  // backend. GDP's newest two non-missing points are Jan 2026 (31,722.514) and Apr 2026
+  // (32,101.6), so the Apr 2026 value is ln(32101.6 / 31722.514) = 0.01188, which the table shows
+  // as 0.01 (the ln itself is pinned by series_data_tests.rs; this checks the option and that the
+  // newest value is not percent-scaled).
+  test('log difference is offered and shows the newest change unscaled', async ({ page, request }) => {
+    const seriesId = await seededSeriesId(request, SEEDED.fredGdp);
+    await page.goto(`/series/${seriesId}`);
+    await expect(transformationSelect(page)).toBeVisible();
 
-      await applyTransformation(page, 'Log difference');
-      await expect(page.getByRole('columnheader', { name: 'Log difference', exact: true })).toBeVisible();
+    await applyTransformation(page, 'Log difference');
+    await expect(page.getByRole('columnheader', { name: 'Log Difference', exact: true })).toBeVisible();
+    await expect(transformationChip(page, 'Log Difference')).toBeVisible();
+    if (!DEPLOYED) {
+      // Not the 1.20 that quarter-over-quarter would give.
+      await expect
+        .poll(() => latestShown(page))
+        .toEqual(SWEPT_SOURCES[0].transformations['Log difference']);
     }
-  );
+  });
 });
