@@ -10,13 +10,7 @@
 # often as you like (scripts/deploy/deploy.sh runs it on every deploy).
 #
 #   Secret (namespace econ-graph)  Key                       Source
-#   econ-graph-secrets             jwt-secret                JWT_SECRET (generated)
-#                                  database-url              built from app-password
-#                                  google-client-id          GOOGLE_CLIENT_ID (optional)
-#                                  google-client-secret      GOOGLE_CLIENT_SECRET (optional)
-#                                  facebook-app-id           FACEBOOK_APP_ID (optional)
-#                                  facebook-app-secret       FACEBOOK_APP_SECRET (optional)
-#                                  facebook-access-token     FACEBOOK_ACCESS_TOKEN (optional)
+#   econ-graph-secrets             database-url              built from app-password
 #   econ-graph-postgres            postgres-password         POSTGRES_PASSWORD (generated)
 #                                  app-password              APP_DB_PASSWORD (generated)
 #   crawler-api-keys               fred-api-key, bls-api-key, bea-api-key, census-api-key
@@ -315,8 +309,7 @@ apply_secret() {
 
 # Validate every supplied value before anything is written, so a bad input
 # never leaves the Secrets half updated.
-for var in JWT_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET FACEBOOK_APP_ID \
-    FACEBOOK_APP_SECRET FACEBOOK_ACCESS_TOKEN POSTGRES_PASSWORD APP_DB_PASSWORD \
+for var in POSTGRES_PASSWORD APP_DB_PASSWORD \
     FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY KEYCLOAK_ADMIN_USERNAME \
     KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_GOOGLE_CLIENT_ID \
     KEYCLOAK_GOOGLE_CLIENT_SECRET GRAFANA_ADMIN_PASSWORD MONITORING_BASIC_AUTH; do
@@ -401,16 +394,15 @@ esac
 
 # --- econ-graph-secrets ----------------------------------------------------
 begin_secret econ-graph-secrets
-add_required JWT_SECRET jwt-secret
 put database-url \
     "postgresql://${APP_DB_USER}:$(urlencode "$APP_PASSWORD")@${DB_HOST}:${DB_PORT}/${DB_NAME}" \
     "built for user $APP_DB_USER"
-add_optional GOOGLE_CLIENT_ID google-client-id
-add_optional GOOGLE_CLIENT_SECRET google-client-secret
-add_optional FACEBOOK_APP_ID facebook-app-id
-add_optional FACEBOOK_APP_SECRET facebook-app-secret
-add_optional FACEBOOK_ACCESS_TOKEN facebook-access-token
 drop_obsolete database-password # written by the old k8s/manifests/secret.yaml
+# The in-house login (AUTH-6) is gone, so nothing reads these; sign-in is Keycloak's.
+for key in jwt-secret google-client-id google-client-secret facebook-app-id \
+    facebook-app-secret facebook-access-token; do
+    drop_obsolete "$key"
+done
 apply_secret
 
 # --- crawler-api-keys ------------------------------------------------------
