@@ -425,12 +425,61 @@ resource "kubernetes_ingress_v1" "econgraph" {
       }
     }
 
-    # Backend API rule
+    # Backend API rule. Only the paths k8s/manifests/ingress.yaml sends to the backend, so
+    # /metrics (and the backend's other endpoints) stay inside the cluster.
     rule {
       host = "api.${var.domain}"
       http {
         path {
-          path      = "/"
+          path      = "/graphql"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "econgraph-backend"
+              port {
+                number = 80
+              }
+            }
+          }
+        }
+        path {
+          path      = "/api"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "econgraph-backend"
+              port {
+                number = 80
+              }
+            }
+          }
+        }
+        path {
+          path      = "/auth"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "econgraph-backend"
+              port {
+                number = 80
+              }
+            }
+          }
+        }
+        path {
+          path      = "/playground"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "econgraph-backend"
+              port {
+                number = 80
+              }
+            }
+          }
+        }
+        path {
+          path      = "/health"
           path_type = "Prefix"
           backend {
             service {

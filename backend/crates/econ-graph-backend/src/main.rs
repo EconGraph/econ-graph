@@ -1078,6 +1078,13 @@ mod playground_tests {
         assert!(!landing_page(false).await.contains("/playground"));
     }
 
+    /// The landing page is public, so it must not name the internal `/metrics` endpoint.
+    #[tokio::test]
+    async fn landing_page_does_not_mention_metrics() {
+        assert!(!landing_page(true).await.contains("/metrics"));
+        assert!(!landing_page(false).await.contains("/metrics"));
+    }
+
     /// The playground is served only when explicitly turned on.
     #[test]
     fn playground_is_off_unless_explicitly_enabled() {
