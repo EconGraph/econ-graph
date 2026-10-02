@@ -121,7 +121,6 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::str::FromStr;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -141,7 +140,7 @@ use crate::error::CrawlError;
 use crate::persist;
 use crate::policy::SourcePolicy;
 use crate::reference::{bls_series, BlsSeries};
-use crate::reference_file::{self, CodeList, ReferenceFile};
+use crate::reference_file::{self, labels_only, CodeList, ReferenceFile};
 use crate::source::SourceId;
 
 /// The real BLS Public Data API v2 root.
@@ -773,12 +772,12 @@ impl CodeFileSpec<'_> {
     /// This file as a [`CodeList`], parsed by [`parse_bls_code_file`] with its columns.
     fn code_list(&self) -> CodeList {
         let (code_col, label_col) = (self.code_col, self.label_col);
-        CodeList {
-            url: self.url.to_string(),
-            dataset: self.dataset,
-            dimension: self.dimension,
-            parse: Arc::new(move |body| parse_bls_code_file(body, code_col, label_col)),
-        }
+        CodeList::new(
+            self.url,
+            self.dataset,
+            self.dimension,
+            labels_only(move |body| parse_bls_code_file(body, code_col, label_col)),
+        )
     }
 }
 
@@ -1446,7 +1445,7 @@ impl SourceAdapter for BlsAdapter {
         Some(BATCH_KEY.to_string())
     }
 
-    fn code_lists(&self) -> Vec<CodeList> {
+    fn code_lists(&self, _keys: &ApiKeys) -> Vec<CodeList> {
         bls_code_lists()
     }
 
@@ -1461,7 +1460,7 @@ impl SourceAdapter for BlsAdapter {
     /// labels are current when discovery runs.
     async fn refresh_reference_data(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
         let mut errors = Vec::new();
-        for list in self.code_lists() {
+        for list in self.code_lists(&ctx.keys) {
             if let Err(e) = reference_file::refresh_code_list(ctx, SourceId::Bls, &list).await {
                 errors.push(format!("{}: {e}", list.url));
             }
@@ -2568,7 +2567,7 @@ mod tests {
     /// one cached `ETag`, and that refresh also reads ln.series for the curated rows.
     #[test]
     fn code_lists_leave_ln_series_to_the_series_file_refresh() {
-        let lists = BlsAdapter::default().code_lists();
+        let lists = BlsAdapter::default().code_lists(&ApiKeys::default());
         assert_eq!(lists.len(), CODE_FILES.len());
         let ln = BlsAdapter::default().series_file_url("LN");
         assert!(lists.iter().all(|l| l.url != ln), "{lists:?}");

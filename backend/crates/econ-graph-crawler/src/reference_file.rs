@@ -50,8 +50,22 @@ use crate::source::SourceId;
 /// the `ETag` is not stored and the next refresh downloads the file again.
 pub type Apply<'a> = Pin<Box<dyn Future<Output = Result<bool, CrawlError>> + Send + 'a>>;
 
-/// Parses one of a source's code-list files into `(code, label)` pairs.
-pub type ParseLabels = Arc<dyn Fn(&str) -> Result<Vec<(String, String)>, CrawlError> + Send + Sync>;
+/// Parses one of a source's code-list files into code entries (code and label, plus a unit or
+/// description where the source gives one).
+pub type ParseCodes = Arc<dyn Fn(&str) -> Result<Vec<Code>, CrawlError> + Send + Sync>;
+
+/// A [`ParseCodes`] from a parser of `(code, label)` pairs.
+pub fn labels_only<F>(parse: F) -> ParseCodes
+where
+    F: Fn(&str) -> Result<Vec<(String, String)>, CrawlError> + Send + Sync + 'static,
+{
+    Arc::new(move |body| {
+        Ok(parse(body)?
+            .into_iter()
+            .map(|(code, label)| Code::new(&code, &label))
+            .collect())
+    })
+}
 
 /// One reference file of a source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,14 +79,41 @@ pub struct ReferenceFile<'a> {
 /// A source's file of codes and labels for one dimension of one of its datasets.
 #[derive(Clone)]
 pub struct CodeList {
-    /// Where the source publishes it.
+    /// Where the source publishes it: the `reference_file_cache` key and the URL a seed records.
+    /// Never carries an API key.
     pub url: String,
+    /// The URL actually requested, when it differs from `url` because the source wants an API
+    /// key in it. `HttpFetcher` redacts the key from logs and errors.
+    pub request_url: Option<String>,
     /// Dataset code (as in `data/datasets/{source}.toml`).
     pub dataset: &'static str,
     /// Dimension name within the dataset.
     pub dimension: &'static str,
     /// Its parser, shared by the refresh and the seed recorder.
-    pub parse: ParseLabels,
+    pub parse: ParseCodes,
+}
+
+impl CodeList {
+    /// A list requested at its own `url`.
+    pub fn new(
+        url: impl Into<String>,
+        dataset: &'static str,
+        dimension: &'static str,
+        parse: ParseCodes,
+    ) -> Self {
+        Self {
+            url: url.into(),
+            request_url: None,
+            dataset,
+            dimension,
+            parse,
+        }
+    }
+
+    /// The URL to request.
+    pub fn request_url(&self) -> &str {
+        self.request_url.as_deref().unwrap_or(&self.url)
+    }
 }
 
 impl fmt::Debug for CodeList {
@@ -98,6 +139,20 @@ fn db_err(source: SourceId, url: &str) -> impl Fn(econ_graph_core::error::AppErr
 pub async fn refresh<'a, F>(
     ctx: &CrawlCtx,
     file: &ReferenceFile<'_>,
+    apply: F,
+) -> Result<bool, CrawlError>
+where
+    F: FnMut(String) -> Apply<'a>,
+{
+    refresh_at(ctx, file, file.url, apply).await
+}
+
+/// [`refresh`], requesting `request_url` instead of `file.url`, for a source that wants an API
+/// key in the URL: `file.url` (the cache key) stays free of it.
+pub async fn refresh_at<'a, F>(
+    ctx: &CrawlCtx,
+    file: &ReferenceFile<'_>,
+    request_url: &str,
     mut apply: F,
 ) -> Result<bool, CrawlError>
 where
@@ -109,7 +164,7 @@ where
         .map_err(&db_err)?;
     let ConditionalText::Modified { body, etag } = ctx
         .http
-        .get_text_conditional(file.source, file.url, etag.as_deref())
+        .get_text_conditional(file.source, request_url, etag.as_deref())
         .await?
     else {
         return Ok(false);
@@ -123,8 +178,8 @@ where
     Ok(true)
 }
 
-/// [`refresh`] for one code list: a changed file's labels are merged into its dataset's
-/// dimension ([`persist::merge_dataset_dimension_codes`]).
+/// [`refresh`] for one code list: a changed file's codes are merged into its dataset's
+/// dimension ([`persist::merge_dataset_dimension_code_entries`]).
 pub async fn refresh_code_list(
     ctx: &CrawlCtx,
     source: SourceId,
@@ -134,17 +189,17 @@ pub async fn refresh_code_list(
         source,
         url: &list.url,
     };
-    refresh(ctx, &file, |body| {
+    refresh_at(ctx, &file, list.request_url(), |body| {
         let parse = Arc::clone(&list.parse);
         let db_err = db_err(source, &list.url);
         Box::pin(async move {
-            let labels = non_empty(&list.url, parse(&body)?)?;
-            persist::merge_dataset_dimension_codes(
+            let codes = non_empty(&list.url, parse(&body)?)?;
+            persist::merge_dataset_dimension_code_entries(
                 &ctx.pool,
                 source,
                 list.dataset,
                 list.dimension,
-                &labels,
+                &codes,
             )
             .await
             .map_err(db_err)
@@ -153,16 +208,13 @@ pub async fn refresh_code_list(
     .await
 }
 
-/// `labels`, or a `Parse` error if a file parsed to none: an empty code list is a broken
+/// `codes`, or a `Parse` error if a file parsed to none: an empty code list is a broken
 /// download (a header-only or truncated file), never a source that has no codes.
-fn non_empty(
-    url: &str,
-    labels: Vec<(String, String)>,
-) -> Result<Vec<(String, String)>, CrawlError> {
-    if labels.is_empty() {
+fn non_empty(url: &str, codes: Vec<Code>) -> Result<Vec<Code>, CrawlError> {
+    if codes.is_empty() {
         return Err(CrawlError::Parse(format!("{url}: no codes")));
     }
-    Ok(labels)
+    Ok(codes)
 }
 
 /// [`refresh_code_list`] for each of `lists`, all attempted even when one fails; the error names
@@ -222,18 +274,16 @@ pub async fn download_seed_entries(
                     list.dataset, list.dimension
                 ))
             })?;
-        let ConditionalText::Modified { body, etag } =
-            http.get_text_conditional(source, &list.url, None).await?
+        let ConditionalText::Modified { body, etag } = http
+            .get_text_conditional(source, list.request_url(), None)
+            .await?
         else {
             return Err(CrawlError::Transient(format!(
                 "{}: 304 to an unconditional request",
                 list.url
             )));
         };
-        let mut codes: Vec<Code> = non_empty(&list.url, (list.parse)(&body)?)?
-            .into_iter()
-            .map(|(code, label)| Code::new(&code, &label))
-            .collect();
+        let mut codes = non_empty(&list.url, (list.parse)(&body)?)?;
         codes.sort_by(|a, b| a.code.cmp(&b.code));
         codes.dedup_by(|a, b| a.code == b.code);
         let mut dimension = DatasetComponent::from(dimension);
@@ -325,7 +375,7 @@ pub fn seed_migration_sql(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapter::SourceAdapter as _;
+    use crate::adapter::{ApiKeys, SourceAdapter as _};
     use crate::persist::stable_id_tests::{database_url, FreshDb};
     use crate::sources::census::{CensusAdapter, STATES_URL};
     use crate::testkit::{test_ctx, MockSource, Reply, Route};
@@ -434,18 +484,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let at = "2026-10-02T03:00:00Z".parse().unwrap();
-        let out =
-            crate::cli::record_reference_seeds(&adapter, &test_ctx().http, &catalog, &dir, at)
-                .await
-                .unwrap();
+        let out = crate::cli::record_reference_seeds(
+            &adapter,
+            &ApiKeys::default(),
+            &test_ctx().http,
+            &catalog,
+            &dir,
+            at,
+        )
+        .await
+        .unwrap();
         assert!(out.contains("bds.state: 51 codes"), "{out}");
         // Recording again replaces the earlier migration rather than adding a second one,
         // whose seed would never load behind the first.
         let later = "2026-10-02T04:00:00Z".parse().unwrap();
-        let out =
-            crate::cli::record_reference_seeds(&adapter, &test_ctx().http, &catalog, &dir, later)
-                .await
-                .unwrap();
+        let out = crate::cli::record_reference_seeds(
+            &adapter,
+            &ApiKeys::default(),
+            &test_ctx().http,
+            &catalog,
+            &dir,
+            later,
+        )
+        .await
+        .unwrap();
         assert!(out.contains("replaced"), "{out}");
         let dirs: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
@@ -502,7 +564,7 @@ mod tests {
             .await;
         let mut ctx = test_ctx();
         ctx.pool = db.pool.clone();
-        let list = &adapter.code_lists()[0];
+        let list = &adapter.code_lists(&ApiKeys::default())[0];
         assert!(!refresh_code_list(&ctx, SourceId::Census, list)
             .await
             .unwrap());
@@ -676,12 +738,12 @@ mod tests {
             Reply::text("code\tlabel\n").header("ETag", "\"e\""),
         )
         .await;
-        let list = CodeList {
-            url: mock.url(URL_PATH),
-            dataset: "bds",
-            dimension: "state",
-            parse: Arc::new(|_| Ok(Vec::new())),
-        };
+        let list = CodeList::new(
+            mock.url(URL_PATH),
+            "bds",
+            "state",
+            Arc::new(|_| Ok(Vec::new())),
+        );
         let mut ctx = test_ctx();
         ctx.pool = db.pool.clone();
         let e = refresh_code_list(&ctx, SourceId::Census, &list)
@@ -703,6 +765,89 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(e.kind(), "parse", "{e}");
+        db.drop().await;
+    }
+
+    /// A keyed list is requested at its `request_url` but cached and seeded under its keyless
+    /// `url`, with descriptions and units kept; the key never reaches the database or the seed.
+    #[tokio::test]
+    async fn keyed_lists_cache_and_seed_under_the_keyless_url() {
+        let Some(admin_url) = database_url() else {
+            return;
+        };
+        let db = FreshDb::create(&admin_url, "econgraph_reference_keyed").await;
+        let mock = MockSource::start().await;
+        let adapter = census(&mock);
+        let catalog = catalog(&adapter);
+        persist::sync_datasets(&db.pool, &catalog).await.unwrap();
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(URL_PATH))
+            .and(wiremock::matchers::query_param("UserID", "s3cret"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_string("01|Alabama|first state")
+                    .insert_header("ETag", "\"k1\""),
+            )
+            .mount(mock.server())
+            .await;
+        let key = "https://example.test/state-codes";
+        let parse: ParseCodes = Arc::new(|body: &str| {
+            Ok(body
+                .lines()
+                .map(|l| {
+                    let f: Vec<&str> = l.split('|').collect();
+                    let mut c = Code::new(f[0], f[1]);
+                    c.description = Some(f[2].to_string());
+                    c
+                })
+                .collect())
+        });
+        let list = CodeList {
+            request_url: Some(format!("{}?UserID=s3cret", mock.url(URL_PATH))),
+            ..CodeList::new(key, "bds", "state", parse)
+        };
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        assert!(refresh_code_list(&ctx, SourceId::Census, &list)
+            .await
+            .unwrap());
+        assert_eq!(
+            persist::reference_file_etag(&db.pool, SourceId::Census, key)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("\"k1\"")
+        );
+        let codes = {
+            use diesel::prelude::*;
+            use diesel_async::RunQueryDsl;
+            use econ_graph_core::schema::datasets::dsl;
+            let mut conn = db.pool.get().await.unwrap();
+            let dims: econ_graph_core::models::DatasetComponents = dsl::datasets
+                .filter(dsl::code.eq("bds"))
+                .select(dsl::dimensions)
+                .first(&mut conn)
+                .await
+                .unwrap();
+            dims.0
+                .into_iter()
+                .find(|d| d.name == "state")
+                .unwrap()
+                .codes
+                .unwrap()
+        };
+        assert_eq!(codes[0].description.as_deref(), Some("first state"));
+
+        let entries = download_seed_entries(&ctx.http, SourceId::Census, &[list], &catalog)
+            .await
+            .unwrap();
+        let at = "2026-10-02T03:00:00Z".parse().unwrap();
+        let (up, down) = seed_migration_sql(SourceId::Census, at, &entries).unwrap();
+        assert!(
+            !up.contains("s3cret") && !down.contains("s3cret"),
+            "{up}{down}"
+        );
+        assert!(up.contains(key) && up.contains("first state"), "{up}");
         db.drop().await;
     }
 }
