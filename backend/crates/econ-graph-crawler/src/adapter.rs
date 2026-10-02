@@ -171,6 +171,21 @@ pub trait SourceAdapter: Send + Sync {
     /// Lists the series this source offers.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError>;
 
+    /// Refreshes this adapter's own reference data — a source's published code→label lists that
+    /// back a dataset's dimension `codes`, as opposed to the series `discover` returns — so
+    /// static reference files in `data/` don't go stale as the source adds or renames codes.
+    /// Called once per scheduled catalog discovery, before [`discover`](Self::discover).
+    ///
+    /// The default is a no-op, for adapters with no such reference data of their own (most
+    /// sources either have none or use a shared [`crate::dataset::CODELISTS`] entry instead).
+    /// An implementation should fetch conditionally (see [`HttpFetcher::get_text_conditional`])
+    /// and cache its validator through `ctx.pool`, so a source that hasn't changed its file costs
+    /// one small request, not a re-parse. Failure here does not fail the discovery job: the
+    /// worker logs it and carries on with whatever labels are already stored.
+    async fn refresh_reference_data(&self, _ctx: &CrawlCtx) -> Result<(), CrawlError> {
+        Ok(())
+    }
+
     /// Whether a successful [`discover`](Self::discover) lists every series this adapter crawls,
     /// so a series it no longer lists has been retired by the source. The worker then marks such
     /// series inactive (see [`persist::retire_unlisted`](crate::persist::retire_unlisted)); they
