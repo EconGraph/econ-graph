@@ -31,8 +31,10 @@ use diesel::sql_types::{
 };
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use econ_graph_core::error::{AppError, AppResult};
-use econ_graph_core::models::{DataSource, NewCrawlAttempt, NewDataSource};
-use econ_graph_core::schema::{data_sources, series_metadata};
+use econ_graph_core::models::{
+    Code, DataSource, DatasetComponents, NewCrawlAttempt, NewDataSource,
+};
+use econ_graph_core::schema::{data_sources, datasets, series_metadata};
 use econ_graph_core::DatabasePool;
 use uuid::Uuid;
 
@@ -196,14 +198,17 @@ async fn data_source_id_conn(conn: &mut AsyncPgConnection, source: SourceId) -> 
 /// and are only rewritten (bumping `updated_at` through its trigger) when one of them changed.
 /// Returns the number of definitions synced.
 pub async fn sync_datasets(pool: &DatabasePool, catalog: &DatasetCatalog) -> AppResult<usize> {
-    use econ_graph_core::models::DatasetComponents;
     let defs: Vec<_> = catalog.iter().collect();
     let mut conn = pool.get().await.map_err(conn_err)?;
     conn.transaction::<usize, AppError, _>(async move |conn| {
         for (source, def) in &defs {
             let source_id = data_source_id_conn(conn, *source).await?;
-            let row = def.to_new_dataset(source_id);
+            let mut row = def.to_new_dataset(source_id);
             row.validate_components()?;
+            // Preserve any codes a previous `refresh_reference_data` run merged in for a code
+            // the file doesn't list (e.g. a BLS code the toml hasn't been updated for yet): the
+            // file's own codes still win where both define the same one.
+            merge_existing_codes(conn, source_id, &row.code, &mut row.dimensions).await?;
             diesel::sql_query(
                 "INSERT INTO datasets (source_id, code, name, description, dimensions, measures, \
                      attributes, default_measure) \
@@ -229,6 +234,148 @@ pub async fn sync_datasets(pool: &DatabasePool, catalog: &DatasetCatalog) -> App
             .await?;
         }
         Ok(defs.len())
+    })
+    .await
+}
+
+/// Adds any code in the stored `(source_id, code)` dataset's dimensions that `dimensions`
+/// doesn't already have for that dimension name, so a dynamically fetched code
+/// ([`merge_dataset_dimension_codes`]) survives the next [`sync_datasets`] run even if the
+/// checked-in file hasn't been updated for it. A code `dimensions` already defines is left as
+/// the file wrote it. No-op if the dataset has no existing row (first sync).
+async fn merge_existing_codes(
+    conn: &mut AsyncPgConnection,
+    source_id: Uuid,
+    code: &str,
+    dimensions: &mut DatasetComponents,
+) -> AppResult<()> {
+    use datasets::dsl;
+    let existing: Option<DatasetComponents> = dsl::datasets
+        .filter(dsl::source_id.eq(source_id))
+        .filter(dsl::code.eq(code))
+        .select(dsl::dimensions)
+        .first(conn)
+        .await
+        .optional()?;
+    let Some(existing) = existing else {
+        return Ok(());
+    };
+    for dim in &mut dimensions.0 {
+        let Some(existing_codes) = existing
+            .0
+            .iter()
+            .find(|d| d.name == dim.name)
+            .and_then(|d| d.codes.as_ref())
+        else {
+            continue;
+        };
+        let codes = dim.codes.get_or_insert_with(Vec::new);
+        for existing_code in existing_codes {
+            if !codes.iter().any(|c| c.code == existing_code.code) {
+                codes.push(existing_code.clone());
+            }
+        }
+        codes.sort_unstable_by(|a, b| a.code.cmp(&b.code));
+    }
+    Ok(())
+}
+
+/// Cached `ETag` for `url`, one of `source`'s own reference files (e.g. a BLS code list), from
+/// the last successful [`set_reference_file_etag`]. `None` if never fetched or the source sent
+/// no `ETag`.
+pub async fn reference_file_etag(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+) -> AppResult<Option<String>> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    #[derive(QueryableByName)]
+    struct Row {
+        #[diesel(sql_type = Nullable<Text>)]
+        etag: Option<String>,
+    }
+    let row: Option<Row> = diesel::sql_query(
+        "SELECT etag FROM reference_file_cache WHERE source_id = $1 AND url = $2",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .get_result(&mut conn)
+    .await
+    .optional()?;
+    Ok(row.and_then(|r| r.etag))
+}
+
+/// Records `etag` (the response header from the fetch that found `url` changed, or `None` if the
+/// source sent none) as the validator to send next time.
+pub async fn set_reference_file_etag(
+    pool: &DatabasePool,
+    source: SourceId,
+    url: &str,
+    etag: Option<&str>,
+) -> AppResult<()> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    diesel::sql_query(
+        "INSERT INTO reference_file_cache (source_id, url, etag, fetched_at) \
+             VALUES ($1, $2, $3, NOW()) \
+         ON CONFLICT (source_id, url) DO UPDATE SET \
+             etag = EXCLUDED.etag, fetched_at = EXCLUDED.fetched_at",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(url)
+    .bind::<Nullable<Text>, _>(etag)
+    .execute(&mut conn)
+    .await?;
+    Ok(())
+}
+
+/// Merges `labels` (code -> label) into `source`'s dataset `dataset_code`, dimension
+/// `dimension_name`: adds a code that isn't there yet, updates the label of one that is, and
+/// leaves any other existing code alone. No-op if the dataset or dimension isn't declared (the
+/// catalog hasn't synced yet, or the caller mis-named one).
+/// Merges `labels` into `dataset_code`'s `dimension_name` codes. Returns whether there was a
+/// matching dataset and dimension to merge into: `false` means nothing was written (the caller
+/// should not treat the fetch that produced `labels` as consumed, e.g. by caching its `ETag`,
+/// since the next fetch still has the same merging to do).
+pub async fn merge_dataset_dimension_codes(
+    pool: &DatabasePool,
+    source: SourceId,
+    dataset_code: &str,
+    dimension_name: &str,
+    labels: &[(String, String)],
+) -> AppResult<bool> {
+    use datasets::dsl;
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source_id = data_source_id_conn(&mut conn, source).await?;
+    conn.transaction::<bool, AppError, _>(async move |conn| {
+        let row: Option<(Uuid, DatasetComponents)> = dsl::datasets
+            .filter(dsl::source_id.eq(source_id))
+            .filter(dsl::code.eq(dataset_code))
+            .select((dsl::id, dsl::dimensions))
+            .first(conn)
+            .await
+            .optional()?;
+        let Some((id, mut dims)) = row else {
+            return Ok(false);
+        };
+        let Some(dim) = dims.0.iter_mut().find(|d| d.name == dimension_name) else {
+            return Ok(false);
+        };
+        let mut codes = dim.codes.take().unwrap_or_default();
+        for (code, label) in labels {
+            match codes.iter_mut().find(|c| &c.code == code) {
+                Some(existing) => existing.label = label.clone(),
+                None => codes.push(Code::new(code, label)),
+            }
+        }
+        codes.sort_unstable_by(|a, b| a.code.cmp(&b.code));
+        dim.codes = Some(codes);
+        diesel::update(dsl::datasets.filter(dsl::id.eq(id)))
+            .set(dsl::dimensions.eq(dims))
+            .execute(conn)
+            .await?;
+        Ok(true)
     })
     .await
 }
@@ -826,4 +973,6 @@ mod tests {
 }
 
 #[cfg(test)]
-mod stable_id_tests;
+mod reference_data_tests;
+#[cfg(test)]
+pub(crate) mod stable_id_tests;
