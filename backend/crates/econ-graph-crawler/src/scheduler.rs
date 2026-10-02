@@ -380,7 +380,7 @@ impl RefreshScheduler {
         let codes: Vec<String> = sources.iter().map(|s| s.as_str().to_string()).collect();
         // Only read when Census is scheduled; the pattern is unused otherwise.
         let census_ids = if sources.contains(&SourceId::Census) {
-            crate::sources::census::fetchable_id_regex()?
+            crate::sources::census::fetchable_id_regex()
         } else {
             String::new()
         };
@@ -836,7 +836,8 @@ mod tests {
         let ids = [
             "bds/national..T15CX",
             "bds/state.06.T15CX",
-            "bds/state.03.T15CX",
+            "bds/state.72.T15CX",
+            "bds/state.57.T15CX",
             "bds/state..T15CX",
             "bds/county.001.T15CX",
             "bds/national.06.T15CX",
