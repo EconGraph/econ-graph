@@ -1077,6 +1077,31 @@ mod tests {
     }
 
     #[test]
+    fn test_series_frequency_type_round_trips_through_normalizer() {
+        // REQUIREMENT: every SeriesFrequencyType variant must still be recognized by
+        // SeriesFrequency::from after going through the `format!("{:?}", f)` conversion used
+        // here and in search_series, so a future rename of a variant can't silently break
+        // frequency filtering by falling through to Irregular.
+        use econ_graph_core::models::economic_series::SeriesFrequency;
+
+        for (variant, expected) in [
+            (SeriesFrequencyType::Daily, SeriesFrequency::Daily),
+            (SeriesFrequencyType::Weekly, SeriesFrequency::Weekly),
+            (SeriesFrequencyType::Monthly, SeriesFrequency::Monthly),
+            (SeriesFrequencyType::Quarterly, SeriesFrequency::Quarterly),
+            (SeriesFrequencyType::SemiAnnual, SeriesFrequency::SemiAnnual),
+            (SeriesFrequencyType::Annual, SeriesFrequency::Annual),
+        ] {
+            let debug_name = format!("{:?}", variant);
+            assert_eq!(
+                SeriesFrequency::from(debug_name.clone()),
+                expected,
+                "{debug_name:?} should normalize to {expected:?}"
+            );
+        }
+    }
+
+    #[test]
     fn test_default_pagination() {
         // REQUIREMENT: GraphQL API should provide reasonable pagination defaults
         // PURPOSE: Verify that pagination defaults protect against excessive data requests

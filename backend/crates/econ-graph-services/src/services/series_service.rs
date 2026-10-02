@@ -1,5 +1,7 @@
 use chrono::Datelike;
+use diesel::dsl::sql;
 use diesel::prelude::*;
+use diesel::sql_types::{Array, Bool, Text};
 use diesel::SelectableHelper;
 use diesel_async::RunQueryDsl;
 use serde_json::Value;
@@ -8,8 +10,8 @@ use econ_graph_core::{
     database::DatabasePool,
     error::{AppError, AppResult},
     models::{
-        DataPoint, DataQueryParams, DataTransformation, EconomicSeries, SeriesSearchParams,
-        TransformedDataPoint,
+        economic_series::SeriesFrequency, DataPoint, DataQueryParams, DataTransformation,
+        EconomicSeries, SeriesSearchParams, TransformedDataPoint,
     },
     schema::{data_points, economic_series},
 };
@@ -90,7 +92,15 @@ pub async fn list_series(
     }
 
     if let Some(frequency) = params.frequency {
-        query = query.filter(economic_series::frequency.eq(frequency));
+        // Sources store their own frequency text verbatim (FRED: "Weekly, Ending Friday", BLS:
+        // "Semi-Annual", ...), so an exact match misses most rows; match the same prefixes
+        // `SeriesFrequency` classifies raw text by instead.
+        let patterns = SeriesFrequency::from(frequency).sql_like_patterns();
+        query = query.filter(
+            sql::<Bool>("frequency ILIKE ANY(")
+                .bind::<Array<Text>, _>(patterns)
+                .sql(")"),
+        );
     }
 
     if let Some(search_query) = params.query {
