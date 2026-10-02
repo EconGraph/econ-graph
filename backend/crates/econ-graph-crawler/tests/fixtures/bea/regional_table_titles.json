@@ -1,0 +1,19 @@
+{
+ "BEAAPI": {
+  "Request": {
+   "RequestParam": [
+    {"ParameterName": "USERID", "ParameterValue": "REDACTED"},
+    {"ParameterName": "METHOD", "ParameterValue": "GETPARAMETERVALUES"},
+    {"ParameterName": "DATASETNAME", "ParameterValue": "REGIONAL"},
+    {"ParameterName": "PARAMETERNAME", "ParameterValue": "TABLENAME"},
+    {"ParameterName": "RESULTFORMAT", "ParameterValue": "JSON"}
+   ]
+  },
+  "Results": {
+   "ParamValue": [
+    {"Key": "SAGDP2N", "Desc": "SAGDP2N Gross domestic product (GDP) by state"},
+    {"Key": "SAINC1", "Desc": "SAINC1 Personal income summary: personal income, population, per capita personal income"}
+   ]
+  }
+ }
+}
