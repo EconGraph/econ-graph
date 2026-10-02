@@ -207,7 +207,7 @@ describe('SeriesChart', () => {
       'Year-over-Year',
       'Quarter-over-Quarter',
       'Month-over-Month',
-      'Change since first observation',
+      'Change since first available value',
       'Log difference',
     ]);
     await userEvent.click(screen.getByRole('option', { name: 'Log difference' }));

@@ -72,6 +72,7 @@ pub mod persist;
 pub mod policy;
 pub mod rate_limit;
 pub mod reference;
+pub mod reference_file;
 pub mod scheduler;
 pub mod series_id;
 pub mod source;

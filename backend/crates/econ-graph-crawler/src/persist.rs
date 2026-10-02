@@ -255,6 +255,8 @@ async fn merge_existing_codes(
         .filter(dsl::source_id.eq(source_id))
         .filter(dsl::code.eq(code))
         .select(dsl::dimensions)
+        // Locked against a concurrent `merge_dataset_dimension_codes` until this sync commits.
+        .for_update()
         .first(conn)
         .await
         .optional()?;
@@ -518,18 +520,30 @@ pub(crate) async fn set_url_validators_conn(
 
 /// Merges `labels` (code -> label) into `source`'s dataset `dataset_code`, dimension
 /// `dimension_name`: adds a code that isn't there yet, updates the label of one that is, and
-/// leaves any other existing code alone. No-op if the dataset or dimension isn't declared (the
-/// catalog hasn't synced yet, or the caller mis-named one).
-/// Merges `labels` into `dataset_code`'s `dimension_name` codes. Returns whether there was a
-/// matching dataset and dimension to merge into: `false` means nothing was written (the caller
-/// should not treat the fetch that produced `labels` as consumed, e.g. by caching its `ETag`,
-/// since the next fetch still has the same merging to do).
+/// leaves any other existing code alone. Returns whether anything was merged: `false` (nothing
+/// written) when the dataset or dimension isn't declared (the catalog hasn't synced yet, or the
+/// caller mis-named one) or the dimension uses a shared `codelist`. The caller should then not
+/// treat the fetch that produced `labels` as consumed, e.g. by caching its `ETag`.
 pub async fn merge_dataset_dimension_codes(
     pool: &DatabasePool,
     source: SourceId,
     dataset_code: &str,
     dimension_name: &str,
     labels: &[(String, String)],
+) -> AppResult<bool> {
+    let entries: Vec<Code> = labels.iter().map(|(c, l)| Code::new(c, l)).collect();
+    merge_dataset_dimension_code_entries(pool, source, dataset_code, dimension_name, &entries).await
+}
+
+/// [`merge_dataset_dimension_codes`] for full code entries: a stored code gets the entry's
+/// label, and its `unit` and `description` where the entry has one (a missing one keeps what is
+/// stored).
+pub async fn merge_dataset_dimension_code_entries(
+    pool: &DatabasePool,
+    source: SourceId,
+    dataset_code: &str,
+    dimension_name: &str,
+    entries: &[Code],
 ) -> AppResult<bool> {
     use datasets::dsl;
     let mut conn = pool.get().await.map_err(conn_err)?;
@@ -539,6 +553,10 @@ pub async fn merge_dataset_dimension_codes(
             .filter(dsl::source_id.eq(source_id))
             .filter(dsl::code.eq(dataset_code))
             .select((dsl::id, dsl::dimensions))
+            // Locked: two refreshes merging different dimensions of one dataset (the worker's
+            // startup refresh and a discovery job) would otherwise each write back the whole
+            // `dimensions` array and drop the other's codes.
+            .for_update()
             .first(conn)
             .await
             .optional()?;
@@ -548,11 +566,24 @@ pub async fn merge_dataset_dimension_codes(
         let Some(dim) = dims.0.iter_mut().find(|d| d.name == dimension_name) else {
             return Ok(false);
         };
+        // A dimension labelled by a shared code list takes no inline codes (it may not have
+        // both); like `seed_reference_codes`, store nothing, so the ETag isn't cached either.
+        if dim.codelist.is_some() {
+            return Ok(false);
+        }
         let mut codes = dim.codes.take().unwrap_or_default();
-        for (code, label) in labels {
-            match codes.iter_mut().find(|c| &c.code == code) {
-                Some(existing) => existing.label = label.clone(),
-                None => codes.push(Code::new(code, label)),
+        for entry in entries {
+            match codes.iter_mut().find(|c| c.code == entry.code) {
+                Some(existing) => {
+                    existing.label = entry.label.clone();
+                    if entry.unit.is_some() {
+                        existing.unit = entry.unit.clone();
+                    }
+                    if entry.description.is_some() {
+                        existing.description = entry.description.clone();
+                    }
+                }
+                None => codes.push(entry.clone()),
             }
         }
         codes.sort_unstable_by(|a, b| a.code.cmp(&b.code));
