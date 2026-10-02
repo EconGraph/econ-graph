@@ -111,13 +111,17 @@ async fn merge_adds_new_codes_and_updates_existing_without_dropping_others() {
         Some(vec![Code::new("NY.GDP.PCAP.CD", "GDP per capita")])
     );
 
-    // Unknown dataset or dimension: no-op, not an error.
-    merge_dataset_dimension_codes(&db.pool, SourceId::WorldBank, "nope", "area", &[])
-        .await
-        .unwrap();
-    merge_dataset_dimension_codes(&db.pool, SourceId::WorldBank, "wdi", "nope", &[])
-        .await
-        .unwrap();
+    // Unknown dataset or dimension: no-op, not an error, and reported as such.
+    assert!(
+        !merge_dataset_dimension_codes(&db.pool, SourceId::WorldBank, "nope", "area", &[])
+            .await
+            .unwrap()
+    );
+    assert!(
+        !merge_dataset_dimension_codes(&db.pool, SourceId::WorldBank, "wdi", "nope", &[])
+            .await
+            .unwrap()
+    );
 
     db.drop().await;
 }
