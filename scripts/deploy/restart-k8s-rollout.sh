@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Restart Kubernetes rollout to deploy v3.7.4 with monitoring stack (Grafana + Loki + Prometheus)
+# Restart Kubernetes rollout to deploy the current release with monitoring stack (Grafana + Loki + Prometheus)
 # Run this script when Docker and Kubernetes cluster are available
 #
 # For MicroK8s setup and troubleshooting, see: docs/deployment/MICROK8S_DEPLOYMENT.md
@@ -8,12 +8,17 @@
 
 set -e
 
-echo "🚀 Restarting EconGraph Kubernetes rollout for v3.7.4 (with monitoring stack)..."
-echo ""
-
 # Get the project root directory
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_ROOT"
+
+# Same source as scripts/deploy/build-images.sh: backend/Cargo.toml is the one
+# place the version lives, so this never drifts from what build-images.sh
+# actually tags (and what the k8s manifests hard-code; see that script).
+VERSION="v$(grep -m1 '^version' backend/Cargo.toml | sed -E 's/version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')"
+
+echo "🚀 Restarting EconGraph Kubernetes rollout for ${VERSION} (with monitoring stack)..."
+echo ""
 
 # Run linter checks before deployment
 echo "🔍 Running linter checks before deployment..."
@@ -97,22 +102,22 @@ if ! kubectl config use-context microk8s; then
 fi
 
 # Rebuild Docker images with new version tag
-echo "🏗️  Building Docker images for v3.7.4..."
+echo "🏗️  Building Docker images for ${VERSION}..."
 ./scripts/deploy/build-images.sh
 
 # Tag images with new version
-echo "🏷️  Tagging images with v3.7.4..."
-docker tag econ-graph-backend:latest econ-graph-backend:v3.7.4
-docker tag econ-graph-crawler-worker:latest econ-graph-crawler-worker:v3.7.4
-docker tag econ-graph-frontend:latest econ-graph-frontend:v3.7.4
+echo "🏷️  Tagging images with ${VERSION}..."
+docker tag econ-graph-backend:latest "econ-graph-backend:${VERSION}"
+docker tag econ-graph-crawler-worker:latest "econ-graph-crawler-worker:${VERSION}"
+docker tag econ-graph-frontend:latest "econ-graph-frontend:${VERSION}"
 docker tag econ-graph-chart-api:latest econ-graph-chart-api:v1.0.0
 docker tag econ-graph-admin-frontend:latest econ-graph-admin-frontend:v1.0.0
 
 # Load images into MicroK8s
 echo "📦 Loading images into MicroK8s..."
-docker save econ-graph-backend:v3.7.4 | microk8s ctr images import - || true
-docker save econ-graph-crawler-worker:v3.7.4 | microk8s ctr images import - || true
-docker save econ-graph-frontend:v3.7.4 | microk8s ctr images import - || true
+docker save "econ-graph-backend:${VERSION}" | microk8s ctr images import - || true
+docker save "econ-graph-crawler-worker:${VERSION}" | microk8s ctr images import - || true
+docker save "econ-graph-frontend:${VERSION}" | microk8s ctr images import - || true
 docker save econ-graph-chart-api:v1.0.0 | microk8s ctr images import - || true
 docker save econ-graph-admin-frontend:v1.0.0 | microk8s ctr images import - || true
 
@@ -390,7 +395,7 @@ echo "    Playground: off (set ENABLE_GRAPHQL_PLAYGROUND=true on the backend to 
 echo "    Health:   http://localhost:${BACKEND_NODEPORT}/health"
 echo "    Grafana:  http://localhost:${GRAFANA_NODEPORT} (user admin, password in Secret grafana-admin)"
 echo ""
-echo "🎯 Version deployed: v3.7.4"
+echo "🎯 Version deployed: ${VERSION}"
 echo "   ✅ Integration tests fixed: All auth tests passing (11/11)"
 echo "   ✅ Collaboration tests fixed: 6/7 tests passing"
 echo "   ✅ GitHub Actions release/deploy workflow disabled"

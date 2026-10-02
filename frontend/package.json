@@ -1,7 +1,7 @@
 {
   "_comment": "Copyright (c) 2024 EconGraph. All rights reserved. Licensed under the Microsoft Reference Source License (MS-RSL). See LICENSE file for complete terms and conditions.",
   "name": "econ-graph-frontend",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
   "dependencies": {
