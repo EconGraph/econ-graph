@@ -530,8 +530,9 @@ impl BeaAdapter {
     /// [`table_titles`](Self::table_titles) reads. The only method that touches the database or
     /// fetches titles over the network; called by
     /// [`refresh_reference_data`](SourceAdapter::refresh_reference_data), so its failure (BEA or
-    /// the database) never fails a `discover` or `fetch_*` already in flight, only leaves the
-    /// cache as it was (empty, or last refresh's titles).
+    /// the database) never fails a `discover` or `fetch_*` already in flight — it still reloads
+    /// the cache from the database either way (below), so only a database that truly has nothing
+    /// yet leaves the cache as it was.
     ///
     /// Uses [`refresh_at`] rather than a plain [`CodeList`](crate::reference_file::CodeList)
     /// (whose `url` doubles as the `reference_file_cache` key): BEA's request URL carries the
@@ -604,9 +605,10 @@ impl BeaAdapter {
         Ok(())
     }
 
-    /// `table_name` -> BEA's title, from the last successful
-    /// [`refresh_table_titles`](Self::refresh_table_titles) in this adapter's lifetime. Empty
-    /// before then.
+    /// `table_name` -> BEA's title, from the last call to
+    /// [`refresh_table_titles`](Self::refresh_table_titles) in this adapter's lifetime, whether
+    /// or not it succeeded (that function reloads the cache from the database either way). Empty
+    /// before the first call.
     async fn table_titles(&self, dataset: BeaDataset) -> HashMap<String, String> {
         self.titles
             .read()
