@@ -88,52 +88,6 @@ spec:
             port:
               number: 3001
 
----
-# Monitoring ingress with Cloudflare DNS-01 challenge
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: monitoring-ingress-cloudflare
-  namespace: econ-graph
-  annotations:
-    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-    nginx.ingress.kubernetes.io/proxy-connect-timeout: "5"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "5"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "5"
-    
-    # SSL/TLS configuration with Cloudflare DNS-01 challenge
-    cert-manager.io/cluster-issuer: "letsencrypt-prod-cloudflare"
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/ssl-protocols: "TLSv1.2 TLSv1.3"
-    
-    # Authentication (basic auth for additional security)
-    nginx.ingress.kubernetes.io/auth-type: "basic"
-    # The monitoring-auth Secret (key `auth`, one htpasswd line) is created out of
-    # band by scripts/deploy/create-secrets.sh from MONITORING_BASIC_AUTH.
-    nginx.ingress.kubernetes.io/auth-secret: "monitoring-auth"
-    nginx.ingress.kubernetes.io/auth-realm: "EconGraph Monitoring"
-    
-    # Cloudflare-specific optimizations
-    nginx.ingress.kubernetes.io/cloudflare-real-ip: "true"
-spec:
-  ingressClassName: nginx
-  
-  # TLS configuration for monitoring subdomain
-  tls:
-  - hosts:
-    - "grafana.econgraph.example.com"  # Replace with your actual domain
-    secretName: monitoring-tls
-  
-  rules:
-  # Grafana monitoring
-  - host: grafana.econgraph.example.com  # Replace with your actual domain
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: grafana-service
-            port:
-              number: 3000
+# Grafana is not exposed on this ingress; use `kubectl port-forward
+# service/grafana-service 3000:3000 -n econ-graph` for staff access.
+# OAuth-behind-Keycloak access is tracked in ECO-294 (train 2).

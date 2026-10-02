@@ -63,7 +63,6 @@ else
     echo "⚠️  ports.env not found, using default ports"
     BACKEND_NODEPORT=30080
     FRONTEND_NODEPORT=30000
-    GRAFANA_NODEPORT=30001
 fi
 
 # Check if MicroK8s is running
@@ -393,7 +392,7 @@ echo "    Backend:  http://localhost:${BACKEND_NODEPORT}"
 echo "    GraphQL:  http://localhost:${FRONTEND_NODEPORT}/graphql"
 echo "    Playground: off (set ENABLE_GRAPHQL_PLAYGROUND=true on the backend to serve /playground)"
 echo "    Health:   http://localhost:${BACKEND_NODEPORT}/health"
-echo "    Grafana:  http://localhost:${GRAFANA_NODEPORT} (user admin, password in Secret grafana-admin)"
+echo "    Grafana:  kubectl port-forward service/grafana-service 3000:3000 -n econ-graph (user admin, password in Secret grafana-admin)"
 echo ""
 echo "🎯 Version deployed: ${VERSION}"
 echo "   ✅ Integration tests fixed: All auth tests passing (11/11)"
@@ -417,7 +416,7 @@ echo "✅ Services are accessible via NodePort:"
 echo "  Frontend: http://localhost:${FRONTEND_NODEPORT}"
 echo "  Admin UI: http://admin.econ-graph.local/admin (add '127.0.0.1 admin.econ-graph.local' to /etc/hosts)"
 echo "  Backend:  http://localhost:${BACKEND_NODEPORT}"
-echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT}"
+echo "  Grafana:  kubectl port-forward service/grafana-service 3000:3000 -n econ-graph"
 echo "            (admin / password: kubectl -n econ-graph get secret grafana-admin -o jsonpath={.data.admin-password} | base64 -d)"
 echo ""
 echo "🔒 Internal Services (not exposed externally):"
@@ -466,11 +465,11 @@ else
     echo "  ⚠️  SSL Certificate: econ-graph-tls secret not found (cert-manager may still be provisioning)"
 fi
 
-# Test Grafana
-if curl -s -o /dev/null -w "%{http_code}" http://localhost:${GRAFANA_NODEPORT} | grep -q "302\|200"; then
-    echo "  ✅ Grafana: http://localhost:${GRAFANA_NODEPORT} - Accessible"
+# Test Grafana (ClusterIP only; no NodePort to curl directly)
+if kubectl get pods -n econ-graph -l app=grafana --no-headers 2>/dev/null | grep -q "Running"; then
+    echo "  ✅ Grafana: pod running (kubectl port-forward service/grafana-service 3000:3000 -n econ-graph)"
 else
-    echo "  ❌ Grafana: http://localhost:${GRAFANA_NODEPORT} - Not accessible"
+    echo "  ❌ Grafana: pod not running"
 fi
 
 # Test Frontend

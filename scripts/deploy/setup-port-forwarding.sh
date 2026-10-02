@@ -32,10 +32,10 @@ pkill -f "kubectl port-forward.*econ-graph-backend-service" || true
 
 # Start Grafana port forwarding
 echo "📊 Starting Grafana port forwarding..."
-kubectl port-forward -n econ-graph service/grafana-service 30001:3000 &
+kubectl port-forward -n econ-graph service/grafana-service 3000:3000 &
 GRAFANA_PID=$!
 echo "  ✅ Grafana port forwarding started (PID: $GRAFANA_PID)"
-echo "     URL: http://localhost:30001"
+echo "     URL: http://localhost:3000"
 echo "     Username: admin"
 echo "     Password: kubectl -n econ-graph get secret grafana-admin -o jsonpath={.data.admin-password} | base64 -d"
 
@@ -52,7 +52,7 @@ sleep 3
 # Test connectivity
 echo ""
 echo "🧪 Testing connectivity..."
-if curl -s -o /dev/null -w "%{http_code}" http://localhost:30001 | grep -q "302\|200"; then
+if curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 | grep -q "302\|200"; then
     echo "  ✅ Grafana is accessible"
 else
     echo "  ❌ Grafana is not accessible"
@@ -70,7 +70,7 @@ echo ""
 echo "📋 Service URLs:"
 echo "  Frontend: http://localhost/"
 echo "  Backend:  http://localhost:9876"
-echo "  Grafana:  http://localhost:30001 (user admin, password in Secret grafana-admin)"
+echo "  Grafana:  http://localhost:3000 (user admin, password in Secret grafana-admin)"
 echo ""
 echo "🛑 To stop port forwarding:"
 echo "  kill $GRAFANA_PID"

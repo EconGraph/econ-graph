@@ -100,7 +100,8 @@ This script will:
 - Frontend: https://www.econgraph.com
 - Backend: https://www.econgraph.com/api
 - Admin: https://www.econgraph.com/admin
-- Grafana: https://www.econgraph.com/grafana
+
+Grafana is not exposed on the public ingress; use port forwarding (below).
 
 **For detailed MicroK8s setup and troubleshooting, see**: [MicroK8s Deployment Guide](MICROK8S_DEPLOYMENT.md)
 
@@ -157,7 +158,7 @@ cd ../..
 # Or manual build:
 cd backend && docker build -t econ-graph-backend:latest . && cd ..
 cd frontend && docker build --build-arg REACT_APP_API_URL="http://localhost" --build-arg REACT_APP_GRAPHQL_URL="/graphql" --build-arg REACT_APP_WS_URL="ws://localhost/graphql" --build-arg NODE_ENV="production" -t econ-graph-frontend:latest . && cd ..
-cd admin-frontend && docker build --build-arg REACT_APP_API_URL="http://localhost" --build-arg REACT_APP_GRAPHQL_URL="/graphql" --build-arg REACT_APP_WS_URL="ws://localhost/graphql" --build-arg REACT_APP_GRAFANA_URL="http://localhost:${GRAFANA_NODEPORT}" --build-arg NODE_ENV="production" -t econ-graph-admin-frontend:latest . && cd ..
+cd admin-frontend && docker build --build-arg REACT_APP_API_URL="http://localhost" --build-arg REACT_APP_GRAPHQL_URL="/graphql" --build-arg REACT_APP_WS_URL="ws://localhost/graphql" --build-arg NODE_ENV="production" -t econ-graph-admin-frontend:latest . && cd ..
 cd chart-api-service && docker build -t econ-graph-chart-api:latest . && cd ..
 ```
 
@@ -209,7 +210,7 @@ source ports.env
 - **Backend**: http://localhost:${BACKEND_NODEPORT}
 - **GraphQL**: http://localhost:${BACKEND_NODEPORT}/graphql
 - **Health Check**: http://localhost:${BACKEND_NODEPORT}/health
-- **Grafana**: http://localhost:${GRAFANA_NODEPORT} (user admin, password in Secret `grafana-admin`, see k8s/README.md)
+- **Grafana**: `kubectl port-forward service/grafana-service 3000:3000 -n econ-graph`, then http://localhost:3000 (user admin, password in Secret `grafana-admin`, see k8s/README.md)
 
 ### Internal Services (ClusterIP)
 - **Chart API Service**: `chart-api-service.econ-graph.svc.cluster.local:3001`
@@ -229,12 +230,11 @@ DATABASE_PORT=5432
 # External NodePort mappings
 BACKEND_NODEPORT=30080
 FRONTEND_NODEPORT=30000
-GRAFANA_NODEPORT=30001
 
 # Service URLs
 BACKEND_URL=http://localhost:${BACKEND_NODEPORT}
 FRONTEND_URL=http://localhost:${FRONTEND_NODEPORT}
-GRAFANA_URL=http://localhost:${GRAFANA_NODEPORT}
+# Grafana is ClusterIP-only; access via kubectl port-forward (see above)
 ```
 
 ## Monitoring and Observability
@@ -255,7 +255,6 @@ GRAFANA_URL=http://localhost:${GRAFANA_NODEPORT}
 # Test service accessibility
 curl -s -o /dev/null -w "%{http_code}" http://localhost:${FRONTEND_NODEPORT}
 curl -s -o /dev/null -w "%{http_code}" http://localhost:${BACKEND_NODEPORT}/health
-curl -s -o /dev/null -w "%{http_code}" http://localhost:${GRAFANA_NODEPORT}
 ```
 
 ## Troubleshooting
@@ -326,7 +325,7 @@ kubectl port-forward service/econ-graph-backend-service 9876:9876 -n econ-graph
 # Admin Frontend
 kubectl port-forward service/econ-graph-admin-frontend-service 3001:3001 -n econ-graph
 # Grafana
-kubectl port-forward service/grafana 3001:3000 -n econ-graph
+kubectl port-forward service/grafana-service 3000:3000 -n econ-graph
 ```
 
 2. **Configure Kind with Extra Port Mappings**:
