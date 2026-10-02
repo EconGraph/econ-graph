@@ -39,24 +39,12 @@ codes = [
   { code = "state", label = "State" },
 ]
 
-# The file's `place_id` column: USA, a census division (DV_*) or a state's USPS code. State
-# codes are USPS codes, not FIPS codes, so only the national and division ids are labelled
-# here.
+# The file's `place_id` column: USA, a census division (DV_*) or a state's USPS code (not
+# Census's FIPS codes). Labels come from the master file's own `place_name` column, one of
+# `FhfaAdapter::code_lists` (see src/sources/fhfa.rs), not a hand-typed list.
 [[dataset.dimensions]]
 name = "place_id"
 label = "Place"
-codes = [
-  { code = "USA", label = "United States" },
-  { code = "DV_ENC", label = "East North Central Division" },
-  { code = "DV_ESC", label = "East South Central Division" },
-  { code = "DV_MA", label = "Middle Atlantic Division" },
-  { code = "DV_MT", label = "Mountain Division" },
-  { code = "DV_NE", label = "New England Division" },
-  { code = "DV_PAC", label = "Pacific Division" },
-  { code = "DV_SA", label = "South Atlantic Division" },
-  { code = "DV_WNC", label = "West North Central Division" },
-  { code = "DV_WSC", label = "West South Central Division" },
-]
 
 # The file has two value columns, index_nsa and index_sa. Train 1 stores one value per
 # observation, so each column is its own series.
