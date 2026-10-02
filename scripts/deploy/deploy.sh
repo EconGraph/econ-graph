@@ -54,7 +54,6 @@ else
     echo "⚠️  ports.env not found, using default ports"
     BACKEND_NODEPORT=30080
     FRONTEND_NODEPORT=30000
-    GRAFANA_NODEPORT=30001
 fi
 
 # Check if kind cluster exists
@@ -317,7 +316,7 @@ echo "  Frontend: http://admin.econ-graph.local (add '127.0.0.1 admin.econ-graph
 echo "  Backend:  http://admin.econ-graph.local/api"
 echo "  GraphQL:  http://admin.econ-graph.local/graphql"
 echo "  Playground: off (set ENABLE_GRAPHQL_PLAYGROUND=true on the backend to serve /playground)"
-echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT}"
+echo "  Grafana:  kubectl port-forward service/grafana-service 3000:3000 -n econ-graph"
 echo "            (admin / password: kubectl -n econ-graph get secret grafana-admin -o jsonpath={.data.admin-password} | base64 -d)"
 echo ""
 echo "📊 Useful commands:"

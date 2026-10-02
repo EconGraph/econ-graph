@@ -129,7 +129,8 @@ kubectl apply -f k8s/manifests/ssl-ingress.yaml
 - **Backend API**: https://www.econgraph.com/api
 - **GraphQL**: https://www.econgraph.com/graphql
 - **Admin UI**: https://www.econgraph.com/admin
-- **Grafana**: https://www.econgraph.com/grafana
+
+Grafana is not exposed on the public ingress; see the port-forwarding section below.
 
 ### Local Development Setup
 Add to `/etc/hosts`:
@@ -213,7 +214,6 @@ Restrictive pod-to-pod communication:
 # Test service accessibility
 curl -k -s -o /dev/null -w "%{http_code}" https://www.econgraph.com
 curl -k -s -o /dev/null -w "%{http_code}" https://www.econgraph.com/api/health
-curl -k -s -o /dev/null -w "%{http_code}" https://www.econgraph.com/grafana
 ```
 
 ## Troubleshooting
