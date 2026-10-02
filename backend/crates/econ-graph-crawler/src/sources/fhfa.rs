@@ -479,6 +479,8 @@ impl FhfaAdapter {
             }
         }
         let labels: Vec<(String, String)> = labels.into_iter().collect();
+        // No ETag of our own to conditionally cache (see the module docs), so the `bool` telling
+        // whether the dataset/dimension existed yet to merge into doesn't change what we do next.
         persist::merge_dataset_dimension_codes(
             &ctx.pool,
             SourceId::Fhfa,
@@ -487,6 +489,7 @@ impl FhfaAdapter {
             &labels,
         )
         .await
+        .map(|_found| ())
         .map_err(db_err)
     }
 }
