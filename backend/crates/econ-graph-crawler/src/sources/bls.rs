@@ -100,7 +100,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -116,7 +115,7 @@ use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
 use crate::policy::SourcePolicy;
 use crate::reference::{bls_series, BlsSeries};
-use crate::reference_file::CodeList;
+use crate::reference_file::{labels_only, CodeList};
 use crate::source::SourceId;
 
 /// The real BLS Public Data API v2 root.
@@ -558,24 +557,24 @@ impl CodeFileSpec<'_> {
     /// This file as a [`CodeList`], parsed by [`parse_bls_code_file`] with its columns.
     fn code_list(&self) -> CodeList {
         let (code_col, label_col) = (self.code_col, self.label_col);
-        CodeList {
-            url: self.url.to_string(),
-            dataset: self.dataset,
-            dimension: self.dimension,
-            parse: Arc::new(move |body| parse_bls_code_file(body, code_col, label_col)),
-        }
+        CodeList::new(
+            self.url,
+            self.dataset,
+            self.dimension,
+            labels_only(move |body| parse_bls_code_file(body, code_col, label_col)),
+        )
     }
 }
 
 /// [`CODE_FILES`], then LN's `series_code` labels from BLS's series catalog.
 fn bls_code_lists() -> Vec<CodeList> {
     let mut lists: Vec<CodeList> = CODE_FILES.iter().map(CodeFileSpec::code_list).collect();
-    lists.push(CodeList {
-        url: LN_SERIES_URL.to_string(),
-        dataset: "LN",
-        dimension: "series_code",
-        parse: Arc::new(parse_ln_series_titles),
-    });
+    lists.push(CodeList::new(
+        LN_SERIES_URL,
+        "LN",
+        "series_code",
+        labels_only(parse_ln_series_titles),
+    ));
     lists
 }
 
@@ -1048,7 +1047,7 @@ impl SourceAdapter for BlsAdapter {
         Some(BATCH_KEY.to_string())
     }
 
-    fn code_lists(&self) -> Vec<CodeList> {
+    fn code_lists(&self, _keys: &ApiKeys) -> Vec<CodeList> {
         bls_code_lists()
     }
 

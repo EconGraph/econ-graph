@@ -237,6 +237,7 @@ impl Cli {
             let catalog = DatasetCatalog::load(&registry)?;
             return record_reference_seeds(
                 &*adapter,
+                &ApiKeys::from_env(),
                 &build_http(&registry)?,
                 &catalog,
                 migrations_dir,
@@ -328,13 +329,14 @@ impl Cli {
 /// replacing the source's previous seed migration; returns what it wrote.
 pub async fn record_reference_seeds(
     adapter: &dyn SourceAdapter,
+    keys: &ApiKeys,
     http: &HttpFetcher,
     catalog: &DatasetCatalog,
     migrations_dir: &Path,
     recorded_at: DateTime<Utc>,
 ) -> anyhow::Result<String> {
     let source = adapter.id();
-    let lists = adapter.code_lists();
+    let lists = adapter.code_lists(keys);
     if lists.is_empty() {
         bail!("{source} publishes no code lists to seed");
     }

@@ -177,7 +177,9 @@ pub trait SourceAdapter: Send + Sync {
     /// The default [`refresh_reference_data`](Self::refresh_reference_data) keeps them current,
     /// and `crawler record-reference-seeds` records them into a seed migration for new databases
     /// (see [`crate::reference_file`]). Empty by default.
-    fn code_lists(&self) -> Vec<CodeList> {
+    /// `keys` is for a source that wants its API key in the request URL
+    /// ([`CodeList::request_url`]).
+    fn code_lists(&self, _keys: &ApiKeys) -> Vec<CodeList> {
         Vec::new()
     }
 
@@ -191,7 +193,7 @@ pub trait SourceAdapter: Send + Sync {
     /// code list, going through [`reference_file::refresh`]. Failure here does not fail the
     /// discovery job: the worker logs it and carries on with whatever labels are already stored.
     async fn refresh_reference_data(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
-        reference_file::refresh_code_lists(ctx, self.id(), &self.code_lists()).await
+        reference_file::refresh_code_lists(ctx, self.id(), &self.code_lists(&ctx.keys)).await
     }
 
     /// Whether a successful [`discover`](Self::discover) lists every series this adapter crawls,

@@ -79,17 +79,18 @@
 
 use std::collections::HashSet;
 use std::str::FromStr;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use chrono::{Datelike, NaiveDate};
 use serde_json::Value;
 
-use crate::adapter::{CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, SourceAdapter};
+use crate::adapter::{
+    ApiKeys, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, SourceAdapter,
+};
 use crate::dataset::{DatasetDef, SeriesDataset};
 use crate::error::CrawlError;
-use crate::reference_file::CodeList;
+use crate::reference_file::{labels_only, CodeList};
 use crate::source::SourceId;
 
 /// The real Census Data API root.
@@ -404,13 +405,13 @@ impl SourceAdapter for CensusAdapter {
 
     /// The state file, whose names become the `bds` dataset's `state` codes (see
     /// [States](self#states)).
-    fn code_lists(&self) -> Vec<CodeList> {
-        vec![CodeList {
-            url: self.states_url.clone(),
-            dataset: BDS_DATASET,
-            dimension: STATE_DIMENSION,
-            parse: Arc::new(state_labels),
-        }]
+    fn code_lists(&self, _keys: &ApiKeys) -> Vec<CodeList> {
+        vec![CodeList::new(
+            self.states_url.clone(),
+            BDS_DATASET,
+            STATE_DIMENSION,
+            labels_only(state_labels),
+        )]
     }
 
     /// All years of a national or per-state series, filtered to `since`'s year and later.

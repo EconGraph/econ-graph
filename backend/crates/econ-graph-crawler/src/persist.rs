@@ -345,6 +345,20 @@ pub async fn merge_dataset_dimension_codes(
     dimension_name: &str,
     labels: &[(String, String)],
 ) -> AppResult<bool> {
+    let entries: Vec<Code> = labels.iter().map(|(c, l)| Code::new(c, l)).collect();
+    merge_dataset_dimension_code_entries(pool, source, dataset_code, dimension_name, &entries).await
+}
+
+/// [`merge_dataset_dimension_codes`] for full code entries: a stored code gets the entry's
+/// label, and its `unit` and `description` where the entry has one (a missing one keeps what is
+/// stored).
+pub async fn merge_dataset_dimension_code_entries(
+    pool: &DatabasePool,
+    source: SourceId,
+    dataset_code: &str,
+    dimension_name: &str,
+    entries: &[Code],
+) -> AppResult<bool> {
     use datasets::dsl;
     let mut conn = pool.get().await.map_err(conn_err)?;
     let source_id = data_source_id_conn(&mut conn, source).await?;
@@ -372,10 +386,18 @@ pub async fn merge_dataset_dimension_codes(
             return Ok(false);
         }
         let mut codes = dim.codes.take().unwrap_or_default();
-        for (code, label) in labels {
-            match codes.iter_mut().find(|c| &c.code == code) {
-                Some(existing) => existing.label = label.clone(),
-                None => codes.push(Code::new(code, label)),
+        for entry in entries {
+            match codes.iter_mut().find(|c| c.code == entry.code) {
+                Some(existing) => {
+                    existing.label = entry.label.clone();
+                    if entry.unit.is_some() {
+                        existing.unit = entry.unit.clone();
+                    }
+                    if entry.description.is_some() {
+                        existing.description = entry.description.clone();
+                    }
+                }
+                None => codes.push(entry.clone()),
             }
         }
         codes.sort_unstable_by(|a, b| a.code.cmp(&b.code));
