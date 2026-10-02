@@ -570,13 +570,13 @@ impl BeaAdapter {
             persist::dataset_dimension_labels(&ctx.pool, SourceId::Bea, dataset_code, "table_name")
                 .await
                 .map_err(db_err)?;
-        refreshed?;
         let titles = if from_db.is_empty() {
             self.table_titles(dataset).await
         } else {
             from_db
         };
         self.titles.write().await.insert(dataset, titles);
+        refreshed?;
         Ok(())
     }
 
@@ -2774,6 +2774,76 @@ mod tests {
             None
         );
         assert!(adapter.table_titles(BeaDataset::Nipa).await.is_empty());
+
+        db.drop().await;
+    }
+
+    /// A refresh that fails outright (BEA down, rate limited, a bad body) still reloads whatever
+    /// titles an earlier successful merge already put in the database into the in-process cache,
+    /// rather than leaving it empty: a worker that starts while BEA is having a bad day should
+    /// still be able to `discover` using titles a previous process (or an earlier refresh in this
+    /// one) already stored, not fail every table with "title not yet known".
+    #[tokio::test]
+    async fn refresh_table_titles_fails_but_still_loads_titles_already_in_the_database() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_bea_refresh_table_titles_error_with_stored_titles",
+        )
+        .await;
+        let mut catalog = crate::dataset::DatasetCatalog::empty();
+        catalog
+            .insert(
+                SourceId::Bea,
+                &[NIPA_DATASET, REGIONAL_DATASET],
+                crate::dataset::parse_dataset_file(
+                    &std::fs::read_to_string(
+                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("data/datasets/bea.toml"),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        crate::persist::sync_datasets(&db.pool, &catalog)
+            .await
+            .unwrap();
+        // A prior successful merge, as if an earlier process (or an earlier refresh in this one)
+        // had already stored titles.
+        persist::merge_dataset_dimension_codes(
+            &db.pool,
+            SourceId::Bea,
+            NIPA_DATASET,
+            "table_name",
+            &[("T10105".to_string(), "Gross Domestic Product".to_string())],
+        )
+        .await
+        .unwrap();
+
+        let mock = MockSource::start().await;
+        mock.mount(
+            &table_titles_route("NIPA"),
+            Reply::json_str(
+                r#"{"BEAAPI":{"Results":{"Error":{"APIErrorCode":"1","APIErrorDescription":"Unknown error."}}}}"#,
+            ),
+        )
+        .await;
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let adapter = BeaAdapter::new(mock.base_url());
+        let e = adapter
+            .refresh_table_titles(&ctx, TEST_API_KEY, BeaDataset::Nipa)
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind(), "transient", "{e}");
+        assert_eq!(
+            adapter.table_titles(BeaDataset::Nipa).await.get("T10105"),
+            Some(&"Gross Domestic Product".to_string()),
+            "a failed refresh should still have loaded the titles already stored in the database"
+        );
 
         db.drop().await;
     }
