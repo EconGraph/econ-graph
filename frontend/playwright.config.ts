@@ -14,8 +14,10 @@ console.log(
 
 export default defineConfig({
   testDir: './tests/e2e',
-  // The release suite needs its own stack: playwright.release.config.ts
-  testIgnore: '**/release/**',
+  // The release suite needs its own stack (playwright.release.config.ts), except the world
+  // map's two mocked specs (ECO-282), which only intercept GraphQL via page.route and run fine
+  // here too.
+  testIgnore: /[\\/]release[\\/](?!world-map[\\/](?:world-map-mocked|world-atlas)\.spec\.ts$).*$/,
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */

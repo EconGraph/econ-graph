@@ -48,8 +48,10 @@ The CI pipeline includes multiple specialized test suites that run in parallel:
 ```typescript
 // ✅ GOOD: Test the actual network call when possible
 test('grafana dashboard access', async () => {
-  // This test WILL make a real HTTP request to Grafana
-  const response = await page.goto('http://localhost:30001/health');
+  // This test WILL make a real HTTP request to Grafana, reached via
+  // `kubectl port-forward service/grafana-service 3000:3000 -n econ-graph`
+  // (Grafana is ClusterIP-only, not on the public ingress)
+  const response = await page.goto('http://localhost:3000/health');
   expect(response?.status()).toBe(200);
 });
 

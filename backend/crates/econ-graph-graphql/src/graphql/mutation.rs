@@ -742,7 +742,7 @@ mod tests {
         assert_eq!(queue_rows(&pool).await.len(), 4);
 
         // The crawlerStatus query reads the same queue.
-        let resp = run_as(&pool, None, "{ crawlerStatus { isRunning activeWorkers lastCrawl nextScheduledCrawl enqueuedCount sources { source pending failedLastDay } } }").await;
+        let resp = run_as(&pool, Some(user("admin")), "{ crawlerStatus { isRunning activeWorkers lastCrawl nextScheduledCrawl enqueuedCount sources { source pending failedLastDay } } }").await;
         assert!(resp.errors.is_empty(), "{:?}", resp.errors);
         let data = resp.data.into_json().unwrap();
         assert_eq!(

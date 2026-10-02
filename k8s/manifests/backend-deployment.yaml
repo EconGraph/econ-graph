@@ -16,6 +16,10 @@ spec:
       labels:
         app: econ-graph-backend
         component: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9876"
+        prometheus.io/path: "/metrics"
     spec:
       initContainers:
       - name: wait-for-postgres
