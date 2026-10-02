@@ -453,8 +453,8 @@ struct CodeFileSpec<'a> {
 }
 
 /// `series_code` (LN) isn't here: CPS has no small per-field code file like the others (its
-/// value is effectively a series' own identity), so [`refresh_ln_series`] reads BLS's series
-/// catalog instead.
+/// value is effectively a series' own identity), so [`BlsAdapter::refresh_ln_series`] reads
+/// BLS's series catalog instead.
 const CODE_FILES: &[CodeFileSpec<'static>] = &[
     CodeFileSpec {
         url: "https://download.bls.gov/pub/time.series/cu/cu.item",
