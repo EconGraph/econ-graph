@@ -131,6 +131,10 @@ pub enum Command {
         /// Diesel migrations directory to write the migration into.
         #[arg(long, default_value = DEFAULT_MIGRATIONS_DIR)]
         migrations_dir: PathBuf,
+        /// Write the lists that downloaded even if others failed, leaving the failed ones
+        /// unseeded (the crawl still fetches them). Without it, any failure writes nothing.
+        #[arg(long)]
+        skip_failed: bool,
     },
 }
 
@@ -228,6 +232,7 @@ impl Cli {
         if let Command::RecordReferenceSeeds {
             source,
             migrations_dir,
+            skip_failed,
         } = &self.command
         {
             let registry = default_registry();
@@ -241,6 +246,7 @@ impl Cli {
                 &build_http(&registry)?,
                 &catalog,
                 migrations_dir,
+                *skip_failed,
                 Utc::now(),
             )
             .await;
@@ -326,13 +332,15 @@ impl Cli {
 
 /// Downloads `adapter`'s code lists and writes them as the migration
 /// `{migrations_dir}/{recorded_at}_seed_{source}_reference_codes` (`source` lowercase),
-/// replacing the source's previous seed migration; returns what it wrote.
+/// replacing the source's previous seed migration; returns what it wrote. If any list fails it
+/// writes nothing and lists every failure, unless `skip_failed`.
 pub async fn record_reference_seeds(
     adapter: &dyn SourceAdapter,
     keys: &ApiKeys,
     http: &HttpFetcher,
     catalog: &DatasetCatalog,
     migrations_dir: &Path,
+    skip_failed: bool,
     recorded_at: DateTime<Utc>,
 ) -> anyhow::Result<String> {
     let source = adapter.id();
@@ -340,7 +348,23 @@ pub async fn record_reference_seeds(
     if lists.is_empty() {
         bail!("{source} publishes no code lists to seed");
     }
-    let entries = reference_file::download_seed_entries(http, source, &lists, catalog).await?;
+    let reference_file::SeedDownload { entries, failures } =
+        reference_file::download_seed_entries(http, source, &lists, catalog).await?;
+    let failed: Vec<String> = failures
+        .iter()
+        .map(|(url, e)| format!("{url}: {e}"))
+        .collect();
+    if !failed.is_empty() && !skip_failed {
+        bail!(
+            "{} of {} {source} code lists failed (--skip-failed writes the rest): {}",
+            failed.len(),
+            lists.len(),
+            failed.join("; ")
+        );
+    }
+    if entries.is_empty() {
+        bail!("every {source} code list failed: {}", failed.join("; "));
+    }
     let (up, down) = reference_file::seed_migration_sql(source, recorded_at, &entries)?;
     let suffix = format!("_seed_{}_reference_codes", source.as_str().to_lowercase());
     let name = format!("{}{suffix}", recorded_at.format("%Y-%m-%d-%H%M%S"));
@@ -384,6 +408,9 @@ pub async fn record_reference_seeds(
             e.url,
             e.etag.as_deref().unwrap_or("none")
         );
+    }
+    for f in &failed {
+        let _ = writeln!(out, "  skipped {f}");
     }
     Ok(out)
 }
@@ -616,6 +643,7 @@ mod tests {
             Command::RecordReferenceSeeds {
                 source: SourceId::Bls,
                 migrations_dir: PathBuf::from(DEFAULT_MIGRATIONS_DIR),
+                skip_failed: false,
             }
         );
         // The default is this checkout's migrations directory.
