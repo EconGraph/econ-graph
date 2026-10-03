@@ -10,6 +10,11 @@ and `world-map/world-atlas.spec.ts` (ECO-282), which only mock GraphQL via `page
 so also run under the older `global-analysis` and default/mobile configs; everything else
 here needs this suite's seeded backend.
 
+A second project, `release-mobile`, runs the `world-map/` specs, `smoke.spec.ts` and the
+phone-only `mobile/` specs on an emulated Pixel 5 (ECO-335: at phone width the app once loaded
+behind its open nav drawer, so nothing on the page could be reached). `release` skips `mobile/`.
+Run one project with `--project`, e.g. `scripts/release-e2e.sh --project release-mobile`.
+
 ## Run it
 
 From the repo root:
@@ -127,6 +132,9 @@ In this mode (`env.ts`):
   behavior, and the outline's load-without-a-network-request and
   failure/Reload cases, all against mocked GraphQL responses (`page.route`)
   rather than this suite's seeded backend (ECO-282).
+- `mobile/navigation.spec.ts` (`release-mobile` only): the home, explore and map
+  pages load with the phone nav drawer closed, the menu opens it and picking a
+  page closes it, and the map's zoom controls leave the map uncovered (ECO-335).
 
 ## Add specs for your area
 
