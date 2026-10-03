@@ -8,7 +8,6 @@ E2E tests exercise browser workflows against running application services. The s
 | --- | --- | --- |
 | [Release E2E](../../.github/workflows/release-e2e.yml) | Matching application/stack/workflow PR changes; manual dispatch | Release frontend build, real Rust backend and PostgreSQL 18, seeded recorded fixtures; no source API keys |
 | [Core CI optional E2E](../../.github/workflows/ci-core.yml) | Manual dispatch with run_e2e_tests=true | Container-based desktop/mobile suites |
-| [Nightly E2E](../../.github/workflows/e2e-tests-nightly.yml) | Daily 02:00 UTC; manual dispatch | Container build followed by selected desktop/mobile suites |
 | [Deployed Playwright](../../.github/workflows/playwright-tests-deployed.yml) | Manual dispatch | Explicit deployed base URL |
 | [Legacy Playwright](../../.github/workflows/playwright-tests.yml) and [comprehensive suite](../../.github/workflows/playwright-tests-comprehensive.yml) | Manual dispatch | Older setups; review workflow comments before use |
 
@@ -21,11 +20,10 @@ Follow the [release suite README](../../frontend/tests/e2e/release/README.md) fo
 ```bash
 gh workflow run release-e2e.yml --repo EconGraph/econ-graph --ref BRANCH
 gh workflow run ci-core.yml --repo EconGraph/econ-graph --ref BRANCH -f run_e2e_tests=true -f e2e_test_suite=core
-gh workflow run e2e-tests-nightly.yml --repo EconGraph/econ-graph --ref BRANCH -f test_suite=core
 gh workflow run playwright-tests-deployed.yml --repo EconGraph/econ-graph -f base_url=https://YOUR_DEPLOYED_TARGET
 ```
 
-The optional Core and nightly workflows expose different suite choices. Use each workflow's declared inputs; do not assume all legacy suite labels map to an active job.
+The optional Core workflow exposes its own suite choices. Use its declared inputs; do not assume all legacy suite labels map to an active job.
 
 ## Interpret results
 

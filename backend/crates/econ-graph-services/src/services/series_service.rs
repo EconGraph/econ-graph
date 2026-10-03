@@ -81,6 +81,7 @@ pub async fn list_series(
 
     let mut query = economic_series::table
         .filter(economic_series::is_active.eq(params.is_active.unwrap_or(true)))
+        .filter(economic_series::end_date.is_not_null())
         .into_boxed();
 
     // Apply filters
@@ -340,7 +341,7 @@ pub enum PageContext {
     Days(i64),
     /// The point just before the page.
     PreviousPoint,
-    /// The series' first point (the base of a percent change).
+    /// The series' earliest usable (non-null, non-zero) point, the base of a percent change.
     FirstPoint,
 }
 
@@ -351,7 +352,7 @@ async fn load_context(
     first: &DataPoint,
     context: PageContext,
 ) -> Result<Vec<DataPoint>, diesel::result::Error> {
-    use data_points::dsl::{date, id, revision_date};
+    use data_points::dsl::{date, id, revision_date, value};
 
     // (date, revision_date, id) < first's, spelled out for Diesel.
     let before_first = date.lt(first.date).or(date.eq(first.date).and(
@@ -379,7 +380,11 @@ async fn load_context(
                 .await
         }
         PageContext::FirstPoint => {
-            in_page_order(earlier)
+            // The percent-change base is the series' earliest *usable* value: a null or zero
+            // reading at the very first date (or several) is skipped. `.ne` on a nullable column
+            // already excludes NULLs under SQL's three-valued logic, so this one filter covers
+            // both.
+            in_page_order(earlier.filter(value.ne(bigdecimal::BigDecimal::from(0))))
                 .limit(1)
                 .load::<DataPoint>(conn)
                 .await
@@ -404,10 +409,14 @@ fn filtered_data_points(
     }
 
     let original_only = params.original_only.unwrap_or(false);
+    let as_of_or_latest = params.as_of.is_some() || params.latest_revision_only.unwrap_or(false);
+    if original_only || as_of_or_latest {
+        query = query.filter(econ_graph_core::models::exclude_synthetic_legacy_rows());
+    }
     if original_only {
         query = query.filter(data_points::is_original_release.eq(true));
     }
-    if params.as_of.is_some() || params.latest_revision_only.unwrap_or(false) {
+    if as_of_or_latest {
         query = query.filter(econ_graph_core::models::revision_filter(
             params.as_of,
             original_only,

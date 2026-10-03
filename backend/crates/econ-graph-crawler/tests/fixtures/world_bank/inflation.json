@@ -1,0 +1,636 @@
+[
+ {
+  "page": 1,
+  "pages": 1,
+  "per_page": 20000,
+  "total": 39,
+  "sourceid": "2",
+  "lastupdated": "2026-07-01"
+ },
+ [
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "ZH",
+    "value": "Africa Eastern and Southern"
+   },
+   "countryiso3code": "AFE",
+   "date": "2023",
+   "value": 7.1,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "ZH",
+    "value": "Africa Eastern and Southern"
+   },
+   "countryiso3code": "AFE",
+   "date": "2022",
+   "value": 9.8,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "ZH",
+    "value": "Africa Eastern and Southern"
+   },
+   "countryiso3code": "AFE",
+   "date": "2021",
+   "value": 6.1,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "1W",
+    "value": "World"
+   },
+   "countryiso3code": "WLD",
+   "date": "2023",
+   "value": 5.8,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "1W",
+    "value": "World"
+   },
+   "countryiso3code": "WLD",
+   "date": "2022",
+   "value": 8.0,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "1W",
+    "value": "World"
+   },
+   "countryiso3code": "WLD",
+   "date": "2021",
+   "value": 3.5,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "XC",
+    "value": "Euro area"
+   },
+   "countryiso3code": "EMU",
+   "date": "2023",
+   "value": 5.4,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "XC",
+    "value": "Euro area"
+   },
+   "countryiso3code": "EMU",
+   "date": "2022",
+   "value": 8.4,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "XC",
+    "value": "Euro area"
+   },
+   "countryiso3code": "EMU",
+   "date": "2021",
+   "value": 2.6,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "AS",
+    "value": "American Samoa"
+   },
+   "countryiso3code": "ASM",
+   "date": "2023",
+   "value": null,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "AS",
+    "value": "American Samoa"
+   },
+   "countryiso3code": "ASM",
+   "date": "2022",
+   "value": null,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "AS",
+    "value": "American Samoa"
+   },
+   "countryiso3code": "ASM",
+   "date": "2021",
+   "value": null,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "BR",
+    "value": "Brazil"
+   },
+   "countryiso3code": "BRA",
+   "date": "2023",
+   "value": 4.6,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "BR",
+    "value": "Brazil"
+   },
+   "countryiso3code": "BRA",
+   "date": "2022",
+   "value": 9.3,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "BR",
+    "value": "Brazil"
+   },
+   "countryiso3code": "BRA",
+   "date": "2021",
+   "value": 8.3,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "JG",
+    "value": "Channel Islands"
+   },
+   "countryiso3code": "CHI",
+   "date": "2023",
+   "value": null,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "JG",
+    "value": "Channel Islands"
+   },
+   "countryiso3code": "CHI",
+   "date": "2022",
+   "value": null,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "JG",
+    "value": "Channel Islands"
+   },
+   "countryiso3code": "CHI",
+   "date": "2021",
+   "value": null,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "CN",
+    "value": "China"
+   },
+   "countryiso3code": "CHN",
+   "date": "2023",
+   "value": 0.2,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "CN",
+    "value": "China"
+   },
+   "countryiso3code": "CHN",
+   "date": "2022",
+   "value": 2.0,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "CN",
+    "value": "China"
+   },
+   "countryiso3code": "CHN",
+   "date": "2021",
+   "value": 0.9,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "DE",
+    "value": "Germany"
+   },
+   "countryiso3code": "DEU",
+   "date": "2023",
+   "value": 5.9,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "DE",
+    "value": "Germany"
+   },
+   "countryiso3code": "DEU",
+   "date": "2022",
+   "value": 6.9,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "DE",
+    "value": "Germany"
+   },
+   "countryiso3code": "DEU",
+   "date": "2021",
+   "value": 3.1,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "FR",
+    "value": "France"
+   },
+   "countryiso3code": "FRA",
+   "date": "2023",
+   "value": 4.9,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "FR",
+    "value": "France"
+   },
+   "countryiso3code": "FRA",
+   "date": "2022",
+   "value": 5.2,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "FR",
+    "value": "France"
+   },
+   "countryiso3code": "FRA",
+   "date": "2021",
+   "value": 1.6,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "GB",
+    "value": "United Kingdom"
+   },
+   "countryiso3code": "GBR",
+   "date": "2023",
+   "value": 7.3,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "GB",
+    "value": "United Kingdom"
+   },
+   "countryiso3code": "GBR",
+   "date": "2022",
+   "value": 7.9,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "GB",
+    "value": "United Kingdom"
+   },
+   "countryiso3code": "GBR",
+   "date": "2021",
+   "value": 2.5,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "IN",
+    "value": "India"
+   },
+   "countryiso3code": "IND",
+   "date": "2023",
+   "value": null,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "IN",
+    "value": "India"
+   },
+   "countryiso3code": "IND",
+   "date": "2022",
+   "value": 6.7,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "IN",
+    "value": "India"
+   },
+   "countryiso3code": "IND",
+   "date": "2021",
+   "value": 5.1,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "JP",
+    "value": "Japan"
+   },
+   "countryiso3code": "JPN",
+   "date": "2023",
+   "value": 3.3,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "JP",
+    "value": "Japan"
+   },
+   "countryiso3code": "JPN",
+   "date": "2022",
+   "value": 2.5,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "JP",
+    "value": "Japan"
+   },
+   "countryiso3code": "JPN",
+   "date": "2021",
+   "value": -0.2,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "US",
+    "value": "United States"
+   },
+   "countryiso3code": "USA",
+   "date": "2023",
+   "value": 4.1,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "US",
+    "value": "United States"
+   },
+   "countryiso3code": "USA",
+   "date": "2022",
+   "value": 8.0,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  },
+  {
+   "indicator": {
+    "id": "FP.CPI.TOTL.ZG",
+    "value": "Inflation, consumer prices (annual %)"
+   },
+   "country": {
+    "id": "US",
+    "value": "United States"
+   },
+   "countryiso3code": "USA",
+   "date": "2021",
+   "value": 4.7,
+   "unit": "",
+   "obs_status": "",
+   "decimal": 1
+  }
+ ]
+]

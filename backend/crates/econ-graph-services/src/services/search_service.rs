@@ -41,6 +41,7 @@ impl SearchService {
         })?;
 
         let search_query = params.query.clone();
+        let fulltext_query = fulltext_query(&search_query);
         let similarity_threshold = params.get_similarity_threshold();
         let limit = params.get_limit();
         let offset = params.get_offset();
@@ -75,8 +76,8 @@ impl SearchService {
                         // External ids are indexed with the `simple` configuration, so the query
                         // is parsed with both `english` (titles, descriptions) and `simple`.
                         "WITH q AS (SELECT tsq, (''::tsvector @@ tsq) AS vacuous FROM (
-                                 SELECT websearch_to_tsquery('english', $1)
-                                     || websearch_to_tsquery('simple', $1) AS tsq
+                                 SELECT websearch_to_tsquery('english', $7)
+                                     || websearch_to_tsquery('simple', $7) AS tsq
                              ) parsed)
                          SELECT es.id, es.title, es.description, es.external_id, es.source_id,
                                 es.frequency, es.units, es.start_date, es.end_date,
@@ -88,6 +89,7 @@ impl SearchService {
                          WHERE NOT q.vacuous
                          AND (es.search_vector @@ q.tsq
                               OR (strpos(q.tsq::text, '!') = 0 AND es.title % $1))
+                         AND es.end_date IS NOT NULL
                          AND ($2::uuid IS NULL OR es.source_id = $2)
                          AND ($3::text IS NULL OR es.frequency = $3)
                          AND ($4::boolean OR es.is_active = true)
@@ -102,6 +104,7 @@ impl SearchService {
                     .bind::<diesel::sql_types::Bool, _>(include_inactive)
                     .bind::<diesel::sql_types::Integer, _>(limit)
                     .bind::<diesel::sql_types::Integer, _>(offset)
+                    .bind::<diesel::sql_types::Text, _>(&fulltext_query)
                     .load::<SeriesSearchResultRow>(conn)
                     .await
                 },
@@ -159,7 +162,7 @@ impl SearchService {
                         AS suggestion_type,
                     COUNT(*) AS match_count
              FROM economic_series
-             WHERE is_active = true AND (title ILIKE $3 OR title % $1)
+             WHERE is_active = true AND end_date IS NOT NULL AND (title ILIKE $3 OR title % $1)
              GROUP BY title
              ORDER BY (title ILIKE $3) DESC, rank DESC, title ASC
              LIMIT $2",
@@ -191,6 +194,19 @@ impl SearchService {
 
         Ok(search_suggestions)
     }
+}
+
+/// The query as `websearch_to_tsquery` gets it: words made only of dashes are dropped, because
+/// websearch syntax reads a dash before a word as "exclude it" even across a space. Without
+/// this, a title written `Label - Area` (Census BDS's style, and many FRED titles) excluded its
+/// own area, so searching a series' exact title didn't find it. A dash attached to a word
+/// (`-rate`) still excludes it.
+fn fulltext_query(query: &str) -> String {
+    query
+        .split_whitespace()
+        .filter(|word| !word.chars().all(|c| c == '-'))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Escapes LIKE wildcards (`%`, `_`) and the default escape character `\`.
@@ -303,14 +319,28 @@ mod db_tests {
             "INSERT INTO data_sources (name, description, base_url)
              VALUES ('search-test', 'search tests', 'http://localhost')
              ON CONFLICT (name) DO NOTHING",
-            "INSERT INTO economic_series (source_id, external_id, title, description, frequency)
-             SELECT id, v.e, v.t, v.d, 'Monthly' FROM data_sources,
+            // Every series needs a dataset of its source.
+            "INSERT INTO datasets (source_id, code, name)
+             SELECT id, 'test', 'Test dataset' FROM data_sources WHERE name = 'search-test'
+             ON CONFLICT (source_id, code) DO NOTHING",
+            "INSERT INTO economic_series
+                 (source_id, external_id, title, description, frequency, end_date, dataset_id)
+             SELECT ds.id, v.e, v.t, v.d, 'Monthly', '2020-01-01'::date, d.id
+             FROM data_sources ds JOIN datasets d ON d.source_id = ds.id AND d.code = 'test',
              (VALUES ('srch_UNRATE', 'Unemployment Rate',
                       'Unemployed persons as a share of the labor force'),
+                     ('srch_ESTAB', 'Number of establishments - United States', NULL),
                      ('srch_CPI', 'Consumer Price Index for All Urban Consumers',
                       'Measure of inflation in prices paid by urban consumers'),
                      ('srch_HOUSES', 'New Dwellings Begun', NULL)) v(e, t, d)
-             WHERE name = 'search-test'",
+             WHERE ds.name = 'search-test'",
+            // A discovered series with no data yet (e.g. its source adapter was removed before
+            // ever crawling it): must never appear in search results.
+            "INSERT INTO economic_series
+                 (source_id, external_id, title, description, frequency, dataset_id)
+             SELECT ds.id, 'srch_NODATA', 'Unemployment No Data Series', NULL, 'Monthly', d.id
+             FROM data_sources ds JOIN datasets d ON d.source_id = ds.id AND d.code = 'test'
+             WHERE ds.name = 'search-test'",
         ] {
             diesel::sql_query(sql).execute(&mut conn).await.unwrap();
         }
@@ -348,6 +378,10 @@ mod db_tests {
             .unwrap();
         assert_eq!(titles(&exact).into_iter().next(), Some("Unemployment Rate"));
         assert!(exact[0].rank > 0.0 && exact[0].similarity_score > 0.0);
+        assert!(
+            !titles(&exact).contains(&"Unemployment No Data Series"),
+            "a series with no data points must never appear in search results"
+        );
 
         // Stemmed match on the description only.
         let described = service
@@ -394,6 +428,23 @@ mod db_tests {
             );
         }
 
+        // A dash standing alone is punctuation, not an exclusion: a series' exact title finds it
+        // (the release suite's six-source sweep found a Census BDS title that didn't).
+        for query in [
+            "Number of establishments - United States",
+            "establishments -- united",
+        ] {
+            let dashed = service
+                .search_series(&SearchParams::simple(query))
+                .await
+                .unwrap();
+            assert_eq!(
+                titles(&dashed).into_iter().next(),
+                Some("Number of establishments - United States"),
+                "{query}"
+            );
+        }
+
         // A query with no positive requirement (all-NOT, or a NOT an empty document already
         // satisfies) returns nothing, rather than every series that lacks the excluded word.
         for query in ["-rate", "-rate -unemployment", "unemployment OR -rate"] {
@@ -421,6 +472,12 @@ mod db_tests {
         let first = <[_]>::first(&completions).expect("a completion");
         assert_eq!(first.suggestion, "Unemployment Rate");
         assert!(matches!(first.suggestion_type, SuggestionType::Completion));
+        assert!(
+            !completions
+                .iter()
+                .any(|s| s.suggestion == "Unemployment No Data Series"),
+            "a series with no data points must never be suggested"
+        );
 
         let corrections = service
             .get_suggestions("unemploymnt rate", 5)
@@ -437,6 +494,21 @@ mod db_tests {
             .all(|s| matches!(s.suggestion_type, SuggestionType::Correction)));
 
         remove_fixtures(&pool).await;
+    }
+
+    #[test]
+    /// Only all-dash words are dropped from the full-text query.
+    fn fulltext_query_drops_standalone_dashes_only() {
+        assert_eq!(
+            fulltext_query("Number of establishments - United States"),
+            "Number of establishments United States"
+        );
+        assert_eq!(fulltext_query("a -- b\t-"), "a b");
+        assert_eq!(fulltext_query("unemployment -rate"), "unemployment -rate");
+        assert_eq!(
+            fulltext_query("\"unemployment\"-rate"),
+            "\"unemployment\"-rate"
+        );
     }
 
     #[test]

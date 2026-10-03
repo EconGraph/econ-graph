@@ -1,7 +1,7 @@
 {
   "_comment": "Copyright (c) 2024 EconGraph. All rights reserved. Licensed under the Microsoft Reference Source License (MS-RSL). See LICENSE file for complete terms and conditions.",
   "name": "econ-graph-frontend",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
   "dependencies": {
@@ -128,6 +128,7 @@
     "prettier-fix": "prettier --write 'src/**/*.{js,ts,tsx,css}'",
     "typecheck": "tsc --noEmit",
     "check:flag-bundle": "node scripts/check-flag-bundle.mjs",
+    "check:release-authenticity": "node scripts/check-release-authenticity.mjs",
     "start-private-chart-api": "node src/server/privateChartServer.js",
     "eslint-check": "eslint src --config eslint.config.js",
     "test:e2e": "playwright test",

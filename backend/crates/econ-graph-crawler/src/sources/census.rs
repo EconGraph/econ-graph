@@ -14,28 +14,52 @@
 //!
 //! Variables are filtered with the old keyword rules ([`is_economic_variable`]) and crossed with
 //! the geography levels that give single series (annual, units "Count"):
-//! - `us`: one national series, `CENSUS_BDS_{VARIABLE}_us`;
-//! - `state`: one series per state and DC, `CENSUS_BDS_{VARIABLE}_state_{FIPS}` (two-digit state
-//!   FIPS code, e.g. `_state_06` for California), from the shared states file
-//!   ([`crate::reference::us_states`], read at runtime).
+//! - `us`: one national series per variable;
+//! - `state`: one series per variable for each state and DC, from the Census Bureau's state
+//!   reference file ([`STATES_URL`], see [States](#states)).
 //!
-//! Only levels that `geography.json` lists are used. Finer levels (county, metro area) have
+//! Only levels that `geography.json` lists are used, and the state file is only requested when
+//! `state` is one of them. Finer levels (county, metro area) have
 //! thousands of areas and are skipped. No pagination, so no page cap.
+//!
+//! # Dataset and series ids
+//!
+//! Every series belongs to the `bds` dataset (`data/datasets/census.toml`), stored long: each BDS
+//! variable is its own series. Its dimensions, in id order, are `geo_level` (`national` or
+//! `state`), `state` (the two-digit state FIPS code, empty for national series) and `variable`
+//! (the BDS variable name). External ids are the canonical key built by
+//! [`DatasetDef::series`](crate::dataset::DatasetDef::series): `bds/national..ESTAB` for the
+//! nation, `bds/state.06.ESTAB` for California.
 //!
 //! # Fetching
 //!
 //! The old code parsed BDS data responses (a JSON array of string rows, header row first), so
-//! fetching is implemented for the ids discovery produces: national (`CENSUS_BDS_{VARIABLE}_us`)
-//! and per-state (`CENSUS_BDS_{VARIABLE}_state_{FIPS}`). Any other id, including the bare
-//! `_state` ids older discovery runs persisted (one value per state and year, not a single
-//! series), is `Permanent`. The request is
-//! `GET {base}/timeseries/bds?get={VARIABLE},YEAR&for={us:*|state:FIPS}&key=KEY`, i.e. all
-//! years (the old
-//! comma-separated `YEAR=` list hit the API's "204 No Content" limitation for multi-year
+//! fetching is implemented for the ids discovery produces. Any other id, including the ids from
+//! earlier versions (e.g. `CENSUS_BDS_*`), is `Permanent`. The request is
+//! `GET {base}/timeseries/bds?get={VARIABLE},YEAR&for={us:*|state:FIPS}&key=KEY`, i.e. all years
+//! (the old comma-separated `YEAR=` list hit the API's "204 No Content" limitation for multi-year
 //! queries); `since` is applied client-side by year. Each row becomes a point dated January 1 of
 //! its `YEAR`, `revision_date = date`, `is_original_release = true`. As in the old parser, rows
 //! of the wrong width or with an unparseable year are skipped, and an empty or non-numeric value
 //! is a missing observation (`None`).
+//!
+//! # States
+//!
+//! The states and DC come from the Census Bureau's FIPS reference file `state.txt`
+//! ([`STATES_URL`], pipe-delimited `STATE|STUSAB|STATE_NAME|STATENS`), not from a checked-in
+//! list. Rows with a FIPS code from `01` to `56` are the states and DC; territories (`60` and up)
+//! are dropped, since BDS publishes no state-level series for them. The file must list exactly
+//! [`US_STATE_COUNT`] of them, so a truncated or reshaped file fails rather than retiring states.
+//!
+//! - Discovery downloads it (a few kilobytes) for the state names in titles.
+//! - [`refresh_reference_data`](SourceAdapter::refresh_reference_data) merges the names into the
+//!   `bds` dataset's `state` dimension codes, which is where the API's state labels come from,
+//!   as one of its [`code_lists`](SourceAdapter::code_lists): a conditional GET at worker
+//!   startup and before each scheduled discovery, seeded into a new database by a recorded
+//!   migration (see [`crate::reference_file`]).
+//!
+//! Fetching needs no list: a per-state id must carry a FIPS code from `01` to `56`, and Census
+//! answers an unused code (`03`, `07`, ...) with an error, which fails that series.
 //!
 //! # API key
 //!
@@ -61,46 +85,152 @@ use bigdecimal::BigDecimal;
 use chrono::{Datelike, NaiveDate};
 use serde_json::Value;
 
-use crate::adapter::{CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, SourceAdapter};
+use crate::adapter::{
+    ApiKeys, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, SourceAdapter,
+};
+use crate::dataset::{DatasetDef, SeriesDataset};
 use crate::error::CrawlError;
-use crate::reference::us_states;
+use crate::reference_file::{labels_only, CodeList};
 use crate::source::SourceId;
 
 /// The real Census Data API root.
 pub const DEFAULT_BASE_URL: &str = "https://api.census.gov/data";
 
+/// The Census Bureau's state FIPS reference file (see [States](self#states)).
+pub const STATES_URL: &str = "https://www2.census.gov/geo/docs/reference/state.txt";
+
+/// States the state file must list: the 50 states and DC.
+pub const US_STATE_COUNT: usize = 51;
+
+/// Highest state FIPS code; territories start at `60`.
+const MAX_STATE_FIPS: u8 = 56;
+
+/// Dimension of the `bds` dataset holding the state FIPS code.
+const STATE_DIMENSION: &str = "state";
+
 /// Dataset path (relative to the base URL).
 const BDS_PATH: &str = "/timeseries/bds";
 
-/// Prefix of every Census external id this adapter produces.
-const ID_PREFIX: &str = "CENSUS_BDS_";
+/// Code of the Business Dynamics Statistics dataset, defined in `datasets/census.toml`.
+pub const BDS_DATASET: &str = "bds";
 
-/// National geography level.
+/// Prefix of every id this adapter produces, used to scope retirement away from the Census
+/// source's other (ACS) rows. See [`SourceAdapter::retirement_scope_prefix`].
+const ID_PREFIX: &str = "bds/";
+
+/// Census geography level of national series (`for=us:*`).
 const NATIONAL_GEO: &str = "us";
 
 /// The error when `CENSUS_API_KEY` is missing.
 const MISSING_KEY: &str = "CENSUS_API_KEY not set: the Census Data API rejects requests without \
                            a key (free at https://api.census.gov/data/key_signup.html)";
 
-/// State geography level. Its series ids end in `_state_{FIPS}`.
+/// Census geography level of per-state series (`for=state:{FIPS}`).
 const STATE_GEO: &str = "state";
 
+/// `geo_level` dimension value of a national series.
+const NATIONAL_LEVEL: &str = "national";
+
+/// `geo_level` dimension value of a per-state series.
+const STATE_LEVEL: &str = "state";
+
+/// The `bds` definition from `datasets/census.toml`, read at runtime.
+fn bds_dataset() -> Result<&'static DatasetDef, CrawlError> {
+    crate::reference::dataset(SourceId::Census, BDS_DATASET)
+}
+
 /// PostgreSQL regular expression matching exactly the ids [`CensusAdapter::fetch_series`] accepts:
-/// `CENSUS_BDS_{VARIABLE}_us` and `CENSUS_BDS_{VARIABLE}_state_{FIPS}` for the FIPS codes in
-/// [`us_states`]. Older discovery runs also persisted other geography levels (e.g. bare `_state`),
-/// which the refresh scheduler must not enqueue.
-pub fn fetchable_id_regex() -> Result<String, CrawlError> {
-    let fips: Vec<&str> = us_states()?.iter().map(|s| s.fips.as_str()).collect();
-    Ok(format!(
-        "^CENSUS_BDS_[A-Za-z0-9_]+_({NATIONAL_GEO}|{STATE_GEO}_({}))$",
-        fips.join("|")
-    ))
+/// `bds/national..{VARIABLE}` and `bds/state.{FIPS}.{VARIABLE}` for a FIPS code from `01` to
+/// `56`. Ids from earlier versions (e.g. `CENSUS_BDS_*`) may still be stored, and the refresh
+/// scheduler must not enqueue them.
+pub fn fetchable_id_regex() -> String {
+    format!(
+        "^{BDS_DATASET}/({NATIONAL_LEVEL}\\.|{STATE_LEVEL}\\.(0[1-9]|[1-4][0-9]|5[0-6]))\\.[A-Za-z0-9_]+$"
+    )
+}
+
+/// A state or DC from the state file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsState {
+    /// Two-digit FIPS code, e.g. `06`.
+    pub fips: String,
+    /// Name, e.g. `California`.
+    pub name: String,
+}
+
+/// Whether `fips` is a two-digit state or DC FIPS code (`01` to `56`).
+fn is_state_fips(fips: &str) -> bool {
+    fips.len() == 2
+        && fips.bytes().all(|b| b.is_ascii_digit())
+        && fips
+            .parse::<u8>()
+            .is_ok_and(|n| (1..=MAX_STATE_FIPS).contains(&n))
+}
+
+/// Parses the state file (see [States](self#states)): columns found by header name, territories
+/// dropped, exactly [`US_STATE_COUNT`] states required. Sorted by FIPS code.
+pub fn parse_state_file(text: &str) -> Result<Vec<UsState>, CrawlError> {
+    let parse_err = |msg: String| CrawlError::Parse(format!("Census state file: {msg}"));
+    let mut lines = text
+        .trim_start_matches('\u{feff}')
+        .lines()
+        .filter(|l| !l.trim().is_empty());
+    let header: Vec<&str> = lines
+        .next()
+        .ok_or_else(|| parse_err("empty body".into()))?
+        .split('|')
+        .map(str::trim)
+        .collect();
+    let find = |name: &str| {
+        header
+            .iter()
+            .position(|c| *c == name)
+            .ok_or_else(|| parse_err(format!("no {name:?} column in header {header:?}")))
+    };
+    let (fips_col, name_col) = (find("STATE")?, find("STATE_NAME")?);
+    let mut states = Vec::new();
+    for line in lines {
+        let fields: Vec<&str> = line.split('|').map(str::trim).collect();
+        let (Some(&fips), Some(&name)) = (fields.get(fips_col), fields.get(name_col)) else {
+            return Err(parse_err(format!("short row {line:?}")));
+        };
+        if !is_state_fips(fips) {
+            continue;
+        }
+        if name.is_empty() {
+            return Err(parse_err(format!("FIPS {fips} has no name")));
+        }
+        states.push(UsState {
+            fips: fips.to_string(),
+            name: name.to_string(),
+        });
+    }
+    states.sort_by(|a, b| a.fips.cmp(&b.fips));
+    if let Some(w) = states.windows(2).find(|w| w[0].fips == w[1].fips) {
+        return Err(parse_err(format!("FIPS {} listed twice", w[0].fips)));
+    }
+    if states.len() != US_STATE_COUNT {
+        return Err(parse_err(format!(
+            "expected {US_STATE_COUNT} states and DC (FIPS 01-56), found {}",
+            states.len()
+        )));
+    }
+    Ok(states)
+}
+
+/// [`parse_state_file`] as `(FIPS code, name)` pairs, the `state` dimension's codes.
+pub fn state_labels(text: &str) -> Result<Vec<(String, String)>, CrawlError> {
+    Ok(parse_state_file(text)?
+        .into_iter()
+        .map(|s| (s.fips, s.name))
+        .collect())
 }
 
 /// Census adapter. See the module docs.
 #[derive(Debug, Clone)]
 pub struct CensusAdapter {
     base_url: String,
+    states_url: String,
 }
 
 impl CensusAdapter {
@@ -108,7 +238,24 @@ impl CensusAdapter {
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
+            states_url: STATES_URL.to_string(),
         }
+    }
+
+    /// Reads the state file from `states_url` instead of [`STATES_URL`].
+    #[must_use]
+    pub fn with_states_url(mut self, states_url: impl Into<String>) -> Self {
+        self.states_url = states_url.into();
+        self
+    }
+
+    /// The states and DC from the state file.
+    async fn states(&self, ctx: &CrawlCtx) -> Result<Vec<UsState>, CrawlError> {
+        let text = ctx
+            .http
+            .get_text(SourceId::Census, &self.states_url, &[])
+            .await?;
+        parse_state_file(&text)
     }
 
     /// `path` (starting with `/`) under the API root.
@@ -165,6 +312,10 @@ impl SourceAdapter for CensusAdapter {
         SourceId::Census
     }
 
+    fn datasets(&self) -> &[&str] {
+        &[BDS_DATASET]
+    }
+
     /// Discovery crosses the dataset's full variable and geography metadata, and fails rather
     /// than returning part of it (a malformed `variables.json`/`geography.json` entry fails the
     /// parse, per [`parse_variables`]/[`parse_geographies`], instead of being silently dropped
@@ -173,7 +324,7 @@ impl SourceAdapter for CensusAdapter {
         true
     }
 
-    /// This adapter only ever produces `CENSUS_BDS_*` ids; the Census data source also holds ACS
+    /// This adapter only ever produces `bds/*` ids; the Census data source also holds ACS
     /// rows seeded by the initial migration, which retirement must not touch.
     fn retirement_scope_prefix(&self) -> Option<&str> {
         Some(ID_PREFIX)
@@ -187,16 +338,23 @@ impl SourceAdapter for CensusAdapter {
         let geographies =
             parse_geographies(&self.metadata_json(ctx, key, "geography.json").await?)?;
 
-        // (id suffix, area name) for every single series the listed geography levels give.
-        let mut areas: Vec<(String, String)> = Vec::new();
+        // Every single series the listed geography levels give, with the area's name. The state
+        // file is downloaded here too, on purpose: discovery takes the states from the source,
+        // not from the codes `refresh_reference_data` stored (which may lag or be missing).
+        let states = if geographies.iter().any(|g| g.name == STATE_GEO) {
+            self.states(ctx).await?
+        } else {
+            Vec::new()
+        };
+        let mut areas: Vec<(Area<'_>, &str)> = Vec::new();
         let mut skipped = Vec::new();
         for geo in &geographies {
             match geo.name.as_str() {
-                NATIONAL_GEO => areas.push((NATIONAL_GEO.into(), "United States".into())),
+                NATIONAL_GEO => areas.push((Area::National, NATIONAL_NAME)),
                 STATE_GEO => areas.extend(
-                    us_states()?
+                    states
                         .iter()
-                        .map(|s| (format!("{STATE_GEO}_{}", s.fips), s.name.clone())),
+                        .map(|s| (Area::State(&s.fips), s.name.as_str())),
                 ),
                 other => skipped.push(other.to_string()),
             }
@@ -210,9 +368,20 @@ impl SourceAdapter for CensusAdapter {
 
         let mut seen = HashSet::new();
         let mut found = Vec::new();
-        for var in variables.iter().filter(|v| is_economic_variable(v)) {
-            for (suffix, area) in &areas {
-                let external_id = format!("{ID_PREFIX}{}_{suffix}", var.name);
+        let (valid, invalid): (Vec<_>, Vec<_>) = variables
+            .iter()
+            .filter(|v| is_economic_variable(v))
+            .partition(|v| is_valid_variable(&v.name));
+        if !invalid.is_empty() {
+            let names: Vec<&str> = invalid.iter().map(|v| v.name.as_str()).collect();
+            tracing::debug!(
+                ?names,
+                "Census BDS: skipping variables with unfetchable names"
+            );
+        }
+        for var in valid {
+            for &(key, area) in &areas {
+                let (external_id, dataset) = series_key(key, &var.name)?;
                 if !seen.insert(external_id.clone()) {
                     continue;
                 }
@@ -226,11 +395,23 @@ impl SourceAdapter for CensusAdapter {
                     units: Some("Count".into()),
                     frequency: Some("Annual".into()),
                     data_url: None,
+                    dataset,
                 });
             }
         }
         tracing::info!(series = found.len(), "Census BDS discovery finished");
         Ok(found)
+    }
+
+    /// The state file, whose names become the `bds` dataset's `state` codes (see
+    /// [States](self#states)).
+    fn code_lists(&self, _keys: &ApiKeys) -> Vec<CodeList> {
+        vec![CodeList::new(
+            self.states_url.clone(),
+            BDS_DATASET,
+            STATE_DIMENSION,
+            labels_only(state_labels),
+        )]
     }
 
     /// All years of a national or per-state series, filtered to `since`'s year and later.
@@ -244,6 +425,8 @@ impl SourceAdapter for CensusAdapter {
     ) -> Result<FetchedSeries, CrawlError> {
         let key = self.api_key(ctx)?;
         let (variable, area) = parse_series_id(external_id)?;
+        let (id, dataset) = series_key(area, variable)?;
+        debug_assert_eq!(id, external_id, "parsing and building ids are inverses");
         let get = format!("{variable},YEAR");
         let for_geo = match area {
             Area::National => format!("{NATIONAL_GEO}:*"),
@@ -266,6 +449,7 @@ impl SourceAdapter for CensusAdapter {
         Ok(FetchedSeries {
             metadata: None,
             points,
+            dataset,
         })
     }
 }
@@ -292,49 +476,80 @@ fn is_invalid_key_page(body: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Area<'a> {
     National,
-    /// Two-digit state FIPS code, one of [`us_states`].
+    /// Two-digit state FIPS code, `01` to `56`.
     State(&'a str),
 }
 
-/// `CENSUS_BDS_{VARIABLE}_us` -> (`VARIABLE`, national);
-/// `CENSUS_BDS_{VARIABLE}_state_{FIPS}` -> (`VARIABLE`, that state).
+/// Display name of the national area in titles.
+const NATIONAL_NAME: &str = "United States";
+
+/// The canonical external id and dataset dimensions of `variable` for `area`.
+fn series_key(area: Area<'_>, variable: &str) -> Result<(String, SeriesDataset), CrawlError> {
+    let (level, state) = match area {
+        Area::National => (NATIONAL_LEVEL, ""),
+        Area::State(fips) => (STATE_LEVEL, fips),
+    };
+    bds_dataset()?
+        .series([
+            ("geo_level", level),
+            ("state", state),
+            ("variable", variable),
+        ])
+        .map_err(|e| match e {
+            CrawlError::Permanent(msg) => {
+                CrawlError::Permanent(format!("Census {variable}: {msg}"))
+            }
+            e => e,
+        })
+}
+
+/// `bds/national..{VARIABLE}` -> (`VARIABLE`, national);
+/// `bds/state.{FIPS}.{VARIABLE}` -> (`VARIABLE`, that state).
 fn parse_series_id(external_id: &str) -> Result<(&str, Area<'_>), CrawlError> {
-    let rest = external_id.strip_prefix(ID_PREFIX).ok_or_else(|| {
-        CrawlError::Permanent(format!(
-            "Census: {external_id:?} is not a {ID_PREFIX}* series id"
-        ))
-    })?;
+    let rest = external_id
+        .strip_prefix(BDS_DATASET)
+        .and_then(|r| r.strip_prefix('/'))
+        .ok_or_else(|| {
+            CrawlError::Permanent(format!(
+                "Census: {external_id:?} is not a {BDS_DATASET}/* series id"
+            ))
+        })?;
     let unsupported = || {
         CrawlError::Permanent(format!(
-            "Census {external_id}: only national (_{NATIONAL_GEO}) and per-state \
-             (_{STATE_GEO}_{{FIPS}}) BDS series can be fetched"
+            "Census {external_id}: only national ({BDS_DATASET}/{NATIONAL_LEVEL}..{{VARIABLE}}) \
+             and per-state ({BDS_DATASET}/{STATE_LEVEL}.{{FIPS}}.{{VARIABLE}}) BDS series can be \
+             fetched"
         ))
     };
-    let (variable, area) = if let Some(v) = rest.strip_suffix(NATIONAL_GEO) {
-        (v.strip_suffix('_').ok_or_else(unsupported)?, Area::National)
-    } else {
-        let (v, fips) = rest.rsplit_once('_').ok_or_else(unsupported)?;
-        let v = v
-            .strip_suffix(STATE_GEO)
-            .and_then(|v| v.strip_suffix('_'))
-            .ok_or_else(unsupported)?;
-        if !us_states()?.iter().any(|s| s.fips == fips) {
-            return Err(CrawlError::Permanent(format!(
-                "Census {external_id}: {fips:?} is not a BDS state FIPS code"
-            )));
-        }
-        (v, Area::State(fips))
+    let mut parts = rest.splitn(3, '.');
+    let (Some(level), Some(state), Some(variable)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return Err(unsupported());
     };
-    if variable.is_empty()
-        || !variable
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    let area = match (level, state) {
+        (NATIONAL_LEVEL, "") => Area::National,
+        (STATE_LEVEL, fips) if !fips.is_empty() => {
+            if !is_state_fips(fips) {
+                return Err(CrawlError::Permanent(format!(
+                    "Census {external_id}: {fips:?} is not a BDS state FIPS code"
+                )));
+            }
+            Area::State(fips)
+        }
+        _ => return Err(unsupported()),
+    };
+    if !is_valid_variable(variable) {
         return Err(CrawlError::Permanent(format!(
             "Census {external_id}: invalid variable name {variable:?}"
         )));
     }
     Ok((variable, area))
+}
+
+/// Whether `name` is a BDS variable name that can be fetched: ASCII letters, digits and `_`.
+/// This keeps it safe in the query string and unambiguous as the last part of an id.
+fn is_valid_variable(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// A response cell as text; `null` is empty.
@@ -534,6 +749,21 @@ mod tests {
     const ESTAB_US: &str = include_str!("../../tests/fixtures/census/bds_estab_us.json");
     const ESTAB_STATE_06: &str =
         include_str!("../../tests/fixtures/census/bds_estab_state_06.json");
+    const STATES: &str = include_str!("../../tests/fixtures/census/state.txt");
+
+    /// Path the mock serves the state file at.
+    const STATES_PATH: &str = "/geo/state.txt";
+
+    /// An adapter talking to `mock` for both the API and the state file, which it serves.
+    async fn adapter(mock: &MockSource) -> CensusAdapter {
+        mock.mount(&Route::get(STATES_PATH), Reply::text(STATES))
+            .await;
+        CensusAdapter::new(mock.base_url()).with_states_url(mock.url(STATES_PATH))
+    }
+
+    fn fixture_states() -> Vec<UsState> {
+        parse_state_file(STATES).unwrap()
+    }
 
     fn d(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
@@ -663,40 +893,56 @@ mod tests {
             1,
         )
         .await;
-        let found = CensusAdapter::new(mock.base_url())
-            .discover(&test_ctx())
-            .await
-            .unwrap();
+        let found = adapter(&mock).await.discover(&test_ctx()).await.unwrap();
         // 3 economic variables x (national + 50 states + DC).
-        let states = us_states().unwrap();
+        let states = &fixture_states();
         assert_eq!(states.len(), 51);
         assert_eq!(found.len(), 3 * (1 + states.len()));
         let ids: HashSet<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
+        assert_eq!(ids.len(), found.len(), "external ids are unique");
+        let by_id = |id: &str| {
+            found
+                .iter()
+                .find(|s| s.external_id == id)
+                .unwrap_or_else(|| panic!("{id} not discovered"))
+        };
+        let dims = |s: &DiscoveredSeries| {
+            let ds = &s.dataset;
+            assert_eq!(ds.code, BDS_DATASET, "{}", s.external_id);
+            ["geo_level", "state", "variable"].map(|k| ds.dimensions.0[k].clone())
+        };
         for var in ["ESTAB", "FIRM", "JOB_CREATION"] {
-            assert!(
-                ids.contains(format!("CENSUS_BDS_{var}_us").as_str()),
-                "{var}"
-            );
+            let national = by_id(&format!("bds/national..{var}"));
+            assert_eq!(dims(national), ["national", "", var]);
             for s in states {
-                let id = format!("CENSUS_BDS_{var}_state_{}", s.fips);
-                assert!(ids.contains(id.as_str()), "{id}");
+                let series = by_id(&format!("bds/state.{}.{var}", s.fips));
+                assert_eq!(dims(series), ["state", s.fips.as_str(), var]);
             }
         }
-        // No bare per-level ids: those are not single series.
-        assert!(!ids.contains("CENSUS_BDS_ESTAB_state"));
-        let by_id = |id: &str| found.iter().find(|s| s.external_id == id).unwrap();
-        let estab_us = by_id("CENSUS_BDS_ESTAB_us");
+        // No bare per-level or old-style ids.
+        assert!(found.iter().all(|s| s.external_id.starts_with("bds/")));
+        // Dimension keys are unique, and the dataset contract holds.
+        let keys: HashSet<_> = found.iter().map(dims).collect();
+        assert_eq!(keys.len(), found.len());
+        crate::testkit::contract::assert_series_datasets(
+            &CensusAdapter::default(),
+            found.iter().map(|s| (s.external_id.as_str(), &s.dataset)),
+        );
+        let estab_us = by_id("bds/national..ESTAB");
         assert_eq!(estab_us.title, "Number of establishments - United States");
         assert_eq!(estab_us.units.as_deref(), Some("Count"));
         assert_eq!(estab_us.frequency.as_deref(), Some("Annual"));
-        let estab_ca = by_id("CENSUS_BDS_ESTAB_state_06");
+        let estab_ca = by_id("bds/state.06.ESTAB");
         assert_eq!(estab_ca.title, "Number of establishments - California");
         assert_eq!(
             estab_ca.description.as_deref(),
             Some("Business Dynamics Statistics: Number of establishments for California")
         );
-        // Metadata requests carry the key too.
+        // Metadata requests carry the key too (the state file is not an API request).
         for r in mock.received_requests().await {
+            if r.url.path() == STATES_PATH {
+                continue;
+            }
             let pairs: Vec<(String, String)> = r.url.query_pairs().into_owned().collect();
             assert_eq!(
                 pairs,
@@ -716,7 +962,8 @@ mod tests {
             Reply::json_str(VARIABLES),
         )
         .await;
-        let e = CensusAdapter::new(mock.base_url())
+        let e = adapter(&mock)
+            .await
             .discover(&test_ctx())
             .await
             .unwrap_err();
@@ -728,7 +975,8 @@ mod tests {
             Reply::json(serde_json::json!({"nope": 1})),
         )
         .await;
-        let e = CensusAdapter::new(mock.base_url())
+        let e = adapter(&mock)
+            .await
             .discover(&test_ctx())
             .await
             .unwrap_err();
@@ -747,11 +995,23 @@ mod tests {
             1,
         )
         .await;
-        let s = CensusAdapter::new(mock.base_url())
-            .fetch_series(&test_ctx(), "CENSUS_BDS_ESTAB_us", None)
+        let s = adapter(&mock)
+            .await
+            .fetch_series(&test_ctx(), "bds/national..ESTAB", None)
             .await
             .unwrap();
         assert_eq!(s.metadata, None);
+        assert_eq!(
+            s.dataset,
+            SeriesDataset::new(
+                BDS_DATASET,
+                [
+                    ("geo_level", "national"),
+                    ("state", ""),
+                    ("variable", "ESTAB")
+                ]
+            )
+        );
         let got: Vec<(NaiveDate, Option<String>)> = s
             .points
             .iter()
@@ -778,8 +1038,9 @@ mod tests {
         let mock = MockSource::start().await;
         mock.mount(&Route::get("/timeseries/bds"), Reply::json_str(ESTAB_US))
             .await;
-        let s = CensusAdapter::new(mock.base_url())
-            .fetch_series(&test_ctx(), "CENSUS_BDS_ESTAB_us", Some(d("2021-06-30")))
+        let s = adapter(&mock)
+            .await
+            .fetch_series(&test_ctx(), "bds/national..ESTAB", Some(d("2021-06-30")))
             .await
             .unwrap();
         let dates: Vec<NaiveDate> = s.points.iter().map(|p| p.date).collect();
@@ -794,17 +1055,17 @@ mod tests {
             .await;
         let mut ctx = test_ctx();
         ctx.keys.census = None;
-        let adapter = CensusAdapter::new(mock.base_url());
+        let adapter = adapter(&mock).await;
 
         let e = adapter
-            .fetch_series(&ctx, "CENSUS_BDS_ESTAB_us", None)
+            .fetch_series(&ctx, "bds/national..ESTAB", None)
             .await
             .unwrap_err();
         assert_eq!(e, CrawlError::Auth(MISSING_KEY.into()));
         assert!(!e.is_retryable());
         // The key is checked before the id, so an unsupported id also reports the missing key.
         let e = adapter
-            .fetch_series(&ctx, "CENSUS_BDS_ESTAB_county", None)
+            .fetch_series(&ctx, "bds/county.001.ESTAB", None)
             .await
             .unwrap_err();
         assert_eq!(e.kind(), "auth", "{e}");
@@ -832,20 +1093,219 @@ mod tests {
             ]})),
         )
         .await;
-        let found = CensusAdapter::new(mock.base_url())
-            .discover(&test_ctx())
-            .await
-            .unwrap();
+        let found = adapter(&mock).await.discover(&test_ctx()).await.unwrap();
         let mut ids: Vec<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
         ids.sort_unstable();
         assert_eq!(
             ids,
             [
-                "CENSUS_BDS_ESTAB_us",
-                "CENSUS_BDS_FIRM_us",
-                "CENSUS_BDS_JOB_CREATION_us",
+                "bds/national..ESTAB",
+                "bds/national..FIRM",
+                "bds/national..JOB_CREATION",
             ]
         );
+        // No state level, so the state file is not requested.
+        let paths: Vec<String> = mock
+            .received_requests()
+            .await
+            .iter()
+            .map(|r| r.url.path().to_string())
+            .collect();
+        assert!(!paths.iter().any(|p| p == STATES_PATH), "{paths:?}");
+    }
+
+    /// A state file that can't be read fails discovery instead of dropping (and so retiring)
+    /// every state series.
+    #[tokio::test]
+    async fn discover_fails_without_the_state_file() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/timeseries/bds/variables.json"),
+            Reply::json_str(VARIABLES),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/timeseries/bds/geography.json"),
+            Reply::json_str(GEOGRAPHY),
+        )
+        .await;
+        let adapter = CensusAdapter::new(mock.base_url()).with_states_url(mock.url(STATES_PATH));
+        mock.mount(
+            &Route::get(STATES_PATH),
+            Reply::text("STATE|STUSAB|STATE_NAME\n06|CA|California\n"),
+        )
+        .await;
+        let e = adapter.discover(&test_ctx()).await.unwrap_err();
+        assert_eq!(e.kind(), "parse", "{e}");
+        assert!(e.to_string().contains("found 1"), "{e}");
+    }
+
+    #[test]
+    fn parse_state_file_keeps_states_and_dc_only() {
+        let states = fixture_states();
+        assert_eq!(states.len(), US_STATE_COUNT);
+        assert_eq!(states.first().unwrap().fips, "01");
+        assert_eq!(states.last().unwrap().fips, "56");
+        let dc = states.iter().find(|s| s.fips == "11").unwrap();
+        assert_eq!(dc.name, "District of Columbia");
+        assert!(!states.iter().any(|s| s.name == "Puerto Rico"));
+    }
+
+    #[test]
+    fn parse_state_file_finds_columns_by_name_and_tolerates_bom_and_crlf() {
+        let mut text = String::from("\u{feff}STATENS|STATE_NAME|STUSAB|STATE\r\n");
+        for s in fixture_states() {
+            text.push_str(&format!("x|{}|ZZ|{}\r\n", s.name, s.fips));
+        }
+        assert_eq!(parse_state_file(&text).unwrap(), fixture_states());
+    }
+
+    #[test]
+    fn parse_state_file_rejects_bad_files() {
+        for (text, want) in [
+            ("", "empty body"),
+            ("STATE|STUSAB\n01|AL\n", "no \"STATE_NAME\" column"),
+            ("STATE|STATE_NAME\n01\n", "short row"),
+            ("STATE|STATE_NAME\n01|\n", "has no name"),
+            ("STATE|STATE_NAME\n01|Alabama\n", "found 1"),
+            ("STATE|STATE_NAME\n01|Alabama\n01|Alabama\n", "listed twice"),
+        ] {
+            let e = parse_state_file(text).unwrap_err();
+            assert_eq!(e.kind(), "parse", "{text:?}");
+            assert!(e.to_string().contains(want), "{text:?}: {e}");
+        }
+    }
+
+    #[test]
+    fn state_fips_range() {
+        for ok in ["01", "06", "11", "56"] {
+            assert!(is_state_fips(ok), "{ok}");
+        }
+        for bad in ["00", "57", "60", "72", "6", "006", "+6", "ab", ""] {
+            assert!(!is_state_fips(bad), "{bad}");
+        }
+    }
+
+    /// The refresh merges the state names into the dataset's `state` codes and caches the
+    /// ETag; an unchanged file (304) is not parsed again.
+    #[tokio::test]
+    async fn refresh_reference_data_merges_state_names_and_caches_etag() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_census_refresh_states",
+        )
+        .await;
+        let mut catalog = crate::dataset::DatasetCatalog::empty();
+        catalog
+            .insert(
+                SourceId::Census,
+                &[BDS_DATASET],
+                crate::dataset::parse_dataset_file(
+                    &std::fs::read_to_string(
+                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("data/datasets/census.toml"),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        crate::persist::sync_datasets(&db.pool, &catalog)
+            .await
+            .unwrap();
+
+        let mock = MockSource::start().await;
+        // A request carrying the cached ETag gets 304 (higher priority than the 200 below).
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(STATES_PATH))
+            .and(wiremock::matchers::header("If-None-Match", "\"v1\""))
+            .respond_with(wiremock::ResponseTemplate::new(304))
+            .with_priority(1)
+            .mount(mock.server())
+            .await;
+        mock.mount(
+            &Route::get(STATES_PATH),
+            Reply::text(STATES).header("ETag", "\"v1\""),
+        )
+        .await;
+        let adapter = CensusAdapter::new(mock.base_url()).with_states_url(mock.url(STATES_PATH));
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+
+        adapter.refresh_reference_data(&ctx).await.unwrap();
+        let codes = state_codes(&db.pool).await;
+        assert_eq!(codes.len(), US_STATE_COUNT);
+        assert!(codes.contains(&("06".to_string(), "California".to_string())));
+        let url = mock.url(STATES_PATH);
+        assert_eq!(
+            crate::persist::reference_file_etag(&db.pool, SourceId::Census, &url)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("\"v1\"")
+        );
+
+        // Second refresh: 304, nothing re-merged, codes unchanged.
+        adapter.refresh_reference_data(&ctx).await.unwrap();
+        assert_eq!(state_codes(&db.pool).await, codes);
+        let requests = mock.received_requests().await;
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests[1]
+                .headers
+                .get("if-none-match")
+                .map(|v| v.to_str().unwrap()),
+            Some("\"v1\"")
+        );
+    }
+
+    /// The `bds` dataset's `state` codes as stored.
+    async fn state_codes(pool: &econ_graph_core::DatabasePool) -> Vec<(String, String)> {
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+        use econ_graph_core::schema::datasets::dsl;
+        let mut conn = pool.get().await.unwrap();
+        let dims: econ_graph_core::models::DatasetComponents = dsl::datasets
+            .filter(dsl::code.eq(BDS_DATASET))
+            .select(dsl::dimensions)
+            .first(&mut conn)
+            .await
+            .unwrap();
+        dims.0
+            .iter()
+            .find(|d| d.name == STATE_DIMENSION)
+            .and_then(|d| d.codes.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| (c.code, c.label))
+            .collect()
+    }
+
+    /// Variables whose names fetch could not handle are skipped, not fatal.
+    #[tokio::test]
+    async fn discover_skips_variables_with_unfetchable_names() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/timeseries/bds/variables.json"),
+            Reply::json(serde_json::json!({"variables": {
+                "ESTAB": {"label": "Number of establishments"},
+                "EMP.X": {"label": "Employment, dotted"},
+                "EMP/X": {"label": "Employment, slashed"},
+                "EMP-X": {"label": "Employment, dashed"},
+            }})),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/timeseries/bds/geography.json"),
+            Reply::json(serde_json::json!({"fips": [{"name": "us"}]})),
+        )
+        .await;
+        let found = adapter(&mock).await.discover(&test_ctx()).await.unwrap();
+        let ids: Vec<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
+        assert_eq!(ids, ["bds/national..ESTAB"]);
     }
 
     /// A per-state id requests `for=state:{FIPS}` and parses its rows.
@@ -861,10 +1321,22 @@ mod tests {
             1,
         )
         .await;
-        let s = CensusAdapter::new(mock.base_url())
-            .fetch_series(&test_ctx(), "CENSUS_BDS_ESTAB_state_06", None)
+        let s = adapter(&mock)
+            .await
+            .fetch_series(&test_ctx(), "bds/state.06.ESTAB", None)
             .await
             .unwrap();
+        assert_eq!(
+            s.dataset,
+            SeriesDataset::new(
+                BDS_DATASET,
+                [
+                    ("geo_level", "state"),
+                    ("state", "06"),
+                    ("variable", "ESTAB")
+                ]
+            )
+        );
         let got: Vec<(NaiveDate, Option<String>)> = s
             .points
             .iter()
@@ -880,45 +1352,86 @@ mod tests {
         mock.server().verify().await;
     }
 
-    /// Ids split into variable and area, including variables whose name ends in `_state`.
+    /// Ids split into variable and area, and round-trip through [`series_key`].
     #[test]
     fn series_id_parsing() {
         assert_eq!(
-            parse_series_id("CENSUS_BDS_ESTAB_us").unwrap(),
+            parse_series_id("bds/national..ESTAB").unwrap(),
             ("ESTAB", Area::National)
         );
         assert_eq!(
-            parse_series_id("CENSUS_BDS_JOB_CREATION_state_56").unwrap(),
+            parse_series_id("bds/state.56.JOB_CREATION").unwrap(),
             ("JOB_CREATION", Area::State("56"))
         );
-        // A variable whose own name ends in "_state" still needs a FIPS suffix.
-        assert_eq!(
-            parse_series_id("CENSUS_BDS_X_state_state_01").unwrap(),
-            ("X_state", Area::State("01"))
-        );
         // fetchable_id_regex is checked against Postgres in the scheduler's DB tests.
-        for s in us_states().unwrap() {
-            let id = format!("CENSUS_BDS_ESTAB_state_{}", s.fips);
-            assert!(parse_series_id(&id).is_ok(), "{id}");
+        for s in &fixture_states() {
+            for area in [Area::National, Area::State(&s.fips)] {
+                let (id, _) = series_key(area, "ESTAB").unwrap();
+                assert_eq!(parse_series_id(&id).unwrap(), ("ESTAB", area), "{id}");
+            }
         }
+    }
+
+    #[test]
+    fn declares_the_bds_dataset() {
+        let adapter = CensusAdapter::default();
+        assert_eq!(adapter.datasets(), [BDS_DATASET]);
+        let def = bds_dataset().unwrap();
+        assert_eq!(
+            def.dimension_names().collect::<Vec<_>>(),
+            ["geo_level", "state", "variable"]
+        );
+        let mut catalog = crate::dataset::DatasetCatalog::empty();
+        catalog.load_adapter(&adapter).unwrap();
+        assert!(catalog.get(SourceId::Census, BDS_DATASET).is_some());
+        // Inline codes aren't a closed list, so pin them here: renaming a code in census.toml
+        // would otherwise pass every other test while disagreeing with the constants this file
+        // actually stores in dimensions.
+        let geo_level = &def.dimensions[0];
+        let codes: Vec<&str> = geo_level
+            .codes
+            .as_ref()
+            .expect("geo_level has inline codes")
+            .iter()
+            .map(|c| c.code.as_str())
+            .collect();
+        assert_eq!(codes, [NATIONAL_LEVEL, STATE_LEVEL]);
+        // The state names are fetched (see `refresh_reference_data`), never shipped.
+        let state = &def.dimensions[1];
+        assert_eq!(state.name, STATE_DIMENSION);
+        assert!(state.codes.is_none() && state.codelist.is_none());
     }
 
     /// Bare levels, unknown FIPS codes, malformed and foreign ids fail before any request.
     #[tokio::test]
     async fn fetch_rejects_unsupported_and_foreign_ids_without_requests() {
         let mock = MockSource::start().await;
-        let adapter = CensusAdapter::new(mock.base_url());
+        let adapter = adapter(&mock).await;
         for id in [
-            "CENSUS_BDS_ESTAB_state",
-            "CENSUS_BDS_ESTAB_county",
-            "CENSUS_BDS_ESTAB_state_03",
-            "CENSUS_BDS_ESTAB_state_6",
-            "CENSUS_BDS_ESTAB_state_06x",
-            "CENSUS_BDS__state_06",
+            // Old-style ids.
+            "CENSUS_BDS_ESTAB_us",
+            "CENSUS_BDS_ESTAB_state_06",
+            // Bare or unsupported levels, and a state on a national series.
+            "bds/state..ESTAB",
+            "bds/county.001.ESTAB",
+            "bds/national.06.ESTAB",
+            "bds/us..ESTAB",
+            // FIPS codes outside 01-56 (territories included) or malformed. Unused codes inside
+            // the range (`03`) go to Census, which answers with an error.
+            "bds/state.00.ESTAB",
+            "bds/state.57.ESTAB",
+            "bds/state.72.ESTAB",
+            "bds/state.6.ESTAB",
+            "bds/state.06x.ESTAB",
+            // Missing or unsafe variables, wrong shape, foreign ids.
+            "bds/state.06.",
+            "bds/national..",
+            "bds/national.ESTAB",
+            "bds/national..ESTAB&x=1",
+            "bds/state.06.ESTAB&x=1",
+            "bds/national..A.B",
+            "bdsx/national..ESTAB",
             "GDP",
-            "CENSUS_BDS__us",
-            "CENSUS_BDS_ESTAB&x=1_us",
-            "CENSUS_BDS_ESTAB&x=1_state_06",
         ] {
             let e = adapter
                 .fetch_series(&test_ctx(), id, None)
@@ -938,8 +1451,9 @@ mod tests {
             Reply::text("error: unknown variable 'NOPE'").with_status(400),
         )
         .await;
-        let e = CensusAdapter::new(mock.base_url())
-            .fetch_series(&test_ctx(), "CENSUS_BDS_NOPE_us", None)
+        let e = adapter(&mock)
+            .await
+            .fetch_series(&test_ctx(), "bds/national..NOPE", None)
             .await
             .unwrap_err();
         assert_eq!(e.kind(), "not_found", "{e}");
@@ -952,8 +1466,9 @@ mod tests {
             Reply::text("<html><body><h1>Invalid Key</h1><p>A valid key must be included with each data API request.</p></body></html>"),
         )
         .await;
-        let e = CensusAdapter::new(mock.base_url())
-            .fetch_series(&test_ctx(), "CENSUS_BDS_ESTAB_us", None)
+        let e = adapter(&mock)
+            .await
+            .fetch_series(&test_ctx(), "bds/national..ESTAB", None)
             .await
             .unwrap_err();
         assert_eq!(e.kind(), "auth", "{e}");
@@ -965,7 +1480,22 @@ mod tests {
             Reply::text("<html><body><h1>Invalid Key</h1></body></html>"),
         )
         .await;
-        let e = CensusAdapter::new(mock.base_url())
+        let e = adapter(&mock)
+            .await
+            .discover(&test_ctx())
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind(), "auth", "{e}");
+
+        // Invalid key on a metadata file: discovery fails with Auth, not Parse.
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/timeseries/bds/variables.json"),
+            Reply::text("<html><body><h1>Invalid Key</h1></body></html>"),
+        )
+        .await;
+        let e = adapter(&mock)
+            .await
             .discover(&test_ctx())
             .await
             .unwrap_err();
@@ -975,8 +1505,9 @@ mod tests {
         let mock = MockSource::start().await;
         mock.mount(&Route::get("/timeseries/bds"), Reply::status(204))
             .await;
-        let e = CensusAdapter::new(mock.base_url())
-            .fetch_series(&test_ctx(), "CENSUS_BDS_ESTAB_us", None)
+        let e = adapter(&mock)
+            .await
+            .fetch_series(&test_ctx(), "bds/national..ESTAB", None)
             .await
             .unwrap_err();
         assert_eq!(e.kind(), "not_found", "{e}");
@@ -1016,12 +1547,20 @@ mod contract {
     use crate::testkit::{Reply, Route};
 
     crate::adapter_contract_tests! {
-        adapter: |base_url: String| CensusAdapter::new(base_url),
-        external_id: "CENSUS_BDS_ESTAB_us",
+        adapter: |base_url: String| {
+            let states = format!("{base_url}/geo/state.txt");
+            CensusAdapter::new(base_url).with_states_url(states)
+        },
+        external_id: "bds/national..ESTAB",
         route: Route::get("/timeseries/bds").query("get", "ESTAB,YEAR").query("for", "us:*"),
         ok_reply: Reply::json_str(include_str!("../../tests/fixtures/census/bds_estab_us.json")),
         expect_points: 4,
         setup: |mock| {
+            mock.mount(
+                &Route::get("/geo/state.txt"),
+                Reply::text(include_str!("../../tests/fixtures/census/state.txt")),
+            )
+            .await;
             mock.mount(
                 &Route::get("/timeseries/bds/geography.json"),
                 Reply::json_str(include_str!("../../tests/fixtures/census/geography.json")),

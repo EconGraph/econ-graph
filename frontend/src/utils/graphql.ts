@@ -31,10 +31,12 @@ export interface GraphQLRequest {
 /**
  * Execute a GraphQL query against the backend.
  * @param request - The GraphQL request object containing query, variables, and operation name.
+ * @param signal - Optional AbortSignal passed to fetch; aborting it rejects with an AbortError.
  * @returns Promise that resolves to the GraphQL response.
  */
 export async function executeGraphQL<T = any>(
-  request: GraphQLRequest
+  request: GraphQLRequest,
+  signal?: AbortSignal
 ): Promise<GraphQLResponse<T>> {
   // Debug logging disabled for browser compatibility
   // if (MSW_DEBUG) {
@@ -53,6 +55,7 @@ export async function executeGraphQL<T = any>(
     method: 'POST',
     headers,
     body: JSON.stringify(request),
+    signal,
   });
 
   if (!response.ok) {
@@ -125,19 +128,22 @@ export const QUERIES = {
     }
   `,
 
-  // Get series observations, transformed on the backend
+  // One page of series observations, transformed on the backend. Pass the previous page's
+  // endCursor as `after` until hasNextPage is false.
   GET_SERIES_DATA: `
     query GetSeriesData(
       $seriesId: ID!
       $filter: DataFilter
       $transformation: DataTransformation
       $first: Int
+      $after: String
     ) {
       seriesData(
         seriesId: $seriesId
         filter: $filter
         transformation: $transformation
         first: $first
+        after: $after
       ) {
         nodes {
           date
@@ -146,6 +152,10 @@ export const QUERIES = {
           isOriginalRelease
         }
         totalCount
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
       }
     }
   `,
@@ -321,75 +331,6 @@ export const QUERIES = {
         createdAt
         updatedAt
         lastLoginAt
-      }
-    }
-  `,
-
-  // Global Analysis queries
-  GET_COUNTRIES_WITH_ECONOMIC_DATA: `
-    query GetCountriesWithEconomicData {
-      countriesWithEconomicData {
-        id
-        name
-        isoAlpha2
-        isoAlpha3
-        region
-        subRegion
-        latitude
-        longitude
-        gdpUsd
-        population
-        economicIndicators {
-          indicatorName
-          indicatorCode
-          value
-          date
-        }
-      }
-    }
-  `,
-
-  GET_CORRELATION_NETWORK: `
-    query GetCorrelationNetwork($indicatorCategory: String) {
-      correlationNetwork(indicatorCategory: $indicatorCategory) {
-        countryAId
-        countryBId
-        indicatorCode
-        correlationCoefficient
-        pValue
-        startDate
-        endDate
-        countryA {
-          name
-          isoAlpha2
-        }
-        countryB {
-          name
-          isoAlpha2
-        }
-      }
-    }
-  `,
-
-  GET_GLOBAL_EVENTS_WITH_IMPACTS: `
-    query GetGlobalEventsWithImpacts($minImpactScore: Int) {
-      globalEventsWithImpacts(minImpactScore: $minImpactScore) {
-        id
-        name
-        description
-        eventType
-        severity
-        startDate
-        endDate
-        countryImpacts {
-          country {
-            name
-            isoAlpha2
-          }
-          impactSeverity
-          recoveryStatus
-          impactDescription
-        }
       }
     }
   `,

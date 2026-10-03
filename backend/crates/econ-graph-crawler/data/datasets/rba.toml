@@ -1,0 +1,9 @@
+# Reserve Bank of Australia dataset definitions. See README.md in this directory for the format.
+#
+# Development only: a static catalog (econ-graph-crawler src/sources/static_catalogs.rs), not a
+# live integration. Its hardcoded series ids are opaque, so it is one dataset with no dimensions.
+
+[[dataset]]
+code = "catalog"
+name = "Reserve Bank of Australia catalog"
+description = "Hardcoded development catalog of Reserve Bank of Australia series (no live data)"

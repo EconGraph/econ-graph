@@ -4,42 +4,122 @@
 
 //! Bureau of Labor Statistics (BLS) Public Data API v2 adapter.
 //!
+//! # Discovery
+//!
+//! Which series to crawl is curated: `bls_series.csv` in the crawler data directory
+//! ([`crate::reference::bls_series`], read at runtime) lists their ids (headline CPI-U, CES
+//! payrolls and earnings, CPS labor force measures, and LAUS state unemployment rates and labor
+//! force). What they are comes from BLS: each survey's series catalog (`cu.series`, `ce.series`,
+//! `la.series`, `ln.series` under [`DEFAULT_DOWNLOAD_URL`], see [`SERIES_FILES`]) gives the title,
+//! the frequency (from the latest period, `end_period`) and, for CPI, the index base. Units come
+//! from the index base (CU), or from the label of the series' own data type (CE) or measure (LA)
+//! code; LN's flat files carry none, so LN series have units only after a fetch with a key (from
+//! the API catalog), and none at all on an install without `BLS_API_KEY`.
+//!
+//! [`refresh_reference_data`](SourceAdapter::refresh_reference_data), which the worker runs just
+//! before each scheduled discovery, re-fetches each series file by conditional GET and stores the
+//! rows of the curated series with the file's `ETag` (`reference_file_cache.payload`). A `304`
+//! keeps the stored rows. [`discover`](SourceAdapter::discover) then reads only the stored rows,
+//! so it makes no API request and costs none of BLS's daily quota. A curated series whose
+//! survey file has never loaded, or that BLS's file doesn't list, is left out of that discovery
+//! (with a warning) rather than listed with a made-up title. An unloaded file's series are
+//! listed once it loads; a series the file doesn't list, once BLS publishes a file that does.
+//!
 //! # Fetching
 //!
 //! `POST {base}/timeseries/data/` with
-//! `{"seriesid": [id], "startyear": "YYYY", "endyear": "YYYY", "catalog": true, "registrationkey"?: key}`.
-//! `registrationkey` is sent only when `ctx.keys.bls` is set.
+//! `{"seriesid": [ids..], "startyear": "YYYY", "endyear": "YYYY", "catalog": true, "registrationkey"?: key}`.
+//! `registrationkey` is sent only when `ctx.keys.bls` (`BLS_API_KEY`) is set.
+//!
+//! With a key, each series in the response carries BLS's `catalog`: its title, survey name,
+//! seasonality and `measure_data_type` (units) become the series metadata. Without a key there
+//! is no catalog, so the fetch reports only the frequency (from the periods) and the seasonal
+//! adjustment (from the id), and the stored series keeps the title and units discovery wrote from
+//! the survey series files (see [`persist::persist_series`]). A field the catalog leaves out falls
+//! back the same way.
+//!
+//! Every BLS series shares one [`batch_key`](SourceAdapter::batch_key), so the worker fetches up
+//! to the policy's `max_batch` series in one request: [`MAX_SERIES_WITH_KEY`] (50) with a key,
+//! [`MAX_SERIES_WITHOUT_KEY`] (25) without, BLS's per-request limits.
+//! [`fetch_batch`](SourceAdapter::fetch_batch) also splits
+//! a longer list into requests of that size, so a keyless context never sends 50.
 //!
 //! BLS caps the year span of one request (20 years with a registration key, 10 without), so a
 //! fetch is split into windows of that size, newest first:
-//! - `since = Some(d)`: from `d.year()` to the current year; points before `d` are dropped.
+//! - `since = Some(d)`: from `d.year()` to the current year; points before `d` are dropped. In a
+//!   batch, `since` is the earliest of the batch's series.
 //! - `since = None`: the last [`HISTORY_YEARS`] years (one request with a key, two without).
 //!
-//! Once a window has returned data, an older window that returns none ends the fetch early
-//! (the series did not exist that far back).
+//! Once a window has returned data for a series, an older window that returns none for it drops
+//! the series from later windows (it did not exist that far back); the fetch ends when no series
+//! is left.
+//!
+//! # Request budget
+//!
+//! BLS allows 500 requests a day with a key and 25 without. For the shipped list (291 series,
+//! all monthly), with full batches:
+//! - With a key: 6 requests for the first 20-year fetch, and 6 for each weekly refresh
+//!   (the 5-year revision lookback fits one window). Even one request per series (291) fits.
+//! - Without a key: 12 batches of 25, so 24 requests for the first fetch (two 10-year windows)
+//!   and 12 for each refresh. That leaves no headroom on the first day: a retry, a partial
+//!   batch or a manual CLI fetch goes over, and the excess waits as `RateLimited`. Set a key.
+//!
+//! A batch's `since` is its earliest series', so one series with no stored points (a row added
+//! later, or an id that keeps failing) turns its whole batch into a full 20-year fetch: two
+//! requests per batch without a key instead of one (one with a key). An unrecognised
+//! not-processed error retries the whole batch up to the policy's `max_retries` times.
+//!
+//! Discovery writes only `series_metadata`. Until the scheduler also fetches discovered series
+//! (DATA-13, #228), the first fetch of a newly listed series needs `crawler enqueue --source BLS
+//! --series <ids>`.
 //!
 //! # Errors
 //!
 //! BLS answers HTTP 200 even on failure, with `status` and `message` in the body:
 //! - a message about the daily threshold / "exceeded" (request not processed) -> `RateLimited { retry_after: None }`
-//! - "Series does not exist" (any status), or no data at all with `since = None` -> `NotFound`
-//! - a not-processed message about an invalid/unregistered key -> `Auth`
-//! - any other status than `REQUEST_SUCCEEDED` -> `Permanent`
+//!   for the whole batch
+//! - "Series does not exist for Series X" -> `NotFound` for series X only; the rest of the batch
+//!   is kept. On an older window, after X returned data from newer ones, it only marks the end
+//!   of X's history and the data is kept
+//! - no data at all with `since = None` -> `NotFound` for that series
+//! - a not-processed message about an invalid/unregistered key -> `Auth` for the whole batch
+//! - a not-processed response whose only messages are per-series ("does not exist", "No Data
+//!   Available") -> `NotFound` for series named as not existing (or the end of their history, as
+//!   above) and `Transient` for any it left out
+//! - "invalid parameter" -> `Permanent` for the whole batch
+//! - any other status than `REQUEST_SUCCEEDED` -> `Transient` for the whole batch, so the worker
+//!   retries it up to `max_retries` instead of failing up to 50 series for good
 //!
 //! HTTP-level errors are mapped by [`HttpFetcher`](crate::HttpFetcher). The registration key is
 //! scrubbed from every message this module builds.
 //!
-//! # Periods
+//! # Periods and footnotes
 //!
 //! [`parse_period`] is the single period parser (it replaces `parse_bls_date` and
 //! `convert_bls_period_to_date` from the old services). Dates are period *starts*:
 //! `M01..M12` -> 1st of the month, `Q01..Q04` -> 1st of Jan/Apr/Jul/Oct, `S01`/`S02` -> Jan 1 /
-//! Jul 1, `A01` -> Jan 1. `M13` (annual average of a monthly series) is skipped: it is derived
-//! from the monthly values and would otherwise collide with `M01`. Unknown periods are skipped.
+//! Jul 1, `A01` -> Jan 1. Annual averages (`M13`, `Q05`, `S03`) are skipped: they are derived
+//! from the other periods and would otherwise collide with them. Unknown periods are skipped.
+//!
+//! Each observation's `footnotes` (`{code, text}`; `[{}]` means none) are parsed. A value such
+//! as `"-"` with footnote `X` ("data unavailable") is stored as a missing value, and the
+//! footnote text is logged. `P` (preliminary) values are stored like any other: BLS replaces
+//! them on a later crawl. `data_points` has no column for footnotes yet, so they are not
+//! stored.
 //!
 //! BLS keeps no vintages, so every point has `revision_date = date` and
 //! `is_original_release = true` (as the old services did); re-crawls overwrite in place.
+//!
+//! # Datasets
+//!
+//! Each survey with a layout in [`SERIES_ID_LAYOUTS`] is one dataset, coded by its two-letter
+//! series id prefix and defined in `data/datasets/bls.toml`. A series id is that prefix followed
+//! by fixed-width fields, which [`series_dataset`] splits into the dataset's dimensions. Series
+//! keep their BLS ids as external ids, since the API takes those. Every series needs a dataset, so
+//! a series of any other survey, or whose id does not fit its survey's layout, goes in the
+//! dimensionless [`OTHER_DATASET`] until its survey gets a layout.
 
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::str::FromStr;
 
 use async_trait::async_trait;
@@ -48,14 +128,26 @@ use chrono::{Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
+use econ_graph_core::error::AppError;
+use econ_graph_core::models::Code;
+
 use crate::adapter::{
-    CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, NewSeriesMetadataLite, SourceAdapter,
+    ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
+    NewSeriesMetadataLite, SourceAdapter,
 };
+use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
+use crate::persist;
+use crate::policy::SourcePolicy;
+use crate::reference::{bls_series, BlsSeries};
+use crate::reference_file::{self, labels_only, CodeList, ReferenceFile};
 use crate::source::SourceId;
 
 /// The real BLS Public Data API v2 root.
 pub const DEFAULT_BASE_URL: &str = "https://api.bls.gov/publicAPI/v2";
+
+/// Root of BLS's flat files: survey code lists and series catalogs.
+pub const DEFAULT_DOWNLOAD_URL: &str = "https://download.bls.gov/pub/time.series";
 
 /// Years fetched when no `since` is given.
 pub const HISTORY_YEARS: i32 = 20;
@@ -65,12 +157,57 @@ const MAX_YEARS_WITH_KEY: i32 = 20;
 /// Maximum years per request without a registration key.
 const MAX_YEARS_WITHOUT_KEY: i32 = 10;
 
+/// Maximum series per request with a registration key.
+pub const MAX_SERIES_WITH_KEY: usize = 50;
+/// Maximum series per request without a registration key.
+pub const MAX_SERIES_WITHOUT_KEY: usize = 25;
+
+/// The batch key every BLS series shares: any series can go in one request.
+const BATCH_KEY: &str = "timeseries";
+
 const STATUS_SUCCEEDED: &str = "REQUEST_SUCCEEDED";
 
-/// BLS adapter. See the module docs for request shape, windowing and error mapping.
+/// Prefix of BLS's per-series "does not exist" message; the series id follows it.
+const DOES_NOT_EXIST: &str = "series does not exist for series ";
+
+/// Prefix of BLS's informational "no data" message; the series id follows it.
+const NO_DATA_FOR_SERIES: &str = "no data available for series ";
+
+/// Series id layouts of the surveys that are datasets: the two-letter prefix (also the dataset
+/// code), then each dimension's name and width in id order. A width of 0 takes the rest of the
+/// id and is only used last. See <https://www.bls.gov/help/hlpforma.htm>.
+pub const SERIES_ID_LAYOUTS: &[(&str, &[(&str, usize)])] = &[
+    // CPI-U: CUUR0000SA0.
+    (
+        "CU",
+        &[
+            ("seasonal", 1),
+            ("periodicity", 1),
+            ("area", 4),
+            ("item", 0),
+        ],
+    ),
+    // CES national: CES0000000001.
+    ("CE", &[("seasonal", 1), ("industry", 8), ("data_type", 2)]),
+    // CPS: LNS14000000.
+    ("LN", &[("seasonal", 1), ("series_code", 8)]),
+    // LAUS: LASST060000000000003.
+    ("LA", &[("seasonal", 1), ("area", 15), ("measure", 2)]),
+];
+
+/// Dataset of BLS series without a layout in [`SERIES_ID_LAYOUTS`]: no dimensions, keyed by the
+/// BLS series id, like FRED.
+pub const OTHER_DATASET: &str = "other";
+
+/// The codes in [`SERIES_ID_LAYOUTS`] and [`OTHER_DATASET`], for [`SourceAdapter::datasets`].
+const DATASET_CODES: &[&str] = &["CU", "CE", "LN", "LA", OTHER_DATASET];
+
+/// BLS adapter. See the module docs for request shape, batching, windowing and error mapping.
 #[derive(Debug, Clone)]
 pub struct BlsAdapter {
     base_url: String,
+    /// Root of the survey series files ([`SERIES_FILES`]), no trailing slash.
+    download_url: String,
     /// Fixed "current year" for tests; `None` uses the clock.
     current_year: Option<i32>,
 }
@@ -80,8 +217,22 @@ impl BlsAdapter {
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
+            download_url: DEFAULT_DOWNLOAD_URL.to_string(),
             current_year: None,
         }
+    }
+
+    /// Reads the survey series files ([`SERIES_FILES`]) under `download_url` (no trailing slash)
+    /// instead of [`DEFAULT_DOWNLOAD_URL`] (a mirror, or a mock upstream in tests).
+    pub fn with_download_url(mut self, download_url: impl Into<String>) -> Self {
+        self.download_url = download_url.into().trim_end_matches('/').to_string();
+        self
+    }
+
+    /// URL of `survey`'s series file, e.g. `{download_url}/cu/cu.series`.
+    fn series_file_url(&self, survey: &str) -> String {
+        let dir = survey.to_ascii_lowercase();
+        format!("{}/{dir}/{dir}.series", self.download_url)
     }
 
     #[cfg(test)]
@@ -101,13 +252,30 @@ impl Default for BlsAdapter {
     }
 }
 
+/// The BLS policy: the built-in one with `max_batch` at BLS's per-request series limit, which
+/// depends on whether a registration key is configured.
+pub fn policy(keyed: bool) -> SourcePolicy {
+    SourcePolicy {
+        max_batch: max_series_per_request(keyed),
+        ..SourcePolicy::default_for(SourceId::Bls)
+    }
+}
+
+fn max_series_per_request(keyed: bool) -> usize {
+    if keyed {
+        MAX_SERIES_WITH_KEY
+    } else {
+        MAX_SERIES_WITHOUT_KEY
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Wire types
 // ---------------------------------------------------------------------------------------------
 
 #[derive(Serialize)]
 struct DataRequest<'a> {
-    seriesid: [&'a str; 1],
+    seriesid: &'a [&'a str],
     startyear: String,
     endyear: String,
     catalog: bool,
@@ -115,10 +283,21 @@ struct DataRequest<'a> {
     registrationkey: Option<&'a str>,
 }
 
+/// Deserializes a JSON array field that BLS may send as an explicit `null` (not just omit) as an
+/// empty `Vec`. `#[serde(default)]` alone only covers a missing field, not an explicit `null`,
+/// which would otherwise fail the whole batch with a `Parse` error.
+fn null_as_empty_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::deserialize(deserializer)?.unwrap_or_default())
+}
+
 #[derive(Debug, Deserialize)]
 struct DataResponse {
     status: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
     message: Vec<String>,
     #[serde(rename = "Results", default)]
     results: Option<DataResults>,
@@ -126,15 +305,17 @@ struct DataResponse {
 
 #[derive(Debug, Default, Deserialize)]
 struct DataResults {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
     series: Vec<SeriesBody>,
 }
 
 #[derive(Debug, Deserialize)]
 struct SeriesBody {
+    #[serde(rename = "seriesID", default)]
+    series_id: Option<String>,
     #[serde(default)]
     catalog: Option<Catalog>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
     data: Vec<DataPoint>,
 }
 
@@ -155,28 +336,47 @@ struct DataPoint {
     year: String,
     period: String,
     value: String,
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    footnotes: Vec<Footnote>,
 }
 
-#[derive(Debug, Deserialize)]
-struct SurveysResponse {
-    status: String,
+/// One observation footnote. BLS sends `[{}]` for "no footnotes", so both fields are optional.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+struct Footnote {
     #[serde(default)]
-    message: Vec<String>,
-    #[serde(rename = "Results")]
-    results: SurveysResults,
+    code: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct SurveysResults {
-    #[serde(default)]
-    survey: Vec<Survey>,
-}
+impl DataPoint {
+    /// Footnotes that carry a code or text (the `{}` placeholder dropped).
+    fn footnotes(&self) -> impl Iterator<Item = &Footnote> {
+        self.footnotes.iter().filter(|f| {
+            f.code.as_deref().is_some_and(|c| !c.trim().is_empty())
+                || f.text.as_deref().is_some_and(|t| !t.trim().is_empty())
+        })
+    }
 
-#[derive(Debug, Deserialize)]
-struct Survey {
-    survey_abbreviation: String,
-    #[serde(default)]
-    survey_name: String,
+    /// Whether BLS marked the value preliminary (footnote code `P`).
+    fn is_preliminary(&self) -> bool {
+        self.footnotes()
+            .any(|f| f.code.as_deref().map(str::trim) == Some("P"))
+    }
+
+    /// The footnotes as `code: text` pairs, for logs.
+    fn footnote_summary(&self) -> String {
+        self.footnotes()
+            .map(|f| {
+                format!(
+                    "{}: {}",
+                    f.code.as_deref().unwrap_or("").trim(),
+                    f.text.as_deref().unwrap_or("").trim()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -185,8 +385,8 @@ struct Survey {
 
 /// Converts a BLS `year` + `period` code to the period's start date.
 ///
-/// Returns `Ok(None)` for periods that are deliberately skipped (`M13` annual averages and
-/// unknown codes) and `Err(Parse)` for an unparsable year.
+/// Returns `Ok(None)` for periods that are deliberately skipped (annual averages `M13`, `Q05`,
+/// `S03` and unknown codes) and `Err(Parse)` for an unparsable year.
 pub fn parse_period(year: &str, period: &str) -> Result<Option<NaiveDate>, CrawlError> {
     let y: i32 = year
         .trim()
@@ -204,12 +404,17 @@ pub fn parse_period(year: &str, period: &str) -> Result<Option<NaiveDate>, Crawl
         ("Q", 1..=4) => (num - 1) * 3 + 1,
         ("S", 1..=2) => (num - 1) * 6 + 1,
         ("A", 1) => 1,
-        // M13 = annual average; anything else is unknown.
+        // M13, Q05, S03 = annual averages; anything else is unknown.
         _ => return Ok(None),
     };
     NaiveDate::from_ymd_opt(y, month, 1)
         .map(Some)
         .ok_or_else(|| CrawlError::Parse(format!("BLS: invalid date {year} {period}")))
+}
+
+/// Whether `period` is an annual average (`M13`, `Q05`, `S03`), skipped without a warning.
+fn is_annual_average(period: &str) -> bool {
+    matches!(period.trim(), "M13" | "Q05" | "S03")
 }
 
 /// Parses a BLS value. `"-"`, empty, and footnote-only markers such as `"(NA)"` (anything with
@@ -252,6 +457,459 @@ fn year_windows(start: i32, end: i32, span: i32) -> Vec<(i32, i32)> {
     windows
 }
 
+/// The dataset and dimension values of BLS series `series_id`, split by its survey's layout in
+/// [`SERIES_ID_LAYOUTS`]. `None` for a survey without a layout, an id whose length does not fit
+/// the layout, or an id with characters other than ASCII letters and digits.
+pub fn series_dataset(series_id: &str) -> Option<SeriesDataset> {
+    if !series_id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let prefix = series_id.get(..2)?;
+    let (code, layout) = SERIES_ID_LAYOUTS.iter().find(|(p, _)| *p == prefix)?;
+    let mut rest = &series_id[2..];
+    let mut dimensions = Vec::with_capacity(layout.len());
+    for &(name, width) in *layout {
+        let width = if width == 0 { rest.len() } else { width };
+        if width == 0 || rest.len() < width {
+            return None;
+        }
+        let (value, tail) = rest.split_at(width);
+        dimensions.push((name, value));
+        rest = tail;
+    }
+    rest.is_empty()
+        .then(|| SeriesDataset::new(*code, dimensions))
+}
+
+/// One of BLS's own flat-file code lists that back a dataset dimension's `codes` in
+/// `data/datasets/bls.toml`. The default `refresh_reference_data` fetches each conditionally
+/// and merges its labels into the dataset so the checked-in file's coverage doesn't have to keep
+/// up by hand with every code BLS has ever published.
+struct CodeFileSpec<'a> {
+    url: &'a str,
+    dataset: &'static str,
+    dimension: &'static str,
+    code_col: &'static str,
+    label_col: &'static str,
+}
+
+/// `series_code` (LN) isn't here: CPS has no small per-field code file like the others (its
+/// value is effectively a series' own identity), so its labels come from `ln.series`, BLS's CPS
+/// series catalog (see [`SERIES_FILES`]).
+const CODE_FILES: &[CodeFileSpec<'static>] = &[
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/cu/cu.item",
+        dataset: "CU",
+        dimension: "item",
+        code_col: "item_code",
+        label_col: "item_name",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/cu/cu.area",
+        dataset: "CU",
+        dimension: "area",
+        code_col: "area_code",
+        label_col: "area_name",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/ce/ce.industry",
+        dataset: "CE",
+        dimension: "industry",
+        code_col: "industry_code",
+        label_col: "industry_name",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/ce/ce.datatype",
+        dataset: "CE",
+        dimension: "data_type",
+        code_col: "data_type_code",
+        label_col: "data_type_text",
+    },
+    CodeFileSpec {
+        url: "https://download.bls.gov/pub/time.series/la/la.area",
+        dataset: "LA",
+        dimension: "area",
+        code_col: "area_code",
+        label_col: "area_text",
+    },
+];
+
+/// Where discovery takes a survey's units from: BLS's `.series` files have no units column.
+///
+/// These are BLS's flat-file wordings, which can differ from the API catalog's
+/// `measure_data_type` that a keyed fetch stores afterwards (`Index 1982-84=100` here vs
+/// `Index 1982-1984=100` in the catalog; for LA the measure name, e.g. `Unemployment rate`).
+/// Both are BLS's own; the stored series shows the catalog's once fetched with a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnitsFrom {
+    /// `Index {base_period}`, from the file's `base_period` column (CPI: `1982-84=100`).
+    IndexBase,
+    /// The stored code of the series' own value of this dataset dimension: its `unit` if it has
+    /// one, else its label (e.g. CE's `data_type` labels from `ce.datatype`).
+    Dimension(&'static str),
+    /// Nowhere in the flat files: only the API catalog's `measure_data_type` (a keyed fetch).
+    CatalogOnly,
+}
+
+/// One survey's series catalog, `{download_url}/{survey}/{survey}.series`: one tab-delimited
+/// row per series with its `series_title`, `begin_period` and survey-specific code columns.
+struct SeriesFileSpec {
+    /// Two-letter survey prefix (also the dataset code), e.g. `CU`.
+    survey: &'static str,
+    units: UnitsFrom,
+    /// The dataset dimension whose code labels are this file's series titles (LN's
+    /// `series_code`, see [`parse_ln_series_titles`]), merged on each fresh copy.
+    title_labels: Option<&'static str>,
+}
+
+/// The series files discovery reads, one per survey in [`SERIES_ID_LAYOUTS`].
+const SERIES_FILES: &[SeriesFileSpec] = &[
+    SeriesFileSpec {
+        survey: "CU",
+        units: UnitsFrom::IndexBase,
+        title_labels: None,
+    },
+    SeriesFileSpec {
+        survey: "CE",
+        units: UnitsFrom::Dimension("data_type"),
+        title_labels: None,
+    },
+    SeriesFileSpec {
+        survey: "LN",
+        units: UnitsFrom::CatalogOnly,
+        title_labels: Some("series_code"),
+    },
+    SeriesFileSpec {
+        survey: "LA",
+        units: UnitsFrom::Dimension("measure"),
+        title_labels: None,
+    },
+];
+
+/// What [`BlsAdapter::refresh_series_file`] keeps from a survey series file, as
+/// `reference_file_cache.payload`: the rows of the curated series only (`la.series` alone lists
+/// tens of thousands).
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct SeriesFilePayload {
+    /// The curated ids looked up in this copy, found or not. A `304` is only trusted for a
+    /// curated list it covers: a newly curated id needs a fresh copy to look it up in.
+    requested: BTreeSet<String>,
+    /// The rows found, by series id.
+    series: BTreeMap<String, SeriesFileRow>,
+}
+
+/// One series' row in a survey series file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct SeriesFileRow {
+    title: String,
+    /// From `end_period` (`M01` -> `Monthly`, ...), else `begin_period`.
+    #[serde(default)]
+    frequency: Option<String>,
+    /// CPI's index base (`base_period`, e.g. `1982-84=100`).
+    #[serde(default)]
+    base_period: Option<String>,
+}
+
+/// Parses a BLS flat reference file: a header row naming tab-delimited columns, then one data
+/// row per line. Returns `(code, label)` for every row that has both `code_col` and `label_col`,
+/// skipping blank lines. `Err` only if the header doesn't have both columns.
+fn parse_bls_code_file(
+    text: &str,
+    code_col: &str,
+    label_col: &str,
+) -> Result<Vec<(String, String)>, CrawlError> {
+    let mut lines = text.lines();
+    let header = lines
+        .next()
+        .ok_or_else(|| CrawlError::Parse("BLS reference file: empty body".into()))?;
+    let columns: Vec<&str> = header.split('\t').map(str::trim).collect();
+    let find = |name: &str| {
+        columns.iter().position(|c| *c == name).ok_or_else(|| {
+            CrawlError::Parse(format!("BLS reference file: no {name:?} column in header"))
+        })
+    };
+    let code_idx = find(code_col)?;
+    let label_idx = find(label_col)?;
+    Ok(lines
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split('\t').collect();
+            Some((fields.get(code_idx)?.trim(), fields.get(label_idx)?.trim()))
+        })
+        .filter(|(code, _)| !code.is_empty())
+        .map(|(code, label)| (code.to_string(), label.to_string()))
+        .collect())
+}
+
+/// The rows of a survey series file for the series in `wanted`. Columns are found by header
+/// name: `series_id` and `series_title` are required, `end_period`, `begin_period` and
+/// `base_period` are read when present. The frequency is read from the latest period
+/// (`end_period`), which is how the series is published today even if its history starts at
+/// another frequency; `begin_period` only when there is no `end_period`. Rows with an empty
+/// title are skipped. `Err` only if a required column is missing.
+fn parse_series_file(
+    text: &str,
+    wanted: &BTreeSet<String>,
+) -> Result<BTreeMap<String, SeriesFileRow>, CrawlError> {
+    let mut lines = text.lines();
+    let header = lines
+        .next()
+        .ok_or_else(|| CrawlError::Parse("BLS series file: empty body".into()))?;
+    let columns: Vec<&str> = header.split('\t').map(str::trim).collect();
+    let find = |name: &str| columns.iter().position(|c| *c == name);
+    let required = |name: &str| {
+        find(name).ok_or_else(|| {
+            CrawlError::Parse(format!("BLS series file: no {name:?} column in header"))
+        })
+    };
+    let id_idx = required("series_id")?;
+    let title_idx = required("series_title")?;
+    let begin_idx = find("begin_period");
+    let end_idx = find("end_period");
+    let base_idx = find("base_period");
+    let mut rows = BTreeMap::new();
+    for line in lines {
+        let fields: Vec<&str> = line.split('\t').map(str::trim).collect();
+        let Some(id) = fields.get(id_idx).filter(|id| wanted.contains(**id)) else {
+            continue;
+        };
+        let Some(title) = fields.get(title_idx).filter(|t| !t.is_empty()) else {
+            continue;
+        };
+        let field = |idx: Option<usize>| {
+            idx.and_then(|i| fields.get(i))
+                .filter(|v| !v.is_empty())
+                .map(|v| v.to_string())
+        };
+        rows.insert(
+            id.to_string(),
+            SeriesFileRow {
+                title: title.to_string(),
+                frequency: field(end_idx)
+                    .or_else(|| field(begin_idx))
+                    .and_then(|p| determine_frequency([p.as_str()]))
+                    .map(str::to_string),
+                base_period: field(base_idx),
+            },
+        );
+    }
+    Ok(rows)
+}
+
+/// Discovery's units for curated series `id` of a survey whose units come from `units` (see
+/// [`UnitsFrom`]), given its series file row and, for [`UnitsFrom::Dimension`], that dimension's
+/// stored codes.
+fn discovered_units(
+    units: UnitsFrom,
+    id: &str,
+    row: &SeriesFileRow,
+    codes: &BTreeMap<String, Code>,
+) -> Option<String> {
+    match units {
+        UnitsFrom::IndexBase => row.base_period.as_ref().map(|b| format!("Index {b}")),
+        UnitsFrom::Dimension(dimension) => {
+            let value = series_dataset(id)?.dimensions.0.get(dimension)?.clone();
+            let code = codes.get(&value)?;
+            Some(code.unit.clone().unwrap_or_else(|| code.label.clone()))
+        }
+        UnitsFrom::CatalogOnly => None,
+    }
+}
+
+fn db_err(e: AppError) -> CrawlError {
+    CrawlError::Transient(format!("BLS reference data: {e}"))
+}
+
+/// The rows [`BlsAdapter::refresh_series_file`] stored for the series file at `url`. `None` if
+/// none are stored, or (with a warning) if they don't parse as the current shape, in which case
+/// the next refresh downloads the file again.
+async fn stored_series_rows(
+    ctx: &CrawlCtx,
+    url: &str,
+) -> Result<Option<SeriesFilePayload>, CrawlError> {
+    let payload = persist::reference_file_cache(&ctx.pool, SourceId::Bls, url)
+        .await
+        .map_err(db_err)?
+        .payload;
+    Ok(payload.and_then(|p| match serde_json::from_value(p) {
+        Ok(rows) => Some(rows),
+        Err(e) => {
+            warn!(url, error = %e, "BLS: stored series rows don't parse; treated as not loaded");
+            None
+        }
+    }))
+}
+
+/// `series_code` -> title for every LN series in `ln.series`'s body: the id's tail after its
+/// 2-letter prefix and 1-letter seasonal code, so S/U variants of the same concept (different
+/// `series_code` values, see the module docs) each keep their own title.
+fn parse_ln_series_titles(text: &str) -> Result<Vec<(String, String)>, CrawlError> {
+    let mut lines = text.lines();
+    let header = lines
+        .next()
+        .ok_or_else(|| CrawlError::Parse("BLS reference file: empty body".into()))?;
+    let columns: Vec<&str> = header.split('\t').map(str::trim).collect();
+    let find = |name: &str| {
+        columns.iter().position(|c| *c == name).ok_or_else(|| {
+            CrawlError::Parse(format!("BLS reference file: no {name:?} column in header"))
+        })
+    };
+    let id_idx = find("series_id")?;
+    let title_idx = find("series_title")?;
+    Ok(lines
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split('\t').collect();
+            let id = fields.get(id_idx)?.trim();
+            let title = fields.get(title_idx)?.trim();
+            let code = id.strip_prefix("LN")?.get(1..)?;
+            (!code.is_empty() && !title.is_empty()).then(|| (code.to_string(), title.to_string()))
+        })
+        .collect())
+}
+
+impl CodeFileSpec<'_> {
+    /// This file as a [`CodeList`], parsed by [`parse_bls_code_file`] with its columns.
+    fn code_list(&self) -> CodeList {
+        let (code_col, label_col) = (self.code_col, self.label_col);
+        CodeList::new(
+            self.url,
+            self.dataset,
+            self.dimension,
+            labels_only(move |body| parse_bls_code_file(body, code_col, label_col)),
+        )
+    }
+}
+
+impl BlsAdapter {
+    /// [`refresh_series_file`](Self::refresh_series_file) for every survey in [`SERIES_FILES`]
+    /// with its ids from `curated`, skipping a survey with none unless its file also carries
+    /// code labels (LN). Returns one error message per file that failed; the others still run,
+    /// except after an `Auth` or `RateLimited` error, which is returned at once.
+    async fn refresh_series_files(
+        &self,
+        ctx: &CrawlCtx,
+        curated: &[BlsSeries],
+    ) -> Result<Vec<String>, CrawlError> {
+        let mut errors = Vec::new();
+        for spec in SERIES_FILES {
+            let wanted: BTreeSet<String> = curated
+                .iter()
+                .filter(|s| s.id.starts_with(spec.survey))
+                .map(|s| s.id.clone())
+                .collect();
+            if wanted.is_empty() && spec.title_labels.is_none() {
+                continue;
+            }
+            if let Err(e) = self.refresh_series_file(ctx, spec, &wanted).await {
+                if reference_file::stops_the_batch(&e) {
+                    return Err(e);
+                }
+                errors.push(format!("{}: {e}", self.series_file_url(spec.survey)));
+            }
+        }
+        Ok(errors)
+    }
+
+    /// Re-fetches `spec`'s survey series file through [`reference_file::refresh`] (a conditional
+    /// GET) and stores the rows of `wanted` (the curated ids of that survey) as the file's payload, for
+    /// [`discover`](SourceAdapter::discover). When the stored rows weren't looked up for every id
+    /// in `wanted` (a newly curated series, or a file applied before rows were kept), the stored
+    /// `ETag` is forgotten first, so the file is downloaded again rather than answered by a
+    /// `304`. For a file with [`title_labels`](SeriesFileSpec::title_labels) (LN), also merges
+    /// every series' title into that dimension's codes; if they had nowhere to land (the dataset
+    /// isn't synced yet), the `ETag` isn't stored, so the next refresh downloads the file again.
+    async fn refresh_series_file(
+        &self,
+        ctx: &CrawlCtx,
+        spec: &SeriesFileSpec,
+        wanted: &BTreeSet<String>,
+    ) -> Result<(), CrawlError> {
+        let url = self.series_file_url(spec.survey);
+        let file = ReferenceFile {
+            source: SourceId::Bls,
+            url: &url,
+        };
+        let covered = stored_series_rows(ctx, &url)
+            .await?
+            .is_some_and(|p| wanted.is_subset(&p.requested));
+        if !covered {
+            persist::clear_reference_file_etag(&ctx.pool, SourceId::Bls, &url)
+                .await
+                .map_err(db_err)?;
+        }
+        let url = url.as_str();
+        reference_file::refresh(ctx, &file, |body| {
+            Box::pin(async move {
+                let series = parse_series_file(&body, wanted)?;
+                let mut labels_landed = true;
+                if let Some(dimension) = spec.title_labels {
+                    let labels = parse_ln_series_titles(&body)?;
+                    labels_landed = persist::merge_dataset_dimension_codes(
+                        &ctx.pool,
+                        SourceId::Bls,
+                        spec.survey,
+                        dimension,
+                        &labels,
+                    )
+                    .await
+                    .map_err(db_err)?;
+                }
+                let missing: Vec<&str> = wanted
+                    .iter()
+                    .filter(|id| !series.contains_key(*id))
+                    .map(String::as_str)
+                    .collect();
+                if !missing.is_empty() {
+                    const SHOWN: usize = 20;
+                    let more = missing.len().saturating_sub(SHOWN);
+                    warn!(
+                        url,
+                        missing = missing.len(),
+                        ids = %missing[..missing.len().min(SHOWN)].join(","),
+                        more,
+                        "BLS: curated series missing from the series file"
+                    );
+                }
+                // No curated ids (the list is unreadable): the file was only fetched for its code
+                // labels, so keep the rows stored for the last list rather than replace them with
+                // none. They came from an older copy than the `ETag` about to be stored, so mark
+                // them as looked up for no id: the next refresh with a list then downloads afresh
+                // instead of taking a `304` for this copy as validating those rows.
+                let payload = if wanted.is_empty() {
+                    match stored_series_rows(ctx, url).await? {
+                        Some(stored) => SeriesFilePayload {
+                            requested: BTreeSet::new(),
+                            series: stored.series,
+                        },
+                        None => return Ok(labels_landed),
+                    }
+                } else {
+                    SeriesFilePayload {
+                        requested: wanted.clone(),
+                        series,
+                    }
+                };
+                let payload = serde_json::to_value(&payload)
+                    .map_err(|e| CrawlError::Permanent(format!("BLS series file payload: {e}")))?;
+                persist::set_reference_file_payload(&ctx.pool, SourceId::Bls, url, &payload)
+                    .await
+                    .map_err(db_err)?;
+                Ok(labels_landed)
+            })
+        })
+        .await
+        .map(|_| ())
+    }
+}
+
+/// [`CODE_FILES`] as code lists. LN's `series_code` labels aren't one: they come from `ln.series`,
+/// which [`BlsAdapter::refresh_series_file`] also reads for the curated LN series' rows, and one
+/// URL has one cached `ETag`. So no seed migration carries them; the first refresh fills them in.
+fn bls_code_lists() -> Vec<CodeList> {
+    CODE_FILES.iter().map(CodeFileSpec::code_list).collect()
+}
+
 /// Removes `secret` from `text`.
 fn scrub(text: &str, secret: Option<&str>) -> String {
     match secret {
@@ -260,23 +918,67 @@ fn scrub(text: &str, secret: Option<&str>) -> String {
     }
 }
 
-/// Maps a BLS body `status` + `message` to an error, or `Ok` if the request succeeded.
+/// Whether `message` is informational and about one series ("No Data Available for Series X
+/// Year: Y"), not a reason to fail the request.
+fn is_no_data_message(message: &str) -> bool {
+    message
+        .to_ascii_lowercase()
+        .starts_with("no data available for series")
+}
+
+/// The series id named by a "Series does not exist for Series X" message, if `message` is one.
+fn missing_series_id(message: &str) -> Option<&str> {
+    let lower = message.to_ascii_lowercase();
+    let at = lower.find(DOES_NOT_EXIST)? + DOES_NOT_EXIST.len();
+    message
+        .get(at..)?
+        .split(|c: char| c.is_whitespace() || c == ',' || c == '.')
+        .find(|s| !s.is_empty())
+}
+
+/// The series id named by a "No Data Available for Series X Year: Y" message, if `message` is
+/// one.
+fn no_data_series_id(message: &str) -> Option<&str> {
+    let lower = message.to_ascii_lowercase();
+    let at = lower.find(NO_DATA_FOR_SERIES)? + NO_DATA_FOR_SERIES.len();
+    message
+        .get(at..)?
+        .split(|c: char| c.is_whitespace() || c == ',' || c == '.')
+        .find(|s| !s.is_empty())
+}
+
+/// Maps a BLS body `status` + `message` to a whole-request error, or `Ok` if the request was
+/// processed. `ids` are the series in the request; errors name the first one and a count.
+///
+/// "Series does not exist for Series X" messages are per-series results, not request failures:
+/// they are handled by the caller, and a response carrying only those (and informational "No
+/// Data Available for Series X" messages) is `Ok` (the caller fails
+/// the series it did not get back). The other messages decide, in this order: threshold ->
+/// `RateLimited`, key problem -> `Auth`, a "series does not exist" that names no id in a
+/// single-series request -> `NotFound`, "invalid parameter" -> `Permanent`, anything else ->
+/// `Transient` (retried up to the policy's `max_retries`, so an unknown message never fails a
+/// whole batch for good on the first try).
 fn check_status(
     status: &str,
     messages: &[String],
-    series_id: &str,
+    ids: &[&str],
     key: Option<&str>,
 ) -> Result<(), CrawlError> {
-    let joined = scrub(&messages.join("; "), key);
-    let lower = joined.to_ascii_lowercase();
-    if lower.contains("series does not exist") {
-        return Err(CrawlError::NotFound(format!(
-            "BLS series {series_id}: {joined}"
-        )));
-    }
-    if status == STATUS_SUCCEEDED {
+    let requested = match ids {
+        [one] => one.to_string(),
+        [first, rest @ ..] => format!("{first} and {} more", rest.len()),
+        [] => "(none)".to_string(),
+    };
+    let other: Vec<&str> = messages
+        .iter()
+        .map(String::as_str)
+        .filter(|m| missing_series_id(m).is_none() && !is_no_data_message(m))
+        .collect();
+    if status == STATUS_SUCCEEDED || (other.is_empty() && !messages.is_empty()) {
         return Ok(());
     }
+    let joined = scrub(&other.join("; "), key);
+    let lower = joined.to_ascii_lowercase();
     if lower.contains("threshold") || lower.contains("exceeded") {
         return Err(CrawlError::RateLimited { retry_after: None });
     }
@@ -292,41 +994,21 @@ fn check_status(
     if lower.contains("key") && key_problem {
         return Err(CrawlError::Auth(format!("BLS: {joined}")));
     }
-    Err(CrawlError::Permanent(format!(
-        "BLS {status} for series {series_id}: {joined}"
-    )))
-}
-
-// ---------------------------------------------------------------------------------------------
-// Adapter
-// ---------------------------------------------------------------------------------------------
-
-impl BlsAdapter {
-    async fn fetch_window(
-        &self,
-        ctx: &CrawlCtx,
-        series_id: &str,
-        (start, end): (i32, i32),
-    ) -> Result<(Option<Catalog>, Vec<DataPoint>), CrawlError> {
-        let key = ctx.keys.bls.as_deref();
-        let url = format!("{}/timeseries/data/", self.base_url);
-        let body = DataRequest {
-            seriesid: [series_id],
-            startyear: start.to_string(),
-            endyear: end.to_string(),
-            catalog: true,
-            registrationkey: key,
-        };
-        debug!(series_id, start, end, "BLS: fetching window");
-        let resp: DataResponse = ctx
-            .http
-            .post_json(SourceId::Bls, &url, &body)
-            .await
-            .map_err(|e| scrub_error(e, key))?;
-        check_status(&resp.status, &resp.message, series_id, key)?;
-        let series = resp.results.unwrap_or_default().series.into_iter().next();
-        Ok(series.map(|s| (s.catalog, s.data)).unwrap_or_default())
+    // Only a single-series request can pin an unnamed "does not exist" on its series.
+    if lower.contains("series does not exist") && ids.len() == 1 {
+        return Err(CrawlError::NotFound(format!(
+            "BLS series {requested}: {joined}"
+        )));
     }
+    if lower.contains("invalid parameter") {
+        return Err(CrawlError::Permanent(format!(
+            "BLS {status} for series {requested}: {joined}"
+        )));
+    }
+    // Unrecognised: retry (bounded by max_retries) rather than failing a whole batch for good.
+    Err(CrawlError::Transient(format!(
+        "BLS {status} for series {requested}: {joined}"
+    )))
 }
 
 fn scrub_error(e: CrawlError, key: Option<&str>) -> CrawlError {
@@ -336,7 +1018,299 @@ fn scrub_error(e: CrawlError, key: Option<&str>) -> CrawlError {
         CrawlError::Auth(m) => CrawlError::Auth(scrub(&m, key)),
         CrawlError::Parse(m) => CrawlError::Parse(scrub(&m, key)),
         CrawlError::Permanent(m) => CrawlError::Permanent(scrub(&m, key)),
+        CrawlError::Busy {
+            retry_after,
+            message,
+        } => CrawlError::Busy {
+            retry_after,
+            message: scrub(&message, key),
+        },
         e @ CrawlError::RateLimited { .. } => e,
+    }
+}
+
+/// Seasonal adjustment as the id encodes it, for the surveys in the series list: the letter after
+/// the two-letter survey prefix is `S` (adjusted) or `U` (not), as in `CUSR`/`CUUR`,
+/// `CES`/`CEU`, `LNS`/`LNU` and `LASST`/`LAUST`.
+fn seasonal_adjustment_from_id(external_id: &str) -> Option<&'static str> {
+    match external_id.get(..3)? {
+        "CUS" | "CES" | "LNS" | "LAS" => Some("Seasonally Adjusted"),
+        "CUU" | "CEU" | "LNU" | "LAU" => Some("Not Seasonally Adjusted"),
+        _ => None,
+    }
+}
+
+/// Converts one series' raw observations to a [`FetchedSeries`], dropping points before `since`.
+fn build_series(
+    external_id: &str,
+    catalog: Option<Catalog>,
+    raw: &[DataPoint],
+    since: Option<NaiveDate>,
+) -> Result<FetchedSeries, CrawlError> {
+    let dataset = dataset_of(external_id);
+    let frequency = determine_frequency(raw.iter().map(|p| p.period.as_str()));
+    let mut points = Vec::with_capacity(raw.len());
+    let mut preliminary = 0usize;
+    for p in raw {
+        let Some(date) = parse_period(&p.year, &p.period)? else {
+            if !is_annual_average(&p.period) {
+                warn!(series = external_id, period = %p.period, "BLS: skipping unknown period");
+            }
+            continue;
+        };
+        if since.is_some_and(|s| date < s) {
+            continue;
+        }
+        let value = parse_value(&p.value)?;
+        if value.is_none() {
+            debug!(
+                series = external_id,
+                %date,
+                raw = %p.value,
+                footnotes = %p.footnote_summary(),
+                "BLS: no value"
+            );
+        }
+        if p.is_preliminary() {
+            preliminary += 1;
+        }
+        points.push(FetchedPoint {
+            date,
+            value,
+            revision_date: date,
+            is_original_release: true,
+        });
+    }
+    points.sort_by_key(|p| p.date);
+    points.dedup_by_key(|p| p.date);
+    if preliminary > 0 {
+        debug!(series = external_id, preliminary, "BLS: preliminary values");
+    }
+
+    // BLS's catalog (sent only with a key) gives the title, survey, units and seasonality. A
+    // field it doesn't give is left empty, so the stored series keeps what discovery wrote from
+    // the survey series files (an empty title counts as none, see `persist_series`).
+    let id_seasonality = || seasonal_adjustment_from_id(external_id).map(str::to_string);
+    let metadata = match catalog {
+        Some(c) => NewSeriesMetadataLite {
+            title: c.series_title.unwrap_or_default().trim().to_string(),
+            description: c.survey_name,
+            units: c.measure_data_type,
+            frequency: frequency.map(str::to_string),
+            seasonal_adjustment: c.seasonality.or_else(id_seasonality),
+        },
+        None => NewSeriesMetadataLite {
+            title: String::new(),
+            description: None,
+            units: None,
+            frequency: frequency.map(str::to_string),
+            seasonal_adjustment: id_seasonality(),
+        },
+    };
+    let metadata = (metadata != NewSeriesMetadataLite::default()).then_some(metadata);
+    Ok(FetchedSeries {
+        metadata,
+        points,
+        dataset,
+    })
+}
+
+/// The dataset of BLS series `series_id`: its survey's ([`series_dataset`]), else
+/// [`OTHER_DATASET`].
+pub fn dataset_of(series_id: &str) -> SeriesDataset {
+    series_dataset(series_id)
+        .unwrap_or_else(|| SeriesDataset::new(OTHER_DATASET, Vec::<(String, String)>::new()))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Adapter
+// ---------------------------------------------------------------------------------------------
+
+/// What one request group has gathered so far for one series.
+#[derive(Default)]
+struct SeriesState {
+    catalog: Option<Catalog>,
+    raw: Vec<DataPoint>,
+    /// The series' own failure (it does not exist, or a not-processed response left it out).
+    failed: Option<CrawlError>,
+    /// An older window returned nothing after a newer one had data: stop asking.
+    done: bool,
+}
+
+impl SeriesState {
+    /// A "does not exist" for an older window: the end of the series' history if newer windows
+    /// returned data, otherwise the series' own `NotFound`.
+    fn end_or_fail(&mut self, not_found: CrawlError) {
+        if self.raw.is_empty() {
+            self.failed = Some(not_found);
+        } else {
+            self.done = true;
+        }
+    }
+}
+
+impl BlsAdapter {
+    /// One POST for `ids` over the years `start..=end`.
+    async fn fetch_window(
+        &self,
+        ctx: &CrawlCtx,
+        ids: &[&str],
+        (start, end): (i32, i32),
+    ) -> Result<DataResponse, CrawlError> {
+        let key = ctx.keys.bls.as_deref();
+        let url = format!("{}/timeseries/data/", self.base_url);
+        let body = DataRequest {
+            seriesid: ids,
+            startyear: start.to_string(),
+            endyear: end.to_string(),
+            catalog: true,
+            registrationkey: key,
+        };
+        debug!(series = ids.len(), start, end, "BLS: fetching window");
+        let resp: DataResponse = ctx
+            .http
+            .post_json(SourceId::Bls, &url, &body)
+            .await
+            .map_err(|e| scrub_error(e, key))?;
+        check_status(&resp.status, &resp.message, ids, key)?;
+        Ok(resp)
+    }
+
+    /// Fetches `ids` (at most one request's worth) window by window, newest first.
+    /// `Err` means a request failed and applies to every id.
+    async fn fetch_group(
+        &self,
+        ctx: &CrawlCtx,
+        ids: &[String],
+        since: Option<NaiveDate>,
+    ) -> Result<BatchFetch, CrawlError> {
+        let keyed = ctx.keys.bls.is_some();
+        let key = ctx.keys.bls.as_deref();
+        let end = self.current_year();
+        let start = match since {
+            Some(d) => d.year().min(end),
+            None => end - HISTORY_YEARS + 1,
+        };
+        let span = if keyed {
+            MAX_YEARS_WITH_KEY
+        } else {
+            MAX_YEARS_WITHOUT_KEY
+        };
+
+        // Unique ids, in the order the worker asked for them.
+        let mut seen = HashSet::new();
+        let unique: Vec<&str> = ids
+            .iter()
+            .map(String::as_str)
+            .filter(|id| seen.insert(*id))
+            .collect();
+        let mut state: HashMap<&str, SeriesState> = unique
+            .iter()
+            .map(|id| (*id, SeriesState::default()))
+            .collect();
+        for window in year_windows(start, end, span) {
+            let active: Vec<&str> = unique
+                .iter()
+                .copied()
+                .filter(|id| state[id].failed.is_none() && !state[id].done)
+                .collect();
+            if active.is_empty() {
+                break;
+            }
+            let resp = match self.fetch_window(ctx, &active, window).await {
+                Ok(resp) => resp,
+                // A lone series left in a later window: its NotFound is its own, not the group's,
+                // and if newer windows already returned data, this is just the end of its history.
+                Err(e @ CrawlError::NotFound(_)) if active.len() == 1 => {
+                    state
+                        .get_mut(active[0])
+                        .expect("active ids have state")
+                        .end_or_fail(e);
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
+            // Not processed, yet only per-series messages: the series BLS names don't exist, and
+            // the ones it doesn't return were not served, so they fail (and are retried) rather
+            // than completing with no data.
+            let partial = resp.status != STATUS_SUCCEEDED;
+            for m in &resp.message {
+                if let Some(id) = missing_series_id(m) {
+                    if let Some(s) = state.get_mut(id) {
+                        s.end_or_fail(CrawlError::NotFound(format!(
+                            "BLS series {id}: {}",
+                            scrub(m, key)
+                        )));
+                    }
+                }
+            }
+            let mut returned: HashMap<&str, SeriesBody> = HashMap::new();
+            for body in resp.results.unwrap_or_default().series {
+                let id = match body.series_id.as_deref() {
+                    Some(id) => id.trim().to_string(),
+                    // A single-series request may omit the id.
+                    None if active.len() == 1 => active[0].to_string(),
+                    None => {
+                        warn!("BLS: series without seriesID in a batch response; ignored");
+                        continue;
+                    }
+                };
+                match active.iter().find(|a| **a == id) {
+                    Some(a) => {
+                        returned.insert(a, body);
+                    }
+                    None => warn!(series = %id, "BLS: unrequested series in response; ignored"),
+                }
+            }
+            for id in &active {
+                let s = state.get_mut(id).expect("active ids have state");
+                if s.failed.is_some() || s.done {
+                    continue;
+                }
+                let body = returned.remove(id);
+                if body.is_none() && partial {
+                    // A "no data" message naming this id, with data already collected from newer
+                    // windows, is the end of its history, not a request failure: don't discard it.
+                    let no_data = resp
+                        .message
+                        .iter()
+                        .any(|m| no_data_series_id(m) == Some(*id));
+                    if no_data && !s.raw.is_empty() {
+                        s.done = true;
+                    } else {
+                        s.failed = Some(CrawlError::Transient(format!(
+                            "BLS series {id}: not returned ({})",
+                            resp.status
+                        )));
+                    }
+                    continue;
+                }
+                let (catalog, data) = body.map(|b| (b.catalog, b.data)).unwrap_or_default();
+                if s.catalog.is_none() {
+                    s.catalog = catalog;
+                }
+                if data.is_empty() && !s.raw.is_empty() {
+                    // Older than the series' first observation: nothing further back.
+                    s.done = true;
+                }
+                s.raw.extend(data);
+            }
+        }
+
+        let mut out = BatchFetch::with_capacity(ids.len());
+        for (id, s) in state {
+            let result = if let Some(e) = s.failed {
+                Err(e)
+            } else if s.raw.is_empty() && since.is_none() {
+                Err(CrawlError::NotFound(format!(
+                    "BLS series {id}: no data for {start}-{end}"
+                )))
+            } else {
+                build_series(id, s.catalog, &s.raw, since)
+            };
+            out.insert(id.to_string(), result);
+        }
+        Ok(out)
     }
 }
 
@@ -346,39 +1320,120 @@ impl SourceAdapter for BlsAdapter {
         SourceId::Bls
     }
 
-    /// `GET {base}/surveys`, then the known series for each survey offered (ported from
-    /// `series_discovery/bls.rs`; the surveys endpoint lists surveys, not series).
+    /// The built-in BLS policy with `max_batch` 50 when `BLS_API_KEY` is set, 25 otherwise.
+    ///
+    /// Reads the key from the environment, as the worker does when it builds `ctx.keys`; if the
+    /// two ever disagree, [`fetch_batch`](SourceAdapter::fetch_batch) still splits by the key in
+    /// `ctx`, so no request exceeds BLS's limit.
+    fn policy(&self) -> SourcePolicy {
+        policy(ApiKeys::from_env().bls.is_some())
+    }
+
+    fn datasets(&self) -> &[&str] {
+        DATASET_CODES
+    }
+
+    /// The series in `bls_series.csv`, described by the rows
+    /// [`refresh_reference_data`](SourceAdapter::refresh_reference_data) stored from BLS's
+    /// survey series files. No request is made. A series without a stored row (its survey's
+    /// file never loaded, or BLS doesn't list it) is left out with a warning; `Transient` if that
+    /// leaves nothing.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
-        let url = format!("{}/surveys", self.base_url);
-        let resp: SurveysResponse = ctx.http.get_json(self.id(), &url, &[]).await?;
-        check_status(
-            &resp.status,
-            &resp.message,
-            "(surveys)",
-            ctx.keys.bls.as_deref(),
-        )?;
-        let mut out: Vec<DiscoveredSeries> = Vec::new();
-        for survey in &resp.results.survey {
-            debug!(
-                survey = %survey.survey_abbreviation,
-                name = %survey.survey_name,
-                "BLS: survey"
-            );
-            for known in known_series_for_survey(&survey.survey_abbreviation) {
-                if out.iter().any(|s| s.external_id == known.id) {
-                    continue;
+        let curated = bls_series()?;
+        let mut found = Vec::with_capacity(curated.len());
+        let mut left_out = 0usize;
+        for spec in SERIES_FILES {
+            let ids: Vec<&str> = curated
+                .iter()
+                .map(|s| s.id.as_str())
+                .filter(|id| id.starts_with(spec.survey))
+                .collect();
+            if ids.is_empty() {
+                continue;
+            }
+            let url = self.series_file_url(spec.survey);
+            let Some(payload) = stored_series_rows(ctx, &url).await? else {
+                warn!(
+                    %url,
+                    series = ids.len(),
+                    "BLS: series file not loaded yet; its series are left out"
+                );
+                left_out += ids.len();
+                continue;
+            };
+            let codes = match spec.units {
+                UnitsFrom::Dimension(dimension) => {
+                    let codes = persist::dataset_dimension_codes(
+                        &ctx.pool,
+                        SourceId::Bls,
+                        spec.survey,
+                        dimension,
+                    )
+                    .await
+                    .map_err(db_err)?;
+                    if codes.is_empty() {
+                        warn!(
+                            survey = spec.survey,
+                            dimension,
+                            "BLS: units dimension has no stored codes; series listed without units"
+                        );
+                    }
+                    codes
                 }
-                out.push(DiscoveredSeries {
-                    external_id: known.id.to_string(),
-                    title: known.title.to_string(),
-                    description: Some(known.title.to_string()),
-                    units: Some(known.units.to_string()),
-                    frequency: Some(known.frequency.to_string()),
-                    data_url: Some(format!("{}/timeseries/data/{}", self.base_url, known.id)),
+                _ => BTreeMap::new(),
+            };
+            let mut not_in_file = 0usize;
+            for id in ids {
+                let Some(row) = payload.series.get(id) else {
+                    debug!(series = id, %url, "BLS: series not in its series file; left out");
+                    not_in_file += 1;
+                    continue;
+                };
+                found.push(DiscoveredSeries {
+                    external_id: id.to_string(),
+                    title: row.title.clone(),
+                    description: None,
+                    units: discovered_units(spec.units, id, row, &codes),
+                    frequency: row.frequency.clone(),
+                    data_url: Some(format!("{}/timeseries/data/{id}", self.base_url)),
+                    dataset: dataset_of(id),
                 });
             }
+            if not_in_file > 0 {
+                warn!(
+                    %url,
+                    series = not_in_file,
+                    "BLS: curated series not in the survey's series file are left out"
+                );
+                left_out += not_in_file;
+            }
         }
-        Ok(out)
+        // Every curated id has a survey in SERIES_FILES (a test checks it); this catches one
+        // added without.
+        let unknown = curated
+            .iter()
+            .filter(|s| !SERIES_FILES.iter().any(|f| s.id.starts_with(f.survey)))
+            .count();
+        if unknown > 0 {
+            warn!(
+                series = unknown,
+                "BLS: curated series of a survey without a series file; left out"
+            );
+        }
+        if found.is_empty() {
+            return Err(CrawlError::Transient(format!(
+                "BLS: none of the {} curated series has a stored series file row yet",
+                curated.len()
+            )));
+        }
+        if left_out + unknown > 0 {
+            debug!(
+                listed = found.len(),
+                left_out = left_out + unknown,
+                "BLS discovery"
+            );
+        }
+        Ok(found)
     }
 
     async fn fetch_series(
@@ -387,116 +1442,87 @@ impl SourceAdapter for BlsAdapter {
         external_id: &str,
         since: Option<NaiveDate>,
     ) -> Result<FetchedSeries, CrawlError> {
-        let end = self.current_year();
-        let start = match since {
-            Some(d) => d.year().min(end),
-            None => end - HISTORY_YEARS + 1,
-        };
-        let span = if ctx.keys.bls.is_some() {
-            MAX_YEARS_WITH_KEY
-        } else {
-            MAX_YEARS_WITHOUT_KEY
-        };
-
-        let mut catalog: Option<Catalog> = None;
-        let mut raw: Vec<DataPoint> = Vec::new();
-        for window in year_windows(start, end, span) {
-            let (cat, data) = self.fetch_window(ctx, external_id, window).await?;
-            if catalog.is_none() {
-                catalog = cat;
-            }
-            if data.is_empty() && !raw.is_empty() {
-                // Older than the series' first observation: nothing further back.
-                break;
-            }
-            raw.extend(data);
-        }
-
-        if raw.is_empty() && since.is_none() {
-            return Err(CrawlError::NotFound(format!(
-                "BLS series {external_id}: no data for {start}-{end}"
-            )));
-        }
-
-        let frequency = determine_frequency(raw.iter().map(|p| p.period.as_str()));
-        let mut points = Vec::with_capacity(raw.len());
-        for p in &raw {
-            let Some(date) = parse_period(&p.year, &p.period)? else {
-                if p.period != "M13" {
-                    warn!(series = external_id, period = %p.period, "BLS: skipping unknown period");
-                }
-                continue;
-            };
-            if since.is_some_and(|s| date < s) {
-                continue;
-            }
-            points.push(FetchedPoint {
-                date,
-                value: parse_value(&p.value)?,
-                revision_date: date,
-                is_original_release: true,
-            });
-        }
-        points.sort_by_key(|p| p.date);
-        points.dedup_by_key(|p| p.date);
-
-        let metadata = catalog.map(|c| NewSeriesMetadataLite {
-            title: c
-                .series_title
-                .filter(|t| !t.trim().is_empty())
-                .unwrap_or_else(|| format!("BLS Series {external_id}")),
-            description: c.survey_name,
-            units: c.measure_data_type,
-            frequency: frequency.map(str::to_string),
-            seasonal_adjustment: c.seasonality,
-        });
-
-        Ok(FetchedSeries { metadata, points })
+        let ids = [external_id.to_string()];
+        self.fetch_group(ctx, &ids, since)
+            .await?
+            .remove(external_id)
+            .unwrap_or_else(|| Err(CrawlError::NotFound(format!("BLS series {external_id}"))))
     }
-}
 
-struct KnownSeries {
-    id: &'static str,
-    title: &'static str,
-    frequency: &'static str,
-    units: &'static str,
-}
+    fn batch_key(&self, _external_id: &str) -> Option<String> {
+        Some(BATCH_KEY.to_string())
+    }
 
-/// Known series per survey (from the old `get_known_bls_series_by_survey`). The unemployment
-/// rate `LNS14000000` belongs to the CPS survey (`LN`); the old table listed it under `LA`, so
-/// both map to it.
-fn known_series_for_survey(abbreviation: &str) -> &'static [KnownSeries] {
-    const CU: &[KnownSeries] = &[
-        KnownSeries {
-            id: "CUUR0000SA0",
-            title: "Consumer Price Index for All Urban Consumers: All Items in U.S. City Average",
-            frequency: "Monthly",
-            units: "Index 1982-1984=100",
-        },
-        KnownSeries {
-            id: "CUUR0000SA0L1E",
-            title: "Consumer Price Index for All Urban Consumers: All Items Less Food and Energy in U.S. City Average",
-            frequency: "Monthly",
-            units: "Index 1982-1984=100",
-        },
-    ];
-    const CE: &[KnownSeries] = &[KnownSeries {
-        id: "CES0000000001",
-        title: "All Employees, Total Nonfarm",
-        frequency: "Monthly",
-        units: "Thousands of Persons",
-    }];
-    const LN: &[KnownSeries] = &[KnownSeries {
-        id: "LNS14000000",
-        title: "Unemployment Rate",
-        frequency: "Monthly",
-        units: "Percent",
-    }];
-    match abbreviation {
-        "CU" => CU,
-        "CE" => CE,
-        "LN" | "LA" => LN,
-        _ => &[],
+    fn code_lists(&self, _keys: &ApiKeys) -> Vec<CodeList> {
+        bls_code_lists()
+    }
+
+    /// Refreshes CU/CE/LA's code labels from BLS's own flat files ([`code_lists`](Self::code_lists)),
+    /// then each survey's series
+    /// file ([`SERIES_FILES`]): the curated series' titles, frequencies and index bases for
+    /// [`discover`](SourceAdapter::discover), and LN's code labels. Every file is fetched by
+    /// conditional GET, so an unchanged file costs one small request. Each file is independent
+    /// (its own URL, its own cached `ETag`), so one failing never stops the others from
+    /// refreshing; if any failed, returns an aggregate error naming all of them (the caller,
+    /// `Worker::discover`, only logs it). An `Auth` or `RateLimited` error stops at once and is
+    /// returned as is, as in [`reference_file::refresh_code_lists`]. The code files go first, so
+    /// units read from their labels are current when discovery runs.
+    async fn refresh_reference_data(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
+        let mut errors = Vec::new();
+        for list in self.code_lists(&ctx.keys) {
+            if let Err(e) = reference_file::refresh_code_list(ctx, SourceId::Bls, &list).await {
+                if reference_file::stops_the_batch(&e) {
+                    return Err(e);
+                }
+                errors.push(format!("{}: {e}", list.url));
+            }
+        }
+        let curated = bls_series()
+            .map_err(|e| errors.push(e.to_string()))
+            .unwrap_or_default();
+        errors.extend(self.refresh_series_files(ctx, curated).await?);
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(CrawlError::Transient(format!(
+                "BLS reference data: {}",
+                errors.join("; ")
+            )))
+        }
+    }
+
+    /// Fetches `external_ids` in requests of at most 50 series (25 without a key). When the ids
+    /// need several requests and one fails, that failure applies to its own series only, except
+    /// `RateLimited` and `Auth`: those apply to every series not fetched yet, and no further
+    /// request is sent (it would fail the same way and spend quota). On the first request they
+    /// fail the whole call.
+    async fn fetch_batch(
+        &self,
+        ctx: &CrawlCtx,
+        external_ids: &[String],
+        since: Option<NaiveDate>,
+    ) -> Result<BatchFetch, CrawlError> {
+        let size = max_series_per_request(ctx.keys.bls.is_some());
+        if external_ids.len() <= size {
+            return self.fetch_group(ctx, external_ids, since).await;
+        }
+        let mut out = BatchFetch::with_capacity(external_ids.len());
+        for (i, chunk) in external_ids.chunks(size).enumerate() {
+            match self.fetch_group(ctx, chunk, since).await {
+                Ok(results) => out.extend(results),
+                // Nothing fetched yet: fail the whole call, so the worker's breaker sees it.
+                Err(e @ (CrawlError::RateLimited { .. } | CrawlError::Auth(_))) if i == 0 => {
+                    return Err(e)
+                }
+                Err(e @ (CrawlError::RateLimited { .. } | CrawlError::Auth(_))) => {
+                    let rest = &external_ids[i * size..];
+                    out.extend(rest.iter().map(|id| (id.clone(), Err(e.clone()))));
+                    break;
+                }
+                Err(e) => out.extend(chunk.iter().map(|id| (id.clone(), Err(e.clone())))),
+            }
+        }
+        Ok(out)
     }
 }
 
@@ -514,6 +1540,7 @@ mod tests {
     const QUARTERLY: &str = include_str!("../../tests/fixtures/bls/eci_quarterly.json");
     const THRESHOLD: &str = include_str!("../../tests/fixtures/bls/not_processed_threshold.json");
     const NO_SERIES: &str = include_str!("../../tests/fixtures/bls/series_does_not_exist.json");
+    const BATCH: &str = include_str!("../../tests/fixtures/bls/batch_mixed.json");
 
     fn d(y: i32, m: u32, day: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(y, m, day).unwrap()
@@ -521,6 +1548,10 @@ mod tests {
 
     fn route() -> Route {
         Route::post("/timeseries/data/")
+    }
+
+    fn ok_empty() -> serde_json::Value {
+        json!({"status": "REQUEST_SUCCEEDED", "message": [], "Results": {"series": []}})
     }
 
     #[test]
@@ -619,34 +1650,62 @@ mod tests {
     fn status_mapping() {
         let msgs = |m: &[&str]| m.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         let k = Some("sekrit");
-        assert!(check_status(STATUS_SUCCEEDED, &[], "X", k).is_ok());
+        assert!(check_status(STATUS_SUCCEEDED, &[], &["X"], k).is_ok());
         assert!(check_status(
             STATUS_SUCCEEDED,
             &msgs(&["No Data Available for Series X Year: 2004"]),
-            "X",
+            &["X"],
             k
         )
         .is_ok());
         let cases: &[(&str, &str, &str)] = &[
             ("REQUEST_NOT_PROCESSED", "Request could not be serviced, as the daily threshold for total number of requests allocated to the user has been reached.", "rate_limited"),
             ("REQUEST_NOT_PROCESSED", "User sekrit has exceeded the number of requests allowed", "rate_limited"),
-            ("REQUEST_SUCCEEDED", "Series does not exist for Series X", "not_found"),
-            ("REQUEST_NOT_PROCESSED", "Series does not exist for Series X", "not_found"),
+            ("REQUEST_NOT_PROCESSED", "Series does not exist", "not_found"),
+            // Per-series messages never mask a request failure.
+            ("REQUEST_NOT_PROCESSED", "Series does not exist for Series X|The daily threshold has been reached", "rate_limited"),
+            ("REQUEST_NOT_PROCESSED", "No Data Available for Series Y Year: 2005|Invalid parameters", "permanent"),
+            ("REQUEST_NOT_PROCESSED", "Series does not exist for Series X|The key: sekrit provided by the User is invalid.", "auth"),
             ("REQUEST_NOT_PROCESSED", "The key: sekrit provided by the User is invalid.", "auth"),
             ("REQUEST_NOT_PROCESSED", "Invalid registration key", "auth"),
             ("REQUEST_NOT_PROCESSED", "Invalid parameters: startyear", "permanent"),
-            ("REQUEST_FAILED", "", "permanent"),
+            ("REQUEST_FAILED", "", "transient"),
+            ("REQUEST_NOT_PROCESSED", "Something unexpected happened", "transient"),
         ];
         for (status, msg, kind) in cases {
-            let err = check_status(status, &msgs(&[msg]), "X", k).unwrap_err();
+            let parts: Vec<&str> = msg.split('|').collect();
+            let err = check_status(status, &msgs(&parts), &["X"], k).unwrap_err();
             assert_eq!(err.kind(), *kind, "{status} {msg}");
             assert!(!err.to_string().contains("sekrit"), "{err}");
+        }
+        // An unnamed "does not exist" can't be pinned on one series of a batch: retry it.
+        let err = check_status(
+            "REQUEST_NOT_PROCESSED",
+            &msgs(&["Series does not exist"]),
+            &["A", "B", "C", "D"],
+            k,
+        )
+        .unwrap_err();
+        assert_eq!(err.kind(), "transient");
+        assert!(err.to_string().contains("A and 3 more"), "{err}");
+        // Per-series "does not exist" and "no data" messages are results, not request failures.
+        for status in [STATUS_SUCCEEDED, "REQUEST_NOT_PROCESSED"] {
+            assert!(check_status(
+                status,
+                &msgs(&[
+                    "Series does not exist for Series X",
+                    "No Data Available for Series Y Year: 2005"
+                ]),
+                &["X"],
+                k
+            )
+            .is_ok());
         }
         assert_eq!(
             check_status(
                 "REQUEST_NOT_PROCESSED",
                 &msgs(&["daily threshold reached"]),
-                "X",
+                &["X"],
                 k
             )
             .unwrap_err()
@@ -681,6 +1740,7 @@ mod tests {
             .iter()
             .all(|p| p.revision_date == p.date && p.is_original_release));
         let m = s.metadata.unwrap();
+        // Everything from BLS's catalog: title, units, survey and seasonality.
         assert_eq!(
             m.title,
             "All items in U.S. city average, all urban consumers, not seasonally adjusted"
@@ -694,6 +1754,20 @@ mod tests {
         assert_eq!(
             m.description.as_deref(),
             Some("CPI for All Urban Consumers (CPI-U)")
+        );
+        let ds = s.dataset;
+        assert_eq!(ds.code, "CU");
+        assert_eq!(
+            ds.dimensions.0,
+            [
+                ("area", "0000"),
+                ("item", "SA0"),
+                ("periodicity", "R"),
+                ("seasonal", "U")
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect::<std::collections::BTreeMap<_, _>>()
         );
     }
 
@@ -711,7 +1785,84 @@ mod tests {
             dates,
             vec![d(2023, 7, 1), d(2023, 10, 1), d(2024, 1, 1), d(2024, 4, 1)]
         );
-        assert!(s.metadata.is_none());
+        // No catalog (and no seasonality the id encodes): only the frequency the periods show.
+        assert_eq!(
+            s.metadata,
+            Some(NewSeriesMetadataLite {
+                frequency: Some("Quarterly".into()),
+                ..Default::default()
+            })
+        );
+        // ECI (CI) has no dataset layout yet, so it is in the dimensionless catch-all.
+        assert_eq!(
+            s.dataset,
+            SeriesDataset::new(OTHER_DATASET, Vec::<(String, String)>::new())
+        );
+
+        // Without a catalog (keyless) the title and units are left to what discovery stored; the
+        // fetch still reports the frequency and the seasonal adjustment the id encodes.
+        mock.reset().await;
+        mock.mount(
+            &route(),
+            Reply::json(json!({"status": "REQUEST_SUCCEEDED", "message": [],
+                "Results": {"series": [{"seriesID": "LNS14000000", "data": [
+                    {"year": "2024", "period": "M01", "value": "3.7", "footnotes": [{}]}]}]}})),
+        )
+        .await;
+        let s = adapter
+            .fetch_series(&test_ctx(), "LNS14000000", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            s.metadata,
+            Some(NewSeriesMetadataLite {
+                frequency: Some("Monthly".into()),
+                seasonal_adjustment: Some("Seasonally Adjusted".into()),
+                ..Default::default()
+            })
+        );
+    }
+
+    #[test]
+    fn seasonal_adjustment_from_id_prefixes() {
+        for (id, want) in [
+            ("CUSR0000SA0", Some("Seasonally Adjusted")),
+            ("CUUR0000SA0", Some("Not Seasonally Adjusted")),
+            ("CES0000000001", Some("Seasonally Adjusted")),
+            ("CEU0000000001", Some("Not Seasonally Adjusted")),
+            ("LNS14000000", Some("Seasonally Adjusted")),
+            ("LNU04000000", Some("Not Seasonally Adjusted")),
+            ("LASST060000000000003", Some("Seasonally Adjusted")),
+            ("LAUST060000000000003", Some("Not Seasonally Adjusted")),
+            ("CIU1010000000000A", None),
+            ("X", None),
+        ] {
+            assert_eq!(seasonal_adjustment_from_id(id), want, "{id}");
+        }
+    }
+
+    /// An error on an older window fails the whole group, even after a newer window had data.
+    #[tokio::test]
+    async fn later_window_error_fails_the_group() {
+        let mock = MockSource::start().await;
+        mock.mount_expect(
+            &route().body_contains(json!({"startyear": "2015"})),
+            Reply::json_str(MONTHLY),
+            1,
+        )
+        .await;
+        mock.mount_expect(
+            &route().body_contains(json!({"startyear": "2005"})),
+            Reply::json_str(THRESHOLD),
+            1,
+        )
+        .await;
+        let mut ctx = test_ctx();
+        ctx.keys.bls = None;
+        let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2024);
+        let ids = vec!["CUUR0000SA0".to_string()];
+        let err = adapter.fetch_batch(&ctx, &ids, None).await.unwrap_err();
+        assert_eq!(err, CrawlError::RateLimited { retry_after: None });
     }
 
     #[tokio::test]
@@ -818,8 +1969,8 @@ mod tests {
     #[tokio::test]
     async fn older_empty_window_stops_early() {
         let mock = MockSource::start().await;
-        let empty = json!({"status": "REQUEST_SUCCEEDED", "message": ["No Data Available for Series X Year: 1990"],
-            "Results": {"series": [{"seriesID": "X", "data": []}]}});
+        let empty = json!({"status": "REQUEST_SUCCEEDED", "message": ["No Data Available for Series CUUR0000SA0 Year: 1990"],
+            "Results": {"series": [{"seriesID": "CUUR0000SA0", "data": []}]}});
         mock.mount_expect(
             &route().body_contains(json!({"startyear": "2007"})),
             Reply::json_str(MONTHLY),
@@ -834,7 +1985,7 @@ mod tests {
         .await;
         let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2026);
         let s = adapter
-            .fetch_series(&test_ctx(), "X", Some(d(1950, 1, 1)))
+            .fetch_series(&test_ctx(), "CUUR0000SA0", Some(d(1950, 1, 1)))
             .await
             .unwrap();
         assert_eq!(s.points.len(), 5);
@@ -939,43 +2090,1229 @@ mod tests {
         assert!(!format!("{err:?}").contains(TEST_API_KEY), "{err:?}");
     }
 
+    /// Hand-built excerpts in the shape of BLS's survey series files (`cu.series` pads ids with
+    /// spaces, as BLS does): `cu.series` has two curated rows and one that isn't curated.
+    const CU_SERIES: &str = include_str!("../../tests/fixtures/bls/series/cu.series");
+    const CE_SERIES: &str = include_str!("../../tests/fixtures/bls/series/ce.series");
+    const LA_SERIES: &str = include_str!("../../tests/fixtures/bls/series/la.series");
+    const LN_SERIES: &str = include_str!("../../tests/fixtures/bls/series/ln.series");
+
+    fn wanted(ids: &[&str]) -> BTreeSet<String> {
+        ids.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn parse_series_file_keeps_wanted_rows_with_title_frequency_and_base() {
+        let rows =
+            parse_series_file(CU_SERIES, &wanted(&["CUUR0000SA0", "CUSR0000SA0", "CUXX"])).unwrap();
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert_eq!(
+            rows["CUUR0000SA0"],
+            SeriesFileRow {
+                title:
+                    "All items in U.S. city average, all urban consumers, not seasonally adjusted"
+                        .into(),
+                frequency: Some("Monthly".into()),
+                base_period: Some("1982-84=100".into()),
+            }
+        );
+        // No base_period column: none; frequency from end_period, else begin_period; blank title:
+        // skipped.
+        let text = "series_id\tseries_title\tbegin_period\tend_period\n\
+                    X1\tA\tA01\tM03\nX2\t\tM01\tM01\nX3\tC\t\t\nX4\tD\tQ01\t\n";
+        let rows = parse_series_file(text, &wanted(&["X1", "X2", "X3", "X4"])).unwrap();
+        assert_eq!(rows.keys().collect::<Vec<_>>(), ["X1", "X3", "X4"]);
+        assert_eq!(rows["X1"].frequency.as_deref(), Some("Monthly"));
+        assert_eq!(rows["X1"].base_period, None);
+        assert_eq!(rows["X3"].frequency, None);
+        assert_eq!(rows["X4"].frequency.as_deref(), Some("Quarterly"));
+    }
+
+    #[test]
+    fn parse_series_file_requires_id_and_title_columns() {
+        for text in ["", "series_id\tbegin_period\n", "series_title\n"] {
+            assert_eq!(
+                parse_series_file(text, &wanted(&["X"])).unwrap_err().kind(),
+                "parse",
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn discovered_units_by_survey() {
+        let row = SeriesFileRow {
+            title: "t".into(),
+            frequency: None,
+            base_period: Some("1982-84=100".into()),
+        };
+        let none = BTreeMap::new();
+        assert_eq!(
+            discovered_units(UnitsFrom::IndexBase, "CUUR0000SA0", &row, &none).as_deref(),
+            Some("Index 1982-84=100")
+        );
+        assert_eq!(
+            discovered_units(UnitsFrom::CatalogOnly, "LNS14000000", &row, &none),
+            None
+        );
+        let mut codes = BTreeMap::from([("03".to_string(), Code::new("03", "Unemployment rate"))]);
+        let la = UnitsFrom::Dimension("measure");
+        assert_eq!(
+            discovered_units(la, "LASST060000000000003", &row, &codes).as_deref(),
+            Some("Unemployment rate")
+        );
+        // A code's own unit wins over its label; an unknown code or id gives none.
+        codes.get_mut("03").unwrap().unit = Some("Percent".into());
+        assert_eq!(
+            discovered_units(la, "LASST060000000000003", &row, &codes).as_deref(),
+            Some("Percent")
+        );
+        assert_eq!(
+            discovered_units(la, "LASST060000000000004", &row, &codes),
+            None
+        );
+        assert_eq!(
+            discovered_units(la, "CIU1010000000000A", &row, &codes),
+            None
+        );
+    }
+
+    /// One series file per survey with a layout, so every curated series can be described.
+    #[test]
+    fn series_files_cover_every_layout() {
+        let files: Vec<&str> = SERIES_FILES.iter().map(|f| f.survey).collect();
+        let layouts: Vec<&str> = SERIES_ID_LAYOUTS.iter().map(|(p, _)| *p).collect();
+        assert_eq!(files, layouts);
+        assert_eq!(
+            BlsAdapter::default().series_file_url("CU"),
+            "https://download.bls.gov/pub/time.series/cu/cu.series"
+        );
+    }
+
+    /// A fresh database with BLS's datasets synced from `data/datasets/bls.toml`.
+    async fn bls_db(name: &str) -> Option<crate::persist::stable_id_tests::FreshDb> {
+        let admin_url = crate::persist::stable_id_tests::database_url()?;
+        let db = crate::persist::stable_id_tests::FreshDb::create(&admin_url, name).await;
+        let mut catalog = crate::dataset::DatasetCatalog::empty();
+        catalog
+            .insert(
+                SourceId::Bls,
+                DATASET_CODES,
+                crate::dataset::parse_dataset_file(
+                    &std::fs::read_to_string(
+                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("data/datasets/bls.toml"),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        crate::persist::sync_datasets(&db.pool, &catalog)
+            .await
+            .unwrap();
+        Some(db)
+    }
+
+    /// The shipped list's ids of `survey`.
+    fn curated(survey: &str) -> BTreeSet<String> {
+        bls_series()
+            .unwrap()
+            .iter()
+            .filter(|s| s.id.starts_with(survey))
+            .map(|s| s.id.clone())
+            .collect()
+    }
+
+    /// Discovery describes the curated series from the stored series file rows: BLS's titles,
+    /// frequency from `end_period`, and units from the index base (CU), a stored dimension
+    /// label (CE, LA) or nowhere (LN). It makes no request. A series without a row is left out.
     #[tokio::test]
-    async fn discover_maps_surveys_to_known_series() {
+    async fn discover_lists_curated_series_from_stored_series_files() {
+        let Some(db) = bls_db("econgraph_bls_discover_series_files").await else {
+            return;
+        };
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
         let mock = MockSource::start().await;
-        mock.mount(
-            &Route::get("/surveys"),
-            Reply::json_str(include_str!("../../tests/fixtures/bls/surveys.json")),
+        let adapter = BlsAdapter::new(mock.base_url()).with_download_url(mock.base_url());
+
+        // Nothing loaded yet: nothing to list, which is an error rather than an empty catalog.
+        assert_eq!(
+            adapter.discover(&ctx).await.unwrap_err().kind(),
+            "transient"
+        );
+
+        // CE's data type labels come from ce.datatype (refresh_code_file); stand in for it.
+        crate::persist::merge_dataset_dimension_codes(
+            &db.pool,
+            SourceId::Bls,
+            "CE",
+            "data_type",
+            &[("01".to_string(), "ALL EMPLOYEES, THOUSANDS".to_string())],
         )
-        .await;
-        let adapter = BlsAdapter::new(mock.base_url());
-        let found = adapter.discover(&test_ctx()).await.unwrap();
-        let ids: Vec<_> = found.iter().map(|s| s.external_id.as_str()).collect();
+        .await
+        .unwrap();
+        for (path, body) in [
+            ("/cu/cu.series", CU_SERIES),
+            ("/ce/ce.series", CE_SERIES),
+            ("/la/la.series", LA_SERIES),
+            ("/ln/ln.series", LN_SERIES),
+        ] {
+            mock.mount(
+                &Route::get(path),
+                Reply::text(body).header("ETag", "\"v1\""),
+            )
+            .await;
+        }
+        for spec in SERIES_FILES {
+            adapter
+                .refresh_series_file(&ctx, spec, &curated(spec.survey))
+                .await
+                .unwrap();
+        }
+        let fetched = mock.received_requests().await.len();
+        assert_eq!(fetched, SERIES_FILES.len());
+
+        let found = adapter.discover(&ctx).await.unwrap();
+        assert!(
+            mock.received_requests().await.len() == fetched,
+            "discover made a request"
+        );
+        let ids: BTreeSet<&str> = found.iter().map(|d| d.external_id.as_str()).collect();
+        // CUURS49ASA0 isn't curated.
         assert_eq!(
             ids,
-            vec![
-                "CES0000000001",
+            BTreeSet::from([
+                "CUSR0000SA0",
                 "CUUR0000SA0",
-                "CUUR0000SA0L1E",
-                "LNS14000000"
-            ]
+                "CES0000000001",
+                "LNS14000000",
+                "LASST060000000000003"
+            ])
+        );
+        let by_id = |id: &str| found.iter().find(|d| d.external_id == id).unwrap();
+        let cpi = by_id("CUUR0000SA0");
+        assert_eq!(
+            cpi.title,
+            "All items in U.S. city average, all urban consumers, not seasonally adjusted"
+        );
+        assert_eq!(cpi.units.as_deref(), Some("Index 1982-84=100"));
+        assert_eq!(cpi.frequency.as_deref(), Some("Monthly"));
+        assert_eq!(
+            cpi.data_url.as_deref(),
+            Some(format!("{}/timeseries/data/CUUR0000SA0", mock.base_url()).as_str())
+        );
+        assert_eq!(cpi.dataset.code, "CU");
+        assert_eq!(
+            by_id("CES0000000001").units.as_deref(),
+            Some("ALL EMPLOYEES, THOUSANDS")
+        );
+        let la = by_id("LASST060000000000003");
+        assert_eq!(la.title, "Unemployment Rate: California (S)");
+        assert_eq!(la.units.as_deref(), Some("Unemployment rate"));
+        let ln = by_id("LNS14000000");
+        assert_eq!(ln.title, "(Seas) Unemployment Rate");
+        assert_eq!(ln.units, None);
+
+        // ln.series also labels LN's series_code dimension.
+        let codes =
+            crate::persist::dataset_dimension_codes(&db.pool, SourceId::Bls, "LN", "series_code")
+                .await
+                .unwrap();
+        assert_eq!(codes["14000000"].label, "(Seas) Unemployment Rate");
+
+        db.drop().await;
+    }
+
+    /// A refresh sends the stored `ETag` and keeps the stored rows on `304`, but only while those
+    /// rows were looked up for every curated id: a newly curated id forces a fresh copy.
+    #[tokio::test]
+    async fn refresh_series_file_is_conditional_only_for_a_covered_list() {
+        let Some(db) = bls_db("econgraph_bls_refresh_series_file").await else {
+            return;
+        };
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let mock = MockSource::start().await;
+        let adapter = BlsAdapter::new(mock.base_url()).with_download_url(mock.base_url());
+        let cu = SERIES_FILES.iter().find(|f| f.survey == "CU").unwrap();
+        let ids = wanted(&["CUUR0000SA0", "CUSR0000SA0"]);
+        let if_none_match = |r: &wiremock::Request| {
+            r.headers
+                .get("if-none-match")
+                .map(|v| v.to_str().unwrap().to_string())
+        };
+
+        mock.mount(
+            &Route::get("/cu/cu.series"),
+            Reply::text(CU_SERIES).header("ETag", "\"v1\""),
+        )
+        .await;
+        adapter.refresh_series_file(&ctx, cu, &ids).await.unwrap();
+        let reqs = mock.received_requests().await;
+        assert_eq!(if_none_match(&reqs[0]), None);
+
+        // Unchanged: a 304 to the stored ETag, and the stored rows stay.
+        mock.reset().await;
+        mock.mount(&Route::get("/cu/cu.series"), Reply::status(304))
+            .await;
+        adapter.refresh_series_file(&ctx, cu, &ids).await.unwrap();
+        let reqs = mock.received_requests().await;
+        assert_eq!(if_none_match(&reqs[0]).as_deref(), Some("\"v1\""));
+        let stored: SeriesFilePayload = serde_json::from_value(
+            crate::persist::reference_file_cache(
+                &db.pool,
+                SourceId::Bls,
+                &adapter.series_file_url("CU"),
+            )
+            .await
+            .unwrap()
+            .payload
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(stored.requested, ids);
+        assert_eq!(stored.series.len(), 2);
+
+        // A subset of what was looked up is still covered.
+        mock.reset().await;
+        mock.mount(&Route::get("/cu/cu.series"), Reply::status(304))
+            .await;
+        adapter
+            .refresh_series_file(&ctx, cu, &wanted(&["CUUR0000SA0"]))
+            .await
+            .unwrap();
+        let reqs = mock.received_requests().await;
+        assert_eq!(if_none_match(&reqs[0]).as_deref(), Some("\"v1\""));
+
+        // A newly curated id was never looked up: unconditional, and the rows are replaced.
+        mock.reset().await;
+        mock.mount(
+            &Route::get("/cu/cu.series"),
+            Reply::text(CU_SERIES).header("ETag", "\"v2\""),
+        )
+        .await;
+        let more = wanted(&["CUUR0000SA0", "CUSR0000SA0", "CUURS49ASA0"]);
+        adapter.refresh_series_file(&ctx, cu, &more).await.unwrap();
+        let reqs = mock.received_requests().await;
+        assert_eq!(if_none_match(&reqs[0]), None);
+        let cache = crate::persist::reference_file_cache(
+            &db.pool,
+            SourceId::Bls,
+            &adapter.series_file_url("CU"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(cache.etag.as_deref(), Some("\"v2\""));
+        let stored: SeriesFilePayload = serde_json::from_value(cache.payload.unwrap()).unwrap();
+        assert_eq!(stored.requested, more);
+        assert_eq!(stored.series.len(), 3);
+
+        db.drop().await;
+    }
+
+    /// One series file failing doesn't stop the others, and its URL is in the errors. With no
+    /// curated ids (the list unreadable), only ln.series is still fetched, for LN's code labels,
+    /// and its stored rows are kept.
+    #[tokio::test]
+    async fn refresh_series_files_runs_each_file_independently() {
+        let Some(db) = bls_db("econgraph_bls_refresh_series_files").await else {
+            return;
+        };
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let mock = MockSource::start().await;
+        let adapter = BlsAdapter::new(mock.base_url()).with_download_url(mock.base_url());
+        for (path, body) in [
+            ("/cu/cu.series", CU_SERIES),
+            ("/ce/ce.series", CE_SERIES),
+            ("/ln/ln.series", LN_SERIES),
+        ] {
+            mock.mount(&Route::get(path), Reply::text(body)).await;
+        }
+        mock.mount(&Route::get("/la/la.series"), Reply::status(404))
+            .await;
+
+        let errors = adapter
+            .refresh_series_files(&ctx, bls_series().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].contains(&adapter.series_file_url("LA")),
+            "{errors:?}"
+        );
+        for (survey, stored) in [("CU", true), ("CE", true), ("LN", true), ("LA", false)] {
+            let cache = crate::persist::reference_file_cache(
+                &db.pool,
+                SourceId::Bls,
+                &adapter.series_file_url(survey),
+            )
+            .await
+            .unwrap();
+            assert_eq!(cache.payload.is_some(), stored, "{survey}");
+        }
+
+        mock.reset().await;
+        mock.mount(
+            &Route::get("/ln/ln.series"),
+            Reply::text(LN_SERIES).header("ETag", "\"v2\""),
+        )
+        .await;
+        assert!(adapter
+            .refresh_series_files(&ctx, &[])
+            .await
+            .unwrap()
+            .is_empty());
+        // That fetch was only for LN's code labels: the rows stored for the curated list stay,
+        // but no longer count as looked up for any id, since they predate the stored `ETag`.
+        let ln_url = adapter.series_file_url("LN");
+        let cache = crate::persist::reference_file_cache(&db.pool, SourceId::Bls, &ln_url)
+            .await
+            .unwrap();
+        assert_eq!(cache.etag.as_deref(), Some("\"v2\""));
+        let stored: SeriesFilePayload = serde_json::from_value(cache.payload.unwrap()).unwrap();
+        assert!(stored.series.contains_key("LNS14000000"));
+        assert!(stored.requested.is_empty());
+        let paths: Vec<String> = mock
+            .received_requests()
+            .await
+            .iter()
+            .map(|r| r.url.path().to_string())
+            .collect();
+        assert_eq!(paths, ["/ln/ln.series"]);
+
+        // With the list readable again, ln.series is downloaded afresh, not answered by a `304`.
+        mock.reset().await;
+        mock.mount(&Route::get("/ln/ln.series"), Reply::text(LN_SERIES))
+            .await;
+        let ln = SERIES_FILES.iter().find(|f| f.survey == "LN").unwrap();
+        adapter
+            .refresh_series_file(&ctx, ln, &wanted(&["LNS14000000"]))
+            .await
+            .unwrap();
+        let reqs = mock.received_requests().await;
+        assert!(reqs[0].headers.get("if-none-match").is_none());
+
+        db.drop().await;
+    }
+
+    /// A throttled series file stops the others: the error comes back as is and nothing more is
+    /// requested.
+    #[tokio::test]
+    async fn refresh_series_files_stops_on_a_rate_limit() {
+        let Some(db) = bls_db("econgraph_bls_refresh_series_files_429").await else {
+            return;
+        };
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let mock = MockSource::start().await;
+        let adapter = BlsAdapter::new(mock.base_url()).with_download_url(mock.base_url());
+        mock.mount(&Route::get("/cu/cu.series"), Reply::status(429))
+            .await;
+        for (path, body) in [
+            ("/ce/ce.series", CE_SERIES),
+            ("/ln/ln.series", LN_SERIES),
+            ("/la/la.series", LA_SERIES),
+        ] {
+            mock.mount(&Route::get(path), Reply::text(body)).await;
+        }
+
+        let err = adapter
+            .refresh_series_files(&ctx, bls_series().unwrap())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CrawlError::RateLimited { .. }), "{err:?}");
+        let paths: Vec<String> = mock
+            .received_requests()
+            .await
+            .iter()
+            .map(|r| r.url.path().to_string())
+            .collect();
+        assert_eq!(paths, ["/cu/cu.series"]);
+
+        db.drop().await;
+    }
+
+    /// A file applied before its rows were kept (ln.series, whose code labels an earlier
+    /// version refreshed on its own, leaving an `ETag` and no payload) is downloaded again
+    /// rather than answered by a `304`.
+    #[tokio::test]
+    async fn refresh_series_file_downloads_a_file_applied_without_rows() {
+        let Some(db) = bls_db("econgraph_bls_refresh_ln_no_payload").await else {
+            return;
+        };
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/ln/ln.series"),
+            Reply::text(LN_SERIES).header("ETag", "\"v1\""),
+        )
+        .await;
+        let adapter = BlsAdapter::new(mock.base_url()).with_download_url(mock.base_url());
+        let url = adapter.series_file_url("LN");
+        crate::persist::set_reference_file_etag(&db.pool, SourceId::Bls, &url, Some("\"v0\""))
+            .await
+            .unwrap();
+        let ln = SERIES_FILES.iter().find(|f| f.survey == "LN").unwrap();
+        adapter
+            .refresh_series_file(&ctx, ln, &wanted(&["LNS14000000"]))
+            .await
+            .unwrap();
+        let reqs = mock.received_requests().await;
+        assert_eq!(reqs.len(), 1);
+        assert!(reqs[0].headers.get("if-none-match").is_none());
+        let cache = crate::persist::reference_file_cache(&db.pool, SourceId::Bls, &url)
+            .await
+            .unwrap();
+        assert_eq!(cache.etag.as_deref(), Some("\"v1\""));
+        let stored: SeriesFilePayload = serde_json::from_value(cache.payload.unwrap()).unwrap();
+        assert_eq!(
+            stored.series["LNS14000000"].title,
+            "(Seas) Unemployment Rate"
+        );
+
+        db.drop().await;
+    }
+
+    /// ln.series before the LN dataset is synced: the curated rows are stored, but its code
+    /// labels had nowhere to land, so no `ETag` is stored and the next refresh downloads it again.
+    #[tokio::test]
+    async fn refresh_series_file_keeps_no_etag_when_ln_labels_have_no_dataset() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_bls_refresh_ln_no_dataset",
+        )
+        .await;
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/ln/ln.series"),
+            Reply::text(LN_SERIES).header("ETag", "\"v1\""),
+        )
+        .await;
+        let adapter = BlsAdapter::new(mock.base_url()).with_download_url(mock.base_url());
+        let ln = SERIES_FILES.iter().find(|f| f.survey == "LN").unwrap();
+        adapter
+            .refresh_series_file(&ctx, ln, &wanted(&["LNS14000000"]))
+            .await
+            .unwrap();
+        let cache = crate::persist::reference_file_cache(
+            &db.pool,
+            SourceId::Bls,
+            &adapter.series_file_url("LN"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(cache.etag, None);
+        let stored: SeriesFilePayload = serde_json::from_value(cache.payload.unwrap()).unwrap();
+        assert!(stored.series.contains_key("LNS14000000"));
+
+        db.drop().await;
+    }
+
+    /// LN's `series_code` labels come from the series-file refresh, not a code list: one URL has
+    /// one cached `ETag`, and that refresh also reads ln.series for the curated rows.
+    #[test]
+    fn code_lists_leave_ln_series_to_the_series_file_refresh() {
+        let lists = BlsAdapter::default().code_lists(&ApiKeys::default());
+        assert_eq!(lists.len(), CODE_FILES.len());
+        let ln = BlsAdapter::default().series_file_url("LN");
+        assert!(lists.iter().all(|l| l.url != ln), "{lists:?}");
+    }
+
+    #[test]
+    fn every_series_shares_one_batch_key() {
+        let a = BlsAdapter::default();
+        assert!(a.batch_key("CUUR0000SA0").is_some());
+        assert_eq!(
+            a.batch_key("CUUR0000SA0"),
+            a.batch_key("LASST060000000000003")
+        );
+    }
+
+    #[test]
+    fn policy_batches_50_with_key_25_without() {
+        assert_eq!(policy(true).max_batch, 50);
+        assert_eq!(policy(false).max_batch, 25);
+        let base = SourcePolicy::default_for(SourceId::Bls);
+        assert_eq!(
+            SourcePolicy {
+                max_batch: base.max_batch,
+                ..policy(true)
+            },
+            base
+        );
+    }
+
+    /// Request budget stated in the module docs, for the shipped list.
+    #[test]
+    fn shipped_list_fits_daily_quotas() {
+        let n = bls_series().unwrap().len();
+        let requests = |per_request: usize, windows: usize| n.div_ceil(per_request) * windows;
+        let keyed_first = requests(
+            MAX_SERIES_WITH_KEY,
+            year_windows(1, HISTORY_YEARS, MAX_YEARS_WITH_KEY).len(),
+        );
+        let keyless_first = requests(
+            MAX_SERIES_WITHOUT_KEY,
+            year_windows(1, HISTORY_YEARS, MAX_YEARS_WITHOUT_KEY).len(),
+        );
+        assert!(
+            keyed_first <= 500 && n <= 500,
+            "keyed: {keyed_first} requests, {n} series"
+        );
+        assert!(
+            keyless_first <= 25,
+            "keyless first fetch: {keyless_first} requests"
+        );
+        // A refresh (the policy's own revision lookback) is one window with or without a key.
+        let lookback_years = (SourcePolicy::default_for(SourceId::Bls)
+            .revision_lookback
+            .as_secs()
+            / (86_400 * 365)) as i32;
+        let end = 2026;
+        let start = end - lookback_years;
+        for span in [MAX_YEARS_WITH_KEY, MAX_YEARS_WITHOUT_KEY] {
+            assert_eq!(
+                year_windows(start, end, span).len(),
+                1,
+                "span {span}, lookback {lookback_years}y"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_series_ids_from_messages() {
+        assert_eq!(
+            missing_series_id("Series does not exist for Series NOPE0000000"),
+            Some("NOPE0000000")
         );
         assert_eq!(
-            found[0].data_url.as_deref(),
-            Some(format!("{}/timeseries/data/CES0000000001", mock.base_url()).as_str())
+            missing_series_id("series does not exist for series ABC1, check the id."),
+            Some("ABC1")
         );
-        assert_eq!(found[0].frequency.as_deref(), Some("Monthly"));
+        assert_eq!(
+            missing_series_id("No Data Available for Series X Year: 2004"),
+            None
+        );
+        assert_eq!(missing_series_id("Series does not exist for Series "), None);
+    }
+
+    #[test]
+    fn footnotes_parse() {
+        let p: DataPoint =
+            serde_json::from_value(json!({"year": "2024", "period": "Q02", "value": "4.1",
+            "footnotes": [{"code": "P", "text": "preliminary"}, {}]}))
+            .unwrap();
+        assert!(p.is_preliminary());
+        assert_eq!(p.footnote_summary(), "P: preliminary");
+        let none: DataPoint = serde_json::from_value(json!({"year": "2024", "period": "M01",
+            "value": "1", "footnotes": [{}]}))
+        .unwrap();
+        assert!(!none.is_preliminary());
+        assert_eq!(none.footnote_summary(), "");
+        let absent: DataPoint =
+            serde_json::from_value(json!({"year": "2024", "period": "M01", "value": "1"})).unwrap();
+        assert_eq!(absent.footnotes().count(), 0);
+        // BLS may send an explicit `null` instead of omitting the field or sending `[{}]`.
+        let null_footnotes: DataPoint = serde_json::from_value(
+            json!({"year": "2024", "period": "M01", "value": "1", "footnotes": null}),
+        )
+        .unwrap();
+        assert_eq!(null_footnotes.footnotes().count(), 0);
+    }
+
+    /// `null` for a whole-response array field (not just an omitted one) doesn't fail parsing.
+    #[test]
+    fn null_arrays_parse_as_empty() {
+        let resp: DataResponse = serde_json::from_value(json!({
+            "status": "REQUEST_SUCCEEDED",
+            "message": null,
+            "Results": {"series": null},
+        }))
+        .unwrap();
+        assert!(resp.message.is_empty());
+        assert!(resp.results.unwrap().series.is_empty());
+
+        let body: SeriesBody = serde_json::from_value(json!({
+            "seriesID": "X",
+            "data": null,
+        }))
+        .unwrap();
+        assert!(body.data.is_empty());
+    }
+
+    #[test]
+    fn series_dataset_splits_fixed_width_ids() {
+        let dims = |id: &str| {
+            let ds = series_dataset(id).unwrap();
+            (ds.code, ds.dimensions.0.into_iter().collect::<Vec<_>>())
+        };
+        let pairs = |v: &[(&str, &str)]| {
+            v.iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            dims("LASST060000000000003"),
+            (
+                "LA".to_string(),
+                pairs(&[
+                    ("area", "ST0600000000000"),
+                    ("measure", "03"),
+                    ("seasonal", "S")
+                ])
+            )
+        );
+        assert_eq!(
+            dims("CUSR0000SEHA"),
+            (
+                "CU".to_string(),
+                pairs(&[
+                    ("area", "0000"),
+                    ("item", "SEHA"),
+                    ("periodicity", "R"),
+                    ("seasonal", "S")
+                ])
+            )
+        );
+        assert_eq!(
+            dims("CEU0500000003"),
+            (
+                "CE".to_string(),
+                pairs(&[
+                    ("data_type", "03"),
+                    ("industry", "05000000"),
+                    ("seasonal", "U")
+                ])
+            )
+        );
+        assert_eq!(
+            dims("LNU04000000"),
+            (
+                "LN".to_string(),
+                pairs(&[("seasonal", "U"), ("series_code", "04000000")])
+            )
+        );
+        for bad in [
+            "",
+            "C",
+            "CU",
+            "CUUR0000",       // no item
+            "CES000000000",   // one short
+            "CES00000000011", // one long
+            "LNS1400000",     // one short
+            "LASST06000000000003",
+            "CIU1010000000000A", // no layout for ECI
+            "cuur0000SA0",       // prefixes are uppercase
+            "CUUR 0000SA0",
+            "CUUR0000SÄ0",
+        ] {
+            assert_eq!(series_dataset(bad), None, "{bad:?}");
+        }
+    }
+
+    /// Every curated series has its survey's dataset, not the catch-all.
+    #[test]
+    fn listed_series_have_survey_datasets() {
+        for s in bls_series().unwrap() {
+            assert!(series_dataset(&s.id).is_some(), "{} has no layout", s.id);
+        }
+    }
+
+    /// The layouts and `data/datasets/bls.toml` list the same datasets and dimensions, in the same
+    /// order, so the id splits into exactly the declared keys.
+    #[test]
+    fn layouts_match_dataset_definitions() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/datasets/bls.toml");
+        let defs =
+            crate::dataset::parse_dataset_file(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let (other, defs): (Vec<_>, Vec<_>) =
+            defs.into_iter().partition(|d| d.code == OTHER_DATASET);
+        assert!(
+            other[0].dimensions.is_empty(),
+            "{OTHER_DATASET} has no dimensions"
+        );
+        let from_file: Vec<(&str, Vec<&str>)> = defs
+            .iter()
+            .map(|d| (d.code.as_str(), d.dimension_names().collect()))
+            .collect();
+        let from_layouts: Vec<(&str, Vec<&str>)> = SERIES_ID_LAYOUTS
+            .iter()
+            .map(|(code, layout)| (*code, layout.iter().map(|(name, _)| *name).collect()))
+            .collect();
+        assert_eq!(from_file, from_layouts);
+        assert_eq!(
+            DATASET_CODES,
+            SERIES_ID_LAYOUTS
+                .iter()
+                .map(|(c, _)| *c)
+                .chain([OTHER_DATASET])
+                .collect::<Vec<_>>()
+        );
+        for ((code, layout), def) in SERIES_ID_LAYOUTS.iter().zip(&defs) {
+            assert!(
+                layout.iter().rev().skip(1).all(|(_, w)| *w > 0),
+                "{code}: only the last dimension may take the rest"
+            );
+            // Labelled codes have their field's width, so a mistyped key cannot hide.
+            for (&(name, width), dim) in layout.iter().zip(&def.dimensions) {
+                if width > 0 {
+                    for c in dim.codes.iter().flatten() {
+                        assert_eq!(c.code.len(), width, "{code}.{name}: code {:?}", c.code);
+                    }
+                }
+            }
+        }
     }
 
     #[tokio::test]
-    async fn discover_not_processed_is_error() {
+    async fn one_request_carries_the_whole_batch() {
         let mock = MockSource::start().await;
-        mock.mount(&Route::get("/surveys"), Reply::json_str(THRESHOLD))
-            .await;
-        let err = BlsAdapter::new(mock.base_url())
-            .discover(&test_ctx())
+        let ids: Vec<String> = ["CUUR0000SA0", "LNS14000000", "CES0000000001", "NOPE0000000"]
+            .map(String::from)
+            .to_vec();
+        mock.mount_expect(
+            &route().body_contains(json!({
+                "seriesid": ids,
+                "startyear": "2005",
+                "endyear": "2024",
+                "registrationkey": TEST_API_KEY,
+            })),
+            Reply::json_str(BATCH),
+            1,
+        )
+        .await;
+        let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2024);
+        let out = adapter.fetch_batch(&test_ctx(), &ids, None).await.unwrap();
+        assert_eq!(out.len(), 4);
+
+        let cpi = out["CUUR0000SA0"].as_ref().unwrap();
+        assert_eq!(cpi.points.len(), 3);
+        assert_eq!(
+            cpi.metadata.as_ref().unwrap().units.as_deref(),
+            Some("Index 1982-1984=100")
+        );
+
+        let unrate = out["LNS14000000"].as_ref().unwrap();
+        let got: Vec<_> = unrate
+            .points
+            .iter()
+            .map(|p| (p.date, p.value.clone()))
+            .collect();
+        let bd = |v: &str| BigDecimal::from_str(v).ok();
+        assert_eq!(
+            got,
+            vec![(d(2024, 1, 1), bd("3.7")), (d(2024, 2, 1), bd("3.9"))]
+        );
+
+        // The "X" footnote's "-" is a missing value; the "P" value is kept.
+        let ces = out["CES0000000001"].as_ref().unwrap();
+        let got: Vec<_> = ces
+            .points
+            .iter()
+            .map(|p| (p.date, p.value.clone()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![(d(2024, 1, 1), None), (d(2024, 2, 1), bd("157808"))]
+        );
+
+        let missing = out["NOPE0000000"].as_ref().unwrap_err();
+        assert_eq!(missing.kind(), "not_found");
+        assert!(missing.to_string().contains("NOPE0000000"), "{missing}");
+    }
+
+    #[tokio::test]
+    async fn batch_request_failure_fails_the_whole_batch() {
+        let mock = MockSource::start().await;
+        mock.mount(&route(), Reply::json_str(THRESHOLD)).await;
+        let adapter = BlsAdapter::new(mock.base_url());
+        let ids = vec!["A1".to_string(), "B2".to_string()];
+        let err = adapter
+            .fetch_batch(&test_ctx(), &ids, None)
             .await
             .unwrap_err();
-        assert_eq!(err.kind(), "rate_limited");
+        assert_eq!(err, CrawlError::RateLimited { retry_after: None });
+    }
+
+    #[tokio::test]
+    async fn keyed_batch_splits_into_requests_of_50() {
+        let mock = MockSource::start().await;
+        mock.mount(&route(), Reply::json(ok_empty())).await;
+        let ids: Vec<String> = (0..60).map(|i| format!("S{i:02}")).collect();
+        let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2024);
+        let out = adapter
+            .fetch_batch(&test_ctx(), &ids, Some(d(2024, 1, 1)))
+            .await
+            .unwrap();
+        assert_eq!(out.len(), 60);
+        let sizes: Vec<usize> = mock
+            .received_requests()
+            .await
+            .iter()
+            .map(|r| {
+                let b: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+                assert_eq!(b["registrationkey"], json!(TEST_API_KEY));
+                b["seriesid"].as_array().unwrap().len()
+            })
+            .collect();
+        assert_eq!(sizes, vec![50, 10]);
+    }
+
+    #[tokio::test]
+    async fn keyless_batch_splits_into_requests_of_25() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &route(),
+            Reply::json(
+                json!({"status": "REQUEST_SUCCEEDED", "message": [], "Results": {"series": []}}),
+            ),
+        )
+        .await;
+        let mut ctx = test_ctx();
+        ctx.keys.bls = None;
+        let ids: Vec<String> = (0..30).map(|i| format!("S{i:02}")).collect();
+        let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2024);
+        let out = adapter
+            .fetch_batch(&ctx, &ids, Some(d(2024, 1, 1)))
+            .await
+            .unwrap();
+        assert_eq!(out.len(), 30);
+        assert!(out
+            .values()
+            .all(|r| r.as_ref().is_ok_and(|s| s.points.is_empty())));
+        let sizes: Vec<usize> = mock
+            .received_requests()
+            .await
+            .iter()
+            .map(|r| {
+                let b: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+                assert!(b.get("registrationkey").is_none(), "{b}");
+                b["seriesid"].as_array().unwrap().len()
+            })
+            .collect();
+        assert_eq!(sizes, vec![25, 5]);
+    }
+
+    #[tokio::test]
+    async fn keyless_chunk_failure_applies_to_its_series_only() {
+        let mock = MockSource::start().await;
+        // The first request (25 series) fails permanently, the second succeeds.
+        mock.mount_expect(
+            &route().body_contains(
+                json!({"seriesid": (0..25).map(|i| format!("S{i:02}")).collect::<Vec<_>>()}),
+            ),
+            Reply::json(json!({"status": "REQUEST_NOT_PROCESSED",
+                "message": ["Invalid parameters"], "Results": {}})),
+            1,
+        )
+        .await;
+        mock.mount(&route(), Reply::json(ok_empty())).await;
+        let mut ctx = test_ctx();
+        ctx.keys.bls = None;
+        let ids: Vec<String> = (0..27).map(|i| format!("S{i:02}")).collect();
+        let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2024);
+        let out = adapter
+            .fetch_batch(&ctx, &ids, Some(d(2024, 1, 1)))
+            .await
+            .unwrap();
+        assert_eq!(out["S00"].as_ref().unwrap_err().kind(), "permanent");
+        assert_eq!(out["S24"].as_ref().unwrap_err().kind(), "permanent");
+        assert!(out["S25"].is_ok() && out["S26"].is_ok());
+        assert_eq!(mock.received_requests().await.len(), 2);
+    }
+
+    /// A rate limit on one request applies to every series not fetched yet, without spending
+    /// more quota on the rest.
+    #[tokio::test]
+    async fn keyless_rate_limit_stops_further_requests() {
+        let mock = MockSource::start().await;
+        mock.mount_expect(
+            &route().body_contains(
+                json!({"seriesid": (25..50).map(|i| format!("S{i:02}")).collect::<Vec<_>>()}),
+            ),
+            Reply::json_str(THRESHOLD),
+            1,
+        )
+        .await;
+        mock.mount(&route(), Reply::json(ok_empty())).await;
+        let mut ctx = test_ctx();
+        ctx.keys.bls = None;
+        let ids: Vec<String> = (0..60).map(|i| format!("S{i:02}")).collect();
+        let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2024);
+        let out = adapter
+            .fetch_batch(&ctx, &ids, Some(d(2024, 1, 1)))
+            .await
+            .unwrap();
+        assert_eq!(out.len(), 60);
+        assert!(out["S24"].is_ok());
+        for id in ["S25", "S49", "S50", "S59"] {
+            assert_eq!(
+                out[id],
+                Err(CrawlError::RateLimited { retry_after: None }),
+                "{id}"
+            );
+        }
+        assert_eq!(mock.received_requests().await.len(), 2);
+
+        // On the first request, the rate limit fails the whole call.
+        mock.reset().await;
+        mock.mount(&route(), Reply::json_str(THRESHOLD)).await;
+        let err = adapter
+            .fetch_batch(&ctx, &ids, Some(d(2024, 1, 1)))
+            .await
+            .unwrap_err();
+        assert_eq!(err, CrawlError::RateLimited { retry_after: None });
+        assert_eq!(mock.received_requests().await.len(), 1);
+    }
+
+    /// An unnamed "does not exist" on a later window that carries one series affects only that
+    /// series: it ends its history if newer windows returned data, and fails it as not found if
+    /// not. The rest of the group keeps its data.
+    #[tokio::test]
+    async fn lone_series_not_found_in_later_window_ends_or_fails_only_it() {
+        let series = |id: &str, year: &str| {
+            json!({"seriesID": id, "data": [
+            {"year": year, "period": "M01", "value": "1.0", "footnotes": [{}]}]})
+        };
+        let empty = |id: &str| json!({"seriesID": id, "data": []});
+        // (B1 in the two newer windows, how B1 ends)
+        for (b1_newer, want_points) in [(true, Some(2)), (false, None)] {
+            let mock = MockSource::start().await;
+            let b1 = |year: &str| {
+                if b1_newer {
+                    series("B1", year)
+                } else {
+                    empty("B1")
+                }
+            };
+            mock.mount_expect(
+                &route().body_contains(json!({"seriesid": ["A1", "B1"], "startyear": "2015"})),
+                Reply::json(json!({"status": "REQUEST_SUCCEEDED", "message": [],
+                    "Results": {"series": [series("A1", "2020"), b1("2020")]}})),
+                1,
+            )
+            .await;
+            mock.mount_expect(
+                &route().body_contains(json!({"seriesid": ["A1", "B1"], "startyear": "2005"})),
+                Reply::json(json!({"status": "REQUEST_SUCCEEDED", "message": [],
+                    "Results": {"series": [empty("A1"), b1("2010")]}})),
+                1,
+            )
+            .await;
+            mock.mount_expect(
+                &route().body_contains(json!({"seriesid": ["B1"], "startyear": "1995"})),
+                Reply::json(json!({"status": "REQUEST_NOT_PROCESSED",
+                    "message": ["Series does not exist"], "Results": {}})),
+                1,
+            )
+            .await;
+            let mut ctx = test_ctx();
+            ctx.keys.bls = None;
+            let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2024);
+            let ids = vec!["A1".to_string(), "B1".to_string()];
+            let out = adapter
+                .fetch_batch(&ctx, &ids, Some(d(1995, 1, 1)))
+                .await
+                .unwrap();
+            assert_eq!(out["A1"].as_ref().unwrap().points.len(), 1);
+            match want_points {
+                // Data from newer windows: the old window just ends its history.
+                Some(n) => assert_eq!(out["B1"].as_ref().unwrap().points.len(), n),
+                None => assert_eq!(out["B1"].as_ref().unwrap_err().kind(), "not_found"),
+            }
+        }
+    }
+
+    /// A named "does not exist" on an older window, after the series returned data, ends its
+    /// history instead of failing it.
+    #[tokio::test]
+    async fn named_not_found_after_data_keeps_the_data() {
+        // Not processed too: a series that already ended must not become transient.
+        for status in [STATUS_SUCCEEDED, "REQUEST_NOT_PROCESSED"] {
+            let mock = MockSource::start().await;
+            mock.mount_expect(
+                &route().body_contains(json!({"startyear": "2015"})),
+                Reply::json_str(MONTHLY),
+                1,
+            )
+            .await;
+            mock.mount_expect(
+                &route().body_contains(json!({"startyear": "2005"})),
+                Reply::json(json!({"status": status,
+                    "message": ["Series does not exist for Series CUUR0000SA0"],
+                    "Results": {"series": []}})),
+                1,
+            )
+            .await;
+            let mut ctx = test_ctx();
+            ctx.keys.bls = None;
+            let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2024);
+            let s = adapter
+                .fetch_series(&ctx, "CUUR0000SA0", None)
+                .await
+                .unwrap_or_else(|e| panic!("{status}: {e}"));
+            assert_eq!(s.points.len(), 5, "{status}");
+        }
+    }
+
+    /// Duplicate ids are requested once; a series the response leaves out is empty with `since`
+    /// and not found without it.
+    #[tokio::test]
+    async fn duplicates_and_omitted_series() {
+        let mock = MockSource::start().await;
+        mock.mount_expect(
+            &route().body_contains(json!({"seriesid": ["CUUR0000SA0", "GONE1"]})),
+            Reply::json_str(MONTHLY),
+            2,
+        )
+        .await;
+        let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2024);
+        let ids = ["CUUR0000SA0", "GONE1", "CUUR0000SA0"]
+            .map(String::from)
+            .to_vec();
+        let out = adapter
+            .fetch_batch(&test_ctx(), &ids, Some(d(2024, 1, 1)))
+            .await
+            .unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out["CUUR0000SA0"].as_ref().unwrap().points.len(), 3);
+        assert!(out["GONE1"].as_ref().unwrap().points.is_empty());
+
+        let out = adapter.fetch_batch(&test_ctx(), &ids, None).await.unwrap();
+        assert_eq!(out["GONE1"].as_ref().unwrap_err().kind(), "not_found");
+    }
+
+    /// A not-processed response whose only messages name missing series fails those as not
+    /// found and the series it left out as transient, instead of completing them with no data.
+    #[tokio::test]
+    async fn not_processed_with_only_missing_series_fails_the_rest_transiently() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &route(),
+            Reply::json(json!({"status": "REQUEST_NOT_PROCESSED",
+                "message": ["Series does not exist for Series NOPE0000000"],
+                "Results": {"series": []}})),
+        )
+        .await;
+        let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2024);
+        let ids = ["NOPE0000000", "CUUR0000SA0"].map(String::from).to_vec();
+        let out = adapter
+            .fetch_batch(&test_ctx(), &ids, Some(d(2024, 1, 1)))
+            .await
+            .unwrap();
+        assert_eq!(out["NOPE0000000"].as_ref().unwrap_err().kind(), "not_found");
+        assert_eq!(out["CUUR0000SA0"].as_ref().unwrap_err().kind(), "transient");
+    }
+
+    /// Series that run out of data in an older window drop out of later requests; the others
+    /// keep going back.
+    #[tokio::test]
+    async fn batch_windows_drop_series_that_ran_out() {
+        let mock = MockSource::start().await;
+        let series = |id: &str, year: &str| {
+            json!({"seriesID": id, "data": [
+            {"year": year, "period": "M01", "value": "1.0", "footnotes": [{}]}]})
+        };
+        let empty = |id: &str| json!({"seriesID": id, "data": []});
+        mock.mount_expect(
+            &route().body_contains(json!({"seriesid": ["OLD1", "NEW1"], "startyear": "2017"})),
+            Reply::json(json!({"status": "REQUEST_SUCCEEDED", "message": [],
+                "Results": {"series": [series("OLD1", "2024"), series("NEW1", "2024")]}})),
+            1,
+        )
+        .await;
+        mock.mount_expect(
+            &route().body_contains(json!({"seriesid": ["OLD1", "NEW1"], "startyear": "2007"})),
+            Reply::json(json!({"status": "REQUEST_SUCCEEDED", "message": [],
+                "Results": {"series": [series("OLD1", "2010"), empty("NEW1")]}})),
+            1,
+        )
+        .await;
+        mock.mount_expect(
+            &route().body_contains(json!({"seriesid": ["OLD1"], "startyear": "2000"})),
+            Reply::json(json!({"status": "REQUEST_SUCCEEDED", "message": [],
+                "Results": {"series": [series("OLD1", "2001")]}})),
+            1,
+        )
+        .await;
+        let mut ctx = test_ctx();
+        ctx.keys.bls = None;
+        let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2026);
+        let ids = vec!["OLD1".to_string(), "NEW1".to_string()];
+        let out = adapter
+            .fetch_batch(&ctx, &ids, Some(d(2000, 1, 1)))
+            .await
+            .unwrap();
+        let dates = |id: &str| -> Vec<NaiveDate> {
+            out[id]
+                .as_ref()
+                .unwrap()
+                .points
+                .iter()
+                .map(|p| p.date)
+                .collect()
+        };
+        assert_eq!(
+            dates("OLD1"),
+            vec![d(2001, 1, 1), d(2010, 1, 1), d(2024, 1, 1)]
+        );
+        assert_eq!(dates("NEW1"), vec![d(2024, 1, 1)]);
+        assert_eq!(mock.received_requests().await.len(), 3);
+    }
+
+    /// A not-processed response that omits a series entirely (no entry in `Results.series`, not
+    /// even an empty one), but names it in an informational "No Data Available" message, ends its
+    /// history when it already has data instead of failing it transiently and losing that data.
+    #[tokio::test]
+    async fn omitted_series_named_no_data_after_data_keeps_the_data() {
+        let mock = MockSource::start().await;
+        mock.mount_expect(
+            &route().body_contains(json!({"seriesid": ["OLD1", "NEW1"], "startyear": "2015"})),
+            Reply::json(json!({"status": "REQUEST_SUCCEEDED", "message": [],
+                "Results": {"series": [
+                    {"seriesID": "OLD1", "data": [{"year": "2020", "period": "M01", "value": "1.0", "footnotes": [{}]}]},
+                    {"seriesID": "NEW1", "data": [{"year": "2020", "period": "M01", "value": "2.0", "footnotes": [{}]}]},
+                ]}})),
+            1,
+        )
+        .await;
+        mock.mount_expect(
+            &route().body_contains(json!({"seriesid": ["OLD1", "NEW1"], "startyear": "2005"})),
+            Reply::json(json!({"status": "REQUEST_NOT_PROCESSED",
+                "message": ["No Data Available for Series OLD1 Year: 2010"],
+                "Results": {"series": [
+                    {"seriesID": "NEW1", "data": [{"year": "2010", "period": "M01", "value": "3.0", "footnotes": [{}]}]},
+                ]}})),
+            1,
+        )
+        .await;
+        let mut ctx = test_ctx();
+        ctx.keys.bls = None;
+        let adapter = BlsAdapter::new(mock.base_url()).with_current_year(2024);
+        let ids = vec!["OLD1".to_string(), "NEW1".to_string()];
+        let out = adapter.fetch_batch(&ctx, &ids, None).await.unwrap();
+        let dates = |id: &str| -> Vec<NaiveDate> {
+            out[id]
+                .as_ref()
+                .unwrap()
+                .points
+                .iter()
+                .map(|p| p.date)
+                .collect()
+        };
+        // OLD1 keeps its window-1 data instead of losing it to a Transient failure.
+        assert_eq!(dates("OLD1"), vec![d(2020, 1, 1)]);
+        assert_eq!(dates("NEW1"), vec![d(2010, 1, 1), d(2020, 1, 1)]);
+        assert_eq!(mock.received_requests().await.len(), 2);
     }
 
     #[test]
@@ -983,6 +3320,215 @@ mod tests {
         assert!(crate::sources::default_registry()
             .get(SourceId::Bls)
             .is_some());
+    }
+
+    #[test]
+    fn parse_bls_code_file_reads_named_columns_and_skips_blank_lines() {
+        let text = "item_code\titem_name\tdisplay_level\n\
+                     SA0\tAll items\t0\n\
+                     \n\
+                     SAA\tApparel\t1\n";
+        assert_eq!(
+            parse_bls_code_file(text, "item_code", "item_name").unwrap(),
+            vec![
+                ("SA0".to_string(), "All items".to_string()),
+                ("SAA".to_string(), "Apparel".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_bls_code_file_rejects_a_missing_column() {
+        let text = "area_type_code\tarea_code\tarea_text\n0\tST0100000000000\tAlabama\n";
+        let err = parse_bls_code_file(text, "item_code", "item_name").unwrap_err();
+        assert!(matches!(err, CrawlError::Parse(_)));
+    }
+
+    #[test]
+    fn parse_ln_series_titles_strips_prefix_and_seasonal_code() {
+        let text = "series_id\tseasonal\tseries_title\tfootnote_codes\n\
+                     LNS14000000\tS\t(Seas) Unemployment Rate\t\n\
+                     LNU04000000\tU\t(Unadj) Unemployment Rate\t\n";
+        assert_eq!(
+            parse_ln_series_titles(text).unwrap(),
+            vec![
+                (
+                    "14000000".to_string(),
+                    "(Seas) Unemployment Rate".to_string()
+                ),
+                (
+                    "04000000".to_string(),
+                    "(Unadj) Unemployment Rate".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_ln_series_titles_skips_rows_outside_ln() {
+        let text = "series_id\tseries_title\nCES0000000001\tAll Employees\n";
+        assert_eq!(parse_ln_series_titles(text).unwrap(), vec![]);
+    }
+
+    /// Refreshing a code list fetches, parses and merges a code file's labels into the dataset, and
+    /// caches the response's `ETag` for next time. The conditional-GET mechanics themselves
+    /// (sending `If-None-Match`, treating `304` as "nothing to do") are covered at the
+    /// `HttpFetcher` level; this checks BLS's own wiring: parsing plus the merge into
+    /// `datasets.dimensions` through `persist`.
+    #[tokio::test]
+    async fn refresh_code_file_merges_labels_and_caches_etag() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_bls_refresh_code_file",
+        )
+        .await;
+        let mut catalog = crate::dataset::DatasetCatalog::empty();
+        catalog
+            .insert(
+                SourceId::Bls,
+                DATASET_CODES,
+                crate::dataset::parse_dataset_file(
+                    &std::fs::read_to_string(
+                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("data/datasets/bls.toml"),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        crate::persist::sync_datasets(&db.pool, &catalog)
+            .await
+            .unwrap();
+
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/cu.item"),
+            Reply::text("item_code\titem_name\nSA0\tAll items\nSAZZ\tBrand new item\n")
+                .header("ETag", "\"v1\""),
+        )
+        .await;
+        let url = mock.url("/cu.item");
+        let spec = CodeFileSpec {
+            url: &url,
+            dataset: "CU",
+            dimension: "item",
+            code_col: "item_code",
+            label_col: "item_name",
+        };
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        crate::reference_file::refresh_code_list(&ctx, SourceId::Bls, &spec.code_list())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            crate::persist::reference_file_etag(&db.pool, SourceId::Bls, spec.url)
+                .await
+                .unwrap(),
+            Some("\"v1\"".to_string())
+        );
+        let codes = {
+            use diesel::prelude::*;
+            use diesel_async::RunQueryDsl;
+            use econ_graph_core::schema::datasets::dsl;
+            let mut conn = db.pool.get().await.unwrap();
+            let dims: econ_graph_core::models::DatasetComponents = dsl::datasets
+                .filter(dsl::code.eq("CU"))
+                .select(dsl::dimensions)
+                .first(&mut conn)
+                .await
+                .unwrap();
+            dims.0
+                .into_iter()
+                .find(|d| d.name == "item")
+                .unwrap()
+                .codes
+                .unwrap()
+        };
+        assert!(codes
+            .iter()
+            .any(|c| c.code == "SA0" && c.label == "All items"));
+        assert!(codes
+            .iter()
+            .any(|c| c.code == "SAZZ" && c.label == "Brand new item"));
+
+        // bls.toml itself carries no "item" codes any more (BLS's own file is the source of
+        // truth), so a resync from it must not drop what this refresh just merged in.
+        crate::persist::sync_datasets(&db.pool, &catalog)
+            .await
+            .unwrap();
+        let codes_after_resync = {
+            use diesel::prelude::*;
+            use diesel_async::RunQueryDsl;
+            use econ_graph_core::schema::datasets::dsl;
+            let mut conn = db.pool.get().await.unwrap();
+            let dims: econ_graph_core::models::DatasetComponents = dsl::datasets
+                .filter(dsl::code.eq("CU"))
+                .select(dsl::dimensions)
+                .first(&mut conn)
+                .await
+                .unwrap();
+            dims.0
+                .into_iter()
+                .find(|d| d.name == "item")
+                .unwrap()
+                .codes
+                .unwrap()
+        };
+        assert_eq!(codes, codes_after_resync);
+
+        db.drop().await;
+    }
+
+    /// If `sync_datasets` hasn't run yet (or the dataset/dimension named in a `CodeFileSpec`
+    /// doesn't exist), `merge_dataset_dimension_codes` has nothing to write into and
+    /// the refresh must not cache the `ETag`: caching it anyway would make the next
+    /// refresh a `304` that still has nothing to merge into, silently losing the labels for
+    /// good (short of BLS changing the file again).
+    #[tokio::test]
+    async fn refresh_code_file_does_not_cache_etag_when_nothing_to_merge_into() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_bls_refresh_no_dataset",
+        )
+        .await;
+        // Deliberately skip sync_datasets: no "CU" dataset row exists yet.
+
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/cu.item"),
+            Reply::text("item_code\titem_name\nSA0\tAll items\n").header("ETag", "\"v1\""),
+        )
+        .await;
+        let url = mock.url("/cu.item");
+        let spec = CodeFileSpec {
+            url: &url,
+            dataset: "CU",
+            dimension: "item",
+            code_col: "item_code",
+            label_col: "item_name",
+        };
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        crate::reference_file::refresh_code_list(&ctx, SourceId::Bls, &spec.code_list())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            crate::persist::reference_file_etag(&db.pool, SourceId::Bls, spec.url)
+                .await
+                .unwrap(),
+            None
+        );
+
+        db.drop().await;
     }
 }
 
@@ -997,10 +3543,5 @@ mod contract {
         route: Route::post("/timeseries/data/"),
         ok_reply: Reply::json_str(include_str!("../../tests/fixtures/bls/cpi_monthly.json")),
         expect_points: 5,
-        discover: {
-            route: Route::get("/surveys"),
-            reply: Reply::json_str(include_str!("../../tests/fixtures/bls/surveys.json")),
-            min_series: 4,
-        },
     }
 }

@@ -1,6 +1,6 @@
 /**
- * The world outline is bundled from the pinned `world-atlas` package, so both
- * maps must render their countries without any network request.
+ * The world outline is bundled from the pinned `world-atlas` package, so the
+ * map must render its countries without any network request.
  */
 
 import React from 'react';
@@ -8,7 +8,6 @@ import { render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import InteractiveWorldMap from '../InteractiveWorldMap';
-import GlobalEconomicNetworkMap from '../GlobalEconomicNetworkMap';
 import { loadWorldAtlas } from '../worldAtlas';
 
 // The shared setup file stubs d3-geo and d3-zoom; this test needs real paths.
@@ -17,8 +16,8 @@ import { loadWorldAtlas } from '../worldAtlas';
 vi.unmock('d3-geo');
 vi.unmock('d3-zoom');
 
-// The 1:110m Natural Earth file has 177 country geometries.
-const COUNTRY_COUNT = 177;
+// The 1:50m Natural Earth file has 241 country geometries.
+const COUNTRY_COUNT = 241;
 // The first dynamic import of the atlas chunk can be slow on a cold CI runner.
 const WAIT = { timeout: 5000 };
 
@@ -44,13 +43,8 @@ describe('bundled world atlas', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <InteractiveWorldMap
-          data={[]}
-          selectedIndicator='gdp'
-          timeRange={{ start: new Date('2020-01-01'), end: new Date('2024-01-01') }}
-          onCountryClick={vi.fn()}
-          onCountryHover={vi.fn()}
-          mapView={{ scale: 1, translation: [0, 0], rotation: [0, 0, 0] }}
-          onMapViewChange={vi.fn()}
+          valuesByIsoNumeric={new Map()}
+          colorScale={() => '#000'}
           width={800}
           height={400}
         />
@@ -64,27 +58,13 @@ describe('bundled world atlas', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('renders GlobalEconomicNetworkMap countries without fetching', async () => {
-    render(<GlobalEconomicNetworkMap />);
-
-    await waitFor(() => {
-      expect(document.querySelectorAll('path.world-country')).toHaveLength(COUNTRY_COUNT);
-    }, WAIT);
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
   it('labels countries by name (world-atlas uses lowercase properties.name)', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={queryClient}>
         <InteractiveWorldMap
-          data={[]}
-          selectedIndicator='gdp'
-          timeRange={{ start: new Date('2020-01-01'), end: new Date('2024-01-01') }}
-          onCountryClick={vi.fn()}
-          onCountryHover={vi.fn()}
-          mapView={{ scale: 1, translation: [0, 0], rotation: [0, 0, 0] }}
-          onMapViewChange={vi.fn()}
+          valuesByIsoNumeric={new Map()}
+          colorScale={() => '#000'}
           width={800}
           height={400}
           showLabels

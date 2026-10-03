@@ -16,16 +16,17 @@ use crate::series_id::stable_series_id;
 use crate::testkit::echo::EchoAdapter;
 use crate::testkit::{test_ctx, MockSource, Reply, Route};
 
-/// A migrated database of its own, dropped by [`FreshDb::drop`].
-struct FreshDb {
+/// A migrated database of its own, dropped by [`FreshDb::drop`]. `pub(crate)` so other
+/// DB-backed test modules (e.g. `reference_data_tests`) can reuse it.
+pub(crate) struct FreshDb {
     admin_url: String,
     name: String,
-    pool: DatabasePool,
+    pub(crate) pool: DatabasePool,
 }
 
 impl FreshDb {
     /// `base` plus this process id, so concurrent test runs on one server don't collide.
-    async fn create(admin_url: &str, base: &str) -> Self {
+    pub(crate) async fn create(admin_url: &str, base: &str) -> Self {
         let name = format!("{base}_{}", std::process::id());
         let mut admin = AsyncPgConnection::establish(admin_url).await.unwrap();
         for sql in [
@@ -45,7 +46,7 @@ impl FreshDb {
         }
     }
 
-    async fn drop(self) {
+    pub(crate) async fn drop(self) {
         drop(self.pool);
         let mut admin = AsyncPgConnection::establish(&self.admin_url).await.unwrap();
         diesel::sql_query(format!(
@@ -58,10 +59,10 @@ impl FreshDb {
     }
 }
 
-fn database_url() -> Option<String> {
+pub(crate) fn database_url() -> Option<String> {
     let url = std::env::var("DATABASE_URL").ok();
     if url.is_none() {
-        eprintln!("DATABASE_URL not set; skipping DB-backed stable id test");
+        eprintln!("DATABASE_URL not set; skipping DB-backed test");
     }
     url
 }
@@ -137,6 +138,11 @@ async fn mock_source() -> MockSource {
 /// list, persisting everything, the same calls the worker makes.
 async fn crawl(pool: &DatabasePool, mock: &MockSource) {
     let adapter = EchoAdapter::new(mock.base_url());
+    let mut datasets = crate::dataset::DatasetCatalog::empty();
+    datasets.load_adapter(&adapter).unwrap();
+    crate::persist::sync_datasets(pool, &datasets)
+        .await
+        .unwrap();
     let ctx = test_ctx();
     let found = adapter.discover(&ctx).await.unwrap();
     persist_discovered(pool, adapter.id(), &found)
@@ -257,7 +263,16 @@ async fn active(pool: &DatabasePool, external_id: &str) -> (Option<bool>, Option
     (series, metadata)
 }
 
+/// FRED series `ids`, as discovery lists them.
 fn listed(ids: &[&str]) -> Vec<DiscoveredSeries> {
+    listed_in(
+        ids,
+        &crate::dataset::SeriesDataset::new("FRED", Vec::<(String, String)>::new()),
+    )
+}
+
+/// Series `ids`, as discovery lists them, all in `dataset`.
+fn listed_in(ids: &[&str], dataset: &crate::dataset::SeriesDataset) -> Vec<DiscoveredSeries> {
     ids.iter()
         .map(|id| DiscoveredSeries {
             external_id: id.to_string(),
@@ -266,6 +281,7 @@ fn listed(ids: &[&str]) -> Vec<DiscoveredSeries> {
             units: None,
             frequency: None,
             data_url: None,
+            dataset: dataset.clone(),
         })
         .collect()
 }
@@ -321,12 +337,13 @@ async fn unlisted_series_are_retired_not_deleted_and_come_back() {
     assert_eq!(before, again);
 }
 
-/// Regression for the review finding on #219: Census discovery only ever lists `CENSUS_BDS_*`
-/// series, but the Census data source also holds ACS `series_metadata` rows seeded by the initial
-/// migration (`B01001001`, `B19013_001E`). A complete-catalog retirement for Census must not
-/// retire those, and `CensusAdapter::retirement_scope_prefix` (`ID_PREFIX`, `"CENSUS_BDS_"`)
-/// exists to stop it. See `unlisted_series_are_retired_not_deleted_and_come_back` for the
-/// unscoped (whole-source) case this specializes.
+/// Regression for the review finding on #219: Census discovery only ever lists `bds/*` series
+/// (the canonical dataset ids from DS-5), but the Census data source also holds ACS
+/// `series_metadata` rows seeded by the initial migration (`B01001001`, `B19013_001E`). A
+/// complete-catalog retirement for Census must not retire those, and
+/// `CensusAdapter::retirement_scope_prefix` (`ID_PREFIX`, `"bds/"`) exists to stop it. See
+/// `unlisted_series_are_retired_not_deleted_and_come_back` for the unscoped (whole-source) case
+/// this specializes.
 #[tokio::test]
 async fn census_retirement_is_scoped_to_bds_and_never_touches_seeded_acs_rows() {
     use crate::sources::census::CensusAdapter;
@@ -337,14 +354,27 @@ async fn census_retirement_is_scoped_to_bds_and_never_touches_seeded_acs_rows() 
     let adapter = CensusAdapter::default();
     assert!(adapter.discovery_is_complete());
     let scope = adapter.retirement_scope_prefix();
-    assert_eq!(scope, Some("CENSUS_BDS_"));
+    assert_eq!(scope, Some("bds/"));
 
     // The seeded ACS rows exist and are active before any Census discovery runs.
     assert_eq!(active(p, "B01001001").await, (None, Some(true)));
     assert_eq!(active(p, "B19013_001E").await, (None, Some(true)));
 
     // A BDS discovery that lists one national series and nothing else.
-    let bds = listed(&["CENSUS_BDS_ESTAB_us"]);
+    let mut datasets = crate::dataset::DatasetCatalog::empty();
+    datasets.load_adapter(&adapter).unwrap();
+    crate::persist::sync_datasets(p, &datasets).await.unwrap();
+    let bds = listed_in(
+        &["bds/national..ESTAB"],
+        &crate::dataset::SeriesDataset::new(
+            "bds",
+            [
+                ("geo_level", "national"),
+                ("state", ""),
+                ("variable", "ESTAB"),
+            ],
+        ),
+    );
     persist_discovered(p, SourceId::Census, &bds).await.unwrap();
     let retired = retire_unlisted(p, SourceId::Census, &bds, scope)
         .await
@@ -355,7 +385,7 @@ async fn census_retirement_is_scoped_to_bds_and_never_touches_seeded_acs_rows() 
     assert_eq!(retired.series_retired, 0, "{retired:?}");
     assert_eq!(active(p, "B01001001").await, (None, Some(true)));
     assert_eq!(active(p, "B19013_001E").await, (None, Some(true)));
-    assert_eq!(active(p, "CENSUS_BDS_ESTAB_us").await, (None, Some(true)));
+    assert_eq!(active(p, "bds/national..ESTAB").await, (None, Some(true)));
 
     // An unscoped call (as if the adapter forgot to scope itself) would retire them: proves the
     // scope parameter, not some other accident, is what protects the ACS rows above.

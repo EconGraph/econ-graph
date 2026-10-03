@@ -41,13 +41,6 @@ export const GRAPHQL_OPERATION_SKIP_LIST: Readonly<Record<string, string>> = {
   'test-utils/mocks/graphql/ratio-queries.ts#GetRatioBenchmarks': 'sec: compiled out',
   'test-utils/mocks/graphql/ratio-queries.ts#GetRatioExplanation': 'sec: compiled out',
 
-  // Global analysis tabs: compiled out (world-map area). The backend never
-  // registered these fields (GlobalAnalysisQuery); train 1 replaces them with a
-  // generic crossSection query. Nothing in src/ uses these three today.
-  'utils/graphql.ts#GetCountriesWithEconomicData': 'world-map: replaced by crossSection',
-  'utils/graphql.ts#GetCorrelationNetwork': 'world-map: replaced by crossSection',
-  'utils/graphql.ts#GetGlobalEventsWithImpacts': 'world-map: replaced by crossSection',
-
   // Unused: nothing in src/ sends these. Their only caller, useCollaboration.ts,
   // was deleted by UI-8 (UI-5 deleted the other one, ChartCollaborationConnectedQuery,
   // and the now-uncalled GetAnnotations with it). Fix or delete them (series search

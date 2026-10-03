@@ -4,6 +4,12 @@
  * This module implements statistical indicators commonly used in economic analysis.
  */
 
+// Unused by any current page (see docs/roadmap/analysis-workspace.md). A future chart
+// overlay that uses these indicators belongs behind the `technical_analysis` build flag
+// (ECO-57): `__FLAGS__.technical_analysis ? lazy(() => import(...)) : null`, per
+// docs/build-flags.md. Import this module statically only from a module already gated
+// that way, so a release build still leaves it out.
+
 export interface DataPoint {
   date: string;
   value: number;
@@ -62,15 +68,16 @@ export function calculateSMA(data: DataPoint[], period: number): TechnicalIndica
  * @returns Array of technical indicator values.
  */
 export function calculateEMA(data: DataPoint[], period: number): TechnicalIndicator[] {
-  if (data.length === 0) return [];
+  if (data.length < period) return [];
 
   const ema: TechnicalIndicator[] = [];
   const multiplier = 2 / (period + 1);
 
-  // Start with SMA for first value
+  // The first EMA value is, by convention, the SMA of the first `period` points.
   let previousEMA = data.slice(0, period).reduce((sum, point) => sum + point.value, 0) / period;
+  ema.push({ date: data[period - 1].date, value: previousEMA, indicator: `EMA(${period})` });
 
-  for (let i = period - 1; i < data.length; i++) {
+  for (let i = period; i < data.length; i++) {
     const currentEMA = data[i].value * multiplier + previousEMA * (1 - multiplier);
 
     ema.push({
@@ -151,8 +158,7 @@ export function calculateRSI(data: DataPoint[], period = 14): RSIPoint[] {
 
   // Calculate RSI for each point
   for (let i = period; i < data.length; i++) {
-    const rs = avgGain / (avgLoss || 0.001); // Avoid division by zero
-    const rsi = 100 - 100 / (1 + rs);
+    const rsi = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
 
     rsiPoints.push({
       date: data[i].date,

@@ -10,10 +10,6 @@ description = "The crawl_queue worker binary: econ-graph-crawler's Worker plus h
 name = "crawler-worker"
 path = "src/main.rs"
 
-[features]
-# Development only: register the static-catalog adapters (see econ-graph-crawler's feature).
-static-catalogs = ["econ-graph-crawler/static-catalogs"]
-
 [dependencies]
 econ-graph-core = { path = "../econ-graph-core" }
 econ-graph-crawler = { path = "../econ-graph-crawler" }

@@ -1,59 +1,80 @@
 /**
  * CountryTooltip Component.
  *
- * Tooltip component for displaying country-specific data when hovering
- * over countries on the world map.
+ * The world map's tooltip for the country under the pointer: its name, and its value with unit
+ * and the value's date, or that it has no data.
  */
 
 import React from 'react';
-import { Box, Typography, Paper } from '@mui/material';
-import { CountryData, EconomicIndicator } from '../../types/globalAnalysis';
-import * as d3 from 'd3';
+import { Typography, Paper } from '@mui/material';
+import type { MapCountryValue } from './hooks/useWorldMapData';
+import { formatMapDate, formatMapValue } from './mapFormat';
 
 interface CountryTooltipProps {
-  countryId: string;
-  countryData: CountryData | undefined;
-  indicator: EconomicIndicator;
-  colorScale: d3.ScaleSequential<string, never>;
+  /** Country name. */
+  name: string;
+  /** The country's value; undefined when it has none. */
+  entry: MapCountryValue | undefined;
+  /** Unit of the value. */
+  unit: string | null;
+  /** Series frequency, e.g. `Annual`. */
+  frequency: string | null;
+  /** Pointer position within the map, in pixels. */
+  x: number;
+  y: number;
+  /** The map's size; the tooltip opens away from the nearer edges so it stays inside. */
+  boxWidth: number;
+  boxHeight: number;
 }
 
+/** Gap between the pointer and the tooltip, in pixels. */
+const OFFSET = 12;
+
 const CountryTooltip: React.FC<CountryTooltipProps> = ({
-  countryId,
-  countryData,
-  indicator,
-  colorScale,
-}) => {
-  if (!countryData) return null;
-
-  const indicatorValue = countryData[indicator as keyof CountryData] as number;
-  const formattedValue = typeof indicatorValue === 'number' ? indicatorValue.toFixed(2) : 'N/A';
-  const indicatorColor = typeof indicatorValue === 'number' ? colorScale(indicatorValue) : '#ccc';
-
-  return (
-    <Paper
-      sx={{
-        position: 'absolute',
-        top: 0, // Will be positioned dynamically by D3 in the future
-        left: 0, // Will be positioned dynamically by D3 in the future
-        p: 1,
-        bgcolor: 'rgba(255, 255, 255, 0.9)',
-        boxShadow: 3,
-        pointerEvents: 'none',
-        zIndex: 1000,
-      }}
-    >
-      <Typography variant='subtitle2' sx={{ fontWeight: 'bold' }}>
-        {countryData.name} ({countryId})
+  name,
+  entry,
+  unit,
+  frequency,
+  x,
+  y,
+  boxWidth,
+  boxHeight,
+}) => (
+  <Paper
+    role='tooltip'
+    data-testid='country-tooltip'
+    sx={{
+      position: 'absolute',
+      ...(x > boxWidth / 2 ? { right: boxWidth - x + OFFSET } : { left: x + OFFSET }),
+      ...(y > boxHeight / 2 ? { bottom: boxHeight - y + OFFSET } : { top: y + OFFSET }),
+      p: 1,
+      // No wider than the room on the side it opens to, so a narrow map doesn't clip it.
+      maxWidth: Math.max(120, Math.min(260, x > boxWidth / 2 ? x - OFFSET : boxWidth - x - OFFSET)),
+      bgcolor: 'rgba(255, 255, 255, 0.95)',
+      boxShadow: 3,
+      pointerEvents: 'none',
+      zIndex: 1000,
+    }}
+  >
+    <Typography variant='subtitle2' sx={{ fontWeight: 'bold' }}>
+      {name || 'Unknown'}
+    </Typography>
+    {entry ? (
+      <>
+        <Typography variant='body2'>
+          {formatMapValue(entry.value)}
+          {unit ? ` ${unit}` : ''}
+        </Typography>
+        <Typography variant='caption' color='text.secondary'>
+          {formatMapDate(entry.date, frequency)}
+        </Typography>
+      </>
+    ) : (
+      <Typography variant='body2' color='text.secondary'>
+        No data
       </Typography>
-      <Typography variant='body2'>
-        {indicator}:{' '}
-        <Box component='span' sx={{ color: indicatorColor, fontWeight: 'bold' }}>
-          {formattedValue}
-        </Box>
-      </Typography>
-      {/* Add more details as needed */}
-    </Paper>
-  );
-};
+    )}
+  </Paper>
+);
 
 export default CountryTooltip;

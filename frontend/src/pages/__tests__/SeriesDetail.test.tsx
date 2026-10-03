@@ -18,9 +18,13 @@ import {
   UNKNOWN_ID,
   UNRATE_ID,
   allNullTransformed,
+  dailyPages,
+  dailyPoints,
   noObservations,
+  page,
   seriesResponses,
   unrateLevels,
+  unrateLogDifference,
   unrateYearOverYear,
 } from './fixtures/seriesDetail';
 
@@ -46,6 +50,7 @@ vi.mock('react-chartjs-2', () => ({
       data-testid='line-chart'
       data-points={JSON.stringify(data.datasets[0].data.map((p: any) => [p.date, p.y]))}
       data-title={options.plugins.title.text}
+      data-y-axis={options.scales.y.title.text}
     />
   ),
 }));
@@ -76,7 +81,7 @@ afterAll(() => {
 const mockExecute = vi.mocked(executeGraphQL);
 const mockUseParams = vi.mocked(useParams);
 
-type DataResponse = { seriesData: { nodes: unknown[]; totalCount: number } };
+type DataResponse = ReturnType<typeof page>;
 
 /**
  * Answer GraphQL requests from fixtures.
@@ -170,13 +175,36 @@ describe('SeriesDetail', () => {
       transformation: 'NONE',
       first: 10000,
     });
+    expect(dataRequests()[0].variables).not.toHaveProperty('after');
+  });
+
+  test('reads every page of a long series and plots them as one', async () => {
+    serve();
+    mockExecute.mockImplementation(async (request: GraphQLRequest) => {
+      if (request.query === QUERIES.GET_SERIES_DETAIL) {
+        return { data: seriesResponses[UNRATE_ID] };
+      }
+      const response = dailyPages[request.variables?.after ?? 'first'];
+      if (!response) throw new Error(`no page after ${request.variables?.after}`);
+      return { data: response };
+    });
+    renderPage(UNRATE_ID);
+    await screen.findByTestId('line-chart');
+
+    expect(dataRequests().map(request => request.variables?.after)).toEqual([undefined, '3', '6']);
+    expect(plottedPoints()).toEqual(dailyPoints.map(p => [p.date, Number(p.value)]));
+    const rows = within(screen.getByRole('table', { name: 'Recent observations' })).getAllByRole(
+      'row'
+    );
+    expect(rows[1]).toHaveTextContent('Jan 10, 2024');
   });
 
   test.each([
     ['Year-over-Year', 'YEAR_OVER_YEAR'],
     ['Quarter-over-Quarter', 'QUARTER_OVER_QUARTER'],
     ['Month-over-Month', 'MONTH_OVER_MONTH'],
-    ['Change since first observation', 'PERCENT_CHANGE'],
+    ['Change since first available value', 'PERCENT_CHANGE'],
+    ['Log difference', 'LOG_DIFFERENCE'],
   ])('choosing %s sends %s to the backend', async (label, enumValue) => {
     serve({ NONE: unrateLevels, [enumValue]: unrateYearOverYear });
     renderPage(UNRATE_ID);
@@ -186,6 +214,20 @@ describe('SeriesDetail', () => {
 
     await waitFor(() => expect(dataRequests().slice(-1)[0]?.variables?.transformation).toBe(enumValue));
     await waitFor(() => expect(plottedPoints()).toContainEqual(['2024-02-01', 5.4054]));
+  });
+
+  test('log difference is labeled without a percent unit', async () => {
+    serve({ NONE: unrateLevels, LOG_DIFFERENCE: unrateLogDifference });
+    renderPage(UNRATE_ID);
+    await screen.findByTestId('line-chart');
+
+    await chooseTransformation('Log difference');
+
+    await waitFor(() => expect(plottedPoints()).toContainEqual(['2024-02-01', 0.052644]));
+    expect(screen.getByTestId('line-chart').dataset.title).toBe(
+      'Unemployment Rate (Log Difference)'
+    );
+    expect(screen.getByTestId('line-chart').dataset.yAxis).toBe('Log Difference');
   });
 
   test('plots the transformed values the backend returns, unchanged', async () => {

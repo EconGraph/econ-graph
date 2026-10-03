@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Restart Kubernetes rollout to deploy v3.7.4 with monitoring stack (Grafana + Loki + Prometheus)
+# Restart Kubernetes rollout to deploy the current release with monitoring stack (Grafana + Loki + Prometheus)
 # Run this script when Docker and Kubernetes cluster are available
 #
 # For MicroK8s setup and troubleshooting, see: docs/deployment/MICROK8S_DEPLOYMENT.md
@@ -8,12 +8,17 @@
 
 set -e
 
-echo "🚀 Restarting EconGraph Kubernetes rollout for v3.7.4 (with monitoring stack)..."
-echo ""
-
 # Get the project root directory
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_ROOT"
+
+# Same source as scripts/deploy/build-images.sh: backend/Cargo.toml is the one
+# place the version lives, so this never drifts from what build-images.sh
+# actually tags (and what the k8s manifests hard-code; see that script).
+VERSION="v$(grep -m1 '^version' backend/Cargo.toml | sed -E 's/version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')"
+
+echo "🚀 Restarting EconGraph Kubernetes rollout for ${VERSION} (with monitoring stack)..."
+echo ""
 
 # Run linter checks before deployment
 echo "🔍 Running linter checks before deployment..."
@@ -58,7 +63,6 @@ else
     echo "⚠️  ports.env not found, using default ports"
     BACKEND_NODEPORT=30080
     FRONTEND_NODEPORT=30000
-    GRAFANA_NODEPORT=30001
 fi
 
 # Check if MicroK8s is running
@@ -97,22 +101,22 @@ if ! kubectl config use-context microk8s; then
 fi
 
 # Rebuild Docker images with new version tag
-echo "🏗️  Building Docker images for v3.7.4..."
+echo "🏗️  Building Docker images for ${VERSION}..."
 ./scripts/deploy/build-images.sh
 
 # Tag images with new version
-echo "🏷️  Tagging images with v3.7.4..."
-docker tag econ-graph-backend:latest econ-graph-backend:v3.7.4
-docker tag econ-graph-crawler-worker:latest econ-graph-crawler-worker:v3.7.4
-docker tag econ-graph-frontend:latest econ-graph-frontend:v3.7.4
+echo "🏷️  Tagging images with ${VERSION}..."
+docker tag econ-graph-backend:latest "econ-graph-backend:${VERSION}"
+docker tag econ-graph-crawler-worker:latest "econ-graph-crawler-worker:${VERSION}"
+docker tag econ-graph-frontend:latest "econ-graph-frontend:${VERSION}"
 docker tag econ-graph-chart-api:latest econ-graph-chart-api:v1.0.0
 docker tag econ-graph-admin-frontend:latest econ-graph-admin-frontend:v1.0.0
 
 # Load images into MicroK8s
 echo "📦 Loading images into MicroK8s..."
-docker save econ-graph-backend:v3.7.4 | microk8s ctr images import - || true
-docker save econ-graph-crawler-worker:v3.7.4 | microk8s ctr images import - || true
-docker save econ-graph-frontend:v3.7.4 | microk8s ctr images import - || true
+docker save "econ-graph-backend:${VERSION}" | microk8s ctr images import - || true
+docker save "econ-graph-crawler-worker:${VERSION}" | microk8s ctr images import - || true
+docker save "econ-graph-frontend:${VERSION}" | microk8s ctr images import - || true
 docker save econ-graph-chart-api:v1.0.0 | microk8s ctr images import - || true
 docker save econ-graph-admin-frontend:v1.0.0 | microk8s ctr images import - || true
 
@@ -388,9 +392,9 @@ echo "    Backend:  http://localhost:${BACKEND_NODEPORT}"
 echo "    GraphQL:  http://localhost:${FRONTEND_NODEPORT}/graphql"
 echo "    Playground: off (set ENABLE_GRAPHQL_PLAYGROUND=true on the backend to serve /playground)"
 echo "    Health:   http://localhost:${BACKEND_NODEPORT}/health"
-echo "    Grafana:  http://localhost:${GRAFANA_NODEPORT} (user admin, password in Secret grafana-admin)"
+echo "    Grafana:  kubectl port-forward service/grafana-service 3000:3000 -n econ-graph (user admin, password in Secret grafana-admin)"
 echo ""
-echo "🎯 Version deployed: v3.7.4"
+echo "🎯 Version deployed: ${VERSION}"
 echo "   ✅ Integration tests fixed: All auth tests passing (11/11)"
 echo "   ✅ Collaboration tests fixed: 6/7 tests passing"
 echo "   ✅ GitHub Actions release/deploy workflow disabled"
@@ -412,7 +416,7 @@ echo "✅ Services are accessible via NodePort:"
 echo "  Frontend: http://localhost:${FRONTEND_NODEPORT}"
 echo "  Admin UI: http://admin.econ-graph.local/admin (add '127.0.0.1 admin.econ-graph.local' to /etc/hosts)"
 echo "  Backend:  http://localhost:${BACKEND_NODEPORT}"
-echo "  Grafana:  http://localhost:${GRAFANA_NODEPORT}"
+echo "  Grafana:  kubectl port-forward service/grafana-service 3000:3000 -n econ-graph"
 echo "            (admin / password: kubectl -n econ-graph get secret grafana-admin -o jsonpath={.data.admin-password} | base64 -d)"
 echo ""
 echo "🔒 Internal Services (not exposed externally):"
@@ -461,11 +465,11 @@ else
     echo "  ⚠️  SSL Certificate: econ-graph-tls secret not found (cert-manager may still be provisioning)"
 fi
 
-# Test Grafana
-if curl -s -o /dev/null -w "%{http_code}" http://localhost:${GRAFANA_NODEPORT} | grep -q "302\|200"; then
-    echo "  ✅ Grafana: http://localhost:${GRAFANA_NODEPORT} - Accessible"
+# Test Grafana (ClusterIP only; no NodePort to curl directly)
+if kubectl get pods -n econ-graph -l app=grafana --no-headers 2>/dev/null | grep -q "Running"; then
+    echo "  ✅ Grafana: pod running (kubectl port-forward service/grafana-service 3000:3000 -n econ-graph)"
 else
-    echo "  ❌ Grafana: http://localhost:${GRAFANA_NODEPORT} - Not accessible"
+    echo "  ❌ Grafana: pod not running"
 fi
 
 # Test Frontend

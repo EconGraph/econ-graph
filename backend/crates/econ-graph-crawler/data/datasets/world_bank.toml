@@ -1,0 +1,36 @@
+# World Bank dataset definitions. See README.md in this directory.
+#
+# The indicator ids the adapter crawls are in data/wdi_indicators.csv, which also carries each
+# indicator's unit. The `indicator` dimension below ships no inline codes: its labels and
+# descriptions come from the World Bank's own /indicator/{id} endpoint, fetched and merged in by
+# WorldBankAdapter::refresh_reference_data on each crawl (sync_datasets preserves them across
+# restarts even though this file never lists them).
+
+[[dataset]]
+code = "wdi"
+name = "World Development Indicators"
+description = "World Bank development indicators, one series per indicator and country or aggregate"
+
+# Canonical ids: wdi/{indicator}.{area}, for example wdi/NY.GDP.PCAP.CD.USA
+[[dataset.dimensions]]
+name = "indicator"
+label = "Indicator"
+
+# The `key` of econ-graph-core's countries.csv: ISO 3166-1 alpha-3 for countries, the World Bank
+# code for aggregates (WLD, EMU, EUU, income groups).
+[[dataset.dimensions]]
+name = "area"
+label = "Country or area"
+codelist = "countries"
+
+# The API's obs_status and decimal fields, declared so the schema is ready; train 1 has no
+# attribute column on data_points, so the adapter does not write per-observation values for
+# them (nearly every WDI row has an empty obs_status anyway).
+[[dataset.attributes]]
+name = "obs_status"
+label = "Observation status"
+
+[[dataset.attributes]]
+name = "decimal"
+label = "Decimal places"
+type = "integer"

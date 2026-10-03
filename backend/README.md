@@ -159,8 +159,10 @@ The backend reads exported variables and optionally loads a `.env` file.
 There is no checked-in `.env.example`; the exported `DATABASE_URL` above is sufficient
 for the local anonymous server.
 
-To enable sign-in, first configure a reachable Keycloak realm and API audience,
-then export these settings before starting the backend:
+To enable sign-in, start the repository's development Keycloak realm using the
+[Keycloak local-stack instructions](../config/keycloak/README.md#local-stack), or
+configure another reachable realm and API audience. Then export these settings
+before starting the backend:
 
 ```bash
 export OIDC_ISSUER=http://localhost:8081/realms/econ-graph
@@ -273,13 +275,18 @@ access tokens. This server does not expose `/auth/login` or `/api/v1/series`.
 ## Deployment and Operations
 
 ### **Docker Support**
+Run the image build from `backend/`:
+
 ```bash
 # Build backend image
 docker build -t econ-graph-backend .
-
-# Run the repository's Compose configuration (from backend/)
-docker compose -f ../docker-compose.yml up -d
 ```
+
+For a local server and frontend, use the [development workflow](#development-workflow).
+The repository's full `docker-compose.yml` still maps and checks backend port 8000,
+while the current image listens on 9876 by default; it needs configuration updates
+before it can serve as a full-stack quick start. Starting only its Keycloak service,
+as documented above, does not start that backend service.
 
 ### **Kubernetes Deployment**
 ```bash

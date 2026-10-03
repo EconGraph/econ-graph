@@ -22,9 +22,8 @@ pub mod static_catalogs;
 pub mod world_bank;
 
 /// Registry with every production adapter, pointed at the real upstream APIs, plus the
-/// development-only static catalogs in a dev build (`debug_assertions`) or with the
-/// `static-catalogs` feature explicitly on (for a `--release` build that still wants them, or a
-/// `--release` test run).
+/// development-only static catalogs when the `static_catalogs` build flag is on
+/// (config/flags/README.md): on by default for the `dev` profile, off for `release`.
 pub fn default_registry() -> AdapterRegistry {
     let mut registry = AdapterRegistry::new();
     // registry.register(std::sync::Arc::new(<name>::XAdapter::default()));
@@ -34,10 +33,8 @@ pub fn default_registry() -> AdapterRegistry {
     registry.register(std::sync::Arc::new(census::CensusAdapter::default()));
     registry.register(std::sync::Arc::new(bea::BeaAdapter::default()));
     registry.register(std::sync::Arc::new(fhfa::FhfaAdapter::default()));
-    // Development only: hardcoded catalogs without live integrations. `--release` (the Dockerfile
-    // and every deployment) leaves debug_assertions off, so this only needs the feature there;
-    // a plain `cargo build`/`cargo test` (debug profile) gets them without any flag.
-    #[cfg(any(feature = "static-catalogs", debug_assertions))]
+    // Development only: hardcoded catalogs without live integrations.
+    #[cfg(flag_static_catalogs)]
     for adapter in static_catalogs::StaticCatalogAdapter::all() {
         registry.register(std::sync::Arc::new(adapter));
     }
@@ -47,9 +44,10 @@ pub fn default_registry() -> AdapterRegistry {
 /// Registry with every HTTP adapter pointed at `base_url` instead of its real upstream, plus the
 /// static catalogs. For mock upstreams serving recorded fixtures (tests and `seed-fixtures`).
 ///
-/// Unlike [`default_registry`], the static catalogs are unconditional here: `seed-fixtures`
-/// already requires the dev-only `testkit` feature, so there is no release build of it to keep
-/// them out of. `SourceId::Imf` has no adapter to register (see the module docs).
+/// Unlike [`default_registry`], the static catalogs are unconditional here regardless of the
+/// `static_catalogs` flag: `seed-fixtures` already requires the dev-only `testkit` feature, so
+/// there is no release build of it to keep them out of. `SourceId::Imf` has no adapter to
+/// register (see the module docs).
 pub fn registry_at(base_url: &str) -> AdapterRegistry {
     let mut registry = AdapterRegistry::new();
     registry.register(std::sync::Arc::new(fred::FredAdapter::new(base_url)));
@@ -92,18 +90,18 @@ mod tests {
     }
 
     #[test]
-    fn static_catalogs_are_registered_in_dev_or_with_the_feature() {
+    fn static_catalogs_are_registered_per_the_flag() {
         let ids = default_registry().ids();
-        let expected = cfg!(feature = "static-catalogs") || cfg!(debug_assertions);
+        let expected = cfg!(flag_static_catalogs);
         for s in static_catalogs::STATIC_CATALOG_SOURCES {
             assert_eq!(ids.contains(&s), expected, "{s}");
         }
     }
 
     /// A new HTTP adapter has to be added to both registries, or `seed-fixtures` can't load its
-    /// fixtures. Equal only under `--all-features`: `registry_at` always carries the static
-    /// catalogs, `default_registry` only with the `static-catalogs` feature.
-    #[cfg(feature = "static-catalogs")]
+    /// fixtures. Equal only when the `static_catalogs` flag is on (the dev profile):
+    /// `registry_at` always carries the static catalogs, `default_registry` only then.
+    #[cfg(flag_static_catalogs)]
     #[test]
     fn registry_at_covers_every_default_adapter() {
         assert_eq!(

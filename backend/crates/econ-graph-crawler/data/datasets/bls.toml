@@ -1,0 +1,116 @@
+# BLS dataset definitions. See README.md in this directory for the format.
+#
+# One dataset per BLS survey the crawler reads, coded by the survey's two-letter series id
+# prefix. A BLS series id is the prefix followed by fixed-width fields, so the adapter splits
+# it into these dimensions (the last dimension of CU takes the rest of the id). Series keep
+# their BLS ids as external ids, since that is the id the BLS API takes.
+#
+# `codes` label common values. They are not closed lists.
+# Layouts: https://www.bls.gov/help/hlpforma.htm
+#
+# Dimensions BLS itself publishes a reference file for (CU item/area, CE industry/data_type,
+# LN series_code) carry no `codes` here: `BlsAdapter::refresh_reference_data` fetches and
+# caches their labels from BLS on each scheduled re-crawl instead, so a BLS rename or addition
+# shows up without a code change here. Dimensions that are just this series id layout's own
+# fixed encoding (seasonal, periodicity, LA measure) keep their codes inline.
+
+[[dataset]]
+code = "CU"
+name = "Consumer Price Index - All Urban Consumers"
+description = "BLS CPI-U. Series ids are CU, seasonal (1), periodicity (1), area (4), item (the rest), for example CUUR0000SA0"
+
+[[dataset.dimensions]]
+name = "seasonal"
+label = "Seasonal adjustment"
+codes = [
+  { code = "S", label = "Seasonally adjusted" },
+  { code = "U", label = "Not seasonally adjusted" },
+]
+
+[[dataset.dimensions]]
+name = "periodicity"
+label = "Periodicity"
+codes = [
+  { code = "R", label = "Monthly" },
+  { code = "S", label = "Semiannual" },
+]
+
+[[dataset.dimensions]]
+name = "area"
+label = "Area"
+
+[[dataset.dimensions]]
+name = "item"
+label = "Item"
+
+[[dataset]]
+code = "CE"
+name = "Employment, Hours, and Earnings - National (CES)"
+description = "BLS Current Employment Statistics, national. Series ids are CE, seasonal (1), industry (8), data type (2), for example CES0000000001"
+
+[[dataset.dimensions]]
+name = "seasonal"
+label = "Seasonal adjustment"
+codes = [
+  { code = "S", label = "Seasonally adjusted" },
+  { code = "U", label = "Not seasonally adjusted" },
+]
+
+[[dataset.dimensions]]
+name = "industry"
+label = "Industry"
+
+[[dataset.dimensions]]
+name = "data_type"
+label = "Data type"
+
+[[dataset]]
+code = "LN"
+name = "Labor Force Statistics from the Current Population Survey"
+description = "BLS CPS. Series ids are LN, seasonal (1), series code (8), for example LNS14000000"
+
+[[dataset.dimensions]]
+name = "seasonal"
+label = "Seasonal adjustment"
+codes = [
+  { code = "S", label = "Seasonally adjusted" },
+  { code = "U", label = "Not seasonally adjusted" },
+]
+
+[[dataset.dimensions]]
+name = "series_code"
+label = "Series"
+
+[[dataset]]
+code = "LA"
+name = "Local Area Unemployment Statistics"
+description = "BLS LAUS. Series ids are LA, seasonal (1), area (15), measure (2), for example LASST060000000000003"
+
+[[dataset.dimensions]]
+name = "seasonal"
+label = "Seasonal adjustment"
+codes = [
+  { code = "S", label = "Seasonally adjusted" },
+  { code = "U", label = "Not seasonally adjusted" },
+]
+
+[[dataset.dimensions]]
+name = "area"
+label = "Area"
+
+[[dataset.dimensions]]
+name = "measure"
+label = "Measure"
+codes = [
+  { code = "03", label = "Unemployment rate" },
+  { code = "04", label = "Unemployment" },
+  { code = "05", label = "Employment" },
+  { code = "06", label = "Labor force" },
+]
+
+# BLS series of any other survey, or whose id does not fit its survey's layout above: no
+# dimensions, keyed by the BLS series id (like FRED) until the survey gets a layout.
+[[dataset]]
+code = "other"
+name = "Other BLS series"
+description = "BLS series from surveys the crawler does not split into dimensions"

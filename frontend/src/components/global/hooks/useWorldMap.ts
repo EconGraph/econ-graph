@@ -20,7 +20,11 @@ export interface MapProjection {
   defaultCenter: [number, number];
 }
 
-const PROJECTIONS: Record<string, MapProjection> = {
+/** Zoom scale limits: the whole world at most, eight times closer at least. */
+export const MIN_ZOOM = 1;
+export const MAX_ZOOM = 8;
+
+export const PROJECTIONS: Record<string, MapProjection> = {
   naturalEarth: {
     name: 'Natural Earth',
     create: geoNaturalEarth1,
@@ -70,6 +74,13 @@ export const useWorldMap = (
     null
   );
 
+  // Current zoom scale, 1 when the whole world is in view
+  const [zoomLevel, setZoomLevel] = useState(1);
+  // Whether the map is zoomed or panned away from the whole-world view
+  const [isTransformed, setIsTransformed] = useState(false);
+
+  const [fitWidth, fitHeight] = size ?? [0, 0];
+
   // Projections, path generators and zoom behaviors are all functions, so every
   // setter below wraps them in an updater; React would otherwise call them as one.
 
@@ -78,17 +89,25 @@ export const useWorldMap = (
     if (!svgRef.current) return;
 
     const zoomBehavior = zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.5, 8])
+      .scaleExtent([MIN_ZOOM, MAX_ZOOM])
       .on('zoom', event => {
         const { transform } = event;
         const mapContainer = d3.select(svgRef.current).select('.map-container');
         mapContainer.attr('transform', transform);
+        setZoomLevel(transform.k);
+        const moved = Math.abs(transform.x) > 1e-6 || Math.abs(transform.y) > 1e-6;
+        setIsTransformed(transform.k !== 1 || moved);
       });
+    // Keep the drawing in view: the world can't be panned off the map.
+    if (fitWidth > 0 && fitHeight > 0) {
+      zoomBehavior.translateExtent([
+        [0, 0],
+        [fitWidth, fitHeight],
+      ]);
+    }
 
     setZoomBehavior(() => zoomBehavior);
-  }, [svgRef]);
-
-  const [fitWidth, fitHeight] = size ?? [0, 0];
+  }, [svgRef, fitWidth, fitHeight]);
 
   // Build the projection for the current type, fitted to the map's drawing size
   // when the caller gives one, and to the container on window resize otherwise
@@ -115,99 +134,29 @@ export const useWorldMap = (
     return () => window.removeEventListener('resize', handleResize);
   }, [projectionType, svgRef, fitWidth, fitHeight]);
 
-  // Zoom to fit all countries
-  const zoomToFit = useCallback(() => {
-    if (!svgRef.current || !zoomBehavior) return;
-
-    const svg = d3.select(svgRef.current);
-    const node = svg.select('.countries').node() as any;
-    const bounds = node?.getBBox?.() || { x: 0, y: 0, width: 0, height: 0 };
-
-    if (bounds) {
-      const { width, height } = svg.node()?.getBoundingClientRect() || { width: 800, height: 600 };
-      const scale = Math.min(width / bounds.width, height / bounds.height) * 0.8;
-      const translate = [
-        width / 2 - scale * (bounds.x + bounds.width / 2),
-        height / 2 - scale * (bounds.y + bounds.height / 2),
-      ];
-
-      svg
-        .transition()
-        .duration(750)
-        .call(
-          zoomBehavior.transform,
-          d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale)
-        );
-    }
-  }, [svgRef, zoomBehavior]);
-
-  // Zoom to specific country
-  const zoomToCountry = useCallback(
-    (countryCode: string) => {
+  // Zoom by a factor about the map's centre, within the zoom behavior's scale extent
+  const zoomBy = useCallback(
+    (factor: number) => {
       if (!svgRef.current || !zoomBehavior) return;
-
-      const svg = d3.select(svgRef.current);
-      const countryPath = svg.select(`path.country[data-country="${countryCode}"]`);
-
-      if (countryPath.empty()) return;
-
-      const node = countryPath.node() as any;
-      const bounds = node?.getBBox?.() || { x: 0, y: 0, width: 0, height: 0 };
-      if (!bounds) return;
-
-      const { width, height } = svg.node()?.getBoundingClientRect() || { width: 800, height: 600 };
-      const scale = Math.min(width / bounds.width, height / bounds.height) * 0.5;
-      const translate = [
-        width / 2 - scale * (bounds.x + bounds.width / 2),
-        height / 2 - scale * (bounds.y + bounds.height / 2),
-      ];
-
-      svg
-        .transition()
-        .duration(750)
-        .call(
-          zoomBehavior.transform,
-          d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale)
-        );
+      d3.select(svgRef.current).call(zoomBehavior.scaleBy, factor);
     },
     [svgRef, zoomBehavior]
   );
 
-  // Reset zoom
+  // Reset zoom and pan
   const resetZoom = useCallback(() => {
     if (!svgRef.current || !zoomBehavior) return;
-
-    const svg = d3.select(svgRef.current);
-    svg.transition().duration(750).call(zoomBehavior.transform, d3.zoomIdentity);
+    d3.select(svgRef.current).call(zoomBehavior.transform, d3.zoomIdentity);
   }, [svgRef, zoomBehavior]);
-
-  // Get current zoom level
-  const getZoomLevel = useCallback(() => {
-    if (!svgRef.current) return 1;
-
-    const svg = d3.select(svgRef.current);
-    const transform = d3.zoomTransform(svg.node() as Element);
-    return transform.k;
-  }, [svgRef]);
-
-  // Get current center
-  const getCenter = useCallback(() => {
-    if (!svgRef.current) return [0, 0] as [number, number];
-
-    const svg = d3.select(svgRef.current);
-    const transform = d3.zoomTransform(svg.node() as Element);
-    return [transform.x, transform.y] as [number, number];
-  }, [svgRef]);
 
   return {
     projection,
     path,
     zoomBehavior,
-    zoomToFit,
-    zoomToCountry,
+    zoomLevel,
+    isTransformed,
+    zoomBy,
     resetZoom,
-    getZoomLevel,
-    getCenter,
     projections: Object.keys(PROJECTIONS),
   };
 };

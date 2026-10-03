@@ -13,9 +13,11 @@ use bigdecimal::BigDecimal;
 use chrono::NaiveDate;
 use econ_graph_core::DatabasePool;
 
+use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
 use crate::http::HttpFetcher;
 use crate::policy::SourcePolicy;
+use crate::reference_file::{self, CodeList};
 use crate::source::SourceId;
 
 /// API keys for sources that use them. `Debug` redacts the values.
@@ -90,7 +92,8 @@ pub struct CrawlCtx {
 /// Series-level metadata returned alongside observations. Maps onto `economic_series` columns.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct NewSeriesMetadataLite {
-    /// Human-readable title.
+    /// Human-readable title. Empty when the fetch carried none (BLS without a key): the stored
+    /// series then keeps its discovered or existing title, as with the `None` fields below.
     pub title: String,
     /// Longer description / notes.
     pub description: Option<String>,
@@ -103,12 +106,15 @@ pub struct NewSeriesMetadataLite {
 }
 
 /// The result of fetching one series.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FetchedSeries {
     /// Updated metadata, if the source returned any.
     pub metadata: Option<NewSeriesMetadataLite>,
     /// Observations, in any order.
     pub points: Vec<FetchedPoint>,
+    /// The series' dataset and dimension values. Every series belongs to a dataset the adapter
+    /// declares in [`SourceAdapter::datasets`].
+    pub dataset: SeriesDataset,
 }
 
 /// One observation of a series.
@@ -139,6 +145,8 @@ pub struct DiscoveredSeries {
     pub frequency: Option<String>,
     /// Link to the series on the source's website or API.
     pub data_url: Option<String>,
+    /// The series' dataset and dimension values (see [`FetchedSeries::dataset`]).
+    pub dataset: SeriesDataset,
 }
 
 /// Per-series results of [`SourceAdapter::fetch_batch`], keyed by external id.
@@ -156,8 +164,38 @@ pub trait SourceAdapter: Send + Sync {
         SourcePolicy::default_for(self.id())
     }
 
+    /// Codes of the datasets this adapter writes, each defined in the source's
+    /// `datasets/<source>.toml` (see [`crate::dataset`]). At least one: every series belongs to
+    /// a dataset, and every series the adapter returns must use one of these codes and the
+    /// definition's dimension keys.
+    fn datasets(&self) -> &[&str];
+
     /// Lists the series this source offers.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError>;
+
+    /// The source's own files of codes and labels behind this adapter's dataset dimensions (a
+    /// state list, a code file per field, ...), as opposed to the series `discover` returns.
+    /// The default [`refresh_reference_data`](Self::refresh_reference_data) keeps them current,
+    /// and `crawler record-reference-seeds` records them into a seed migration for new databases
+    /// (see [`crate::reference_file`]). Empty by default.
+    /// `keys` is for a source that wants its API key in the request URL
+    /// ([`CodeList::request_url`]).
+    fn code_lists(&self, _keys: &ApiKeys) -> Vec<CodeList> {
+        Vec::new()
+    }
+
+    /// Refreshes this adapter's own reference data so its labels don't go stale as the source
+    /// adds or renames codes. Called at worker startup and once per scheduled catalog discovery,
+    /// before [`discover`](Self::discover).
+    ///
+    /// The default refreshes each of [`code_lists`](Self::code_lists) with a conditional GET
+    /// ([`reference_file::refresh_code_lists`]), so a source that hasn't changed a file costs one
+    /// small request, not a re-parse. Override it for reference data that isn't a dimension's
+    /// code list, going through [`reference_file::refresh`]. Failure here does not fail the
+    /// discovery job: the worker logs it and carries on with whatever labels are already stored.
+    async fn refresh_reference_data(&self, ctx: &CrawlCtx) -> Result<(), CrawlError> {
+        reference_file::refresh_code_lists(ctx, self.id(), &self.code_lists(&ctx.keys)).await
+    }
 
     /// Whether a successful [`discover`](Self::discover) lists every series this adapter crawls,
     /// so a series it no longer lists has been retired by the source. The worker then marks such
@@ -186,6 +224,32 @@ pub trait SourceAdapter: Send + Sync {
         external_id: &str,
         since: Option<NaiveDate>,
     ) -> Result<FetchedSeries, CrawlError>;
+
+    /// Whether this source publishes vintages (each observation's revisions, with real
+    /// publication dates). The worker then passes the newest stored `revision_date` to
+    /// [`fetch_series_incremental`](Self::fetch_series_incremental).
+    fn tracks_vintages(&self) -> bool {
+        false
+    }
+
+    /// Incremental fetch for a series already stored. `since` is as for
+    /// [`fetch_series`](Self::fetch_series). `known_vintage` is the newest `revision_date` already
+    /// stored for the series, given only when [`tracks_vintages`](Self::tracks_vintages) is true:
+    /// every vintage published on or before it is stored, so the adapter asks only for later ones.
+    ///
+    /// The default ignores `known_vintage`. An adapter that wraps another must forward this and
+    /// [`tracks_vintages`](Self::tracks_vintages), or the wrapped adapter's vintage handling is
+    /// bypassed.
+    async fn fetch_series_incremental(
+        &self,
+        ctx: &CrawlCtx,
+        external_id: &str,
+        since: Option<NaiveDate>,
+        known_vintage: Option<NaiveDate>,
+    ) -> Result<FetchedSeries, CrawlError> {
+        let _ = known_vintage;
+        self.fetch_series(ctx, external_id, since).await
+    }
 
     /// Groups series that one upstream request can fetch together: the worker only batches
     /// `fetch_series` jobs whose ids return the same key (up to the policy's
@@ -274,10 +338,22 @@ mod tests {
 
     struct Dummy(SourceId, &'static str);
 
+    /// A fetch with no metadata and no points, in the dimensionless `test` dataset.
+    fn empty_series() -> FetchedSeries {
+        FetchedSeries {
+            metadata: None,
+            points: Vec::new(),
+            dataset: SeriesDataset::new("test", Vec::<(String, String)>::new()),
+        }
+    }
+
     #[async_trait]
     impl SourceAdapter for Dummy {
         fn id(&self) -> SourceId {
             self.0
+        }
+        fn datasets(&self) -> &[&str] {
+            &["test"]
         }
         async fn discover(&self, _: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
             Err(CrawlError::Permanent(self.1.into()))
@@ -288,7 +364,7 @@ mod tests {
             _: &str,
             _: Option<NaiveDate>,
         ) -> Result<FetchedSeries, CrawlError> {
-            Ok(FetchedSeries::default())
+            Ok(empty_series())
         }
     }
 
@@ -325,8 +401,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.len(), 2);
-        assert_eq!(out["A"], Ok(FetchedSeries::default()));
-        assert_eq!(out["B"], Ok(FetchedSeries::default()));
+        assert_eq!(out["A"], Ok(empty_series()));
+        assert_eq!(out["B"], Ok(empty_series()));
     }
 
     /// Rate limited on ids starting with `"limited"`, unauthorised on `"denied"`, else not found.
@@ -336,6 +412,9 @@ mod tests {
     impl SourceAdapter for Limited {
         fn id(&self) -> SourceId {
             SourceId::Bea
+        }
+        fn datasets(&self) -> &[&str] {
+            &["test"]
         }
         async fn discover(&self, _: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
             Ok(Vec::new())

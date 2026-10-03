@@ -17,6 +17,10 @@
 //! - Output types must be optimized for GraphQL serialization
 //! - All types must have comprehensive documentation
 
+use crate::graphql::datasets::{
+    label_dimensions, load_dataset, load_series_dataset_fields, DatasetType, SeriesDatasetFields,
+    SeriesDimensionType,
+};
 use crate::imports::*;
 
 /// GraphQL representation of an economic series
@@ -36,6 +40,34 @@ pub struct EconomicSeriesType {
     pub is_active: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Dataset columns when the source row carried them; `None` loads them on demand.
+    pub dataset_fields: Option<SeriesDatasetFields>,
+}
+
+impl EconomicSeriesType {
+    /// The series' dataset columns, from the row it was built from or loaded by id.
+    async fn load_dataset_fields(&self, ctx: &Context<'_>) -> Result<SeriesDatasetFields> {
+        if let Some(fields) = &self.dataset_fields {
+            return Ok(fields.clone());
+        }
+        let series_id = Uuid::parse_str(&self.id)?;
+        Ok(load_series_dataset_fields(ctx, series_id)
+            .await?
+            .unwrap_or_default())
+    }
+
+    /// The series' dataset columns and its dataset, if it has one.
+    async fn load_dataset(
+        &self,
+        ctx: &Context<'_>,
+    ) -> Result<(SeriesDatasetFields, Option<models::Dataset>)> {
+        let fields = self.load_dataset_fields(ctx).await?;
+        let dataset = match fields.dataset_id {
+            Some(id) => load_dataset(ctx, id).await?,
+            None => None,
+        };
+        Ok((fields, dataset))
+    }
 }
 
 #[Object]
@@ -94,6 +126,30 @@ impl EconomicSeriesType {
 
     async fn updated_at(&self) -> DateTime<Utc> {
         self.updated_at
+    }
+
+    /// The dataset this series belongs to. Every series has one; null only if the series or its
+    /// dataset can no longer be found.
+    async fn dataset(&self, ctx: &Context<'_>) -> Result<Option<DatasetType>> {
+        let (_, dataset) = self.load_dataset(ctx).await?;
+        Ok(dataset.map(DatasetType))
+    }
+
+    /// The series' dimension values within its dataset, in the dataset's dimension order,
+    /// with dimension and code labels. Keys the dataset does not declare follow in key order
+    /// with null labels. Empty for a series without dimensions.
+    async fn dimensions(&self, ctx: &Context<'_>) -> Result<Vec<SeriesDimensionType>> {
+        let (fields, dataset) = self.load_dataset(ctx).await?;
+        Ok(label_dimensions(&fields.dimensions, dataset.as_ref()))
+    }
+
+    /// The measure a chart plots by default: the series' own override, else its dataset's.
+    /// Null when neither the series nor its dataset sets one.
+    async fn default_measure(&self, ctx: &Context<'_>) -> Result<Option<String>> {
+        let (fields, dataset) = self.load_dataset(ctx).await?;
+        Ok(fields
+            .default_measure
+            .or_else(|| dataset.map(|d| d.default_measure)))
     }
 
     /// Fetch the data source using direct database query
@@ -191,7 +247,16 @@ impl EconomicSeriesType {
         let pool = ctx.data::<DatabasePool>()?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
-        let filter = filter.unwrap_or_default();
+        // As in `seriesData`: a transformation reads the latest revisions unless the filter
+        // picks a revision mode, so it never compares one date's revisions with each other.
+        let transformed = transformation.is_some_and(|t| t != DataTransformationType::None);
+        let chose_mode = filter.as_ref().is_some_and(|f| {
+            f.as_of.is_some() || f.original_only == Some(true) || f.latest_revision_only.is_some()
+        });
+        let mut filter = filter.unwrap_or_default();
+        if transformed && !chose_mode {
+            filter.latest_revision_only = Some(true);
+        }
 
         // Query data points directly from database
         use diesel::{ExpressionMethods, QueryDsl};
@@ -211,15 +276,20 @@ impl EconomicSeriesType {
             query = query.filter(dsl::date.le(end_date));
         }
 
-        if filter.original_only.unwrap_or(false) {
+        let original_only = filter.original_only.unwrap_or(false);
+        let as_of_or_latest =
+            filter.as_of.is_some() || filter.latest_revision_only.unwrap_or(false);
+
+        if original_only || as_of_or_latest {
+            query = query.filter(models::exclude_synthetic_legacy_rows());
+        }
+
+        if original_only {
             query = query.filter(dsl::is_original_release.eq(true));
         }
 
-        if filter.as_of.is_some() || filter.latest_revision_only.unwrap_or(false) {
-            query = query.filter(models::revision_filter(
-                filter.as_of,
-                filter.original_only.unwrap_or(false),
-            ));
+        if as_of_or_latest {
+            query = query.filter(models::revision_filter(filter.as_of, original_only));
         }
 
         let data_points = query
@@ -244,6 +314,11 @@ impl EconomicSeriesType {
 
 impl From<EconomicSeries> for EconomicSeriesType {
     fn from(series: EconomicSeries) -> Self {
+        let dataset_fields = Some(SeriesDatasetFields {
+            dataset_id: Some(series.dataset_id),
+            dimensions: series.dimensions,
+            default_measure: series.default_measure,
+        });
         Self {
             id: ID::from(series.id.to_string()),
             source_id: ID::from(series.source_id.to_string()),
@@ -259,6 +334,7 @@ impl From<EconomicSeries> for EconomicSeriesType {
             is_active: series.is_active,
             created_at: series.created_at,
             updated_at: series.updated_at,
+            dataset_fields,
         }
     }
 }
@@ -281,6 +357,7 @@ impl From<search::SeriesSearchResult> for EconomicSeriesType {
             is_active: result.is_active,
             created_at: chrono::Utc::now(), // Not available in search result
             updated_at: chrono::Utc::now(), // Not available in search result
+            dataset_fields: None,           // Loaded on demand
         }
     }
 }
@@ -391,6 +468,7 @@ impl DataSourceType {
         let all_series = dsl::economic_series
             .filter(dsl::source_id.eq(source_uuid))
             .filter(dsl::is_active.eq(true))
+            .filter(dsl::end_date.is_not_null())
             .select(models::EconomicSeries::as_select())
             .load::<models::EconomicSeries>(&mut conn)
             .await?;
@@ -442,6 +520,7 @@ impl DataSourceType {
         let count = dsl::economic_series
             .filter(dsl::source_id.eq(source_uuid))
             .filter(dsl::is_active.eq(true))
+            .filter(dsl::end_date.is_not_null())
             .count()
             .get_result::<i64>(&mut conn)
             .await?;
@@ -659,6 +738,8 @@ pub struct DataFilterInput {
     pub start_date: Option<NaiveDate>,
     pub end_date: Option<NaiveDate>,
     pub original_only: Option<bool>,
+    /// Keep only each date's newest revision. Defaults to true when a `transformation` is
+    /// requested (and `asOf`/`originalOnly` are not), otherwise false.
     pub latest_revision_only: Option<bool>,
     /// Return each observation as it was known on this day (its newest revision published on or
     /// before it). Takes precedence over `latestRevisionOnly`.

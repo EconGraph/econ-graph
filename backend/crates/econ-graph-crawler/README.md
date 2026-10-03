@@ -46,14 +46,13 @@ worker's environment as well as in the CLI's environment for direct `fetch` call
 
 ## Development-only static catalogs
 
-Ten hardcoded catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO) register
-automatically in a dev build (`cargo run`, `cargo test`, anything without `--release`), and
-never in a `--release` build (the Dockerfile, every deployment). A `--release` build that still
-wants them (a `--release` test run, for instance) can turn them on explicitly with the
-`static-catalogs` feature: `cargo build --release -p econ-graph-crawler-worker --features
-static-catalogs`, or `--build-arg CARGO_FEATURES=econ-graph-crawler-worker/static-catalogs` to
-`backend/Dockerfile`. Their discovery writes a fixed series list with no HTTP and they can't
-fetch data.
+Ten hardcoded catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO) register behind
+the `static_catalogs` build flag (`config/flags/README.md`): on by default for the `dev` profile
+(`cargo run`, `cargo test`, anything that doesn't set `FLAGS_PROFILE=release`), off for `release`
+(the Dockerfile, every deployment). A release build that still wants them can set
+`FLAGS_PROFILE=dev` explicitly: `FLAGS_PROFILE=dev cargo build --release -p
+econ-graph-crawler-worker`, or `--build-arg FLAGS_PROFILE=dev` to `backend/Dockerfile`. Their
+discovery writes a fixed series list with no HTTP and they can't fetch data.
 
 ## Tests
 
@@ -66,5 +65,6 @@ Adapters are tested against a local mock upstream (`testkit`, see `src/testkit`)
 ## License
 
 This project is licensed under the Microsoft Reference Source License (MS-RSL). See the LICENSE file for complete terms and conditions.
+
 
 

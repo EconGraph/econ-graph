@@ -228,8 +228,8 @@ impl Mutation {
         if changes.is_empty() {
             return Err(GraphQLError::new("No fields to update"));
         }
-        let mut conn = pool.get().await?;
         require_manageable(ctx, caller, user_id)?;
+        let mut conn = pool.get().await?;
         let final_user: User = diesel::update(users::table.filter(users::id.eq(user_id)))
             .set(&changes)
             .returning(User::as_select())
@@ -259,8 +259,8 @@ impl Mutation {
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::users;
 
-        let mut conn = pool.get().await?;
         require_manageable(ctx, caller, user_id)?;
+        let mut conn = pool.get().await?;
 
         // Delete user (cascade will handle related records)
         let deleted = diesel::delete(users::table.filter(users::id.eq(user_id)))
@@ -282,8 +282,8 @@ impl Mutation {
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::users;
 
-        let mut conn = pool.get().await?;
         require_manageable(ctx, caller, user_id)?;
+        let mut conn = pool.get().await?;
 
         // Suspend user
         let updated = diesel::update(users::table.filter(users::id.eq(user_id)))
@@ -306,8 +306,8 @@ impl Mutation {
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::users;
 
-        let mut conn = pool.get().await?;
         require_manageable(ctx, caller, user_id)?;
+        let mut conn = pool.get().await?;
 
         // Activate user
         let updated = diesel::update(users::table.filter(users::id.eq(user_id)))
@@ -583,9 +583,10 @@ mod tests {
         assert!(err(input(&["NOPE"], &[], None, None)).contains("unknown source"));
         assert!(err(input(&[], &["GDP"], Some("NOPE"), None)).contains("unknown source"));
         // IMF has no adapter in any build (its series ids were made up). The static catalogs
-        // (ECB and friends) can't be asserted against here: they register in this same test
-        // binary's dev-profile build via `debug_assertions`, so only a --release build excludes
-        // them (see the crawler crate's own `default_registry_holds_exactly_the_live_sources`).
+        // (ECB and friends) can't be asserted against here: they register whenever the
+        // `static_catalogs` build flag is on, which this test binary's dev profile build is by
+        // default, so only a FLAGS_PROFILE=release build excludes them (see the crawler crate's
+        // own `default_registry_holds_exactly_the_live_sources`).
         assert!(err(input(&["IMF"], &[], None, None)).contains("not available in this build"));
         assert!(err(input(&["FRED"], &[], None, Some(0))).contains("priority"));
         assert!(err(input(&["FRED"], &[], None, Some(11))).contains("priority"));
@@ -741,7 +742,7 @@ mod tests {
         assert_eq!(queue_rows(&pool).await.len(), 4);
 
         // The crawlerStatus query reads the same queue.
-        let resp = run_as(&pool, None, "{ crawlerStatus { isRunning activeWorkers lastCrawl nextScheduledCrawl enqueuedCount sources { source pending failedLastDay } } }").await;
+        let resp = run_as(&pool, Some(user("admin")), "{ crawlerStatus { isRunning activeWorkers lastCrawl nextScheduledCrawl enqueuedCount sources { source pending failedLastDay } } }").await;
         assert!(resp.errors.is_empty(), "{:?}", resp.errors);
         let data = resp.data.into_json().unwrap();
         assert_eq!(

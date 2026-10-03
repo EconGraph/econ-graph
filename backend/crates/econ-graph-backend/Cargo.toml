@@ -15,6 +15,8 @@ econ-graph-services = { path = "../econ-graph-services" }
 econ-graph-auth = { path = "../econ-graph-auth" }
 econ-graph-graphql = { path = "../econ-graph-graphql" }
 econ-graph-mcp = { path = "../econ-graph-mcp" }
+# Crawler status for the integration tests.
+econ-graph-crawler = { path = "../econ-graph-crawler" }
 
 # Web framework
 warp.workspace = true
@@ -53,7 +55,6 @@ econ-graph-flags-build = { path = "../econ-graph-flags-build" }
 # Test dependencies
 [dev-dependencies]
 econ-graph-auth = { path = "../econ-graph-auth", features = ["testkit"] }
-econ-graph-crawler = { path = "../econ-graph-crawler" }
 reqwest.workspace = true
 serial_test.workspace = true
 tokio-test.workspace = true

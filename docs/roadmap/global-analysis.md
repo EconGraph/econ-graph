@@ -25,7 +25,7 @@ None of it is useful before the map shows real data, and today it shows none.
 | Frontend queries | `frontend/src/utils/graphql.ts` defines three global queries that no component uses. Their argument types and field shapes don't match the backend's (flat edge lists versus nested nodes, `Int` versus `Float`, `isoAlpha2` versus `isoCode2`). |
 | Frontend | `/global` has three tabs. The map (`pages/GlobalAnalysisDemo.tsx` with `InteractiveWorldMap`, `useWorldMap`, `useCountryData`, D3) draws `data/sampleCountryData.ts`. `MultiCountryDashboard` (Chart.js) and `GlobalEventsExplorer` use sample arrays defined in the component. `GlobalEconomicNetworkMap` is imported nowhere. The world outline is fetched at runtime from `cdn.jsdelivr.net`. |
 | Sources | The World Bank and IMF adapters only discover; `fetch_series` returns an error. The OECD, ECB, central bank (BOC, BOE, BOJ, RBA, SNB), ILO, UN and WTO catalogs are hard-coded lists that can't fetch. No adapter knows which country a series belongs to. See the data source docs added by PR #186 (`docs/data-sources/`). |
-| Tests | 11 backend service tests, one of which passes only because of the mocked 0.75. Five Playwright specs (`frontend/tests/e2e/global-analysis/`) that run nightly and on manual dispatch, not on PRs. No unit tests for `components/global`. |
+| Tests | 11 backend service tests, one of which passes only because of the mocked 0.75. Five Playwright specs (`frontend/tests/e2e/global-analysis/`) that run only on manual dispatch, not on PRs. No unit tests for `components/global`. |
 
 In short, the page is a D3 demo on sample data whose world outline never loads (decision 7),
 and the backend beneath it is unreachable and partly fake.

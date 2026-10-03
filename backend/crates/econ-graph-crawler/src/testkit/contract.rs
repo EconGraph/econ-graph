@@ -8,10 +8,15 @@
 //! Each function takes the adapter (already pointed at `mock.base_url()`), a context from
 //! [`test_ctx`](super::test_ctx) and the [`MockSource`]. Success assertions expect the caller to
 //! have mounted the fixtures; error assertions mount their own reply on `route`.
+//!
+//! The success assertions also check the dataset contract ([`assert_series_datasets`]): every
+//! series names a dataset the adapter declares, with the dimension keys its definition in
+//! `data/datasets/<source>.toml` lists.
 
 use std::collections::HashSet;
 
 use crate::adapter::{CrawlCtx, DiscoveredSeries, FetchedSeries, SourceAdapter};
+use crate::dataset::{DatasetCatalog, SeriesDataset};
 use crate::error::CrawlError;
 
 use super::{MockSource, Reply, Route};
@@ -55,6 +60,7 @@ pub async fn assert_fetch_ok(
             p.revision_date
         );
     }
+    assert_series_datasets(adapter, [(external_id, &series.dataset)]);
     series
 }
 
@@ -180,7 +186,38 @@ pub async fn assert_discover_ok(
             s.external_id
         );
     }
+    assert_series_datasets(
+        adapter,
+        found.iter().map(|s| (s.external_id.as_str(), &s.dataset)),
+    );
     found
+}
+
+/// Loads `adapter`'s declared datasets from the reference data directory (panicking if a declared
+/// code has no definition, or the file defines one it does not declare) and checks `series`
+/// against them with [`assert_series_datasets_in`].
+pub fn assert_series_datasets<'a>(
+    adapter: &dyn SourceAdapter,
+    series: impl IntoIterator<Item = (&'a str, &'a SeriesDataset)>,
+) {
+    let mut catalog = DatasetCatalog::empty();
+    catalog
+        .load_adapter(adapter)
+        .unwrap_or_else(|e| panic!("{:?} dataset declarations: {e}", adapter.id()));
+    assert_series_datasets_in(&catalog, adapter, series);
+}
+
+/// Panics unless every series in `series` passes [`DatasetCatalog::check_all`]: its dataset is
+/// declared by `adapter`, its dimension keys match the definition, and no two series share a
+/// dataset and dimension values.
+pub fn assert_series_datasets_in<'a>(
+    catalog: &DatasetCatalog,
+    adapter: &dyn SourceAdapter,
+    series: impl IntoIterator<Item = (&'a str, &'a SeriesDataset)>,
+) {
+    if let Err(e) = catalog.check_all(adapter.id(), series) {
+        panic!("{:?} dataset contract: {e}", adapter.id());
+    }
 }
 
 async fn assert_hit_mock(mock: &MockSource) {

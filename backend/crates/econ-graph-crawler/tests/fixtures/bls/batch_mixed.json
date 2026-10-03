@@ -1,0 +1,65 @@
+{
+  "status": "REQUEST_SUCCEEDED",
+  "responseTime": 212,
+  "message": [
+    "No Data Available for Series LNS14000000 Year: 2005",
+    "Series does not exist for Series NOPE0000000"
+  ],
+  "Results": {
+    "series": [
+      {
+        "seriesID": "CUUR0000SA0",
+        "catalog": {
+          "series_title": "All items in U.S. city average, all urban consumers, not seasonally adjusted",
+          "series_id": "CUUR0000SA0",
+          "seasonality": "Not Seasonally Adjusted",
+          "survey_name": "CPI for All Urban Consumers (CPI-U)",
+          "survey_abbreviation": "CU",
+          "measure_data_type": "Index 1982-1984=100",
+          "area": "U.S. city average",
+          "item": "All items"
+        },
+        "data": [
+          {"year": "2024", "period": "M02", "periodName": "February", "latest": "true", "value": "310.326", "footnotes": [{}]},
+          {"year": "2024", "period": "M01", "periodName": "January", "value": "308.417", "footnotes": [{}]},
+          {"year": "2023", "period": "M13", "periodName": "Annual", "value": "304.702", "footnotes": [{}]},
+          {"year": "2023", "period": "M12", "periodName": "December", "value": "306.746", "footnotes": [{}]}
+        ]
+      },
+      {
+        "seriesID": "LNS14000000",
+        "catalog": {
+          "series_title": "(Seas) Unemployment Rate",
+          "series_id": "LNS14000000",
+          "seasonality": "Seasonally Adjusted",
+          "survey_name": "Labor Force Statistics from the Current Population Survey",
+          "survey_abbreviation": "LN",
+          "measure_data_type": "Percent or rate"
+        },
+        "data": [
+          {"year": "2024", "period": "M02", "periodName": "February", "latest": "true", "value": "3.9", "footnotes": [{}]},
+          {"year": "2024", "period": "M01", "periodName": "January", "value": "3.7", "footnotes": [{}]}
+        ]
+      },
+      {
+        "seriesID": "CES0000000001",
+        "catalog": {
+          "series_title": "All employees, thousands, total nonfarm, seasonally adjusted",
+          "series_id": "CES0000000001",
+          "seasonality": "Seasonally Adjusted",
+          "survey_name": "Employment, Hours, and Earnings from the Current Employment Statistics survey (National)",
+          "survey_abbreviation": "CE",
+          "measure_data_type": "All Employees, In Thousands"
+        },
+        "data": [
+          {"year": "2024", "period": "M02", "periodName": "February", "latest": "true", "value": "157808", "footnotes": [{"code": "P", "text": "preliminary"}]},
+          {"year": "2024", "period": "M01", "periodName": "January", "value": "-", "footnotes": [{"code": "X", "text": "Data unavailable due to the lapse in appropriations."}]}
+        ]
+      },
+      {
+        "seriesID": "NOPE0000000",
+        "data": []
+      }
+    ]
+  }
+}

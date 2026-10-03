@@ -19,9 +19,10 @@
 //!   [`is_static_catalog_source`] let status pages and the UI flag them.
 //!
 //! **Development only.** [`default_registry`](crate::sources::default_registry) registers these
-//! adapters only when the crate is built with the `static-catalogs` feature, which release builds
-//! leave off (for example `cargo run -p econ-graph-crawler-worker --features static-catalogs`).
-//! They give a development database catalog entries for more sources without any API keys.
+//! adapters only when the `static_catalogs` build flag is on (config/flags/README.md): on by
+//! default for the `dev` profile, off for `release` (for example a release image built with
+//! `--build-arg FLAGS_PROFILE=dev` still gets them). They give a development database catalog
+//! entries for more sources without any API keys.
 //!
 //! Because no HTTP is made, the testkit's `new(base_url)` constructor convention does not apply;
 //! the constructors are one per source ([`StaticCatalogAdapter::boc`], ...). The `data_url`
@@ -35,6 +36,7 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use crate::adapter::{CrawlCtx, DiscoveredSeries, FetchedSeries, SourceAdapter};
+use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
 use crate::source::SourceId;
 
@@ -59,6 +61,10 @@ pub const STATIC_CATALOG_SOURCES: [SourceId; 10] = [
 pub fn is_static_catalog_source(source: SourceId) -> bool {
     STATIC_CATALOG_SOURCES.contains(&source)
 }
+
+/// Code of each static catalog's one dataset. Its series ids are opaque keys, so the dataset has
+/// no dimensions.
+pub const DATASET: &str = "catalog";
 
 /// One hardcoded catalog entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +94,7 @@ impl CatalogEntry {
             units: Some(self.units.to_string()),
             frequency: Some(self.frequency.to_string()),
             data_url: Some(self.data_url.to_string()),
+            dataset: SeriesDataset::new(DATASET, Vec::<(String, String)>::new()),
         }
     }
 }
@@ -178,6 +185,11 @@ impl StaticCatalogAdapter {
 impl SourceAdapter for StaticCatalogAdapter {
     fn id(&self) -> SourceId {
         self.source
+    }
+
+    /// One dimensionless dataset, [`DATASET`], defined in each source's `datasets/<source>.toml`.
+    fn datasets(&self) -> &[&str] {
+        &[DATASET]
     }
 
     /// Returns the hardcoded catalog. Makes no HTTP requests.

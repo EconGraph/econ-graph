@@ -48,7 +48,6 @@
 - **PostgreSQL**: Indexing capabilities for query optimization
 - **Kubernetes foundation**: Deployment manifests provide a basis for future scaling and reliability work
 - **Open Source**: Transparency and customization impossible with proprietary solutions
-- **AI-Assisted Development**: 0 lines of code delivered at ~$34557.836 vs $4.8M traditional cost
 - **Testing**: Unit, database integration, and browser end-to-end tests cover different parts of the platform
 
 ---
@@ -355,4 +354,5 @@ Let's discuss how EconGraph can deliver exceptional returns while transforming h
 ---
 
 *This pitch deck represents a compelling investment opportunity in a large, growing market with a proven team and differentiated technology solution. EconGraph is positioned to capture significant market share and deliver strong returns to investors.*
+
 

@@ -27,7 +27,8 @@ pub struct SourcePolicy {
     pub needs_api_key: bool,
     /// How far before the latest stored observation an incremental fetch starts, so recent
     /// revisions are re-fetched (`since = latest - revision_lookback`). Zero re-fetches only
-    /// from the latest stored date.
+    /// from the latest stored date. Unused for sources whose adapter
+    /// [tracks vintages](crate::SourceAdapter::tracks_vintages): they fetch by vintage instead.
     pub revision_lookback: Duration,
     /// Most `fetch_series` jobs the worker claims and fetches together in one
     /// [`SourceAdapter::fetch_batch`](crate::SourceAdapter::fetch_batch) call. Only applies to
@@ -47,7 +48,8 @@ impl SourcePolicy {
     /// matching the SEC crawler default); every other source gets 1 req/s with concurrency 2.
     /// Revision lookback: FRED 730 days, BLS 5 years (BLS revises seasonal factors for five
     /// years), everything else 365 days. Every source starts with `max_batch` 1; an adapter that
-    /// implements batching raises it for its source.
+    /// implements batching raises it for its source: BEA fetches up to 64 series (a NIPA table's
+    /// lines, or a Regional line's states) per request.
     pub fn default_for(source: SourceId) -> Self {
         let base = SourcePolicy {
             requests_per_second: 1.0,
@@ -79,6 +81,7 @@ impl SourcePolicy {
                 requests_per_second: 30.0 / 60.0,
                 max_concurrency: 1,
                 needs_api_key: true,
+                max_batch: 64,
                 ..base
             },
             SourceId::Census => SourcePolicy {

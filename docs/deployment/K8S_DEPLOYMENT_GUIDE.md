@@ -6,8 +6,8 @@ This guide provides comprehensive instructions for deploying the EconGraph appli
 
 ### Architecture Components
 
-- **Backend**: Rust API with GraphQL (v3.7.4)
-- **Frontend**: React application (v3.7.4) 
+- **Backend**: Rust API with GraphQL (v4.0.0)
+- **Frontend**: React application (v4.0.0) 
 - **Admin Frontend**: Administrative interface (v1.0.0)
 - **Chart API Service**: Private chart generation service (v1.0.0)
 - **Database**: PostgreSQL 18 with persistent storage
@@ -69,21 +69,21 @@ microk8s status --wait-ready
 
 ```bash
 # Run from the repository root. These tags match the checked-in manifests.
-docker build -t econ-graph-backend:v3.7.4 backend
-docker build --target crawler-worker -t econ-graph-crawler-worker:v3.7.4 backend
+docker build -t econ-graph-backend:v4.0.0 backend
+docker build --target crawler-worker -t econ-graph-crawler-worker:v4.0.0 backend
 docker build \
   --build-arg VITE_API_URL="http://localhost" \
   --build-arg VITE_GRAPHQL_URL="/graphql" \
   --build-arg VITE_WS_URL="ws://localhost/graphql" \
   --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER:-}" \
   --build-arg VITE_OIDC_CLIENT_ID="${VITE_OIDC_CLIENT_ID:-econ-graph-web}" \
-  -t econ-graph-frontend:v3.7.4 frontend
+  -t econ-graph-frontend:v4.0.0 frontend
 docker build -t econ-graph-chart-api:v1.0.0 chart-api-service
 
 # Explicitly import local Docker images into MicroK8s, not Kind.
 set -o pipefail
-for image in econ-graph-backend:v3.7.4 econ-graph-crawler-worker:v3.7.4 \
-             econ-graph-frontend:v3.7.4 econ-graph-chart-api:v1.0.0; do
+for image in econ-graph-backend:v4.0.0 econ-graph-crawler-worker:v4.0.0 \
+             econ-graph-frontend:v4.0.0 econ-graph-chart-api:v1.0.0; do
   docker save "$image" | microk8s ctr images import -
 done
 ```
@@ -129,7 +129,8 @@ kubectl apply -f k8s/manifests/ssl-ingress.yaml
 - **Backend API**: https://www.econgraph.com/api
 - **GraphQL**: https://www.econgraph.com/graphql
 - **Admin UI**: https://www.econgraph.com/admin
-- **Grafana**: https://www.econgraph.com/grafana
+
+Grafana is not exposed on the public ingress; see the port-forwarding section below.
 
 ### Local Development Setup
 Add to `/etc/hosts`:
@@ -213,7 +214,6 @@ Restrictive pod-to-pod communication:
 # Test service accessibility
 curl -k -s -o /dev/null -w "%{http_code}" https://www.econgraph.com
 curl -k -s -o /dev/null -w "%{http_code}" https://www.econgraph.com/api/health
-curl -k -s -o /dev/null -w "%{http_code}" https://www.econgraph.com/grafana
 ```
 
 ## Troubleshooting

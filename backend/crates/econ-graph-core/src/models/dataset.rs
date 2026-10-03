@@ -29,10 +29,8 @@ pub const VALUE_MEASURE: &str = "value";
 
 /// Shared code list of countries and areas (ISO 3166 alpha-3 plus World Bank aggregate codes).
 pub const COUNTRIES_CODELIST: &str = "countries";
-/// Shared code list of US states and DC by FIPS code.
-pub const US_STATES_CODELIST: &str = "us_states";
 /// Code lists a component may name in `codelist`; each is a reference data file loaded at runtime.
-pub const KNOWN_CODELISTS: &[&str] = &[COUNTRIES_CODELIST, US_STATES_CODELIST];
+pub const KNOWN_CODELISTS: &[&str] = &[COUNTRIES_CODELIST];
 
 /// Implements Diesel `Jsonb` conversion for a serde newtype.
 macro_rules! jsonb_newtype {
@@ -150,8 +148,8 @@ impl DatasetComponents {
 }
 
 /// A series' dimension values within its dataset, stored as a flat `jsonb` object of strings,
-/// e.g. `{"geo_level": "state", "state": "06", "variable": "ESTAB"}`. Empty for a series with
-/// no dataset or in a dimensionless dataset.
+/// e.g. `{"geo_level": "state", "state": "06", "variable": "ESTAB"}`. Empty for a series in a
+/// dimensionless dataset (or a catalog row without a dataset).
 #[derive(
     Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, AsExpression, FromSqlRow,
 )]

@@ -1,0 +1,29 @@
+# Census Bureau datasets. See README.md in this directory for the format.
+
+# Business Dynamics Statistics, stored long: each variable is its own series.
+# Canonical ids: bds/{geo_level}.{state}.{variable}, for example
+# bds/national..ESTAB (the nation) and bds/state.06.ESTAB (California).
+[[dataset]]
+code = "bds"
+name = "Business Dynamics Statistics"
+description = "Annual counts and rates of establishments, firms and job flows, by geography"
+
+[[dataset.dimensions]]
+name = "geo_level"
+label = "Geography level"
+codes = [
+  { code = "national", label = "United States" },
+  { code = "state", label = "State" },
+]
+
+# Two-digit state FIPS code; empty for national series. No codes here: the crawler fetches the
+# Census Bureau's state file on each crawl and stores the state names as this dimension's codes
+# (see src/sources/census.rs).
+[[dataset.dimensions]]
+name = "state"
+label = "State"
+
+# The BDS variable name (for example ESTAB or JOB_CREATION).
+[[dataset.dimensions]]
+name = "variable"
+label = "Variable"

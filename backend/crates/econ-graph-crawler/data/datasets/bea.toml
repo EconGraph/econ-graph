@@ -1,0 +1,42 @@
+# BEA datasets (see docs/data-sources/bea.md). Curated tables: data/bea_tables.csv.
+
+[[dataset]]
+code = "bea_nipa"
+name = "BEA National Income and Product Accounts"
+description = "Lines of BEA NIPA tables, one series per table line and frequency"
+
+# bea_nipa/{table_name}.{line_number}.{frequency}, for example bea_nipa/T10105.1.Q
+[[dataset.dimensions]]
+name = "table_name"
+label = "NIPA table"
+
+[[dataset.dimensions]]
+name = "line_number"
+label = "Table line"
+
+[[dataset.dimensions]]
+name = "frequency"
+label = "Frequency"
+codes = [
+  { code = "A", label = "Annual" },
+  { code = "Q", label = "Quarterly" },
+  { code = "M", label = "Monthly" },
+]
+
+[[dataset]]
+code = "bea_regional"
+name = "BEA Regional Economic Accounts"
+description = "Lines of BEA Regional tables by state, one series per table line and area"
+
+# bea_regional/{table_name}.{line_code}.{geo_fips}, for example bea_regional/SAGDP2N.1.06000
+[[dataset.dimensions]]
+name = "table_name"
+label = "Regional table"
+
+[[dataset.dimensions]]
+name = "line_code"
+label = "Table line"
+
+[[dataset.dimensions]]
+name = "geo_fips"
+label = "Area (BEA GeoFips)"
