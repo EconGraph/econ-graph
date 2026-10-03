@@ -26,50 +26,9 @@ export interface Company {
   updated_at: string;
 }
 
-export interface SecCrawlResult {
-  success: boolean;
-  message: string;
-  documentsProcessed: number;
-  documentsSkipped: number;
-  documentsFailed: number;
-  totalSizeBytes: number;
-  processingTimeMs: number;
-  errors: string[];
-  warnings: string[];
-}
-
-export interface SecCrawlInput {
-  companyId: string;
-  startDate?: string;
-  endDate?: string;
-  formTypes?: string[];
-  maxDocuments?: number;
-  includeAmendments?: boolean;
-  includeExhibits?: boolean;
-  rateLimit?: number;
-  retryAttempts?: number;
-  timeout?: number;
-}
-
-export interface SecRssImportInput {
-  feedUrl: string;
-  maxItems?: number;
-  includeAmendments?: boolean;
-  includeExhibits?: boolean;
-  rateLimit?: number;
-  retryAttempts?: number;
-  timeout?: number;
-}
-
-export interface SecRssImportResult {
-  success: boolean;
-  message: string;
-  itemsProcessed: number;
-  itemsSkipped: number;
-  itemsFailed: number;
-  newCompanies: number;
-  updatedCompanies: number;
-  processingTimeMs: number;
-  errors: string[];
-  warnings: string[];
-}
+export type {
+  SecCrawlInput,
+  SecCrawlResult,
+  SecRssImportInput,
+  SecRssImportResult,
+} from "../hooks/useSecCrawler";

@@ -18,3 +18,6 @@ pub mod n_plus_one_tests;
 pub use mutation::Mutation;
 pub use query::Query;
 pub use schema::{create_schema, create_schema_with_data, GraphQLContext};
+
+#[cfg(test)]
+mod sec_api_tests;

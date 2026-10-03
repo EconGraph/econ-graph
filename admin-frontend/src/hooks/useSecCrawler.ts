@@ -13,13 +13,13 @@ import { gql } from "@apollo/client";
 const TRIGGER_SEC_CRAWL = gql`
   mutation TriggerSecCrawl($input: SecCrawlInput!) {
     triggerSecCrawl(input: $input) {
-      operation_id
+      operation_id: operationId
       cik
-      filings_downloaded
-      filings_processed
+      filings_downloaded: filingsDownloaded
+      filings_processed: filingsProcessed
       errors
-      start_time
-      end_time
+      start_time: startTime
+      end_time: endTime
       status
     }
   }
@@ -29,12 +29,12 @@ const TRIGGER_SEC_CRAWL = gql`
 const IMPORT_SEC_RSS = gql`
   mutation ImportSecRss($input: SecRssImportInput!) {
     importSecRss(input: $input) {
-      operation_id
-      filings_imported
-      companies_added
+      operation_id: operationId
+      filings_imported: filingsImported
+      companies_added: companiesAdded
       errors
-      start_time
-      end_time
+      start_time: startTime
+      end_time: endTime
       status
     }
   }
@@ -110,7 +110,17 @@ export const useSecCrawler = (): UseSecCrawlerReturn => {
         setProgress(0);
 
         const result = await triggerCrawlMutation({
-          variables: { input },
+          variables: {
+            input: {
+              cik: input.cik,
+              formTypes: input.form_types,
+              startDate: input.start_date,
+              endDate: input.end_date,
+              excludeAmended: input.exclude_amended,
+              excludeRestated: input.exclude_restated,
+              maxFileSize: input.max_file_size,
+            },
+          },
         });
 
         if (!result.data?.triggerSecCrawl) {
@@ -118,7 +128,7 @@ export const useSecCrawler = (): UseSecCrawlerReturn => {
         }
 
         setProgress(100);
-        setStatus("completed");
+        setStatus(result.data.triggerSecCrawl.status);
         setIsCrawling(false);
 
         return result.data.triggerSecCrawl;
@@ -137,7 +147,13 @@ export const useSecCrawler = (): UseSecCrawlerReturn => {
     async (input: SecRssImportInput): Promise<SecRssImportResult> => {
       try {
         const result = await importRssMutation({
-          variables: { input },
+          variables: {
+            input: {
+              rssUrl: input.rss_url,
+              maxFilings: input.max_filings,
+              formTypes: input.form_types,
+            },
+          },
         });
 
         if (!result.data?.importSecRss) {

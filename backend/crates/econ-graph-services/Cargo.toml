@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+econ-graph-sec-crawler = { path = "../econ-graph-sec-crawler" }
 # Core dependency
 econ-graph-core = { path = "../econ-graph-core" }
 econ-graph-metrics = { path = "../econ-graph-metrics" }

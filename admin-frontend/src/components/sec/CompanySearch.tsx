@@ -39,19 +39,7 @@ import {
 } from "@mui/icons-material";
 import { useCompanySearch } from "../../hooks/useCompanySearch";
 
-interface Company {
-  id: string;
-  cik: string;
-  ticker?: string;
-  name: string;
-  legal_name?: string;
-  industry?: string;
-  sector?: string;
-  website?: string;
-  phone?: string;
-  state_of_incorporation?: string;
-  is_active: boolean;
-}
+import type { Company } from "../../hooks/useCompanySearch";
 
 interface CompanySearchProps {
   onCompanySelect?: (company: Company) => void;
@@ -164,12 +152,12 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
         sx={{ mb: 2 }}
         aria-describedby="search-help"
       />
-      
+
       {/* Help text */}
-      <Typography 
-        id="search-help" 
-        variant="caption" 
-        color="text.secondary" 
+      <Typography
+        id="search-help"
+        variant="caption"
+        color="text.secondary"
         sx={{ display: "block", mb: 1 }}
       >
         Type at least 2 characters to search for companies
@@ -177,8 +165,8 @@ export const CompanySearch: React.FC<CompanySearchProps> = ({
 
       {/* Search Results */}
       {searchQuery.length >= 2 && (
-        <Paper 
-          elevation={2} 
+        <Paper
+          elevation={2}
           sx={{ maxHeight: 400, overflow: "auto" }}
           role="region"
           aria-label="Search results"

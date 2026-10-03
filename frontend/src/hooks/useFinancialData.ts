@@ -17,23 +17,23 @@ const GET_COMPANY = gql`
       cik
       ticker
       name
-      legal_name
-      sic_code
-      sic_description
+      legal_name: legalName
+      sic_code: sicCode
+      sic_description: sicDescription
       industry
       sector
-      business_address
-      mailing_address
+      business_address: businessAddress
+      mailing_address: mailingAddress
       phone
       website
-      state_of_incorporation
-      state_of_incorporation_description
-      fiscal_year_end
-      entity_type
-      entity_size
-      is_active
-      created_at
-      updated_at
+      state_of_incorporation: stateOfIncorporation
+      state_of_incorporation_description: stateOfIncorporationDescription
+      fiscal_year_end: fiscalYearEnd
+      entity_type: entityType
+      entity_size: entitySize
+      is_active: isActive
+      created_at: createdAt
+      updated_at: updatedAt
     }
   }
 `;
@@ -44,29 +44,29 @@ const GET_COMPANY_FINANCIAL_STATEMENTS = gql`
     companyFinancialStatements(companyId: $companyId, pagination: $pagination) {
       nodes {
         id
-        company_id
-        filing_type
-        form_type
-        accession_number
-        filing_date
-        period_end_date
-        fiscal_year
-        fiscal_quarter
-        document_type
-        document_url
-        xbrl_file_oid
-        xbrl_file_size_bytes
-        xbrl_file_compressed
-        xbrl_processing_status
-        created_at
-        updated_at
+        company_id: companyId
+        filing_type: filingType
+        form_type: formType
+        accession_number: accessionNumber
+        filing_date: filingDate
+        period_end_date: periodEndDate
+        fiscal_year: fiscalYear
+        fiscal_quarter: fiscalQuarter
+        document_type: documentType
+        document_url: documentUrl
+        xbrl_file_oid: xbrlFileOid
+        xbrl_file_size_bytes: xbrlFileSizeBytes
+        xbrl_file_compressed: xbrlFileCompressed
+        xbrl_processing_status: xbrlProcessingStatus
+        created_at: createdAt
+        updated_at: updatedAt
       }
-      total_count
-      page_info {
-        has_next_page
-        has_previous_page
-        start_cursor
-        end_cursor
+      total_count: totalCount
+      page_info: pageInfo {
+        has_next_page: hasNextPage
+        has_previous_page: hasPreviousPage
+        start_cursor: startCursor
+        end_cursor: endCursor
       }
     }
   }

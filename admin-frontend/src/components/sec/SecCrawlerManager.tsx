@@ -9,7 +9,7 @@
  * - Crawl history and status tracking
  */
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   Box,
   Card,
@@ -37,7 +37,7 @@ import {
   Download,
   Business,
   CheckCircle,
-  Error,
+  Error as ErrorIcon,
   Warning,
   History,
   Settings,
@@ -54,9 +54,14 @@ interface SecCrawlerManagerProps {
 }
 
 export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
+  company,
+  onCrawlComplete,
+  onCrawlError,
   className,
 }) => {
-  const [selectedCompany, setSelectedCompany] = useState<any>(null);
+  const [selectedCompany, setSelectedCompany] = useState<Company | null>(
+    company ?? null,
+  );
   const [crawlConfig, setCrawlConfig] = useState({
     formTypes: "10-K,10-Q",
     startDate: "",
@@ -65,7 +70,16 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
     excludeRestated: false,
     maxFileSize: 52428800, // 50MB
   });
-  const [activeStep, setActiveStep] = useState(0);
+  const [activeStep, setActiveStep] = useState(company ? 1 : 0);
+  const [crawlResult, setCrawlResult] = useState<SecCrawlResult | null>(null);
+  const [executionError, setExecutionError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    if (company) {
+      setSelectedCompany(company);
+      setActiveStep(1);
+    }
+  }, [company]);
   const [crawlDialogOpen, setCrawlDialogOpen] = useState(false);
   const [rssDialogOpen, setRssDialogOpen] = useState(false);
 
@@ -73,7 +87,7 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
     useSecCrawler();
 
   // Handle company selection
-  const handleCompanySelect = useCallback((company: any) => {
+  const handleCompanySelect = useCallback((company: Company) => {
     setSelectedCompany(company);
     setActiveStep(1);
   }, []);
@@ -90,8 +104,23 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
   const handleCrawl = useCallback(async () => {
     if (!selectedCompany) return;
 
+    setExecutionError(null);
+    setCrawlResult(null);
     try {
-      await crawlCompany({
+      if (
+        crawlConfig.startDate &&
+        crawlConfig.endDate &&
+        crawlConfig.startDate > crawlConfig.endDate
+      ) {
+        throw new Error("Start Date must not be after End Date");
+      }
+      if (
+        !Number.isFinite(crawlConfig.maxFileSize) ||
+        crawlConfig.maxFileSize <= 0
+      ) {
+        throw new Error("Max File Size must be positive");
+      }
+      const result = await crawlCompany({
         cik: selectedCompany.cik,
         form_types: crawlConfig.formTypes,
         start_date: crawlConfig.startDate || undefined,
@@ -100,11 +129,24 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
         exclude_restated: crawlConfig.excludeRestated,
         max_file_size: crawlConfig.maxFileSize,
       });
+      setCrawlResult(result);
+      onCrawlComplete?.(result);
       setCrawlDialogOpen(false);
     } catch (err) {
-      console.error("Crawl error:", err);
+      const failure =
+        err instanceof globalThis.Error
+          ? err
+          : new globalThis.Error(String(err));
+      setExecutionError(failure);
+      onCrawlError?.(failure);
     }
-  }, [selectedCompany, crawlConfig, crawlCompany]);
+  }, [
+    selectedCompany,
+    crawlConfig,
+    crawlCompany,
+    onCrawlComplete,
+    onCrawlError,
+  ]);
 
   // Handle RSS import
   const handleRssImport = useCallback(async () => {
@@ -289,9 +331,9 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
       </Typography>
 
       {/* Error Display */}
-      {error && (
+      {(executionError || error) && (
         <Alert severity="error" sx={{ mb: 3 }}>
-          {error.message}
+          {(executionError || error)?.message}
         </Alert>
       )}
 
@@ -303,6 +345,17 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
             Processing crawl operation... {progress}%
           </Typography>
         </Box>
+      )}
+
+      {crawlResult && (
+        <Alert
+          severity={crawlResult.status === "completed" ? "success" : "warning"}
+          sx={{ mb: 3 }}
+        >
+          Filings Downloaded: {crawlResult.filings_downloaded.toLocaleString()};
+          Filings Processed: {crawlResult.filings_processed.toLocaleString()};
+          Errors: {crawlResult.errors.toLocaleString()}
+        </Alert>
       )}
 
       {/* Main Content */}
@@ -395,11 +448,15 @@ export const SecCrawlerManager: React.FC<SecCrawlerManagerProps> = ({
                 <Typography variant="h6" gutterBottom>
                   Crawl Status
                 </Typography>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <Box
+                  role="status"
+                  aria-live="polite"
+                  sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                >
                   {status === "completed" ? (
                     <CheckCircle color="success" />
                   ) : status === "error" ? (
-                    <Error color="error" />
+                    <ErrorIcon color="error" />
                   ) : (
                     <Warning color="warning" />
                   )}

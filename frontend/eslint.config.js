@@ -10,6 +10,8 @@ import jsdoc from 'eslint-plugin-jsdoc';
 import importPlugin from 'eslint-plugin-import';
 
 export default [
+  // CLI documentation rules also apply to CommonJS files.
+  { plugins: { jsdoc } },
   js.configs.recommended,
   {
     files: ['**/*.{ts,tsx,js,jsx}'],
@@ -135,7 +137,7 @@ export default [
 
       // Import rules - temporarily disable path resolution warnings
       'import/no-unresolved': 'off',
-      
+
       // JSDoc rules for documentation quality (initially lenient)
       'jsdoc/require-jsdoc': [
         'warn',
