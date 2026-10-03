@@ -88,7 +88,7 @@ const About: React.FC = () => {
           <Typography variant='h3' component='h1' gutterBottom>
             EconGraph
           </Typography>
-          <Typography variant='h5' sx={{ mb: 3, opacity: 0.9 }}>
+          <Typography component='p' variant='h5' sx={{ mb: 3, opacity: 0.9 }}>
             Modern Economic Data Visualization Platform
           </Typography>
           <Typography variant='body1' sx={{ maxWidth: 600, mx: 'auto', opacity: 0.9 }}>
@@ -128,7 +128,7 @@ const About: React.FC = () => {
         {/* Overview */}
         <Grid item xs={12} md={8}>
           <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant='h5' gutterBottom>
+            <Typography component='h2' variant='h5' gutterBottom>
               About EconGraph
             </Typography>
             <Typography variant='body1' paragraph>
@@ -138,7 +138,7 @@ const About: React.FC = () => {
               responsive, and feature-rich interface.
             </Typography>
 
-            <Typography variant='h6' gutterBottom sx={{ mt: 3 }}>
+            <Typography component='h3' variant='h6' gutterBottom sx={{ mt: 3 }}>
               Key Improvements Over FRED
             </Typography>
             <List>
@@ -183,7 +183,7 @@ const About: React.FC = () => {
 
           {/* Features */}
           <Paper sx={{ p: 3 }}>
-            <Typography variant='h5' gutterBottom>
+            <Typography component='h2' variant='h5' gutterBottom>
               Features
             </Typography>
             <Grid container spacing={2}>
@@ -193,7 +193,7 @@ const About: React.FC = () => {
                     <CardContent>
                       <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
                         {feature.icon}
-                        <Typography variant='h6' sx={{ ml: 1 }}>
+                        <Typography component='h3' variant='h6' sx={{ ml: 1 }}>
                           {feature.title}
                         </Typography>
                       </Box>
@@ -212,7 +212,7 @@ const About: React.FC = () => {
         <Grid item xs={12} md={4}>
           {/* Data Sources */}
           <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant='h6' gutterBottom>
+            <Typography component='h3' variant='h6' gutterBottom>
               Data Sources
             </Typography>
             <List dense>
@@ -229,7 +229,7 @@ const About: React.FC = () => {
 
           {/* Technology Stack */}
           <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant='h6' gutterBottom>
+            <Typography component='h3' variant='h6' gutterBottom>
               Technology Stack
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
@@ -253,7 +253,12 @@ const About: React.FC = () => {
 
           {/* Open Source */}
           <Paper sx={{ p: 3 }}>
-            <Typography variant='h6' gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+            <Typography
+              component='h3'
+              variant='h6'
+              gutterBottom
+              sx={{ display: 'flex', alignItems: 'center' }}
+            >
               <CodeIcon sx={{ mr: 1 }} />
               Open Source
             </Typography>

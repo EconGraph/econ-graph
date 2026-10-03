@@ -13,7 +13,7 @@ use warp::Filter;
 
 // Import from our new crates
 use econ_graph_auth::auth::{routes::auth_routes, services::AuthService};
-use econ_graph_core::{create_pool, AppError, AppResult, Config, DatabasePool};
+use econ_graph_core::{AppError, AppResult, Config, DatabasePool};
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
 use econ_graph_mcp::mcp_server::{mcp_handler, EconGraphMcpServer};
 
@@ -213,31 +213,8 @@ async fn main() -> AppResult<()> {
     info!("  - CORS origins: {:?}", config.cors.allowed_origins);
     info!("  - Database URL: {}", config.database_url);
 
-    // Create database connection pool
-    info!("🗄️  Creating database connection pool...");
-    info!("  - Database URL: {}", config.database_url);
-
-    let pool = create_pool(&config.database_url).await.map_err(|e| {
-        let error = AppError::DatabaseError(format!("Failed to create database pool: {}", e));
-        error.log_with_context("Application startup database pool creation");
-        eprintln!("❌ Failed to create database pool: {}", e);
-        error
-    })?;
-
-    info!("✅ Database connection pool created successfully");
-
-    // Run migrations
-    info!("🔄 Running database migrations...");
-    econ_graph_core::run_migrations(&config.database_url)
-        .await
-        .map_err(|e| {
-            let error = AppError::DatabaseError(format!("Failed to run migrations: {}", e));
-            error.log_with_context("Application startup database migrations");
-            eprintln!("❌ Failed to run migrations: {}", e);
-            error
-        })?;
-
-    info!("✅ Database migrations completed successfully");
+    // Verify the database and migrate it before constructing the serving application.
+    let pool = econ_graph_core::database::initialize_database(&config.database_url).await?;
 
     // Create GraphQL schema
     let schema = create_schema_with_data(std::sync::Arc::new(pool.clone()), ());

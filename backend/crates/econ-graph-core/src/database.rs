@@ -133,9 +133,24 @@ pub async fn check_database_health(pool: &DatabasePool) -> AppResult<()> {
     test_connection(pool).await
 }
 
+/// Verify connectivity and run migrations before serving requests.
+pub async fn initialize_database(database_url: &str) -> AppResult<DatabasePool> {
+    let pool = create_pool(database_url).await?;
+    test_connection(&pool).await?;
+    run_migrations(database_url).await?;
+    Ok(pool)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn initialization_rejects_an_unreachable_database() {
+        let result =
+            initialize_database("postgres://localhost:1/startup_test?connect_timeout=1").await;
+        assert!(result.is_err(), "startup must fail before serving requests");
+    }
+
     // Tests now use TestContainer directly for better control
 
     #[tokio::test]

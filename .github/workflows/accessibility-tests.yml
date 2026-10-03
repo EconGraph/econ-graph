@@ -49,11 +49,11 @@ jobs:
 
     - name: Install frontend dependencies
       working-directory: frontend
-      run: npm ci
+      run: npm ci --legacy-peer-deps
 
     - name: Install admin-frontend dependencies
       working-directory: admin-frontend
-      run: npm ci
+      run: npm ci --legacy-peer-deps
 
     - name: Install accessibility linting tools
       run: |
@@ -201,81 +201,17 @@ jobs:
 
     - name: Install frontend dependencies
       working-directory: frontend
-      run: npm ci
+      run: npm ci --legacy-peer-deps
 
     - name: Install admin-frontend dependencies
       working-directory: admin-frontend
-      run: npm ci
+      run: npm ci --legacy-peer-deps
 
     - name: Install accessibility testing tools
       run: |
         echo "Installing axe-core and jest-axe for runtime accessibility testing..."
-        cd frontend && npm install --save-dev @axe-core/react jest-axe
-        cd ../admin-frontend && npm install --save-dev @axe-core/react jest-axe
-
-    - name: Configure accessibility testing setup
-      run: |
-        echo "Setting up accessibility testing configuration..."
-
-        # Frontend setupTests.ts
-        cat > frontend/src/setupTests.accessibility.ts << 'EOF'
-        import { toHaveNoViolations } from 'jest-axe';
-        import '@axe-core/react';
-
-        expect.extend(toHaveNoViolations);
-        EOF
-
-        # Admin-frontend setupTests.ts
-        cat > admin-frontend/src/setupTests.accessibility.ts << 'EOF'
-        import { toHaveNoViolations } from 'jest-axe';
-        import '@axe-core/react';
-
-        expect.extend(toHaveNoViolations);
-        EOF
-
-        # Frontend accessibility test configuration
-        cat > frontend/jest.config.accessibility.js << 'EOF'
-        const baseConfig = require('./jest.config.js');
-
-        module.exports = {
-          ...baseConfig,
-          setupFilesAfterEnv: [
-            '<rootDir>/src/setupTests.accessibility.ts',
-            ...(baseConfig.setupFilesAfterEnv || [])
-          ],
-          testMatch: [
-            '**/__tests__/**/*.accessibility.test.{js,jsx,ts,tsx}',
-            '**/*.accessibility.test.{js,jsx,ts,tsx}'
-          ],
-          collectCoverageFrom: [
-            'src/**/*.{js,jsx,ts,tsx}',
-            '!src/**/*.d.ts',
-            '!src/setupTests.accessibility.ts'
-          ]
-        };
-        EOF
-
-        # Admin-frontend accessibility test configuration
-        cat > admin-frontend/jest.config.accessibility.js << 'EOF'
-        const baseConfig = require('./jest.config.js');
-
-        module.exports = {
-          ...baseConfig,
-          setupFilesAfterEnv: [
-            '<rootDir>/src/setupTests.accessibility.ts',
-            ...(baseConfig.setupFilesAfterEnv || [])
-          ],
-          testMatch: [
-            '**/__tests__/**/*.accessibility.test.{js,jsx,ts,tsx}',
-            '**/*.accessibility.test.{js,jsx,ts,tsx}'
-          ],
-          collectCoverageFrom: [
-            'src/**/*.{js,jsx,ts,tsx}',
-            '!src/**/*.d.ts',
-            '!src/setupTests.accessibility.ts'
-          ]
-        };
-        EOF
+        cd frontend && npm install --legacy-peer-deps --save-dev jest-axe @types/jest-axe
+        cd ../admin-frontend && npm install --legacy-peer-deps --save-dev jest-axe @types/jest-axe
 
     - name: Create sample accessibility tests
       run: |
@@ -287,13 +223,19 @@ jobs:
         import React from 'react';
         import { render } from '@testing-library/react';
         import { axe, toHaveNoViolations } from 'jest-axe';
-        import App from '../App';
+        import App from '../../App';
+        import { MemoryRouter } from 'react-router-dom';
+        import { QueryClient, QueryClientProvider } from 'react-query';
 
         expect.extend(toHaveNoViolations);
 
         describe('App Accessibility Tests', () => {
           it('should not have accessibility violations', async () => {
-            const { container } = render(<App />);
+            const { container } = render(
+              <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+                <MemoryRouter initialEntries={['/about']}><App /></MemoryRouter>
+              </QueryClientProvider>
+            );
             const results = await axe(container);
             expect(results).toHaveNoViolations();
           });
@@ -306,7 +248,7 @@ jobs:
         import React from 'react';
         import { render } from '@testing-library/react';
         import { axe, toHaveNoViolations } from 'jest-axe';
-        import App from '../App';
+        import App from '../../App';
 
         expect.extend(toHaveNoViolations);
 
@@ -323,15 +265,17 @@ jobs:
       working-directory: frontend
       run: |
         echo "Running accessibility runtime tests on frontend..."
-        npm test -- --config=jest.config.accessibility.js --coverage --watchAll=false --testPathPattern="accessibility" || echo "Accessibility tests completed with results"
+        npm test -- --coverage --watchAll=false --runInBand --testPathPattern="accessibility"
 
     - name: Run accessibility runtime tests on admin-frontend
+      if: ${{ !cancelled() }}
       working-directory: admin-frontend
       run: |
         echo "Running accessibility runtime tests on admin-frontend..."
-        npm test -- --config=jest.config.accessibility.js --coverage --watchAll=false --testPathPattern="accessibility" || echo "Accessibility tests completed with results"
+        npm test -- --coverage --watchAll=false --runInBand --testPathPattern="accessibility"
 
     - name: Upload accessibility test results
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: accessibility-test-results-${{ github.sha }}
