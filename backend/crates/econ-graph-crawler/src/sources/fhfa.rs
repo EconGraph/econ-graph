@@ -40,8 +40,8 @@
 //! [`batch_key`](SourceAdapter::batch_key) and the policy's `max_batch` ([`MAX_BATCH`]) covers
 //! every train 1 series, so fetching them all is normally one download (discovery downloads the
 //! file separately). The file is also one of [`code_lists`](SourceAdapter::code_lists): the
-//! default `refresh_reference_data` downloads it once more (no ETag of its own to short-circuit
-//! on) to label every `place_id` dimension code (states and census divisions alike) from its own
+//! default `refresh_reference_data` reads it once more, under its own `ETag` cache (a full
+//! download whenever FHFA sends no `ETag`; QA checks whether it does), to label every `place_id` dimension code (states and census divisions alike) from its own
 //! `place_name` column; the dataset definition (`data/datasets/fhfa.toml`) ships no hand-typed
 //! place labels.
 //!
@@ -49,6 +49,29 @@
 //! `is_original_release = true`. FHFA re-estimates the whole history at every release and the file
 //! has no vintage column, so a fetch returns every observation (ignoring `since`) and each refresh
 //! overwrites the stored values with the latest estimate.
+//!
+//! # Re-crawls
+//!
+//! FHFA publishes the file monthly, while monthly series are refreshed weekly and discovery runs
+//! weekly, so most downloads would fetch the file they already read. Both therefore download it
+//! with [`HttpFetcher::get_text_if_changed`](crate::HttpFetcher::get_text_if_changed): a
+//! conditional GET with the `ETag` / `Last-Modified` from the last read, and a SHA-256 of the body
+//! for a server that honours neither.
+//!
+//! - **Discovery** compares against the validators it stored for the master file, under its own
+//!   key (`{master URL}#discovery`, see [`persist::url_validators`]), so another cache of the
+//!   URL's `ETag` can't stand in for a discovery that never happened. An unchanged file is
+//!   [`Discovery::Unchanged`]: nothing is written or retired.
+//! - **A fetch batch** compares against the validators its series stored with their last fetch
+//!   ([`persist::stored_fetch_state`]), used only when every series in the batch stored the same
+//!   ones. An unchanged file gives each series [`FetchedSeries::unchanged`]: it is marked crawled
+//!   and keeps its points. A series never fetched, or last fetched from another version of the
+//!   file, makes the batch a full download, so no series is ever marked current without data.
+//!
+//! Stored validators carry [`PARSE_VERSION`] as their `version`, and ones with another version
+//! are not sent, so a release that changes how the file is read (parsing, scope, the dataset
+//! definition) re-reads it once instead of waiting for FHFA's next file. If the stored validators
+//! can't be read, the download is a full one.
 //!
 //! # Concurrency
 //!
@@ -90,11 +113,13 @@ use chrono::NaiveDate;
 use rand::RngExt;
 
 use crate::adapter::{
-    ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
+    ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, Discovery, FetchedPoint, FetchedSeries,
     NewSeriesMetadataLite, SourceAdapter,
 };
 use crate::dataset::{DatasetDef, SeriesDataset};
 use crate::error::CrawlError;
+use crate::http::{IfChanged, Validators};
+use crate::persist::{self, StoredFetchState};
 use crate::policy::SourcePolicy;
 use crate::reference_file::{labels_only, CodeList};
 use crate::source::SourceId;
@@ -111,6 +136,11 @@ pub const DATASET: &str = "fhfa_hpi";
 /// Most series fetched per download: more than train 1's roughly 200, so one download fetches
 /// them all.
 pub const MAX_BATCH: usize = 500;
+
+/// How this adapter reads the master file. Bump it whenever a change to parsing, scope or the
+/// `fhfa_hpi` dataset definition should rewrite already-stored series: validators stored under
+/// another version are ignored (see [Re-crawls](self#re-crawls)).
+pub const PARSE_VERSION: &str = "fhfa-1";
 
 /// Every series comes from the same file, so they all share one batch key.
 const BATCH_KEY: &str = "hpi_master";
@@ -235,6 +265,7 @@ impl HpiSeries {
                 })
                 .collect(),
             dataset: self.dataset.clone(),
+            validators: None,
         })
     }
 }
@@ -456,14 +487,89 @@ impl FhfaAdapter {
         format!("{}{MASTER_CSV_PATH}", self.base_url)
     }
 
-    /// Downloads and parses the master file.
+    /// Key under which discovery stores the validators of the master file it last listed. Not the
+    /// bare master URL: anything else that caches that URL's `ETag` (a reference-data refresh)
+    /// must not make discovery think it has already read a newer file.
+    fn discovery_key(&self) -> String {
+        format!("{}#discovery", self.master_url())
+    }
+
+    /// Downloads and parses the whole master file.
     async fn master(&self, ctx: &CrawlCtx) -> Result<BTreeMap<String, HpiSeries>, CrawlError> {
+        let (master, _) = self.master_if_changed(ctx, None).await?;
+        master.ok_or_else(|| {
+            // Unreachable: with no known validators the fetcher never reports `Unchanged`.
+            CrawlError::Transient("FHFA: master file reported unchanged without validators".into())
+        })
+    }
+
+    /// Downloads and parses the master file, unless `known` shows it hasn't changed (see
+    /// [Re-crawls](self#re-crawls)): `None` then, without parsing.
+    async fn master_if_changed(
+        &self,
+        ctx: &CrawlCtx,
+        known: Option<&Validators>,
+    ) -> Result<(Option<BTreeMap<String, HpiSeries>>, Validators), CrawlError> {
         let url = self.master_url();
         let _reservation = DownloadGuard::try_acquire(&url)?;
         let def = crate::reference::dataset(SourceId::Fhfa, DATASET)?;
-        let text = ctx.http.get_text(SourceId::Fhfa, &url, &[]).await?;
-        parse_master(&text, def)
+        let known = known.filter(|k| k.version.as_deref() == Some(PARSE_VERSION));
+        let (master, mut validators) = match ctx
+            .http
+            .get_text_if_changed(SourceId::Fhfa, &url, &[], known)
+            .await?
+        {
+            IfChanged::Unchanged { validators } => (None, validators),
+            IfChanged::Changed { body, validators } => {
+                (Some(parse_master(&body, def)?), validators)
+            }
+        };
+        validators.version = Some(PARSE_VERSION.to_string());
+        Ok((master, validators))
     }
+
+    /// Discovered series of a parsed master file.
+    fn discovered(&self, master: BTreeMap<String, HpiSeries>) -> Vec<DiscoveredSeries> {
+        let url = self.master_url();
+        master
+            .into_iter()
+            .map(|(external_id, s)| {
+                let m = s.metadata();
+                DiscoveredSeries {
+                    title: m.title,
+                    description: m.description,
+                    units: m.units,
+                    frequency: m.frequency,
+                    data_url: Some(url.clone()),
+                    dataset: s.dataset,
+                    external_id,
+                }
+            })
+            .collect()
+    }
+}
+
+/// The validators every one of `ids` stored with its last fetch, if they all stored the same
+/// ones: the master file they were read from. Otherwise (a series never fetched, or fetched from a
+/// different version of the file) `None`, so the batch downloads the file in full.
+///
+/// A series FHFA dropped from the file keeps the validators of its last successful fetch until
+/// discovery retires it, so until then a batch with it downloads in full: wasteful for a week at
+/// most, never stale.
+fn shared_validators(
+    ids: &[String],
+    stored: &HashMap<String, StoredFetchState>,
+) -> Option<Validators> {
+    let mut shared: Option<&Validators> = None;
+    for id in ids {
+        let v = stored.get(id)?.validators.as_ref()?;
+        match shared {
+            None => shared = Some(v),
+            Some(s) if s == v => {}
+            Some(_) => return None,
+        }
+    }
+    shared.cloned()
 }
 
 impl Default for FhfaAdapter {
@@ -524,9 +630,8 @@ impl SourceAdapter for FhfaAdapter {
     }
 
     /// The master file itself, whose `place_name` column labels [`DATASET`]'s `place_id`
-    /// dimension (see [`place_labels`]). The default `refresh_reference_data` downloads it again
-    /// each scheduled discovery: FHFA sends no `ETag` for it to short-circuit on (see the module
-    /// docs).
+    /// dimension (see [`place_labels`]). The default `refresh_reference_data` reads it again each
+    /// scheduled discovery, short-circuiting only if FHFA sends an `ETag` (see the module docs).
     fn code_lists(&self, _keys: &ApiKeys) -> Vec<CodeList> {
         vec![CodeList::new(
             self.master_url(),
@@ -538,24 +643,26 @@ impl SourceAdapter for FhfaAdapter {
 
     /// Every train 1 series in the master file (see the module docs).
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
-        let url = self.master_url();
-        Ok(self
-            .master(ctx)
-            .await?
-            .into_iter()
-            .map(|(external_id, s)| {
-                let m = s.metadata();
-                DiscoveredSeries {
-                    title: m.title,
-                    description: m.description,
-                    units: m.units,
-                    frequency: m.frequency,
-                    data_url: Some(url.clone()),
-                    dataset: s.dataset,
-                    external_id,
-                }
-            })
-            .collect())
+        Ok(self.discovered(self.master(ctx).await?))
+    }
+
+    /// [`Discovery::Unchanged`] when the master file is the one the last discovery read (see
+    /// [Re-crawls](self#re-crawls)).
+    async fn discover_if_changed(&self, ctx: &CrawlCtx) -> Result<Discovery, CrawlError> {
+        let key = self.discovery_key();
+        let known = persist::url_validators(&ctx.pool, SourceId::Fhfa, &key)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "FHFA: reading stored validators failed; full download");
+                None
+            });
+        match self.master_if_changed(ctx, known.as_ref()).await? {
+            (None, _) => Ok(Discovery::Unchanged),
+            (Some(master), validators) => Ok(Discovery::Changed {
+                found: self.discovered(master),
+                validator: Some((key, validators)),
+            }),
+        }
     }
 
     /// Every observation of the series; `since` is ignored (see the module docs).
@@ -581,20 +688,46 @@ impl SourceAdapter for FhfaAdapter {
         is_hpi_id(external_id).then(|| BATCH_KEY.to_string())
     }
 
-    /// One download of the master file for the whole batch.
+    /// One download of the master file for the whole batch, or none if the file is the one
+    /// every series in the batch was last fetched from (see [Re-crawls](self#re-crawls)).
     async fn fetch_batch(
         &self,
         ctx: &CrawlCtx,
         external_ids: &[String],
         _since: Option<NaiveDate>,
     ) -> Result<BatchFetch, CrawlError> {
-        let master = self.master(ctx).await?;
+        let stored = persist::stored_fetch_state(&ctx.pool, SourceId::Fhfa, external_ids)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "FHFA: reading stored validators failed; full download");
+                HashMap::new()
+            });
+        let known = shared_validators(external_ids, &stored);
+        let (master, validators) = self.master_if_changed(ctx, known.as_ref()).await?;
+        let Some(master) = master else {
+            // `known` is only set when every id has a stored state, and the fetcher reports
+            // `Unchanged` only for a request that sent `known`.
+            return Ok(external_ids
+                .iter()
+                .map(|id| {
+                    let dataset = stored[id].dataset.clone();
+                    (
+                        id.clone(),
+                        Ok(FetchedSeries::unchanged(dataset, validators.clone())),
+                    )
+                })
+                .collect());
+        };
         Ok(external_ids
             .iter()
             .map(|id| {
                 let fetched = master
                     .get(id)
-                    .map_or_else(|| Err(not_in_file(id)), |s| s.fetched(id));
+                    .map_or_else(|| Err(not_in_file(id)), |s| s.fetched(id))
+                    .map(|f| FetchedSeries {
+                        validators: Some(validators.clone()),
+                        ..f
+                    });
                 (id.clone(), fetched)
             })
             .collect())
@@ -1045,6 +1178,159 @@ mod tests {
             .unwrap();
         assert!(!ok.points.is_empty());
         assert_eq!(mock.received_requests().await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_file_is_neither_rediscovered_nor_refetched() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, ResponseTemplate};
+
+        use crate::dataset::DatasetCatalog;
+        use crate::persist::stable_id_tests::{database_url, FreshDb};
+
+        let Some(admin_url) = database_url() else {
+            return;
+        };
+        let db = FreshDb::create(&admin_url, "econgraph_fhfa_validators").await;
+        let mut catalog = DatasetCatalog::empty();
+        catalog.load_adapter(&FhfaAdapter::default()).unwrap();
+        persist::sync_datasets(&db.pool, &catalog).await.unwrap();
+
+        let mock = MockSource::start().await;
+        Mock::given(method("GET"))
+            .and(path(MASTER_CSV_PATH))
+            .and(header("if-none-match", "\"m1\""))
+            .respond_with(ResponseTemplate::new(304))
+            .mount(mock.server())
+            .await;
+        Mock::given(method("GET"))
+            .and(path(MASTER_CSV_PATH))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(MASTER)
+                    .insert_header("ETag", "\"m1\""),
+            )
+            .mount(mock.server())
+            .await;
+        let adapter = FhfaAdapter::new(mock.base_url());
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+
+        // Discovery: the first run lists the file and returns the validator to store with it.
+        let Discovery::Changed {
+            found,
+            validator: Some((url, validators)),
+        } = adapter.discover_if_changed(&ctx).await.unwrap()
+        else {
+            panic!("first discovery must list the file")
+        };
+        assert_eq!(url, format!("{}#discovery", mock.url(MASTER_CSV_PATH)));
+        assert_eq!(validators.etag.as_deref(), Some("\"m1\""));
+        assert_eq!(validators.version.as_deref(), Some(PARSE_VERSION));
+        let mut conn = db.pool.get().await.unwrap();
+        persist::set_url_validators_conn(&mut conn, SourceId::Fhfa, &url, &validators)
+            .await
+            .unwrap();
+        drop(conn);
+        assert_eq!(
+            adapter.discover_if_changed(&ctx).await.unwrap(),
+            Discovery::Unchanged
+        );
+
+        // Fetching: the first batch stores the file's validators with each series' points.
+        let ids = vec![US_PO_MONTHLY_SA.to_string(), CA_AT_NSA.to_string()];
+        let first = adapter.fetch_batch(&ctx, &ids, None).await.unwrap();
+        for id in &ids {
+            let f = first[id].as_ref().unwrap();
+            assert!(!f.points.is_empty());
+            assert_eq!(f.validators.as_ref(), Some(&validators));
+            persist::persist_series(&db.pool, SourceId::Fhfa, id, f)
+                .await
+                .unwrap();
+        }
+        let again = adapter.fetch_batch(&ctx, &ids, None).await.unwrap();
+        for id in &ids {
+            assert_eq!(
+                again[id].as_ref().unwrap(),
+                &FetchedSeries::unchanged(
+                    first[id].as_ref().unwrap().dataset.clone(),
+                    validators.clone()
+                ),
+                "{id}"
+            );
+        }
+
+        // A series never fetched in the batch makes it a full download for every series.
+        let new = found
+            .iter()
+            .map(|d| d.external_id.clone())
+            .find(|id| !ids.contains(id))
+            .unwrap();
+        let mixed = vec![US_PO_MONTHLY_SA.to_string(), new.clone()];
+        let out = adapter.fetch_batch(&ctx, &mixed, None).await.unwrap();
+        for id in &mixed {
+            assert!(!out[id].as_ref().unwrap().points.is_empty(), "{id}");
+        }
+
+        // Validators stored by another parser version aren't sent: the file is read again.
+        let mut conn = db.pool.get().await.unwrap();
+        diesel_async::RunQueryDsl::execute(
+            diesel::sql_query("UPDATE series_fetch_validators SET version = 'fhfa-0'"),
+            &mut conn,
+        )
+        .await
+        .unwrap();
+        drop(conn);
+        let out = adapter.fetch_batch(&ctx, &ids, None).await.unwrap();
+        for id in &ids {
+            let f = out[id].as_ref().unwrap();
+            assert!(!f.points.is_empty(), "{id}");
+            assert_eq!(f.validators.as_ref(), Some(&validators));
+        }
+
+        let conditional: Vec<bool> = mock
+            .received_requests()
+            .await
+            .iter()
+            .map(|r| r.headers.contains_key("if-none-match"))
+            .collect();
+        // discover, rediscover (304), fetch, refetch (304), mixed batch and old parser version
+        // (plain GETs).
+        assert_eq!(conditional, [false, true, false, true, false, false]);
+
+        db.drop().await;
+    }
+
+    #[test]
+    fn shared_validators_need_every_series_on_the_same_file() {
+        let v = |etag: &str| Validators {
+            etag: Some(etag.into()),
+            ..Validators::default()
+        };
+        let state = |validators| StoredFetchState {
+            dataset: SeriesDataset::default(),
+            validators,
+        };
+        let ids = vec!["a".to_string(), "b".to_string()];
+        let stored =
+            |a, b| HashMap::from([("a".to_string(), state(a)), ("b".to_string(), state(b))]);
+        assert_eq!(
+            shared_validators(&ids, &stored(Some(v("1")), Some(v("1")))),
+            Some(v("1"))
+        );
+        assert_eq!(
+            shared_validators(&ids, &stored(Some(v("1")), Some(v("2")))),
+            None
+        );
+        assert_eq!(shared_validators(&ids, &stored(Some(v("1")), None)), None);
+        assert_eq!(
+            shared_validators(
+                &ids,
+                &HashMap::from([("a".to_string(), state(Some(v("1"))))])
+            ),
+            None
+        );
+        assert_eq!(shared_validators(&[], &HashMap::new()), None);
     }
 
     /// FHFA's `refresh_reference_data` (the default, driven by [`FhfaAdapter::code_lists`])

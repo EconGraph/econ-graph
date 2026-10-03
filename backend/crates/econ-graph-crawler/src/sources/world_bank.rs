@@ -77,6 +77,32 @@
 //! attribute columns in train 1 (the dataset still declares them, for the schema). WDI leaves
 //! `obs_status` empty for nearly every row.
 //!
+//! # Re-crawls
+//!
+//! The World Bank updates WDI a few times a year, while annual series are refreshed every 30 days
+//! and discovery runs weekly, and each run would otherwise download every area of every
+//! indicator. Both first ask for a one-row page of the same request (`per_page=1`), whose
+//! `lastupdated` says whether the indicator changed:
+//!
+//! - **A fetch batch** stores the indicator's `lastupdated` as each series' validator `version`,
+//!   with a fingerprint of the indicator's cached name and description, so a renamed indicator
+//!   still rewrites its series' titles.
+//!   When every requested series of an indicator stored the same one and the probe returns it,
+//!   each gets [`FetchedSeries::unchanged`] (marked crawled, points kept) without the full
+//!   request. A series never fetched, a different stored value, or a failed probe means a full
+//!   fetch (an `Auth` or `RateLimited` probe fails the indicator's series instead).
+//! - **Discovery** joins every listed indicator's `indicator=version` pair into one version,
+//!   stored for the indicator endpoint (see [`persist::url_validators`]). With a version stored,
+//!   it probes every indicator first, and a matching version is [`Discovery::Unchanged`]; with
+//!   none (the first run), it discovers in full and takes the version from the full requests. The
+//!   version is stored only by a discovery in which every indicator succeeded, so a skipped
+//!   indicator is retried next time. A failed probe means a full discovery.
+//!
+//! Every stored version starts with [`PARSE_VERSION`], so a release that changes how the data is
+//! read rewrites stored series once instead of waiting for the World Bank's next update.
+//!
+//! QA verifies live that a `per_page=1` page carries the same `lastupdated` as the full request.
+//!
 //! # Errors
 //!
 //! Successful responses are a two-element array `[meta, rows]` (`rows` may be `null`). Errors
@@ -99,12 +125,13 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::adapter::{
-    ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
+    ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, Discovery, FetchedPoint, FetchedSeries,
     NewSeriesMetadataLite, SourceAdapter,
 };
 use crate::dataset::{DatasetDef, SeriesDataset};
 use crate::error::CrawlError;
-use crate::persist;
+use crate::http::Validators;
+use crate::persist::{self, StoredFetchState};
 use crate::policy::SourcePolicy;
 use crate::reference::{self, WdiIndicator};
 use crate::reference_file::{self, CodeList, ParseCodes};
@@ -124,6 +151,11 @@ const PER_PAGE: &str = "20000";
 
 /// Upper bound on pages per indicator (a response claiming more is cut off with a warning).
 pub const MAX_PAGES: u64 = 10;
+
+/// How this adapter reads indicator data, prefixed to every stored `lastupdated` version (see
+/// [Re-crawls](self#re-crawls)). Bump it whenever a change to parsing, the indicator list's units
+/// or the area table should rewrite already-stored series before the World Bank's next update.
+pub const PARSE_VERSION: &str = "wb-1";
 
 /// Most series fetched per request: every area of one indicator (the country table has about 260
 /// rows), with room to spare.
@@ -346,6 +378,157 @@ impl WorldBankAdapter {
             seasonal_adjustment: None,
         }
     }
+
+    /// `lastupdated` of `indicator`, from a one-row page of the same request
+    /// [`fetch_indicator`](Self::fetch_indicator) makes (see [Re-crawls](self#re-crawls)).
+    async fn probe_last_updated(
+        &self,
+        ctx: &CrawlCtx,
+        indicator: &str,
+    ) -> Result<NaiveDate, CrawlError> {
+        let path = format!("/country/all/indicator/{indicator}");
+        let body: Value = ctx
+            .http
+            .get_json(
+                SourceId::WorldBank,
+                &format!("{}{path}", self.base_url),
+                &[("format", "json"), ("per_page", "1"), ("page", "1")],
+            )
+            .await?;
+        parse_list(&path, body)?.0.last_updated.ok_or_else(|| {
+            CrawlError::Parse(format!("World Bank {path}: response has no lastupdated"))
+        })
+    }
+
+    /// Key under which discovery stores [`catalog_version`](Self::catalog_version)'s result (see
+    /// [`persist::url_validators`]): the indicator endpoint, without an indicator.
+    fn catalog_key(&self) -> String {
+        format!("{}/country/all/indicator", self.base_url)
+    }
+
+    /// One string naming every listed indicator and its `lastupdated`, so a discovery can tell
+    /// that neither the list nor any indicator changed. `None` if a probe failed with anything
+    /// but `Auth` or `RateLimited` (which abort): discovery then runs in full.
+    async fn catalog_version(
+        &self,
+        ctx: &CrawlCtx,
+        indicators: &[WdiIndicator],
+    ) -> Result<Option<String>, CrawlError> {
+        let mut parts = Vec::with_capacity(indicators.len());
+        for indicator in indicators {
+            match self.probe_last_updated(ctx, &indicator.id).await {
+                Ok(d) => parts.push(format!(
+                    "{}={}",
+                    indicator.id,
+                    self.series_version(&indicator.id, d)
+                )),
+                Err(e @ (CrawlError::Auth(_) | CrawlError::RateLimited { .. })) => return Err(e),
+                Err(e) => {
+                    tracing::warn!(indicator = %indicator.id, error = %e,
+                        "World Bank lastupdated probe failed; discovering in full");
+                    return Ok(None);
+                }
+            }
+        }
+        parts.sort();
+        Ok(Some(format!("{PARSE_VERSION}|{}", parts.join(";"))))
+    }
+
+    /// A series' stored `version`: [`PARSE_VERSION`], its indicator's `lastupdated`, and a
+    /// fingerprint of the indicator's name and description as currently cached (see
+    /// [`seed_cache_from_db`](Self::seed_cache_from_db)), so a renamed or redescribed indicator
+    /// rewrites its series' titles even when its data hasn't moved.
+    fn series_version(&self, indicator: &str, last_updated: NaiveDate) -> String {
+        let meta = self.indicator_meta.lock().unwrap().get(indicator).map(|m| {
+            let mut bytes = m.name.clone().into_bytes();
+            bytes.push(0);
+            bytes.extend(m.description.as_deref().unwrap_or_default().as_bytes());
+            bytes
+        });
+        let tag = meta.map_or_else(String::new, |b| {
+            use sha2::{Digest, Sha256};
+            Sha256::digest(b)[..6]
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect()
+        });
+        format!("{PARSE_VERSION}:{last_updated}:{tag}")
+    }
+
+    /// Discovered series, whether every indicator's request succeeded, and (when they all did)
+    /// the catalog version their `lastupdated` values give (as [`catalog_version`](Self::catalog_version)).
+    async fn discover_all(
+        &self,
+        ctx: &CrawlCtx,
+    ) -> Result<(Vec<DiscoveredSeries>, bool, Option<String>), CrawlError> {
+        self.seed_cache_from_db(ctx).await;
+        let indicators = reference::wdi_indicators()?;
+        let def = wdi_def()?;
+        let areas = areas().map_err(|e| CrawlError::Permanent(e.to_string()))?;
+        let mut found = Vec::new();
+        let mut attempted = HashSet::new();
+        let mut parts = Vec::with_capacity(indicators.len());
+        let (mut any_ok, mut last_err) = (false, None);
+        for indicator in indicators {
+            match self.fetch_indicator(ctx, &indicator.id).await {
+                Ok(data) => {
+                    any_ok = true;
+                    for (area, rows) in data.resolve(areas) {
+                        let (external_id, dataset) = series_id(def, &indicator.id, &area.key)?;
+                        let meta = self
+                            .series_metadata(ctx, indicator, area, &rows, &mut attempted)
+                            .await;
+                        found.push(DiscoveredSeries {
+                            external_id,
+                            title: meta.title,
+                            description: meta.description,
+                            units: meta.units,
+                            frequency: meta.frequency,
+                            data_url: Some(data_url(&indicator.id, &rows)),
+                            dataset,
+                        });
+                    }
+                    // After the titles: a row-carried fallback name may have just been cached.
+                    let version = self.series_version(&indicator.id, data.last_updated);
+                    parts.push(format!("{}={version}", indicator.id));
+                }
+                Err(e @ (CrawlError::Auth(_) | CrawlError::RateLimited { .. })) => return Err(e),
+                Err(e) => {
+                    tracing::warn!(indicator = %indicator.id, error = %e, "World Bank indicator failed; skipping");
+                    last_err = Some(e);
+                }
+            }
+        }
+        match (any_ok, last_err) {
+            (false, Some(e)) => Err(e),
+            (_, last_err) => {
+                tracing::info!(series = found.len(), "World Bank discovery finished");
+                let complete = last_err.is_none();
+                parts.sort();
+                let version = complete.then(|| format!("{PARSE_VERSION}|{}", parts.join(";")));
+                Ok((found, complete, version))
+            }
+        }
+    }
+}
+
+/// The validators every one of `ids` stored, if they all stored the same ones (their indicator's
+/// `lastupdated` at their last fetch). Otherwise `None`: fetch the indicator in full.
+fn shared_validators<'a>(
+    ids: impl IntoIterator<Item = &'a str>,
+    stored: &HashMap<String, StoredFetchState>,
+) -> Option<Validators> {
+    let mut shared: Option<&Validators> = None;
+    for id in ids {
+        let v = stored.get(id)?.validators.as_ref()?;
+        v.version.as_ref()?;
+        match shared {
+            None => shared = Some(v),
+            Some(s) if s == v => {}
+            Some(_) => return None,
+        }
+    }
+    shared.cloned()
 }
 
 impl Default for WorldBankAdapter {
@@ -440,47 +623,46 @@ impl SourceAdapter for WorldBankAdapter {
     /// (in file order), areas sorted by key, so the queue holds each indicator's series together
     /// for batching.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
+        Ok(self.discover_all(ctx).await?.0)
+    }
+
+    /// [`Discovery::Unchanged`] when no indicator's `lastupdated` (and not the list) has changed
+    /// since the last discovery that read every indicator (see [Re-crawls](self#re-crawls)).
+    async fn discover_if_changed(&self, ctx: &CrawlCtx) -> Result<Discovery, CrawlError> {
+        let key = self.catalog_key();
+        let stored = persist::url_validators(&ctx.pool, SourceId::WorldBank, &key)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "World Bank: reading stored validators failed");
+                None
+            })
+            .and_then(|v| v.version);
+        // The probes give the version to store after a full discovery too, but with nothing stored
+        // they can't save one: the full requests below carry the same `lastupdated` values.
         self.seed_cache_from_db(ctx).await;
-        let indicators = reference::wdi_indicators()?;
-        let def = wdi_def()?;
-        let areas = areas().map_err(|e| CrawlError::Permanent(e.to_string()))?;
-        let mut found = Vec::new();
-        let mut attempted = HashSet::new();
-        let (mut any_ok, mut last_err) = (false, None);
-        for indicator in indicators {
-            match self.fetch_indicator(ctx, &indicator.id).await {
-                Ok(data) => {
-                    any_ok = true;
-                    for (area, rows) in data.resolve(areas) {
-                        let (external_id, dataset) = series_id(def, &indicator.id, &area.key)?;
-                        let meta = self
-                            .series_metadata(ctx, indicator, area, &rows, &mut attempted)
-                            .await;
-                        found.push(DiscoveredSeries {
-                            external_id,
-                            title: meta.title,
-                            description: meta.description,
-                            units: meta.units,
-                            frequency: meta.frequency,
-                            data_url: Some(data_url(&indicator.id, &rows)),
-                            dataset,
-                        });
-                    }
-                }
-                Err(e @ (CrawlError::Auth(_) | CrawlError::RateLimited { .. })) => return Err(e),
-                Err(e) => {
-                    tracing::warn!(indicator = %indicator.id, error = %e, "World Bank indicator failed; skipping");
-                    last_err = Some(e);
-                }
+        let version = match stored {
+            Some(_) => {
+                self.catalog_version(ctx, reference::wdi_indicators()?)
+                    .await?
             }
+            None => None,
+        };
+        if version.is_some() && version == stored {
+            return Ok(Discovery::Unchanged);
         }
-        match (any_ok, last_err) {
-            (false, Some(e)) => Err(e),
-            _ => {
-                tracing::info!(series = found.len(), "World Bank discovery finished");
-                Ok(found)
-            }
-        }
+        let (found, complete, full_version) = self.discover_all(ctx).await?;
+        let version = full_version.or(version);
+        // Only a discovery that read every indicator may vouch for the catalog.
+        let validator = version.filter(|_| complete).map(|version| {
+            (
+                key,
+                Validators {
+                    version: Some(version),
+                    ..Validators::default()
+                },
+            )
+        });
+        Ok(Discovery::Changed { found, validator })
     }
 
     /// The same request as a batch: every area of the indicator, keeping `external_id`'s.
@@ -542,7 +724,49 @@ impl SourceAdapter for WorldBankAdapter {
                 None => wanted.push((indicator, BTreeMap::from([(area, id.as_str())]))),
             }
         }
+        let requested: Vec<String> = wanted
+            .iter()
+            .flat_map(|(_, ids)| ids.values().map(|id| (*id).to_string()))
+            .collect();
+        let stored = if requested.is_empty() {
+            HashMap::new()
+        } else {
+            persist::stored_fetch_state(&ctx.pool, SourceId::WorldBank, &requested)
+                .await
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "World Bank: reading stored validators failed; full fetch");
+                    HashMap::new()
+                })
+        };
         for (indicator, ids) in wanted {
+            if let Some(known) = shared_validators(ids.values().copied(), &stored) {
+                match self.probe_last_updated(ctx, &indicator.id).await {
+                    Ok(d)
+                        if known.version.as_deref()
+                            == Some(self.series_version(&indicator.id, d).as_str()) =>
+                    {
+                        for id in ids.values() {
+                            let dataset = stored[*id].dataset.clone();
+                            out.insert(
+                                (*id).to_string(),
+                                Ok(FetchedSeries::unchanged(dataset, known.clone())),
+                            );
+                        }
+                        continue;
+                    }
+                    Ok(_) => {}
+                    Err(e @ (CrawlError::Auth(_) | CrawlError::RateLimited { .. })) => {
+                        for id in ids.values() {
+                            out.insert((*id).to_string(), Err(e.clone()));
+                        }
+                        continue;
+                    }
+                    Err(e) => {
+                        tracing::warn!(indicator = %indicator.id, error = %e,
+                            "World Bank lastupdated probe failed; full fetch");
+                    }
+                }
+            }
             let data = match self.fetch_indicator(ctx, &indicator.id).await {
                 Ok(data) => data,
                 Err(e) => {
@@ -573,6 +797,12 @@ impl SourceAdapter for WorldBankAdapter {
                                 })
                                 .collect(),
                             dataset,
+                            validators: Some(Validators {
+                                version: Some(
+                                    self.series_version(&indicator.id, data.last_updated),
+                                ),
+                                ..Validators::default()
+                            }),
                         })
                     }
                     Err(e) => Err(e),
