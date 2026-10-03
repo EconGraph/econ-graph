@@ -10,8 +10,8 @@ use econ_graph_core::{
     database::DatabasePool,
     error::{AppError, AppResult},
     models::{
-        economic_series::SeriesFrequency, DataPoint, DataQueryParams, DataTransformation,
-        EconomicSeries, SeriesSearchParams, TransformedDataPoint,
+        DataPoint, DataQueryParams, DataTransformation, EconomicSeries, SeriesSearchParams,
+        TransformedDataPoint,
     },
     schema::{data_points, economic_series},
 };
@@ -95,12 +95,16 @@ pub async fn list_series(
         // Sources store their own frequency text verbatim (FRED: "Weekly, Ending Friday", BLS:
         // "Semi-Annual", ...), so an exact match misses most rows; match the same prefixes
         // `SeriesFrequency` classifies raw text by instead.
-        let patterns = SeriesFrequency::from(frequency).sql_like_patterns();
-        query = query.filter(
-            sql::<Bool>("frequency ILIKE ANY(")
-                .bind::<Array<Text>, _>(patterns)
-                .sql(")"),
-        );
+        let (patterns, exact_frequency) = super::frequency_filter(&frequency);
+        if let Some(patterns) = patterns {
+            query = query.filter(
+                sql::<Bool>("frequency ILIKE ANY(")
+                    .bind::<Array<Text>, _>(patterns)
+                    .sql(")"),
+            );
+        } else if let Some(raw) = exact_frequency {
+            query = query.filter(economic_series::frequency.eq(raw));
+        }
     }
 
     if let Some(search_query) = params.query {

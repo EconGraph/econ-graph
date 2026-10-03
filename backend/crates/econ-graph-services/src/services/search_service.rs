@@ -6,7 +6,6 @@ use diesel::prelude::*;
 use diesel_async::{AsyncConnection, RunQueryDsl};
 use econ_graph_core::database::DatabasePool;
 use econ_graph_core::error::{AppError, AppResult};
-use econ_graph_core::models::economic_series::SeriesFrequency;
 use econ_graph_core::models::search::{
     SearchParams, SearchSuggestion, SeriesSearchResult, SuggestionType,
 };
@@ -51,10 +50,11 @@ impl SearchService {
         // (FRED: "Weekly, Ending Friday"; BLS: "Semi-Annual"; others: a bare "Monthly"), so an
         // exact-match filter silently misses rows. Match on the same prefixes that classify a
         // raw frequency string, via `ILIKE ANY(...)`, instead.
-        let frequency_patterns: Option<Vec<String>> = params
+        let (frequency_patterns, exact_frequency) = params
             .frequency
-            .clone()
-            .map(|f| SeriesFrequency::from(f).sql_like_patterns());
+            .as_deref()
+            .map(super::frequency_filter)
+            .unwrap_or((None, None));
         let include_inactive = params.should_include_inactive();
 
         let mut conn = self.pool.get().await.map_err(|e| {
@@ -99,7 +99,8 @@ impl SearchService {
                               OR (strpos(q.tsq::text, '!') = 0 AND es.title % $1))
                          AND es.end_date IS NOT NULL
                          AND ($2::uuid IS NULL OR es.source_id = $2)
-                         AND ($3::text[] IS NULL OR es.frequency ILIKE ANY($3))
+                         AND (($3::text[] IS NULL AND $8::text IS NULL)
+                              OR es.frequency ILIKE ANY($3) OR es.frequency = $8)
                          AND ($4::boolean OR es.is_active = true)
                          ORDER BY rank DESC, es.title ASC, es.id ASC
                          LIMIT $5 OFFSET $6",
@@ -113,6 +114,7 @@ impl SearchService {
                     .bind::<diesel::sql_types::Integer, _>(limit)
                     .bind::<diesel::sql_types::Integer, _>(offset)
                     .bind::<diesel::sql_types::Text, _>(&fulltext_query)
+                    .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(exact_frequency)
                     .load::<SeriesSearchResultRow>(conn)
                     .await
                 },
