@@ -257,6 +257,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [backend-build-cache-main, backend-build-cache-branch]
+    # The alternate build is skipped; require the selected build to succeed.
+    if: >-
+      ${{ !cancelled() &&
+          ((needs.backend-build-cache-main.result == 'success' && needs.backend-build-cache-branch.result == 'skipped') ||
+           (needs.backend-build-cache-main.result == 'skipped' && needs.backend-build-cache-branch.result == 'success')) }}
 
     steps:
     - name: Checkout code
@@ -603,6 +608,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-build-cache-main, backend-build-cache-branch]
+    # The alternate build is skipped; require the selected build to succeed.
+    if: >-
+      ${{ !cancelled() &&
+          ((needs.backend-build-cache-main.result == 'success' && needs.backend-build-cache-branch.result == 'skipped') ||
+           (needs.backend-build-cache-main.result == 'skipped' && needs.backend-build-cache-branch.result == 'success')) }}
 
     services:
       postgres:
@@ -669,6 +679,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-build-cache-main, backend-build-cache-branch]
+    # The alternate build is skipped; require the selected build to succeed.
+    if: >-
+      ${{ !cancelled() &&
+          ((needs.backend-build-cache-main.result == 'success' && needs.backend-build-cache-branch.result == 'skipped') ||
+           (needs.backend-build-cache-main.result == 'skipped' && needs.backend-build-cache-branch.result == 'success')) }}
 
     services:
       postgres:
@@ -735,6 +750,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-build-cache-main, backend-build-cache-branch]
+    # The alternate build is skipped; require the selected build to succeed.
+    if: >-
+      ${{ !cancelled() &&
+          ((needs.backend-build-cache-main.result == 'success' && needs.backend-build-cache-branch.result == 'skipped') ||
+           (needs.backend-build-cache-main.result == 'skipped' && needs.backend-build-cache-branch.result == 'success')) }}
 
     services:
       postgres:
@@ -801,6 +821,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-build-cache-main, backend-build-cache-branch]
+    # The alternate build is skipped; require the selected build to succeed.
+    if: >-
+      ${{ !cancelled() &&
+          ((needs.backend-build-cache-main.result == 'success' && needs.backend-build-cache-branch.result == 'skipped') ||
+           (needs.backend-build-cache-main.result == 'skipped' && needs.backend-build-cache-branch.result == 'success')) }}
 
     services:
       postgres:
@@ -867,6 +892,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-build-cache-main, backend-build-cache-branch]
+    # The alternate build is skipped; require the selected build to succeed.
+    if: >-
+      ${{ !cancelled() &&
+          ((needs.backend-build-cache-main.result == 'success' && needs.backend-build-cache-branch.result == 'skipped') ||
+           (needs.backend-build-cache-main.result == 'skipped' && needs.backend-build-cache-branch.result == 'success')) }}
 
     services:
       postgres:
@@ -933,6 +963,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-build-cache-main, backend-build-cache-branch]
+    # The alternate build is skipped; require the selected build to succeed.
+    if: >-
+      ${{ !cancelled() &&
+          ((needs.backend-build-cache-main.result == 'success' && needs.backend-build-cache-branch.result == 'skipped') ||
+           (needs.backend-build-cache-main.result == 'skipped' && needs.backend-build-cache-branch.result == 'success')) }}
 
     services:
       postgres:
@@ -999,6 +1034,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-build-cache-main, backend-build-cache-branch]
+    # The alternate build is skipped; require the selected build to succeed.
+    if: >-
+      ${{ !cancelled() &&
+          ((needs.backend-build-cache-main.result == 'success' && needs.backend-build-cache-branch.result == 'skipped') ||
+           (needs.backend-build-cache-main.result == 'skipped' && needs.backend-build-cache-branch.result == 'success')) }}
 
     services:
       postgres:
@@ -1065,6 +1105,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-build-cache-main, backend-build-cache-branch]
+    # The alternate build is skipped; require the selected build to succeed.
+    if: >-
+      ${{ !cancelled() &&
+          ((needs.backend-build-cache-main.result == 'success' && needs.backend-build-cache-branch.result == 'skipped') ||
+           (needs.backend-build-cache-main.result == 'skipped' && needs.backend-build-cache-branch.result == 'success')) }}
 
     services:
       postgres:
@@ -1131,6 +1176,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-build-cache-main, backend-build-cache-branch]
+    # The alternate build is skipped; require the selected build to succeed.
+    if: >-
+      ${{ !cancelled() &&
+          ((needs.backend-build-cache-main.result == 'success' && needs.backend-build-cache-branch.result == 'skipped') ||
+           (needs.backend-build-cache-main.result == 'skipped' && needs.backend-build-cache-branch.result == 'success')) }}
 
     services:
       postgres:
@@ -1197,6 +1247,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-build-cache-main, backend-build-cache-branch]
+    # The alternate build is skipped; require the selected build to succeed.
+    if: >-
+      ${{ !cancelled() &&
+          ((needs.backend-build-cache-main.result == 'success' && needs.backend-build-cache-branch.result == 'skipped') ||
+           (needs.backend-build-cache-main.result == 'skipped' && needs.backend-build-cache-branch.result == 'success')) }}
 
     services:
       postgres:
@@ -1263,6 +1318,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [backend-build-cache-main, backend-build-cache-branch]
+    # The alternate build is skipped; require the selected build to succeed.
+    if: >-
+      ${{ !cancelled() &&
+          ((needs.backend-build-cache-main.result == 'success' && needs.backend-build-cache-branch.result == 'skipped') ||
+           (needs.backend-build-cache-main.result == 'skipped' && needs.backend-build-cache-branch.result == 'success')) }}
 
     services:
       postgres:
