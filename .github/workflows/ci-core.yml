@@ -135,7 +135,7 @@ jobs:
         SCCACHE_GHA_ENABLED: "false"
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install --locked diesel_cli --no-default-features --features postgres
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres
       working-directory: backend
 
     - name: Build backend
@@ -378,7 +378,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -490,7 +490,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -557,7 +557,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -623,7 +623,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -689,7 +689,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -755,7 +755,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -821,7 +821,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -887,7 +887,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -953,7 +953,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -1019,7 +1019,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -1085,7 +1085,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -1151,7 +1151,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -1217,7 +1217,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -1283,7 +1283,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -1451,9 +1451,9 @@ jobs:
           ${{ runner.os }}-shared-cargo-
 
     - name: Install cargo-audit
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install cargo-audit --force
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-audit
 
     - name: Run Rust security audit
       run: |
@@ -1518,9 +1518,9 @@ jobs:
         cache-dependency-path: frontend/package-lock.json
 
     - name: Install cargo-deny
-      run: |
-        export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install cargo-deny --force
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-deny
 
     - name: Install license-checker
       run: npm install -g license-checker
@@ -1643,7 +1643,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -1817,7 +1817,7 @@ jobs:
     - name: Install shared tools
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Wait for PostgreSQL
@@ -1934,7 +1934,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -2158,7 +2158,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -2358,7 +2358,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -2562,7 +2562,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -2770,7 +2770,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
@@ -2978,7 +2978,7 @@ jobs:
     - name: Install diesel CLI
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cargo install diesel_cli --no-default-features --features postgres --verbose --force
+        cargo install --locked diesel_cli --version 2.2.12 --no-default-features --features postgres --verbose --force
       working-directory: backend
 
     - name: Setup database
