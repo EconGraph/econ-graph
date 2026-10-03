@@ -102,3 +102,6 @@ EarningsCalls/
 # Demo videos and audio files
 demo-videos/
 *.aiff
+
+# Temporary agent execution logs and CI artifacts
+.cursor/.agent-tools/

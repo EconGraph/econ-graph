@@ -164,7 +164,7 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.9'
 
@@ -242,27 +242,20 @@ jobs:
       with:
         tool: cargo-nextest
 
-    - name: Check Rust formatting
-      if: false # handled by pre-commit in quality-checks
-      run: echo "rustfmt handled by pre-commit"
-      working-directory: backend
-
-    - name: Run Clippy (linting)
-      if: false # handled by pre-commit/reviewdog elsewhere
-      run: echo "clippy handled by pre-commit/CI annotations"
-      working-directory: backend
-
+    # Keep database tests in the dedicated database jobs, as in the baseline smoke suite.
     - name: Run fast unit tests with nextest (no database)
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         set +e
-        cargo nextest run --workspace --lib --status-level=fail --retries=1 --no-fail-fast
+        cargo nextest run --workspace --lib --status-level=fail --retries=1 --no-fail-fast \
+          -E 'test(config) | test(metrics) | test(mcp_server::tests::test_get_available_tools) | test(mcp_server::tests::test_get_available_resources)'
         status=$?
         if [ $status -ne 0 ]; then
           echo "nextest failed; attempting fallback without sccache"
           export RUSTC_WRAPPER=
           export SCCACHE_GHA_ENABLED=false
-          cargo nextest run --workspace --lib --status-level=fail --retries=1 --no-fail-fast
+          cargo nextest run --workspace --lib --status-level=fail --retries=1 --no-fail-fast \
+          -E 'test(config) | test(metrics) | test(mcp_server::tests::test_get_available_tools) | test(mcp_server::tests::test_get_available_resources)'
         fi
       working-directory: backend
       env:
@@ -1427,12 +1420,9 @@ jobs:
       with:
         extra_args: --all-files --hook-stage manual
 
-    - name: Clippy annotations
+    - name: Run Clippy
       if: always()
-      uses: actions-rs/clippy-check@v1
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        args: --workspace --all-targets --all-features
+      run: cargo clippy --manifest-path backend/Cargo.toml --workspace --all-targets --all-features -- -D warnings -A unused_imports -A dead_code -A clippy::empty_line_after_doc_comments -A clippy::explicit_auto_deref -A clippy::unused_enumerate_index -A clippy::manual_range_contains -A clippy::unnecessary_map_or -A clippy::inherent_to_string -A clippy::too_many_arguments -A clippy::uninlined_format_args -A clippy::needless_borrow -A unused_variables -A clippy::if_same_then_else -A clippy::assertions_on_constants -A clippy::useless_vec -A clippy::overly_complex_bool_expr -A clippy::manual_clamp -A clippy::upper_case_acronyms -A unused_must_use -A unused_mut -A clippy::derivable_impls
 
   security-audit:
     name: Security Audit

@@ -10,6 +10,8 @@ import jsdoc from 'eslint-plugin-jsdoc';
 import importPlugin from 'eslint-plugin-import';
 
 export default [
+  // CLI documentation rules also apply to CommonJS files.
+  { plugins: { jsdoc } },
   js.configs.recommended,
   {
     files: ['**/*.{ts,tsx,js,jsx}'],
