@@ -34,7 +34,8 @@
 //! `wdi_indicators.csv` carries only each indicator's id and unit. Its name and description
 //! (`sourceNote`) are not shipped: each indicator's own `/indicator/{id}?format=json` carries
 //! both, one indicator per URL, so [`code_lists`](SourceAdapter::code_lists) lists one
-//! [`CodeList`] per listed indicator rather than one shared file. The default
+//! [`CodeList`] per listed indicator (after the `/country` list, see
+//! [Aggregate names](self#aggregate-names)) rather than one shared file. The default
 //! `refresh_reference_data` (`reference_file::refresh_code_lists`) fetches every one of them,
 //! merging each indicator's name and description into the `wdi` dataset's `indicator` dimension
 //! codes ([`persist::merge_dataset_dimension_code_entries`]); being `code_lists` entries, these can
@@ -57,6 +58,21 @@
 //! gets a usable indicator picker (the world map's indicator list reads these codes) from the very
 //! first discovery or fetch, not just a usable series title, before `refresh_reference_data` has
 //! ever run.
+//!
+//! # Aggregate names
+//!
+//! The shared country table carries the aggregates we crawl (World, Euro area, European Union,
+//! the income groups) by World Bank code but does not name them: their names are the World
+//! Bank's. The first of [`code_lists`](SourceAdapter::code_lists) is `/country?format=json&
+//! per_page=1000` (every economy and aggregate, with names, regions and income levels), whose
+//! names for the table's aggregates ([`parse_aggregate_names`]) are merged into the `wdi`
+//! dataset's `area` dimension codes. That dimension keeps its `countries` code list; the API
+//! labels an area by the dataset's own code for it where there is one
+//! ([`DatasetComponent::area_label`](econ_graph_core::models::DatasetComponent::area_label)),
+//! so countries keep their ISO names. Like the indicator lists, it is fetched conditionally on
+//! each refresh and can be recorded as a seed migration. A series title names an aggregate by
+//! the World Bank name its data rows carry (`country.value`), so titles never depend on the
+//! refresh having run.
 //!
 //! # Rows
 //!
@@ -120,7 +136,7 @@ use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use chrono::NaiveDate;
 use econ_graph_core::models::Code;
-use econ_graph_core::reference::{areas, Area};
+use econ_graph_core::reference::{areas, Area, AreaKind};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -172,6 +188,13 @@ struct IndicatorMeta {
 
 /// The dataset dimension indicator names and descriptions are merged into.
 const INDICATOR_DIMENSION: &str = "indicator";
+
+/// The dataset dimension keyed by the shared country table, which aggregate names are merged
+/// into.
+const AREA_DIMENSION: &str = "area";
+
+/// Rows per page of `/country`: every economy and aggregate (about 300) in one page.
+const COUNTRY_PER_PAGE: &str = "1000";
 
 /// World Bank adapter. See the module docs for endpoints, ids and error mapping.
 #[derive(Debug, Clone)]
@@ -336,8 +359,8 @@ impl WorldBankAdapter {
                 .await
                 {
                     // Only cache a name the DB actually stored: `false` (the dataset row isn't
-                    // synced yet, or this dimension uses a shared codelist) must not make later
-                    // calls in this process believe the DB has a label it doesn't.
+                    // synced yet) must not make later calls in this process believe the DB has a
+                    // label it doesn't.
                     Ok(true) => {
                         self.indicator_meta
                             .lock()
@@ -359,14 +382,24 @@ impl WorldBankAdapter {
                 }
             }
         }
+        // A country by its name in the shared table; an aggregate (which the table doesn't name)
+        // by the World Bank's own name for it, which every data row carries.
+        let area_name = match area.kind {
+            AreaKind::Country => area.name.as_str(),
+            AreaKind::Aggregate => rows
+                .first()
+                .map(|r| r.name.trim())
+                .filter(|n| !n.is_empty())
+                .unwrap_or(&area.name),
+        };
         let description = description.unwrap_or_else(|| {
             format!(
-                "World Development Indicators {} for {}",
-                indicator.id, area.name
+                "World Development Indicators {} for {area_name}",
+                indicator.id
             )
         });
         NewSeriesMetadataLite {
-            title: format!("{name}: {}", area.name),
+            title: format!("{name}: {area_name}"),
             description: Some(description),
             units: Some(indicator.unit.clone()),
             frequency: Some(
@@ -554,10 +587,20 @@ impl SourceAdapter for WorldBankAdapter {
         &[DATASET]
     }
 
-    /// One [`CodeList`] per listed indicator: World Bank indicator names and `sourceNote`s each
-    /// live at their own `/indicator/{id}?format=json`, never in one shared file. See the module
-    /// docs.
+    /// `/country`, for the names of the aggregates the shared country table carries
+    /// ([`parse_aggregate_names`]), then one [`CodeList`] per listed indicator: World Bank
+    /// indicator names and `sourceNote`s each live at their own `/indicator/{id}?format=json`,
+    /// never in one shared file. See the module docs.
     fn code_lists(&self, _keys: &ApiKeys) -> Vec<CodeList> {
+        let countries = CodeList::new(
+            format!(
+                "{}/country?format=json&per_page={COUNTRY_PER_PAGE}",
+                self.base_url
+            ),
+            DATASET,
+            AREA_DIMENSION,
+            Arc::new(parse_aggregate_names),
+        );
         let indicators = match reference::wdi_indicators() {
             Ok(indicators) => indicators,
             Err(e) => {
@@ -568,44 +611,41 @@ impl SourceAdapter for WorldBankAdapter {
                 return Vec::new();
             }
         };
-        indicators
-            .iter()
-            .map(|indicator| {
-                let id = indicator.id.clone();
-                let url = format!("{}/indicator/{id}?format=json", self.base_url);
-                let parse: ParseCodes = Arc::new(move |body: &str| {
-                    let value: Value = serde_json::from_str(body).map_err(|e| {
-                        CrawlError::Parse(format!("World Bank indicator {id}: {e}"))
-                    })?;
-                    let (_, items) = parse_list(&format!("/indicator/{id}"), value)?;
-                    let Some(row) = items.first() else {
-                        return Err(CrawlError::Parse(format!(
-                            "World Bank indicator {id}: response has no rows"
-                        )));
-                    };
-                    let name = row
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .trim();
-                    if name.is_empty() {
-                        return Err(CrawlError::Parse(format!(
-                            "World Bank indicator {id}: response has no name"
-                        )));
-                    }
-                    let description = row
-                        .get("sourceNote")
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_string);
-                    let mut code = Code::new(&id, name);
-                    code.description = description;
-                    Ok(vec![code])
-                });
-                CodeList::new(url, DATASET, INDICATOR_DIMENSION, parse)
-            })
-            .collect()
+        let indicators = indicators.iter().map(|indicator| {
+            let id = indicator.id.clone();
+            let url = format!("{}/indicator/{id}?format=json", self.base_url);
+            let parse: ParseCodes = Arc::new(move |body: &str| {
+                let value: Value = serde_json::from_str(body)
+                    .map_err(|e| CrawlError::Parse(format!("World Bank indicator {id}: {e}")))?;
+                let (_, items) = parse_list(&format!("/indicator/{id}"), value)?;
+                let Some(row) = items.first() else {
+                    return Err(CrawlError::Parse(format!(
+                        "World Bank indicator {id}: response has no rows"
+                    )));
+                };
+                let name = row
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .trim();
+                if name.is_empty() {
+                    return Err(CrawlError::Parse(format!(
+                        "World Bank indicator {id}: response has no name"
+                    )));
+                }
+                let description = row
+                    .get("sourceNote")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+                let mut code = Code::new(&id, name);
+                code.description = description;
+                Ok(vec![code])
+            });
+            CodeList::new(url, DATASET, INDICATOR_DIMENSION, parse)
+        });
+        std::iter::once(countries).chain(indicators).collect()
     }
 
     /// The default `code_lists` refresh (every indicator attempted and failures aggregated, except
@@ -864,6 +904,63 @@ struct Meta {
     last_updated: Option<NaiveDate>,
 }
 
+/// The World Bank's names for the aggregates the shared country table carries, keyed as the
+/// table keys them, from a `/country` response (every economy and aggregate, with `id`, `name`,
+/// `region`, `incomeLevel`, ...). Economies, and aggregates the table doesn't carry, are
+/// skipped; so is an entry with no name. A carried aggregate missing from the response is
+/// logged. A response that names none of them, or that has more than one page, is a `Parse`
+/// error, so a wrong or truncated body is never taken as the current list.
+fn parse_aggregate_names(body: &str) -> Result<Vec<Code>, CrawlError> {
+    const WHAT: &str = "/country";
+    let value: Value = serde_json::from_str(body)
+        .map_err(|e| CrawlError::Parse(format!("World Bank {WHAT}: {e}")))?;
+    let (meta, items) = parse_list(WHAT, value)?;
+    if meta.pages.is_some_and(|p| p > 1) {
+        return Err(CrawlError::Parse(format!(
+            "World Bank {WHAT}: response has {} pages; raise COUNTRY_PER_PAGE",
+            meta.pages.unwrap_or_default()
+        )));
+    }
+    let areas = areas().map_err(|e| CrawlError::Permanent(e.to_string()))?;
+    let mut codes: Vec<Code> = Vec::new();
+    for item in &items {
+        let field = |name: &str| {
+            item.get(name)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default()
+        };
+        let (id, name) = (field("id"), field("name"));
+        let Some(area) = areas
+            .by_wb_code(id)
+            .filter(|a| a.kind == AreaKind::Aggregate && !name.is_empty())
+        else {
+            continue;
+        };
+        if !codes.iter().any(|c| c.code == area.key) {
+            codes.push(Code::new(&area.key, name));
+        }
+    }
+    if codes.is_empty() {
+        return Err(CrawlError::Parse(format!(
+            "World Bank {WHAT}: response names none of the country table's aggregates"
+        )));
+    }
+    let missing: Vec<&str> = areas
+        .all()
+        .iter()
+        .filter(|a| a.kind == AreaKind::Aggregate && !codes.iter().any(|c| c.code == a.key))
+        .map(|a| a.key.as_str())
+        .collect();
+    if !missing.is_empty() {
+        tracing::warn!(
+            aggregates = ?missing,
+            "World Bank /country no longer lists these aggregates of the country table"
+        );
+    }
+    Ok(codes)
+}
+
 /// Splits a `[meta, items]` response into its metadata and items; a `[{"message": ..}]` body
 /// becomes an error via [`classify_world_bank_message`].
 fn parse_list(what: &str, body: Value) -> Result<(Meta, Vec<Value>), CrawlError> {
@@ -988,7 +1085,8 @@ struct Row {
     iso3: String,
     /// `country.id` (ISO alpha-2, or a two-character aggregate id).
     wb_id: String,
-    /// `country.value`, for warnings.
+    /// `country.value`: the World Bank's name for the area. Names an aggregate in series titles
+    /// (the shared table doesn't name aggregates), and appears in warnings.
     name: String,
     /// `indicator.value` from this same row: the indicator's own name, straight from the data
     /// response. Used as a fallback title when `refresh_reference_data` hasn't named this
