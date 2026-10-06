@@ -82,10 +82,18 @@ const webServer: PlaywrightTestConfig['webServer'] = [
   },
 ];
 
+// The auth specs are one folder so a QA run can drop them while sign-in is broken.
+const authIgnore = SKIP_AUTH ? ['auth/**'] : [];
+
+// A preinstalled Chromium whose revision differs from this Playwright's, e.g.
+// /opt/pw-browsers/chromium in Claude Code's cloud containers. CI installs its own.
+const launchOptions = process.env.RELEASE_CHROMIUM_PATH
+  ? { executablePath: process.env.RELEASE_CHROMIUM_PATH }
+  : {};
+
 export default defineConfig({
   testDir: './tests/e2e/release',
-  // The auth specs are one folder so a QA run can drop them while sign-in is broken.
-  testIgnore: SKIP_AUTH ? ['auth/**'] : [],
+  testIgnore: authIgnore,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   // Retries hide real failures in a suite whose data is fixed; a flaky spec should be fixed.
@@ -105,14 +113,17 @@ export default defineConfig({
   projects: [
     {
       name: 'release',
-      use: {
-        ...devices['Desktop Chrome'],
-        // A preinstalled Chromium whose revision differs from this Playwright's, e.g.
-        // /opt/pw-browsers/chromium in Claude Code's cloud containers. CI installs its own.
-        launchOptions: process.env.RELEASE_CHROMIUM_PATH
-          ? { executablePath: process.env.RELEASE_CHROMIUM_PATH }
-          : {},
-      },
+      // A project's testIgnore replaces the top-level one, so it repeats the auth skip.
+      testIgnore: [...authIgnore, 'mobile/**'],
+      use: { ...devices['Desktop Chrome'], launchOptions },
+    },
+    {
+      // A phone (ECO-335: at this width the app once started behind its open nav drawer, so the
+      // world map's controls were unreachable). The world map, the smoke checks on the home and
+      // explore pages, and the phone-only navigation spec. Pixel 5 is Chromium, like the above.
+      name: 'release-mobile',
+      testMatch: ['world-map/**/*.spec.ts', 'smoke.spec.ts', 'mobile/**/*.spec.ts'],
+      use: { ...devices['Pixel 5'], launchOptions },
     },
   ],
   webServer: DEPLOYED ? undefined : webServer,
