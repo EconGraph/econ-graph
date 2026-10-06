@@ -57,6 +57,14 @@ Two limits, both only affecting databases that were never deployed from a tag:
   last replaced version was also the last to merge (`git log --diff-filter=A` on each replaced
   directory). If not, every database built in between must first run the chain to its head
   (start the backend once on the commit before the squash), or be recreated after it.
+  For the v4.0.0 fold, this query returns a row on an affected database:
+
+  ```sql
+  SELECT version
+  FROM __diesel_schema_migrations
+  WHERE version = '20261002000500'
+    AND to_regclass('public.series_fetch_validators') IS NULL;
+  ```
 - A database that ran the old chain keeps the replaced versions in `__diesel_schema_migrations`.
   `run_pending_migrations` ignores them, but `diesel migration revert` / `redo` stop with
   `UnknownMigrationVersion` when they reach one, or with the squash's own error when they reach
